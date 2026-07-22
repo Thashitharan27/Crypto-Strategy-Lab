@@ -5,40 +5,66 @@ from __future__ import annotations
 import pandas as pd
 
 
-def summarize(trades: pd.DataFrame) -> dict[str, object]:
+def _max_streak(mask: pd.Series) -> int:
+    if mask.empty:
+        return 0
+    groups = mask.ne(mask.shift()).cumsum()
+    return int(mask.groupby(groups).sum().max() or 0)
+
+
+def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str, object]:
     if trades.empty:
-        return {"total_trades": 0}
-    wins = trades["net_pnl"] > 0
-    losses = trades["net_pnl"] < 0
-    gross_profit = trades.loc[wins, "net_pnl"].sum()
-    gross_loss = -trades.loc[losses, "net_pnl"].sum()
-    equity = trades["net_pnl"].cumsum()
-    drawdown = equity - equity.cummax()
-    signs = trades["net_pnl"].gt(0).astype(int).replace(0, -1)
-    groups = signs.ne(signs.shift()).cumsum()
-    streaks = signs.groupby(groups).agg(["first", "size"])
+        return {"total_pairs": 0, "ending_equity": initial_equity}
+    wins = trades["pair_net_pnl"] > 0
+    losses = trades["pair_net_pnl"] < 0
+    flats = trades["pair_net_pnl"] == 0
+    gross_profit = trades.loc[wins, "pair_net_pnl"].sum()
+    gross_loss = -trades.loc[losses, "pair_net_pnl"].sum()
+    equity = trades["equity_after_trade"]
+    running_peak = equity.cummax().clip(lower=initial_equity)
+    drawdown = equity - running_peak
+    max_dd = float(drawdown.min())
+    max_dd_pct = float((drawdown / running_peak).min()) if not running_peak.empty else 0.0
+    combos = {}
+    grouped = trades.groupby(["long_exit_reason", "short_exit_reason"], dropna=False)
+    for (long_reason, short_reason), group in grouped:
+        key = f"Long {long_reason} / Short {short_reason}"
+        combos[key] = {
+            "count": int(len(group)),
+            "percentage": float(len(group) / len(trades)),
+            "average_net_r": float(group["pair_net_r"].mean()),
+            "total_net_r": float(group["pair_net_r"].sum()),
+        }
     return {
-        "total_trades": int(len(trades)),
-        "winning_pairs": int(wins.sum()),
-        "losing_pairs": int(losses.sum()),
+        "total_pairs": int(len(trades)),
+        "wins": int(wins.sum()),
+        "losses": int(losses.sum()),
+        "flat_pairs": int(flats.sum()),
         "win_rate": float(wins.mean()),
+        "loss_rate": float(losses.mean()),
+        "average_net_r": float(trades["pair_net_r"].mean()),
+        "median_net_r": float(trades["pair_net_r"].median()),
+        "total_net_r": float(trades["pair_net_r"].sum()),
         "profit_factor": float(gross_profit / gross_loss) if gross_loss else float("inf"),
-        "average_r": float(trades["net_r"].mean()),
-        "total_r": float(trades["net_r"].sum()),
-        "maximum_drawdown": float(drawdown.min()),
-        "maximum_consecutive_losses": int(streaks.loc[streaks["first"] == -1, "size"].max() or 0),
-        "maximum_consecutive_wins": int(streaks.loc[streaks["first"] == 1, "size"].max() or 0),
-        "average_holding_time": str(trades["holding_time"].mean()),
-        "total_fees_paid": float(trades["fees"].sum()),
+        "ending_equity": float(equity.iloc[-1]),
+        "total_return_percentage": float((equity.iloc[-1] / initial_equity - 1) * 100),
+        "maximum_drawdown": max_dd,
+        "maximum_drawdown_percentage": max_dd_pct * 100,
+        "maximum_consecutive_wins": _max_streak(wins),
+        "maximum_consecutive_losses": _max_streak(losses),
+        "average_holding_time": float(trades["holding_hours"].mean()),
+        "total_fees": float(trades["pair_total_fees"].sum()),
+        "ambiguous_event_count": int(trades["ambiguous_candle"].sum()),
+        "exit_combinations": combos,
     }
 
 
-def equity_curve(trades: pd.DataFrame, initial_equity: float = 0.0) -> pd.DataFrame:
+def equity_curve(trades: pd.DataFrame, initial_equity: float = 1000.0) -> pd.DataFrame:
     if trades.empty:
         return pd.DataFrame(columns=["time", "equity", "drawdown"])
-    equity = initial_equity + trades["net_pnl"].cumsum()
+    equity = trades["equity_after_trade"]
     return pd.DataFrame({
         "time": pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1)),
         "equity": equity,
-        "drawdown": equity - equity.cummax(),
+        "drawdown": equity - equity.cummax().clip(lower=initial_equity),
     })

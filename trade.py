@@ -12,6 +12,12 @@ class Side(str, Enum):
     SHORT = "SHORT"
 
 
+class ExitReason(str, Enum):
+    TP = "TP"
+    SL = "SL"
+    END_OF_DATA = "END_OF_DATA"
+
+
 @dataclass
 class Position:
     side: Side
@@ -21,12 +27,20 @@ class Position:
     risk: float
     sl: float
     tp: float
+    quantity: float
+    risk_amount: float
+    entry_notional: float
+    atr_at_entry: float
     exit_time: Optional[object] = None
     exit_index: Optional[int] = None
     exit_price: Optional[float] = None
-    result_r: Optional[float] = None
-    gross_pnl: Optional[float] = None
+    exit_reason: Optional[ExitReason] = None
+    gross_pnl: float = 0.0
     fees: float = 0.0
+    gross_r: float = 0.0
+    net_pnl: float = 0.0
+    net_r: float = 0.0
+    ambiguous: bool = False
 
     @property
     def is_open(self) -> bool:
@@ -38,6 +52,8 @@ class TradePair:
     pair_id: int
     long: Position
     short: Position
+    equity_before_trade: float
+    equity_after_trade: Optional[float] = None
 
     @property
     def is_open(self) -> bool:
