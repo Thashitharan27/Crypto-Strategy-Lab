@@ -1,5 +1,6 @@
 """Event-driven dual long/short backtesting engine with 15m strategy and optional 1m exits."""
 from __future__ import annotations
+from collections.abc import Callable
 import numpy as np, pandas as pd
 from atr import atr
 from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy
@@ -7,8 +8,8 @@ from strategy import custom_entry_signal
 from trade import ExitReason, ExitSource, Position, Side, TradePair
 
 class BacktestEngine:
-    def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None):
-        self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config
+    def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
+        self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.times=self.data.timestamp.to_numpy()
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.risk=self._risk_array()
         self.active_pairs=[]; self.completed_pairs=[]; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
@@ -21,10 +22,18 @@ class BacktestEngine:
         idx=np.where(np.isfinite(self.atr_values))[0]
         return self.data.timestamp.iloc[int(idx[0])] if len(idx) else None
     def run(self)->pd.DataFrame:
-        for i in range(len(self.data)):
+        total=len(self.data)
+        self._emit_progress(0,total)
+        for i in range(total):
             self._update_positions_to_strategy_index(i); self._collect_closed_pairs()
             if self._should_enter(i): self._open_pair(i)
-        self._force_close_end(); self._collect_closed_pairs(force=True); return self.results_frame()
+            processed=i+1
+            if processed == total or processed % self.progress_interval == 0:
+                self._emit_progress(processed,total)
+        self._force_close_end(); self._collect_closed_pairs(force=True); self._emit_progress(total,total); return self.results_frame()
+    def _emit_progress(self, processed_candles, total_candles):
+        if self.progress_callback is not None:
+            self.progress_callback(processed_candles, total_candles, len(self.completed_pairs), self.next_pair_id - 1)
     def _risk_array(self):
         if self.config.risk_mode==RiskMode.FIXED: return np.full(len(self.data), self.config.fixed_r, float)
         if self.config.risk_mode==RiskMode.PERCENT: return self.close*self.config.percent_r
