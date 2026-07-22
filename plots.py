@@ -19,8 +19,8 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
     if trades.empty:
         return
     charts = [
-        (trades["net_r"], "R Distribution", "r_distribution.png"),
-        (trades["holding_time"].dt.total_seconds() / 3600, "Holding Time (hours)", "holding_time_distribution.png"),
+        (trades["pair_net_r"], "R Distribution", "r_distribution.png"),
+        (trades["holding_hours"], "Holding Time (hours)", "holding_time_distribution.png"),
     ]
     for series, title, filename in charts:
         fig, ax = plt.subplots()
@@ -31,7 +31,7 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
         plt.close(fig)
     returns = trades.assign(exit_time=pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1)))
     for freq, filename, title in [("ME", "monthly_returns.png", "Monthly Returns"), ("YE", "yearly_returns.png", "Yearly Returns")]:
-        agg = returns.set_index("exit_time")["net_pnl"].resample(freq).sum()
+        agg = returns.set_index("exit_time")["pair_net_pnl"].resample(freq).sum()
         fig, ax = plt.subplots()
         agg.plot(kind="bar", ax=ax, title=title)
         fig.tight_layout()
