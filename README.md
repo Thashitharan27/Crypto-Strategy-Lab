@@ -181,3 +181,38 @@ The tests use small artificial datasets covering Binance loading, millisecond ti
 - `TiePolicy.INTRABAR` is intentionally not implemented without lower-timeframe data.
 - Missing candle detection assumes a 15-minute input timeframe.
 - Chart generation requires matplotlib.
+
+## 15-Minute Strategy Candles With 1-Minute Exit Resolution
+
+The backtester now separates strategy data from intrabar exit data. Use `strategy_csv` / `--strategy-input` for 15-minute candles and `intrabar_csv` / `--intrabar-input` for optional 1-minute candles. ATR, entry timing, raw entry price, stop-loss, and take-profit levels are calculated only from the completed 15-minute strategy candle. The 1-minute file is used only after entry to determine which exit barrier was touched first.
+
+Binance `open_time` is the candle start time. A 15-minute row with `open_time = 10:00` is considered complete at `10:15`, so the internal `strategy_entry_time` is the 15-minute candle open time plus 15 minutes. This avoids look-ahead bias: the entry uses the 15-minute close, and the high/low of that just-completed candle are not used after the entry.
+
+You can provide warm-up history before the trading window. For example, start the 15-minute data on `2026-05-25`, then set `--trading-start 2026-06-01 --trading-end 2026-06-30`. Warm-up candles seed Wilder ATR but do not generate trades.
+
+Fees remain charged on full notional, not margin. Leverage changes required margin but does not reduce trading fees, so small ATR values can create large notional sizes under account-risk sizing. Optional leverage caps (`--max-leverage-per-leg` and `--max-combined-leverage`) reduce quantities explicitly and mark trades with `leverage_capped` instead of silently changing size.
+
+Trade output separates price-distance R from account-risk R. Price R is price movement divided by the ATR-based R distance. Account R is cash PnL divided by planned cash risk per leg. This makes pairs such as one TP and one SL easier to interpret when SL and TP multiples differ.
+
+The optional zero-cost comparison (`--zero-cost-comparison`) reruns the same strategy with zero fees and zero slippage and stores side-by-side metrics in `summary.json`, helping identify whether execution costs are overwhelming the raw setup.
+
+### GUI
+
+```powershell
+.venv\Scripts\activate
+pip install -r requirements.txt
+python gui.py
+```
+
+The GUI includes separate selectors for the 15-minute strategy CSV and 1-minute intrabar CSV, a checkbox for 1-minute exit resolution, ATR controls, trading date filters, leverage caps, missing intrabar policy, and zero-cost comparison.
+
+### CLI
+
+```powershell
+python main.py ^
+  --strategy-input data/BTCUSDT_15m.csv ^
+  --intrabar-input data/BTCUSDT_1m.csv ^
+  --use-intrabar
+```
+
+Additional CLI options include `--strategy-timeframe`, `--intrabar-timeframe`, `--atr-period`, `--atr-multiplier`, `--trading-start`, `--trading-end`, `--max-leverage-per-leg`, `--max-combined-leverage`, `--intrabar-missing-policy`, and `--zero-cost-comparison`.

@@ -1,68 +1,60 @@
 """CSV loading utilities for Binance OHLCV files."""
-
 from __future__ import annotations
-
+from dataclasses import dataclass
 import pandas as pd
 
 REQUIRED_COLUMNS = ("timestamp", "open", "high", "low", "close", "volume")
 TIMESTAMP_ALIASES = ("timestamp", "open_time", "time", "datetime", "date")
-EXPECTED_INTERVAL = pd.Timedelta(minutes=15)
 
+@dataclass
+class DataSummary:
+    label: str; rows_loaded: int; start: object; end: object; detected_timeframe_minutes: int | None; missing_candles: int; gaps: list[tuple[object, object, int]]
 
-def load_ohlcv_csv(path: str, timestamp_unit: str | None = "ms") -> pd.DataFrame:
-    """Load, normalize, and validate a Binance-style OHLCV CSV."""
+def _detect(diffs: pd.Series) -> int | None:
+    if diffs.empty: return None
+    mode = diffs.dt.total_seconds().div(60).mode()
+    return int(mode.iloc[0]) if not mode.empty else None
+
+def load_ohlcv_csv(path: str, timestamp_unit: str | None = "ms", expected_timeframe_minutes: int | None = None, label: str = "Data", strict_timeframe: bool = False) -> pd.DataFrame:
     df = pd.read_csv(path)
-    df.columns = [str(col).strip().lower().replace(" ", "_") for col in df.columns]
-
-    time_col = next((col for col in TIMESTAMP_ALIASES if col in df.columns), None)
-    if time_col is None:
-        raise ValueError(f"Missing timestamp column. Accepted aliases: {list(TIMESTAMP_ALIASES)}")
-    if time_col != "timestamp":
-        df = df.rename(columns={time_col: "timestamp"})
-
-    missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
-
-    df = df.loc[:, list(REQUIRED_COLUMNS)].copy()
-    before = len(df)
-    raw_timestamp = df["timestamp"].copy()
-
-    unit = timestamp_unit or None
-    df["timestamp"] = pd.to_datetime(raw_timestamp, unit=unit, utc=True, errors="coerce")
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    time_col = next((c for c in TIMESTAMP_ALIASES if c in df.columns), None)
+    if time_col is None: raise ValueError(f"Missing timestamp column. Accepted aliases: {list(TIMESTAMP_ALIASES)}")
+    if time_col != "timestamp": df = df.rename(columns={time_col: "timestamp"})
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing: raise ValueError(f"Missing required columns: {missing}")
+    df = df.loc[:, list(REQUIRED_COLUMNS)].copy(); before = len(df)
+    raw = df["timestamp"].copy(); unit = timestamp_unit or None
+    df["timestamp"] = pd.to_datetime(raw, unit=unit, utc=True, errors="coerce")
     if df["timestamp"].isna().any() and unit is not None:
-        fallback = pd.to_datetime(raw_timestamp, utc=True, errors="coerce")
-        df["timestamp"] = df["timestamp"].fillna(fallback)
-
-    for col in ("open", "high", "low", "close", "volume"):
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
+        df["timestamp"] = df["timestamp"].fillna(pd.to_datetime(raw, utc=True, errors="coerce"))
+    if df["timestamp"].isna().any(): raise ValueError("timestamps are invalid")
+    for c in ("open","high","low","close","volume"): df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.dropna(subset=REQUIRED_COLUMNS)
-    invalid_ohlc = (
-        (df["high"] < df[["open", "close", "low"]].max(axis=1))
-        | (df["low"] > df[["open", "close", "high"]].min(axis=1))
-        | (df["volume"] < 0)
-    )
-    invalid_count = int(invalid_ohlc.sum())
-    df = df.loc[~invalid_ohlc]
+    invalid = (df["high"] < df[["open","close","low"]].max(axis=1)) | (df["low"] > df[["open","close","high"]].min(axis=1)) | (df["volume"] < 0)
+    invalid_count = int(invalid.sum()); df = df.loc[~invalid]
     df = df.sort_values("timestamp", kind="stable")
-    duplicate_count = int(df["timestamp"].duplicated().sum())
-    df = df.drop_duplicates("timestamp", keep="first").reset_index(drop=True)
-
-    diffs = df["timestamp"].diff().dropna()
-    missing_gaps = diffs[diffs > EXPECTED_INTERVAL]
-    missing_candles = int(((missing_gaps / EXPECTED_INTERVAL) - 1).sum()) if not missing_gaps.empty else 0
-    if missing_candles:
-        print(f"WARNING: Detected {missing_candles} missing 15-minute candles across {len(missing_gaps)} gaps.")
-
-    print(
-        "Loading summary: "
-        f"rows_read={before}, rows_loaded={len(df)}, rows_removed={before - len(df)}, "
-        f"duplicates_removed={duplicate_count}, invalid_ohlc_removed={invalid_count}, "
-        f"missing_15m_candles={missing_candles}, "
-        f"start={df['timestamp'].min() if not df.empty else 'n/a'}, "
-        f"end={df['timestamp'].max() if not df.empty else 'n/a'}"
-    )
-    if df.empty:
-        raise ValueError("No valid OHLCV rows loaded")
+    dup = int(df["timestamp"].duplicated().sum()); df = df.drop_duplicates("timestamp", keep="first").reset_index(drop=True)
+    if df.empty: raise ValueError("No valid OHLCV rows loaded")
+    diffs = df["timestamp"].diff().dropna(); detected = _detect(diffs)
+    basis = expected_timeframe_minutes or 15
+    expected = pd.Timedelta(minutes=basis)
+    gaps_s = diffs[diffs > expected]
+    gaps=[]; missing_candles=0
+    for idx, delta in gaps_s.items():
+        miss = int(delta / expected) - 1; missing_candles += miss; gaps.append((df.loc[idx-1,"timestamp"], df.loc[idx,"timestamp"], miss))
+    if strict_timeframe and expected_timeframe_minutes and detected != expected_timeframe_minutes:
+        raise ValueError(f"{label} data is not {expected_timeframe_minutes}-minute data (detected {detected})")
+    print(f"{label}:\nRows loaded: {len(df)}\nStart: {df.timestamp.min()}\nEnd: {df.timestamp.max()}\nDetected timeframe: {detected} minutes\nMissing candles: {missing_candles}\nmissing_{basis}m_candles={missing_candles}")
+    if missing_candles: print(f"WARNING: {label} has {missing_candles} missing candles across {len(gaps)} gaps.")
+    df.attrs["summary"] = DataSummary(label, len(df), df.timestamp.min(), df.timestamp.max(), detected, missing_candles, gaps)
     return df
+
+def load_backtest_data(config):
+    strat = load_ohlcv_csv(str(config.strategy_csv), config.timestamp_unit, config.strategy_timeframe_minutes, "Strategy data", True)
+    intra = None
+    if config.use_intrabar_data and config.intrabar_csv:
+        intra = load_ohlcv_csv(str(config.intrabar_csv), config.timestamp_unit, config.intrabar_timeframe_minutes, "Intrabar data", True)
+        if intra.timestamp.max() <= strat.timestamp.min() or intra.timestamp.min() >= strat.timestamp.max() + pd.Timedelta(minutes=config.strategy_timeframe_minutes):
+            raise ValueError("intrabar data does not overlap the strategy period")
+    return strat, intra

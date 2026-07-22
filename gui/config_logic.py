@@ -6,16 +6,19 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from config import BacktestConfig, EntryMode, RiskMode, TiePolicy
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy
 
 DEFAULT_GUI_CONFIG: dict[str, Any] = {
-    "input_csv": "data/binance_ohlcv.csv", "output_dir": "output",
+    "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output",
     "sl_mult": 2.0, "tp_mult": 3.0, "entry_mode": "WAIT_UNTIL_CLOSED",
     "entry_interval": 1, "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
     "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0,
     "percent_r": 0.002, "fixed_r": 100.0, "initial_equity": 1000.0,
     "risk_per_leg": 0.005, "maker_fee": 0.0002, "taker_fee": 0.0005,
     "use_maker_entry": False, "use_maker_exit": False, "slippage": 0.0001,
+    "strategy_timeframe_minutes": 15, "intrabar_timeframe_minutes": 1, "use_intrabar_data": True,
+    "trading_start_date": None, "trading_end_date": None, "max_effective_leverage_per_leg": None,
+    "max_combined_effective_leverage": None, "intrabar_missing_policy": "WARN_AND_USE_15M", "zero_cost_comparison": False,
 }
 
 
@@ -46,15 +49,18 @@ def theoretical_break_even(sl_mult: float, tp_mult: float) -> float:
 def validate_config_values(values: dict[str, Any], require_paths: bool = True) -> list[str]:
     errors: list[str] = []
     if require_paths:
-        if not Path(values.get("input_csv", "")).is_file():
-            errors.append("Input CSV must exist.")
+        strategy_path = values.get("strategy_csv") if values.get("strategy_csv") != DEFAULT_GUI_CONFIG.get("strategy_csv") else values.get("input_csv")
+        if not Path(strategy_path or "").is_file():
+            errors.append("15-Minute Strategy CSV must exist.")
+        if values.get("use_intrabar_data") and values.get("intrabar_csv") and values.get("intrabar_csv") != DEFAULT_GUI_CONFIG.get("intrabar_csv") and not Path(values.get("intrabar_csv")).is_file():
+            errors.append("1-Minute Intrabar CSV must exist when enabled.")
         out = Path(values.get("output_dir", ""))
         if not str(out):
             errors.append("Output folder is required.")
     checks = [
         ("sl_mult", 0, "SL multiple must be > 0."), ("tp_mult", 0, "TP multiple must be > 0."),
         ("initial_equity", 0, "Starting equity must be > 0."), ("risk_per_leg", 0, "Risk per leg must be > 0."),
-        ("atr_multiplier", 0, "ATR multiplier must be > 0."), ("percent_r", 0, "Percentage R must be > 0."),
+        ("atr_multiplier", 0, "ATR multiplier must be > 0."), ("strategy_timeframe_minutes", 0, "Strategy timeframe must be > 0."), ("intrabar_timeframe_minutes", 0, "Intrabar timeframe must be > 0."), ("percent_r", 0, "Percentage R must be > 0."),
         ("fixed_r", 0, "Fixed R must be > 0."),
     ]
     for key, limit, msg in checks:
@@ -73,6 +79,8 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("entry_mode") not in [e.value for e in EntryMode]: errors.append("Invalid entry mode.")
     if values.get("tie_policy") not in [TiePolicy.PESSIMISTIC.value, TiePolicy.OPTIMISTIC.value]: errors.append("Invalid tie policy.")
     if values.get("risk_mode") not in [e.value for e in RiskMode]: errors.append("Invalid risk mode.")
+    if int(values.get("intrabar_timeframe_minutes", 1)) >= int(values.get("strategy_timeframe_minutes", 15)): errors.append("Intrabar timeframe must be less than strategy timeframe.")
+    if values.get("intrabar_missing_policy") not in [e.value for e in IntrabarMissingPolicy]: errors.append("Invalid missing intrabar policy.")
     return errors
 
 
@@ -82,7 +90,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
     if errors:
         raise ValueError("\n".join(errors))
     return BacktestConfig(
-        input_csv=Path(merged["input_csv"]), output_dir=Path(merged["output_dir"]),
+        input_csv=Path(merged["input_csv"]), strategy_csv=Path(merged["input_csv"] if merged.get("strategy_csv") == DEFAULT_GUI_CONFIG.get("strategy_csv") else (merged.get("strategy_csv") or merged["input_csv"])), intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") and merged.get("intrabar_csv") != DEFAULT_GUI_CONFIG.get("intrabar_csv") else None, output_dir=Path(merged["output_dir"]),
         sl_mult=float(merged["sl_mult"]), tp_mult=float(merged["tp_mult"]),
         entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]),
         max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),
@@ -92,6 +100,11 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         risk_per_leg=float(merged["risk_per_leg"]), maker_fee=float(merged["maker_fee"]),
         taker_fee=float(merged["taker_fee"]), use_maker_entry=bool(merged["use_maker_entry"]),
         use_maker_exit=bool(merged["use_maker_exit"]), slippage=float(merged["slippage"]),
+        strategy_timeframe_minutes=int(merged["strategy_timeframe_minutes"]), intrabar_timeframe_minutes=int(merged["intrabar_timeframe_minutes"]),
+        use_intrabar_data=bool(merged["use_intrabar_data"]), trading_start_date=merged.get("trading_start_date"), trading_end_date=merged.get("trading_end_date"),
+        max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
+        max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
+        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]),
     )
 
 

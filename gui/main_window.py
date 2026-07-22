@@ -8,7 +8,7 @@ from PySide6.QtCore import QSettings, QThread, QTimer, Qt, QSortFilterProxyModel
 from PySide6.QtGui import QPixmap, QDesktopServices
 from PySide6.QtWidgets import *
 
-from loader import load_ohlcv_csv, EXPECTED_INTERVAL
+from loader import load_ohlcv_csv
 from .config_logic import *
 from .table_model import PandasTableModel
 from .worker import BacktestWorker
@@ -27,7 +27,10 @@ class MainWindow(QMainWindow):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); form=QVBoxLayout(inner); self.config_controls=[]
         def group(title): g=QGroupBox(title); l=QFormLayout(g); form.addWidget(g); return l
         data=group("Data")
-        self.input_csv=self._line(); self.input_csv.setReadOnly(True); b=QPushButton("Browse"); b.clicked.connect(self.browse_csv); row=QHBoxLayout(); row.addWidget(self.input_csv); row.addWidget(b); data.addRow("Input CSV", row)
+        self.input_csv=self._line(); self.input_csv.setReadOnly(True); b=QPushButton("Browse"); b.clicked.connect(self.browse_csv); row=QHBoxLayout(); row.addWidget(self.input_csv); row.addWidget(b); data.addRow("15-Minute Strategy CSV", row)
+        self.intrabar_csv=self._line(); self.intrabar_csv.setReadOnly(True); bi=QPushButton("Browse"); bi.clicked.connect(self.browse_intrabar_csv); row=QHBoxLayout(); row.addWidget(self.intrabar_csv); row.addWidget(bi); data.addRow("1-Minute Intrabar CSV", row)
+        self.use_intrabar=QCheckBox("Use 1-minute data for exit resolution"); self.use_intrabar.setChecked(True); data.addRow("", self.use_intrabar)
+        data.addRow(QLabel("ATR, entry price, SL, and TP are calculated from 15-minute candles.\n1-minute candles are used only to determine the exact exit sequence.\nFees are charged on full notional, not margin; leverage changes required margin but does not reduce trading fees."))
         self.output_folder=self._line(); self.output_folder.setReadOnly(True); bo=QPushButton("Browse"); bo.clicked.connect(self.browse_output); row=QHBoxLayout(); row.addWidget(self.output_folder); row.addWidget(bo); data.addRow("Output Folder", row)
         self.dataset_info=QLabel("No CSV loaded."); data.addRow("Dataset Information", self.dataset_info); val=QPushButton("Validate Data"); val.clicked.connect(self.validate_data); data.addRow(val)
         strat=group("Strategy")
@@ -35,9 +38,9 @@ class MainWindow(QMainWindow):
         for lab,w in [("Stop Loss Multiple",self.sl),("Take Profit Multiple",self.tp),("Entry Mode",self.entry_mode),("Entry Interval",self.entry_interval),("Maximum Active Pairs",self.max_pairs),("Tie Policy",self.tie)]: strat.addRow(lab,w)
         self.entry_mode.currentTextChanged.connect(lambda t:self.entry_interval.setEnabled(t=="EVERY_N_CANDLES"))
         risk=group("Risk and Position Sizing")
-        self.risk_mode=QComboBox(); self.risk_mode.addItems(["ATR","PERCENT","FIXED"]); self.atr_period=QSpinBox(); self.atr_period.setRange(1,99999); self.atr_mult=self._spin(1,0); self.percent_r=self._line("0.20%"); self.fixed_r=self._spin(100,0); self.equity=self._spin(1000,0,1e12,2); self.risk_leg=self._line("0.5%")
+        self.risk_mode=QComboBox(); self.risk_mode.addItems(["ATR","PERCENT","FIXED"]); self.trading_start=self._line(); self.trading_end=self._line(); self.max_lev_leg=self._line(); self.max_lev_combined=self._line(); self.missing_policy=QComboBox(); self.missing_policy.addItems(["ERROR","WARN_AND_USE_15M","WARN_AND_CONTINUE"]); self.zero_cost=QCheckBox("Run Zero-Cost Comparison"); self.atr_period=QSpinBox(); self.atr_period.setRange(1,99999); self.atr_mult=self._spin(1,0); self.percent_r=self._line("0.20%"); self.fixed_r=self._spin(100,0); self.equity=self._spin(1000,0,1e12,2); self.risk_leg=self._line("0.5%")
         self.risk_formula=QLabel(); self.risk_warn=QLabel(); self.risk_warn.setWordWrap(True)
-        for lab,w in [("Risk Mode",self.risk_mode),("ATR Period",self.atr_period),("ATR Multiplier",self.atr_mult),("R Percentage",self.percent_r),("Fixed R Distance",self.fixed_r),("Starting Equity",self.equity),("Risk Per Leg",self.risk_leg),("Formula",self.risk_formula),("Sizing",QLabel("Risk amount per leg = Current Equity × Risk Per Leg\nPosition quantity = Risk Amount ÷ Stop Distance")),("Combined Risk",self.risk_warn)]: risk.addRow(lab,w)
+        for lab,w in [("Risk Mode",self.risk_mode),("ATR Period",self.atr_period),("ATR Multiplier",self.atr_mult),("Trading Start Date",self.trading_start),("Trading End Date",self.trading_end),("Maximum Leverage Per Leg",self.max_lev_leg),("Maximum Combined Leverage",self.max_lev_combined),("Missing Intrabar Policy",self.missing_policy),("",self.zero_cost),("R Percentage",self.percent_r),("Fixed R Distance",self.fixed_r),("Starting Equity",self.equity),("Risk Per Leg",self.risk_leg),("Formula",self.risk_formula),("Sizing",QLabel("Risk amount per leg = Current Equity × Risk Per Leg\nPosition quantity = Risk Amount ÷ Stop Distance")),("Combined Risk",self.risk_warn)]: risk.addRow(lab,w)
         self.risk_mode.currentTextChanged.connect(self.update_dynamic); self.risk_leg.textChanged.connect(self.update_dynamic)
         fees=group("Fees and Execution")
         self.maker=self._line("0.02%"); self.taker=self._line("0.05%"); self.maker_entry=QCheckBox("Use Maker Fee for Entry"); self.maker_exit=QCheckBox("Use Maker Fee for Exit"); self.slippage=self._line("0.01%"); self.cost=QLabel()
@@ -63,20 +66,23 @@ class MainWindow(QMainWindow):
         for name,fn in [("Copy Log",lambda:self.log.selectAll() or self.log.copy()),("Clear Log",self.log.clear),("Save Log",self.save_log)]: btn=QPushButton(name); btn.clicked.connect(fn); row.addWidget(btn)
         l.addLayout(row); self.tabs.addTab(page,"Log")
     def values(self):
-        return {"input_csv":self.input_csv.text(),"output_dir":self.output_folder.text(),"sl_mult":self.sl.value(),"tp_mult":self.tp.value(),"entry_mode":self.entry_mode.currentText(),"entry_interval":self.entry_interval.value(),"max_active_pairs":self.max_pairs.value(),"tie_policy":self.tie.currentText(),"risk_mode":self.risk_mode.currentText(),"atr_period":self.atr_period.value(),"atr_multiplier":self.atr_mult.value(),"percent_r":parse_percentage(self.percent_r.text()),"fixed_r":self.fixed_r.value(),"initial_equity":self.equity.value(),"risk_per_leg":parse_percentage(self.risk_leg.text()),"maker_fee":parse_percentage(self.maker.text()),"taker_fee":parse_percentage(self.taker.text()),"use_maker_entry":self.maker_entry.isChecked(),"use_maker_exit":self.maker_exit.isChecked(),"slippage":parse_percentage(self.slippage.text())}
+        return {"input_csv":self.input_csv.text(),"strategy_csv":self.input_csv.text(),"intrabar_csv":self.intrabar_csv.text(),"use_intrabar_data":self.use_intrabar.isChecked(),"trading_start_date":self.trading_start.text() or None,"trading_end_date":self.trading_end.text() or None,"max_effective_leverage_per_leg":self.max_lev_leg.text() or None,"max_combined_effective_leverage":self.max_lev_combined.text() or None,"intrabar_missing_policy":self.missing_policy.currentText(),"zero_cost_comparison":self.zero_cost.isChecked(),"output_dir":self.output_folder.text(),"sl_mult":self.sl.value(),"tp_mult":self.tp.value(),"entry_mode":self.entry_mode.currentText(),"entry_interval":self.entry_interval.value(),"max_active_pairs":self.max_pairs.value(),"tie_policy":self.tie.currentText(),"risk_mode":self.risk_mode.currentText(),"atr_period":self.atr_period.value(),"atr_multiplier":self.atr_mult.value(),"percent_r":parse_percentage(self.percent_r.text()),"fixed_r":self.fixed_r.value(),"initial_equity":self.equity.value(),"risk_per_leg":parse_percentage(self.risk_leg.text()),"maker_fee":parse_percentage(self.maker.text()),"taker_fee":parse_percentage(self.taker.text()),"use_maker_entry":self.maker_entry.isChecked(),"use_maker_exit":self.maker_exit.isChecked(),"slippage":parse_percentage(self.slippage.text())}
     def reset_defaults(self):
-        d=DEFAULT_GUI_CONFIG; self.input_csv.setText(d["input_csv"]); self.output_folder.setText(d["output_dir"]); self.entry_interval.setValue(1); self.max_pairs.setValue(1); self.update_dynamic()
+        d=DEFAULT_GUI_CONFIG; self.input_csv.setText(d["strategy_csv"]); self.intrabar_csv.setText(d["intrabar_csv"]); self.output_folder.setText(d["output_dir"]); self.entry_interval.setValue(1); self.max_pairs.setValue(1); self.update_dynamic()
     def _restore_settings(self):
         self.input_csv.setText(self.settings.value("last_csv", self.input_csv.text())); self.output_folder.setText(self.settings.value("last_output", self.output_folder.text()))
     def browse_csv(self):
         p,_=QFileDialog.getOpenFileName(self,"Select CSV",self.input_csv.text(),"CSV files (*.csv)");
         if p: self.input_csv.setText(p); self.settings.setValue("last_csv",p); self.validate_data()
+    def browse_intrabar_csv(self):
+        p,_=QFileDialog.getOpenFileName(self,"Select Intrabar CSV",self.intrabar_csv.text(),"CSV files (*.csv)");
+        if p: self.intrabar_csv.setText(p)
     def browse_output(self):
         p=QFileDialog.getExistingDirectory(self,"Select Output Folder",self.output_folder.text());
         if p: self.output_folder.setText(p); self.settings.setValue("last_output",p)
     def validate_data(self):
         try:
-            df=load_ohlcv_csv(self.input_csv.text()); diffs=df.timestamp.diff().dropna(); miss=int((((diffs[diffs>EXPECTED_INTERVAL]/EXPECTED_INTERVAL)-1).sum()) if not diffs.empty else 0); tf=str(diffs.mode().iloc[0]) if not diffs.empty else "n/a"; self.dataset_info.setText(f"Total candles: {len(df):,}\nStart date: {df.timestamp.min()}\nEnd date: {df.timestamp.max()}\nDetected timeframe: {tf}\nMissing candles: {miss}\nRows removed: see log/console\nDuplicate candles removed: see log/console"); self.append_log("Data validation passed."); return True
+            df=load_ohlcv_csv(self.input_csv.text(), expected_timeframe_minutes=15, label="Strategy data"); sm=df.attrs.get("summary"); miss=sm.missing_candles; tf=f"{sm.detected_timeframe_minutes} minutes"; self.dataset_info.setText(f"Total candles: {len(df):,}\nStart date: {df.timestamp.min()}\nEnd date: {df.timestamp.max()}\nDetected timeframe: {tf}\nMissing candles: {miss}\nRows removed: see log/console\nDuplicate candles removed: see log/console"); self.append_log("Data validation passed."); return True
         except Exception as e: QMessageBox.warning(self,"Invalid CSV",str(e)); self.append_log(traceback.format_exc()); return False
     def update_dynamic(self):
         m=getattr(self,'risk_mode',None) and self.risk_mode.currentText(); self.atr_period.setVisible(m=="ATR"); self.atr_mult.setVisible(m=="ATR"); self.percent_r.setVisible(m=="PERCENT"); self.fixed_r.setVisible(m=="FIXED"); self.risk_formula.setText({"ATR":"R = ATR × ATR Multiplier","PERCENT":"R = Entry Price × Percentage","FIXED":"R = Fixed Price Distance"}.get(m,""));
@@ -96,7 +102,7 @@ class MainWindow(QMainWindow):
     def on_failed(self,msg,tb): QMessageBox.critical(self,"Backtest Error",msg); self.append_log(tb); self.cleanup_thread()
     def cleanup_thread(self): self.run_btn.setEnabled(True); self.cancel_btn.setEnabled(False); self.thread.quit(); self.thread.wait(); self.thread=None; self.worker=None
     def populate_summary(self,s):
-        keys=["total_pairs","wins","losses","flat_pairs","win_rate","loss_rate","average_net_r","median_net_r","total_net_r","profit_factor","ending_equity","total_return_percentage","maximum_drawdown","maximum_drawdown_percentage","maximum_consecutive_wins","maximum_consecutive_losses","average_holding_time","total_fees","ambiguous_event_count"]
+        keys=["total_pairs","wins","losses","flat_pairs","win_rate","loss_rate","average_net_r","median_net_r","total_net_r","profit_factor","ending_equity","total_return_percentage","maximum_drawdown","maximum_drawdown_percentage","maximum_consecutive_wins","maximum_consecutive_losses","average_holding_time","total_fees","ambiguous_event_count","average_combined_effective_leverage","maximum_combined_effective_leverage","total_fees","average_fees_as_percentage_of_expected_winning_profit"]
         self.summary_table.setRowCount(len(keys)+1); vals={**s,"starting_equity":self.equity.value()}; keys.insert(10,"starting_equity")
         for r,k in enumerate(keys): self.summary_table.setItem(r,0,QTableWidgetItem(k)); v=vals.get(k,""); txt=format_percentage(v) if "rate" in k else (f"{v:.4f}R" if k.endswith("net_r") else str(v)); self.summary_table.setItem(r,1,QTableWidgetItem(txt))
         combos=s.get("exit_combinations",{}); self.combo_table.setRowCount(len(combos))

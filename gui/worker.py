@@ -8,7 +8,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from config import BacktestConfig
 from engine import BacktestEngine
-from loader import load_ohlcv_csv
+from loader import load_backtest_data
 from plots import save_plots
 from statistics import equity_curve, summarize
 
@@ -32,14 +32,15 @@ class BacktestWorker(QObject):
     def run(self) -> None:
         try:
             self.status.emit("Loading CSV...", 5)
-            data = load_ohlcv_csv(str(self.config.input_csv), self.config.timestamp_unit)
-            self.log.emit(f"Loaded {len(data):,} candles")
+            data, intrabar = load_backtest_data(self.config)
+            self.log.emit(f"Loaded {len(data):,} strategy candles")
+            if intrabar is not None: self.log.emit(f"Loaded {len(intrabar):,} intrabar candles")
             self.log.emit(f"Period: {data['timestamp'].min()} to {data['timestamp'].max()}")
             self._check(); self.status.emit("Validating data...", 15)
             self._check(); self.status.emit("Calculating ATR...", 25)
             self.log.emit(f"Running {self.config.risk_mode.value}, ATR({self.config.atr_period}), multiplier {self.config.atr_multiplier}")
             self.status.emit("Running backtest...", 45)
-            trades = BacktestEngine(data, self.config).run()
+            trades = BacktestEngine(data, self.config, intrabar).run()
             self._check(); self.status.emit("Creating statistics...", 70)
             self.config.output_dir.mkdir(parents=True, exist_ok=True)
             trades.to_csv(self.config.output_dir / "trade_list.csv", index=False)
