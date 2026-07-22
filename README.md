@@ -20,6 +20,15 @@ A modular Python backtesting tool for dual long/short crypto strategies on Binan
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 py -m pip install -r requirements.txt pytest
+python gui.py
+```
+
+For Command Prompt on Windows:
+
+```bat
+.venv\Scripts\activate
+pip install -r requirements.txt
+python gui.py
 ```
 
 On macOS/Linux use `python -m venv .venv`, `source .venv/bin/activate`, then install the same requirements.
@@ -96,6 +105,16 @@ If a candle touches both TP and SL for the same leg, `ambiguous_candle` is writt
 - `INTRABAR` remains reserved for future lower-timeframe resolution.
 
 Trades opened at a candle close are not tested against that same candle's high or low. SL/TP checks begin on the next candle to avoid look-ahead bias.
+
+## Desktop GUI
+
+Run the PySide6 desktop interface separately from the CLI:
+
+```bash
+python gui.py
+```
+
+The GUI uses the same loader, `BacktestEngine`, statistics, and plotting modules as `python main.py`. It provides configuration, summary, trade-list, chart, and log tabs, saves/loads JSON configurations, and keeps the backtest worker on a `QThread` so the window remains responsive.
 
 ## CLI examples
 
