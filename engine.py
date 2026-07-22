@@ -11,7 +11,7 @@ class BacktestEngine:
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.times=self.data.timestamp.to_numpy()
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.risk=self._risk_array()
-        self.active_pairs=[]; self.completed_pairs=[]; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]
+        self.active_pairs=[]; self.completed_pairs=[]; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.trading_start=pd.Timestamp(config.trading_start_date, tz="UTC") if config.trading_start_date else None
         self.trading_end=pd.Timestamp(config.trading_end_date, tz="UTC") if config.trading_end_date else None
@@ -56,19 +56,35 @@ class BacktestEngine:
             for pos in (pair.long,pair.short):
                 if pos.is_open and i>pos.entry_index: self._scan_exit(pos,i)
     def _scan_exit(self,pos,i):
-        if self.intrabar_data is not None and self.config.use_intrabar_data:
-            start=pd.Timestamp(pos.entry_time); end=pd.Timestamp(self.times[i])+self.entry_delta
-            sub=self.intrabar_data[(self.intrabar_data.timestamp>start)&(self.intrabar_data.timestamp<end)]
-            if self._has_missing_intrabar(sub,start,end):
-                pos.missing_intrabar_data=True
-                if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR: raise ValueError("Missing intrabar candles during open trade")
-                if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M: return self._maybe_exit_ohlc(pos,i,ExitSource.FALLBACK_15M)
-            for j,row in sub.iterrows():
-                if self._maybe_exit_bar(pos,j,row.high,row.low,row.timestamp,ExitSource.INTRABAR): return
-        else: self._maybe_exit_ohlc(pos,i,ExitSource.FALLBACK_15M)
+        start=pd.Timestamp(pos.entry_time); end=pd.Timestamp(self.times[i])+self.entry_delta
+        if not self.config.use_intrabar_data:
+            return self._fallback_exit(pos,i,"intrabar_disabled")
+        if self.intrabar_data is None:
+            return self._fallback_exit(pos,i,"intrabar_file_missing")
+        if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
+            return self._fallback_exit(pos,i,"timestamp_alignment_failure")
+        sub=self.intrabar_data[(self.intrabar_data.timestamp>=start)&(self.intrabar_data.timestamp<end)]
+        if sub.empty:
+            reason="end_of_intrabar_data" if self.intrabar_data.timestamp.max() < start else "no_overlapping_intrabar_rows"
+            return self._fallback_exit(pos,i,reason)
+        expected=pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
+        if sub.timestamp.iloc[0] > start + expected:
+            return self._fallback_exit(pos,i,"timestamp_alignment_failure")
+        if self._has_missing_intrabar(sub,start,end):
+            pos.missing_intrabar_data=True
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR: raise ValueError("Missing intrabar candles during open trade")
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M: return self._fallback_exit(pos,i,"intrabar_gap")
+        for j,row in sub.iterrows():
+            if self._maybe_exit_bar(pos,j,row.high,row.low,row.timestamp,ExitSource.INTRABAR): return True
+        if self.intrabar_data.timestamp.max() < end - pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes):
+            return self._fallback_exit(pos,i,"end_of_intrabar_data")
+        return False
+    def _fallback_exit(self,pos,i,reason):
+        pos.fallback_reason=reason; self.fallback_reasons.append(reason)
+        return self._maybe_exit_ohlc(pos,i,ExitSource.FALLBACK_15M)
     def _has_missing_intrabar(self,sub,start,end):
-        if sub.empty: return False
-        diffs=sub.timestamp.diff().dropna(); gaps=diffs[diffs>pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)]
+        expected=pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
+        diffs=sub.timestamp.diff().dropna(); gaps=diffs[diffs>expected]
         for idx,d in gaps.items(): self.missing_intrabar_intervals.append((sub.loc[idx-1,'timestamp'],sub.loc[idx,'timestamp'])); print(f"WARNING: Missing intrabar data {sub.loc[idx-1,'timestamp']} to {sub.loc[idx,'timestamp']}")
         return not gaps.empty
     def _maybe_exit_ohlc(self,pos,i,source): return self._maybe_exit_bar(pos,i,self.high[i],self.low[i],self.times[i],source)
@@ -102,4 +118,4 @@ class BacktestEngine:
             **self._pos_cols('long',p.long), **self._pos_cols('short',p.short),"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":p.long.price_r+p.short.price_r,"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":p.long.gross_r+p.short.gross_r,"pair_fee_r":fees/p.long.risk_amount,"pair_net_r":p.long.net_r+p.short.net_r,"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":p.long.ambiguous or p.short.ambiguous,"ambiguous_candle":p.long.ambiguous or p.short.ambiguous,"missing_intrabar_data":p.long.missing_intrabar_data or p.short.missing_intrabar_data})
         return pd.DataFrame(rows)
     def _pos_cols(self,prefix,pos):
-        return {f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_sl":pos.sl,f"{prefix}_tp":pos.tp,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
+        return {f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_sl":pos.sl,f"{prefix}_tp":pos.tp,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
