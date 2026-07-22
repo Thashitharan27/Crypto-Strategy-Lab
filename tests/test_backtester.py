@@ -98,3 +98,68 @@ def test_equity_and_drawdown():
     assert summary["ending_equity"] == pytest.approx(trades.equity_after_trade.iloc[-1])
     assert "maximum_drawdown" in summary
     assert not curve.empty
+
+def one_minute(start, rows):
+    return pd.DataFrame({
+        "timestamp": [start + pd.Timedelta(minutes=i) for i in range(len(rows))],
+        "open": [r[0] for r in rows], "high": [r[1] for r in rows],
+        "low": [r[2] for r in rows], "close": [r[3] for r in rows], "volume": [1]*len(rows),
+    })
+
+def test_strategy_entry_time_is_candle_close_and_uses_close_price_not_high_low():
+    df = candles([(100, 1000, 1, 100), (100, 111, 89, 100)])
+    row = BacktestEngine(df, cfg()).run().iloc[0]
+    assert row.strategy_candle_open_time == pd.Timestamp("2024-01-01 00:00", tz="UTC")
+    assert row.strategy_entry_time == pd.Timestamp("2024-01-01 00:15", tz="UTC")
+    assert row.strategy_entry_price == 100
+    assert row.long_exit_reason == "SL"
+
+
+def test_atr_uses_strategy_candles_not_intrabar_volatility():
+    rows = [(100+i, 102+i, 99+i, 101+i) for i in range(20)]
+    strat = candles(rows)
+    start = pd.Timestamp("2024-01-01 00:15", tz="UTC")
+    quiet = one_minute(start, [(100,100,100,100)]*60)
+    wild = one_minute(start, [(100,10000,1,100)]*60)
+    c = cfg(risk_mode=RiskMode.ATR, atr_period=14, entry_mode=EntryMode.EVERY_N_CANDLES, use_intrabar_data=True)
+    a = BacktestEngine(strat, c, quiet).run().atr_at_entry.iloc[0]
+    b = BacktestEngine(strat, c, wild).run().atr_at_entry.iloc[0]
+    assert a == pytest.approx(b)
+    assert a == pytest.approx(atr(strat.high.to_numpy(float), strat.low.to_numpy(float), strat.close.to_numpy(float), 14)[13])
+
+
+def test_intrabar_resolves_each_side_and_sources():
+    strat = candles([(100,100,100,100), (100,100,100,100)])
+    intra = one_minute(pd.Timestamp("2024-01-01 00:16", tz="UTC"), [(100,111,100,100)])
+    row = BacktestEngine(strat, cfg(use_intrabar_data=True), intra).run().iloc[0]
+    assert row.long_exit_reason == "TP"
+    assert row.short_exit_reason == "SL"
+    assert row.long_exit_source == "1M_INTRABAR"
+    assert row.long_exit_time == pd.Timestamp("2024-01-01 00:16", tz="UTC")
+
+
+def test_leverage_caps_and_full_notional_fees():
+    df = candles([(100,100,100,100), (100,111,100,100)])
+    row = BacktestEngine(df, cfg(taker_fee=0.001, max_effective_leverage_per_leg=0.05)).run().iloc[0]
+    assert row.leverage_capped
+    assert row.long_quantity < row.long_uncapped_quantity
+    assert row.long_effective_leverage == pytest.approx(0.05)
+    assert row.long_entry_fee == pytest.approx(row.long_entry_notional * 0.001)
+
+
+def test_warmup_candles_do_not_trade_before_start():
+    df = candles([(100,100,100,100)]*20 + [(100,111,100,100)])
+    c = cfg(trading_start_date="2024-01-01 04:00", risk_mode=RiskMode.ATR, atr_period=14)
+    engine = BacktestEngine(df, c)
+    trades = engine.run()
+    assert engine.warmup_candle_count == 16
+    assert (trades.strategy_entry_time >= pd.Timestamp("2024-01-01 04:00", tz="UTC")).all()
+
+
+def test_missing_intrabar_fallback_policy_records_flag():
+    strat = candles([(100,100,100,100), (100,111,100,100)])
+    intra = one_minute(pd.Timestamp("2024-01-01 00:16", tz="UTC"), [(100,100,100,100), (100,100,100,100), (100,100,100,100)])
+    intra.loc[2, "timestamp"] = pd.Timestamp("2024-01-01 00:20", tz="UTC")
+    row = BacktestEngine(strat, cfg(use_intrabar_data=True), intra).run().iloc[0]
+    assert row.missing_intrabar_data
+    assert row.long_exit_source == "15M_FALLBACK"

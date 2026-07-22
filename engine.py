@@ -1,197 +1,105 @@
-"""Event-driven dual long/short backtesting engine."""
-
+"""Event-driven dual long/short backtesting engine with 15m strategy and optional 1m exits."""
 from __future__ import annotations
-
-import numpy as np
-import pandas as pd
-
+import numpy as np, pandas as pd
 from atr import atr
-from config import BacktestConfig, EntryMode, RiskMode, TiePolicy
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy
 from strategy import custom_entry_signal
-from trade import ExitReason, Position, Side, TradePair
-
+from trade import ExitReason, ExitSource, Position, Side, TradePair
 
 class BacktestEngine:
-    def __init__(self, data: pd.DataFrame, config: BacktestConfig):
-        self.data = data
-        self.config = config
-        self.high = data["high"].to_numpy(float)
-        self.low = data["low"].to_numpy(float)
-        self.close = data["close"].to_numpy(float)
-        self.open = data["open"].to_numpy(float)
-        self.times = data["timestamp"].to_numpy()
-        self.risk = self._risk_array()
-        self.atr_values = atr(self.high, self.low, self.close, self.config.atr_period)
-        self.active_pairs: list[TradePair] = []
-        self.completed_pairs: list[TradePair] = []
-        self.next_pair_id = 1
-        self.current_equity = config.initial_equity
-
-    def run(self) -> pd.DataFrame:
+    def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None):
+        self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config
+        self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.times=self.data.timestamp.to_numpy()
+        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.risk=self._risk_array()
+        self.active_pairs=[]; self.completed_pairs=[]; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]
+        self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
+        self.trading_start=pd.Timestamp(config.trading_start_date, tz="UTC") if config.trading_start_date else None
+        self.trading_end=pd.Timestamp(config.trading_end_date, tz="UTC") if config.trading_end_date else None
+        self.first_valid_atr_timestamp=self._first_valid_atr_timestamp()
+        self.warmup_candle_count=int((self.data.timestamp < self.trading_start).sum()) if self.trading_start is not None else 0
+    def _first_valid_atr_timestamp(self):
+        idx=np.where(np.isfinite(self.atr_values))[0]
+        return self.data.timestamp.iloc[int(idx[0])] if len(idx) else None
+    def run(self)->pd.DataFrame:
         for i in range(len(self.data)):
-            self._update_positions(i)
-            self._collect_closed_pairs()
-            if self._should_enter(i):
-                self._open_pair(i)
-        self._force_close_end()
-        self._collect_closed_pairs(force=True)
-        return self.results_frame()
-
-    def _risk_array(self) -> np.ndarray:
-        if self.config.risk_mode == RiskMode.FIXED:
-            return np.full(len(self.data), self.config.fixed_r, dtype=float)
-        if self.config.risk_mode == RiskMode.PERCENT:
-            return self.close * self.config.percent_r
-        return atr(self.high, self.low, self.close, self.config.atr_period) * self.config.atr_multiplier
-
-    def _should_enter(self, i: int) -> bool:
-        if not np.isfinite(self.risk[i]) or self.risk[i] <= 0:
-            return False
-        if len(self.active_pairs) >= self.config.max_active_pairs:
-            return False
-        mode = self.config.entry_mode
-        if mode == EntryMode.WAIT_UNTIL_CLOSED:
-            return not self.active_pairs
-        if mode == EntryMode.EVERY_N_CANDLES:
-            return i % self.config.entry_interval == 0
-        if mode == EntryMode.CUSTOM:
-            arrays = {"open": self.open, "high": self.high, "low": self.low, "close": self.close}
-            return custom_entry_signal(i, arrays, len(self.active_pairs))
+            self._update_positions_to_strategy_index(i); self._collect_closed_pairs()
+            if self._should_enter(i): self._open_pair(i)
+        self._force_close_end(); self._collect_closed_pairs(force=True); return self.results_frame()
+    def _risk_array(self):
+        if self.config.risk_mode==RiskMode.FIXED: return np.full(len(self.data), self.config.fixed_r, float)
+        if self.config.risk_mode==RiskMode.PERCENT: return self.close*self.config.percent_r
+        return self.atr_values*self.config.atr_multiplier
+    def _entry_time(self,i): return pd.Timestamp(self.times[i]) + self.entry_delta
+    def _in_trading_window(self,i):
+        et=self._entry_time(i)
+        return (self.trading_start is None or et >= self.trading_start) and (self.trading_end is None or et <= self.trading_end)
+    def _should_enter(self,i):
+        if not np.isfinite(self.risk[i]) or self.risk[i]<=0 or len(self.active_pairs)>=self.config.max_active_pairs or not self._in_trading_window(i): return False
+        if self.config.entry_mode==EntryMode.WAIT_UNTIL_CLOSED: return not self.active_pairs
+        if self.config.entry_mode==EntryMode.EVERY_N_CANDLES: return i % self.config.entry_interval==0
+        if self.config.entry_mode==EntryMode.CUSTOM: return custom_entry_signal(i,{"open":self.open,"high":self.high,"low":self.low,"close":self.close},len(self.active_pairs))
         return False
-
-    def _open_pair(self, i: int) -> None:
-        raw_entry = self.close[i]
-        long_entry = raw_entry * (1 + self.config.slippage)
-        short_entry = raw_entry * (1 - self.config.slippage)
-        risk = float(self.risk[i])
-        stop_distance = self.config.sl_mult * risk
-        risk_amount = self.current_equity * self.config.risk_per_leg
-        quantity = risk_amount / stop_distance
-        entry_fee_rate = self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
-        long = Position(
-            Side.LONG, self.times[i], i, long_entry, risk,
-            long_entry - stop_distance, long_entry + self.config.tp_mult * risk,
-            quantity, risk_amount, long_entry * quantity, float(self.atr_values[i]),
-            fees=long_entry * quantity * entry_fee_rate,
-        )
-        short = Position(
-            Side.SHORT, self.times[i], i, short_entry, risk,
-            short_entry + stop_distance, short_entry - self.config.tp_mult * risk,
-            quantity, risk_amount, short_entry * quantity, float(self.atr_values[i]),
-            fees=short_entry * quantity * entry_fee_rate,
-        )
-        self.active_pairs.append(TradePair(self.next_pair_id, long, short, self.current_equity))
-        self.next_pair_id += 1
-
-    def _update_positions(self, i: int) -> None:
+    def _cap_qty(self, qty, entry_price, equity):
+        capped=False; cap_qty=qty
+        if self.config.max_effective_leverage_per_leg is not None: cap_qty=min(cap_qty, self.config.max_effective_leverage_per_leg*equity/entry_price)
+        if self.config.max_combined_effective_leverage is not None: cap_qty=min(cap_qty, self.config.max_combined_effective_leverage*equity/(2*entry_price))
+        capped=cap_qty < qty - 1e-12
+        return cap_qty,capped
+    def _open_pair(self,i):
+        raw=self.close[i]; long_entry=raw*(1+self.config.slippage); short_entry=raw*(1-self.config.slippage); r=float(self.risk[i]); stop=self.config.sl_mult*r; risk_amt=self.current_equity*self.config.risk_per_leg
+        uncapped=risk_amt/stop; lqty,lc=self._cap_qty(uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(uncapped,short_entry,self.current_equity); fee_rate=self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
+        long=Position(Side.LONG,self._entry_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate)
+        short=Position(Side.SHORT,self._entry_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate)
+        self.active_pairs.append(TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc)); self.next_pair_id+=1
+    def _update_positions_to_strategy_index(self,i):
         for pair in self.active_pairs:
-            for pos in (pair.long, pair.short):
-                if pos.is_open and i > pos.entry_index:
-                    self._maybe_exit(pos, i)
-
-    def _maybe_exit(self, pos: Position, i: int) -> None:
-        hit_tp = self.high[i] >= pos.tp if pos.side == Side.LONG else self.low[i] <= pos.tp
-        hit_sl = self.low[i] <= pos.sl if pos.side == Side.LONG else self.high[i] >= pos.sl
-        if not (hit_tp or hit_sl):
-            return
-        if hit_tp and hit_sl:
-            pos.ambiguous = True
-            if self.config.tie_policy == TiePolicy.INTRABAR:
-                raise NotImplementedError("Intrabar tie resolution requires lower timeframe data")
-            use_tp = self.config.tie_policy == TiePolicy.OPTIMISTIC
-        else:
-            use_tp = hit_tp
-        raw_exit = pos.tp if use_tp else pos.sl
-        slip = 1 - self.config.slippage if pos.side == Side.LONG else 1 + self.config.slippage
-        self._close_position(pos, i, raw_exit * slip, ExitReason.TP if use_tp else ExitReason.SL)
-
-    def _close_position(self, pos: Position, i: int, exit_price: float, reason: ExitReason) -> None:
-        exit_fee_rate = self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
-        gross = (exit_price - pos.entry_price) * pos.quantity if pos.side == Side.LONG else (pos.entry_price - exit_price) * pos.quantity
-        exit_fee = exit_price * pos.quantity * exit_fee_rate
-        pos.exit_time = self.times[i]
-        pos.exit_index = i
-        pos.exit_price = exit_price
-        pos.exit_reason = reason
-        pos.gross_pnl = gross
-        pos.fees += exit_fee
-        pos.net_pnl = pos.gross_pnl - pos.fees
-        pos.gross_r = pos.gross_pnl / pos.risk_amount
-        pos.net_r = pos.net_pnl / pos.risk_amount
-
-    def _force_close_end(self) -> None:
-        last = len(self.data) - 1
+            for pos in (pair.long,pair.short):
+                if pos.is_open and i>pos.entry_index: self._scan_exit(pos,i)
+    def _scan_exit(self,pos,i):
+        if self.intrabar_data is not None and self.config.use_intrabar_data:
+            start=pd.Timestamp(pos.entry_time); end=pd.Timestamp(self.times[i])+self.entry_delta
+            sub=self.intrabar_data[(self.intrabar_data.timestamp>start)&(self.intrabar_data.timestamp<end)]
+            if self._has_missing_intrabar(sub,start,end):
+                pos.missing_intrabar_data=True
+                if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR: raise ValueError("Missing intrabar candles during open trade")
+                if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M: return self._maybe_exit_ohlc(pos,i,ExitSource.FALLBACK_15M)
+            for j,row in sub.iterrows():
+                if self._maybe_exit_bar(pos,j,row.high,row.low,row.timestamp,ExitSource.INTRABAR): return
+        else: self._maybe_exit_ohlc(pos,i,ExitSource.FALLBACK_15M)
+    def _has_missing_intrabar(self,sub,start,end):
+        if sub.empty: return False
+        diffs=sub.timestamp.diff().dropna(); gaps=diffs[diffs>pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)]
+        for idx,d in gaps.items(): self.missing_intrabar_intervals.append((sub.loc[idx-1,'timestamp'],sub.loc[idx,'timestamp'])); print(f"WARNING: Missing intrabar data {sub.loc[idx-1,'timestamp']} to {sub.loc[idx,'timestamp']}")
+        return not gaps.empty
+    def _maybe_exit_ohlc(self,pos,i,source): return self._maybe_exit_bar(pos,i,self.high[i],self.low[i],self.times[i],source)
+    def _maybe_exit_bar(self,pos,i,high,low,timestamp,source):
+        hit_tp=high>=pos.tp if pos.side==Side.LONG else low<=pos.tp; hit_sl=low<=pos.sl if pos.side==Side.LONG else high>=pos.sl
+        if not(hit_tp or hit_sl): return False
+        if hit_tp and hit_sl: pos.ambiguous=True; use_tp=self.config.tie_policy==TiePolicy.OPTIMISTIC
+        else: use_tp=hit_tp
+        raw=pos.tp if use_tp else pos.sl; slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
+        self._close_position(pos,i,raw*slip,ExitReason.TP if use_tp else ExitReason.SL,source,timestamp); return True
+    def _close_position(self,pos,i,exit_price,reason,source=None,timestamp=None):
+        rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee; gross=(exit_price-pos.entry_price)*pos.quantity if pos.side==Side.LONG else (pos.entry_price-exit_price)*pos.quantity; exit_fee=exit_price*pos.quantity*rate
+        pos.exit_time=timestamp if timestamp is not None else self.times[i]; pos.exit_index=i; pos.exit_price=exit_price; pos.exit_reason=reason; pos.exit_source=source or (ExitSource.END_OF_DATA if reason==ExitReason.END_OF_DATA else ExitSource.FALLBACK_15M); pos.gross_pnl=gross; pos.exit_fee=exit_fee; pos.fees=pos.entry_fee+exit_fee; pos.net_pnl=gross-pos.fees; pos.gross_r=gross/pos.risk_amount; pos.net_r=pos.net_pnl/pos.risk_amount; move=(exit_price-pos.entry_price) if pos.side==Side.LONG else (pos.entry_price-exit_price); pos.price_r=move/pos.risk
+    def _force_close_end(self):
+        last=len(self.data)-1
         for pair in self.active_pairs:
-            for pos in (pair.long, pair.short):
-                if pos.is_open:
-                    self._close_position(pos, last, self.close[last], ExitReason.END_OF_DATA)
-
-    def _collect_closed_pairs(self, force: bool = False) -> None:
-        still_open = []
-        for pair in self.active_pairs:
-            if force or not pair.is_open:
-                pair_net = pair.long.net_pnl + pair.short.net_pnl
-                self.current_equity += pair_net
-                pair.equity_after_trade = self.current_equity
-                self.completed_pairs.append(pair)
-            else:
-                still_open.append(pair)
-        self.active_pairs = still_open
-
-    def results_frame(self) -> pd.DataFrame:
-        rows = []
-        for pair in self.completed_pairs:
-            gross = pair.long.gross_pnl + pair.short.gross_pnl
-            fees = pair.long.fees + pair.short.fees
-            net = pair.long.net_pnl + pair.short.net_pnl
-            gross_r = pair.long.gross_r + pair.short.gross_r
-            fee_r = fees / pair.long.risk_amount
-            net_r = pair.long.net_r + pair.short.net_r
-            exit_i = max(pair.long.exit_index or pair.long.entry_index, pair.short.exit_index or pair.short.entry_index)
-            holding = pd.Timestamp(self.times[exit_i]) - pd.Timestamp(pair.long.entry_time)
-            rows.append({
-                "pair_id": pair.pair_id,
-                "entry_time": pair.long.entry_time,
-                "entry_price": self.close[pair.long.entry_index],
-                "r_distance": pair.long.risk,
-                "atr_at_entry": pair.long.atr_at_entry,
-                "equity_before_trade": pair.equity_before_trade,
-                "long_quantity": pair.long.quantity,
-                "long_risk_amount": pair.long.risk_amount,
-                "long_entry_notional": pair.long.entry_notional,
-                "long_sl": pair.long.sl,
-                "long_tp": pair.long.tp,
-                "long_exit_time": pair.long.exit_time,
-                "long_exit_price": pair.long.exit_price,
-                "long_exit_reason": pair.long.exit_reason.value if pair.long.exit_reason else None,
-                "long_gross_pnl": pair.long.gross_pnl,
-                "long_fees": pair.long.fees,
-                "long_net_pnl": pair.long.net_pnl,
-                "long_gross_r": pair.long.gross_r,
-                "long_net_r": pair.long.net_r,
-                "short_quantity": pair.short.quantity,
-                "short_risk_amount": pair.short.risk_amount,
-                "short_entry_notional": pair.short.entry_notional,
-                "short_sl": pair.short.sl,
-                "short_tp": pair.short.tp,
-                "short_exit_time": pair.short.exit_time,
-                "short_exit_price": pair.short.exit_price,
-                "short_exit_reason": pair.short.exit_reason.value if pair.short.exit_reason else None,
-                "short_gross_pnl": pair.short.gross_pnl,
-                "short_fees": pair.short.fees,
-                "short_net_pnl": pair.short.net_pnl,
-                "short_gross_r": pair.short.gross_r,
-                "short_net_r": pair.short.net_r,
-                "pair_gross_pnl": gross,
-                "pair_total_fees": fees,
-                "pair_net_pnl": net,
-                "pair_gross_r": gross_r,
-                "pair_fee_r": fee_r,
-                "pair_net_r": net_r,
-                "equity_after_trade": pair.equity_after_trade,
-                "holding_bars": exit_i - pair.long.entry_index,
-                "holding_hours": holding.total_seconds() / 3600,
-                "holding_time": holding,
-                "ambiguous_candle": pair.long.ambiguous or pair.short.ambiguous,
-            })
+            for pos in (pair.long,pair.short):
+                if pos.is_open: self._close_position(pos,last,self.close[last],ExitReason.END_OF_DATA,ExitSource.END_OF_DATA,self.times[last])
+    def _collect_closed_pairs(self,force=False):
+        still=[]
+        for p in self.active_pairs:
+            if force or not p.is_open: self.current_equity+=p.long.net_pnl+p.short.net_pnl; p.equity_after_trade=self.current_equity; self.completed_pairs.append(p)
+            else: still.append(p)
+        self.active_pairs=still
+    def results_frame(self):
+        rows=[]
+        for p in self.completed_pairs:
+            fees=p.long.fees+p.short.fees; gross=p.long.gross_pnl+p.short.gross_pnl; net=p.long.net_pnl+p.short.net_pnl; risk_base=p.long.risk_amount+p.short.risk_amount
+            exit_t=max(pd.Timestamp(p.long.exit_time),pd.Timestamp(p.short.exit_time)); hold=exit_t-pd.Timestamp(p.strategy_entry_time); comb=p.long.entry_notional+p.short.entry_notional; exp=(self.config.tp_mult-self.config.sl_mult)*p.long.risk*(p.long.quantity+p.short.quantity)/2; est=(p.long.entry_notional+p.short.entry_notional)*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
+            rows.append({"pair_id":p.pair_id,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
+            **self._pos_cols('long',p.long), **self._pos_cols('short',p.short),"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":p.long.price_r+p.short.price_r,"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":p.long.gross_r+p.short.gross_r,"pair_fee_r":fees/p.long.risk_amount,"pair_net_r":p.long.net_r+p.short.net_r,"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":p.long.ambiguous or p.short.ambiguous,"ambiguous_candle":p.long.ambiguous or p.short.ambiguous,"missing_intrabar_data":p.long.missing_intrabar_data or p.short.missing_intrabar_data})
         return pd.DataFrame(rows)
+    def _pos_cols(self,prefix,pos):
+        return {f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_sl":pos.sl,f"{prefix}_tp":pos.tp,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
