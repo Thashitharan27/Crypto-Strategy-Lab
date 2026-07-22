@@ -16,6 +16,12 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
         ax.figure.tight_layout()
         ax.figure.savefig(output_dir / "equity_curve.png")
         plt.close(ax.figure)
+
+        ax = equity.plot(x="time", y="drawdown", title="Drawdown", legend=False)
+        ax.set_ylabel("Drawdown")
+        ax.figure.tight_layout()
+        ax.figure.savefig(output_dir / "drawdown.png")
+        plt.close(ax.figure)
     if trades.empty:
         return
     charts = [
