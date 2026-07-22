@@ -90,7 +90,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
     if errors:
         raise ValueError("\n".join(errors))
     return BacktestConfig(
-        input_csv=Path(merged["input_csv"]), strategy_csv=Path(merged["input_csv"] if merged.get("strategy_csv") == DEFAULT_GUI_CONFIG.get("strategy_csv") else (merged.get("strategy_csv") or merged["input_csv"])), intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") and merged.get("intrabar_csv") != DEFAULT_GUI_CONFIG.get("intrabar_csv") else None, output_dir=Path(merged["output_dir"]),
+        input_csv=Path(merged["input_csv"]), strategy_csv=Path(merged["input_csv"] if merged.get("strategy_csv") == DEFAULT_GUI_CONFIG.get("strategy_csv") else (merged.get("strategy_csv") or merged["input_csv"])), intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") else None, output_dir=Path(merged["output_dir"]),
         sl_mult=float(merged["sl_mult"]), tp_mult=float(merged["tp_mult"]),
         entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]),
         max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),

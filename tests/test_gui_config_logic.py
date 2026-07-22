@@ -48,3 +48,14 @@ def test_saved_configuration_loads_correctly(tmp_path):
     cfg = build_backtest_config(loaded)
     assert cfg.fixed_r == pytest.approx(123)
     assert cfg.risk_per_leg == pytest.approx(0.005)
+
+def test_gui_passes_selected_intrabar_csv_and_enabled_flag(tmp_path):
+    strategy = tmp_path / "strategy.csv"
+    intrabar = tmp_path / "intrabar.csv"
+    content = "timestamp,open,high,low,close,volume\n2024-01-01,1,1,1,1,1\n"
+    strategy.write_text(content)
+    intrabar.write_text(content)
+    cfg = build_backtest_config({**base(tmp_path), "input_csv": str(strategy), "intrabar_csv": str(intrabar), "use_intrabar_data": True})
+    assert cfg.intrabar_csv == intrabar
+    assert cfg.use_intrabar_data is True
+    assert cfg.intrabar_timeframe_minutes == 1

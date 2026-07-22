@@ -39,6 +39,7 @@ class BacktestWorker(QObject):
             self._check(); self.status.emit("Validating data...", 15)
             self._check(); self.status.emit("Calculating ATR...", 25)
             self.log.emit(f"Running {self.config.risk_mode.value}, ATR({self.config.atr_period}), multiplier {self.config.atr_multiplier}")
+            self.log.emit(f"Intrabar config: use_intrabar_data={self.config.use_intrabar_data}, intrabar_csv={self.config.intrabar_csv}, intrabar_timeframe={self.config.intrabar_timeframe_minutes}m")
             self.status.emit("Running backtest...", 45)
             trades = BacktestEngine(data, self.config, intrabar).run()
             self._check(); self.status.emit("Creating statistics...", 70)
@@ -47,6 +48,9 @@ class BacktestWorker(QObject):
             equity = equity_curve(trades, self.config.initial_equity)
             equity.to_csv(self.config.output_dir / "equity_curve.csv", index=False)
             summary = summarize(trades, self.config.initial_equity)
+            summary.update({"use_intrabar_data": self.config.use_intrabar_data, "intrabar_csv": str(self.config.intrabar_csv) if self.config.intrabar_csv else None, "strategy_timeframe": self.config.strategy_timeframe_minutes, "intrabar_timeframe": self.config.intrabar_timeframe_minutes, "atr_period": self.config.atr_period, "atr_multiplier": self.config.atr_multiplier})
+            if self.config.use_intrabar_data and summary.get("intrabar_exit_count") == 0:
+                self.log.emit("WARNING: use_intrabar_data=True but 1M_INTRABAR exit count is 0. Check intrabar path, overlap, and timestamp alignment.")
             (self.config.output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
             self._check(); self.status.emit("Saving charts...", 90)
             save_plots(trades, equity, self.config.output_dir)

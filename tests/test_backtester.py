@@ -163,3 +163,22 @@ def test_missing_intrabar_fallback_policy_records_flag():
     row = BacktestEngine(strat, cfg(use_intrabar_data=True), intra).run().iloc[0]
     assert row.missing_intrabar_data
     assert row.long_exit_source == "15M_FALLBACK"
+
+def test_matching_intrabar_candles_record_intrabar_exit_source():
+    strat = candles([(100,100,100,100), (100,100,100,100), (100,100,100,100)])
+    start = pd.Timestamp("2024-01-01 00:15", tz="UTC")
+    rows = [(100,100,100,100)] * 15 + [(100,111,100,100)]
+    intra = one_minute(start, rows)
+    row = BacktestEngine(strat, cfg(use_intrabar_data=True), intra).run().iloc[0]
+    assert row.long_exit_source == "1M_INTRABAR"
+    assert row.long_fallback_reason is None
+    assert row.long_exit_time == pd.Timestamp("2024-01-01 00:30", tz="UTC")
+
+
+def test_summary_counts_intrabar_fallback_and_end_of_data_sources():
+    strat = candles([(100,100,100,100), (100,111,100,100), (100,100,100,100)])
+    intra = one_minute(pd.Timestamp("2024-01-01 00:15", tz="UTC"), [(100,111,100,100)] * 30)
+    trades = BacktestEngine(strat, cfg(use_intrabar_data=True), intra).run()
+    summary = summarize(trades, 1000)
+    assert summary["exit_source_counts"]["1M_INTRABAR"] >= 1
+    assert "fallback_reason_counts" in summary
