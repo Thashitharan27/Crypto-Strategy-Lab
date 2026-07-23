@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import numpy as np, pandas as pd
 from atr import atr
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy
 from strategy import custom_entry_signal
 from trade import ExitReason, ExitSource, Position, Side, TradePair
 
@@ -56,7 +56,12 @@ class BacktestEngine:
         return cap_qty,capped
     def _open_pair(self,i):
         raw=self.close[i]; long_entry=raw*(1+self.config.slippage); short_entry=raw*(1-self.config.slippage); r=float(self.risk[i]); stop=self.config.sl_mult*r; risk_amt=self.current_equity*self.config.risk_per_leg
-        uncapped=risk_amt/stop; lqty,lc=self._cap_qty(uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(uncapped,short_entry,self.current_equity); fee_rate=self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
+        entry_fee_rate=self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee; exit_fee_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
+        long_stop_exit=(long_entry-stop)*(1-self.config.slippage); short_stop_exit=(short_entry+stop)*(1+self.config.slippage)
+        long_stop_loss_per_unit=(long_entry-long_stop_exit)+(long_entry*entry_fee_rate)+(long_stop_exit*exit_fee_rate)
+        short_stop_loss_per_unit=(short_stop_exit-short_entry)+(short_entry*entry_fee_rate)+(short_stop_exit*exit_fee_rate)
+        sizing_loss_per_unit=max(long_stop_loss_per_unit, short_stop_loss_per_unit) if self.config.position_sizing_mode==PositionSizingMode.ALL_IN_STOP_RISK else stop
+        uncapped=risk_amt/sizing_loss_per_unit; lqty,lc=self._cap_qty(uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(uncapped,short_entry,self.current_equity); fee_rate=entry_fee_rate
         long=Position(Side.LONG,self._entry_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate)
         short=Position(Side.SHORT,self._entry_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate)
         self.active_pairs.append(TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc)); self.next_pair_id+=1
@@ -111,7 +116,7 @@ class BacktestEngine:
         last=len(self.data)-1
         for pair in self.active_pairs:
             for pos in (pair.long,pair.short):
-                if pos.is_open: self._close_position(pos,last,self.close[last],ExitReason.END_OF_DATA,ExitSource.END_OF_DATA,self.times[last])
+                if pos.is_open: self._close_position(pos,last,self.close[last],ExitReason.END_OF_DATA,ExitSource.END_OF_DATA,pd.Timestamp(self.times[last]) + self.entry_delta)
     def _collect_closed_pairs(self,force=False):
         still=[]
         for p in self.active_pairs:
@@ -123,8 +128,17 @@ class BacktestEngine:
         for p in self.completed_pairs:
             fees=p.long.fees+p.short.fees; gross=p.long.gross_pnl+p.short.gross_pnl; net=p.long.net_pnl+p.short.net_pnl; risk_base=p.long.risk_amount+p.short.risk_amount
             exit_t=max(pd.Timestamp(p.long.exit_time),pd.Timestamp(p.short.exit_time)); hold=exit_t-pd.Timestamp(p.strategy_entry_time); comb=p.long.entry_notional+p.short.entry_notional; exp=(self.config.tp_mult-self.config.sl_mult)*p.long.risk*(p.long.quantity+p.short.quantity)/2; est=(p.long.entry_notional+p.short.entry_notional)*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
-            rows.append({"pair_id":p.pair_id,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
+            all_in_stop_risk = (self._estimated_stop_loss(p.long) + self._estimated_stop_loss(p.short)) / 2 / p.equity_before_trade
+            rows.append({"pair_id":p.pair_id,"position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
             **self._pos_cols('long',p.long), **self._pos_cols('short',p.short),"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":p.long.price_r+p.short.price_r,"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":p.long.gross_r+p.short.gross_r,"pair_fee_r":fees/p.long.risk_amount,"pair_net_r":p.long.net_r+p.short.net_r,"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":p.long.ambiguous or p.short.ambiguous,"ambiguous_candle":p.long.ambiguous or p.short.ambiguous,"missing_intrabar_data":p.long.missing_intrabar_data or p.short.missing_intrabar_data})
         return pd.DataFrame(rows)
+    def _estimated_stop_loss(self,pos):
+        if pos.side==Side.LONG:
+            stop_exit=pos.sl*(1-self.config.slippage); gross=(pos.entry_price-stop_exit)*pos.quantity
+        else:
+            stop_exit=pos.sl*(1+self.config.slippage); gross=(stop_exit-pos.entry_price)*pos.quantity
+        exit_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
+        return gross + pos.entry_fee + stop_exit*pos.quantity*exit_rate
     def _pos_cols(self,prefix,pos):
-        return {f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_sl":pos.sl,f"{prefix}_tp":pos.tp,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
+        est_stop_loss=self._estimated_stop_loss(pos)
+        return {f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_configured_price_risk_percentage":self.config.risk_per_leg,f"{prefix}_estimated_all_in_stop_risk_percentage":est_stop_loss/pos.risk_amount*self.config.risk_per_leg if pos.risk_amount else 0,f"{prefix}_sl":pos.sl,f"{prefix}_tp":pos.tp,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}

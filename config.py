@@ -12,6 +12,8 @@ class TiePolicy(str, Enum):
     PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"; INTRABAR = "INTRABAR"
 class IntrabarMissingPolicy(str, Enum):
     ERROR = "ERROR"; WARN_AND_USE_15M = "WARN_AND_USE_15M"; WARN_AND_CONTINUE = "WARN_AND_CONTINUE"
+class PositionSizingMode(str, Enum):
+    PRICE_RISK = "PRICE_RISK"; ALL_IN_STOP_RISK = "ALL_IN_STOP_RISK"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -23,6 +25,7 @@ class BacktestConfig:
     strategy_timeframe_minutes: int = 15
     intrabar_timeframe_minutes: int = 1
     use_intrabar_data: bool = True
+    data_start_date: Optional[str] = None
     trading_start_date: Optional[str] = None
     trading_end_date: Optional[str] = None
     max_effective_leverage_per_leg: Optional[float] = None
@@ -35,6 +38,7 @@ class BacktestConfig:
     fixed_r: float = 100.0; percent_r: float = 0.01
     atr_period: int = 14; atr_multiplier: float = 1.0
     risk_per_leg: float = 0.005
+    position_sizing_mode: PositionSizingMode = PositionSizingMode.PRICE_RISK
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
     entry_interval: int = 1
     maker_fee: float = 0.0002; taker_fee: float = 0.0005
@@ -64,3 +68,4 @@ class BacktestConfig:
         if self.max_effective_leverage_per_leg is not None and self.max_effective_leverage_per_leg <= 0: raise ValueError("max leverage per leg must be positive")
         if self.max_combined_effective_leverage is not None and self.max_combined_effective_leverage <= 0: raise ValueError("max combined leverage must be positive")
         if isinstance(self.intrabar_missing_policy, str): object.__setattr__(self, "intrabar_missing_policy", IntrabarMissingPolicy(self.intrabar_missing_policy))
+        if isinstance(self.position_sizing_mode, str): object.__setattr__(self, "position_sizing_mode", PositionSizingMode(self.position_sizing_mode))
