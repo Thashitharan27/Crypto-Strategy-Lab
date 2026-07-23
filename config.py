@@ -83,6 +83,11 @@ class BacktestConfig:
     max_active_pairs: int = 1
     run_name: str = ""
     output_run_dir: Optional[Path] = None
+    enable_trade_telemetry: bool = True
+    save_full_telemetry_csv: bool = True
+    save_trade_journey_summary: bool = True
+    save_trade_journey_charts: bool = True
+    telemetry_interval_minutes: int = 15
 
     def __post_init__(self) -> None:
         if self.input_csv != Path("data/binance_ohlcv.csv") and self.strategy_csv == Path("data/BTCUSDT_15m.csv"):
@@ -118,4 +123,7 @@ class BacktestConfig:
         if isinstance(self.adx_filter_mode, str): object.__setattr__(self, "adx_filter_mode", AdxFilterMode(self.adx_filter_mode))
         if isinstance(self.bb_width_filter_mode, str): object.__setattr__(self, "bb_width_filter_mode", BBWidthFilterMode(self.bb_width_filter_mode))
         if isinstance(self.di_spread_filter_mode, str): object.__setattr__(self, "di_spread_filter_mode", DISpreadFilterMode(self.di_spread_filter_mode))
+        if self.telemetry_interval_minutes <= 0: raise ValueError("telemetry interval must be > 0")
+        if self.telemetry_interval_minutes % self.strategy_timeframe_minutes != 0: raise ValueError("telemetry interval must be a multiple of the strategy timeframe")
+        if self.enable_trade_telemetry and (self.strategy_timeframe_minutes != 15 or self.telemetry_interval_minutes != 15): raise ValueError("only 15-minute telemetry is currently supported when the strategy timeframe is 15 minutes")
         if isinstance(self.comparison_timeout_minutes, list): object.__setattr__(self, "comparison_timeout_minutes", tuple(int(v) for v in self.comparison_timeout_minutes))

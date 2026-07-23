@@ -12,6 +12,7 @@ from engine import BacktestEngine
 from loader import load_backtest_data, load_ohlcv_csv
 from plots import save_plots
 from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
+from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis
 from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 
 
@@ -87,6 +88,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--di-spread-maximum", type=float)
     parser.add_argument("--di-spread-minimum", type=float)
     parser.add_argument("--di-spread-comparison", action="store_true", help="Compare DI spread disabled and maximum-spread filters")
+    parser.add_argument("--disable-trade-telemetry", action="store_false", default=None, dest="enable_trade_telemetry")
+    parser.add_argument("--no-full-telemetry-csv", action="store_false", default=None, dest="save_full_telemetry_csv")
+    parser.add_argument("--no-trade-journey-summary", action="store_false", default=None, dest="save_trade_journey_summary")
+    parser.add_argument("--no-trade-journey-charts", action="store_false", default=None, dest="save_trade_journey_charts")
+    parser.add_argument("--telemetry-interval-minutes", type=int)
     return parser.parse_args()
 
 
@@ -102,10 +108,20 @@ def main() -> None:
     data, intrabar = load_backtest_data(config)
     engine = BacktestEngine(data, config, intrabar)
     trades = engine.run()
+    telemetry = engine.telemetry_frame()
+    if config.enable_trade_telemetry:
+        trades = add_journey_columns(trades, telemetry)
     output_root = config.output_dir
     run_dir = create_run_dir(config)
     write_config(config, run_dir)
     trades.to_csv(run_dir / "trade_list.csv", index=False)
+    if config.enable_trade_telemetry:
+        if config.save_full_telemetry_csv:
+            telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False)
+        if config.save_trade_journey_summary:
+            trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False)
+            winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False)
+            double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False)
     import pandas as pd
     pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False)
     adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False)
@@ -117,6 +133,8 @@ def main() -> None:
     periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False)
     periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False)
     chart_warnings = save_plots(trades, equity, run_dir / "charts")
+    if config.enable_trade_telemetry and config.save_trade_journey_charts:
+        chart_warnings.extend(save_journey_charts(trades, telemetry, run_dir / "charts"))
     for warning in chart_warnings:
       print(f"WARNING: {warning}")
     summary = summarize(trades, config.initial_equity)

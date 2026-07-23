@@ -15,7 +15,7 @@ class BacktestEngine:
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.times=self.data.timestamp.to_numpy()
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.risk=self._risk_array(); self.entry_filters=[ADXFilter(self.config,self.adx_values),BBWidthFilter(self.config,self.bb_width),DISpreadFilter(self.config,self.di_spread)]
-        self.active_pairs=[]; self.completed_pairs=[]; self.skipped_signals=[]; self.signals_evaluated=0; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.signals_evaluated=0; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
         self.last_timeout_exit_time=None
@@ -30,7 +30,7 @@ class BacktestEngine:
         total=len(self.data)
         self._emit_progress(0,total)
         for i in range(total):
-            self._update_positions_to_strategy_index(i); self._collect_closed_pairs()
+            self._update_positions_to_strategy_index(i); self._record_active_telemetry(i); self._collect_closed_pairs()
             if self._should_enter(i):
                 self.signals_evaluated += 1
                 passed, reason = self._entry_filter_result(i)
@@ -88,7 +88,7 @@ class BacktestEngine:
         uncapped=risk_amt/sizing_loss_per_unit; lqty,lc=self._cap_qty(uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(uncapped,short_entry,self.current_equity); fee_rate=entry_fee_rate
         long=Position(Side.LONG,self._entry_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate, original_sl=long_entry-stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
         short=Position(Side.SHORT,self._entry_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate, original_sl=short_entry+stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
-        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc); pair.adx=float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan; pair.plus_di=float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan; pair.minus_di=float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan; self._attach_market_state(pair,i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self.next_pair_id+=1
+        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc); pair.adx=float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan; pair.plus_di=float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan; pair.minus_di=float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan; self._attach_market_state(pair,i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self._record_pair_telemetry(pair, i); self.next_pair_id+=1
 
     def _attach_market_state(self, pair, i):
         fields = {"bb_middle":self.bb_middle,"bb_upper":self.bb_upper,"bb_lower":self.bb_lower,"bb_width":self.bb_width,"bb_width_pct":self.bb_width_pct,"bb_width_1":self.bb_width_1,"bb_width_3":self.bb_width_3,"bb_width_5":self.bb_width_5,"bb_width_change":self.bb_width_change,"bb_width_change_pct":self.bb_width_change_pct,"di_spread":self.di_spread,"di_ratio":self.di_ratio,"di_spread_1":self.di_spread_1,"di_spread_3":self.di_spread_3,"di_spread_5":self.di_spread_5,"di_spread_change":self.di_spread_change}
@@ -258,6 +258,51 @@ class BacktestEngine:
             frame["signals_traded"] = len(frame)
         frame.attrs["skipped_signals"] = self.skipped_signals
         return frame
+
+    def telemetry_frame(self):
+        from telemetry import TELEMETRY_COLUMNS
+        return pd.DataFrame(self.telemetry_rows, columns=TELEMETRY_COLUMNS)
+
+    def _num(self, arr, i):
+        value = arr[i]
+        return float(value) if np.isfinite(value) else np.nan
+
+    def _unrealized(self, pos, close):
+        if not pos.is_open:
+            return 0.0
+        gross = (close - pos.entry_price) * pos.quantity if pos.side == Side.LONG else (pos.entry_price - close) * pos.quantity
+        return float(gross - pos.fees)
+
+    def _record_active_telemetry(self, i):
+        if not self.config.enable_trade_telemetry:
+            return
+        for pair in self.active_pairs:
+            self._record_pair_telemetry(pair, i)
+
+    def _record_pair_telemetry(self, pair, i):
+        if not self.config.enable_trade_telemetry:
+            return
+        ts = pd.Timestamp(self.times[i]) + self.entry_delta
+        entry = pd.Timestamp(pair.strategy_entry_time)
+        if ts < entry or not pair.is_open:
+            return
+        elapsed = (ts - entry).total_seconds() / 60
+        if elapsed < 0 or elapsed % self.config.telemetry_interval_minutes != 0:
+            return
+        if self.telemetry_rows and self.telemetry_rows[-1].get("pair_id") == pair.pair_id and pd.Timestamp(self.telemetry_rows[-1].get("timestamp")) == ts:
+            return
+        close = float(self.close[i]); high = float(self.high[i]); low = float(self.low[i])
+        long_open = pair.long.is_open; short_open = pair.short.is_open
+        long_pnl = self._unrealized(pair.long, close); short_pnl = self._unrealized(pair.short, close)
+        def distances(pos, is_long):
+            if not pos.is_open:
+                return (np.nan, np.nan, np.nan, np.nan)
+            sl_d = close - pos.sl if is_long else pos.sl - close
+            tp_d = pos.tp - close if is_long else close - pos.tp
+            return (float(sl_d), float(tp_d), float(sl_d / pos.risk) if pos.risk else np.nan, float(tp_d / pos.risk) if pos.risk else np.nan)
+        lsl, ltp, lslr, ltpr = distances(pair.long, True); ssl, stp, sslr, stpr = distances(pair.short, False)
+        self.telemetry_rows.append({"pair_id":pair.pair_id,"timestamp":ts,"elapsed_minutes":elapsed,"elapsed_strategy_bars":int(elapsed / self.config.strategy_timeframe_minutes),"close":close,"high":high,"low":low,"atr":self._num(self.atr_values,i),"adx":self._num(self.adx_values,i),"plus_di":self._num(self.plus_di_values,i),"minus_di":self._num(self.minus_di_values,i),"di_spread":self._num(self.di_spread,i),"di_ratio":self._num(self.di_ratio,i),"bb_middle":self._num(self.bb_middle,i),"bb_upper":self._num(self.bb_upper,i),"bb_lower":self._num(self.bb_lower,i),"bb_width":self._num(self.bb_width,i),"bb_width_pct":self._num(self.bb_width_pct,i),"long_is_open":long_open,"short_is_open":short_open,"long_unrealized_pnl":long_pnl,"short_unrealized_pnl":short_pnl,"pair_unrealized_pnl":long_pnl+short_pnl,"long_distance_to_sl":lsl,"long_distance_to_tp":ltp,"short_distance_to_sl":ssl,"short_distance_to_tp":stp,"long_distance_to_sl_r":lslr,"long_distance_to_tp_r":ltpr,"short_distance_to_sl_r":sslr,"short_distance_to_tp_r":stpr,"long_current_sl":pair.long.sl if pair.long.is_open else np.nan,"short_current_sl":pair.short.sl if pair.short.is_open else np.nan,"long_tp":pair.long.tp,"short_tp":pair.short.tp})
+
     def _estimated_stop_loss(self,pos):
         if pos.side==Side.LONG:
             stop_exit=pos.sl*(1-self.config.slippage); gross=(pos.entry_price-stop_exit)*pos.quantity
