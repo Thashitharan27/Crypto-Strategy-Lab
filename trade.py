@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Optional
 
 class Side(str, Enum): LONG="LONG"; SHORT="SHORT"
-class ExitReason(str, Enum): TP="TP"; SL="SL"; END_OF_DATA="END_OF_DATA"
+class ExitReason(str, Enum): TP="TP"; SL="SL"; BOTH_OPEN_TIMEOUT="BOTH_OPEN_TIMEOUT"; END_OF_DATA="END_OF_DATA"
 class ExitSource(str, Enum): INTRABAR="1M_INTRABAR"; FALLBACK_15M="15M_FALLBACK"; END_OF_DATA="END_OF_DATA"
 
 @dataclass
@@ -19,6 +19,6 @@ class Position:
 
 @dataclass
 class TradePair:
-    pair_id: int; long: Position; short: Position; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; equity_after_trade: Optional[float] = None
+    pair_id: int; long: Position; short: Position; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; equity_after_trade: Optional[float] = None; both_open_timeout_triggered: bool = False; timeout_minutes: Optional[int] = None; timeout_exit_time: Optional[object] = None
     @property
     def is_open(self) -> bool: return self.long.is_open or self.short.is_open

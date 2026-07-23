@@ -14,6 +14,8 @@ class IntrabarMissingPolicy(str, Enum):
     ERROR = "ERROR"; WARN_AND_USE_15M = "WARN_AND_USE_15M"; WARN_AND_CONTINUE = "WARN_AND_CONTINUE"
 class PositionSizingMode(str, Enum):
     PRICE_RISK = "PRICE_RISK"; ALL_IN_STOP_RISK = "ALL_IN_STOP_RISK"
+class TimeoutExitPrice(str, Enum):
+    OPEN = "OPEN"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -32,6 +34,10 @@ class BacktestConfig:
     max_combined_effective_leverage: Optional[float] = None
     intrabar_missing_policy: IntrabarMissingPolicy = IntrabarMissingPolicy.WARN_AND_USE_15M
     zero_cost_comparison: bool = False
+    enable_both_open_timeout: bool = False
+    max_both_open_minutes: int = 480
+    timeout_exit_price: TimeoutExitPrice = TimeoutExitPrice.OPEN
+    comparison_timeout_minutes: tuple[int, ...] = ()
     initial_equity: float = 1000.0
     sl_mult: float = 2.0; tp_mult: float = 3.0
     risk_mode: RiskMode = RiskMode.ATR
@@ -67,5 +73,8 @@ class BacktestConfig:
         if self.slippage < 0: raise ValueError("slippage must be non-negative")
         if self.max_effective_leverage_per_leg is not None and self.max_effective_leverage_per_leg <= 0: raise ValueError("max leverage per leg must be positive")
         if self.max_combined_effective_leverage is not None and self.max_combined_effective_leverage <= 0: raise ValueError("max combined leverage must be positive")
+        if self.enable_both_open_timeout and self.max_both_open_minutes <= 0: raise ValueError("max_both_open_minutes must be > 0 when both-open timeout is enabled")
         if isinstance(self.intrabar_missing_policy, str): object.__setattr__(self, "intrabar_missing_policy", IntrabarMissingPolicy(self.intrabar_missing_policy))
         if isinstance(self.position_sizing_mode, str): object.__setattr__(self, "position_sizing_mode", PositionSizingMode(self.position_sizing_mode))
+        if isinstance(self.timeout_exit_price, str): object.__setattr__(self, "timeout_exit_price", TimeoutExitPrice(self.timeout_exit_price))
+        if isinstance(self.comparison_timeout_minutes, list): object.__setattr__(self, "comparison_timeout_minutes", tuple(int(v) for v in self.comparison_timeout_minutes))
