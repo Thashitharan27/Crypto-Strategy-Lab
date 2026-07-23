@@ -161,7 +161,6 @@ class MainWindow(QMainWindow):
         self.maker_exit.setChecked(bool(values["use_maker_exit"]))
         self.slippage.setText(format_percentage(float(values["slippage"])))
         self.update_dynamic()
-        self.update_dynamic()
         self.update_planned_output()
     def append_log(self,t): self.log.append(str(t))
     def save_log(self):

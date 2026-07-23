@@ -107,12 +107,27 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
     (run_dir / "run_info.txt").write_text("\n".join(lines) + "\n")
 
 
+def compatible_resample_freq(freq: str) -> str:
+    """Map legacy pandas aliases to modern aliases by default."""
+    return {"M": "ME", "Y": "YE"}.get(freq, freq)
+
+
 def periodic_results(trades: pd.DataFrame, freq: str) -> pd.DataFrame:
     if trades.empty:
         return pd.DataFrame(columns=["period", "pair_count", "net_pnl", "net_r"])
     exits = pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1))
     frame = trades.assign(exit_time=exits).set_index("exit_time")
-    return frame.resample(freq).agg(pair_count=("pair_net_pnl", "size"), net_pnl=("pair_net_pnl", "sum"), net_r=("pair_net_r", "sum")).reset_index(names="period")
+    candidates = [compatible_resample_freq(freq)]
+    fallback = {"ME": "M", "YE": "Y", "M": "ME", "Y": "YE"}.get(candidates[0])
+    if fallback and fallback not in candidates:
+        candidates.append(fallback)
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            return frame.resample(candidate).agg(pair_count=("pair_net_pnl", "size"), net_pnl=("pair_net_pnl", "sum"), net_r=("pair_net_r", "sum")).reset_index(names="period")
+        except ValueError as exc:
+            last_error = exc
+    raise last_error if last_error is not None else ValueError(f"Unsupported resample frequency: {freq}")
 
 
 def update_latest(output_root: Path, run_dir: Path) -> None:

@@ -22,6 +22,11 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
 }
 
 
+def default_gui_config() -> dict[str, Any]:
+    """Return a fresh copy of the GUI defaults."""
+    return DEFAULT_GUI_CONFIG.copy()
+
+
 def parse_percentage(value: str | float | int) -> float:
     """Convert human-readable percentages such as ``0.5%`` to decimals."""
     if isinstance(value, (int, float)):
@@ -85,7 +90,7 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
 
 
 def build_backtest_config(values: dict[str, Any], require_paths: bool = True) -> BacktestConfig:
-    merged = {**DEFAULT_GUI_CONFIG, **values}
+    merged = {**default_gui_config(), **values}
     errors = validate_config_values(merged, require_paths=require_paths)
     if errors:
         raise ValueError("\n".join(errors))
@@ -110,8 +115,8 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
 
 
 def save_config_json(path: str | Path, values: dict[str, Any]) -> None:
-    Path(path).write_text(json.dumps({**DEFAULT_GUI_CONFIG, **values}, indent=2, default=str))
+    Path(path).write_text(json.dumps({**default_gui_config(), **values}, indent=2, default=str))
 
 
 def load_config_json(path: str | Path) -> dict[str, Any]:
-    return {**DEFAULT_GUI_CONFIG, **json.loads(Path(path).read_text())}
+    return {**default_gui_config(), **json.loads(Path(path).read_text())}
