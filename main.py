@@ -80,7 +80,9 @@ def main() -> None:
     equity.to_csv(run_dir / "equity_curve.csv", index=False)
     periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False)
     periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False)
-    save_plots(trades, equity, run_dir / "charts")
+    chart_warnings = save_plots(trades, equity, run_dir / "charts")
+    for warning in chart_warnings:
+      print(f"WARNING: {warning}")
     summary = summarize(trades, config.initial_equity)
     summary.update({"use_intrabar_data": config.use_intrabar_data, "intrabar_csv": str(config.intrabar_csv) if config.intrabar_csv else None, "strategy_timeframe": config.strategy_timeframe_minutes, "intrabar_timeframe": config.intrabar_timeframe_minutes, "atr_timeframe": config.strategy_timeframe_minutes, "atr_period": config.atr_period, "atr_multiplier": config.atr_multiplier, "indicator_data_start": str(data.timestamp.min()), "trading_start": config.trading_start_date, "trading_end": config.trading_end_date, "warmup_candles": engine.warmup_candle_count, "first_valid_atr_timestamp": str(engine.first_valid_atr_timestamp)})
     if config.zero_cost_comparison:

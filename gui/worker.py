@@ -98,7 +98,8 @@ class BacktestWorker(QObject):
             (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
             write_summary_txt(summary, run_dir)
             write_run_info(self.config, summary, run_dir)
-            save_plots(trades, equity, run_dir / "charts")
+            for warning in save_plots(trades, equity, run_dir / "charts"):
+              self.log.emit(f"WARNING: {warning}")
             update_latest(output_root, run_dir)
             self._emit_stage("Saving outputs", 100, len(data), len(data), len(trades), len(trades), 0)
             self._log(f"Completed {len(trades):,} trade pairs")
