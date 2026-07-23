@@ -116,6 +116,31 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
         _save_chart("adx_distribution.png", adx_distribution_chart, warnings)
         _save_chart("adx_vs_pnl.png", adx_vs_pnl_chart, warnings)
 
+
+    double_sl_mask = (trades.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (trades.get("short_exit_reason", pd.Series(dtype=object)) == "SL")
+    win_mask = trades.get("pair_net_pnl", pd.Series(dtype=float)) > 0
+    for column, title, filename, xlabel in [("bb_width_pct", "Bollinger Width Histogram", "bb_width_histogram.png", "BB Width (%)"), ("di_spread", "DI Spread Histogram", "di_spread_histogram.png", "DI Spread")]:
+        if column in trades:
+            def market_histogram(column: str = column, title: str = title, filename: str = filename, xlabel: str = xlabel) -> None:
+                fig, ax = plt.subplots()
+                try:
+                    trades.loc[win_mask, column].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
+                    trades.loc[double_sl_mask, column].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Double SL trades")
+                    ax.set_title(title); ax.set_xlabel(xlabel); ax.legend(); fig.tight_layout(); fig.savefig(output_dir / filename)
+                finally:
+                    plt.close(fig)
+            _save_chart(filename, market_histogram, warnings)
+    for column, title, filename, xlabel in [("bb_width_pct", "BB Width vs Net PnL", "bb_width_vs_pnl.png", "BB Width (%)"), ("di_spread", "DI Spread vs Net PnL", "di_spread_vs_pnl.png", "DI Spread")]:
+        if column in trades:
+            def market_scatter(column: str = column, title: str = title, filename: str = filename, xlabel: str = xlabel) -> None:
+                fig, ax = plt.subplots()
+                try:
+                    trades.plot(kind="scatter", x=column, y="pair_net_pnl", ax=ax, title=title)
+                    ax.set_xlabel(xlabel); ax.set_ylabel("Pair Net PnL"); fig.tight_layout(); fig.savefig(output_dir / filename)
+                finally:
+                    plt.close(fig)
+            _save_chart(filename, market_scatter, warnings)
+
     returns = trades.assign(exit_time=pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1)))
     try:
         monthly_freq, yearly_freq = _month_year_frequencies(returns)

@@ -10,8 +10,8 @@ from config import BacktestConfig
 from engine import BacktestEngine
 from loader import load_backtest_data
 from plots import save_plots
-from statistics import adx_analysis, equity_curve, summarize
-from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt
+from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
+from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 
 class BacktestWorker(QObject):
     status = Signal(str, int)
@@ -95,6 +95,9 @@ class BacktestWorker(QObject):
             import pandas as pd
             pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False)
             adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False)
+            bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False)
+            di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False)
+            write_trade_column_metadata(run_dir)
             equity.to_csv(run_dir / "equity_curve.csv", index=False)
             periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False)
             periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False)

@@ -22,6 +22,10 @@ class BreakEvenSameCandlePolicy(str, Enum):
     NEXT_CANDLE = "NEXT_CANDLE"; PESSIMISTIC = "PESSIMISTIC"
 class AdxFilterMode(str, Enum):
     DISABLED = "Disabled"; MAXIMUM = "ADX <= Maximum"; MINIMUM = "ADX >= Minimum"; RANGE = "Range"
+class BBWidthFilterMode(str, Enum):
+    DISABLED = "Disabled"; MAXIMUM = "Maximum Width"; MINIMUM = "Minimum Width"; RANGE = "Range"
+class DISpreadFilterMode(str, Enum):
+    DISABLED = "Disabled"; MAXIMUM = "Maximum Spread"; MINIMUM = "Minimum Spread"; RANGE = "Range"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -58,6 +62,16 @@ class BacktestConfig:
     adx_filter_mode: AdxFilterMode = AdxFilterMode.DISABLED
     adx_maximum: float = 25.0
     adx_minimum: float = 20.0
+    bb_period: int = 20
+    bb_stddevs: float = 2.0
+    enable_bb_width_filter: bool = False
+    bb_width_filter_mode: BBWidthFilterMode = BBWidthFilterMode.DISABLED
+    bb_width_maximum: float = 0.03
+    bb_width_minimum: float = 0.0
+    enable_di_spread_filter: bool = False
+    di_spread_filter_mode: DISpreadFilterMode = DISpreadFilterMode.DISABLED
+    di_spread_maximum: float = 10.0
+    di_spread_minimum: float = 0.0
     risk_per_leg: float = 0.005
     position_sizing_mode: PositionSizingMode = PositionSizingMode.PRICE_RISK
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
@@ -83,6 +97,10 @@ class BacktestConfig:
         if self.atr_multiplier <= 0: raise ValueError("atr_multiplier must be positive")
         if self.adx_period <= 0: raise ValueError("adx_period must be positive")
         if self.adx_maximum < 0 or self.adx_minimum < 0: raise ValueError("ADX thresholds must be non-negative")
+        if self.bb_period <= 0: raise ValueError("BB period must be positive")
+        if self.bb_stddevs <= 0: raise ValueError("BB standard deviations must be positive")
+        if self.bb_width_maximum < 0 or self.bb_width_minimum < 0: raise ValueError("BB width thresholds must be non-negative")
+        if self.di_spread_maximum < 0 or self.di_spread_minimum < 0: raise ValueError("DI spread thresholds must be non-negative")
         if self.entry_interval <= 0: raise ValueError("entry_interval must be positive")
         if self.max_active_pairs <= 0: raise ValueError("max_active_pairs must be positive")
         if self.fixed_r <= 0 or self.percent_r <= 0: raise ValueError("risk distances must be positive")
@@ -98,4 +116,6 @@ class BacktestConfig:
         if isinstance(self.be_mode, str): object.__setattr__(self, "be_mode", BreakEvenMode(self.be_mode))
         if isinstance(self.be_same_candle_policy, str): object.__setattr__(self, "be_same_candle_policy", BreakEvenSameCandlePolicy(self.be_same_candle_policy))
         if isinstance(self.adx_filter_mode, str): object.__setattr__(self, "adx_filter_mode", AdxFilterMode(self.adx_filter_mode))
+        if isinstance(self.bb_width_filter_mode, str): object.__setattr__(self, "bb_width_filter_mode", BBWidthFilterMode(self.bb_width_filter_mode))
+        if isinstance(self.di_spread_filter_mode, str): object.__setattr__(self, "di_spread_filter_mode", DISpreadFilterMode(self.di_spread_filter_mode))
         if isinstance(self.comparison_timeout_minutes, list): object.__setattr__(self, "comparison_timeout_minutes", tuple(int(v) for v in self.comparison_timeout_minutes))

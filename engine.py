@@ -4,7 +4,9 @@ from collections.abc import Callable
 import numpy as np, pandas as pd
 from atr import atr
 from adx import adx
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy
+from entry_filters import ADXFilter, BBWidthFilter, DISpreadFilter
+from indicators import bollinger_bands, lag
 from strategy import custom_entry_signal
 from trade import ExitReason, ExitSource, Position, Side, TradePair
 
@@ -12,7 +14,7 @@ class BacktestEngine:
     def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.times=self.data.timestamp.to_numpy()
-        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.risk=self._risk_array()
+        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.risk=self._risk_array(); self.entry_filters=[ADXFilter(self.config,self.adx_values),BBWidthFilter(self.config,self.bb_width),DISpreadFilter(self.config,self.di_spread)]
         self.active_pairs=[]; self.completed_pairs=[]; self.skipped_signals=[]; self.signals_evaluated=0; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
@@ -31,7 +33,7 @@ class BacktestEngine:
             self._update_positions_to_strategy_index(i); self._collect_closed_pairs()
             if self._should_enter(i):
                 self.signals_evaluated += 1
-                passed, reason = self._adx_filter_result(i)
+                passed, reason = self._entry_filter_result(i)
                 if passed: self._open_pair(i, passed, reason)
                 else: self._record_skipped_signal(i, reason)
             processed=i+1
@@ -56,23 +58,20 @@ class BacktestEngine:
         if self.config.entry_mode==EntryMode.EVERY_N_CANDLES: return i % self.config.entry_interval==0
         if self.config.entry_mode==EntryMode.CUSTOM: return custom_entry_signal(i,{"open":self.open,"high":self.high,"low":self.low,"close":self.close},len(self.active_pairs))
         return False
+    def _entry_filter_result(self, i):
+        reasons=[]
+        for flt in self.entry_filters:
+            result=flt.evaluate(i)
+            reasons.append(result.reason)
+            if not result.passed:
+                return False, "; ".join(reasons)
+        return True, "; ".join(reasons)
+
     def _adx_filter_result(self, i):
-        if not self.config.enable_adx_filter or self.config.adx_filter_mode == AdxFilterMode.DISABLED:
-            return True, "ADX filter disabled"
-        value = float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan
-        if not np.isfinite(value):
-            return False, "ADX unavailable"
-        mode = self.config.adx_filter_mode
-        if mode == AdxFilterMode.MAXIMUM:
-            ok = value <= self.config.adx_maximum
-            return ok, f"ADX {value:.2f} <= maximum {self.config.adx_maximum:g}" if ok else f"ADX {value:.2f} > maximum {self.config.adx_maximum:g}"
-        if mode == AdxFilterMode.MINIMUM:
-            ok = value >= self.config.adx_minimum
-            return ok, f"ADX {value:.2f} >= minimum {self.config.adx_minimum:g}" if ok else f"ADX {value:.2f} < minimum {self.config.adx_minimum:g}"
-        ok = self.config.adx_minimum <= value <= self.config.adx_maximum
-        return ok, f"minimum {self.config.adx_minimum:g} <= ADX {value:.2f} <= maximum {self.config.adx_maximum:g}" if ok else f"ADX {value:.2f} outside range {self.config.adx_minimum:g}-{self.config.adx_maximum:g}"
+        result = self.entry_filters[0].evaluate(i)
+        return result.passed, result.reason
     def _record_skipped_signal(self, i, reason):
-        self.skipped_signals.append({"strategy_candle_open_time": self.times[i], "strategy_entry_time": self._entry_time(i), "strategy_entry_price": float(self.close[i]), "adx": float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan, "plus_di": float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan, "minus_di": float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan, "adx_filter_passed": False, "adx_filter_reason": reason})
+        self.skipped_signals.append({"strategy_candle_open_time": self.times[i], "strategy_entry_time": self._entry_time(i), "strategy_entry_price": float(self.close[i]), "adx": float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan, "plus_di": float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan, "minus_di": float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan, "bb_width": float(self.bb_width[i]) if np.isfinite(self.bb_width[i]) else np.nan, "di_spread": float(self.di_spread[i]) if np.isfinite(self.di_spread[i]) else np.nan, "entry_filter_passed": False, "entry_filter_reason": reason, "adx_filter_passed": False, "adx_filter_reason": reason})
     def _cap_qty(self, qty, entry_price, equity):
         capped=False; cap_qty=qty
         if self.config.max_effective_leverage_per_leg is not None: cap_qty=min(cap_qty, self.config.max_effective_leverage_per_leg*equity/entry_price)
@@ -89,7 +88,12 @@ class BacktestEngine:
         uncapped=risk_amt/sizing_loss_per_unit; lqty,lc=self._cap_qty(uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(uncapped,short_entry,self.current_equity); fee_rate=entry_fee_rate
         long=Position(Side.LONG,self._entry_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate, original_sl=long_entry-stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
         short=Position(Side.SHORT,self._entry_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate, original_sl=short_entry+stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
-        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc); pair.adx=float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan; pair.plus_di=float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan; pair.minus_di=float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan; pair.adx_filter_passed=adx_filter_passed; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self.next_pair_id+=1
+        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc); pair.adx=float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan; pair.plus_di=float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan; pair.minus_di=float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan; self._attach_market_state(pair,i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self.next_pair_id+=1
+
+    def _attach_market_state(self, pair, i):
+        fields = {"bb_middle":self.bb_middle,"bb_upper":self.bb_upper,"bb_lower":self.bb_lower,"bb_width":self.bb_width,"bb_width_pct":self.bb_width_pct,"bb_width_1":self.bb_width_1,"bb_width_3":self.bb_width_3,"bb_width_5":self.bb_width_5,"bb_width_change":self.bb_width_change,"bb_width_change_pct":self.bb_width_change_pct,"di_spread":self.di_spread,"di_ratio":self.di_ratio,"di_spread_1":self.di_spread_1,"di_spread_3":self.di_spread_3,"di_spread_5":self.di_spread_5,"di_spread_change":self.di_spread_change}
+        for name, arr in fields.items():
+            setattr(pair, name, float(arr[i]) if np.isfinite(arr[i]) else np.nan)
     def _update_positions_to_strategy_index(self,i):
         for pair in self.active_pairs:
             if i > pair.long.entry_index and self._maybe_timeout_pair(pair, i):
@@ -244,12 +248,13 @@ class BacktestEngine:
             fees=p.long.fees+p.short.fees; gross=p.long.gross_pnl+p.short.gross_pnl; net=p.long.net_pnl+p.short.net_pnl; risk_base=p.long.risk_amount+p.short.risk_amount
             exit_t=max(pd.Timestamp(p.long.exit_time),pd.Timestamp(p.short.exit_time)); hold=exit_t-pd.Timestamp(p.strategy_entry_time); comb=p.long.entry_notional+p.short.entry_notional; exp=(self.config.tp_mult-self.config.sl_mult)*p.long.risk*(p.long.quantity+p.short.quantity)/2; est=(p.long.entry_notional+p.short.entry_notional)*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
             all_in_stop_risk = (self._estimated_stop_loss(p.long) + self._estimated_stop_loss(p.short)) / 2 / p.equity_before_trade
-            rows.append({"pair_id":p.pair_id,"position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
+            rows.append({"pair_id":p.pair_id,"position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_change":getattr(p,"di_spread_change",np.nan),"bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_change":getattr(p,"bb_width_change",np.nan),"bb_width_change_pct":getattr(p,"bb_width_change_pct",np.nan),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
             **self._pos_cols('long',p.long), **self._pos_cols('short',p.short),"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":p.long.price_r+p.short.price_r,"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":p.long.gross_r+p.short.gross_r,"pair_fee_r":fees/p.long.risk_amount,"pair_net_r":p.long.net_r+p.short.net_r,"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":p.long.ambiguous or p.short.ambiguous,"ambiguous_candle":p.long.ambiguous or p.short.ambiguous,"missing_intrabar_data":p.long.missing_intrabar_data or p.short.missing_intrabar_data})
         frame=pd.DataFrame(rows)
         if not frame.empty:
             frame["signals_evaluated"] = self.signals_evaluated
-            frame["signals_skipped_by_adx"] = len(self.skipped_signals)
+            frame["signals_skipped_by_adx"] = sum(("ADX unavailable" in str(x.get("entry_filter_reason", x.get("adx_filter_reason", "")))) or str(x.get("entry_filter_reason", x.get("adx_filter_reason", ""))).startswith("ADX ") for x in self.skipped_signals)
+            frame["signals_skipped_by_filters"] = len(self.skipped_signals)
             frame["signals_traded"] = len(frame)
         frame.attrs["skipped_signals"] = self.skipped_signals
         return frame
