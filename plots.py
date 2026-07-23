@@ -97,6 +97,25 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
 
         _save_chart(filename, histogram_chart, warnings)
 
+    if "adx" in trades:
+        def adx_distribution_chart() -> None:
+            fig, ax = plt.subplots()
+            try:
+                trades.loc[trades["pair_net_pnl"] > 0, "adx"].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
+                trades.loc[trades["pair_net_pnl"] < 0, "adx"].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Losing trades")
+                ax.set_title("ADX Distribution"); ax.set_xlabel("ADX"); ax.legend(); fig.tight_layout(); fig.savefig(output_dir / "adx_distribution.png")
+            finally:
+                plt.close(fig)
+        def adx_vs_pnl_chart() -> None:
+            fig, ax = plt.subplots()
+            try:
+                trades.plot(kind="scatter", x="adx", y="pair_net_pnl", ax=ax, title="ADX vs PnL")
+                ax.set_xlabel("ADX"); ax.set_ylabel("Pair Net PnL"); fig.tight_layout(); fig.savefig(output_dir / "adx_vs_pnl.png")
+            finally:
+                plt.close(fig)
+        _save_chart("adx_distribution.png", adx_distribution_chart, warnings)
+        _save_chart("adx_vs_pnl.png", adx_vs_pnl_chart, warnings)
+
     returns = trades.assign(exit_time=pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1)))
     try:
         monthly_freq, yearly_freq = _month_year_frequencies(returns)

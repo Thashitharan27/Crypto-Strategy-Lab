@@ -388,3 +388,46 @@ def test_be_same_candle_next_candle_vs_pessimistic_policy():
     assert not nxt.short_be_same_candle_ambiguous
     assert pess.short_exit_time == pd.Timestamp("2024-01-01 00:16", tz="UTC")
     assert pess.short_be_same_candle_ambiguous
+
+
+def test_adx_matches_tradingview_reference_values():
+    from adx import adx
+    rows = [(100+i, 102+i+(i%3), 99+i-(i%2), 101+i+((i%4)-1)*0.3) for i in range(40)]
+    df = candles(rows)
+    out, plus, minus = adx(df.high.to_numpy(float), df.low.to_numpy(float), df.close.to_numpy(float), 14)
+    assert out[-1] == pytest.approx(100.0, abs=1e-5)
+    assert plus[-1] == pytest.approx(28.365647, abs=1e-5)
+    assert minus[-1] == pytest.approx(0.0, abs=1e-5)
+
+
+def test_adx_uses_strategy_candles_not_intrabar_volatility():
+    rows = [(100+i, 102+i+(i%3), 99+i-(i%2), 101+i) for i in range(40)]
+    strat = candles(rows)
+    quiet = one_minute(pd.Timestamp("2024-01-01 00:15", tz="UTC"), [(100,100,100,100)]*600)
+    wild = one_minute(pd.Timestamp("2024-01-01 00:15", tz="UTC"), [(100,10000,1,100)]*600)
+    c = cfg(entry_mode=EntryMode.EVERY_N_CANDLES, use_intrabar_data=True, adx_period=14)
+    a = BacktestEngine(strat, c, quiet).run().adx.iloc[0]
+    b = BacktestEngine(strat, c, wild).run().adx.iloc[0]
+    assert (np.isnan(a) and np.isnan(b)) or a == pytest.approx(b)
+
+
+def test_disabled_adx_filter_matches_unfiltered_engine():
+    df = candles([(100,100,100,100), (100,111,100,100), (100,100,89,100), (100,111,100,100)])
+    base = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=10)).run()
+    disabled = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=10, enable_adx_filter=True, adx_filter_mode="Disabled")).run()
+    pd.testing.assert_frame_equal(base.drop(columns=["signals_evaluated", "signals_skipped_by_adx", "signals_traded"], errors="ignore"), disabled.drop(columns=["signals_evaluated", "signals_skipped_by_adx", "signals_traded"], errors="ignore"))
+
+
+def test_adx_filter_skips_entries_records_signals_and_outputs_stats():
+    df = candles([(100+i, 102+i+(i%3), 99+i-(i%2), 101+i) for i in range(45)])
+    unfiltered = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=50)).run()
+    engine = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=50, enable_adx_filter=True, adx_filter_mode="ADX <= Maximum", adx_maximum=101))
+    filtered = engine.run()
+    assert len(filtered) < len(unfiltered)
+    assert len(engine.skipped_signals) > 0
+    assert {"adx", "plus_di", "minus_di", "adx_filter_passed", "adx_filter_reason"}.issubset(filtered.columns)
+    summary = summarize(filtered, 1000)
+    assert "signals_evaluated" in summary and "average_adx_of_winning_trades" in summary
+    from statistics import adx_analysis
+    analysis = adx_analysis(filtered)
+    assert list(analysis.columns) == ["Bucket", "Trades", "Wins", "Losses", "Win rate", "Average PnL", "Average duration", "Double SL count", "TP/SL count"]
