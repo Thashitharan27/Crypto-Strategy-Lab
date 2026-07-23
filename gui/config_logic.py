@@ -8,18 +8,22 @@ from typing import Any
 
 from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy
 
-DEFAULT_GUI_CONFIG: dict[str, Any] = {
-    "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output",
-    "sl_mult": 2.0, "tp_mult": 3.0, "entry_mode": "WAIT_UNTIL_CLOSED",
-    "entry_interval": 1, "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
-    "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0,
-    "percent_r": 0.002, "fixed_r": 100.0, "initial_equity": 1000.0,
-    "risk_per_leg": 0.005, "maker_fee": 0.0002, "taker_fee": 0.0005,
-    "use_maker_entry": False, "use_maker_exit": False, "slippage": 0.0001,
-    "strategy_timeframe_minutes": 15, "intrabar_timeframe_minutes": 1, "use_intrabar_data": True,
-    "trading_start_date": None, "trading_end_date": None, "max_effective_leverage_per_leg": None,
-    "max_combined_effective_leverage": None, "intrabar_missing_policy": "WARN_AND_USE_15M", "zero_cost_comparison": False,
-}
+def config_to_gui_values(config: BacktestConfig) -> dict[str, Any]:
+    """Return GUI-serializable values for a BacktestConfig instance."""
+    values = asdict(config)
+    for key in ("input_csv", "strategy_csv", "intrabar_csv", "output_dir"):
+        values[key] = str(values[key]) if values[key] is not None else ""
+    for key in ("entry_mode", "tie_policy", "risk_mode", "intrabar_missing_policy"):
+        values[key] = values[key].value
+    return values
+
+
+def default_gui_config() -> dict[str, Any]:
+    """Build the GUI defaults from the project BacktestConfig defaults."""
+    return config_to_gui_values(BacktestConfig())
+
+
+DEFAULT_GUI_CONFIG: dict[str, Any] = default_gui_config()
 
 
 def parse_percentage(value: str | float | int) -> float:
