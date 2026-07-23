@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
     def values(self):
         return {"run_name":self.run_name.text().strip(),"input_csv":self.input_csv.text(),"strategy_csv":self.input_csv.text(),"intrabar_csv":self.intrabar_csv.text(),"use_intrabar_data":self.use_intrabar.isChecked(),"trading_start_date":self.trading_start.text() or None,"trading_end_date":self.trading_end.text() or None,"max_effective_leverage_per_leg":self.max_lev_leg.text() or None,"max_combined_effective_leverage":self.max_lev_combined.text() or None,"intrabar_missing_policy":self.missing_policy.currentText(),"zero_cost_comparison":self.zero_cost.isChecked(),"output_dir":self.output_folder.text(),"sl_mult":self.sl.value(),"tp_mult":self.tp.value(),"entry_mode":self.entry_mode.currentText(),"entry_interval":self.entry_interval.value(),"max_active_pairs":self.max_pairs.value(),"tie_policy":self.tie.currentText(),"risk_mode":self.risk_mode.currentText(),"atr_period":self.atr_period.value(),"atr_multiplier":self.atr_mult.value(),"percent_r":parse_percentage(self.percent_r.text()),"fixed_r":self.fixed_r.value(),"initial_equity":self.equity.value(),"risk_per_leg":parse_percentage(self.risk_leg.text()),"maker_fee":parse_percentage(self.maker.text()),"taker_fee":parse_percentage(self.taker.text()),"use_maker_entry":self.maker_entry.isChecked(),"use_maker_exit":self.maker_exit.isChecked(),"slippage":parse_percentage(self.slippage.text())}
     def reset_defaults(self):
-        d=DEFAULT_GUI_CONFIG; self.run_name.setText(d.get("run_name", "")); self.input_csv.setText(d["strategy_csv"]); self.intrabar_csv.setText(d["intrabar_csv"]); self.output_folder.setText(d["output_dir"]); self.entry_interval.setValue(1); self.max_pairs.setValue(1); self.update_dynamic(); self.update_planned_output()
+        self.apply_values(default_gui_config())
     def _restore_settings(self):
         self.input_csv.setText(self.settings.value("last_csv", self.input_csv.text())); self.output_folder.setText(self.settings.value("last_output", self.output_folder.text()))
     def browse_csv(self):
@@ -130,7 +130,39 @@ class MainWindow(QMainWindow):
         p,_=QFileDialog.getOpenFileName(self,"Load Configuration","","JSON (*.json)");
         if p: self.apply_values(load_config_json(p))
     def apply_values(self,d):
-        self.run_name.setText(str(d.get("run_name",""))); self.input_csv.setText(str(d.get("input_csv",""))); self.output_folder.setText(str(d.get("output_dir","output"))); self.sl.setValue(float(d.get("sl_mult",2))); self.tp.setValue(float(d.get("tp_mult",3))); self.risk_mode.setCurrentText(d.get("risk_mode","ATR")); self.atr_period.setValue(int(d.get("atr_period",14))); self.atr_mult.setValue(float(d.get("atr_multiplier",1))); self.percent_r.setText(format_percentage(float(d.get("percent_r",0.002)))); self.fixed_r.setValue(float(d.get("fixed_r",100))); self.equity.setValue(float(d.get("initial_equity",1000))); self.risk_leg.setText(format_percentage(float(d.get("risk_per_leg",0.005)))); self.maker.setText(format_percentage(float(d.get("maker_fee",0.0002)))); self.taker.setText(format_percentage(float(d.get("taker_fee",0.0005)))); self.slippage.setText(format_percentage(float(d.get("slippage",0.0001)))); self.entry_mode.setCurrentText(d.get("entry_mode","WAIT_UNTIL_CLOSED")); self.tie.setCurrentText(d.get("tie_policy","PESSIMISTIC")); self.update_dynamic(); self.update_planned_output()
+        values = {**default_gui_config(), **d}
+        self.run_name.setText(str(values.get("run_name", "")))
+        self.input_csv.setText(str(values["input_csv"]))
+        self.intrabar_csv.setText(str(values["intrabar_csv"]))
+        self.use_intrabar.setChecked(bool(values["use_intrabar_data"]))
+        self.output_folder.setText(str(values["output_dir"]))
+        self.sl.setValue(float(values["sl_mult"]))
+        self.tp.setValue(float(values["tp_mult"]))
+        self.entry_mode.setCurrentText(values["entry_mode"])
+        self.entry_interval.setValue(int(values["entry_interval"]))
+        self.max_pairs.setValue(int(values["max_active_pairs"]))
+        self.tie.setCurrentText(values["tie_policy"])
+        self.risk_mode.setCurrentText(values["risk_mode"])
+        self.atr_period.setValue(int(values["atr_period"]))
+        self.atr_mult.setValue(float(values["atr_multiplier"]))
+        self.trading_start.setText(str(values["trading_start_date"] or ""))
+        self.trading_end.setText(str(values["trading_end_date"] or ""))
+        self.max_lev_leg.setText(str(values["max_effective_leverage_per_leg"] or ""))
+        self.max_lev_combined.setText(str(values["max_combined_effective_leverage"] or ""))
+        self.missing_policy.setCurrentText(values["intrabar_missing_policy"])
+        self.zero_cost.setChecked(bool(values["zero_cost_comparison"]))
+        self.percent_r.setText(format_percentage(float(values["percent_r"])))
+        self.fixed_r.setValue(float(values["fixed_r"]))
+        self.equity.setValue(float(values["initial_equity"]))
+        self.risk_leg.setText(format_percentage(float(values["risk_per_leg"])))
+        self.maker.setText(format_percentage(float(values["maker_fee"])))
+        self.taker.setText(format_percentage(float(values["taker_fee"])))
+        self.maker_entry.setChecked(bool(values["use_maker_entry"]))
+        self.maker_exit.setChecked(bool(values["use_maker_exit"]))
+        self.slippage.setText(format_percentage(float(values["slippage"])))
+        self.update_dynamic()
+        self.update_dynamic()
+        self.update_planned_output()
     def append_log(self,t): self.log.append(str(t))
     def save_log(self):
         p,_=QFileDialog.getSaveFileName(self,"Save Log","backtest.log","Log (*.log *.txt)");
