@@ -444,7 +444,8 @@ def test_bollinger_width_matches_manual_population_std_and_csv_columns():
     assert row.bb_lower == pytest.approx(sma - 2*std)
     assert row.bb_width == pytest.approx((4*std)/sma)
     assert row.bb_width_pct == pytest.approx(row.bb_width * 100)
-    assert {"bb_width_change", "bb_width_change_pct", "di_spread", "di_ratio", "di_spread_change"}.issubset(trades.columns)
+    assert {"bb_width_entry_5bar_change", "bb_width_entry_5bar_change_pct", "di_spread", "di_ratio", "di_spread_entry_5bar_change", "indicator_warmup_complete", "adx_available_at_entry", "bb_width_available_at_entry", "indicator_warmup_note"}.issubset(trades.columns)
+    assert not trades.columns.duplicated().any()
 
 
 def test_di_spread_and_ratio_match_manual_calculation():
@@ -507,6 +508,9 @@ def test_journey_summaries_milestones_and_winner_loser_analysis():
     trades = pd.DataFrame({"pair_id":[1,2],"entry_time":[pd.Timestamp("2024-01-01", tz="UTC")]*2,"long_exit_reason":["TP","SL"],"short_exit_reason":["SL","SL"],"holding_minutes":[30,75],"holding_hours":[0.5,1.25],"pair_net_pnl":[10.0,-20.0]})
     tel = pd.DataFrame({"pair_id":[1,1,1,2,2,2,2,2,2],"timestamp":pd.date_range("2024-01-01", periods=9, freq="15min", tz="UTC"),"elapsed_minutes":[0,15,30,0,15,30,45,60,75],"adx":[10,11,12,20,21,22,23,24,25],"di_spread":[1,2,3,4,5,6,7,8,9],"bb_width":[.1,.2,.3,.4,.5,.6,.7,.8,.9],"atr":[5,6,7,8,9,10,11,12,13]})
     out = add_journey_columns(trades, tel)
+    assert not out.columns.duplicated().any()
+    assert "di_spread_journey_change" in out.columns
+    assert "bb_width_journey_change_pct" in out.columns
     assert out.loc[0,"adx_entry"] == 10
     assert out.loc[0,"adx_first_hour"] == 12
     assert not out.loc[0,"first_hour_full_window_available"]
