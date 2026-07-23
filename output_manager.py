@@ -143,3 +143,25 @@ def update_latest(output_root: Path, run_dir: Path) -> None:
         latest.symlink_to(run_dir.resolve(), target_is_directory=True)
     except OSError:
         shutil.copytree(run_dir, latest)
+
+TRADE_R_COLUMN_METADATA = {
+    "r_distance": "Price-distance R selected by the configured risk mode before SL/TP multiples.",
+    "configured_price_risk_percentage": "Configured account-equity percentage used as the price-risk budget per leg before fees and slippage.",
+    "estimated_all_in_stop_risk_percentage": "Estimated per-leg account-equity loss at stop after entry fee, stop-exit fee, and configured slippage.",
+    "*_price_r": "Realized price movement divided by r_distance; excludes quantity, fees, and account equity.",
+    "*_gross_r": "Gross cash PnL divided by that leg's planned risk_amount.",
+    "*_net_r": "Net cash PnL after fees divided by that leg's planned risk_amount.",
+    "*_account_r": "Alias for leg net_r retained for backward-compatible account-risk reporting.",
+    "pair_price_r": "Sum of long_price_r and short_price_r; a price-distance measure, not cash risk.",
+    "pair_gross_account_r": "Pair gross cash PnL divided by combined planned risk_amount for both legs.",
+    "pair_fee_account_r": "Pair fees divided by combined planned risk_amount for both legs.",
+    "pair_net_account_r": "Pair net cash PnL divided by combined planned risk_amount for both legs.",
+    "pair_gross_r": "Sum of leg gross_r values.",
+    "pair_fee_r": "Pair fees divided by one leg's planned risk_amount for legacy pair-R comparison.",
+    "pair_net_r": "Sum of leg net_r values; legacy pair R where two stopped legs equal roughly -2 before costs.",
+}
+
+
+def write_trade_column_metadata(run_dir: Path) -> None:
+    """Write tooltip-style definitions for R and risk percentage columns in trade_list.csv."""
+    (run_dir / "trade_list_column_metadata.json").write_text(json.dumps(TRADE_R_COLUMN_METADATA, indent=2))

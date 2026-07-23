@@ -7,7 +7,7 @@ A modular Python backtesting tool for dual long/short crypto strategies on Binan
 - Opens one long and one short position per entry signal.
 - Independent SL/TP handling for each side.
 - Configurable fixed, percentage, or Wilder ATR risk distance with an ATR multiplier.
-- Real position sizing from current equity, risk-per-leg, and stop distance.
+- Real position sizing from current equity, risk-per-leg, and stop distance, with optional all-in stop-risk sizing that includes estimated fees and slippage.
 - Binance maker/taker fee modelling by entry/exit notional plus configurable slippage.
 - Pessimistic and optimistic same-candle TP/SL policies with ambiguity flags.
 - Entry modes for waiting until closed, every N candles, or isolated custom strategy logic.
@@ -80,6 +80,8 @@ quantity = risk_amount_per_leg / stop_distance
 
 The same risk amount and quantity formula is used for the long and short legs.
 
+By default, `risk_per_leg` is a price-risk budget: a stopped leg is expected to lose the configured price distance before execution costs, so net account loss will be larger after entry fees, stop-exit fees, and slippage. Set `position_sizing_mode = ALL_IN_STOP_RISK` or pass `--all-in-risk-sizing` to reduce quantity so the estimated stop loss including those costs stays near `risk_per_leg`. Trade output records both `configured_price_risk_percentage` and `estimated_all_in_stop_risk_percentage`.
+
 Gross PnL is calculated with quantity:
 
 ```text
@@ -142,6 +144,7 @@ python main.py \
   --sl-mult 2.0 \
   --tp-mult 3.0 \
   --risk-per-leg 0.005 \
+  --position-sizing-mode PRICE_RISK \
   --initial-equity 1000 \
   --maker-fee 0.0002 \
   --taker-fee 0.0005 \
@@ -163,7 +166,8 @@ python main.py --risk-mode PERCENT --percent-r 0.01
 
 The output directory contains:
 
-- `trade_list.csv` — detailed pair-level and leg-level results including quantity, risk amount, notionals, SL/TP, exit reason, gross/net PnL, gross/net R, fees, equity, holding time, and ambiguity flags.
+- `trade_list.csv` — detailed pair-level and leg-level results including quantity, risk amount, configured price-risk percentage, estimated all-in stop-risk percentage, notionals, SL/TP, exit reason, gross/net PnL, price-distance R, account-risk R, fees, equity, holding time, and ambiguity flags.
+- `trade_list_column_metadata.json` — tooltip-style definitions for every R and risk-percentage column in `trade_list.csv`.
 - `summary.json` — total pairs, wins/losses/flats, win/loss rates, average/median/total net R, profit factor, ending equity, total return percentage, drawdown, streaks, average holding time, total fees, ambiguity count, and exit-reason combination groups.
 - `equity_curve.csv` — equity and drawdown after each fully closed pair.
 - `equity_curve.png`, `r_distribution.png`, `holding_time_distribution.png`, `monthly_returns.png`, `yearly_returns.png` — charts when matplotlib is installed.
@@ -188,7 +192,7 @@ The backtester now separates strategy data from intrabar exit data. Use `strateg
 
 Binance `open_time` is the candle start time. A 15-minute row with `open_time = 10:00` is considered complete at `10:15`, so the internal `strategy_entry_time` is the 15-minute candle open time plus 15 minutes. This avoids look-ahead bias: the entry uses the 15-minute close, and the high/low of that just-completed candle are not used after the entry.
 
-You can provide warm-up history before the trading window. For example, start the 15-minute data on `2026-05-25`, then set `--trading-start 2026-06-01 --trading-end 2026-06-30`. Warm-up candles seed Wilder ATR but do not generate trades.
+You can provide warm-up history before the trading window. Use `--data-start` to choose the first candle loaded for indicators and `--trading-start` to choose the first eligible entry time. For example, start the 15-minute data on `2026-05-25`, then set `--trading-start 2026-06-01 --trading-end 2026-06-30`. Warm-up candles seed Wilder ATR but do not generate trades.
 
 Fees remain charged on full notional, not margin. Leverage changes required margin but does not reduce trading fees, so small ATR values can create large notional sizes under account-risk sizing. Optional leverage caps (`--max-leverage-per-leg` and `--max-combined-leverage`) reduce quantities explicitly and mark trades with `leverage_capped` instead of silently changing size.
 
@@ -215,4 +219,4 @@ python main.py ^
   --use-intrabar
 ```
 
-Additional CLI options include `--strategy-timeframe`, `--intrabar-timeframe`, `--atr-period`, `--atr-multiplier`, `--trading-start`, `--trading-end`, `--max-leverage-per-leg`, `--max-combined-leverage`, `--intrabar-missing-policy`, and `--zero-cost-comparison`.
+Additional CLI options include `--strategy-timeframe`, `--intrabar-timeframe`, `--atr-period`, `--atr-multiplier`, `--data-start`, `--trading-start`, `--trading-end`, `--max-leverage-per-leg`, `--max-combined-leverage`, `--intrabar-missing-policy`, and `--zero-cost-comparison`.

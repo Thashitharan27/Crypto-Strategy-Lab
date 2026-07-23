@@ -52,6 +52,10 @@ def load_ohlcv_csv(path: str, timestamp_unit: str | None = "ms", expected_timefr
 
 def load_backtest_data(config):
     strat = load_ohlcv_csv(str(config.strategy_csv), config.timestamp_unit, config.strategy_timeframe_minutes, "Strategy data", True)
+    if getattr(config, "data_start_date", None):
+        data_start = pd.Timestamp(config.data_start_date, tz="UTC")
+        strat = strat.loc[strat.timestamp >= data_start].reset_index(drop=True)
+        if strat.empty: raise ValueError("No strategy rows remain on or after data_start_date")
     intra = None
     if config.use_intrabar_data and config.intrabar_csv:
         intra = load_ohlcv_csv(str(config.intrabar_csv), config.timestamp_unit, config.intrabar_timeframe_minutes, "Intrabar data", True)

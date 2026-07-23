@@ -235,3 +235,39 @@ def test_save_plots_reports_failed_chart_without_raising(monkeypatch, tmp_path):
     assert any("drawdown.png" in warning and "drawdown boom" in warning for warning in warnings)
     assert (tmp_path / "equity_curve.png").exists()
     assert (tmp_path / "r_distribution.png").exists()
+
+
+def test_price_risk_leg_loses_more_than_configured_after_fees_and_slippage():
+    df = candles([(100,100,100,100), (100,100,89,100)])
+    row = BacktestEngine(df, cfg(risk_per_leg=0.005, taker_fee=0.001, slippage=0.001)).run().iloc[0]
+    assert row.long_exit_reason == "SL"
+    assert row.long_net_pnl / row.equity_before_trade < -0.005
+    assert row.long_estimated_all_in_stop_risk_percentage > row.long_configured_price_risk_percentage
+
+
+def test_all_in_risk_sizing_keeps_stop_loss_near_configured_risk():
+    from config import PositionSizingMode
+
+    df = candles([(100,100,100,100), (100,100,89,100)])
+    row = BacktestEngine(df, cfg(risk_per_leg=0.005, taker_fee=0.001, slippage=0.001, position_sizing_mode=PositionSizingMode.ALL_IN_STOP_RISK)).run().iloc[0]
+    assert row.long_exit_reason == "SL"
+    assert -row.long_net_pnl / row.equity_before_trade == pytest.approx(0.005, rel=0.01)
+    assert row.long_estimated_all_in_stop_risk_percentage == pytest.approx(0.005, rel=0.01)
+
+
+def test_end_of_data_uses_final_candle_close_timestamp():
+    start = pd.Timestamp("2024-01-01 23:30", tz="UTC")
+    df = pd.DataFrame({
+        "timestamp": [start, start + pd.Timedelta(minutes=15)],
+        "open": [100, 100], "high": [100, 100], "low": [100, 100], "close": [100, 100], "volume": [1, 1],
+    })
+    row = BacktestEngine(df, cfg()).run().iloc[0]
+    assert row.long_exit_reason == "END_OF_DATA"
+    assert row.long_exit_time == pd.Timestamp("2024-01-02 00:00", tz="UTC")
+    assert row.short_exit_time == pd.Timestamp("2024-01-02 00:00", tz="UTC")
+
+
+def test_equity_reconciliation_is_exact_sum_of_pair_pnl():
+    trades = BacktestEngine(candles([(100,100,100,100), (100,111,100,100), (100,100,89,100)]), cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=10, taker_fee=0.001, slippage=0.001)).run()
+    expected = 1000 + trades.pair_net_pnl.sum()
+    assert trades.equity_after_trade.iloc[-1] == pytest.approx(expected, abs=1e-12)
