@@ -124,7 +124,9 @@ def periodic_results(trades: pd.DataFrame, freq: str) -> pd.DataFrame:
     last_error: Exception | None = None
     for candidate in candidates:
         try:
-            return frame.resample(candidate).agg(pair_count=("pair_net_pnl", "size"), net_pnl=("pair_net_pnl", "sum"), net_r=("pair_net_r", "sum")).reset_index(names="period")
+            periodic = frame.resample(candidate).agg(pair_count=("pair_net_pnl", "size"), net_pnl=("pair_net_pnl", "sum"), net_r=("pair_net_r", "sum"))
+            periodic = periodic.reset_index()
+            return periodic.rename(columns={periodic.columns[0]: "period"})
         except ValueError as exc:
             last_error = exc
     raise last_error if last_error is not None else ValueError(f"Unsupported resample frequency: {freq}")

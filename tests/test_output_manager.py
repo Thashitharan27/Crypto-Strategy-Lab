@@ -25,6 +25,27 @@ def test_periodic_results_groups_by_exit_period():
     assert list(monthly["net_pnl"]) == [8.0, 5.0]
 
 
+def test_periodic_results_does_not_use_reset_index_names_keyword(monkeypatch):
+    trades = pd.DataFrame({
+        "long_exit_time": ["2024-01-01", "2024-02-01"],
+        "short_exit_time": ["2024-01-02", "2024-02-02"],
+        "pair_net_pnl": [10.0, 5.0],
+        "pair_net_r": [1.0, 0.5],
+    })
+    original_reset_index = pd.DataFrame.reset_index
+
+    def legacy_reset_index(self, *args, **kwargs):
+        if "names" in kwargs:
+            raise TypeError("DataFrame.reset_index() got an unexpected keyword argument 'names'")
+        return original_reset_index(self, *args, **kwargs)
+
+    monkeypatch.setattr(pd.DataFrame, "reset_index", legacy_reset_index)
+
+    monthly = periodic_results(trades, "ME")
+
+    assert list(monthly.columns) == ["period", "pair_count", "net_pnl", "net_r"]
+    assert list(monthly["net_pnl"]) == [10.0, 5.0]
+
 def test_create_run_dir_creates_timestamped_folder_and_latest_pointer(tmp_path):
     from output_manager import create_run_dir, update_latest
 
