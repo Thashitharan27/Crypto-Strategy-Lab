@@ -87,7 +87,8 @@ class BacktestWorker(QObject):
             trades.to_csv(self.config.output_dir / "trade_list.csv", index=False)
             equity.to_csv(self.config.output_dir / "equity_curve.csv", index=False)
             (self.config.output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
-            save_plots(trades, equity, self.config.output_dir)
+            for warning in save_plots(trades, equity, self.config.output_dir):
+                self.log.emit(f"WARNING: {warning}")
             self._emit_stage("Saving outputs", 100, len(data), len(data), len(trades), len(trades), 0)
             self.log.emit(f"Completed {len(trades):,} trade pairs")
             self.log.emit(f"Results saved to {self.config.output_dir}")

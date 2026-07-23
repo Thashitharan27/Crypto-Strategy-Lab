@@ -2,44 +2,120 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from pathlib import Path
+
 import pandas as pd
 
+logger = logging.getLogger(__name__)
 
-def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> None:
-    import matplotlib.pyplot as plt
+
+def _first_compatible_frequency(*aliases: str) -> str:
+    """Return the first pandas frequency alias accepted by this environment."""
+    for alias in aliases:
+        try:
+            pd.date_range("2000-01-01", periods=1, freq=alias)
+        except ValueError:
+            continue
+        return alias
+    raise ValueError(f"No compatible pandas frequency alias found from: {', '.join(aliases)}")
+
+
+def _month_year_frequencies() -> tuple[str, str]:
+    """Return pandas month/year-end aliases across old and new pandas releases."""
+    monthly_freq = _first_compatible_frequency("ME", "M")
+    yearly_freq = _first_compatible_frequency("YE", "Y")
+    return monthly_freq, yearly_freq
+
+
+def _save_chart(chart_name: str, draw: Callable[[], None], warnings: list[str]) -> None:
+    try:
+        draw()
+    except Exception as exc:  # noqa: BLE001 - chart export must not fail the backtest.
+        message = f"Chart generation failed for {chart_name}: {exc}"
+        logger.warning(message, exc_info=True)
+        warnings.append(message)
+
+
+def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> list[str]:
+    warnings: list[str] = []
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as exc:  # noqa: BLE001 - chart export must not fail the backtest.
+        message = f"Chart generation failed for all charts: {exc}"
+        logger.warning(message, exc_info=True)
+        return [message]
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    if not equity.empty:
-        ax = equity.plot(x="time", y="equity", title="Equity Curve", legend=False)
-        ax.set_ylabel("Equity")
-        ax.figure.tight_layout()
-        ax.figure.savefig(output_dir / "equity_curve.png")
-        plt.close(ax.figure)
 
-        ax = equity.plot(x="time", y="drawdown", title="Drawdown", legend=False)
-        ax.set_ylabel("Drawdown")
-        ax.figure.tight_layout()
-        ax.figure.savefig(output_dir / "drawdown.png")
-        plt.close(ax.figure)
+    if not equity.empty:
+        def equity_curve_chart() -> None:
+            ax = equity.plot(x="time", y="equity", title="Equity Curve", legend=False)
+            try:
+                ax.set_ylabel("Equity")
+                ax.figure.tight_layout()
+                ax.figure.savefig(output_dir / "equity_curve.png")
+            finally:
+                plt.close(ax.figure)
+
+        def drawdown_chart() -> None:
+            ax = equity.plot(x="time", y="drawdown", title="Drawdown", legend=False)
+            try:
+                ax.set_ylabel("Drawdown")
+                ax.figure.tight_layout()
+                ax.figure.savefig(output_dir / "drawdown.png")
+            finally:
+                plt.close(ax.figure)
+
+        _save_chart("equity_curve.png", equity_curve_chart, warnings)
+        _save_chart("drawdown.png", drawdown_chart, warnings)
+
     if trades.empty:
-        return
+        return warnings
+
     charts = [
         (trades["pair_net_r"], "R Distribution", "r_distribution.png"),
         (trades["holding_hours"], "Holding Time (hours)", "holding_time_distribution.png"),
     ]
     for series, title, filename in charts:
-        fig, ax = plt.subplots()
-        series.hist(ax=ax, bins=50)
-        ax.set_title(title)
-        fig.tight_layout()
-        fig.savefig(output_dir / filename)
-        plt.close(fig)
-    returns = trades.assign(exit_time=pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1)))
-    for freq, filename, title in [("ME", "monthly_returns.png", "Monthly Returns"), ("YE", "yearly_returns.png", "Yearly Returns")]:
-        agg = returns.set_index("exit_time")["pair_net_pnl"].resample(freq).sum()
-        fig, ax = plt.subplots()
-        agg.plot(kind="bar", ax=ax, title=title)
-        fig.tight_layout()
-        fig.savefig(output_dir / filename)
-        plt.close(fig)
+        def histogram_chart(series: pd.Series = series, title: str = title, filename: str = filename) -> None:
+            fig, ax = plt.subplots()
+            try:
+                series.hist(ax=ax, bins=50)
+                ax.set_title(title)
+                fig.tight_layout()
+                fig.savefig(output_dir / filename)
+            finally:
+                plt.close(fig)
+
+        _save_chart(filename, histogram_chart, warnings)
+
+    def returns_frame() -> pd.DataFrame:
+        return trades.assign(exit_time=pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1)))
+
+    try:
+        monthly_freq, yearly_freq = _month_year_frequencies()
+    except Exception as exc:  # noqa: BLE001 - chart export must not fail the backtest.
+        message = f"Chart generation failed for return charts: {exc}"
+        logger.warning(message, exc_info=True)
+        warnings.append(message)
+        return warnings
+
+    for freq, filename, title in [
+        (monthly_freq, "monthly_returns.png", "Monthly Returns"),
+        (yearly_freq, "yearly_returns.png", "Yearly Returns"),
+    ]:
+        def returns_chart(freq: str = freq, filename: str = filename, title: str = title) -> None:
+            agg = returns_frame().set_index("exit_time")["pair_net_pnl"].resample(freq).sum()
+            fig, ax = plt.subplots()
+            try:
+                agg.plot(kind="bar", ax=ax, title=title)
+                fig.tight_layout()
+                fig.savefig(output_dir / filename)
+            finally:
+                plt.close(fig)
+
+        _save_chart(filename, returns_chart, warnings)
+
+    return warnings

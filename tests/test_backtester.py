@@ -182,3 +182,48 @@ def test_summary_counts_intrabar_fallback_and_end_of_data_sources():
     summary = summarize(trades, 1000)
     assert summary["exit_source_counts"]["1M_INTRABAR"] >= 1
     assert "fallback_reason_counts" in summary
+
+
+def test_plot_frequency_aliases_fall_back_for_older_pandas(monkeypatch):
+    import plots
+
+    def legacy_date_range(*args, **kwargs):
+        if kwargs.get("freq") in {"ME", "YE"}:
+            raise ValueError(f"Invalid frequency: {kwargs['freq']}")
+        return pd.DatetimeIndex([pd.Timestamp("2000-01-01")])
+
+    monkeypatch.setattr(plots.pd, "date_range", legacy_date_range)
+
+    assert plots._month_year_frequencies() == ("M", "Y")
+
+
+def test_save_plots_reports_failed_chart_without_raising(monkeypatch, tmp_path):
+    import plots
+
+    trades = pd.DataFrame({
+        "pair_net_r": [1.0],
+        "holding_hours": [2.0],
+        "long_exit_time": [pd.Timestamp("2024-01-31")],
+        "short_exit_time": [pd.Timestamp("2024-01-31")],
+        "pair_net_pnl": [100.0],
+    })
+    equity = pd.DataFrame({
+        "time": [pd.Timestamp("2024-01-31")],
+        "equity": [1100.0],
+        "drawdown": [0.0],
+    })
+
+    original_call = pd.plotting._core.PlotAccessor.__call__
+
+    def fail_drawdown_accessor(self, *args, **kwargs):
+        if kwargs.get("y") == "drawdown":
+            raise RuntimeError("drawdown boom")
+        return original_call(self, *args, **kwargs)
+
+    monkeypatch.setattr(pd.plotting._core.PlotAccessor, "__call__", fail_drawdown_accessor)
+
+    warnings = plots.save_plots(trades, equity, tmp_path)
+
+    assert any("drawdown.png" in warning and "drawdown boom" in warning for warning in warnings)
+    assert (tmp_path / "equity_curve.png").exists()
+    assert (tmp_path / "r_distribution.png").exists()
