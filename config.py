@@ -42,6 +42,8 @@ class BacktestConfig:
     slippage: float = 0.0001
     tie_policy: TiePolicy = TiePolicy.PESSIMISTIC
     max_active_pairs: int = 1
+    run_name: str = ""
+    output_run_dir: Optional[Path] = None
 
     def __post_init__(self) -> None:
         if self.input_csv != Path("data/binance_ohlcv.csv") and self.strategy_csv == Path("data/BTCUSDT_15m.csv"):
