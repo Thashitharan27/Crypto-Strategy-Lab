@@ -7,11 +7,11 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode
 from engine import BacktestEngine
 from loader import load_backtest_data, load_ohlcv_csv
 from plots import save_plots
-from statistics import adx_analysis, equity_curve, summarize
+from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
 from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 
 
@@ -19,9 +19,12 @@ def enum_value(enum_cls):
     def parse(value: str):
         normalized = value.upper()
         try:
-            return enum_cls(normalized)
+            return enum_cls(value)
         except ValueError:
-            return enum_cls[normalized]
+            try:
+                return enum_cls(normalized)
+            except ValueError:
+                return enum_cls[normalized]
     return parse
 
 
@@ -74,6 +77,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--adx-maximum", type=float)
     parser.add_argument("--adx-minimum", type=float)
     parser.add_argument("--adx-comparison", action="store_true", help="Compare ADX disabled and maximum-threshold filters")
+    parser.add_argument("--enable-bb-width-filter", action="store_true", default=None)
+    parser.add_argument("--bb-width-filter-mode", type=enum_value(BBWidthFilterMode), choices=list(BBWidthFilterMode))
+    parser.add_argument("--bb-width-maximum", type=float)
+    parser.add_argument("--bb-width-minimum", type=float)
+    parser.add_argument("--bb-width-comparison", action="store_true", help="Compare BB width disabled and maximum-width filters")
+    parser.add_argument("--enable-di-spread-filter", action="store_true", default=None)
+    parser.add_argument("--di-spread-filter-mode", type=enum_value(DISpreadFilterMode), choices=list(DISpreadFilterMode))
+    parser.add_argument("--di-spread-maximum", type=float)
+    parser.add_argument("--di-spread-minimum", type=float)
+    parser.add_argument("--di-spread-comparison", action="store_true", help="Compare DI spread disabled and maximum-spread filters")
     return parser.parse_args()
 
 
@@ -82,7 +95,7 @@ def main() -> None:
     config = BacktestConfig()
     overrides = {}
     for key, value in vars(args).items():
-        if value is not None and key not in ("timeout_comparison", "be_comparison", "adx_comparison"):
+        if value is not None and key not in ("timeout_comparison", "be_comparison", "adx_comparison", "bb_width_comparison", "di_spread_comparison"):
             overrides["input_csv" if key == "input" else key] = value
     config = replace(config, **overrides)
 
@@ -96,6 +109,8 @@ def main() -> None:
     import pandas as pd
     pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False)
     adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False)
+    bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False)
+    di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False)
     write_trade_column_metadata(run_dir)
     equity = equity_curve(trades, config.initial_equity)
     equity.to_csv(run_dir / "equity_curve.csv", index=False)
@@ -139,6 +154,27 @@ def main() -> None:
         summary["adx_comparison"] = rows
         import pandas as pd
         pd.DataFrame(rows).to_csv(run_dir / "adx_comparison.csv", index=False)
+
+    if args.bb_width_comparison:
+        rows=[]
+        scenarios=[("BB width disabled", False, BBWidthFilterMode.DISABLED, config.bb_width_maximum)] + [(f"Maximum {v}%", True, BBWidthFilterMode.MAXIMUM, v/100.0) for v in (2,3,4,5,6)]
+        for label,enabled,mode,max_width in scenarios:
+            cmp_cfg=replace(config, enable_bb_width_filter=enabled, bb_width_filter_mode=mode, bb_width_maximum=max_width)
+            cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run(); cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity); combos=cmp_summary.get("exit_combinations", {})
+            rows.append({"scenario":label,"return":cmp_summary.get("total_return_percentage"),"win_rate":cmp_summary.get("win_rate"),"double_sl":combos.get("Long SL / Short SL",{}).get("count",0),"profit_factor":cmp_summary.get("profit_factor"),"max_drawdown":cmp_summary.get("maximum_drawdown"),"fees":cmp_summary.get("total_fees")})
+        summary["bb_width_comparison"] = rows
+        import pandas as pd
+        pd.DataFrame(rows).to_csv(run_dir / "bb_width_comparison.csv", index=False)
+    if args.di_spread_comparison:
+        rows=[]
+        scenarios=[("DI spread disabled", False, DISpreadFilterMode.DISABLED, config.di_spread_maximum)] + [(f"Maximum {v}", True, DISpreadFilterMode.MAXIMUM, float(v)) for v in (5,10,15,20)]
+        for label,enabled,mode,max_spread in scenarios:
+            cmp_cfg=replace(config, enable_di_spread_filter=enabled, di_spread_filter_mode=mode, di_spread_maximum=max_spread)
+            cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run(); cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity); combos=cmp_summary.get("exit_combinations", {})
+            rows.append({"scenario":label,"return":cmp_summary.get("total_return_percentage"),"win_rate":cmp_summary.get("win_rate"),"double_sl":combos.get("Long SL / Short SL",{}).get("count",0),"profit_factor":cmp_summary.get("profit_factor"),"max_drawdown":cmp_summary.get("maximum_drawdown"),"fees":cmp_summary.get("total_fees")})
+        summary["di_spread_comparison"] = rows
+        import pandas as pd
+        pd.DataFrame(rows).to_csv(run_dir / "di_spread_comparison.csv", index=False)
     if config.zero_cost_comparison:
         ideal_cfg = replace(config, maker_fee=0, taker_fee=0, slippage=0, zero_cost_comparison=False)
         ideal_trades = BacktestEngine(data, ideal_cfg, intrabar).run()

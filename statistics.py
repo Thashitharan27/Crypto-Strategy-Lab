@@ -135,3 +135,25 @@ def equity_curve(trades: pd.DataFrame, initial_equity: float = 1000.0) -> pd.Dat
         "equity": equity,
         "drawdown": equity - equity.cummax().clip(lower=initial_equity),
     })
+
+def bucket_analysis(trades: pd.DataFrame, column: str, buckets: list[tuple[float, float | None]], pct_labels: bool = False) -> pd.DataFrame:
+    rows=[]; values=pd.to_numeric(trades.get(column, pd.Series(dtype=float)), errors="coerce")
+    for lo, hi in buckets:
+        label = f"{lo:g}+" if hi is None else f"{lo:g}-{hi:g}"
+        if pct_labels:
+            label = f"{lo:g}%+" if hi is None else f"{lo:g}-{hi:g}%"
+        mask = values >= lo if hi is None else ((values >= lo) & (values < hi))
+        g=trades[mask]
+        wins=g.get("pair_net_pnl", pd.Series(dtype=float)) > 0
+        losses=g.get("pair_net_pnl", pd.Series(dtype=float)) < 0
+        double_sl=((g.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (g.get("short_exit_reason", pd.Series(dtype=object)) == "SL"))
+        rows.append({"Bucket":label,"Trades":int(len(g)),"Wins":int(wins.sum()),"Losses":int(losses.sum()),"Win Rate":float(wins.mean()) if len(g) else 0.0,"Average Net PnL":float(g["pair_net_pnl"].mean()) if len(g) else 0.0,"Average Holding Time":float(g["holding_minutes"].mean()) if len(g) else 0.0,"Double SL Count":int(double_sl.sum())})
+    return pd.DataFrame(rows)
+
+
+def bb_width_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    return bucket_analysis(trades, "bb_width_pct", [(0,2),(2,4),(4,6),(6,8),(8,10),(10,None)], pct_labels=True)
+
+
+def di_spread_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    return bucket_analysis(trades, "di_spread", [(0,5),(5,10),(10,15),(15,20),(20,30),(30,None)])

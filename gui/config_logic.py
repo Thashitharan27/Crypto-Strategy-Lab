@@ -6,13 +6,13 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode
 
 DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output", "run_name": "",
     "sl_mult": 2.0, "tp_mult": 3.0, "entry_mode": "WAIT_UNTIL_CLOSED",
     "entry_interval": 1, "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
-    "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0, "enable_adx_filter": False, "adx_period": 14, "adx_filter_mode": "Disabled", "adx_maximum": 25.0, "adx_minimum": 20.0,
+    "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0, "enable_adx_filter": False, "adx_period": 14, "adx_filter_mode": "Disabled", "adx_maximum": 25.0, "adx_minimum": 20.0, "enable_bb_width_filter": False, "bb_width_filter_mode": "Disabled", "bb_width_maximum": 0.03, "bb_width_minimum": 0.0, "enable_di_spread_filter": False, "di_spread_filter_mode": "Disabled", "di_spread_maximum": 10.0, "di_spread_minimum": 0.0,
     "percent_r": 0.002, "fixed_r": 100.0, "initial_equity": 1000.0,
     "risk_per_leg": 0.005, "maker_fee": 0.0002, "taker_fee": 0.0005,
     "use_maker_entry": False, "use_maker_exit": False, "slippage": 0.0001,
@@ -90,10 +90,16 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("be_mode") not in [e.value for e in BreakEvenMode]: errors.append("Invalid BE mode.")
     if values.get("be_same_candle_policy") not in [e.value for e in BreakEvenSameCandlePolicy]: errors.append("Invalid same-candle BE policy.")
     if values.get("adx_filter_mode") not in [e.value for e in AdxFilterMode]: errors.append("Invalid ADX filter mode.")
+    if values.get("bb_width_filter_mode") not in [e.value for e in BBWidthFilterMode]: errors.append("Invalid BB width filter mode.")
+    if values.get("di_spread_filter_mode") not in [e.value for e in DISpreadFilterMode]: errors.append("Invalid DI spread filter mode.")
     try:
         if int(values.get("adx_period", 0)) < 1: errors.append("ADX period must be >= 1.")
         if float(values.get("adx_maximum", 0)) < 0 or float(values.get("adx_minimum", 0)) < 0: errors.append("ADX thresholds must be >= 0.")
     except (TypeError, ValueError): errors.append("ADX settings are invalid.")
+    try:
+        if float(values.get("bb_width_maximum", 0)) < 0 or float(values.get("bb_width_minimum", 0)) < 0: errors.append("BB width thresholds must be >= 0.")
+        if float(values.get("di_spread_maximum", 0)) < 0 or float(values.get("di_spread_minimum", 0)) < 0: errors.append("DI spread thresholds must be >= 0.")
+    except (TypeError, ValueError): errors.append("Market compression filter settings are invalid.")
     try:
         if float(values.get("be_offset_r", 0)) < 0: errors.append("BE Offset in R must be >= 0.")
     except (TypeError, ValueError): errors.append("BE Offset in R must be >= 0.")
@@ -115,7 +121,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]),
         max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),
         risk_mode=RiskMode(merged["risk_mode"]), atr_period=int(merged["atr_period"]),
-        atr_multiplier=float(merged["atr_multiplier"]), enable_adx_filter=bool(merged["enable_adx_filter"]), adx_period=int(merged["adx_period"]), adx_filter_mode=AdxFilterMode(merged["adx_filter_mode"]), adx_maximum=float(merged["adx_maximum"]), adx_minimum=float(merged["adx_minimum"]), percent_r=float(merged["percent_r"]),
+        atr_multiplier=float(merged["atr_multiplier"]), enable_adx_filter=bool(merged["enable_adx_filter"]), adx_period=int(merged["adx_period"]), adx_filter_mode=AdxFilterMode(merged["adx_filter_mode"]), adx_maximum=float(merged["adx_maximum"]), adx_minimum=float(merged["adx_minimum"]), enable_bb_width_filter=bool(merged["enable_bb_width_filter"]), bb_width_filter_mode=BBWidthFilterMode(merged["bb_width_filter_mode"]), bb_width_maximum=float(merged["bb_width_maximum"]), bb_width_minimum=float(merged["bb_width_minimum"]), enable_di_spread_filter=bool(merged["enable_di_spread_filter"]), di_spread_filter_mode=DISpreadFilterMode(merged["di_spread_filter_mode"]), di_spread_maximum=float(merged["di_spread_maximum"]), di_spread_minimum=float(merged["di_spread_minimum"]), percent_r=float(merged["percent_r"]),
         fixed_r=float(merged["fixed_r"]), initial_equity=float(merged["initial_equity"]),
         risk_per_leg=float(merged["risk_per_leg"]), maker_fee=float(merged["maker_fee"]),
         taker_fee=float(merged["taker_fee"]), use_maker_entry=bool(merged["use_maker_entry"]),

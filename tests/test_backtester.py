@@ -431,3 +431,37 @@ def test_adx_filter_skips_entries_records_signals_and_outputs_stats():
     from statistics import adx_analysis
     analysis = adx_analysis(filtered)
     assert list(analysis.columns) == ["Bucket", "Trades", "Wins", "Losses", "Win rate", "Average PnL", "Average duration", "Double SL count", "TP/SL count"]
+
+
+def test_bollinger_width_matches_manual_population_std_and_csv_columns():
+    df = candles([(100+i, 100+i, 100+i, 100+i) for i in range(25)])
+    trades = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=50)).run()
+    row = trades[trades["bb_width"].notna()].iloc[0]
+    closes = np.array([100+i for i in range(20)], float)
+    sma = closes.mean(); std = closes.std(ddof=0)
+    assert row.bb_middle == pytest.approx(sma)
+    assert row.bb_upper == pytest.approx(sma + 2*std)
+    assert row.bb_lower == pytest.approx(sma - 2*std)
+    assert row.bb_width == pytest.approx((4*std)/sma)
+    assert row.bb_width_pct == pytest.approx(row.bb_width * 100)
+    assert {"bb_width_change", "bb_width_change_pct", "di_spread", "di_ratio", "di_spread_change"}.issubset(trades.columns)
+
+
+def test_di_spread_and_ratio_match_manual_calculation():
+    df = candles([(100+i, 102+i+(i%3), 99+i-(i%2), 101+i) for i in range(45)])
+    row = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=50)).run().dropna(subset=["plus_di", "minus_di"]).iloc[-1]
+    assert row.di_spread == pytest.approx(abs(row.plus_di - row.minus_di))
+    expected_ratio = max(row.plus_di, row.minus_di) / min(row.plus_di, row.minus_di) if min(row.plus_di, row.minus_di) else np.nan
+    if np.isfinite(expected_ratio):
+        assert row.di_ratio == pytest.approx(expected_ratio)
+
+
+def test_market_compression_filters_skip_trades_and_disabled_matches():
+    df = candles([(100+i, 102+i+(i%3), 99+i-(i%2), 101+i) for i in range(45)])
+    base = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=50)).run()
+    disabled = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=50, enable_bb_width_filter=True, bb_width_filter_mode="Disabled", enable_di_spread_filter=True, di_spread_filter_mode="Disabled")).run()
+    pd.testing.assert_frame_equal(base.drop(columns=["signals_evaluated", "signals_skipped_by_adx", "signals_traded"], errors="ignore"), disabled.drop(columns=["signals_evaluated", "signals_skipped_by_adx", "signals_traded"], errors="ignore"))
+    filtered_engine = BacktestEngine(df, cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=50, enable_bb_width_filter=True, bb_width_filter_mode="Maximum Width", bb_width_maximum=0.0001, enable_di_spread_filter=True, di_spread_filter_mode="Maximum Spread", di_spread_maximum=0.1))
+    filtered = filtered_engine.run()
+    assert len(filtered) < len(base)
+    assert filtered_engine.skipped_signals
