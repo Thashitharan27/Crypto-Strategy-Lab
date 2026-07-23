@@ -12,6 +12,7 @@ from engine import BacktestEngine
 from loader import load_backtest_data, load_ohlcv_csv
 from plots import save_plots
 from statistics import equity_curve, summarize
+from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt
 
 
 def enum_value(enum_cls):
@@ -39,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--intrabar-missing-policy", type=enum_value(IntrabarMissingPolicy), choices=list(IntrabarMissingPolicy))
     parser.add_argument("--zero-cost-comparison", action="store_true", default=None)
     parser.add_argument("--output-dir", type=Path, help="Directory for reports and charts")
+    parser.add_argument("--run-name", default=None, help="Optional run name prefix for the timestamped output folder")
     parser.add_argument("--risk-mode", type=enum_value(RiskMode), choices=list(RiskMode))
     parser.add_argument("--fixed-r", type=float)
     parser.add_argument("--percent-r", type=float)
@@ -70,11 +72,15 @@ def main() -> None:
     data, intrabar = load_backtest_data(config)
     engine = BacktestEngine(data, config, intrabar)
     trades = engine.run()
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-    trades.to_csv(config.output_dir / "trade_list.csv", index=False)
+    output_root = config.output_dir
+    run_dir = create_run_dir(config)
+    write_config(config, run_dir)
+    trades.to_csv(run_dir / "trade_list.csv", index=False)
     equity = equity_curve(trades, config.initial_equity)
-    equity.to_csv(config.output_dir / "equity_curve.csv", index=False)
-    save_plots(trades, equity, config.output_dir)
+    equity.to_csv(run_dir / "equity_curve.csv", index=False)
+    periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False)
+    periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False)
+    save_plots(trades, equity, run_dir / "charts")
     summary = summarize(trades, config.initial_equity)
     summary.update({"use_intrabar_data": config.use_intrabar_data, "intrabar_csv": str(config.intrabar_csv) if config.intrabar_csv else None, "strategy_timeframe": config.strategy_timeframe_minutes, "intrabar_timeframe": config.intrabar_timeframe_minutes, "atr_timeframe": config.strategy_timeframe_minutes, "atr_period": config.atr_period, "atr_multiplier": config.atr_multiplier, "indicator_data_start": str(data.timestamp.min()), "trading_start": config.trading_start_date, "trading_end": config.trading_end_date, "warmup_candles": engine.warmup_candle_count, "first_valid_atr_timestamp": str(engine.first_valid_atr_timestamp)})
     if config.zero_cost_comparison:
@@ -84,7 +90,12 @@ def main() -> None:
         summary["zero_cost_comparison"] = {"actual": {k: summary.get(k) for k in ("win_rate","total_net_r","ending_equity","total_return_percentage","profit_factor","maximum_drawdown")}, "zero_cost": {k: ideal.get(k) for k in ("win_rate","total_net_r","ending_equity","total_return_percentage","profit_factor","maximum_drawdown")}}
     if config.use_intrabar_data and summary.get("intrabar_exit_count") == 0:
         print("WARNING: use_intrabar_data=True but 1M_INTRABAR exit count is 0. Check intrabar path, overlap, and timestamp alignment.")
-    (config.output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    write_summary_txt(summary, run_dir)
+    write_run_info(config, summary, run_dir)
+    (run_dir / "log.txt").write_text("Command-line backtest completed.\n")
+    update_latest(output_root, run_dir)
+    summary["output_dir"] = str(run_dir)
     print(json.dumps(summary, indent=2, default=str))
 
 

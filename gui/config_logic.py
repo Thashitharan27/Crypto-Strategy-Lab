@@ -9,7 +9,7 @@ from typing import Any
 from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy
 
 DEFAULT_GUI_CONFIG: dict[str, Any] = {
-    "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output",
+    "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output", "run_name": "",
     "sl_mult": 2.0, "tp_mult": 3.0, "entry_mode": "WAIT_UNTIL_CLOSED",
     "entry_interval": 1, "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
     "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0,
@@ -105,6 +105,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
         max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
         intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]),
+        run_name=str(merged.get("run_name", "")),
     )
 
 
