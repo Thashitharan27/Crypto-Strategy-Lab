@@ -14,6 +14,16 @@ from output_manager import compatible_resample_freq
 logger = logging.getLogger(__name__)
 
 
+def _series(frame: pd.DataFrame, column: str, dtype=float) -> pd.Series:
+    """Return one column as a Series even when duplicate column names exist."""
+    if column not in frame:
+        return pd.Series(dtype=dtype)
+    values = frame[column]
+    if isinstance(values, pd.DataFrame):
+        values = values.iloc[:, 0]
+    return values
+
+
 def _supported_resample_freq(series: pd.Series, preferred: str) -> str:
     """Return the first equivalent alias supported by the installed pandas version."""
     candidates = [compatible_resample_freq(preferred)]
@@ -32,7 +42,7 @@ def _supported_resample_freq(series: pd.Series, preferred: str) -> str:
 
 def _month_year_frequencies(returns: pd.DataFrame) -> tuple[str, str]:
     """Return month/year-end aliases supported across pandas versions."""
-    pnl_by_exit = returns.set_index("exit_time")["pair_net_pnl"]
+    pnl_by_exit = _series(returns.set_index("exit_time"), "pair_net_pnl")
     return _supported_resample_freq(pnl_by_exit, "ME"), _supported_resample_freq(pnl_by_exit, "YE")
 
 
@@ -82,8 +92,8 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
         return warnings
 
     charts = [
-        (trades["pair_net_r"], "R Distribution", "r_distribution.png"),
-        (trades["holding_hours"], "Holding Time (hours)", "holding_time_distribution.png"),
+        (_series(trades, "pair_net_r"), "R Distribution", "r_distribution.png"),
+        (_series(trades, "holding_hours"), "Holding Time (hours)", "holding_time_distribution.png"),
     ]
     for series, title, filename in charts:
         def histogram_chart(series: pd.Series = series, title: str = title, filename: str = filename) -> None:
@@ -102,31 +112,31 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
         def adx_distribution_chart() -> None:
             fig, ax = plt.subplots()
             try:
-                trades.loc[trades["pair_net_pnl"] > 0, "adx"].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
-                trades.loc[trades["pair_net_pnl"] < 0, "adx"].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Losing trades")
+                _series(trades.loc[_series(trades, "pair_net_pnl") > 0], "adx").dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
+                _series(trades.loc[_series(trades, "pair_net_pnl") < 0], "adx").dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Losing trades")
                 ax.set_title("ADX Distribution"); ax.set_xlabel("ADX"); ax.legend(); fig.tight_layout(); fig.savefig(output_dir / "adx_distribution.png")
             finally:
                 plt.close(fig)
         def adx_vs_pnl_chart() -> None:
             fig, ax = plt.subplots()
             try:
-                trades.plot(kind="scatter", x="adx", y="pair_net_pnl", ax=ax, title="ADX vs PnL")
-                ax.set_xlabel("ADX"); ax.set_ylabel("Pair Net PnL"); fig.tight_layout(); fig.savefig(output_dir / "adx_vs_pnl.png")
+                ax.scatter(_series(trades, "adx"), _series(trades, "pair_net_pnl"))
+                ax.set_title("ADX vs PnL"); ax.set_xlabel("ADX"); ax.set_ylabel("Pair Net PnL"); fig.tight_layout(); fig.savefig(output_dir / "adx_vs_pnl.png")
             finally:
                 plt.close(fig)
         _save_chart("adx_distribution.png", adx_distribution_chart, warnings)
         _save_chart("adx_vs_pnl.png", adx_vs_pnl_chart, warnings)
 
 
-    double_sl_mask = (trades.get("long_exit_reason", pd.Series([], dtype=object)) == "SL") & (trades.get("short_exit_reason", pd.Series([], dtype=object)) == "SL")
-    win_mask = trades.get("pair_net_pnl", pd.Series([], dtype=float)) > 0
+    double_sl_mask = (_series(trades, "long_exit_reason", dtype=object) == "SL") & (_series(trades, "short_exit_reason", dtype=object) == "SL")
+    win_mask = _series(trades, "pair_net_pnl") > 0
     for column, title, filename, xlabel in [("bb_width_pct", "Bollinger Width Histogram", "bb_width_histogram.png", "BB Width (%)"), ("di_spread", "DI Spread Histogram", "di_spread_histogram.png", "DI Spread")]:
         if column in trades:
             def market_histogram(column: str = column, title: str = title, filename: str = filename, xlabel: str = xlabel) -> None:
                 fig, ax = plt.subplots()
                 try:
-                    trades.loc[win_mask, column].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
-                    trades.loc[double_sl_mask, column].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Double SL trades")
+                    _series(trades.loc[win_mask], column).dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
+                    _series(trades.loc[double_sl_mask], column).dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Double SL trades")
                     ax.set_title(title); ax.set_xlabel(xlabel); ax.legend(); fig.tight_layout(); fig.savefig(output_dir / filename)
                 finally:
                     plt.close(fig)
@@ -136,8 +146,8 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
             def market_scatter(column: str = column, title: str = title, filename: str = filename, xlabel: str = xlabel) -> None:
                 fig, ax = plt.subplots()
                 try:
-                    trades.plot(kind="scatter", x=column, y="pair_net_pnl", ax=ax, title=title)
-                    ax.set_xlabel(xlabel); ax.set_ylabel("Pair Net PnL"); fig.tight_layout(); fig.savefig(output_dir / filename)
+                    ax.scatter(_series(trades, column), _series(trades, "pair_net_pnl"))
+                    ax.set_title(title); ax.set_xlabel(xlabel); ax.set_ylabel("Pair Net PnL"); fig.tight_layout(); fig.savefig(output_dir / filename)
                 finally:
                     plt.close(fig)
             _save_chart(filename, market_scatter, warnings)
@@ -156,7 +166,7 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
         (yearly_freq, "yearly_returns.png", "Yearly Returns"),
     ]:
         def returns_chart(freq: str = freq, filename: str = filename, title: str = title) -> None:
-            agg = returns.set_index("exit_time")["pair_net_pnl"].resample(freq).sum()
+            agg = _series(returns.set_index("exit_time"), "pair_net_pnl").resample(freq).sum()
             fig, ax = plt.subplots()
             try:
                 agg.plot(kind="bar", ax=ax, title=title)
