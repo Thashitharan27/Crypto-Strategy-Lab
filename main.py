@@ -40,6 +40,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-combined-leverage", type=float, dest="max_combined_effective_leverage")
     parser.add_argument("--intrabar-missing-policy", type=enum_value(IntrabarMissingPolicy), choices=list(IntrabarMissingPolicy))
     parser.add_argument("--zero-cost-comparison", action="store_true", default=None)
+    parser.add_argument("--enable-both-open-timeout", action="store_true", default=None)
+    parser.add_argument("--max-both-open-minutes", type=int)
+    parser.add_argument("--timeout-comparison", action="store_true", help="Compare no timeout plus 2/4/6/8/12 hour both-open timeout runs")
     parser.add_argument("--output-dir", type=Path, help="Directory for reports and charts")
     parser.add_argument("--run-name", default=None, help="Optional run name prefix for the timestamped output folder")
     parser.add_argument("--risk-mode", type=enum_value(RiskMode), choices=list(RiskMode))
@@ -68,7 +71,7 @@ def main() -> None:
     config = BacktestConfig()
     overrides = {}
     for key, value in vars(args).items():
-        if value is not None:
+        if value is not None and key != "timeout_comparison":
             overrides["input_csv" if key == "input" else key] = value
     config = replace(config, **overrides)
 
@@ -88,7 +91,19 @@ def main() -> None:
     for warning in chart_warnings:
       print(f"WARNING: {warning}")
     summary = summarize(trades, config.initial_equity)
-    summary.update({"use_intrabar_data": config.use_intrabar_data, "intrabar_csv": str(config.intrabar_csv) if config.intrabar_csv else None, "strategy_timeframe": config.strategy_timeframe_minutes, "intrabar_timeframe": config.intrabar_timeframe_minutes, "atr_timeframe": config.strategy_timeframe_minutes, "atr_period": config.atr_period, "atr_multiplier": config.atr_multiplier, "indicator_data_start": str(data.timestamp.min()), "data_start": config.data_start_date, "trading_start": config.trading_start_date, "trading_end": config.trading_end_date, "warmup_candles": engine.warmup_candle_count, "first_valid_atr_timestamp": str(engine.first_valid_atr_timestamp)})
+    summary.update({"use_intrabar_data": config.use_intrabar_data,"both_open_timeout_enabled":config.enable_both_open_timeout,"max_both_open_minutes":config.max_both_open_minutes, "intrabar_csv": str(config.intrabar_csv) if config.intrabar_csv else None, "strategy_timeframe": config.strategy_timeframe_minutes, "intrabar_timeframe": config.intrabar_timeframe_minutes, "atr_timeframe": config.strategy_timeframe_minutes, "atr_period": config.atr_period, "atr_multiplier": config.atr_multiplier, "indicator_data_start": str(data.timestamp.min()), "data_start": config.data_start_date, "trading_start": config.trading_start_date, "trading_end": config.trading_end_date, "warmup_candles": engine.warmup_candle_count, "first_valid_atr_timestamp": str(engine.first_valid_atr_timestamp)})
+
+    if args.timeout_comparison:
+        rows = []
+        for label, minutes, enabled in [("No timeout", 0, False), ("2 hours", 120, True), ("4 hours", 240, True), ("6 hours", 360, True), ("8 hours", 480, True), ("12 hours", 720, True)]:
+            cmp_cfg = replace(config, enable_both_open_timeout=enabled, max_both_open_minutes=minutes or config.max_both_open_minutes)
+            cmp_trades = BacktestEngine(data, cmp_cfg, intrabar).run()
+            cmp_summary = summarize(cmp_trades, cmp_cfg.initial_equity)
+            combos = cmp_summary.get("exit_combinations", {})
+            rows.append({"duration": label, "total_pairs": cmp_summary.get("total_pairs"), "win_rate": cmp_summary.get("win_rate"), "double_sl_count": combos.get("Long SL / Short SL", {}).get("count", 0), "timeout_count": cmp_summary.get("pairs_closed_by_both_open_timeout", 0), "net_pnl": float(cmp_trades["pair_net_pnl"].sum()) if not cmp_trades.empty else 0.0, "total_return": cmp_summary.get("total_return_percentage"), "profit_factor": cmp_summary.get("profit_factor"), "maximum_drawdown": cmp_summary.get("maximum_drawdown"), "total_fees": cmp_summary.get("total_fees")})
+        summary["both_open_timeout_comparison"] = rows
+        import pandas as pd
+        pd.DataFrame(rows).to_csv(run_dir / "both_open_timeout_comparison.csv", index=False)
     if config.zero_cost_comparison:
         ideal_cfg = replace(config, maker_fee=0, taker_fee=0, slippage=0, zero_cost_comparison=False)
         ideal_trades = BacktestEngine(data, ideal_cfg, intrabar).run()

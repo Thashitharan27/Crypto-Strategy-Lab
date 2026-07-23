@@ -159,6 +159,10 @@ TRADE_R_COLUMN_METADATA = {
     "pair_gross_r": "Sum of leg gross_r values.",
     "pair_fee_r": "Pair fees divided by one leg's planned risk_amount for legacy pair-R comparison.",
     "pair_net_r": "Sum of leg net_r values; legacy pair R where two stopped legs equal roughly -2 before costs.",
+    "both_open_timeout_enabled": "Whether the optional rule to close pairs that keep both legs open beyond the configured duration was enabled for this run.",
+    "max_both_open_minutes": "Configured maximum elapsed minutes from pair entry while both long and short remain open.",
+    "both_open_timeout_triggered": "True when both legs of this pair were closed by the both-open timeout rule.",
+    "timeout_exit_time": "Timestamp used for the both-open timeout exit, when applicable.",
 }
 
 

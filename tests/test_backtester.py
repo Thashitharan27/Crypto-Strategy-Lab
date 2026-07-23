@@ -271,3 +271,57 @@ def test_equity_reconciliation_is_exact_sum_of_pair_pnl():
     trades = BacktestEngine(candles([(100,100,100,100), (100,111,100,100), (100,100,89,100)]), cfg(entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=10, taker_fee=0.001, slippage=0.001)).run()
     expected = 1000 + trades.pair_net_pnl.sum()
     assert trades.equity_after_trade.iloc[-1] == pytest.approx(expected, abs=1e-12)
+
+def timeout_minutes(rows, start="2024-01-01 00:15"):
+    t0 = pd.Timestamp(start, tz="UTC")
+    return pd.DataFrame({
+        "timestamp": [t0 + pd.Timedelta(minutes=i) for i in range(len(rows))],
+        "open": [r[0] for r in rows], "high": [r[1] for r in rows],
+        "low": [r[2] for r in rows], "close": [r[3] for r in rows],
+        "volume": [1] * len(rows),
+    })
+
+
+def test_both_open_timeout_closes_both_legs_at_one_minute_open_with_costs():
+    strat = candles([(100, 100, 100, 100), (100, 105, 95, 100), (100, 105, 95, 100), (100, 105, 95, 100)])
+    intra = timeout_minutes([(100, 101, 99, 100)] * 30 + [(102, 999, 1, 102)] + [(100, 101, 99, 100)] * 14)
+    row = BacktestEngine(strat, cfg(use_intrabar_data=True, enable_both_open_timeout=True, max_both_open_minutes=30, taker_fee=0.001, slippage=0.01), intra).run().iloc[0]
+    assert row.long_exit_reason == row.short_exit_reason == "BOTH_OPEN_TIMEOUT"
+    assert row.long_exit_source == row.short_exit_source == "1M_INTRABAR"
+    assert row.both_open_timeout_triggered == True
+    assert row.timeout_exit_time == pd.Timestamp("2024-01-01 00:45", tz="UTC")
+    assert row.timeout_minutes == 30
+    assert row.long_exit_price == pytest.approx(102 * 0.99)
+    assert row.short_exit_price == pytest.approx(102 * 1.01)
+    assert row.long_exit_fee == pytest.approx(row.long_exit_price * row.long_quantity * 0.001)
+
+
+def test_timeout_waits_for_duration_and_ignores_pairs_after_one_leg_closed():
+    no_timeout = BacktestEngine(candles([(100, 100, 100, 100), (100, 105, 95, 100)]), cfg(enable_both_open_timeout=True, max_both_open_minutes=30)).run().iloc[0]
+    assert no_timeout.long_exit_reason == "END_OF_DATA"
+    one_leg_closed = BacktestEngine(candles([(100, 100, 100, 100), (100, 111, 100, 100), (100, 105, 95, 100), (100, 105, 95, 100)]), cfg(enable_both_open_timeout=True, max_both_open_minutes=30)).run().iloc[0]
+    assert one_leg_closed.long_exit_reason == "TP"
+    assert one_leg_closed.short_exit_reason != "BOTH_OPEN_TIMEOUT"
+
+
+def test_timeout_replacement_entry_waits_for_next_completed_strategy_candle_and_recalculates_atr_size():
+    strat = candles([(100,100,100,100),(100,105,95,100),(100,105,95,100),(130,140,120,130),(130,140,120,130),(130,200,50,130)])
+    intra = timeout_minutes([(100,101,99,100)] * 60)
+    trades = BacktestEngine(strat, cfg(use_intrabar_data=True, enable_both_open_timeout=True, max_both_open_minutes=30, entry_mode=EntryMode.EVERY_N_CANDLES, max_active_pairs=1, risk_mode=RiskMode.PERCENT, percent_r=0.1), intra).run()
+    assert len(trades) >= 2
+    assert trades.iloc[0].timeout_exit_time == pd.Timestamp("2024-01-01 00:45", tz="UTC")
+    assert trades.iloc[1].entry_time > trades.iloc[0].timeout_exit_time
+    assert trades.iloc[1].strategy_entry_price == pytest.approx(130)
+    assert trades.iloc[1].r_distance == pytest.approx(13)
+    assert trades.iloc[1].long_quantity != pytest.approx(trades.iloc[0].long_quantity)
+
+
+def test_disabled_timeout_preserves_existing_results_and_summary_records_timeout():
+    data = candles([(100,100,100,100),(100,105,95,100),(100,105,95,100),(100,105,95,100)])
+    baseline = BacktestEngine(data, cfg()).run()
+    disabled = BacktestEngine(data, cfg(enable_both_open_timeout=False)).run()
+    pd.testing.assert_frame_equal(baseline, disabled)
+    timed = BacktestEngine(data, cfg(enable_both_open_timeout=True, max_both_open_minutes=30)).run()
+    summary = summarize(timed, 1000)
+    assert summary["pairs_closed_by_both_open_timeout"] == 1
+    assert "Long BOTH_OPEN_TIMEOUT / Short BOTH_OPEN_TIMEOUT" in summary["exit_combinations"]

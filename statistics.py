@@ -27,6 +27,7 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     max_dd_pct = float((drawdown / running_peak).min()) if not running_peak.empty else 0.0
     source_values = pd.concat([trades.get("long_exit_source", pd.Series(dtype=object)), trades.get("short_exit_source", pd.Series(dtype=object))], ignore_index=True)
     source_counts = {"1M_INTRABAR": int((source_values == "1M_INTRABAR").sum()), "15M_FALLBACK": int((source_values == "15M_FALLBACK").sum()), "END_OF_DATA": int((source_values == "END_OF_DATA").sum())}
+    timeout_pairs = trades[trades.get("both_open_timeout_triggered", pd.Series(False, index=trades.index)).astype(bool)]
     fallback_reasons = pd.concat([trades.get("long_fallback_reason", pd.Series(dtype=object)), trades.get("short_fallback_reason", pd.Series(dtype=object))], ignore_index=True).dropna().value_counts().to_dict()
     combos = {}
     grouped = trades.groupby(["long_exit_reason", "short_exit_reason"], dropna=False)
@@ -59,6 +60,11 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
         "maximum_consecutive_losses": _max_streak(losses),
         "average_holding_time": float(trades["holding_hours"].mean()),
         "total_fees": float(trades["pair_total_fees"].sum()),
+        "pairs_closed_by_both_open_timeout": int(len(timeout_pairs)),
+        "average_timeout_pair_pnl": float(timeout_pairs["pair_net_pnl"].mean()) if not timeout_pairs.empty else 0.0,
+        "total_timeout_pair_pnl": float(timeout_pairs["pair_net_pnl"].sum()) if not timeout_pairs.empty else 0.0,
+        "timeout_pairs_profitable": int((timeout_pairs["pair_net_pnl"] > 0).sum()) if not timeout_pairs.empty else 0,
+        "timeout_pairs_losing": int((timeout_pairs["pair_net_pnl"] < 0).sum()) if not timeout_pairs.empty else 0,
         "ambiguous_event_count": int(trades["ambiguous_candle"].sum()),
         "ambiguous_intrabar_count": int(trades.get("ambiguous_intrabar", trades["ambiguous_candle"]).sum()),
         "missing_intrabar_interval_count": int(trades.get("missing_intrabar_data", pd.Series(dtype=bool)).sum()),

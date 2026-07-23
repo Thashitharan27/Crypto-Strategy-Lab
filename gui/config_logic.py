@@ -19,6 +19,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "strategy_timeframe_minutes": 15, "intrabar_timeframe_minutes": 1, "use_intrabar_data": True,
     "trading_start_date": None, "trading_end_date": None, "max_effective_leverage_per_leg": None,
     "max_combined_effective_leverage": None, "intrabar_missing_policy": "WARN_AND_USE_15M", "zero_cost_comparison": False,
+    "enable_both_open_timeout": False, "max_both_open_minutes": 480, "both_open_timeout_unit": "Hours",
 }
 
 
@@ -86,6 +87,10 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("risk_mode") not in [e.value for e in RiskMode]: errors.append("Invalid risk mode.")
     if int(values.get("intrabar_timeframe_minutes", 1)) >= int(values.get("strategy_timeframe_minutes", 15)): errors.append("Intrabar timeframe must be less than strategy timeframe.")
     if values.get("intrabar_missing_policy") not in [e.value for e in IntrabarMissingPolicy]: errors.append("Invalid missing intrabar policy.")
+    if values.get("enable_both_open_timeout"):
+        try:
+            if int(values.get("max_both_open_minutes", 0)) <= 0: errors.append("Maximum Both-Open Time must be > 0 when enabled.")
+        except (TypeError, ValueError): errors.append("Maximum Both-Open Time must be > 0 when enabled.")
     return errors
 
 
@@ -110,6 +115,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
         max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
         intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]),
+        enable_both_open_timeout=bool(merged["enable_both_open_timeout"]), max_both_open_minutes=int(merged["max_both_open_minutes"]),
         run_name=str(merged.get("run_name", "")),
     )
 

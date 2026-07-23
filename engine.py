@@ -14,6 +14,8 @@ class BacktestEngine:
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.risk=self._risk_array()
         self.active_pairs=[]; self.completed_pairs=[]; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
+        self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
+        self.last_timeout_exit_time=None
         self.trading_start=pd.Timestamp(config.trading_start_date, tz="UTC") if config.trading_start_date else None
         self.trading_end=pd.Timestamp(config.trading_end_date, tz="UTC") if config.trading_end_date else None
         self.first_valid_atr_timestamp=self._first_valid_atr_timestamp()
@@ -44,6 +46,7 @@ class BacktestEngine:
         return (self.trading_start is None or et >= self.trading_start) and (self.trading_end is None or et <= self.trading_end)
     def _should_enter(self,i):
         if not np.isfinite(self.risk[i]) or self.risk[i]<=0 or len(self.active_pairs)>=self.config.max_active_pairs or not self._in_trading_window(i): return False
+        if self.last_timeout_exit_time is not None and self._entry_time(i) <= self.last_timeout_exit_time: return False
         if self.config.entry_mode==EntryMode.WAIT_UNTIL_CLOSED: return not self.active_pairs
         if self.config.entry_mode==EntryMode.EVERY_N_CANDLES: return i % self.config.entry_interval==0
         if self.config.entry_mode==EntryMode.CUSTOM: return custom_entry_signal(i,{"open":self.open,"high":self.high,"low":self.low,"close":self.close},len(self.active_pairs))
@@ -67,6 +70,8 @@ class BacktestEngine:
         self.active_pairs.append(TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc)); self.next_pair_id+=1
     def _update_positions_to_strategy_index(self,i):
         for pair in self.active_pairs:
+            if i > pair.long.entry_index and self._maybe_timeout_pair(pair, i):
+                continue
             for pos in (pair.long,pair.short):
                 if pos.is_open and i>pos.entry_index: self._scan_exit(pos,i)
     def _scan_exit(self,pos,i):
@@ -93,6 +98,32 @@ class BacktestEngine:
         if self.intrabar_data.timestamp.max() < end - pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes):
             return self._fallback_exit(pos,i,"end_of_intrabar_data")
         return False
+
+    def _timeout_source(self):
+        return ExitSource.INTRABAR if self.config.use_intrabar_data and self.intrabar_data is not None else ExitSource.FALLBACK_15M
+    def _maybe_timeout_pair(self,pair,i):
+        if not self.config.enable_both_open_timeout or not (pair.long.is_open and pair.short.is_open): return False
+        timeout_at=pd.Timestamp(pair.strategy_entry_time) + self.timeout_delta
+        interval_end=pd.Timestamp(self.times[i]) + self.entry_delta
+        if interval_end < timeout_at: return False
+        source=self._timeout_source()
+        raw=None; ts=None; idx=i
+        if source==ExitSource.INTRABAR:
+            sub=self.intrabar_data[self.intrabar_data.timestamp>=timeout_at]
+            sub=sub[sub.timestamp<=interval_end]
+            if not sub.empty:
+                row=sub.iloc[0]; raw=float(row.open); ts=pd.Timestamp(row.timestamp); idx=int(row.name)
+            else:
+                source=ExitSource.FALLBACK_15M
+        if raw is None:
+            future=self.data[self.data.timestamp>=timeout_at]
+            row=future.iloc[0] if not future.empty else self.data.iloc[i]
+            raw=float(row.open); ts=pd.Timestamp(row.timestamp); idx=int(row.name)
+        long_exit=raw*(1-self.config.slippage); short_exit=raw*(1+self.config.slippage)
+        self._close_position(pair.long,idx,long_exit,ExitReason.BOTH_OPEN_TIMEOUT,source,ts)
+        self._close_position(pair.short,idx,short_exit,ExitReason.BOTH_OPEN_TIMEOUT,source,ts)
+        pair.both_open_timeout_triggered=True; pair.timeout_minutes=int(self.config.max_both_open_minutes); pair.timeout_exit_time=ts; self.last_timeout_exit_time=ts
+        return True
     def _fallback_exit(self,pos,i,reason):
         pos.fallback_reason=reason; self.fallback_reasons.append(reason)
         return self._maybe_exit_ohlc(pos,i,ExitSource.FALLBACK_15M)
@@ -129,7 +160,7 @@ class BacktestEngine:
             fees=p.long.fees+p.short.fees; gross=p.long.gross_pnl+p.short.gross_pnl; net=p.long.net_pnl+p.short.net_pnl; risk_base=p.long.risk_amount+p.short.risk_amount
             exit_t=max(pd.Timestamp(p.long.exit_time),pd.Timestamp(p.short.exit_time)); hold=exit_t-pd.Timestamp(p.strategy_entry_time); comb=p.long.entry_notional+p.short.entry_notional; exp=(self.config.tp_mult-self.config.sl_mult)*p.long.risk*(p.long.quantity+p.short.quantity)/2; est=(p.long.entry_notional+p.short.entry_notional)*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
             all_in_stop_risk = (self._estimated_stop_loss(p.long) + self._estimated_stop_loss(p.short)) / 2 / p.equity_before_trade
-            rows.append({"pair_id":p.pair_id,"position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
+            rows.append({"pair_id":p.pair_id,"position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
             **self._pos_cols('long',p.long), **self._pos_cols('short',p.short),"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":p.long.price_r+p.short.price_r,"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":p.long.gross_r+p.short.gross_r,"pair_fee_r":fees/p.long.risk_amount,"pair_net_r":p.long.net_r+p.short.net_r,"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":p.long.ambiguous or p.short.ambiguous,"ambiguous_candle":p.long.ambiguous or p.short.ambiguous,"missing_intrabar_data":p.long.missing_intrabar_data or p.short.missing_intrabar_data})
         return pd.DataFrame(rows)
     def _estimated_stop_loss(self,pos):
