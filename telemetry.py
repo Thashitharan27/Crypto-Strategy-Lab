@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 from pathlib import Path
+import traceback
 import numpy as np
 import pandas as pd
 
 INDICATORS = ("adx", "di_spread", "bb_width", "atr")
 MILESTONES = {15:"15m",30:"30m",45:"45m",60:"60m",120:"2h",240:"4h",480:"8h"}
 TELEMETRY_COLUMNS = ["pair_id","timestamp","elapsed_minutes","elapsed_strategy_bars","close","high","low","atr","adx","plus_di","minus_di","di_spread","di_ratio","bb_middle","bb_upper","bb_lower","bb_width","bb_width_pct","long_is_open","short_is_open","long_unrealized_pnl","short_unrealized_pnl","pair_unrealized_pnl","long_distance_to_sl","long_distance_to_tp","short_distance_to_sl","short_distance_to_tp","long_distance_to_sl_r","long_distance_to_tp_r","short_distance_to_sl_r","short_distance_to_tp_r","long_current_sl","short_current_sl","long_tp","short_tp"]
+
+
+def _as_membership_values(values):
+    if values is None:
+        return []
+    if isinstance(values, (pd.Series, np.ndarray, list, tuple)):
+        return values
+    return [values]
 
 
 def finite(value):
@@ -66,7 +75,7 @@ def add_journey_columns(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.Dat
 
 
 def _ensure_journey_columns(trades: pd.DataFrame) -> pd.DataFrame:
-    trades = trades.copy(); trades["first_hour_full_window_available"] = pd.Series(dtype=bool)
+    trades = trades.copy(); trades["first_hour_full_window_available"] = pd.Series([], dtype=bool)
     for ind in INDICATORS:
         for suffix in ("entry","first_hour","exit","min","max","mean","change","change_first_hour","slope_per_hour"):
             trades[f"{ind}_{suffix}"] = np.nan
@@ -99,7 +108,9 @@ def winner_loser_journey_analysis(trades: pd.DataFrame) -> pd.DataFrame:
 
 def double_sl_journey_analysis(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.DataFrame:
     rows=[]; tel={pid:g.sort_values("timestamp") for pid,g in telemetry.groupby("pair_id", sort=False)} if not telemetry.empty else {}
-    ds=trades[(trades.get("long_exit_reason")=="SL") & (trades.get("short_exit_reason")=="SL")] if not trades.empty else trades
+    long_exit = trades.get("long_exit_reason", pd.Series([], dtype=object))
+    short_exit = trades.get("short_exit_reason", pd.Series([], dtype=object))
+    ds=trades[(long_exit=="SL") & (short_exit=="SL")] if not trades.empty else trades
     for _,r in ds.iterrows():
         lt,st=pd.Timestamp(r.long_exit_time),pd.Timestamp(r.short_exit_time); first_side="long" if lt<=st else "short"; first_t=min(lt,st); second_t=max(lt,st); g=tel.get(r.pair_id,pd.DataFrame())
         row={"pair_id":r.pair_id,"entry_time":r.entry_time,"first_sl_side":first_side,"first_sl_time":first_t,"second_sl_time":second_t,"minutes_between_sl_hits":(second_t-first_t).total_seconds()/60,"holding_hours":r.holding_hours,"pair_net_pnl":r.pair_net_pnl}
@@ -115,19 +126,21 @@ def save_journey_charts(trades: pd.DataFrame, telemetry: pd.DataFrame, charts_di
     try:
         import matplotlib.pyplot as plt
     except Exception as exc:
-        return [f"Chart generation failed for journey charts: {exc}"]
+        return [f"Chart generation failed for journey charts: {exc}\n{traceback.format_exc()}"]
     charts_dir.mkdir(parents=True, exist_ok=True)
     winners=trades[trades.apply(outcome_label, axis=1).isin(["Long TP / Short SL","Long SL / Short TP"])] if not trades.empty else trades
-    double=trades[(trades.get("long_exit_reason")=="SL") & (trades.get("short_exit_reason")=="SL")] if not trades.empty else trades
+    long_exit = trades.get("long_exit_reason", pd.Series([], dtype=object))
+    short_exit = trades.get("short_exit_reason", pd.Series([], dtype=object))
+    double=trades[(long_exit=="SL") & (short_exit=="SL")] if not trades.empty else trades
     for ind in INDICATORS:
         try:
             fig,ax=plt.subplots()
             for label, ids in [("TP/SL winners", winners.pair_id if not winners.empty else []),("Double-SL trades", double.pair_id if not double.empty else [])]:
-                g=telemetry[telemetry.pair_id.isin(ids)] if not telemetry.empty else telemetry
+                g=telemetry[telemetry.pair_id.isin(_as_membership_values(ids))] if not telemetry.empty else telemetry
                 if not g.empty: g.groupby("elapsed_minutes")[ind].mean().plot(ax=ax,label=label)
             ax.set_xlabel("Elapsed minutes from entry"); ax.set_ylabel(ind); ax.legend(); fig.tight_layout(); fig.savefig(charts_dir / f"{ind}_journey_winners_vs_double_sl.png"); plt.close(fig)
-        except Exception as exc: warnings.append(f"Chart generation failed for {ind} journey: {exc}")
+        except Exception as exc: warnings.append(f"Chart generation failed for {ind} journey: {exc}\n{traceback.format_exc()}")
         try:
             fig,ax=plt.subplots(); trades[f"{ind}_change_first_hour"].dropna().plot(kind="hist", bins=30, ax=ax); ax.set_title(f"{ind} first-hour change distribution"); fig.tight_layout(); fig.savefig(charts_dir / f"{ind}_first_hour_change_distribution.png"); plt.close(fig)
-        except Exception as exc: warnings.append(f"Chart generation failed for {ind} first-hour distribution: {exc}")
+        except Exception as exc: warnings.append(f"Chart generation failed for {ind} first-hour distribution: {exc}\n{traceback.format_exc()}")
     return warnings

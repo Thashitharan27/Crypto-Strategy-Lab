@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from collections.abc import Callable
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def _save_chart(chart_name: str, draw: Callable[[], None], warnings: list[str]) 
     try:
         draw()
     except Exception as exc:  # noqa: BLE001 - chart export must not fail the backtest.
-        message = f"Chart generation failed for {chart_name}: {exc}"
+        message = f"Chart generation failed for {chart_name}: {exc}\n{traceback.format_exc()}"
         logger.warning(message, exc_info=True)
         warnings.append(message)
 
@@ -49,7 +50,7 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
     try:
         import matplotlib.pyplot as plt
     except Exception as exc:  # noqa: BLE001 - chart export must not fail the backtest.
-        message = f"Chart generation failed for all charts: {exc}"
+        message = f"Chart generation failed for all charts: {exc}\n{traceback.format_exc()}"
         logger.warning(message, exc_info=True)
         return [message]
 
@@ -117,8 +118,8 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
         _save_chart("adx_vs_pnl.png", adx_vs_pnl_chart, warnings)
 
 
-    double_sl_mask = (trades.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (trades.get("short_exit_reason", pd.Series(dtype=object)) == "SL")
-    win_mask = trades.get("pair_net_pnl", pd.Series(dtype=float)) > 0
+    double_sl_mask = (trades.get("long_exit_reason", pd.Series([], dtype=object)) == "SL") & (trades.get("short_exit_reason", pd.Series([], dtype=object)) == "SL")
+    win_mask = trades.get("pair_net_pnl", pd.Series([], dtype=float)) > 0
     for column, title, filename, xlabel in [("bb_width_pct", "Bollinger Width Histogram", "bb_width_histogram.png", "BB Width (%)"), ("di_spread", "DI Spread Histogram", "di_spread_histogram.png", "DI Spread")]:
         if column in trades:
             def market_histogram(column: str = column, title: str = title, filename: str = filename, xlabel: str = xlabel) -> None:
@@ -145,7 +146,7 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
     try:
         monthly_freq, yearly_freq = _month_year_frequencies(returns)
     except Exception as exc:  # noqa: BLE001 - chart export must not fail the backtest.
-        message = f"Chart generation failed for return charts: {exc}"
+        message = f"Chart generation failed for return charts: {exc}\n{traceback.format_exc()}"
         logger.warning(message, exc_info=True)
         warnings.append(message)
         return warnings
