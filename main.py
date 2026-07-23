@@ -7,11 +7,11 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode
 from engine import BacktestEngine
 from loader import load_backtest_data, load_ohlcv_csv
 from plots import save_plots
-from statistics import equity_curve, summarize
+from statistics import adx_analysis, equity_curve, summarize
 from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 
 
@@ -68,6 +68,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--be-offset-r", type=float)
     parser.add_argument("--be-same-candle-policy", type=enum_value(BreakEvenSameCandlePolicy), choices=list(BreakEvenSameCandlePolicy))
     parser.add_argument("--be-comparison", action="store_true", help="Compare BE disabled, entry-price, cost-adjusted, +0.1R, and +0.25R runs")
+    parser.add_argument("--enable-adx-filter", action="store_true", default=None)
+    parser.add_argument("--adx-period", type=int)
+    parser.add_argument("--adx-filter-mode", type=enum_value(AdxFilterMode), choices=list(AdxFilterMode))
+    parser.add_argument("--adx-maximum", type=float)
+    parser.add_argument("--adx-minimum", type=float)
+    parser.add_argument("--adx-comparison", action="store_true", help="Compare ADX disabled and maximum-threshold filters")
     return parser.parse_args()
 
 
@@ -76,7 +82,7 @@ def main() -> None:
     config = BacktestConfig()
     overrides = {}
     for key, value in vars(args).items():
-        if value is not None and key not in ("timeout_comparison", "be_comparison"):
+        if value is not None and key not in ("timeout_comparison", "be_comparison", "adx_comparison"):
             overrides["input_csv" if key == "input" else key] = value
     config = replace(config, **overrides)
 
@@ -87,6 +93,9 @@ def main() -> None:
     run_dir = create_run_dir(config)
     write_config(config, run_dir)
     trades.to_csv(run_dir / "trade_list.csv", index=False)
+    import pandas as pd
+    pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False)
+    adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False)
     write_trade_column_metadata(run_dir)
     equity = equity_curve(trades, config.initial_equity)
     equity.to_csv(run_dir / "equity_curve.csv", index=False)
@@ -120,6 +129,16 @@ def main() -> None:
         summary["be_comparison"] = rows
         import pandas as pd
         pd.DataFrame(rows).to_csv(run_dir / "be_comparison.csv", index=False)
+    if args.adx_comparison:
+        rows=[]
+        scenarios=[("ADX disabled", False, AdxFilterMode.DISABLED, config.adx_maximum)] + [(f"Maximum {v}", True, AdxFilterMode.MAXIMUM, float(v)) for v in (15,20,25,30,35)]
+        for label,enabled,mode,max_adx in scenarios:
+            cmp_cfg=replace(config, enable_adx_filter=enabled, adx_filter_mode=mode, adx_maximum=max_adx)
+            cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run(); cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity); combos=cmp_summary.get("exit_combinations", {})
+            rows.append({"scenario":label,"return":cmp_summary.get("total_return_percentage"),"profit_factor":cmp_summary.get("profit_factor"),"max_drawdown":cmp_summary.get("maximum_drawdown"),"double_sl":combos.get("Long SL / Short SL",{}).get("count",0),"fees":cmp_summary.get("total_fees"),"win_rate":cmp_summary.get("win_rate")})
+        summary["adx_comparison"] = rows
+        import pandas as pd
+        pd.DataFrame(rows).to_csv(run_dir / "adx_comparison.csv", index=False)
     if config.zero_cost_comparison:
         ideal_cfg = replace(config, maker_fee=0, taker_fee=0, slippage=0, zero_cost_comparison=False)
         ideal_trades = BacktestEngine(data, ideal_cfg, intrabar).run()

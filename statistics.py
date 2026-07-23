@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import numpy as np
 
 
 def _max_streak(mask: pd.Series) -> int:
@@ -48,8 +49,14 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
             "average_net_r": float(group["pair_net_r"].mean()),
             "total_net_r": float(group["pair_net_r"].sum()),
         }
+    adx = pd.to_numeric(trades.get("adx", pd.Series(dtype=float)), errors="coerce")
+    plus_di = pd.to_numeric(trades.get("plus_di", pd.Series(dtype=float)), errors="coerce")
+    minus_di = pd.to_numeric(trades.get("minus_di", pd.Series(dtype=float)), errors="coerce")
     return {
         "total_pairs": int(len(trades)),
+        "signals_evaluated": int(trades.get("signals_evaluated", pd.Series([len(trades)])).iloc[0]) if "signals_evaluated" in trades else int(len(trades)),
+        "signals_skipped_by_adx": int(trades.get("signals_skipped_by_adx", pd.Series([0])).iloc[0]) if "signals_skipped_by_adx" in trades else 0,
+        "signals_traded": int(len(trades)),
         "wins": int(wins.sum()),
         "losses": int(losses.sum()),
         "flat_pairs": int(flats.sum()),
@@ -93,8 +100,30 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
         "average_combined_effective_leverage": float(trades.get("combined_effective_leverage", pd.Series(dtype=float)).mean()),
         "maximum_combined_effective_leverage": float(trades.get("combined_effective_leverage", pd.Series(dtype=float)).max()),
         "average_fees_as_percentage_of_expected_winning_profit": float(trades.get("fees_as_percentage_of_expected_winning_profit", pd.Series(dtype=float)).mean()),
+        "average_adx_of_winning_trades": float(adx[wins].mean()) if not adx[wins].empty else np.nan,
+        "average_adx_of_losing_trades": float(adx[losses].mean()) if not adx[losses].empty else np.nan,
+        "average_plus_di_of_winners": float(plus_di[wins].mean()) if not plus_di[wins].empty else np.nan,
+        "average_plus_di_of_losers": float(plus_di[losses].mean()) if not plus_di[losses].empty else np.nan,
+        "average_minus_di_of_winners": float(minus_di[wins].mean()) if not minus_di[wins].empty else np.nan,
+        "average_minus_di_of_losers": float(minus_di[losses].mean()) if not minus_di[losses].empty else np.nan,
         "exit_combinations": combos,
     }
+
+
+def adx_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    buckets = [(0,10),(10,15),(15,20),(20,25),(25,30),(30,35),(35,40),(40,None)]
+    rows=[]
+    adx_values = pd.to_numeric(trades.get("adx", pd.Series(dtype=float)), errors="coerce")
+    for lo, hi in buckets:
+        label = f"{lo}+" if hi is None else f"{lo}-{hi}"
+        mask = adx_values >= lo if hi is None else ((adx_values >= lo) & (adx_values < hi))
+        g = trades[mask]
+        wins = g.get("pair_net_pnl", pd.Series(dtype=float)) > 0
+        losses = g.get("pair_net_pnl", pd.Series(dtype=float)) < 0
+        double_sl = ((g.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (g.get("short_exit_reason", pd.Series(dtype=object)) == "SL"))
+        tp_sl = (((g.get("long_exit_reason", pd.Series(dtype=object)) == "TP") & (g.get("short_exit_reason", pd.Series(dtype=object)) == "SL")) | ((g.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (g.get("short_exit_reason", pd.Series(dtype=object)) == "TP")))
+        rows.append({"Bucket": label, "Trades": int(len(g)), "Wins": int(wins.sum()), "Losses": int(losses.sum()), "Win rate": float(wins.mean()) if len(g) else 0.0, "Average PnL": float(g["pair_net_pnl"].mean()) if len(g) else 0.0, "Average duration": float(g["holding_minutes"].mean()) if len(g) else 0.0, "Double SL count": int(double_sl.sum()), "TP/SL count": int(tp_sl.sum())})
+    return pd.DataFrame(rows)
 
 
 def equity_curve(trades: pd.DataFrame, initial_equity: float = 1000.0) -> pd.DataFrame:
