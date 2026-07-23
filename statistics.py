@@ -28,10 +28,10 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     max_dd_pct = float((drawdown / running_peak).min()) if not running_peak.empty else 0.0
     source_values = pd.concat([trades.get("long_exit_source", pd.Series(dtype=object)), trades.get("short_exit_source", pd.Series(dtype=object))], ignore_index=True)
     source_counts = {"1M_INTRABAR": int((source_values == "1M_INTRABAR").sum()), "15M_FALLBACK": int((source_values == "15M_FALLBACK").sum()), "END_OF_DATA": int((source_values == "END_OF_DATA").sum())}
-    timeout_pairs = trades[trades.get("both_open_timeout_triggered", pd.Series(False, index=trades.index)).astype(bool)]
-    be_pairs = trades[trades.get("pair_be_triggered", pd.Series(False, index=trades.index)).astype(bool)]
+    timeout_pairs = trades[trades.get("both_open_timeout_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)]
+    be_pairs = trades[trades.get("pair_be_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)]
     be_exit_mask = pd.concat([trades.get("long_exit_reason", pd.Series(dtype=object)), trades.get("short_exit_reason", pd.Series(dtype=object))], ignore_index=True).isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"])
-    tp_after_be = ((trades.get("long_be_triggered", pd.Series(False, index=trades.index)).astype(bool)) & (trades.get("long_exit_reason", pd.Series(dtype=object)) == "TP")) | ((trades.get("short_be_triggered", pd.Series(False, index=trades.index)).astype(bool)) & (trades.get("short_exit_reason", pd.Series(dtype=object)) == "TP"))
+    tp_after_be = ((trades.get("long_be_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)) & (trades.get("long_exit_reason", pd.Series(dtype=object)) == "TP")) | ((trades.get("short_be_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)) & (trades.get("short_exit_reason", pd.Series(dtype=object)) == "TP"))
     double_sl_prevented = ((trades.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (trades.get("short_exit_reason", pd.Series(dtype=object)).isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"]))) | ((trades.get("short_exit_reason", pd.Series(dtype=object)) == "SL") & (trades.get("long_exit_reason", pd.Series(dtype=object)).isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"])))
     fallback_reasons = pd.concat([trades.get("long_fallback_reason", pd.Series(dtype=object)), trades.get("short_fallback_reason", pd.Series(dtype=object))], ignore_index=True).dropna().value_counts().to_dict()
     combos = {}
@@ -83,7 +83,7 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
         "average_pnl_of_be_triggered_pairs": float(be_pairs["pair_net_pnl"].mean()) if not be_pairs.empty else 0.0,
         "total_pnl_of_be_triggered_pairs": float(be_pairs["pair_net_pnl"].sum()) if not be_pairs.empty else 0.0,
         "double_sl_count_prevented": int(double_sl_prevented.sum()),
-        "be_same_candle_ambiguity_count": int(trades.get("long_be_same_candle_ambiguous", pd.Series(False, index=trades.index)).astype(bool).sum() + trades.get("short_be_same_candle_ambiguous", pd.Series(False, index=trades.index)).astype(bool).sum()),
+        "be_same_candle_ambiguity_count": int(trades.get("long_be_same_candle_ambiguous", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool).sum() + trades.get("short_be_same_candle_ambiguous", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool).sum()),
         "average_timeout_pair_pnl": float(timeout_pairs["pair_net_pnl"].mean()) if not timeout_pairs.empty else 0.0,
         "total_timeout_pair_pnl": float(timeout_pairs["pair_net_pnl"].sum()) if not timeout_pairs.empty else 0.0,
         "timeout_pairs_profitable": int((timeout_pairs["pair_net_pnl"] > 0).sum()) if not timeout_pairs.empty else 0,

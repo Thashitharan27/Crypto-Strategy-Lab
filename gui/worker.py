@@ -95,31 +95,47 @@ class BacktestWorker(QObject):
             output_root = self.config.output_dir
             run_dir = create_run_dir(self.config)
             write_config(self.config, run_dir)
-            trades.to_csv(run_dir / "trade_list.csv", index=False)
+            output_failures = []
+
+            def run_output_step(label, action):
+                self._log(f"{label}...")
+                try:
+                    return action()
+                except Exception as exc:  # noqa: BLE001 - output exports must continue independently.
+                    tb = traceback.format_exc()
+                    output_failures.append({"step": label, "error": str(exc), "traceback": tb})
+                    self._log(f"ERROR while {label}: {exc}")
+                    self._log(tb.rstrip())
+                    return None
+
+            run_output_step("Saving trade_list.csv", lambda: trades.to_csv(run_dir / "trade_list.csv", index=False))
             if self.config.enable_trade_telemetry:
                 if self.config.save_full_telemetry_csv:
-                    telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False)
+                    run_output_step("Saving telemetry", lambda: telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False))
                 if self.config.save_trade_journey_summary:
-                    trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False)
-                    winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False)
-                    double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False)
+                    run_output_step("Building trade_journey_analysis", lambda: trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False))
+                    run_output_step("Building winner_loser_journey_analysis", lambda: winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False))
+                    run_output_step("Building double_sl_journey_analysis", lambda: double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False))
             import pandas as pd
-            pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False)
-            adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False)
-            bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False)
-            di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False)
-            write_trade_column_metadata(run_dir)
-            equity.to_csv(run_dir / "equity_curve.csv", index=False)
-            periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False)
-            periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False)
-            (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
-            write_summary_txt(summary, run_dir)
-            write_run_info(self.config, summary, run_dir)
-            chart_warnings = save_plots(trades, equity, run_dir / "charts")
+            run_output_step("Saving skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
+            run_output_step("Saving telemetry summaries", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
+            run_output_step("Saving BB width analysis", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
+            run_output_step("Saving DI spread analysis", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
+            run_output_step("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir))
+            run_output_step("Saving equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False))
+            run_output_step("Saving monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False))
+            run_output_step("Saving yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False))
+            chart_warnings = run_output_step("Saving charts", lambda: save_plots(trades, equity, run_dir / "charts")) or []
             if self.config.enable_trade_telemetry and self.config.save_trade_journey_charts:
-                chart_warnings.extend(save_journey_charts(trades, telemetry, run_dir / "charts"))
+                chart_warnings.extend(run_output_step("Saving journey charts", lambda: save_journey_charts(trades, telemetry, run_dir / "charts")) or [])
             for warning in chart_warnings:
               self.log.emit(f"WARNING: {warning}")
+            if output_failures:
+                summary["failed_output_reports"] = output_failures
+                self._log("WARNING: Some output reports failed: " + ", ".join(f["step"] for f in output_failures))
+            run_output_step("Saving summary.json", lambda: (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str)))
+            run_output_step("Saving summary.txt", lambda: write_summary_txt(summary, run_dir))
+            run_output_step("Saving run info", lambda: write_run_info(self.config, summary, run_dir))
             update_latest(output_root, run_dir)
             self._emit_stage("Saving outputs", 100, len(data), len(data), len(trades), len(trades), 0)
             self._log(f"Completed {len(trades):,} trade pairs")

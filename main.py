@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import traceback
 from dataclasses import replace
 from pathlib import Path
+
+import pandas as pd
 
 from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode
 from engine import BacktestEngine
@@ -114,27 +117,39 @@ def main() -> None:
     output_root = config.output_dir
     run_dir = create_run_dir(config)
     write_config(config, run_dir)
-    trades.to_csv(run_dir / "trade_list.csv", index=False)
+    output_failures = []
+
+    def run_output_step(label: str, action):
+        print(f"{label}...")
+        try:
+            return action()
+        except Exception as exc:  # noqa: BLE001 - output exports must continue independently.
+            tb = traceback.format_exc()
+            output_failures.append({"step": label, "error": str(exc), "traceback": tb})
+            print(f"ERROR while {label}: {exc}")
+            print(tb)
+            return None
+
+    run_output_step("Saving trade_list.csv", lambda: trades.to_csv(run_dir / "trade_list.csv", index=False))
     if config.enable_trade_telemetry:
         if config.save_full_telemetry_csv:
-            telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False)
+            run_output_step("Saving telemetry", lambda: telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False))
         if config.save_trade_journey_summary:
-            trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False)
-            winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False)
-            double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False)
-    import pandas as pd
-    pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False)
-    adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False)
-    bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False)
-    di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False)
-    write_trade_column_metadata(run_dir)
+            run_output_step("Building trade_journey_analysis", lambda: trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False))
+            run_output_step("Building winner_loser_journey_analysis", lambda: winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False))
+            run_output_step("Building double_sl_journey_analysis", lambda: double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False))
+    run_output_step("Saving skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
+    run_output_step("Saving telemetry summaries", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
+    run_output_step("Saving BB width analysis", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
+    run_output_step("Saving DI spread analysis", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
+    run_output_step("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir))
     equity = equity_curve(trades, config.initial_equity)
-    equity.to_csv(run_dir / "equity_curve.csv", index=False)
-    periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False)
-    periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False)
-    chart_warnings = save_plots(trades, equity, run_dir / "charts")
+    run_output_step("Saving equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False))
+    run_output_step("Saving monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False))
+    run_output_step("Saving yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False))
+    chart_warnings = run_output_step("Saving charts", lambda: save_plots(trades, equity, run_dir / "charts")) or []
     if config.enable_trade_telemetry and config.save_trade_journey_charts:
-        chart_warnings.extend(save_journey_charts(trades, telemetry, run_dir / "charts"))
+        chart_warnings.extend(run_output_step("Saving journey charts", lambda: save_journey_charts(trades, telemetry, run_dir / "charts")) or [])
     for warning in chart_warnings:
       print(f"WARNING: {warning}")
     summary = summarize(trades, config.initial_equity)
@@ -149,7 +164,6 @@ def main() -> None:
             combos = cmp_summary.get("exit_combinations", {})
             rows.append({"duration": label, "total_pairs": cmp_summary.get("total_pairs"), "win_rate": cmp_summary.get("win_rate"), "double_sl_count": combos.get("Long SL / Short SL", {}).get("count", 0), "timeout_count": cmp_summary.get("pairs_closed_by_both_open_timeout", 0), "net_pnl": float(cmp_trades["pair_net_pnl"].sum()) if not cmp_trades.empty else 0.0, "total_return": cmp_summary.get("total_return_percentage"), "profit_factor": cmp_summary.get("profit_factor"), "maximum_drawdown": cmp_summary.get("maximum_drawdown"), "total_fees": cmp_summary.get("total_fees")})
         summary["both_open_timeout_comparison"] = rows
-        import pandas as pd
         pd.DataFrame(rows).to_csv(run_dir / "both_open_timeout_comparison.csv", index=False)
     if args.be_comparison:
         rows=[]
@@ -160,7 +174,6 @@ def main() -> None:
             normal=sum(v.get("count",0) for k,v in combos.items() if k in ("Long TP / Short SL","Long SL / Short TP"))
             rows.append({"scenario":label,"total_pairs":cmp_summary.get("total_pairs"),"normal_tp_sl_pairs":normal,"double_sl_pairs":combos.get("Long SL / Short SL",{}).get("count",0),"be_exits":cmp_summary.get("remaining_legs_stopped_at_be"),"tp_after_be_trigger":cmp_summary.get("remaining_legs_reaching_tp_after_be_move"),"net_pnl":float(cmp_trades["pair_net_pnl"].sum()) if not cmp_trades.empty else 0.0,"total_fees":cmp_summary.get("total_fees"),"profit_factor":cmp_summary.get("profit_factor"),"maximum_drawdown":cmp_summary.get("maximum_drawdown"),"ending_equity":cmp_summary.get("ending_equity")})
         summary["be_comparison"] = rows
-        import pandas as pd
         pd.DataFrame(rows).to_csv(run_dir / "be_comparison.csv", index=False)
     if args.adx_comparison:
         rows=[]
@@ -170,7 +183,6 @@ def main() -> None:
             cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run(); cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity); combos=cmp_summary.get("exit_combinations", {})
             rows.append({"scenario":label,"return":cmp_summary.get("total_return_percentage"),"profit_factor":cmp_summary.get("profit_factor"),"max_drawdown":cmp_summary.get("maximum_drawdown"),"double_sl":combos.get("Long SL / Short SL",{}).get("count",0),"fees":cmp_summary.get("total_fees"),"win_rate":cmp_summary.get("win_rate")})
         summary["adx_comparison"] = rows
-        import pandas as pd
         pd.DataFrame(rows).to_csv(run_dir / "adx_comparison.csv", index=False)
 
     if args.bb_width_comparison:
@@ -181,7 +193,6 @@ def main() -> None:
             cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run(); cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity); combos=cmp_summary.get("exit_combinations", {})
             rows.append({"scenario":label,"return":cmp_summary.get("total_return_percentage"),"win_rate":cmp_summary.get("win_rate"),"double_sl":combos.get("Long SL / Short SL",{}).get("count",0),"profit_factor":cmp_summary.get("profit_factor"),"max_drawdown":cmp_summary.get("maximum_drawdown"),"fees":cmp_summary.get("total_fees")})
         summary["bb_width_comparison"] = rows
-        import pandas as pd
         pd.DataFrame(rows).to_csv(run_dir / "bb_width_comparison.csv", index=False)
     if args.di_spread_comparison:
         rows=[]
@@ -191,13 +202,15 @@ def main() -> None:
             cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run(); cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity); combos=cmp_summary.get("exit_combinations", {})
             rows.append({"scenario":label,"return":cmp_summary.get("total_return_percentage"),"win_rate":cmp_summary.get("win_rate"),"double_sl":combos.get("Long SL / Short SL",{}).get("count",0),"profit_factor":cmp_summary.get("profit_factor"),"max_drawdown":cmp_summary.get("maximum_drawdown"),"fees":cmp_summary.get("total_fees")})
         summary["di_spread_comparison"] = rows
-        import pandas as pd
         pd.DataFrame(rows).to_csv(run_dir / "di_spread_comparison.csv", index=False)
     if config.zero_cost_comparison:
         ideal_cfg = replace(config, maker_fee=0, taker_fee=0, slippage=0, zero_cost_comparison=False)
         ideal_trades = BacktestEngine(data, ideal_cfg, intrabar).run()
         ideal = summarize(ideal_trades, ideal_cfg.initial_equity)
         summary["zero_cost_comparison"] = {"actual": {k: summary.get(k) for k in ("win_rate","total_net_r","ending_equity","total_return_percentage","profit_factor","maximum_drawdown")}, "zero_cost": {k: ideal.get(k) for k in ("win_rate","total_net_r","ending_equity","total_return_percentage","profit_factor","maximum_drawdown")}}
+    if output_failures:
+        summary["failed_output_reports"] = output_failures
+        print("WARNING: Some output reports failed: " + ", ".join(f["step"] for f in output_failures))
     if config.use_intrabar_data and summary.get("intrabar_exit_count") == 0:
         print("WARNING: use_intrabar_data=True but 1M_INTRABAR exit count is 0. Check intrabar path, overlap, and timestamp alignment.")
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
