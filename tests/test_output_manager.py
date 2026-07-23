@@ -23,3 +23,39 @@ def test_periodic_results_groups_by_exit_period():
     monthly = periodic_results(trades, "ME")
     assert list(monthly["pair_count"]) == [2, 1]
     assert list(monthly["net_pnl"]) == [8.0, 5.0]
+
+
+def test_create_run_dir_creates_timestamped_folder_and_latest_pointer(tmp_path):
+    from output_manager import create_run_dir, update_latest
+
+    cfg = BacktestConfig(output_dir=tmp_path, strategy_csv=Path("data/BTCUSDT_15m.csv"), atr_period=14, sl_mult=2, tp_mult=3)
+    run_dir = create_run_dir(cfg)
+    assert run_dir.parent == tmp_path
+    assert run_dir.name.startswith("BTC_15m_ATR14_SL2_TP3_")
+    assert (run_dir / "charts").is_dir()
+
+    (run_dir / "trade_list.csv").write_text("trade\n")
+    update_latest(tmp_path, run_dir)
+    assert (tmp_path / "latest" / "trade_list.csv").exists()
+
+
+def test_periodic_results_accepts_newer_month_year_aliases_on_installed_pandas():
+    trades = pd.DataFrame({
+        "long_exit_time": ["2024-01-01", "2024-02-01"],
+        "short_exit_time": ["2024-01-02", "2024-02-02"],
+        "pair_net_pnl": [10.0, 5.0],
+        "pair_net_r": [1.0, 0.5],
+    })
+    assert list(periodic_results(trades, "ME")["net_pnl"]) == [10.0, 5.0]
+    assert list(periodic_results(trades, "YE")["net_pnl"]) == [15.0]
+
+
+def test_no_unresolved_merge_markers_remain():
+    root = Path(__file__).resolve().parents[1]
+    offenders = []
+    for path in root.rglob("*"):
+        if path.is_file() and ".git" not in path.parts and path.suffix not in {".pyc", ".png", ".csv"}:
+            text = path.read_text(errors="ignore")
+            if any(line.startswith(("<<<<<<<", "=======", ">>>>>>>")) for line in text.splitlines()):
+                offenders.append(path.relative_to(root))
+    assert offenders == []

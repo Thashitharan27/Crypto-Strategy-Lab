@@ -59,3 +59,18 @@ def test_gui_passes_selected_intrabar_csv_and_enabled_flag(tmp_path):
     assert cfg.intrabar_csv == intrabar
     assert cfg.use_intrabar_data is True
     assert cfg.intrabar_timeframe_minutes == 1
+
+
+def test_default_gui_config_returns_copy_and_does_not_mutate_source():
+    from gui.config_logic import DEFAULT_GUI_CONFIG, default_gui_config
+
+    first = default_gui_config()
+    second = default_gui_config()
+
+    assert first == DEFAULT_GUI_CONFIG
+    assert first is not DEFAULT_GUI_CONFIG
+    assert first is not second
+
+    first["atr_period"] = 99
+    assert DEFAULT_GUI_CONFIG["atr_period"] == 14
+    assert second["atr_period"] == 14

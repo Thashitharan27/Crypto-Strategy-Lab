@@ -8,25 +8,31 @@ from pathlib import Path
 
 import pandas as pd
 
+from output_manager import compatible_resample_freq
+
 logger = logging.getLogger(__name__)
 
 
-def _compatible_resample_frequency(series: pd.Series, preferred: str, fallback: str) -> str:
-    """Return the first resample alias supported by the installed pandas version."""
-    try:
-        series.resample(preferred)
-    except ValueError:
-        series.resample(fallback)
-        return fallback
-    return preferred
+def _supported_resample_freq(series: pd.Series, preferred: str) -> str:
+    """Return the first equivalent alias supported by the installed pandas version."""
+    candidates = [compatible_resample_freq(preferred)]
+    fallback = {"ME": "M", "YE": "Y", "M": "ME", "Y": "YE"}.get(candidates[0])
+    if fallback and fallback not in candidates:
+        candidates.append(fallback)
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            series.resample(candidate)
+            return candidate
+        except ValueError as exc:
+            last_error = exc
+    raise last_error if last_error is not None else ValueError(f"Unsupported resample frequency: {preferred}")
 
 
 def _month_year_frequencies(returns: pd.DataFrame) -> tuple[str, str]:
-    """Return month/year-end aliases supported by this pandas version."""
+    """Return month/year-end aliases supported across pandas versions."""
     pnl_by_exit = returns.set_index("exit_time")["pair_net_pnl"]
-    monthly_freq = _compatible_resample_frequency(pnl_by_exit, "ME", "M")
-    yearly_freq = _compatible_resample_frequency(pnl_by_exit, "YE", "Y")
-    return monthly_freq, yearly_freq
+    return _supported_resample_freq(pnl_by_exit, "ME"), _supported_resample_freq(pnl_by_exit, "YE")
 
 
 def _save_chart(chart_name: str, draw: Callable[[], None], warnings: list[str]) -> None:
