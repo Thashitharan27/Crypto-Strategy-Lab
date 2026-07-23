@@ -325,3 +325,66 @@ def test_disabled_timeout_preserves_existing_results_and_summary_records_timeout
     summary = summarize(timed, 1000)
     assert summary["pairs_closed_by_both_open_timeout"] == 1
     assert "Long BOTH_OPEN_TIMEOUT / Short BOTH_OPEN_TIMEOUT" in summary["exit_combinations"]
+
+
+def test_be_after_long_sl_moves_short_to_executed_entry_and_records_be_exit():
+    strat = candles([(100, 100, 100, 100), (100, 100, 89, 100), (100, 91, 80, 100)])
+    row = BacktestEngine(strat, cfg(enable_be_after_opposite_sl=True)).run().iloc[0]
+    assert row.long_exit_reason == "SL"
+    assert row.short_be_triggered
+    assert row.short_current_sl == pytest.approx(row.short_entry_price)
+    assert row.short_exit_reason == "BE"
+    assert row.pair_be_triggered
+
+
+def test_be_after_short_sl_moves_long_to_executed_entry_and_tp_unchanged():
+    strat = candles([(100, 100, 100, 100), (100, 111, 100, 100), (100, 120, 99, 100)])
+    row = BacktestEngine(strat, cfg(enable_be_after_opposite_sl=True, tp_mult=2)).run().iloc[0]
+    assert row.short_exit_reason == "SL"
+    assert row.long_be_triggered
+    assert row.long_current_sl == pytest.approx(row.long_entry_price)
+    assert row.long_tp == pytest.approx(120)
+    assert row.long_exit_reason == "BE"
+
+
+def test_first_leg_tp_and_timeout_do_not_trigger_be():
+    tp_first = BacktestEngine(candles([(100,100,100,100), (100,111,100,100)]), cfg(enable_be_after_opposite_sl=True)).run().iloc[0]
+    assert tp_first.long_exit_reason == "TP"
+    assert not tp_first.short_be_triggered
+    timeout = BacktestEngine(candles([(100,100,100,100), (100,105,95,100), (100,105,95,100), (100,105,95,100)]), cfg(enable_be_after_opposite_sl=True, enable_both_open_timeout=True, max_both_open_minutes=30)).run().iloc[0]
+    assert timeout.long_exit_reason == timeout.short_exit_reason == "BOTH_OPEN_TIMEOUT"
+    assert not timeout.pair_be_triggered
+
+
+def test_entry_price_be_uses_slippage_adjusted_entry_and_r_offset():
+    data = candles([(100,100,100,100), (100,100,88,100), (100,91,80,100)])
+    entry = BacktestEngine(data, cfg(enable_be_after_opposite_sl=True, slippage=0.01)).run().iloc[0]
+    assert entry.short_entry_price == pytest.approx(99)
+    assert entry.short_current_sl == pytest.approx(99)
+    offset = BacktestEngine(data, cfg(enable_be_after_opposite_sl=True, be_mode="R_OFFSET", be_offset_r=0.25)).run().iloc[0]
+    assert offset.short_current_sl == pytest.approx(100 - 0.25 * 10)
+    assert offset.short_exit_reason == "BE_R_OFFSET"
+
+
+def test_cost_adjusted_be_offsets_fees_approximately_and_summary_records_outcomes():
+    data = candles([(100,100,100,100), (100,100.2,89,100)])
+    trades = BacktestEngine(data, cfg(enable_be_after_opposite_sl=True, be_mode="COST_ADJUSTED", taker_fee=0.001)).run()
+    row = trades.iloc[0]
+    assert row.short_exit_reason == "BE_COST_ADJUSTED"
+    assert row.short_net_pnl == pytest.approx(0, abs=1e-9)
+    summary = summarize(trades, 1000)
+    assert summary["pairs_where_be_was_triggered"] == 1
+    assert summary["remaining_legs_stopped_at_be"] == 1
+    assert summary["double_sl_count_prevented"] == 1
+    assert "Long SL / Short BE_COST_ADJUSTED" in summary["exit_combinations"]
+
+
+def test_be_same_candle_next_candle_vs_pessimistic_policy():
+    strat = candles([(100,100,100,100), (100,100,100,100), (100,100,100,100)])
+    intra = one_minute(pd.Timestamp("2024-01-01 00:15", tz="UTC"), [(100,100,100,100), (100,111,89,100), (100,101,89,100)])
+    nxt = BacktestEngine(strat, cfg(use_intrabar_data=True, enable_be_after_opposite_sl=True, tie_policy=TiePolicy.PESSIMISTIC), intra).run().iloc[0]
+    pess = BacktestEngine(strat, cfg(use_intrabar_data=True, enable_be_after_opposite_sl=True, tie_policy=TiePolicy.PESSIMISTIC, be_same_candle_policy="PESSIMISTIC"), intra).run().iloc[0]
+    assert nxt.short_exit_time == pd.Timestamp("2024-01-01 00:17", tz="UTC")
+    assert not nxt.short_be_same_candle_ambiguous
+    assert pess.short_exit_time == pd.Timestamp("2024-01-01 00:16", tz="UTC")
+    assert pess.short_be_same_candle_ambiguous

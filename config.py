@@ -16,6 +16,10 @@ class PositionSizingMode(str, Enum):
     PRICE_RISK = "PRICE_RISK"; ALL_IN_STOP_RISK = "ALL_IN_STOP_RISK"
 class TimeoutExitPrice(str, Enum):
     OPEN = "OPEN"
+class BreakEvenMode(str, Enum):
+    ENTRY_PRICE = "ENTRY_PRICE"; COST_ADJUSTED = "COST_ADJUSTED"; R_OFFSET = "R_OFFSET"
+class BreakEvenSameCandlePolicy(str, Enum):
+    NEXT_CANDLE = "NEXT_CANDLE"; PESSIMISTIC = "PESSIMISTIC"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -36,6 +40,10 @@ class BacktestConfig:
     zero_cost_comparison: bool = False
     enable_both_open_timeout: bool = False
     max_both_open_minutes: int = 480
+    enable_be_after_opposite_sl: bool = False
+    be_mode: BreakEvenMode = BreakEvenMode.ENTRY_PRICE
+    be_offset_r: float = 0.0
+    be_same_candle_policy: BreakEvenSameCandlePolicy = BreakEvenSameCandlePolicy.NEXT_CANDLE
     timeout_exit_price: TimeoutExitPrice = TimeoutExitPrice.OPEN
     comparison_timeout_minutes: tuple[int, ...] = ()
     initial_equity: float = 1000.0
@@ -74,7 +82,10 @@ class BacktestConfig:
         if self.max_effective_leverage_per_leg is not None and self.max_effective_leverage_per_leg <= 0: raise ValueError("max leverage per leg must be positive")
         if self.max_combined_effective_leverage is not None and self.max_combined_effective_leverage <= 0: raise ValueError("max combined leverage must be positive")
         if self.enable_both_open_timeout and self.max_both_open_minutes <= 0: raise ValueError("max_both_open_minutes must be > 0 when both-open timeout is enabled")
+        if self.be_offset_r < 0: raise ValueError("be_offset_r must be >= 0")
         if isinstance(self.intrabar_missing_policy, str): object.__setattr__(self, "intrabar_missing_policy", IntrabarMissingPolicy(self.intrabar_missing_policy))
         if isinstance(self.position_sizing_mode, str): object.__setattr__(self, "position_sizing_mode", PositionSizingMode(self.position_sizing_mode))
         if isinstance(self.timeout_exit_price, str): object.__setattr__(self, "timeout_exit_price", TimeoutExitPrice(self.timeout_exit_price))
+        if isinstance(self.be_mode, str): object.__setattr__(self, "be_mode", BreakEvenMode(self.be_mode))
+        if isinstance(self.be_same_candle_policy, str): object.__setattr__(self, "be_same_candle_policy", BreakEvenSameCandlePolicy(self.be_same_candle_policy))
         if isinstance(self.comparison_timeout_minutes, list): object.__setattr__(self, "comparison_timeout_minutes", tuple(int(v) for v in self.comparison_timeout_minutes))

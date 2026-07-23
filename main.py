@@ -7,7 +7,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy
 from engine import BacktestEngine
 from loader import load_backtest_data, load_ohlcv_csv
 from plots import save_plots
@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--entry-mode", type=enum_value(EntryMode), choices=list(EntryMode))
     parser.add_argument("--entry-interval", type=int)
     parser.add_argument("--max-active-pairs", type=int)
+    parser.add_argument("--enable-be-after-opposite-sl", action="store_true", default=None)
+    parser.add_argument("--be-mode", type=enum_value(BreakEvenMode), choices=list(BreakEvenMode))
+    parser.add_argument("--be-offset-r", type=float)
+    parser.add_argument("--be-same-candle-policy", type=enum_value(BreakEvenSameCandlePolicy), choices=list(BreakEvenSameCandlePolicy))
+    parser.add_argument("--be-comparison", action="store_true", help="Compare BE disabled, entry-price, cost-adjusted, +0.1R, and +0.25R runs")
     return parser.parse_args()
 
 
@@ -71,7 +76,7 @@ def main() -> None:
     config = BacktestConfig()
     overrides = {}
     for key, value in vars(args).items():
-        if value is not None and key != "timeout_comparison":
+        if value is not None and key not in ("timeout_comparison", "be_comparison"):
             overrides["input_csv" if key == "input" else key] = value
     config = replace(config, **overrides)
 
@@ -104,6 +109,17 @@ def main() -> None:
         summary["both_open_timeout_comparison"] = rows
         import pandas as pd
         pd.DataFrame(rows).to_csv(run_dir / "both_open_timeout_comparison.csv", index=False)
+    if args.be_comparison:
+        rows=[]
+        scenarios=[("BE disabled", False, BreakEvenMode.ENTRY_PRICE, 0.0),("Entry-price BE", True, BreakEvenMode.ENTRY_PRICE, 0.0),("Cost-adjusted BE", True, BreakEvenMode.COST_ADJUSTED, 0.0),("BE +0.1R", True, BreakEvenMode.R_OFFSET, 0.1),("BE +0.25R", True, BreakEvenMode.R_OFFSET, 0.25)]
+        for label,enabled,mode,offset in scenarios:
+            cmp_cfg=replace(config, enable_be_after_opposite_sl=enabled, be_mode=mode, be_offset_r=offset)
+            cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run(); cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity); combos=cmp_summary.get("exit_combinations", {})
+            normal=sum(v.get("count",0) for k,v in combos.items() if k in ("Long TP / Short SL","Long SL / Short TP"))
+            rows.append({"scenario":label,"total_pairs":cmp_summary.get("total_pairs"),"normal_tp_sl_pairs":normal,"double_sl_pairs":combos.get("Long SL / Short SL",{}).get("count",0),"be_exits":cmp_summary.get("remaining_legs_stopped_at_be"),"tp_after_be_trigger":cmp_summary.get("remaining_legs_reaching_tp_after_be_move"),"net_pnl":float(cmp_trades["pair_net_pnl"].sum()) if not cmp_trades.empty else 0.0,"total_fees":cmp_summary.get("total_fees"),"profit_factor":cmp_summary.get("profit_factor"),"maximum_drawdown":cmp_summary.get("maximum_drawdown"),"ending_equity":cmp_summary.get("ending_equity")})
+        summary["be_comparison"] = rows
+        import pandas as pd
+        pd.DataFrame(rows).to_csv(run_dir / "be_comparison.csv", index=False)
     if config.zero_cost_comparison:
         ideal_cfg = replace(config, maker_fee=0, taker_fee=0, slippage=0, zero_cost_comparison=False)
         ideal_trades = BacktestEngine(data, ideal_cfg, intrabar).run()
