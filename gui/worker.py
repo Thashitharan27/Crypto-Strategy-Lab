@@ -11,6 +11,7 @@ from engine import BacktestEngine
 from loader import load_backtest_data
 from plots import save_plots
 from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
+from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis
 from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 
 class BacktestWorker(QObject):
@@ -81,6 +82,9 @@ class BacktestWorker(QObject):
             engine = BacktestEngine(data, self.config, intrabar, progress_callback=self._backtest_progress, progress_interval=50)
             self._check(); self._emit_stage("ATR calculation", 20, 0, len(data))
             trades = engine.run()
+            telemetry = engine.telemetry_frame()
+            if self.config.enable_trade_telemetry:
+                trades = add_journey_columns(trades, telemetry)
             self._check(); self._emit_stage("Statistics", 90, len(data), len(data), len(trades), len(trades))
             equity = equity_curve(trades, self.config.initial_equity)
             summary = summarize(trades, self.config.initial_equity)
@@ -92,6 +96,13 @@ class BacktestWorker(QObject):
             run_dir = create_run_dir(self.config)
             write_config(self.config, run_dir)
             trades.to_csv(run_dir / "trade_list.csv", index=False)
+            if self.config.enable_trade_telemetry:
+                if self.config.save_full_telemetry_csv:
+                    telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False)
+                if self.config.save_trade_journey_summary:
+                    trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False)
+                    winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False)
+                    double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False)
             import pandas as pd
             pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False)
             adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False)
@@ -104,7 +115,10 @@ class BacktestWorker(QObject):
             (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
             write_summary_txt(summary, run_dir)
             write_run_info(self.config, summary, run_dir)
-            for warning in save_plots(trades, equity, run_dir / "charts"):
+            chart_warnings = save_plots(trades, equity, run_dir / "charts")
+            if self.config.enable_trade_telemetry and self.config.save_trade_journey_charts:
+                chart_warnings.extend(save_journey_charts(trades, telemetry, run_dir / "charts"))
+            for warning in chart_warnings:
               self.log.emit(f"WARNING: {warning}")
             update_latest(output_root, run_dir)
             self._emit_stage("Saving outputs", 100, len(data), len(data), len(trades), len(trades), 0)

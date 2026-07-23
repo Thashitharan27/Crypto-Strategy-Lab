@@ -465,3 +465,62 @@ def test_market_compression_filters_skip_trades_and_disabled_matches():
     filtered = filtered_engine.run()
     assert len(filtered) < len(base)
     assert filtered_engine.skipped_signals
+
+
+def test_trade_telemetry_lifecycle_and_strategy_values():
+    strat = candles([(100,101,99,100)] * 6)
+    engine = BacktestEngine(strat, cfg(use_intrabar_data=False))
+    trades = engine.run()
+    telemetry = engine.telemetry_frame()
+    assert telemetry.timestamp.min() >= trades.strategy_entry_time.iloc[0]
+    assert len(telemetry) == 6  # entry plus each completed strategy candle until end-of-data close
+    assert telemetry.elapsed_strategy_bars.tolist() == [0, 1, 2, 3, 4, 5]
+    assert telemetry.close.tolist() == [100.0] * 6
+    assert telemetry.long_is_open.iloc[-1] and telemetry.short_is_open.iloc[-1]
+
+
+def test_trade_telemetry_continues_after_one_leg_and_stops_after_both_close():
+    strat = candles([(100,100,100,100), (100,111,100,100), (100,100,100,100), (100,111,100,100)])
+    engine = BacktestEngine(strat, cfg(use_intrabar_data=False, tp_mult=1, sl_mult=2))
+    engine.run()
+    telemetry = engine.telemetry_frame()
+    assert len(telemetry) >= 2
+    assert telemetry.long_is_open.iloc[1] is False or telemetry.long_is_open.iloc[1] == False
+    assert telemetry.short_is_open.iloc[1]
+    assert telemetry.timestamp.max() <= pd.Timestamp(engine.completed_pairs[0].short.exit_time)
+
+
+def test_trade_telemetry_records_break_even_current_stop():
+    strat = candles([(100,100,100,100), (100,100,79,100), (100,100,100,100)])
+    intra = one_minute(pd.Timestamp("2024-01-01 00:15", tz="UTC"), [(99,99,99,99)] * 30)
+    intra.loc[0, ["open", "high", "low", "close"]] = [100, 100, 100, 100]
+    intra.loc[1, ["open", "high", "low", "close"]] = [99, 99, 89, 99]
+    engine = BacktestEngine(strat, cfg(use_intrabar_data=True, sl_mult=1, tp_mult=5, enable_be_after_opposite_sl=True), intra)
+    engine.run()
+    telemetry = engine.telemetry_frame()
+    moved = telemetry[telemetry.short_is_open]
+    assert moved.short_current_sl.iloc[-1] == pytest.approx(engine.completed_pairs[0].short.entry_price)
+
+
+def test_journey_summaries_milestones_and_winner_loser_analysis():
+    from telemetry import add_journey_columns, winner_loser_journey_analysis
+    trades = pd.DataFrame({"pair_id":[1,2],"entry_time":[pd.Timestamp("2024-01-01", tz="UTC")]*2,"long_exit_reason":["TP","SL"],"short_exit_reason":["SL","SL"],"holding_minutes":[30,75],"holding_hours":[0.5,1.25],"pair_net_pnl":[10.0,-20.0]})
+    tel = pd.DataFrame({"pair_id":[1,1,1,2,2,2,2,2,2],"timestamp":pd.date_range("2024-01-01", periods=9, freq="15min", tz="UTC"),"elapsed_minutes":[0,15,30,0,15,30,45,60,75],"adx":[10,11,12,20,21,22,23,24,25],"di_spread":[1,2,3,4,5,6,7,8,9],"bb_width":[.1,.2,.3,.4,.5,.6,.7,.8,.9],"atr":[5,6,7,8,9,10,11,12,13]})
+    out = add_journey_columns(trades, tel)
+    assert out.loc[0,"adx_entry"] == 10
+    assert out.loc[0,"adx_first_hour"] == 12
+    assert not out.loc[0,"first_hour_full_window_available"]
+    assert np.isnan(out.loc[0,"adx_60m"])
+    assert out.loc[1,"adx_60m"] == 24
+    stats = winner_loser_journey_analysis(out)
+    assert stats[(stats["class"]=="Winner") & (stats["metric"]=="Net PnL")]["mean"].iloc[0] == 10
+
+
+def test_double_sl_report_identifies_first_and_second_sl_times():
+    from telemetry import add_journey_columns, double_sl_journey_analysis
+    trades = pd.DataFrame({"pair_id":[1],"entry_time":[pd.Timestamp("2024-01-01", tz="UTC")],"long_exit_reason":["SL"],"short_exit_reason":["SL"],"long_exit_time":[pd.Timestamp("2024-01-01 00:20", tz="UTC")],"short_exit_time":[pd.Timestamp("2024-01-01 00:35", tz="UTC")],"holding_minutes":[35],"holding_hours":[35/60],"pair_net_pnl":[-2.0]})
+    tel = pd.DataFrame({"pair_id":[1,1,1],"timestamp":[pd.Timestamp("2024-01-01", tz="UTC"),pd.Timestamp("2024-01-01 00:15", tz="UTC"),pd.Timestamp("2024-01-01 00:30", tz="UTC")],"elapsed_minutes":[0,15,30],"adx":[10,20,30],"di_spread":[1,2,3],"bb_width":[.1,.2,.3],"atr":[5,6,7]})
+    out = double_sl_journey_analysis(add_journey_columns(trades, tel), tel).iloc[0]
+    assert out.first_sl_side == "long"
+    assert out.minutes_between_sl_hits == 15
+    assert out.adx_max_before_first_sl == 20
