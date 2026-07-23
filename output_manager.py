@@ -163,6 +163,10 @@ TRADE_R_COLUMN_METADATA = {
     "max_both_open_minutes": "Configured maximum elapsed minutes from pair entry while both long and short remain open.",
     "both_open_timeout_triggered": "True when both legs of this pair were closed by the both-open timeout rule.",
     "timeout_exit_time": "Timestamp used for the both-open timeout exit, when applicable.",
+    "*_original_sl": "The leg stop loss at entry before any break-even replacement.",
+    "*_current_sl": "The final active stop loss after any break-even replacement.",
+    "*_be_*": "Break-even-after-opposite-SL audit fields. COST_ADJUSTED estimates a zero-net exit using entry fee, estimated exit fee, and configured slippage; final realized net PnL may differ slightly because exit fee depends on actual exit notional.",
+    "pair_be_triggered": "True when one leg hit SL and the opposite leg stop was moved by the break-even rule.",
 }
 
 

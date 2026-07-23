@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import numpy as np, pandas as pd
 from atr import atr
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy
 from strategy import custom_entry_signal
 from trade import ExitReason, ExitSource, Position, Side, TradePair
 
@@ -65,15 +65,43 @@ class BacktestEngine:
         short_stop_loss_per_unit=(short_stop_exit-short_entry)+(short_entry*entry_fee_rate)+(short_stop_exit*exit_fee_rate)
         sizing_loss_per_unit=max(long_stop_loss_per_unit, short_stop_loss_per_unit) if self.config.position_sizing_mode==PositionSizingMode.ALL_IN_STOP_RISK else stop
         uncapped=risk_amt/sizing_loss_per_unit; lqty,lc=self._cap_qty(uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(uncapped,short_entry,self.current_equity); fee_rate=entry_fee_rate
-        long=Position(Side.LONG,self._entry_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate)
-        short=Position(Side.SHORT,self._entry_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate)
+        long=Position(Side.LONG,self._entry_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate, original_sl=long_entry-stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
+        short=Position(Side.SHORT,self._entry_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate, original_sl=short_entry+stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
         self.active_pairs.append(TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc)); self.next_pair_id+=1
     def _update_positions_to_strategy_index(self,i):
         for pair in self.active_pairs:
             if i > pair.long.entry_index and self._maybe_timeout_pair(pair, i):
                 continue
+            if i > pair.long.entry_index:
+                self._scan_pair_exit(pair,i)
+    def _scan_pair_exit(self,pair,i):
+        if not self.config.use_intrabar_data or self.intrabar_data is None:
             for pos in (pair.long,pair.short):
-                if pos.is_open and i>pos.entry_index: self._scan_exit(pos,i)
+                if pos.is_open: self._scan_exit(pos,i); self._maybe_apply_be(pair,pos,None,None,None,None)
+            return
+        start=pd.Timestamp(pair.strategy_entry_time); end=pd.Timestamp(self.times[i])+self.entry_delta
+        if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
+            for pos in (pair.long,pair.short):
+                if pos.is_open: self._fallback_exit(pos,i,"timestamp_alignment_failure"); self._maybe_apply_be(pair,pos,None,None,None,None)
+            return
+        sub=self.intrabar_data[(self.intrabar_data.timestamp>=start)&(self.intrabar_data.timestamp<end)]
+        if sub.empty or (sub.timestamp.iloc[0] > start + pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)) or self._has_missing_intrabar(sub,start,end):
+            reason="no_overlapping_intrabar_rows" if sub.empty else "intrabar_gap"
+            for pos in (pair.long,pair.short):
+                if pos.is_open: pos.missing_intrabar_data=True; self._fallback_exit(pos,i,reason); self._maybe_apply_be(pair,pos,None,None,None,None)
+            return
+        for j,row in sub.iterrows():
+            before=(pair.long.is_open,pair.short.is_open)
+            for pos in (pair.long,pair.short):
+                if pos.is_open and not (pos.be_active_after is not None and pd.Timestamp(row.timestamp) < pd.Timestamp(pos.be_active_after)):
+                    self._maybe_exit_bar(pos,j,row.high,row.low,row.timestamp,ExitSource.INTRABAR)
+                    self._maybe_apply_be(pair,pos,j,row.high,row.low,row.timestamp)
+            if not pair.is_open or before != (pair.long.is_open,pair.short.is_open):
+                pass
+        if self.intrabar_data.timestamp.max() < end - pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes):
+            for pos in (pair.long,pair.short):
+                if pos.is_open: self._fallback_exit(pos,i,"end_of_intrabar_data"); self._maybe_apply_be(pair,pos,None,None,None,None)
+
     def _scan_exit(self,pos,i):
         start=pd.Timestamp(pos.entry_time); end=pd.Timestamp(self.times[i])+self.entry_delta
         if not self.config.use_intrabar_data:
@@ -99,6 +127,39 @@ class BacktestEngine:
             return self._fallback_exit(pos,i,"end_of_intrabar_data")
         return False
 
+
+    def _be_exit_reason(self):
+        return {BreakEvenMode.ENTRY_PRICE: ExitReason.BE, BreakEvenMode.COST_ADJUSTED: ExitReason.BE_COST_ADJUSTED, BreakEvenMode.R_OFFSET: ExitReason.BE_R_OFFSET}[self.config.be_mode]
+    def _be_stop(self,pos):
+        if self.config.be_mode==BreakEvenMode.ENTRY_PRICE:
+            return pos.entry_price
+        if self.config.be_mode==BreakEvenMode.R_OFFSET:
+            return pos.entry_price + self.config.be_offset_r*pos.risk if pos.side==Side.LONG else pos.entry_price - self.config.be_offset_r*pos.risk
+        rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
+        q=pos.quantity or 1.0
+        if pos.side==Side.LONG:
+            # exit_price solves (x-entry)*q - entry_fee - x*q*rate ~= 0 before configured exit slippage; raw stop is adjusted so executed exit is x.
+            target=(pos.entry_price*q + pos.entry_fee)/(q*(1-rate))
+            return target/(1-self.config.slippage)
+        target=(pos.entry_price*q - pos.entry_fee)/(q*(1+rate))
+        return target/(1+self.config.slippage)
+    def _maybe_apply_be(self,pair,closed_pos,bar_index,high,low,timestamp):
+        if not self.config.enable_be_after_opposite_sl or closed_pos.exit_reason != ExitReason.SL: return False
+        other=pair.short if closed_pos.side==Side.LONG else pair.long
+        if not other.is_open or other.be_triggered: return False
+        new_sl=self._be_stop(other)
+        improves = new_sl > other.sl if other.side==Side.LONG else new_sl < other.sl
+        if not improves: return False
+        other.sl=new_sl; other.be_triggered=True; other.be_trigger_time=timestamp if timestamp is not None else closed_pos.exit_time; other.be_triggered_by_side=closed_pos.side; other.be_mode=self.config.be_mode.value; other.be_offset_r=self.config.be_offset_r; other.be_stop_price=new_sl; other.be_exit_reason=self._be_exit_reason(); pair.pair_be_triggered=True
+        if timestamp is not None and self.config.be_same_candle_policy==BreakEvenSameCandlePolicy.NEXT_CANDLE:
+            other.be_active_after=pd.Timestamp(timestamp)+pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
+        elif timestamp is not None:
+            touched = low<=new_sl if other.side==Side.LONG else high>=new_sl
+            if touched:
+                other.be_same_candle_ambiguous=True
+                slip=1-self.config.slippage if other.side==Side.LONG else 1+self.config.slippage
+                self._close_position(other,bar_index,new_sl*slip,other.be_exit_reason,ExitSource.INTRABAR,timestamp)
+        return True
     def _timeout_source(self):
         return ExitSource.INTRABAR if self.config.use_intrabar_data and self.intrabar_data is not None else ExitSource.FALLBACK_15M
     def _maybe_timeout_pair(self,pair,i):
@@ -139,7 +200,8 @@ class BacktestEngine:
         if hit_tp and hit_sl: pos.ambiguous=True; use_tp=self.config.tie_policy==TiePolicy.OPTIMISTIC
         else: use_tp=hit_tp
         raw=pos.tp if use_tp else pos.sl; slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
-        self._close_position(pos,i,raw*slip,ExitReason.TP if use_tp else ExitReason.SL,source,timestamp); return True
+        reason=ExitReason.TP if use_tp else (pos.be_exit_reason if pos.be_triggered else ExitReason.SL)
+        self._close_position(pos,i,raw*slip,reason,source,timestamp); return True
     def _close_position(self,pos,i,exit_price,reason,source=None,timestamp=None):
         rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee; gross=(exit_price-pos.entry_price)*pos.quantity if pos.side==Side.LONG else (pos.entry_price-exit_price)*pos.quantity; exit_fee=exit_price*pos.quantity*rate
         pos.exit_time=timestamp if timestamp is not None else self.times[i]; pos.exit_index=i; pos.exit_price=exit_price; pos.exit_reason=reason; pos.exit_source=source or (ExitSource.END_OF_DATA if reason==ExitReason.END_OF_DATA else ExitSource.FALLBACK_15M); pos.gross_pnl=gross; pos.exit_fee=exit_fee; pos.fees=pos.entry_fee+exit_fee; pos.net_pnl=gross-pos.fees; pos.gross_r=gross/pos.risk_amount; pos.net_r=pos.net_pnl/pos.risk_amount; move=(exit_price-pos.entry_price) if pos.side==Side.LONG else (pos.entry_price-exit_price); pos.price_r=move/pos.risk
@@ -160,7 +222,7 @@ class BacktestEngine:
             fees=p.long.fees+p.short.fees; gross=p.long.gross_pnl+p.short.gross_pnl; net=p.long.net_pnl+p.short.net_pnl; risk_base=p.long.risk_amount+p.short.risk_amount
             exit_t=max(pd.Timestamp(p.long.exit_time),pd.Timestamp(p.short.exit_time)); hold=exit_t-pd.Timestamp(p.strategy_entry_time); comb=p.long.entry_notional+p.short.entry_notional; exp=(self.config.tp_mult-self.config.sl_mult)*p.long.risk*(p.long.quantity+p.short.quantity)/2; est=(p.long.entry_notional+p.short.entry_notional)*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
             all_in_stop_risk = (self._estimated_stop_loss(p.long) + self._estimated_stop_loss(p.short)) / 2 / p.equity_before_trade
-            rows.append({"pair_id":p.pair_id,"position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
+            rows.append({"pair_id":p.pair_id,"position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
             **self._pos_cols('long',p.long), **self._pos_cols('short',p.short),"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":p.long.price_r+p.short.price_r,"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":p.long.gross_r+p.short.gross_r,"pair_fee_r":fees/p.long.risk_amount,"pair_net_r":p.long.net_r+p.short.net_r,"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":p.long.ambiguous or p.short.ambiguous,"ambiguous_candle":p.long.ambiguous or p.short.ambiguous,"missing_intrabar_data":p.long.missing_intrabar_data or p.short.missing_intrabar_data})
         return pd.DataFrame(rows)
     def _estimated_stop_loss(self,pos):
@@ -172,4 +234,4 @@ class BacktestEngine:
         return gross + pos.entry_fee + stop_exit*pos.quantity*exit_rate
     def _pos_cols(self,prefix,pos):
         est_stop_loss=self._estimated_stop_loss(pos)
-        return {f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_configured_price_risk_percentage":self.config.risk_per_leg,f"{prefix}_estimated_all_in_stop_risk_percentage":est_stop_loss/pos.risk_amount*self.config.risk_per_leg if pos.risk_amount else 0,f"{prefix}_sl":pos.sl,f"{prefix}_tp":pos.tp,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
+        return {f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_configured_price_risk_percentage":self.config.risk_per_leg,f"{prefix}_estimated_all_in_stop_risk_percentage":est_stop_loss/pos.risk_amount*self.config.risk_per_leg if pos.risk_amount else 0,f"{prefix}_original_sl":pos.original_sl,f"{prefix}_current_sl":pos.sl,f"{prefix}_sl":pos.sl,f"{prefix}_tp":pos.tp,f"{prefix}_be_enabled":pos.be_enabled,f"{prefix}_be_triggered":pos.be_triggered,f"{prefix}_be_trigger_time":pos.be_trigger_time,f"{prefix}_be_triggered_by_side":pos.be_triggered_by_side.value if pos.be_triggered_by_side else None,f"{prefix}_be_mode":pos.be_mode,f"{prefix}_be_offset_r":pos.be_offset_r,f"{prefix}_be_stop_price":pos.be_stop_price,f"{prefix}_be_exit_reason":pos.be_exit_reason.value if pos.be_exit_reason else None,f"{prefix}_be_same_candle_ambiguous":pos.be_same_candle_ambiguous,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
