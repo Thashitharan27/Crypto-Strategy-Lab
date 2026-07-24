@@ -13,9 +13,29 @@ def _max_streak(mask: pd.Series) -> int:
     return int(mask.groupby(groups).sum().max() or 0)
 
 
+def _daily_schedule_summary(trades: pd.DataFrame, stats: dict | None, skipped: list | None) -> dict[str, object]:
+    stats = stats or {}; skipped = skipped or []
+    skipped_reasons = pd.Series([r.get("reason") for r in skipped], dtype=object)
+    delays = pd.to_numeric(trades.get("entry_delay_minutes", pd.Series(dtype=float)), errors="coerce") if not trades.empty else pd.Series(dtype=float)
+    entry_days = pd.to_datetime(trades.get("actual_entry_timestamp", pd.Series(dtype=object)), errors="coerce", utc=True).dt.date if not trades.empty else pd.Series(dtype=object)
+    skipped_days = pd.to_datetime(pd.Series([r.get("scheduled_timestamp") for r in skipped]), errors="coerce", utc=True).dt.date if skipped else pd.Series(dtype=object)
+    return {
+        "scheduled_entry_opportunities": int(stats.get("scheduled_entry_opportunities", 0)),
+        "trades_opened_on_schedule": int(stats.get("trades_opened_on_schedule", 0)),
+        "scheduled_entries_skipped_because_trade_was_open": int((skipped_reasons == "ACTIVE_TRADE").sum()),
+        "scheduled_entries_skipped_by_filters": int((skipped_reasons == "FILTER_REJECTED").sum()),
+        "scheduled_entries_skipped_due_to_missing_data": int((skipped_reasons == "MISSING_DATA").sum()),
+        "average_entry_delay": float(delays.mean()) if len(delays) else 0.0,
+        "maximum_entry_delay": float(delays.max()) if len(delays) else 0.0,
+        "days_with_trades": int(entry_days.dropna().nunique()),
+        "days_without_trades": int(skipped_days.dropna().nunique()),
+    }
+
 def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str, object]:
     if trades.empty:
-        return {"total_pairs": 0, "ending_equity": initial_equity, "exit_source_counts": {"1M_INTRABAR": 0, "15M_FALLBACK": 0, "END_OF_DATA": 0}}
+        stats = trades.attrs.get("daily_schedule_stats", {})
+        skipped = trades.attrs.get("skipped_daily_entries", [])
+        return {"total_pairs": 0, "ending_equity": initial_equity, "exit_source_counts": {"1M_INTRABAR": 0, "15M_FALLBACK": 0, "END_OF_DATA": 0}, **_daily_schedule_summary(pd.DataFrame(), stats, skipped)}
     wins = trades["pair_net_pnl"] > 0
     losses = trades["pair_net_pnl"] < 0
     flats = trades["pair_net_pnl"] == 0
@@ -58,7 +78,9 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     adx = pd.to_numeric(trades.get("adx", pd.Series(dtype=float)), errors="coerce")
     plus_di = pd.to_numeric(trades.get("plus_di", pd.Series(dtype=float)), errors="coerce")
     minus_di = pd.to_numeric(trades.get("minus_di", pd.Series(dtype=float)), errors="coerce")
+    daily_stats = _daily_schedule_summary(trades, trades.attrs.get("daily_schedule_stats", {}), trades.attrs.get("skipped_daily_entries", []))
     return {
+        **daily_stats,
         "total_pairs": int(len(trades)),
         "total_trades": int(len(trades)),
         "average_winner": float(trades.loc[wins, "pair_net_pnl"].mean()) if wins.any() else 0.0,

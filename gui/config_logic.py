@@ -6,12 +6,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy
 
 DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output", "run_name": "",
     "sl_mult": 2.0, "tp_mult": 3.0, "entry_mode": "WAIT_UNTIL_CLOSED",
-    "entry_interval": 1, "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
+    "entry_interval": 1, "enable_daily_entry_schedule": False, "daily_entry_time": "00:00", "daily_entry_timezone": "UTC", "daily_entry_missed_policy": "SKIP_DAY", "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
     "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0, "enable_adx_filter": False, "adx_period": 14, "adx_filter_mode": "Disabled", "adx_maximum": 25.0, "adx_minimum": 20.0, "enable_bb_width_filter": False, "bb_width_filter_mode": "Disabled", "bb_width_maximum": 0.03, "bb_width_minimum": 0.0, "enable_di_spread_filter": False, "di_spread_filter_mode": "Disabled", "di_spread_maximum": 10.0, "di_spread_minimum": 0.0,
     "percent_r": 0.002, "fixed_r": 100.0, "initial_equity": 1000.0,
     "risk_per_leg": 0.005, "maker_fee": 0.0002, "taker_fee": 0.0005,
@@ -86,6 +86,12 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("tie_policy") not in [TiePolicy.PESSIMISTIC.value, TiePolicy.OPTIMISTIC.value]: errors.append("Invalid tie policy.")
     if values.get("risk_mode") not in [e.value for e in RiskMode]: errors.append("Invalid risk mode.")
     if values.get("trade_direction") not in [e.value for e in TradeDirectionMode]: errors.append("Invalid trade direction mode.")
+    if values.get("daily_entry_missed_policy") not in [e.value for e in DailyEntryMissedPolicy]: errors.append("Invalid daily entry missed policy.")
+    try:
+        hh, mm = [int(part) for part in str(values.get("daily_entry_time", "00:00")).split(":", 1)]
+        if not (0 <= hh <= 23 and 0 <= mm <= 59): raise ValueError
+        if (hh * 60 + mm) % int(values.get("strategy_timeframe_minutes", 15)) != 0: errors.append("Daily entry time must align to the strategy timeframe.")
+    except (TypeError, ValueError): errors.append("Daily entry time must be HH:MM.")
     if int(values.get("intrabar_timeframe_minutes", 1)) >= int(values.get("strategy_timeframe_minutes", 15)): errors.append("Intrabar timeframe must be less than strategy timeframe.")
     if int(values.get("telemetry_interval_minutes", 15)) % int(values.get("strategy_timeframe_minutes", 15)) != 0: errors.append("Telemetry interval must be a multiple of the strategy timeframe.")
     if values.get("enable_trade_telemetry") and (int(values.get("strategy_timeframe_minutes", 15)) != 15 or int(values.get("telemetry_interval_minutes", 15)) != 15): errors.append("Only 15-minute telemetry is currently supported with a 15-minute strategy timeframe.")
@@ -121,7 +127,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
     return BacktestConfig(
         input_csv=Path(merged["input_csv"]), strategy_csv=Path(merged["input_csv"] if merged.get("strategy_csv") == DEFAULT_GUI_CONFIG.get("strategy_csv") else (merged.get("strategy_csv") or merged["input_csv"])), intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") else None, output_dir=Path(merged["output_dir"]),
         sl_mult=float(merged["sl_mult"]), tp_mult=float(merged["tp_mult"]),
-        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]),
+        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]), enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]), daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]), daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]),
         max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),
         risk_mode=RiskMode(merged["risk_mode"]), atr_period=int(merged["atr_period"]),
         atr_multiplier=float(merged["atr_multiplier"]), enable_adx_filter=bool(merged["enable_adx_filter"]), adx_period=int(merged["adx_period"]), adx_filter_mode=AdxFilterMode(merged["adx_filter_mode"]), adx_maximum=float(merged["adx_maximum"]), adx_minimum=float(merged["adx_minimum"]), enable_bb_width_filter=bool(merged["enable_bb_width_filter"]), bb_width_filter_mode=BBWidthFilterMode(merged["bb_width_filter_mode"]), bb_width_maximum=float(merged["bb_width_maximum"]), bb_width_minimum=float(merged["bb_width_minimum"]), enable_di_spread_filter=bool(merged["enable_di_spread_filter"]), di_spread_filter_mode=DISpreadFilterMode(merged["di_spread_filter_mode"]), di_spread_maximum=float(merged["di_spread_maximum"]), di_spread_minimum=float(merged["di_spread_minimum"]), percent_r=float(merged["percent_r"]),

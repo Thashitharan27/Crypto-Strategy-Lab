@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy
 from engine import BacktestEngine
 from loader import load_backtest_data, load_ohlcv_csv
 from plots import save_plots
@@ -71,6 +71,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tie-policy", type=enum_value(TiePolicy), choices=list(TiePolicy))
     parser.add_argument("--entry-mode", type=enum_value(EntryMode), choices=list(EntryMode))
     parser.add_argument("--entry-interval", type=int)
+    parser.add_argument("--enable-daily-entry-schedule", action="store_true", default=None)
+    parser.add_argument("--daily-entry-time", default=None)
+    parser.add_argument("--daily-entry-timezone", default=None)
+    parser.add_argument("--daily-entry-missed-policy", type=enum_value(DailyEntryMissedPolicy), choices=list(DailyEntryMissedPolicy))
+    parser.add_argument("--daily-entry-comparison", action="store_true", help="Compare continuous mode and daily 00:00/08:00/12:00/16:00 UTC schedules")
     parser.add_argument("--max-active-pairs", type=int)
     parser.add_argument("--enable-be-after-opposite-sl", action="store_true", default=None)
     parser.add_argument("--be-mode", type=enum_value(BreakEvenMode), choices=list(BreakEvenMode))
@@ -106,7 +111,7 @@ def main() -> None:
     config = BacktestConfig()
     overrides = {}
     for key, value in vars(args).items():
-        if value is not None and key not in ("timeout_comparison", "be_comparison", "adx_comparison", "bb_width_comparison", "di_spread_comparison", "trade_direction_comparison"):
+        if value is not None and key not in ("timeout_comparison", "be_comparison", "adx_comparison", "bb_width_comparison", "di_spread_comparison", "trade_direction_comparison", "daily_entry_comparison"):
             overrides["input_csv" if key == "input" else key] = value
     config = replace(config, **overrides)
 
@@ -141,6 +146,7 @@ def main() -> None:
             run_output_step("Building winner_loser_journey_analysis", lambda: winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False))
             run_output_step("Building double_sl_journey_analysis", lambda: double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False))
     run_output_step("Saving skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
+    run_output_step("Saving skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
     run_output_step("Saving telemetry summaries", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
     run_output_step("Saving BB width analysis", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
     run_output_step("Saving DI spread analysis", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
@@ -205,6 +211,16 @@ def main() -> None:
             rows.append({"scenario":label,"return":cmp_summary.get("total_return_percentage"),"win_rate":cmp_summary.get("win_rate"),"double_sl":combos.get("Long SL / Short SL",{}).get("count",0),"profit_factor":cmp_summary.get("profit_factor"),"max_drawdown":cmp_summary.get("maximum_drawdown"),"fees":cmp_summary.get("total_fees")})
         summary["di_spread_comparison"] = rows
         pd.DataFrame(rows).to_csv(run_dir / "di_spread_comparison.csv", index=False)
+
+    if args.daily_entry_comparison:
+        rows=[]
+        scenarios=[("Continuous re-entry", False, config.daily_entry_time), ("Daily 00:00 UTC", True, "00:00"), ("Daily 08:00 UTC", True, "08:00"), ("Daily 12:00 UTC", True, "12:00"), ("Daily 16:00 UTC", True, "16:00")]
+        for label, enabled, entry_time in scenarios:
+            cmp_cfg=replace(config, enable_daily_entry_schedule=enabled, daily_entry_time=entry_time, daily_entry_timezone="UTC")
+            cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run(); cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity)
+            rows.append({"scenario":label,"Trades":cmp_summary.get("total_trades"),"Win rate":cmp_summary.get("win_rate"),"Net PnL":float(cmp_trades["pair_net_pnl"].sum()) if not cmp_trades.empty else 0.0,"Profit factor":cmp_summary.get("profit_factor"),"Maximum drawdown":cmp_summary.get("maximum_drawdown"),"Average holding time":cmp_summary.get("average_holding_time"),"Total fees":cmp_summary.get("total_fees"),"Skipped days":cmp_summary.get("days_without_trades")})
+        summary["daily_entry_comparison"] = rows
+        pd.DataFrame(rows).to_csv(run_dir / "daily_entry_comparison.csv", index=False)
 
     if args.trade_direction_comparison:
         rows=[]
