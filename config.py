@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 class RiskMode(str, Enum):
     FIXED = "FIXED"; PERCENT = "PERCENT"; ATR = "ATR"
@@ -28,6 +29,8 @@ class DISpreadFilterMode(str, Enum):
     DISABLED = "Disabled"; MAXIMUM = "Maximum Spread"; MINIMUM = "Minimum Spread"; RANGE = "Range"
 class TradeDirectionMode(str, Enum):
     BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"; BOTH_INDEPENDENT = "BOTH_INDEPENDENT"
+class DailyEntryMissedPolicy(str, Enum):
+    SKIP_DAY = "SKIP_DAY"; NEXT_AVAILABLE_CANDLE = "NEXT_AVAILABLE_CANDLE"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -79,6 +82,10 @@ class BacktestConfig:
     position_sizing_mode: PositionSizingMode = PositionSizingMode.PRICE_RISK
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
     entry_interval: int = 1
+    enable_daily_entry_schedule: bool = False
+    daily_entry_time: str = "00:00"
+    daily_entry_timezone: str = "UTC"
+    daily_entry_missed_policy: DailyEntryMissedPolicy = DailyEntryMissedPolicy.SKIP_DAY
     maker_fee: float = 0.0002; taker_fee: float = 0.0005
     use_maker_entry: bool = False; use_maker_exit: bool = False
     slippage: float = 0.0001
@@ -127,6 +134,18 @@ class BacktestConfig:
         if isinstance(self.bb_width_filter_mode, str): object.__setattr__(self, "bb_width_filter_mode", BBWidthFilterMode(self.bb_width_filter_mode))
         if isinstance(self.di_spread_filter_mode, str): object.__setattr__(self, "di_spread_filter_mode", DISpreadFilterMode(self.di_spread_filter_mode))
         if isinstance(self.trade_direction, str): object.__setattr__(self, "trade_direction", TradeDirectionMode(self.trade_direction))
+        if isinstance(self.daily_entry_missed_policy, str): object.__setattr__(self, "daily_entry_missed_policy", DailyEntryMissedPolicy(self.daily_entry_missed_policy))
+        try:
+            hh, mm = [int(part) for part in str(self.daily_entry_time).split(":", 1)]
+            if not (0 <= hh <= 23 and 0 <= mm <= 59): raise ValueError
+        except Exception as exc:
+            raise ValueError("daily_entry_time must be HH:MM in 24-hour time") from exc
+        if (hh * 60 + mm) % self.strategy_timeframe_minutes != 0:
+            raise ValueError("daily_entry_time must align to the strategy timeframe")
+        try:
+            ZoneInfo(self.daily_entry_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("daily_entry_timezone must be a valid IANA timezone") from exc
         if self.telemetry_interval_minutes <= 0: raise ValueError("telemetry interval must be > 0")
         if self.telemetry_interval_minutes % self.strategy_timeframe_minutes != 0: raise ValueError("telemetry interval must be a multiple of the strategy timeframe")
         if self.enable_trade_telemetry and (self.strategy_timeframe_minutes != 15 or self.telemetry_interval_minutes != 15): raise ValueError("only 15-minute telemetry is currently supported when the strategy timeframe is 15 minutes")

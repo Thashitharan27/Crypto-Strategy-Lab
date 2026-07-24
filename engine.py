@@ -2,9 +2,10 @@
 from __future__ import annotations
 from collections.abc import Callable
 import numpy as np, pandas as pd
+from zoneinfo import ZoneInfo
 from atr import atr
 from adx import adx
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode, DailyEntryMissedPolicy
 from entry_filters import ADXFilter, BBWidthFilter, DISpreadFilter
 from indicators import bollinger_bands, lag
 from strategy import custom_entry_signal
@@ -15,7 +16,7 @@ class BacktestEngine:
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.times=self.data.timestamp.to_numpy()
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.risk=self._risk_array(); self.entry_filters=[ADXFilter(self.config,self.adx_values),BBWidthFilter(self.config,self.bb_width),DISpreadFilter(self.config,self.di_spread)]
-        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.signals_evaluated=0; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
         self.last_timeout_exit_time=None
@@ -23,6 +24,9 @@ class BacktestEngine:
         self.trading_end=pd.Timestamp(config.trading_end_date, tz="UTC") if config.trading_end_date else None
         self.first_valid_atr_timestamp=self._first_valid_atr_timestamp()
         self.warmup_candle_count=int((self.data.timestamp < self.trading_start).sum()) if self.trading_start is not None else 0
+        self.daily_entry_tz=ZoneInfo(config.daily_entry_timezone)
+        hh, mm = [int(part) for part in str(config.daily_entry_time).split(":", 1)]
+        self.daily_entry_minutes = hh * 60 + mm
     def _first_valid_atr_timestamp(self):
         idx=np.where(np.isfinite(self.atr_values))[0]
         return self.data.timestamp.iloc[int(idx[0])] if len(idx) else None
@@ -30,12 +34,16 @@ class BacktestEngine:
         total=len(self.data)
         self._emit_progress(0,total)
         for i in range(total):
+            active_at_candle_start = bool(self.active_pairs)
             self._update_positions_to_strategy_index(i); self._record_active_telemetry(i); self._collect_closed_pairs()
-            if self._should_enter(i):
+            decision = self._entry_decision(i, active_at_candle_start)
+            if decision:
                 self.signals_evaluated += 1
-                passed, reason = self._entry_filter_result(i)
-                if passed: self._open_pair(i, passed, reason)
-                else: self._record_skipped_signal(i, reason)
+                passed, reason = self._entry_filter_result(decision["indicator_index"])
+                if passed: self._open_pair(decision["execution_index"], passed, reason, decision)
+                else:
+                    self._record_skipped_signal(decision["indicator_index"], reason)
+                    if self.config.enable_daily_entry_schedule: self._record_skipped_daily_entry(decision["scheduled_timestamp"], "FILTER_REJECTED", reason)
             processed=i+1
             if processed == total or processed % self.progress_interval == 0:
                 self._emit_progress(processed,total)
@@ -48,9 +56,54 @@ class BacktestEngine:
         if self.config.risk_mode==RiskMode.PERCENT: return self.close*self.config.percent_r
         return self.atr_values*self.config.atr_multiplier
     def _entry_time(self,i): return pd.Timestamp(self.times[i]) + self.entry_delta
+    def _execution_time(self,i): return pd.Timestamp(self.times[i]) if self.config.enable_daily_entry_schedule else self._entry_time(i)
+    def _price_index(self,i): return i
+    def _indicator_index_for_execution(self,i): return i - 1 if self.config.enable_daily_entry_schedule else i
     def _in_trading_window(self,i):
-        et=self._entry_time(i)
+        et=self._execution_time(i)
         return (self.trading_start is None or et >= self.trading_start) and (self.trading_end is None or et <= self.trading_end)
+
+    def _is_scheduled_candle(self, i):
+        ts = pd.Timestamp(self.times[i])
+        if ts.tzinfo is None: ts = ts.tz_localize("UTC")
+        local = ts.tz_convert(self.daily_entry_tz)
+        return local.hour * 60 + local.minute == self.daily_entry_minutes
+
+    def _active_pair_for_skip(self):
+        if not self.active_pairs: return None
+        return self.active_pairs[0]
+
+    def _record_skipped_daily_entry(self, scheduled_ts, reason, detail=""):
+        pair = self._active_pair_for_skip()
+        positions = pair.positions() if pair is not None else []
+        exit_times = [pd.Timestamp(pos.exit_time) for pos in positions if pos.exit_time is not None]
+        self.skipped_daily_entries.append({"scheduled_timestamp": scheduled_ts, "timezone": self.config.daily_entry_timezone, "reason": reason, "active_trade_id": pair.pair_id if pair is not None else None, "active_trade_entry_time": pair.strategy_entry_time if pair is not None else None, "active_trade_expected_or_actual_exit_time": max(exit_times) if exit_times else None, "detail": detail})
+
+    def _daily_entry_decision(self, i, active_at_candle_start):
+        if self.pending_daily_entry and not self.active_pairs:
+            if self._base_entry_allowed(i):
+                d=self.pending_daily_entry; self.pending_daily_entry=None; d.update({"execution_index": i, "indicator_index": i-1, "actual_entry_timestamp": pd.Timestamp(self.times[i]), "entry_schedule_status": "NEXT_AVAILABLE_CANDLE"}); return d
+        if not self._is_scheduled_candle(i): return None
+        scheduled_ts = pd.Timestamp(self.times[i])
+        self.daily_entry_opportunities += 1
+        if i <= 0 or not np.isfinite(self.risk[i-1]) or self.risk[i-1] <= 0:
+            self._record_skipped_daily_entry(scheduled_ts, "INDICATOR_WARMUP") ; return None
+        if not self._in_trading_window(i):
+            self._record_skipped_daily_entry(scheduled_ts, "OUTSIDE_TRADING_DATE_RANGE") ; return None
+        if active_at_candle_start or len(self.active_pairs) >= self.config.max_active_pairs:
+            self._record_skipped_daily_entry(scheduled_ts, "ACTIVE_TRADE")
+            if self.config.daily_entry_missed_policy == DailyEntryMissedPolicy.NEXT_AVAILABLE_CANDLE:
+                self.pending_daily_entry={"scheduled_timestamp": scheduled_ts}
+            return None
+        return {"execution_index": i, "indicator_index": i-1, "scheduled_timestamp": scheduled_ts, "actual_entry_timestamp": scheduled_ts, "entry_schedule_status": "ON_TIME"}
+
+    def _base_entry_allowed(self, i):
+        return i > 0 and np.isfinite(self.risk[i-1]) and self.risk[i-1] > 0 and len(self.active_pairs) < self.config.max_active_pairs and self._in_trading_window(i)
+
+    def _entry_decision(self, i, active_at_candle_start=False):
+        if self.config.enable_daily_entry_schedule:
+            return self._daily_entry_decision(i, active_at_candle_start)
+        return {"execution_index": i, "indicator_index": i, "scheduled_timestamp": None, "actual_entry_timestamp": self._entry_time(i), "entry_schedule_status": None} if self._should_enter(i) else None
     def _should_enter(self,i):
         if not np.isfinite(self.risk[i]) or self.risk[i]<=0 or len(self.active_pairs)>=self.config.max_active_pairs or not self._in_trading_window(i): return False
         if self.last_timeout_exit_time is not None and self._entry_time(i) <= self.last_timeout_exit_time: return False
@@ -83,21 +136,25 @@ class BacktestEngine:
     def _active_positions(self, pair):
         return pair.positions()
 
-    def _open_pair(self,i, adx_filter_passed=True, adx_filter_reason="ADX filter disabled"):
-        raw=self.close[i]; long_entry=raw*(1+self.config.slippage); short_entry=raw*(1-self.config.slippage); r=float(self.risk[i]); stop=self.config.sl_mult*r; risk_amt=self.current_equity*self.config.risk_per_leg
+    def _open_pair(self,i, adx_filter_passed=True, adx_filter_reason="ADX filter disabled", schedule=None):
+        ind_i = schedule["indicator_index"] if schedule else i; raw=(self.open[i] if self.config.enable_daily_entry_schedule else self.close[i]); long_entry=raw*(1+self.config.slippage); short_entry=raw*(1-self.config.slippage); r=float(self.risk[ind_i]); stop=self.config.sl_mult*r; risk_amt=self.current_equity*self.config.risk_per_leg
         entry_fee_rate=self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee; exit_fee_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
         long_stop_exit=(long_entry-stop)*(1-self.config.slippage); short_stop_exit=(short_entry+stop)*(1+self.config.slippage)
         long_stop_loss_per_unit=(long_entry-long_stop_exit)+(long_entry*entry_fee_rate)+(long_stop_exit*exit_fee_rate)
         short_stop_loss_per_unit=(short_stop_exit-short_entry)+(short_entry*entry_fee_rate)+(short_stop_exit*exit_fee_rate)
         sizing_loss_per_unit=max(long_stop_loss_per_unit, short_stop_loss_per_unit) if self.config.position_sizing_mode==PositionSizingMode.ALL_IN_STOP_RISK else stop
         uncapped=risk_amt/sizing_loss_per_unit; lqty,lc=self._cap_qty(uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(uncapped,short_entry,self.current_equity); fee_rate=entry_fee_rate
-        long=Position(Side.LONG,self._entry_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate, original_sl=long_entry-stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
-        short=Position(Side.SHORT,self._entry_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate, original_sl=short_entry+stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
+        long=Position(Side.LONG,self._execution_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[ind_i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate, original_sl=long_entry-stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
+        short=Position(Side.SHORT,self._execution_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[ind_i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate, original_sl=short_entry+stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
         if self.config.trade_direction == TradeDirectionMode.LONG_ONLY:
             short = None
         elif self.config.trade_direction == TradeDirectionMode.SHORT_ONLY:
             long = None
-        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc); pair.trade_direction=self.config.trade_direction.value; pair.adx=float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan; pair.plus_di=float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan; pair.minus_di=float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan; self._attach_market_state(pair,i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self._record_pair_telemetry(pair, i); self.next_pair_id+=1
+        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._execution_time(i),raw,lc or sc); pair.trade_direction=self.config.trade_direction.value; pair.daily_schedule_enabled=self.config.enable_daily_entry_schedule; pair.scheduled_entry_time=self.config.daily_entry_time; pair.scheduled_entry_timezone=self.config.daily_entry_timezone; pair.scheduled_entry_timestamp=(schedule or {}).get("scheduled_timestamp"); pair.actual_entry_timestamp=(schedule or {}).get("actual_entry_timestamp", self._execution_time(i)); pair.entry_schedule_status=(schedule or {}).get("entry_schedule_status");
+        if self.config.enable_daily_entry_schedule:
+            if pair.entry_schedule_status == "ON_TIME": self.daily_entries_on_schedule += 1
+            elif pair.entry_schedule_status == "NEXT_AVAILABLE_CANDLE": self.daily_entries_next_available += 1
+        pair.adx=float(self.adx_values[ind_i]) if np.isfinite(self.adx_values[ind_i]) else np.nan; pair.plus_di=float(self.plus_di_values[ind_i]) if np.isfinite(self.plus_di_values[ind_i]) else np.nan; pair.minus_di=float(self.minus_di_values[ind_i]) if np.isfinite(self.minus_di_values[ind_i]) else np.nan; self._attach_market_state(pair,ind_i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self._record_pair_telemetry(pair, i); self.next_pair_id+=1
 
     def _attach_market_state(self, pair, i):
         fields = {"bb_middle":self.bb_middle,"bb_upper":self.bb_upper,"bb_lower":self.bb_lower,"bb_width":self.bb_width,"bb_width_pct":self.bb_width_pct,"bb_width_1":self.bb_width_1,"bb_width_3":self.bb_width_3,"bb_width_5":self.bb_width_5,"bb_width_entry_5bar_change":self.bb_width_change,"bb_width_entry_5bar_change_pct":self.bb_width_change_pct,"di_spread":self.di_spread,"di_ratio":self.di_ratio,"di_spread_1":self.di_spread_1,"di_spread_3":self.di_spread_3,"di_spread_5":self.di_spread_5,"di_spread_entry_5bar_change":self.di_spread_change}
@@ -268,7 +325,7 @@ class BacktestEngine:
                 exp=(self.config.tp_mult-self.config.sl_mult)*sum(pos.risk*pos.quantity for pos in positions)/len(positions)
                 est=comb*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
                 all_in_stop_risk = sum(self._estimated_stop_loss(pos) for pos in positions) / len(positions) / p.equity_before_trade
-                row={"pair_id":p.pair_id,"trade_id":f"{p.pair_id}-{row_kind}" if row_kind != "pair" else p.pair_id,"trade_direction":self.config.trade_direction.value,"result_type":row_kind,"side":primary.side.value if len(positions)==1 else "BOTH","position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":primary.entry_price if len(positions)==1 else p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":primary.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),"indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.","bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_entry_5bar_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":primary.risk,"equity_before_trade":p.equity_before_trade,"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":sum(pos.price_r for pos in positions),"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":sum(pos.gross_r for pos in positions),"pair_fee_r":fees/primary.risk_amount,"pair_net_r":sum(pos.net_r for pos in positions),"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":any(pos.ambiguous for pos in positions),"ambiguous_candle":any(pos.ambiguous for pos in positions),"missing_intrabar_data":any(pos.missing_intrabar_data for pos in positions)}
+                row={"pair_id":p.pair_id,"trade_id":f"{p.pair_id}-{row_kind}" if row_kind != "pair" else p.pair_id,"trade_direction":self.config.trade_direction.value,"result_type":row_kind,"side":primary.side.value if len(positions)==1 else "BOTH","position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":primary.entry_price if len(positions)==1 else p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":primary.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),"indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.","bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_entry_5bar_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),"daily_schedule_enabled":getattr(p,"daily_schedule_enabled",False),"scheduled_entry_time":getattr(p,"scheduled_entry_time",None),"scheduled_entry_timezone":getattr(p,"scheduled_entry_timezone",None),"scheduled_entry_timestamp":getattr(p,"scheduled_entry_timestamp",None),"actual_entry_timestamp":getattr(p,"actual_entry_timestamp",p.strategy_entry_time),"entry_delay_minutes":((pd.Timestamp(getattr(p,"actual_entry_timestamp",p.strategy_entry_time))-pd.Timestamp(getattr(p,"scheduled_entry_timestamp",p.strategy_entry_time))).total_seconds()/60 if getattr(p,"scheduled_entry_timestamp",None) is not None else 0),"entry_schedule_status":getattr(p,"entry_schedule_status",None),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":primary.risk,"equity_before_trade":p.equity_before_trade,"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":sum(pos.price_r for pos in positions),"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":sum(pos.gross_r for pos in positions),"pair_fee_r":fees/primary.risk_amount,"pair_net_r":sum(pos.net_r for pos in positions),"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":any(pos.ambiguous for pos in positions),"ambiguous_candle":any(pos.ambiguous for pos in positions),"missing_intrabar_data":any(pos.missing_intrabar_data for pos in positions)}
                 if p.long is not None and (len(positions)>1 or primary.side==Side.LONG): row.update(self._pos_cols('long', p.long))
                 if p.short is not None and (len(positions)>1 or primary.side==Side.SHORT): row.update(self._pos_cols('short', p.short))
                 rows.append(row)
@@ -284,6 +341,8 @@ class BacktestEngine:
             frame["signals_skipped_by_filters"] = len(self.skipped_signals)
             frame["signals_traded"] = len(frame)
         frame.attrs["skipped_signals"] = self.skipped_signals
+        frame.attrs["skipped_daily_entries"] = self.skipped_daily_entries
+        frame.attrs["daily_schedule_stats"] = {"scheduled_entry_opportunities": self.daily_entry_opportunities, "trades_opened_on_schedule": self.daily_entries_on_schedule, "scheduled_entries_opened_next_available": self.daily_entries_next_available}
         return frame
 
     def telemetry_frame(self):

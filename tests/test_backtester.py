@@ -567,3 +567,44 @@ def test_trade_direction_both_independent_creates_one_result_per_leg():
     assert summary["total_trades"] == len(trades)
     assert summary["wins"] >= 1
     assert summary["losses"] >= 1
+
+
+def scheduled_candles(start="2023-12-31 23:45", periods=4*24*4, price=100):
+    ts = pd.date_range(pd.Timestamp(start, tz="UTC"), periods=periods, freq="15min")
+    return pd.DataFrame({"timestamp": ts, "open": price, "high": price, "low": price, "close": price, "volume": 1})
+
+
+def test_daily_schedule_skip_day_does_not_reopen_after_later_close():
+    df = scheduled_candles(periods=3*24*4 + 2)
+    # Day 2 09:00: close the Day 1 long; no replacement until Day 3 00:00.
+    idx = df.index[df.timestamp == pd.Timestamp("2024-01-02 09:00", tz="UTC")][0]
+    df.loc[idx, "high"] = 111
+    c = cfg(enable_daily_entry_schedule=True, daily_entry_time="00:00", daily_entry_timezone="UTC", daily_entry_missed_policy="SKIP_DAY", trade_direction=TradeDirectionMode.LONG_ONLY, max_active_pairs=1)
+    trades = BacktestEngine(df, c).run()
+    assert list(trades.entry_time[:2]) == [pd.Timestamp("2024-01-01 00:00", tz="UTC"), pd.Timestamp("2024-01-03 00:00", tz="UTC")]
+    assert pd.Timestamp("2024-01-02 09:00", tz="UTC") not in set(pd.to_datetime(trades.entry_time))
+    skipped = trades.attrs["skipped_daily_entries"]
+    assert any(r["reason"] == "ACTIVE_TRADE" and r["scheduled_timestamp"] == pd.Timestamp("2024-01-02 00:00", tz="UTC") for r in skipped)
+    summary = summarize(trades, 1000)
+    assert summary["scheduled_entry_opportunities"] == 4
+    assert summary["scheduled_entries_skipped_because_trade_was_open"] >= 1
+
+
+def test_daily_schedule_next_available_opens_after_close():
+    df = scheduled_candles(periods=3*24*4)
+    idx = df.index[df.timestamp == pd.Timestamp("2024-01-02 09:00", tz="UTC")][0]
+    df.loc[idx, "high"] = 111
+    c = cfg(enable_daily_entry_schedule=True, daily_entry_time="00:00", daily_entry_timezone="UTC", daily_entry_missed_policy="NEXT_AVAILABLE_CANDLE", trade_direction=TradeDirectionMode.LONG_ONLY, max_active_pairs=1)
+    trades = BacktestEngine(df, c).run()
+    assert pd.Timestamp("2024-01-02 09:00", tz="UTC") in set(pd.to_datetime(trades.entry_time))
+    delayed = trades[trades.entry_schedule_status == "NEXT_AVAILABLE_CANDLE"].iloc[0]
+    assert delayed.entry_delay_minutes == pytest.approx(540)
+
+
+def test_daily_schedule_timezone_and_invalid_alignment():
+    df = scheduled_candles(periods=24*4 + 5)
+    c = cfg(enable_daily_entry_schedule=True, daily_entry_time="19:00", daily_entry_timezone="America/New_York", trade_direction=TradeDirectionMode.LONG_ONLY)
+    trades = BacktestEngine(df, c).run()
+    assert trades.entry_time.iloc[0] == pd.Timestamp("2024-01-01 00:00", tz="UTC")
+    with pytest.raises(ValueError, match="align"):
+        cfg(enable_daily_entry_schedule=True, daily_entry_time="00:07")

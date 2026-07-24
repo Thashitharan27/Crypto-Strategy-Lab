@@ -118,6 +118,7 @@ class BacktestWorker(QObject):
                     run_output_step("Building double_sl_journey_analysis", lambda: double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False))
             import pandas as pd
             run_output_step("Saving skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
+            run_output_step("Saving skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
             run_output_step("Saving telemetry summaries", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
             run_output_step("Saving BB width analysis", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
             run_output_step("Saving DI spread analysis", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
