@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode
 
 DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output", "run_name": "",
@@ -18,7 +18,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "use_maker_entry": False, "use_maker_exit": False, "slippage": 0.0001,
     "strategy_timeframe_minutes": 15, "intrabar_timeframe_minutes": 1, "use_intrabar_data": True,
     "trading_start_date": None, "trading_end_date": None, "max_effective_leverage_per_leg": None,
-    "max_combined_effective_leverage": None, "intrabar_missing_policy": "WARN_AND_USE_15M", "zero_cost_comparison": False,
+    "max_combined_effective_leverage": None, "intrabar_missing_policy": "WARN_AND_USE_15M", "zero_cost_comparison": False, "trade_direction": "BOTH",
     "enable_both_open_timeout": False, "max_both_open_minutes": 480, "enable_trade_telemetry": True, "save_full_telemetry_csv": True, "save_trade_journey_summary": True, "save_trade_journey_charts": True, "telemetry_interval_minutes": 15, "both_open_timeout_unit": "Hours", "enable_be_after_opposite_sl": False, "be_mode": "ENTRY_PRICE", "be_offset_r": 0.0, "be_same_candle_policy": "NEXT_CANDLE",
 }
 
@@ -85,6 +85,7 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("entry_mode") not in [e.value for e in EntryMode]: errors.append("Invalid entry mode.")
     if values.get("tie_policy") not in [TiePolicy.PESSIMISTIC.value, TiePolicy.OPTIMISTIC.value]: errors.append("Invalid tie policy.")
     if values.get("risk_mode") not in [e.value for e in RiskMode]: errors.append("Invalid risk mode.")
+    if values.get("trade_direction") not in [e.value for e in TradeDirectionMode]: errors.append("Invalid trade direction mode.")
     if int(values.get("intrabar_timeframe_minutes", 1)) >= int(values.get("strategy_timeframe_minutes", 15)): errors.append("Intrabar timeframe must be less than strategy timeframe.")
     if int(values.get("telemetry_interval_minutes", 15)) % int(values.get("strategy_timeframe_minutes", 15)) != 0: errors.append("Telemetry interval must be a multiple of the strategy timeframe.")
     if values.get("enable_trade_telemetry") and (int(values.get("strategy_timeframe_minutes", 15)) != 15 or int(values.get("telemetry_interval_minutes", 15)) != 15): errors.append("Only 15-minute telemetry is currently supported with a 15-minute strategy timeframe.")
@@ -132,7 +133,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         use_intrabar_data=bool(merged["use_intrabar_data"]), trading_start_date=merged.get("trading_start_date"), trading_end_date=merged.get("trading_end_date"),
         max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
         max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
-        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]),
+        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]), trade_direction=TradeDirectionMode(merged["trade_direction"]),
         enable_both_open_timeout=bool(merged["enable_both_open_timeout"]), max_both_open_minutes=int(merged["max_both_open_minutes"]),
         enable_be_after_opposite_sl=bool(merged["enable_be_after_opposite_sl"]), be_mode=BreakEvenMode(merged["be_mode"]), be_offset_r=float(merged["be_offset_r"]), be_same_candle_policy=BreakEvenSameCandlePolicy(merged["be_same_candle_policy"]),
         run_name=str(merged.get("run_name", "")), enable_trade_telemetry=bool(merged["enable_trade_telemetry"]), save_full_telemetry_csv=bool(merged["save_full_telemetry_csv"]), save_trade_journey_summary=bool(merged["save_trade_journey_summary"]), save_trade_journey_charts=bool(merged["save_trade_journey_charts"]), telemetry_interval_minutes=int(merged["telemetry_interval_minutes"]),

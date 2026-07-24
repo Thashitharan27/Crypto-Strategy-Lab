@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from atr import atr
-from config import BacktestConfig, EntryMode, RiskMode, TiePolicy
+from config import BacktestConfig, EntryMode, RiskMode, TiePolicy, TradeDirectionMode
 from engine import BacktestEngine
 from loader import load_ohlcv_csv
 from statistics import equity_curve, summarize
@@ -528,3 +528,42 @@ def test_double_sl_report_identifies_first_and_second_sl_times():
     assert out.first_sl_side == "long"
     assert out.minutes_between_sl_hits == 15
     assert out.adx_max_before_first_sl == 20
+
+
+def test_trade_direction_long_only_omits_short_columns_and_telemetry():
+    engine = BacktestEngine(candles([(100,100,100,100), (100,111,100,100)]), cfg(trade_direction=TradeDirectionMode.LONG_ONLY))
+    trades = engine.run()
+    telemetry = engine.telemetry_frame()
+    row = trades.iloc[0]
+    assert row.trade_direction == "LONG_ONLY"
+    assert row.side == "LONG"
+    assert row.long_exit_reason == "TP"
+    assert "short_exit_reason" not in trades.columns
+    assert not any(c.startswith("short_") for c in telemetry.columns)
+    summary = summarize(trades, 1000)
+    assert summary["total_trades"] == len(trades)
+    assert summary["exit_combinations"]["Trade TP"]["count"] >= 1
+
+
+def test_trade_direction_short_only_omits_long_columns_and_tracks_losses():
+    trades = BacktestEngine(candles([(100,100,100,100), (100,111,100,100)]), cfg(trade_direction=TradeDirectionMode.SHORT_ONLY)).run()
+    row = trades.iloc[0]
+    assert row.trade_direction == "SHORT_ONLY"
+    assert row.side == "SHORT"
+    assert row.short_exit_reason == "SL"
+    assert "long_exit_reason" not in trades.columns
+    summary = summarize(trades, 1000)
+    assert summary["losses"] == 1
+    assert summary["average_loser"] == pytest.approx(row.pair_net_pnl)
+
+
+def test_trade_direction_both_independent_creates_one_result_per_leg():
+    trades = BacktestEngine(candles([(100,100,100,100), (100,111,100,100)]), cfg(trade_direction=TradeDirectionMode.BOTH_INDEPENDENT)).run()
+    assert len(trades) >= 2
+    assert set(trades.side) == {"LONG", "SHORT"}
+    assert trades.loc[trades.side == "LONG", "long_exit_reason"].iloc[0] == "TP"
+    assert trades.loc[trades.side == "SHORT", "short_exit_reason"].iloc[0] == "SL"
+    summary = summarize(trades, 1000)
+    assert summary["total_trades"] == len(trades)
+    assert summary["wins"] >= 1
+    assert summary["losses"] >= 1

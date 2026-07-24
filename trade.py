@@ -19,6 +19,8 @@ class Position:
 
 @dataclass
 class TradePair:
-    pair_id: int; long: Position; short: Position; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; pair_be_triggered: bool = False; equity_after_trade: Optional[float] = None; both_open_timeout_triggered: bool = False; timeout_minutes: Optional[int] = None; timeout_exit_time: Optional[object] = None
+    pair_id: int; long: Optional[Position]; short: Optional[Position]; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; pair_be_triggered: bool = False; equity_after_trade: Optional[float] = None; both_open_timeout_triggered: bool = False; timeout_minutes: Optional[int] = None; timeout_exit_time: Optional[object] = None
+    def positions(self):
+        return tuple(p for p in (self.long, self.short) if p is not None)
     @property
-    def is_open(self) -> bool: return self.long.is_open or self.short.is_open
+    def is_open(self) -> bool: return any(p.is_open for p in self.positions())
