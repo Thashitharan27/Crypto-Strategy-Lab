@@ -88,7 +88,7 @@ class BacktestWorker(QObject):
             self._check(); self._emit_stage("Statistics", 90, len(data), len(data), len(trades), len(trades))
             equity = equity_curve(trades, self.config.initial_equity)
             summary = summarize(trades, self.config.initial_equity)
-            summary.update({"use_intrabar_data": self.config.use_intrabar_data, "intrabar_csv": str(self.config.intrabar_csv) if self.config.intrabar_csv else None, "strategy_timeframe": self.config.strategy_timeframe_minutes, "intrabar_timeframe": self.config.intrabar_timeframe_minutes, "atr_period": self.config.atr_period, "atr_multiplier": self.config.atr_multiplier})
+            summary.update({"trade_direction": self.config.trade_direction.value, "use_intrabar_data": self.config.use_intrabar_data, "intrabar_csv": str(self.config.intrabar_csv) if self.config.intrabar_csv else None, "strategy_timeframe": self.config.strategy_timeframe_minutes, "intrabar_timeframe": self.config.intrabar_timeframe_minutes, "atr_period": self.config.atr_period, "atr_multiplier": self.config.atr_multiplier})
             if self.config.use_intrabar_data and summary.get("intrabar_exit_count") == 0:
                 self._log("WARNING: use_intrabar_data=True but 1M_INTRABAR exit count is 0. Check intrabar path, overlap, and timestamp alignment.")
             self._check(); self._emit_stage("Saving outputs", 95, len(data), len(data), len(trades), len(trades))

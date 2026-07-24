@@ -4,7 +4,7 @@ from collections.abc import Callable
 import numpy as np, pandas as pd
 from atr import atr
 from adx import adx
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode
 from entry_filters import ADXFilter, BBWidthFilter, DISpreadFilter
 from indicators import bollinger_bands, lag
 from strategy import custom_entry_signal
@@ -75,9 +75,14 @@ class BacktestEngine:
     def _cap_qty(self, qty, entry_price, equity):
         capped=False; cap_qty=qty
         if self.config.max_effective_leverage_per_leg is not None: cap_qty=min(cap_qty, self.config.max_effective_leverage_per_leg*equity/entry_price)
-        if self.config.max_combined_effective_leverage is not None: cap_qty=min(cap_qty, self.config.max_combined_effective_leverage*equity/(2*entry_price))
+        if self.config.max_combined_effective_leverage is not None: cap_qty=min(cap_qty, self.config.max_combined_effective_leverage*equity/(self._entry_leg_count()*entry_price))
         capped=cap_qty < qty - 1e-12
         return cap_qty,capped
+    def _entry_leg_count(self):
+        return 2 if self.config.trade_direction in (TradeDirectionMode.BOTH, TradeDirectionMode.BOTH_INDEPENDENT) else 1
+    def _active_positions(self, pair):
+        return pair.positions()
+
     def _open_pair(self,i, adx_filter_passed=True, adx_filter_reason="ADX filter disabled"):
         raw=self.close[i]; long_entry=raw*(1+self.config.slippage); short_entry=raw*(1-self.config.slippage); r=float(self.risk[i]); stop=self.config.sl_mult*r; risk_amt=self.current_equity*self.config.risk_per_leg
         entry_fee_rate=self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee; exit_fee_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
@@ -88,7 +93,11 @@ class BacktestEngine:
         uncapped=risk_amt/sizing_loss_per_unit; lqty,lc=self._cap_qty(uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(uncapped,short_entry,self.current_equity); fee_rate=entry_fee_rate
         long=Position(Side.LONG,self._entry_time(i),i,long_entry,r,long_entry-stop,long_entry+self.config.tp_mult*r,lqty,risk_amt,long_entry*lqty,float(self.atr_values[i]),uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate, original_sl=long_entry-stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
         short=Position(Side.SHORT,self._entry_time(i),i,short_entry,r,short_entry+stop,short_entry-self.config.tp_mult*r,sqty,risk_amt,short_entry*sqty,float(self.atr_values[i]),uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate, original_sl=short_entry+stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
-        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc); pair.adx=float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan; pair.plus_di=float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan; pair.minus_di=float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan; self._attach_market_state(pair,i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self._record_pair_telemetry(pair, i); self.next_pair_id+=1
+        if self.config.trade_direction == TradeDirectionMode.LONG_ONLY:
+            short = None
+        elif self.config.trade_direction == TradeDirectionMode.SHORT_ONLY:
+            long = None
+        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._entry_time(i),raw,lc or sc); pair.trade_direction=self.config.trade_direction.value; pair.adx=float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan; pair.plus_di=float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan; pair.minus_di=float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan; self._attach_market_state(pair,i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self._record_pair_telemetry(pair, i); self.next_pair_id+=1
 
     def _attach_market_state(self, pair, i):
         fields = {"bb_middle":self.bb_middle,"bb_upper":self.bb_upper,"bb_lower":self.bb_lower,"bb_width":self.bb_width,"bb_width_pct":self.bb_width_pct,"bb_width_1":self.bb_width_1,"bb_width_3":self.bb_width_3,"bb_width_5":self.bb_width_5,"bb_width_entry_5bar_change":self.bb_width_change,"bb_width_entry_5bar_change_pct":self.bb_width_change_pct,"di_spread":self.di_spread,"di_ratio":self.di_ratio,"di_spread_1":self.di_spread_1,"di_spread_3":self.di_spread_3,"di_spread_5":self.di_spread_5,"di_spread_entry_5bar_change":self.di_spread_change}
@@ -96,36 +105,37 @@ class BacktestEngine:
             setattr(pair, name, float(arr[i]) if np.isfinite(arr[i]) else np.nan)
     def _update_positions_to_strategy_index(self,i):
         for pair in self.active_pairs:
-            if i > pair.long.entry_index and self._maybe_timeout_pair(pair, i):
+            first = pair.positions()[0]
+            if i > first.entry_index and self._maybe_timeout_pair(pair, i):
                 continue
-            if i > pair.long.entry_index:
+            if i > first.entry_index:
                 self._scan_pair_exit(pair,i)
     def _scan_pair_exit(self,pair,i):
         if not self.config.use_intrabar_data or self.intrabar_data is None:
-            for pos in (pair.long,pair.short):
+            for pos in pair.positions():
                 if pos.is_open: self._scan_exit(pos,i); self._maybe_apply_be(pair,pos,None,None,None,None)
             return
         start=pd.Timestamp(pair.strategy_entry_time); end=pd.Timestamp(self.times[i])+self.entry_delta
         if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
-            for pos in (pair.long,pair.short):
+            for pos in pair.positions():
                 if pos.is_open: self._fallback_exit(pos,i,"timestamp_alignment_failure"); self._maybe_apply_be(pair,pos,None,None,None,None)
             return
         sub=self.intrabar_data[(self.intrabar_data.timestamp>=start)&(self.intrabar_data.timestamp<end)]
         if sub.empty or (sub.timestamp.iloc[0] > start + pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)) or self._has_missing_intrabar(sub,start,end):
             reason="no_overlapping_intrabar_rows" if sub.empty else "intrabar_gap"
-            for pos in (pair.long,pair.short):
+            for pos in pair.positions():
                 if pos.is_open: pos.missing_intrabar_data=True; self._fallback_exit(pos,i,reason); self._maybe_apply_be(pair,pos,None,None,None,None)
             return
         for j,row in sub.iterrows():
-            before=(pair.long.is_open,pair.short.is_open)
-            for pos in (pair.long,pair.short):
+            before=tuple(pos.is_open for pos in pair.positions())
+            for pos in pair.positions():
                 if pos.is_open and not (pos.be_active_after is not None and pd.Timestamp(row.timestamp) < pd.Timestamp(pos.be_active_after)):
                     self._maybe_exit_bar(pos,j,row.high,row.low,row.timestamp,ExitSource.INTRABAR)
                     self._maybe_apply_be(pair,pos,j,row.high,row.low,row.timestamp)
-            if not pair.is_open or before != (pair.long.is_open,pair.short.is_open):
+            if not pair.is_open or before != tuple(pos.is_open for pos in pair.positions()):
                 pass
         if self.intrabar_data.timestamp.max() < end - pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes):
-            for pos in (pair.long,pair.short):
+            for pos in pair.positions():
                 if pos.is_open: self._fallback_exit(pos,i,"end_of_intrabar_data"); self._maybe_apply_be(pair,pos,None,None,None,None)
 
     def _scan_exit(self,pos,i):
@@ -172,7 +182,7 @@ class BacktestEngine:
     def _maybe_apply_be(self,pair,closed_pos,bar_index,high,low,timestamp):
         if not self.config.enable_be_after_opposite_sl or closed_pos.exit_reason != ExitReason.SL: return False
         other=pair.short if closed_pos.side==Side.LONG else pair.long
-        if not other.is_open or other.be_triggered: return False
+        if other is None or not other.is_open or other.be_triggered: return False
         new_sl=self._be_stop(other)
         improves = new_sl > other.sl if other.side==Side.LONG else new_sl < other.sl
         if not improves: return False
@@ -189,7 +199,7 @@ class BacktestEngine:
     def _timeout_source(self):
         return ExitSource.INTRABAR if self.config.use_intrabar_data and self.intrabar_data is not None else ExitSource.FALLBACK_15M
     def _maybe_timeout_pair(self,pair,i):
-        if not self.config.enable_both_open_timeout or not (pair.long.is_open and pair.short.is_open): return False
+        if not self.config.enable_both_open_timeout or pair.long is None or pair.short is None or not (pair.long.is_open and pair.short.is_open): return False
         timeout_at=pd.Timestamp(pair.strategy_entry_time) + self.timeout_delta
         interval_end=pd.Timestamp(self.times[i]) + self.entry_delta
         if interval_end < timeout_at: return False
@@ -234,23 +244,40 @@ class BacktestEngine:
     def _force_close_end(self):
         last=len(self.data)-1
         for pair in self.active_pairs:
-            for pos in (pair.long,pair.short):
+            for pos in pair.positions():
                 if pos.is_open: self._close_position(pos,last,self.close[last],ExitReason.END_OF_DATA,ExitSource.END_OF_DATA,pd.Timestamp(self.times[last]) + self.entry_delta)
     def _collect_closed_pairs(self,force=False):
         still=[]
         for p in self.active_pairs:
-            if force or not p.is_open: self.current_equity+=p.long.net_pnl+p.short.net_pnl; p.equity_after_trade=self.current_equity; self.completed_pairs.append(p)
+            if force or not p.is_open: self.current_equity+=sum(pos.net_pnl for pos in p.positions()); p.equity_after_trade=self.current_equity; self.completed_pairs.append(p)
             else: still.append(p)
         self.active_pairs=still
+    def _result_rows_for_pair(self, p):
+        positions = list(p.positions())
+        if self.config.trade_direction == TradeDirectionMode.BOTH_INDEPENDENT:
+            return [(pos.side.value.lower(), [pos]) for pos in positions]
+        return [("pair" if len(positions) > 1 else positions[0].side.value.lower(), positions)]
+
     def results_frame(self):
         rows=[]
         for p in self.completed_pairs:
-            fees=p.long.fees+p.short.fees; gross=p.long.gross_pnl+p.short.gross_pnl; net=p.long.net_pnl+p.short.net_pnl; risk_base=p.long.risk_amount+p.short.risk_amount
-            exit_t=max(pd.Timestamp(p.long.exit_time),pd.Timestamp(p.short.exit_time)); hold=exit_t-pd.Timestamp(p.strategy_entry_time); comb=p.long.entry_notional+p.short.entry_notional; exp=(self.config.tp_mult-self.config.sl_mult)*p.long.risk*(p.long.quantity+p.short.quantity)/2; est=(p.long.entry_notional+p.short.entry_notional)*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
-            all_in_stop_risk = (self._estimated_stop_loss(p.long) + self._estimated_stop_loss(p.short)) / 2 / p.equity_before_trade
-            rows.append({"pair_id":p.pair_id,"position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":p.long.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),"indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.","bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_entry_5bar_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":p.long.risk,"equity_before_trade":p.equity_before_trade,
-            **self._pos_cols('long',p.long), **self._pos_cols('short',p.short),"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":p.long.price_r+p.short.price_r,"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":p.long.gross_r+p.short.gross_r,"pair_fee_r":fees/p.long.risk_amount,"pair_net_r":p.long.net_r+p.short.net_r,"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":p.long.ambiguous or p.short.ambiguous,"ambiguous_candle":p.long.ambiguous or p.short.ambiguous,"missing_intrabar_data":p.long.missing_intrabar_data or p.short.missing_intrabar_data})
+            for row_kind, positions in self._result_rows_for_pair(p):
+                primary = positions[0]
+                fees=sum(pos.fees for pos in positions); gross=sum(pos.gross_pnl for pos in positions); net=sum(pos.net_pnl for pos in positions); risk_base=sum(pos.risk_amount for pos in positions)
+                exit_t=max(pd.Timestamp(pos.exit_time) for pos in positions); hold=exit_t-pd.Timestamp(p.strategy_entry_time); comb=sum(pos.entry_notional for pos in positions)
+                exp=(self.config.tp_mult-self.config.sl_mult)*sum(pos.risk*pos.quantity for pos in positions)/len(positions)
+                est=comb*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
+                all_in_stop_risk = sum(self._estimated_stop_loss(pos) for pos in positions) / len(positions) / p.equity_before_trade
+                row={"pair_id":p.pair_id,"trade_id":f"{p.pair_id}-{row_kind}" if row_kind != "pair" else p.pair_id,"trade_direction":self.config.trade_direction.value,"result_type":row_kind,"side":primary.side.value if len(positions)==1 else "BOTH","position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":primary.entry_price if len(positions)==1 else p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":primary.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),"indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.","bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_entry_5bar_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":primary.risk,"equity_before_trade":p.equity_before_trade,"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":sum(pos.price_r for pos in positions),"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":sum(pos.gross_r for pos in positions),"pair_fee_r":fees/primary.risk_amount,"pair_net_r":sum(pos.net_r for pos in positions),"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":any(pos.ambiguous for pos in positions),"ambiguous_candle":any(pos.ambiguous for pos in positions),"missing_intrabar_data":any(pos.missing_intrabar_data for pos in positions)}
+                if p.long is not None and (len(positions)>1 or primary.side==Side.LONG): row.update(self._pos_cols('long', p.long))
+                if p.short is not None and (len(positions)>1 or primary.side==Side.SHORT): row.update(self._pos_cols('short', p.short))
+                rows.append(row)
         frame=pd.DataFrame(rows)
+        if not frame.empty and self.config.trade_direction == TradeDirectionMode.BOTH_INDEPENDENT:
+            exit_cols=[c for c in ("long_exit_time","short_exit_time") if c in frame]
+            exit_times=frame[exit_cols].max(axis=1) if exit_cols else frame["entry_time"]
+            frame=frame.assign(_result_exit_time=pd.to_datetime(exit_times)).sort_values(["_result_exit_time","trade_id"]).drop(columns=["_result_exit_time"]).reset_index(drop=True)
+            frame["equity_after_trade"] = self.config.initial_equity + frame["pair_net_pnl"].cumsum()
         if not frame.empty:
             frame["signals_evaluated"] = self.signals_evaluated
             frame["signals_skipped_by_adx"] = sum(("ADX unavailable" in str(x.get("entry_filter_reason", x.get("adx_filter_reason", "")))) or str(x.get("entry_filter_reason", x.get("adx_filter_reason", ""))).startswith("ADX ") for x in self.skipped_signals)
@@ -260,8 +287,8 @@ class BacktestEngine:
         return frame
 
     def telemetry_frame(self):
-        from telemetry import TELEMETRY_COLUMNS
-        return pd.DataFrame(self.telemetry_rows, columns=TELEMETRY_COLUMNS)
+        from telemetry import telemetry_columns_for_direction
+        return pd.DataFrame(self.telemetry_rows, columns=telemetry_columns_for_direction(self.config.trade_direction))
 
     def _num(self, arr, i):
         value = arr[i]
@@ -292,16 +319,21 @@ class BacktestEngine:
         if self.telemetry_rows and self.telemetry_rows[-1].get("pair_id") == pair.pair_id and pd.Timestamp(self.telemetry_rows[-1].get("timestamp")) == ts:
             return
         close = float(self.close[i]); high = float(self.high[i]); low = float(self.low[i])
-        long_open = pair.long.is_open; short_open = pair.short.is_open
-        long_pnl = self._unrealized(pair.long, close); short_pnl = self._unrealized(pair.short, close)
+        long_open = pair.long.is_open if pair.long is not None else False; short_open = pair.short.is_open if pair.short is not None else False
+        long_pnl = self._unrealized(pair.long, close) if pair.long is not None else 0.0; short_pnl = self._unrealized(pair.short, close) if pair.short is not None else 0.0
         def distances(pos, is_long):
             if not pos.is_open:
                 return (np.nan, np.nan, np.nan, np.nan)
             sl_d = close - pos.sl if is_long else pos.sl - close
             tp_d = pos.tp - close if is_long else close - pos.tp
             return (float(sl_d), float(tp_d), float(sl_d / pos.risk) if pos.risk else np.nan, float(tp_d / pos.risk) if pos.risk else np.nan)
-        lsl, ltp, lslr, ltpr = distances(pair.long, True); ssl, stp, sslr, stpr = distances(pair.short, False)
-        self.telemetry_rows.append({"pair_id":pair.pair_id,"timestamp":ts,"elapsed_minutes":elapsed,"elapsed_strategy_bars":int(elapsed / self.config.strategy_timeframe_minutes),"close":close,"high":high,"low":low,"atr":self._num(self.atr_values,i),"adx":self._num(self.adx_values,i),"plus_di":self._num(self.plus_di_values,i),"minus_di":self._num(self.minus_di_values,i),"di_spread":self._num(self.di_spread,i),"di_ratio":self._num(self.di_ratio,i),"bb_middle":self._num(self.bb_middle,i),"bb_upper":self._num(self.bb_upper,i),"bb_lower":self._num(self.bb_lower,i),"bb_width":self._num(self.bb_width,i),"bb_width_pct":self._num(self.bb_width_pct,i),"long_is_open":long_open,"short_is_open":short_open,"long_unrealized_pnl":long_pnl,"short_unrealized_pnl":short_pnl,"pair_unrealized_pnl":long_pnl+short_pnl,"long_distance_to_sl":lsl,"long_distance_to_tp":ltp,"short_distance_to_sl":ssl,"short_distance_to_tp":stp,"long_distance_to_sl_r":lslr,"long_distance_to_tp_r":ltpr,"short_distance_to_sl_r":sslr,"short_distance_to_tp_r":stpr,"long_current_sl":pair.long.sl if pair.long.is_open else np.nan,"short_current_sl":pair.short.sl if pair.short.is_open else np.nan,"long_tp":pair.long.tp,"short_tp":pair.short.tp})
+        lsl, ltp, lslr, ltpr = distances(pair.long, True) if pair.long is not None else (np.nan, np.nan, np.nan, np.nan); ssl, stp, sslr, stpr = distances(pair.short, False) if pair.short is not None else (np.nan, np.nan, np.nan, np.nan)
+        row={"pair_id":pair.pair_id,"timestamp":ts,"elapsed_minutes":elapsed,"elapsed_strategy_bars":int(elapsed / self.config.strategy_timeframe_minutes),"close":close,"high":high,"low":low,"atr":self._num(self.atr_values,i),"adx":self._num(self.adx_values,i),"plus_di":self._num(self.plus_di_values,i),"minus_di":self._num(self.minus_di_values,i),"di_spread":self._num(self.di_spread,i),"di_ratio":self._num(self.di_ratio,i),"bb_middle":self._num(self.bb_middle,i),"bb_upper":self._num(self.bb_upper,i),"bb_lower":self._num(self.bb_lower,i),"bb_width":self._num(self.bb_width,i),"bb_width_pct":self._num(self.bb_width_pct,i),"long_is_open":long_open,"short_is_open":short_open,"long_unrealized_pnl":long_pnl,"short_unrealized_pnl":short_pnl,"pair_unrealized_pnl":long_pnl+short_pnl,"long_distance_to_sl":lsl,"long_distance_to_tp":ltp,"short_distance_to_sl":ssl,"short_distance_to_tp":stp,"long_distance_to_sl_r":lslr,"long_distance_to_tp_r":ltpr,"short_distance_to_sl_r":sslr,"short_distance_to_tp_r":stpr,"long_current_sl":pair.long.sl if pair.long is not None and pair.long.is_open else np.nan,"short_current_sl":pair.short.sl if pair.short is not None and pair.short.is_open else np.nan,"long_tp":pair.long.tp if pair.long is not None else np.nan,"short_tp":pair.short.tp if pair.short is not None else np.nan}
+        if self.config.trade_direction == TradeDirectionMode.LONG_ONLY:
+            row={k:v for k,v in row.items() if not k.startswith("short_")}
+        elif self.config.trade_direction == TradeDirectionMode.SHORT_ONLY:
+            row={k:v for k,v in row.items() if not k.startswith("long_")}
+        self.telemetry_rows.append(row)
 
     def _estimated_stop_loss(self,pos):
         if pos.side==Side.LONG:

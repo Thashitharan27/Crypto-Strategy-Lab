@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode
 from engine import BacktestEngine
 from loader import load_backtest_data, load_ohlcv_csv
 from plots import save_plots
@@ -47,6 +47,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-combined-leverage", type=float, dest="max_combined_effective_leverage")
     parser.add_argument("--intrabar-missing-policy", type=enum_value(IntrabarMissingPolicy), choices=list(IntrabarMissingPolicy))
     parser.add_argument("--zero-cost-comparison", action="store_true", default=None)
+    parser.add_argument("--trade-direction", type=enum_value(TradeDirectionMode), choices=list(TradeDirectionMode))
+    parser.add_argument("--trade-direction-comparison", action="store_true", help="Run BOTH, LONG_ONLY, and SHORT_ONLY comparison report")
     parser.add_argument("--enable-both-open-timeout", action="store_true", default=None)
     parser.add_argument("--max-both-open-minutes", type=int)
     parser.add_argument("--timeout-comparison", action="store_true", help="Compare no timeout plus 2/4/6/8/12 hour both-open timeout runs")
@@ -104,7 +106,7 @@ def main() -> None:
     config = BacktestConfig()
     overrides = {}
     for key, value in vars(args).items():
-        if value is not None and key not in ("timeout_comparison", "be_comparison", "adx_comparison", "bb_width_comparison", "di_spread_comparison"):
+        if value is not None and key not in ("timeout_comparison", "be_comparison", "adx_comparison", "bb_width_comparison", "di_spread_comparison", "trade_direction_comparison"):
             overrides["input_csv" if key == "input" else key] = value
     config = replace(config, **overrides)
 
@@ -153,7 +155,7 @@ def main() -> None:
     for warning in chart_warnings:
       print(f"WARNING: {warning}")
     summary = summarize(trades, config.initial_equity)
-    summary.update({"use_intrabar_data": config.use_intrabar_data,"both_open_timeout_enabled":config.enable_both_open_timeout,"max_both_open_minutes":config.max_both_open_minutes, "intrabar_csv": str(config.intrabar_csv) if config.intrabar_csv else None, "strategy_timeframe": config.strategy_timeframe_minutes, "intrabar_timeframe": config.intrabar_timeframe_minutes, "atr_timeframe": config.strategy_timeframe_minutes, "atr_period": config.atr_period, "atr_multiplier": config.atr_multiplier, "indicator_data_start": str(data.timestamp.min()), "data_start": config.data_start_date, "trading_start": config.trading_start_date, "trading_end": config.trading_end_date, "warmup_candles": engine.warmup_candle_count, "first_valid_atr_timestamp": str(engine.first_valid_atr_timestamp)})
+    summary.update({"trade_direction": config.trade_direction.value, "use_intrabar_data": config.use_intrabar_data,"both_open_timeout_enabled":config.enable_both_open_timeout,"max_both_open_minutes":config.max_both_open_minutes, "intrabar_csv": str(config.intrabar_csv) if config.intrabar_csv else None, "strategy_timeframe": config.strategy_timeframe_minutes, "intrabar_timeframe": config.intrabar_timeframe_minutes, "atr_timeframe": config.strategy_timeframe_minutes, "atr_period": config.atr_period, "atr_multiplier": config.atr_multiplier, "indicator_data_start": str(data.timestamp.min()), "data_start": config.data_start_date, "trading_start": config.trading_start_date, "trading_end": config.trading_end_date, "warmup_candles": engine.warmup_candle_count, "first_valid_atr_timestamp": str(engine.first_valid_atr_timestamp)})
 
     if args.timeout_comparison:
         rows = []
@@ -203,6 +205,17 @@ def main() -> None:
             rows.append({"scenario":label,"return":cmp_summary.get("total_return_percentage"),"win_rate":cmp_summary.get("win_rate"),"double_sl":combos.get("Long SL / Short SL",{}).get("count",0),"profit_factor":cmp_summary.get("profit_factor"),"max_drawdown":cmp_summary.get("maximum_drawdown"),"fees":cmp_summary.get("total_fees")})
         summary["di_spread_comparison"] = rows
         pd.DataFrame(rows).to_csv(run_dir / "di_spread_comparison.csv", index=False)
+
+    if args.trade_direction_comparison:
+        rows=[]
+        for label, mode in [("BOTH", TradeDirectionMode.BOTH), ("LONG", TradeDirectionMode.LONG_ONLY), ("SHORT", TradeDirectionMode.SHORT_ONLY)]:
+            cmp_cfg=replace(config, trade_direction=mode)
+            cmp_trades=BacktestEngine(data, cmp_cfg, intrabar).run()
+            cmp_summary=summarize(cmp_trades, cmp_cfg.initial_equity)
+            rows.append({"Metric":"values","mode":label,"Trades":cmp_summary.get("total_trades"),"Win %":cmp_summary.get("win_rate"),"Net PnL":float(cmp_trades["pair_net_pnl"].sum()) if not cmp_trades.empty else 0.0,"Profit Factor":cmp_summary.get("profit_factor"),"Max Drawdown":cmp_summary.get("maximum_drawdown"),"Avg Hold":cmp_summary.get("average_holding_time"),"Fees":cmp_summary.get("total_fees"),"Avg Winner":cmp_summary.get("average_winner"),"Avg Loser":cmp_summary.get("average_loser")})
+        comparison=pd.DataFrame(rows).set_index("mode").drop(columns=["Metric"]).T.reset_index().rename(columns={"index":"Metric"})
+        summary["trade_direction_comparison"] = comparison.to_dict(orient="records")
+        comparison.to_csv(run_dir / "trade_direction_comparison.csv", index=False)
     if config.zero_cost_comparison:
         ideal_cfg = replace(config, maker_fee=0, taker_fee=0, slippage=0, zero_cost_comparison=False)
         ideal_trades = BacktestEngine(data, ideal_cfg, intrabar).run()

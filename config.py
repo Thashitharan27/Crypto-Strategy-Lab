@@ -26,6 +26,8 @@ class BBWidthFilterMode(str, Enum):
     DISABLED = "Disabled"; MAXIMUM = "Maximum Width"; MINIMUM = "Minimum Width"; RANGE = "Range"
 class DISpreadFilterMode(str, Enum):
     DISABLED = "Disabled"; MAXIMUM = "Maximum Spread"; MINIMUM = "Minimum Spread"; RANGE = "Range"
+class TradeDirectionMode(str, Enum):
+    BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"; BOTH_INDEPENDENT = "BOTH_INDEPENDENT"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -44,6 +46,7 @@ class BacktestConfig:
     max_combined_effective_leverage: Optional[float] = None
     intrabar_missing_policy: IntrabarMissingPolicy = IntrabarMissingPolicy.WARN_AND_USE_15M
     zero_cost_comparison: bool = False
+    trade_direction: TradeDirectionMode = TradeDirectionMode.BOTH
     enable_both_open_timeout: bool = False
     max_both_open_minutes: int = 480
     enable_be_after_opposite_sl: bool = False
@@ -123,6 +126,7 @@ class BacktestConfig:
         if isinstance(self.adx_filter_mode, str): object.__setattr__(self, "adx_filter_mode", AdxFilterMode(self.adx_filter_mode))
         if isinstance(self.bb_width_filter_mode, str): object.__setattr__(self, "bb_width_filter_mode", BBWidthFilterMode(self.bb_width_filter_mode))
         if isinstance(self.di_spread_filter_mode, str): object.__setattr__(self, "di_spread_filter_mode", DISpreadFilterMode(self.di_spread_filter_mode))
+        if isinstance(self.trade_direction, str): object.__setattr__(self, "trade_direction", TradeDirectionMode(self.trade_direction))
         if self.telemetry_interval_minutes <= 0: raise ValueError("telemetry interval must be > 0")
         if self.telemetry_interval_minutes % self.strategy_timeframe_minutes != 0: raise ValueError("telemetry interval must be a multiple of the strategy timeframe")
         if self.enable_trade_telemetry and (self.strategy_timeframe_minutes != 15 or self.telemetry_interval_minutes != 15): raise ValueError("only 15-minute telemetry is currently supported when the strategy timeframe is 15 minutes")

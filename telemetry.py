@@ -19,8 +19,17 @@ def _series(frame: pd.DataFrame, column: str, dtype=float) -> pd.Series:
     return values
 
 MILESTONES = {15:"15m",30:"30m",45:"45m",60:"60m",120:"2h",240:"4h",480:"8h"}
-TELEMETRY_COLUMNS = ["pair_id","timestamp","elapsed_minutes","elapsed_strategy_bars","close","high","low","atr","adx","plus_di","minus_di","di_spread","di_ratio","bb_middle","bb_upper","bb_lower","bb_width","bb_width_pct","long_is_open","short_is_open","long_unrealized_pnl","short_unrealized_pnl","pair_unrealized_pnl","long_distance_to_sl","long_distance_to_tp","short_distance_to_sl","short_distance_to_tp","long_distance_to_sl_r","long_distance_to_tp_r","short_distance_to_sl_r","short_distance_to_tp_r","long_current_sl","short_current_sl","long_tp","short_tp"]
+BASE_TELEMETRY_COLUMNS = ["pair_id","timestamp","elapsed_minutes","elapsed_strategy_bars","close","high","low","atr","adx","plus_di","minus_di","di_spread","di_ratio","bb_middle","bb_upper","bb_lower","bb_width","bb_width_pct","long_is_open","short_is_open","long_unrealized_pnl","short_unrealized_pnl","pair_unrealized_pnl","long_distance_to_sl","long_distance_to_tp","short_distance_to_sl","short_distance_to_tp","long_distance_to_sl_r","long_distance_to_tp_r","short_distance_to_sl_r","short_distance_to_tp_r","long_current_sl","short_current_sl","long_tp","short_tp"]
 
+TELEMETRY_COLUMNS = BASE_TELEMETRY_COLUMNS
+
+def telemetry_columns_for_direction(direction) -> list[str]:
+    value = getattr(direction, "value", direction)
+    if value == "LONG_ONLY":
+        return [c for c in BASE_TELEMETRY_COLUMNS if not c.startswith("short_")]
+    if value == "SHORT_ONLY":
+        return [c for c in BASE_TELEMETRY_COLUMNS if not c.startswith("long_")]
+    return BASE_TELEMETRY_COLUMNS
 
 def _as_membership_values(values):
     if values is None:

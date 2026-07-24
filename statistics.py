@@ -26,18 +26,24 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     drawdown = equity - running_peak
     max_dd = float(drawdown.min())
     max_dd_pct = float((drawdown / running_peak).min()) if not running_peak.empty else 0.0
-    source_values = pd.concat([trades.get("long_exit_source", pd.Series(dtype=object)), trades.get("short_exit_source", pd.Series(dtype=object))], ignore_index=True)
+    exit_source_cols = [c for c in ("long_exit_source", "short_exit_source") if c in trades]
+    source_values = pd.concat([trades[c] for c in exit_source_cols], ignore_index=True) if exit_source_cols else trades.get("exit_source", pd.Series(dtype=object))
     source_counts = {"1M_INTRABAR": int((source_values == "1M_INTRABAR").sum()), "15M_FALLBACK": int((source_values == "15M_FALLBACK").sum()), "END_OF_DATA": int((source_values == "END_OF_DATA").sum())}
     timeout_pairs = trades[trades.get("both_open_timeout_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)]
     be_pairs = trades[trades.get("pair_be_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)]
-    be_exit_mask = pd.concat([trades.get("long_exit_reason", pd.Series(dtype=object)), trades.get("short_exit_reason", pd.Series(dtype=object))], ignore_index=True).isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"])
+    exit_reason_cols = [c for c in ("long_exit_reason", "short_exit_reason") if c in trades]
+    exit_reasons = pd.concat([trades[c] for c in exit_reason_cols], ignore_index=True) if exit_reason_cols else pd.Series(dtype=object)
+    be_exit_mask = exit_reasons.isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"])
     tp_after_be = ((trades.get("long_be_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)) & (trades.get("long_exit_reason", pd.Series(dtype=object)) == "TP")) | ((trades.get("short_be_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)) & (trades.get("short_exit_reason", pd.Series(dtype=object)) == "TP"))
     double_sl_prevented = ((trades.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (trades.get("short_exit_reason", pd.Series(dtype=object)).isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"]))) | ((trades.get("short_exit_reason", pd.Series(dtype=object)) == "SL") & (trades.get("long_exit_reason", pd.Series(dtype=object)).isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"])))
-    fallback_reasons = pd.concat([trades.get("long_fallback_reason", pd.Series(dtype=object)), trades.get("short_fallback_reason", pd.Series(dtype=object))], ignore_index=True).dropna().value_counts().to_dict()
+    fallback_cols = [c for c in ("long_fallback_reason", "short_fallback_reason") if c in trades]
+    fallback_reasons = (pd.concat([trades[c] for c in fallback_cols], ignore_index=True) if fallback_cols else pd.Series(dtype=object)).dropna().value_counts().to_dict()
     combos = {}
     def combo_label(row):
         lr = row.get("long_exit_reason")
         sr = row.get("short_exit_reason")
+        if pd.isna(lr) and pd.notna(sr): return f"Trade {sr}"
+        if pd.isna(sr) and pd.notna(lr): return f"Trade {lr}"
         if lr == "TP" and bool(row.get("long_be_triggered", False)): lr = "TP after BE move"
         if sr == "TP" and bool(row.get("short_be_triggered", False)): sr = "TP after BE move"
         return f"Long {lr} / Short {sr}"
@@ -54,9 +60,13 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     minus_di = pd.to_numeric(trades.get("minus_di", pd.Series(dtype=float)), errors="coerce")
     return {
         "total_pairs": int(len(trades)),
+        "total_trades": int(len(trades)),
+        "average_winner": float(trades.loc[wins, "pair_net_pnl"].mean()) if wins.any() else 0.0,
+        "average_loser": float(trades.loc[losses, "pair_net_pnl"].mean()) if losses.any() else 0.0,
+        "expectancy": float(trades["pair_net_pnl"].mean()),
         "signals_evaluated": int(trades.get("signals_evaluated", pd.Series([len(trades)])).iloc[0]) if "signals_evaluated" in trades else int(len(trades)),
         "signals_skipped_by_adx": int(trades.get("signals_skipped_by_adx", pd.Series([0])).iloc[0]) if "signals_skipped_by_adx" in trades else 0,
-        "signals_traded": int(len(trades)),
+        "signals_traded": int(trades.get("signals_traded", pd.Series([len(trades)])).iloc[0]) if "signals_traded" in trades else int(len(trades)),
         "wins": int(wins.sum()),
         "losses": int(losses.sum()),
         "flat_pairs": int(flats.sum()),
@@ -107,6 +117,7 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
         "average_minus_di_of_winners": float(minus_di[wins].mean()) if not minus_di[wins].empty else np.nan,
         "average_minus_di_of_losers": float(minus_di[losses].mean()) if not minus_di[losses].empty else np.nan,
         "exit_combinations": combos,
+        "outcomes": combos,
     }
 
 
@@ -130,8 +141,10 @@ def equity_curve(trades: pd.DataFrame, initial_equity: float = 1000.0) -> pd.Dat
     if trades.empty:
         return pd.DataFrame(columns=["time", "equity", "drawdown"])
     equity = trades["equity_after_trade"]
+    exit_cols=[c for c in ("long_exit_time","short_exit_time") if c in trades]
+    times = trades[exit_cols].max(axis=1) if exit_cols else trades.get("exit_time", trades["entry_time"])
     return pd.DataFrame({
-        "time": pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1)),
+        "time": pd.to_datetime(times),
         "equity": equity,
         "drawdown": equity - equity.cummax().clip(lower=initial_equity),
     })
