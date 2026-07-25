@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Optional
 
 class Side(str, Enum): LONG="LONG"; SHORT="SHORT"
-class ExitReason(str, Enum): TP="TP"; SL="SL"; TRAILING_STOP="TRAILING_STOP"; BE="BE"; BE_COST_ADJUSTED="BE_COST_ADJUSTED"; BE_R_OFFSET="BE_R_OFFSET"; BOTH_OPEN_TIMEOUT="BOTH_OPEN_TIMEOUT"; END_OF_DATA="END_OF_DATA"
+class ExitReason(str, Enum): TP="TP"; SL="SL"; TRAILING_STOP="TRAILING_STOP"; BE="BE"; BE_COST_ADJUSTED="BE_COST_ADJUSTED"; BE_R_OFFSET="BE_R_OFFSET"; BOTH_OPEN_TIMEOUT="BOTH_OPEN_TIMEOUT"; REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL="REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL"; END_OF_DATA="END_OF_DATA"
 class ExitSource(str, Enum): INTRABAR="1M_INTRABAR"; FALLBACK_15M="15M_FALLBACK"; END_OF_DATA="END_OF_DATA"
 
 @dataclass
@@ -27,6 +27,7 @@ class Position:
 @dataclass
 class TradePair:
     pair_id: int; long: Optional[Position]; short: Optional[Position]; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; pair_be_triggered: bool = False; equity_after_trade: Optional[float] = None; both_open_timeout_triggered: bool = False; timeout_minutes: Optional[int] = None; timeout_exit_time: Optional[object] = None
+    remaining_leg_timeout_after_first_sl_started: bool = False; first_sl_side: Optional[Side] = None; first_sl_time: Optional[object] = None; remaining_leg_timeout_deadline: Optional[object] = None; remaining_leg_timeout_triggered: bool = False; remaining_leg_timeout_exit_time: Optional[object] = None; remaining_leg_timeout_exit_side: Optional[Side] = None
     def positions(self):
         return tuple(p for p in (self.long, self.short) if p is not None)
     @property

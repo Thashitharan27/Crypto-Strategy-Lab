@@ -117,3 +117,24 @@ def test_gui_reset_restores_all_default_values_and_run_name():
         assert values["use_intrabar_data"] is True
     finally:
         window.close()
+
+
+def test_remaining_leg_timeout_gui_hours_save_load_round_trip(tmp_path):
+    path = tmp_path / "timeout.json"
+    app()
+    window = MainWindow()
+    try:
+        assert not window.remaining_leg_timeout.isChecked()
+        assert not window.remaining_leg_timeout_duration.isEnabled()
+        window.remaining_leg_timeout.setChecked(True)
+        window.remaining_leg_timeout_unit.setCurrentText("Hours")
+        window.remaining_leg_timeout_duration.setValue(4)
+        values = window.values()
+        assert values["remaining_leg_timeout_after_first_sl_minutes"] == 240
+        save_config_json(path, values)
+        window.apply_values(load_config_json(path))
+        assert window.remaining_leg_timeout.isChecked()
+        assert window.remaining_leg_timeout_unit.currentText() == "Hours"
+        assert window.remaining_leg_timeout_duration.value() == 4
+    finally:
+        window.close()

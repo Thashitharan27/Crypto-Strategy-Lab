@@ -95,3 +95,19 @@ def test_intrabar_timeframe_must_be_lower_only_when_enabled(tmp_path):
 
     cfg = build_backtest_config({**values, "use_intrabar_data": False})
     assert cfg.use_intrabar_data is False
+
+
+def test_remaining_leg_timeout_json_round_trip_and_validation(tmp_path):
+    path = tmp_path / "remaining-timeout.json"
+    values = {**base(tmp_path), "enable_remaining_leg_timeout_after_first_sl": True,
+              "remaining_leg_timeout_after_first_sl_minutes": 120,
+              "remaining_leg_timeout_after_first_sl_unit": "Hours"}
+    save_config_json(path, values)
+    loaded = load_config_json(path)
+    cfg = build_backtest_config(loaded)
+    assert cfg.enable_remaining_leg_timeout_after_first_sl is True
+    assert cfg.remaining_leg_timeout_after_first_sl_minutes == 120
+    assert loaded["remaining_leg_timeout_after_first_sl_unit"] == "Hours"
+
+    with pytest.raises(ValueError, match="Remaining-Leg Timeout After First SL"):
+        build_backtest_config({**values, "remaining_leg_timeout_after_first_sl_minutes": -1})
