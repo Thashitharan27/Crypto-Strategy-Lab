@@ -19,7 +19,8 @@ def rma(values: np.ndarray, period: int) -> np.ndarray:
     out = np.full(values.shape, np.nan, dtype=float)
     if len(values) < period:
         return out
-    seed = np.nanmean(values[:period])
+    seed_values = values[:period]
+    seed = float(np.mean(seed_values[~np.isnan(seed_values)])) if np.isfinite(seed_values).any() else np.nan
     out[period - 1] = seed
     alpha = 1.0 / period
     for i in range(period, len(values)):

@@ -147,7 +147,7 @@ class MainWindow(QMainWindow):
         if p: self.output_folder.setText(p); self.settings.setValue("last_output",p)
     def validate_data(self):
         try:
-            df=load_ohlcv_csv(self.input_csv.text(), expected_timeframe_minutes=self._timeframe_minutes(self.strategy_timeframe.currentText()), label="Strategy data", strict_timeframe=True); sm=df.attrs.get("summary"); miss=sm.missing_candles; tf=f"{sm.detected_timeframe_minutes} minutes"; self.dataset_info.setText(f"Total candles: {len(df):,}\nStart date: {df.timestamp.min()}\nEnd date: {df.timestamp.max()}\nDetected timeframe: {tf}\nMissing candles: {miss}\nRows removed: see log/console\nDuplicate candles removed: see log/console"); self.append_log("Data validation passed."); return True
+            df=load_ohlcv_csv(self.input_csv.text(), expected_timeframe_minutes=self._timeframe_minutes(self.strategy_timeframe.currentText()), label="Strategy data", strict_timeframe=True); self._validated_strategy_data=df; sm=df.attrs.get("summary"); miss=sm.missing_candles; tf=f"{sm.detected_timeframe_minutes} minutes"; self.dataset_info.setText(f"Total candles: {len(df):,}\nStart date: {df.timestamp.min()}\nEnd date: {df.timestamp.max()}\nDetected timeframe: {tf}\nMissing candles: {miss}\nRows removed: see log/console\nDuplicate candles removed: see log/console"); self.append_log("Data validation passed."); return True
         except Exception as e: QMessageBox.warning(self,"Invalid CSV",str(e)); self.append_log(traceback.format_exc()); return False
     def update_planned_output(self):
         try:
@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         try: vals=self.values(); cfg=build_backtest_config(vals); Path(vals['output_dir']).mkdir(parents=True,exist_ok=True); cfg=replace(cfg, output_run_dir=planned_run_dir(cfg)); self.planned_output.setText(str(cfg.output_run_dir.resolve()))
         except Exception as e: QMessageBox.warning(self,"Validation Problems",str(e)); return
         if not self.validate_data(): return
-        self.output_dir=cfg.output_run_dir; self.thread=QThread(); self.worker=BacktestWorker(cfg); self.worker.moveToThread(self.thread); self.thread.started.connect(self.worker.run); self.worker.status.connect(self.on_status); self.worker.log.connect(self.append_log); self.worker.finished.connect(self.on_finished); self.worker.failed.connect(self.on_failed); self.started=time.time(); self.cancel_btn.setEnabled(True); self.run_btn.setEnabled(False); self.thread.start()
+        self.output_dir=cfg.output_run_dir; self.thread=QThread(); self.worker=BacktestWorker(cfg, self._validated_strategy_data); self.worker.moveToThread(self.thread); self.thread.started.connect(self.worker.run); self.worker.status.connect(self.on_status); self.worker.log.connect(self.append_log); self.worker.finished.connect(self.on_finished); self.worker.failed.connect(self.on_failed); self.started=time.time(); self.cancel_btn.setEnabled(True); self.run_btn.setEnabled(False); self.thread.start()
     def on_status(self,s,p): self.status.setText(s); self.progress.setValue(p); self.elapsed.setText(f"Elapsed: {int(time.time()-self.started)}s")
     def on_finished(self,summary,trades,equity,out): self.last_summary=summary; self.output_dir=Path(out); self.populate_summary(summary); self.trade_model.set_dataframe(trades); self.refresh_chart(); self.cleanup_thread(); self.update_dynamic()
     def on_failed(self,msg,tb): QMessageBox.critical(self,"Backtest Error",msg); self.append_log(tb); self.cleanup_thread()

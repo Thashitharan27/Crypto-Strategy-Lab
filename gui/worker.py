@@ -1,7 +1,7 @@
 """QThread worker that runs the existing backtesting pipeline."""
 from __future__ import annotations
 
-import json, time, traceback
+import json, time, traceback, threading
 import pandas as pd
 from pathlib import Path
 
@@ -25,8 +25,8 @@ class BacktestWorker(QObject):
     finished = Signal(dict, object, object, object)
     failed = Signal(str, str)
 
-    def __init__(self, config: BacktestConfig):
-        super().__init__(); self.config = config; self._cancel = False; self._started = 0.0; self._log_lines: list[str] = []
+    def __init__(self, config: BacktestConfig, strategy_data: pd.DataFrame | None = None):
+        super().__init__(); self.config = config; self.strategy_data = strategy_data; self._cancel = False; self._started = 0.0; self._log_lines: list[str] = []; self._output_status = ("Preparing outputs", 95)
 
     @Slot()
     def cancel(self) -> None:
@@ -71,12 +71,22 @@ class BacktestWorker(QObject):
         remaining = (elapsed / ratio) - elapsed if ratio > 0 else None
         self._emit_stage("Backtesting", percent, processed, total, completed, opened, remaining)
 
+    def _output_progress(self, detail: str, percent: int) -> None:
+        self._output_status = (detail, percent)
+        self._emit_stage(detail, percent)
+
+    def _heartbeat(self, stop: threading.Event) -> None:
+        """Keep Qt's queued status stream active during long pandas/matplotlib calls."""
+        while not stop.wait(1.0):
+            detail, percent = self._output_status
+            self._emit_stage(detail, percent)
+
     @Slot()
     def run(self) -> None:
         self._started = time.time()
         try:
             self._emit_stage("Loading data", 0)
-            data, intrabar = load_backtest_data(self.config)
+            data, intrabar = load_backtest_data(self.config, self.strategy_data)
             self._emit_stage("Loading data", 10, 0, len(data))
             self._log(f"Loaded {len(data):,} strategy candles")
             if intrabar is not None: self._log(f"Loaded {len(intrabar):,} intrabar candles")
@@ -96,14 +106,20 @@ class BacktestWorker(QObject):
             summary.update({"trade_direction": self.config.trade_direction.value, "use_intrabar_data": self.config.use_intrabar_data, "intrabar_csv": str(self.config.intrabar_csv) if self.config.intrabar_csv else None, "strategy_timeframe": self.config.strategy_timeframe_minutes, "intrabar_timeframe": self.config.intrabar_timeframe_minutes, "atr_period": self.config.atr_period, "atr_multiplier": self.config.atr_multiplier})
             if self.config.use_intrabar_data and summary.get("intrabar_exit_count") == 0:
                 self._log("WARNING: use_intrabar_data=True but 1M_INTRABAR exit count is 0. Check intrabar path, overlap, and timestamp alignment.")
-            self._check(); self._emit_stage("Saving outputs", 95, len(data), len(data), len(trades), len(trades))
+            self._check(); self._output_progress("preparing trade list", 95)
+            heartbeat_stop = threading.Event()
+            heartbeat = threading.Thread(target=self._heartbeat, args=(heartbeat_stop,), daemon=True)
+            heartbeat.start()
             output_root = self.config.output_dir
             run_dir = create_run_dir(self.config)
             write_config(self.config, run_dir)
             output_failures = []
 
-            def run_output_step(label, action):
+            output_timings = []
+            def run_output_step(label, action, percent=98):
+                self._output_progress(label, percent)
                 self._log(f"{label}...")
+                started = time.perf_counter()
                 try:
                     return action()
                 except Exception as exc:  # noqa: BLE001 - output exports must continue independently.
@@ -112,52 +128,70 @@ class BacktestWorker(QObject):
                     self._log(f"ERROR while {label}: {exc}")
                     self._log(tb.rstrip())
                     return None
+                finally:
+                    elapsed = time.perf_counter() - started
+                    output_timings.append((label, elapsed))
+                    self._log(f"Output report timing: {label}: {elapsed:.3f}s")
 
-            run_output_step("Saving trade_list.csv", lambda: trades.to_csv(run_dir / "trade_list.csv", index=False))
+            run_output_step("writing trade_list.csv", lambda: trades.to_csv(run_dir / "trade_list.csv", index=False), 96)
             if engine.random_entry_active:
-                run_output_step("Saving random_entry_decisions.csv",lambda:decisions_frame(engine.random_entry_decisions).to_csv(run_dir/"random_entry_decisions.csv",index=False))
-                run_output_step("Saving random_entry_analysis.csv",lambda:random_analysis(trades,engine.random_entry_decisions,self.config).to_csv(run_dir/"random_entry_analysis.csv",index=False))
+                run_output_step("writing random_entry_decisions.csv",lambda:decisions_frame(engine.random_entry_decisions).to_csv(run_dir/"random_entry_decisions.csv",index=False))
+                run_output_step("writing random_entry_analysis.csv",lambda:random_analysis(trades,engine.random_entry_decisions,self.config).to_csv(run_dir/"random_entry_analysis.csv",index=False))
                 baseline_cfg=replace(self.config,enable_random_entry=False,entry_timing_mode=EntryTimingMode.CURRENT,enable_random_entry_batch=False)
                 baseline=BacktestEngine(data,baseline_cfg,intrabar).run()
-                run_output_step("Saving random_vs_baseline_comparison.csv",lambda:pd.DataFrame([comparison_row("CURRENT",None,baseline,self.config.initial_equity),comparison_row("RANDOM_AFTER_PAIR_CLOSE",self.config.random_seed,trades,self.config.initial_equity)]).to_csv(run_dir/"random_vs_baseline_comparison.csv",index=False))
+                run_output_step("writing random_vs_baseline_comparison.csv",lambda:pd.DataFrame([comparison_row("CURRENT",None,baseline,self.config.initial_equity),comparison_row("RANDOM_AFTER_PAIR_CLOSE",self.config.random_seed,trades,self.config.initial_equity)]).to_csv(run_dir/"random_vs_baseline_comparison.csv",index=False))
                 if self.config.enable_random_entry_batch:
-                    batch,batch_stats=run_batch(data,intrabar,self.config); run_output_step("Saving random_entry_batch_summary.csv",lambda:batch.to_csv(run_dir/"random_entry_batch_summary.csv",index=False)); run_output_step("Saving random_entry_batch_statistics.csv",lambda:batch_stats.to_csv(run_dir/"random_entry_batch_statistics.csv",index=False))
-            run_output_step("Building trailing_profit_analysis", lambda: trailing_profit_analysis(trades).to_csv(run_dir / "trailing_profit_analysis.csv", index=False))
-            run_output_step("Building partial_take_profit_analysis", lambda: partial_take_profit_analysis(trades).to_csv(run_dir / "partial_take_profit_analysis.csv", index=False))
+                    batch,batch_stats=run_batch(data,intrabar,self.config); run_output_step("writing random_entry_batch_summary.csv",lambda:batch.to_csv(run_dir/"random_entry_batch_summary.csv",index=False)); run_output_step("writing random_entry_batch_statistics.csv",lambda:batch_stats.to_csv(run_dir/"random_entry_batch_statistics.csv",index=False))
+            run_output_step("writing trailing_profit_analysis.csv", lambda: trailing_profit_analysis(trades).to_csv(run_dir / "trailing_profit_analysis.csv", index=False))
+            run_output_step("writing partial_take_profit_analysis.csv", lambda: partial_take_profit_analysis(trades).to_csv(run_dir / "partial_take_profit_analysis.csv", index=False))
             if self.config.enable_trade_telemetry:
+                self._output_progress("preparing telemetry", 96)
                 if self.config.save_full_telemetry_csv:
-                    run_output_step("Saving telemetry", lambda: telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False))
+                    run_output_step("writing trade_telemetry.csv", lambda: telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False), 97)
                 if self.config.save_trade_journey_summary:
-                    run_output_step("Building trade_journey_analysis", lambda: trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False))
-                    run_output_step("Building winner_loser_journey_analysis", lambda: winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False))
-                    run_output_step("Building double_sl_journey_analysis", lambda: double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False))
+                    run_output_step("writing trade_journey_analysis.csv", lambda: trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False))
+                    run_output_step("writing winner_loser_journey_analysis.csv", lambda: winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False))
+                    run_output_step("writing double_sl_journey_analysis.csv", lambda: double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False))
                 if self.config.enable_indicator_lifecycle_analysis:
-                    run_output_step("Building indicator lifecycle reports", lambda: export_lifecycle_reports(trades, telemetry, run_dir, phases=self.config.lifecycle_phases, checkpoints=self.config.lifecycle_early_checkpoints, minimum_sample=self.config.lifecycle_minimum_bucket_sample, charts=self.config.create_lifecycle_charts, flat_threshold_pct=self.config.lifecycle_flat_pattern_threshold_pct))
-            run_output_step("Saving skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
-            run_output_step("Saving skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
-            run_output_step("Saving telemetry summaries", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
-            run_output_step("Saving BB width analysis", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
-            run_output_step("Saving DI spread analysis", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
+                    def lifecycle_progress(label, current, total):
+                        detail = f"{label} trade {current:,} of {total:,}" if total else label
+                        now = time.monotonic()
+                        self._output_status = (detail, 97 if total and current < total else 98)
+                        if current in (1, total) or now - getattr(self, "_last_lifecycle_update", 0.0) >= 0.25:
+                            self._last_lifecycle_update = now
+                            self._output_progress(*self._output_status)
+                        self._check()
+                    run_output_step("lifecycle analysis", lambda: export_lifecycle_reports(trades, telemetry, run_dir, phases=self.config.lifecycle_phases, checkpoints=self.config.lifecycle_early_checkpoints, minimum_sample=self.config.lifecycle_minimum_bucket_sample, charts=self.config.create_lifecycle_charts, flat_threshold_pct=self.config.lifecycle_flat_pattern_threshold_pct, progress=lifecycle_progress), 97)
+            run_output_step("writing skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
+            run_output_step("writing skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
+            run_output_step("writing adx_analysis.csv", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
+            run_output_step("writing bb_width_analysis.csv", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
+            run_output_step("writing di_spread_analysis.csv", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
             run_output_step("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir))
-            run_output_step("Saving equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False))
-            run_output_step("Saving monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False))
-            run_output_step("Saving yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False))
-            chart_warnings = run_output_step("Saving charts", lambda: save_plots(trades, equity, run_dir / "charts")) or []
+            run_output_step("writing equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False))
+            run_output_step("writing monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False))
+            run_output_step("writing yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False))
+            chart_warnings = run_output_step("creating charts", lambda: save_plots(trades, equity, run_dir / "charts"), 99) or []
             if self.config.enable_trade_telemetry and self.config.save_trade_journey_charts:
-                chart_warnings.extend(run_output_step("Saving journey charts", lambda: save_journey_charts(trades, telemetry, run_dir / "charts")) or [])
+                chart_warnings.extend(run_output_step("creating journey charts", lambda: save_journey_charts(trades, telemetry, run_dir / "charts")) or [])
             for warning in chart_warnings:
               self.log.emit(f"WARNING: {warning}")
             if output_failures:
                 summary["failed_output_reports"] = output_failures
                 self._log("WARNING: Some output reports failed: " + ", ".join(f["step"] for f in output_failures))
-            run_output_step("Saving summary.json", lambda: (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str)))
-            run_output_step("Saving summary.txt", lambda: write_summary_txt(summary, run_dir))
+            run_output_step("writing summary.json", lambda: (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str)))
+            run_output_step("writing summary.txt", lambda: write_summary_txt(summary, run_dir))
             run_output_step("Saving run info", lambda: write_run_info(self.config, summary, run_dir))
             update_latest(output_root, run_dir)
+            heartbeat_stop.set(); heartbeat.join(timeout=2)
             self._emit_stage("Saving outputs", 100, len(data), len(data), len(trades), len(trades), 0)
+            if output_timings:
+                slowest_label, slowest_elapsed = max(output_timings, key=lambda item: item[1])
+                self._log(f"Slowest output report: {slowest_label} ({slowest_elapsed:.3f}s)")
             self._log(f"Completed {len(trades):,} trade pairs")
             self._log(f"Results saved to {run_dir}")
             (run_dir / "log.txt").write_text("\n".join(self._log_lines + ["Backtest completed from GUI worker."]) + "\n")
             self.finished.emit(summary, trades, equity, run_dir)
         except Exception as exc:
+            if "heartbeat_stop" in locals(): heartbeat_stop.set()
             self.failed.emit(str(exc), traceback.format_exc())
