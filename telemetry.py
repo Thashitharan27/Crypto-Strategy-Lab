@@ -21,6 +21,9 @@ def _series(frame: pd.DataFrame, column: str, dtype=float) -> pd.Series:
 MILESTONES = {15:"15m",30:"30m",45:"45m",60:"60m",120:"2h",240:"4h",480:"8h"}
 BASE_TELEMETRY_COLUMNS = ["pair_id","timestamp","elapsed_minutes","elapsed_strategy_bars","close","high","low","atr","adx","plus_di","minus_di","di_spread","di_ratio","bb_middle","bb_upper","bb_lower","bb_width","bb_width_pct","long_is_open","short_is_open","long_unrealized_pnl","short_unrealized_pnl","pair_unrealized_pnl","long_distance_to_sl","long_distance_to_tp","short_distance_to_sl","short_distance_to_tp","long_distance_to_sl_r","long_distance_to_tp_r","short_distance_to_sl_r","short_distance_to_tp_r","long_current_sl","short_current_sl","long_tp","short_tp","long_trailing_enabled","long_trailing_active","long_trailing_activation_price","long_current_trailing_stop","long_current_active_stop","long_highest_price_since_entry","long_distance_to_activation_r","long_distance_to_trailing_stop_r","long_unrealized_profit_r","short_trailing_enabled","short_trailing_active","short_trailing_activation_price","short_current_trailing_stop","short_current_active_stop","short_lowest_price_since_entry","short_distance_to_activation_r","short_distance_to_trailing_stop_r","short_unrealized_profit_r"]
 
+for _side in ("long", "short"):
+    BASE_TELEMETRY_COLUMNS.extend([f"{_side}_original_quantity", f"{_side}_remaining_quantity", f"{_side}_tp1_hit", f"{_side}_tp2_hit", f"{_side}_tp1_price", f"{_side}_tp2_price", f"{_side}_realized_pnl", f"{_side}_total_current_pnl"])
+
 TELEMETRY_COLUMNS = BASE_TELEMETRY_COLUMNS
 
 def telemetry_columns_for_direction(direction) -> list[str]:
@@ -30,6 +33,20 @@ def telemetry_columns_for_direction(direction) -> list[str]:
     if value == "SHORT_ONLY":
         return [c for c in BASE_TELEMETRY_COLUMNS if not c.startswith("long_")]
     return BASE_TELEMETRY_COLUMNS
+
+def partial_take_profit_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    """Build a one-row audit summary for two-stage exits."""
+    pairs=len(trades); legs=sum(f"{s}_original_quantity" in trades for s in ("long","short"))*pairs
+    def count(side, field):
+        col=f"{side}_{field}"; return int(trades[col].fillna(False).astype(bool).sum()) if col in trades else 0
+    l1,l2,s1,s2=(count("long","tp1_hit"),count("long","tp2_hit"),count("short","tp1_hit"),count("short","tp2_hit"))
+    reasons=pd.concat([trades.get("long_final_exit_reason",pd.Series(dtype=object)),trades.get("short_final_exit_reason",pd.Series(dtype=object))],ignore_index=True)
+    gross=float(trades.get("pair_gross_pnl",pd.Series(dtype=float)).sum()); fees=float(trades.get("pair_total_fees",pd.Series(dtype=float)).sum()); net=float(trades.get("pair_net_pnl",pd.Series(dtype=float)).sum())
+    wins=trades.get("pair_net_pnl",pd.Series(dtype=float)); gains=float(wins[wins>0].sum()); losses=float(-wins[wins<0].sum())
+    eq=trades.get("equity_after_trade",pd.Series(dtype=float)); dd=float((eq-eq.cummax()).min()) if len(eq) else 0.0
+    def avg(cols):
+        values=pd.concat([trades[c].dropna() for c in cols if c in trades],ignore_index=True); return float(values.mean()) if len(values) else np.nan
+    return pd.DataFrame([{"total_pairs":pairs,"total_legs":legs,"long_tp1_hit_count":l1,"long_tp1_hit_rate":l1/pairs if pairs else 0,"long_tp2_hit_count":l2,"long_tp2_hit_rate":l2/pairs if pairs else 0,"short_tp1_hit_count":s1,"short_tp1_hit_rate":s1/pairs if pairs else 0,"short_tp2_hit_count":s2,"short_tp2_hit_rate":s2/pairs if pairs else 0,"legs_stopped_before_tp1":int(reasons.eq("SL").sum()),"legs_stopped_after_tp1":int(reasons.eq("TP1_THEN_SL").sum()),"legs_reached_tp1_and_tp2":l2+s2,"average_tp1_realized_pnl":avg(["long_tp1_net_pnl","short_tp1_net_pnl"]),"average_tp2_realized_pnl":avg(["long_tp2_net_pnl","short_tp2_net_pnl"]),"average_loss_before_tp1":avg(["long_stop_net_pnl","short_stop_net_pnl"]),"average_loss_after_tp1":avg(["long_stop_net_pnl","short_stop_net_pnl"]),"gross_pnl":gross,"total_fees":fees,"net_pnl":net,"profit_factor":gains/losses if losses else np.inf,"pair_win_rate":float((wins>0).mean()) if len(wins) else 0,"maximum_drawdown":dd}])
 
 def _as_membership_values(values):
     if values is None:

@@ -99,6 +99,8 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
         f"Risk mode: {config.risk_mode.value}",
         f"ATR period/multiplier: {config.atr_period} / {config.atr_multiplier}",
         f"SL/TP multiples: {config.sl_mult} / {config.tp_mult}",
+        f"Partial TP: {config.enable_partial_take_profit}; TP1/TP2: {config.tp1_r}R / {config.tp2_r}R; stop: {config.stop_loss_r}R",
+        f"Partial intrabar ordering: {'STOP_FIRST' if config.tie_policy.value == 'PESSIMISTIC' else 'TP1_THEN_TP2_THEN_STOP'}",
         f"Initial equity: {config.initial_equity}",
         f"Total pairs: {summary.get('total_pairs')}",
         f"Ending equity: {summary.get('ending_equity')}",
@@ -186,6 +188,9 @@ TRADE_R_COLUMN_METADATA = {
     "*_current_sl": "The final active stop loss after any break-even replacement.",
     "*_be_*": "Break-even-after-opposite-SL audit fields. COST_ADJUSTED estimates a zero-net exit using entry fee, estimated exit fee, and configured slippage; final realized net PnL may differ slightly because exit fee depends on actual exit notional.",
     "pair_be_triggered": "True when one leg hit SL and the opposite leg stop was moved by the break-even rule.",
+    "intrabar_partial_tp_ordering": "PESSIMISTIC uses STOP_FIRST; OPTIMISTIC uses TP1_THEN_TP2_THEN_STOP. Each leg is resolved independently.",
+    "*_remaining_quantity": "Quantity still protected by reduce-only-equivalent exit logic after partial fills.",
+    "*_tp1_* / *_tp2_* / *_stop_*": "Independent partial-fill quantities, times, prices, gross PnL, fees, and net PnL; unused fills are null.",
 }
 
 
