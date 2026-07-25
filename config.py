@@ -134,6 +134,12 @@ class BacktestConfig:
     save_trade_journey_summary: bool = True
     save_trade_journey_charts: bool = True
     telemetry_interval_minutes: int = 15
+    enable_indicator_lifecycle_analysis: bool = True
+    lifecycle_phases: int = 4
+    lifecycle_early_checkpoints: tuple[int, ...] = (15, 30, 60)
+    lifecycle_minimum_bucket_sample: int = 20
+    create_lifecycle_charts: bool = True
+    lifecycle_flat_pattern_threshold_pct: float = 5.0
 
     def __post_init__(self) -> None:
         if self.input_csv != Path("data/binance_ohlcv.csv") and self.strategy_csv == Path("data/BTCUSDT_15m.csv"):
@@ -200,6 +206,11 @@ class BacktestConfig:
         except ZoneInfoNotFoundError as exc:
             raise ValueError("daily_entry_timezone must be a valid IANA timezone") from exc
         if self.telemetry_interval_minutes <= 0: raise ValueError("telemetry interval must be > 0")
+        if self.lifecycle_phases != 4: raise ValueError("lifecycle_phases must currently be 4")
+        if self.lifecycle_minimum_bucket_sample <= 0: raise ValueError("lifecycle minimum bucket sample must be positive")
+        if self.lifecycle_flat_pattern_threshold_pct < 0: raise ValueError("lifecycle flat-pattern threshold must be non-negative")
+        if isinstance(self.lifecycle_early_checkpoints, list): object.__setattr__(self, "lifecycle_early_checkpoints", tuple(int(v) for v in self.lifecycle_early_checkpoints))
+        if any(v <= 0 for v in self.lifecycle_early_checkpoints): raise ValueError("lifecycle early checkpoints must be positive")
         if self.telemetry_interval_minutes % self.strategy_timeframe_minutes != 0: raise ValueError("telemetry interval must be a multiple of the strategy timeframe")
         if self.enable_trade_telemetry and (self.strategy_timeframe_minutes != 15 or self.telemetry_interval_minutes != 15): raise ValueError("only 15-minute telemetry is currently supported when the strategy timeframe is 15 minutes")
         if isinstance(self.comparison_timeout_minutes, list): object.__setattr__(self, "comparison_timeout_minutes", tuple(int(v) for v in self.comparison_timeout_minutes))
