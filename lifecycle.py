@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import warnings
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd
@@ -61,19 +62,33 @@ def _phase_values(g, column, entry, exit_, phases):
 
 
 def build_lifecycle_analysis(trades: pd.DataFrame, telemetry: pd.DataFrame, phases: int = 4,
-                             checkpoints=(15, 30, 60)) -> tuple[pd.DataFrame, pd.DataFrame]:
+                             checkpoints=(15, 30, 60),
+                             progress: Callable[[str, int, int], None] | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return one lifecycle row per completed leg and all validation failures.
 
     Telemetry is joined strictly by ``pair_id`` (the telemetry's unique parent ID),
     then bounded inclusively by the leg's true entry and exit times. Empty phase
     bins use the nearest observation to the phase midpoint.
     """
-    tel = telemetry.copy()
-    if "timestamp" in tel:
+    # Normalize telemetry and group it once.  The previous implementation scanned
+    # the complete telemetry frame for every leg, which made this O(trades *
+    # telemetry).  Group indices retain the exact original rows without making
+    # thousands of per-trade copies.
+    tel = telemetry
+    if "timestamp" in tel and not pd.api.types.is_datetime64_any_dtype(tel["timestamp"]):
+        tel = tel.copy()
         tel["timestamp"] = pd.to_datetime(tel["timestamp"])
+    if not tel.empty and "pair_id" in tel:
+        telemetry_groups = {key: group for key, group in tel.groupby("pair_id", sort=False, dropna=False)}
+    else:
+        telemetry_groups = {}
     rows, failures = [], []
-    for trade, side, trade_id, pair_id, entry, exit_ in _leg_rows(trades):
-        raw = tel[tel.get("pair_id", pd.Series(index=tel.index, dtype=object)).eq(pair_id)].copy()
+    legs = list(_leg_rows(trades))
+    total = len(legs)
+    for number, (trade, side, trade_id, pair_id, entry, exit_) in enumerate(legs, 1):
+        if progress:
+            progress("lifecycle analysis", number, total)
+        raw = telemetry_groups.get(pair_id, tel.iloc[0:0])
         flags = {name: False for name in VALIDATIONS}
         flags["missing_trade_id"] = pd.isna(trade_id) or pd.isna(pair_id)
         flags["exit_before_entry"] = exit_ < entry
@@ -147,14 +162,23 @@ def build_lifecycle_analysis(trades: pd.DataFrame, telemetry: pd.DataFrame, phas
     return pd.DataFrame(rows), pd.DataFrame(failures, columns=["trade_id", "pair_id", "side", "validation", "entry_time", "exit_time", "detail"])
 
 
+def _safe_stats(series):
+    """Return nullable descriptive statistics without NumPy empty-slice warnings."""
+    valid = pd.to_numeric(series, errors="coerce").dropna()
+    if valid.empty:
+        return (np.nan,) * 5
+    return valid.mean(), valid.median(), valid.std(), valid.min(), valid.max()
+
+
 def lifecycle_summary(analysis):
     rows=[]; numeric=analysis.select_dtypes(include=np.number).columns
     winners=analysis[analysis.is_winner.astype(bool)] if not analysis.empty else analysis; losers=analysis[~analysis.is_winner.astype(bool)] if not analysis.empty else analysis
     for metric in numeric:
-        wm, lm = winners[metric].mean(), losers[metric].mean()
+        wm, *_ = _safe_stats(winners[metric]); lm, *_ = _safe_stats(losers[metric])
         for label, group in (("WINNER", winners), ("LOSER", losers), ("ALL", analysis)):
             s=pd.to_numeric(group[metric],errors="coerce"); valid=s.dropna()
-            rows.append({"group":label,"metric":metric,"trade_count":len(group),"non_null_count":len(valid),"mean":valid.mean(),"median":valid.median(),"std":valid.std(),"min":valid.min(),"max":valid.max(),"winner_mean":wm,"loser_mean":lm,"mean_difference":wm-lm,"percentage_difference":((wm-lm)/abs(lm)*100 if pd.notna(lm) and lm else np.nan),"correlation_with_final_net_r":analysis[[metric,"final_net_r"]].corr().iloc[0,1] if metric != "final_net_r" else 1.0,"correlation_with_net_pnl":analysis[[metric,"net_pnl"]].corr().iloc[0,1] if metric != "net_pnl" else 1.0})
+            mean, median, std, minimum, maximum = _safe_stats(valid)
+            rows.append({"group":label,"metric":metric,"trade_count":len(group),"non_null_count":len(valid),"mean":mean,"median":median,"std":std,"min":minimum,"max":maximum,"winner_mean":wm,"loser_mean":lm,"mean_difference":wm-lm,"percentage_difference":((wm-lm)/abs(lm)*100 if pd.notna(lm) and lm else np.nan),"correlation_with_final_net_r":analysis[[metric,"final_net_r"]].corr().iloc[0,1] if metric != "final_net_r" else 1.0,"correlation_with_net_pnl":analysis[[metric,"net_pnl"]].corr().iloc[0,1] if metric != "net_pnl" else 1.0})
     return pd.DataFrame(rows)
 
 
@@ -234,9 +258,13 @@ def save_lifecycle_charts(analysis, charts_dir):
             fig.tight_layout(); fig.savefig(charts_dir / "early_indicator_change_win_rate.png"); plt.close(fig)
 
 
-def export_lifecycle_reports(trades, telemetry, run_dir, *, phases=4, checkpoints=(15,30,60), minimum_sample=20, charts=True, flat_threshold_pct=5.0):
-    analysis, validation=build_lifecycle_analysis(trades,telemetry,phases,checkpoints)
+def export_lifecycle_reports(trades, telemetry, run_dir, *, phases=4, checkpoints=(15,30,60), minimum_sample=20, charts=True, flat_threshold_pct=5.0, progress=None):
+    analysis, validation=build_lifecycle_analysis(trades,telemetry,phases,checkpoints,progress)
     reports={"indicator_lifecycle_analysis.csv":analysis,"indicator_lifecycle_summary.csv":lifecycle_summary(analysis),"indicator_phase_comparison.csv":phase_comparison(analysis,phases),"indicator_early_warning_analysis.csv":early_warning_analysis(analysis,minimum_sample),"indicator_sequence_analysis.csv":sequence_analysis(analysis,flat_threshold_pct),"indicator_lifecycle_validation.csv":validation}
-    for name,frame in reports.items(): frame.to_csv(Path(run_dir)/name,index=False)
-    if charts: save_lifecycle_charts(analysis,Path(run_dir)/"charts")
+    for name,frame in reports.items():
+        if progress: progress(f"writing {name}", 0, 0)
+        frame.to_csv(Path(run_dir)/name,index=False)
+    if charts:
+        if progress: progress("creating lifecycle charts", 0, 0)
+        save_lifecycle_charts(analysis,Path(run_dir)/"charts")
     return reports

@@ -50,3 +50,19 @@ def test_zero_r_and_zero_indicator_entry_are_safe_and_summaries_ignore_nan():
     assert not lifecycle_summary(out).empty
     assert len(phase_comparison(out)) >= 16
     assert isinstance(early_warning_analysis(out),pd.DataFrame)
+
+
+def test_lifecycle_progress_reports_every_leg_and_empty_stats_do_not_warn():
+    import warnings
+
+    trades, tel = fixtures()
+    calls = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        out, _ = build_lifecycle_analysis(trades, tel, progress=lambda label, current, total: calls.append((label, current, total)))
+        out["all_missing"] = np.nan
+        summary = lifecycle_summary(out)
+
+    assert calls == [("lifecycle analysis", 1, 1)]
+    missing = summary.loc[summary.metric.eq("all_missing")]
+    assert missing[["mean", "median", "std", "min", "max"]].isna().all().all()
