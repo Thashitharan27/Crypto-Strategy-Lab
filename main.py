@@ -17,6 +17,8 @@ from plots import save_plots
 from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
 from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, partial_take_profit_analysis
 from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
+from random_entry import decisions_frame, random_analysis, run_batch, comparison_row
+from config import EntryTimingMode
 
 
 def enum_value(enum_cls):
@@ -147,6 +149,16 @@ def main() -> None:
             return None
 
     run_output_step("Saving trade_list.csv", lambda: trades.to_csv(run_dir / "trade_list.csv", index=False))
+    if engine.random_entry_active:
+        run_output_step("Saving random_entry_decisions.csv", lambda: decisions_frame(engine.random_entry_decisions).to_csv(run_dir / "random_entry_decisions.csv", index=False))
+        run_output_step("Saving random_entry_analysis.csv", lambda: random_analysis(trades, engine.random_entry_decisions, config).to_csv(run_dir / "random_entry_analysis.csv", index=False))
+        baseline_cfg=replace(config,enable_random_entry=False,entry_timing_mode=EntryTimingMode.CURRENT,enable_random_entry_batch=False)
+        baseline_trades=BacktestEngine(data,baseline_cfg,intrabar).run()
+        run_output_step("Saving random_vs_baseline_comparison.csv", lambda: pd.DataFrame([comparison_row("CURRENT",None,baseline_trades,config.initial_equity),comparison_row("RANDOM_AFTER_PAIR_CLOSE",config.random_seed,trades,config.initial_equity)]).to_csv(run_dir / "random_vs_baseline_comparison.csv",index=False))
+        if config.enable_random_entry_batch:
+            batch, batch_stats=run_batch(data,intrabar,config)
+            run_output_step("Saving random_entry_batch_summary.csv",lambda:batch.to_csv(run_dir / "random_entry_batch_summary.csv",index=False))
+            run_output_step("Saving random_entry_batch_statistics.csv",lambda:batch_stats.to_csv(run_dir / "random_entry_batch_statistics.csv",index=False))
     run_output_step("Building partial_take_profit_analysis", lambda: partial_take_profit_analysis(trades).to_csv(run_dir / "partial_take_profit_analysis.csv", index=False))
     if config.enable_trade_telemetry:
         if config.save_full_telemetry_csv:

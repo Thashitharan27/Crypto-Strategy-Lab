@@ -39,6 +39,10 @@ class AfterTP1StopMode(str, Enum):
     KEEP_ORIGINAL_SL = "KEEP_ORIGINAL_SL"; MOVE_TO_ENTRY = "MOVE_TO_ENTRY"; MOVE_TO_R_OFFSET = "MOVE_TO_R_OFFSET"
 class TP2ExitMode(str, Enum):
     FIXED_TP2 = "FIXED_TP2"; TRAILING_AFTER_TP1 = "TRAILING_AFTER_TP1"
+class EntryTimingMode(str, Enum):
+    CURRENT = "CURRENT"; RANDOM_AFTER_PAIR_CLOSE = "RANDOM_AFTER_PAIR_CLOSE"
+class RandomEntryStartMode(str, Enum):
+    NEXT_CANDLE_AFTER_PAIR_CLOSE = "NEXT_CANDLE_AFTER_PAIR_CLOSE"; NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE = "NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -104,6 +108,16 @@ class BacktestConfig:
     position_sizing_mode: PositionSizingMode = PositionSizingMode.PRICE_RISK
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
     entry_interval: int = 1
+    enable_random_entry: bool = False
+    entry_timing_mode: EntryTimingMode = EntryTimingMode.CURRENT
+    random_entry_probability: float = 0.50
+    random_seed: int = 42
+    random_entry_start_mode: RandomEntryStartMode = RandomEntryStartMode.NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE
+    randomize_first_entry: bool = True
+    max_random_wait_candles: int = 0
+    enable_random_entry_batch: bool = False
+    random_seed_start: int = 1
+    random_seed_count: int = 100
     enable_daily_entry_schedule: bool = False
     daily_entry_time: str = "00:00"
     daily_entry_timezone: str = "UTC"
@@ -146,6 +160,10 @@ class BacktestConfig:
         if self.bb_width_maximum < 0 or self.bb_width_minimum < 0: raise ValueError("BB width thresholds must be non-negative")
         if self.di_spread_maximum < 0 or self.di_spread_minimum < 0: raise ValueError("DI spread thresholds must be non-negative")
         if self.entry_interval <= 0: raise ValueError("entry_interval must be positive")
+        if not 0 < self.random_entry_probability <= 1: raise ValueError("random_entry_probability must be greater than 0 and less than or equal to 1")
+        if isinstance(self.random_seed, bool) or not isinstance(self.random_seed, int): raise ValueError("random_seed must be an integer")
+        if self.max_random_wait_candles < 0: raise ValueError("max_random_wait_candles must be >= 0")
+        if self.random_seed_count <= 0: raise ValueError("random_seed_count must be positive")
         if self.max_active_pairs <= 0: raise ValueError("max_active_pairs must be positive")
         if self.fixed_r <= 0 or self.percent_r <= 0: raise ValueError("risk distances must be positive")
         if self.maker_fee < 0 or self.taker_fee < 0: raise ValueError("fee rates must be non-negative")
@@ -168,6 +186,8 @@ class BacktestConfig:
         if isinstance(self.after_tp1_stop_mode, str): object.__setattr__(self, "after_tp1_stop_mode", AfterTP1StopMode(self.after_tp1_stop_mode))
         if isinstance(self.tp2_exit_mode, str): object.__setattr__(self, "tp2_exit_mode", TP2ExitMode(self.tp2_exit_mode))
         if isinstance(self.daily_entry_missed_policy, str): object.__setattr__(self, "daily_entry_missed_policy", DailyEntryMissedPolicy(self.daily_entry_missed_policy))
+        if isinstance(self.entry_timing_mode, str): object.__setattr__(self, "entry_timing_mode", EntryTimingMode(self.entry_timing_mode))
+        if isinstance(self.random_entry_start_mode, str): object.__setattr__(self, "random_entry_start_mode", RandomEntryStartMode(self.random_entry_start_mode))
         try:
             hh, mm = [int(part) for part in str(self.daily_entry_time).split(":", 1)]
             if not (0 <= hh <= 23 and 0 <= mm <= 59): raise ValueError

@@ -1,11 +1,12 @@
 """Event-driven dual long/short backtesting engine with 15m strategy and optional 1m exits."""
 from __future__ import annotations
 from collections.abc import Callable
+from random import Random
 import numpy as np, pandas as pd
 from zoneinfo import ZoneInfo
 from atr import atr
 from adx import adx
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, AfterTP1StopMode, TP2ExitMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, AfterTP1StopMode, TP2ExitMode, EntryTimingMode, RandomEntryStartMode
 from entry_filters import ADXFilter, BBWidthFilter, DISpreadFilter
 from indicators import bollinger_bands, lag
 from strategy import custom_entry_signal
@@ -27,6 +28,9 @@ class BacktestEngine:
         self.daily_entry_tz=ZoneInfo(config.daily_entry_timezone)
         hh, mm = [int(part) for part in str(config.daily_entry_time).split(":", 1)]
         self.daily_entry_minutes = hh * 60 + mm
+        self.random_entry_active = bool(config.enable_random_entry and config.entry_timing_mode == EntryTimingMode.RANDOM_AFTER_PAIR_CLOSE)
+        self.random_rng = Random(config.random_seed) if self.random_entry_active else None
+        self.random_entry_decisions=[]; self.random_skips=0; self.last_closed_pair_id=None; self.previous_pair_close_time=None; self.pair_closed_index=None
     def _first_valid_atr_timestamp(self):
         idx=np.where(np.isfinite(self.atr_values))[0]
         return self.data.timestamp.iloc[int(idx[0])] if len(idx) else None
@@ -34,6 +38,7 @@ class BacktestEngine:
         total=len(self.data)
         self._emit_progress(0,total)
         for i in range(total):
+            self.current_index=i
             active_at_candle_start = bool(self.active_pairs)
             self._update_positions_to_strategy_index(i); self._record_active_telemetry(i); self._collect_closed_pairs()
             decision = self._entry_decision(i, active_at_candle_start)
@@ -56,7 +61,7 @@ class BacktestEngine:
         if self.config.risk_mode==RiskMode.PERCENT: return self.close*self.config.percent_r
         return self.atr_values*self.config.atr_multiplier
     def _entry_time(self,i): return pd.Timestamp(self.times[i]) + self.entry_delta
-    def _execution_time(self,i): return pd.Timestamp(self.times[i]) if self.config.enable_daily_entry_schedule else self._entry_time(i)
+    def _execution_time(self,i): return pd.Timestamp(self.times[i]) if (self.config.enable_daily_entry_schedule or self.random_entry_active) else self._entry_time(i)
     def _price_index(self,i): return i
     def _indicator_index_for_execution(self,i): return i - 1 if self.config.enable_daily_entry_schedule else i
     def _in_trading_window(self,i):
@@ -101,9 +106,28 @@ class BacktestEngine:
         return i > 0 and np.isfinite(self.risk[i-1]) and self.risk[i-1] > 0 and len(self.active_pairs) < self.config.max_active_pairs and self._in_trading_window(i)
 
     def _entry_decision(self, i, active_at_candle_start=False):
+        if self.random_entry_active:
+            return self._random_entry_decision(i, active_at_candle_start)
         if self.config.enable_daily_entry_schedule:
             return self._daily_entry_decision(i, active_at_candle_start)
         return {"execution_index": i, "indicator_index": i, "scheduled_timestamp": None, "actual_entry_timestamp": self._entry_time(i), "entry_schedule_status": None} if self._should_enter(i) else None
+    def _random_entry_decision(self, i, active_at_candle_start=False):
+        """Flip at an eligible candle open using indicators completed at i-1."""
+        if active_at_candle_start or self.active_pairs or i <= 0 or not self._base_entry_allowed(i): return None
+        # Entry filters are part of eligibility, so rejected/warm-up candles do
+        # not perturb the dedicated random stream.
+        if not self._entry_filter_result(i-1)[0]: return None
+        if self.next_pair_id == 1 and not self.config.randomize_first_entry:
+            return {"execution_index":i,"indicator_index":i-1,"actual_entry_timestamp":pd.Timestamp(self.times[i]),"entry_schedule_status":None,"random_bypass":True}
+        if self.pair_closed_index is not None and i <= self.pair_closed_index: return None
+        forced = self.config.max_random_wait_candles > 0 and self.random_skips >= self.config.max_random_wait_candles
+        draw = self.random_rng.random()
+        opens = forced or draw < self.config.random_entry_probability
+        row={"decision_id":len(self.random_entry_decisions)+1,"candle_timestamp":pd.Timestamp(self.times[i]),"candle_open_time":pd.Timestamp(self.times[i]),"candle_close_time":pd.Timestamp(self.times[i])+self.entry_delta,"pair_id_previously_closed":self.last_closed_pair_id,"previous_pair_close_time":self.previous_pair_close_time,"candles_waited_since_close":self.random_skips+1,"random_seed":self.config.random_seed,"random_draw":draw,"entry_probability":self.config.random_entry_probability,"decision":"FORCED_OPEN" if forced else ("OPEN" if opens else "SKIP"),"forced_entry":forced,"entry_created":opens,"new_pair_id":self.next_pair_id if opens else None,"entry_timestamp":pd.Timestamp(self.times[i]) if opens else None,"entry_price":float(self.open[i]) if opens else None,"equity_before_entry":self.current_equity,"entry_timing_mode":self.config.entry_timing_mode.value}
+        self.random_entry_decisions.append(row)
+        if not opens: self.random_skips += 1; return None
+        self.random_skips=0
+        return {"execution_index":i,"indicator_index":i-1,"scheduled_timestamp":None,"actual_entry_timestamp":pd.Timestamp(self.times[i]),"entry_schedule_status":None,"random_decision":row}
     def _should_enter(self,i):
         if not np.isfinite(self.risk[i]) or self.risk[i]<=0 or len(self.active_pairs)>=self.config.max_active_pairs or not self._in_trading_window(i): return False
         if self.last_timeout_exit_time is not None and self._entry_time(i) <= self.last_timeout_exit_time: return False
@@ -137,7 +161,7 @@ class BacktestEngine:
         return pair.positions()
 
     def _open_pair(self,i, adx_filter_passed=True, adx_filter_reason="ADX filter disabled", schedule=None):
-        ind_i = schedule["indicator_index"] if schedule else i; raw=(self.open[i] if self.config.enable_daily_entry_schedule else self.close[i]); long_entry=raw*(1+self.config.slippage); short_entry=raw*(1-self.config.slippage); r=float(self.risk[ind_i]); stop=(self.config.stop_loss_r if self.config.enable_partial_take_profit else self.config.sl_mult)*r; risk_amt=self.current_equity*self.config.risk_per_leg
+        ind_i = schedule["indicator_index"] if schedule else i; raw=(self.open[i] if (self.config.enable_daily_entry_schedule or self.random_entry_active) else self.close[i]); long_entry=raw*(1+self.config.slippage); short_entry=raw*(1-self.config.slippage); r=float(self.risk[ind_i]); stop=(self.config.stop_loss_r if self.config.enable_partial_take_profit else self.config.sl_mult)*r; risk_amt=self.current_equity*self.config.risk_per_leg
         entry_fee_rate=self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee; exit_fee_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
         long_stop_exit=(long_entry-stop)*(1-self.config.slippage); short_stop_exit=(short_entry+stop)*(1+self.config.slippage)
         long_stop_loss_per_unit=(long_entry-long_stop_exit)+(long_entry*entry_fee_rate)+(long_stop_exit*exit_fee_rate)
@@ -164,6 +188,8 @@ class BacktestEngine:
         elif self.config.trade_direction == TradeDirectionMode.SHORT_ONLY:
             long = None
         pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._execution_time(i),raw,lc or sc); pair.trade_direction=self.config.trade_direction.value; pair.daily_schedule_enabled=self.config.enable_daily_entry_schedule; pair.scheduled_entry_time=self.config.daily_entry_time; pair.scheduled_entry_timezone=self.config.daily_entry_timezone; pair.scheduled_entry_timestamp=(schedule or {}).get("scheduled_timestamp"); pair.actual_entry_timestamp=(schedule or {}).get("actual_entry_timestamp", self._execution_time(i)); pair.entry_schedule_status=(schedule or {}).get("entry_schedule_status");
+        rd=(schedule or {}).get("random_decision")
+        pair.random_decision=rd; pair.previous_pair_close_time=self.previous_pair_close_time
         if self.config.enable_daily_entry_schedule:
             if pair.entry_schedule_status == "ON_TIME": self.daily_entries_on_schedule += 1
             elif pair.entry_schedule_status == "NEXT_AVAILABLE_CANDLE": self.daily_entries_next_available += 1
@@ -436,7 +462,10 @@ class BacktestEngine:
     def _collect_closed_pairs(self,force=False):
         still=[]
         for p in self.active_pairs:
-            if force or not p.is_open: self.current_equity+=sum(pos.net_pnl for pos in p.positions()); p.equity_after_trade=self.current_equity; self.completed_pairs.append(p)
+            if force or not p.is_open:
+                self.current_equity+=sum(pos.net_pnl for pos in p.positions()); p.equity_after_trade=self.current_equity; self.completed_pairs.append(p)
+                if not force:
+                    self.last_closed_pair_id=p.pair_id; self.previous_pair_close_time=max(pd.Timestamp(pos.exit_time) for pos in p.positions()); self.pair_closed_index=self.current_index; self.random_skips=0
             else: still.append(p)
         self.active_pairs=still
     def _result_rows_for_pair(self, p):
@@ -456,6 +485,8 @@ class BacktestEngine:
                 est=comb*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
                 all_in_stop_risk = sum(self._estimated_stop_loss(pos) for pos in positions) / len(positions) / p.equity_before_trade
                 row={"partial_tp_enabled":self.config.enable_partial_take_profit,"tp1_r":self.config.tp1_r,"tp1_close_pct":self.config.tp1_close_pct,"tp2_r":self.config.tp2_r,"tp2_close_pct":self.config.tp2_close_pct,"stop_loss_r":self.config.stop_loss_r,"after_tp1_stop_mode":self.config.after_tp1_stop_mode.value,"after_tp1_stop_offset_r":self.config.after_tp1_stop_offset_r,"tp2_exit_mode":self.config.tp2_exit_mode.value,"intrabar_partial_tp_ordering":("STOP_FIRST" if self.config.tie_policy==TiePolicy.PESSIMISTIC else "TP1_THEN_TP2_THEN_STOP"),"pair_id":p.pair_id,"trade_id":f"{p.pair_id}-{row_kind}" if row_kind != "pair" else p.pair_id,"trade_direction":self.config.trade_direction.value,"trailing_profit_enabled":self.config.enable_trailing_profit,"trail_activation_r":self.config.trail_activation_r,"trail_distance_r":self.config.trail_distance_r,"trail_apply_to":self.config.trail_apply_to.value,"trail_intrabar_mode":self.config.trail_intrabar_mode.value,"result_type":row_kind,"side":primary.side.value if len(positions)==1 else "BOTH","position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":primary.entry_price if len(positions)==1 else p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":primary.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),"indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.","bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_entry_5bar_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),"daily_schedule_enabled":getattr(p,"daily_schedule_enabled",False),"scheduled_entry_time":getattr(p,"scheduled_entry_time",None),"scheduled_entry_timezone":getattr(p,"scheduled_entry_timezone",None),"scheduled_entry_timestamp":getattr(p,"scheduled_entry_timestamp",None),"actual_entry_timestamp":getattr(p,"actual_entry_timestamp",p.strategy_entry_time),"entry_delay_minutes":((pd.Timestamp(getattr(p,"actual_entry_timestamp",p.strategy_entry_time))-pd.Timestamp(getattr(p,"scheduled_entry_timestamp",p.strategy_entry_time))).total_seconds()/60 if getattr(p,"scheduled_entry_timestamp",None) is not None else 0),"entry_schedule_status":getattr(p,"entry_schedule_status",None),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":primary.risk,"equity_before_trade":p.equity_before_trade,"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":sum(pos.price_r for pos in positions),"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":sum(pos.gross_r for pos in positions),"pair_fee_r":fees/primary.risk_amount,"pair_net_r":sum(pos.net_r for pos in positions),"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"exit_time":exit_t,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":any(pos.ambiguous for pos in positions),"ambiguous_candle":any(pos.ambiguous for pos in positions),"missing_intrabar_data":any(pos.missing_intrabar_data for pos in positions)}
+                rd=getattr(p,"random_decision",None)
+                row.update({"random_entry_enabled":self.random_entry_active,"random_seed":self.config.random_seed if self.random_entry_active else None,"random_entry_probability":self.config.random_entry_probability if self.random_entry_active else None,"randomize_first_entry":self.config.randomize_first_entry,"max_random_wait_candles":self.config.max_random_wait_candles,"random_decision_id":rd.get("decision_id") if rd else None,"random_draw_that_opened_trade":rd.get("random_draw") if rd else None,"random_decision_timestamp":rd.get("candle_timestamp") if rd else None,"candles_waited_before_entry":rd.get("candles_waited_since_close") if rd else None,"minutes_waited_before_entry":rd.get("candles_waited_since_close",0)*self.config.strategy_timeframe_minutes if rd else None,"previous_pair_close_time":getattr(p,"previous_pair_close_time",None),"random_entry_forced":rd.get("forced_entry",False) if rd else False,"entry_timing_mode":self.config.entry_timing_mode.value if self.random_entry_active else EntryTimingMode.CURRENT.value})
                 if p.long is not None and (len(positions)>1 or primary.side==Side.LONG): row.update(self._pos_cols('long', p.long))
                 if p.short is not None and (len(positions)>1 or primary.side==Side.SHORT): row.update(self._pos_cols('short', p.short))
                 rows.append(row)
@@ -487,6 +518,7 @@ class BacktestEngine:
         frame.attrs["skipped_signals"] = self.skipped_signals
         frame.attrs["skipped_daily_entries"] = self.skipped_daily_entries
         frame.attrs["daily_schedule_stats"] = {"scheduled_entry_opportunities": self.daily_entry_opportunities, "trades_opened_on_schedule": self.daily_entries_on_schedule, "scheduled_entries_opened_next_available": self.daily_entries_next_available}
+        frame.attrs["random_entry_decisions"] = list(self.random_entry_decisions)
         return frame
 
     def telemetry_frame(self):
