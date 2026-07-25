@@ -11,7 +11,7 @@ from engine import BacktestEngine
 from loader import load_backtest_data
 from plots import save_plots
 from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
-from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis
+from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, trailing_profit_analysis
 from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 
 class BacktestWorker(QObject):
@@ -109,6 +109,7 @@ class BacktestWorker(QObject):
                     return None
 
             run_output_step("Saving trade_list.csv", lambda: trades.to_csv(run_dir / "trade_list.csv", index=False))
+            run_output_step("Building trailing_profit_analysis", lambda: trailing_profit_analysis(trades).to_csv(run_dir / "trailing_profit_analysis.csv", index=False))
             if self.config.enable_trade_telemetry:
                 if self.config.save_full_telemetry_csv:
                     run_output_step("Saving telemetry", lambda: telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False))
