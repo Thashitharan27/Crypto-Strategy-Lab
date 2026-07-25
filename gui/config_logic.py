@@ -59,9 +59,9 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if require_paths:
         strategy_path = values.get("strategy_csv") if values.get("strategy_csv") != DEFAULT_GUI_CONFIG.get("strategy_csv") else values.get("input_csv")
         if not Path(strategy_path or "").is_file():
-            errors.append("15-Minute Strategy CSV must exist.")
+            errors.append("Strategy CSV must exist.")
         if values.get("use_intrabar_data") and values.get("intrabar_csv") and values.get("intrabar_csv") != DEFAULT_GUI_CONFIG.get("intrabar_csv") and not Path(values.get("intrabar_csv")).is_file():
-            errors.append("1-Minute Intrabar CSV must exist when enabled.")
+            errors.append("Intrabar CSV must exist when enabled.")
         out = Path(values.get("output_dir", ""))
         if not str(out):
             errors.append("Output folder is required.")
@@ -113,9 +113,8 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         if not (0 <= hh <= 23 and 0 <= mm <= 59): raise ValueError
         if (hh * 60 + mm) % int(values.get("strategy_timeframe_minutes", 15)) != 0: errors.append("Daily entry time must align to the strategy timeframe.")
     except (TypeError, ValueError): errors.append("Daily entry time must be HH:MM.")
-    if int(values.get("intrabar_timeframe_minutes", 1)) >= int(values.get("strategy_timeframe_minutes", 15)): errors.append("Intrabar timeframe must be less than strategy timeframe.")
+    if values.get("use_intrabar_data") and int(values.get("intrabar_timeframe_minutes", 1)) >= int(values.get("strategy_timeframe_minutes", 15)): errors.append("Intrabar timeframe must be less than strategy timeframe.")
     if int(values.get("telemetry_interval_minutes", 15)) % int(values.get("strategy_timeframe_minutes", 15)) != 0: errors.append("Telemetry interval must be a multiple of the strategy timeframe.")
-    if values.get("enable_trade_telemetry") and (int(values.get("strategy_timeframe_minutes", 15)) != 15 or int(values.get("telemetry_interval_minutes", 15)) != 15): errors.append("Only 15-minute telemetry is currently supported with a 15-minute strategy timeframe.")
     if values.get("intrabar_missing_policy") not in [e.value for e in IntrabarMissingPolicy]: errors.append("Invalid missing intrabar policy.")
     if values.get("be_mode") not in [e.value for e in BreakEvenMode]: errors.append("Invalid BE mode.")
     if values.get("be_same_candle_policy") not in [e.value for e in BreakEvenSameCandlePolicy]: errors.append("Invalid same-candle BE policy.")

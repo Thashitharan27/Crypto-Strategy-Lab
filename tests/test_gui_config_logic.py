@@ -74,3 +74,24 @@ def test_default_gui_config_returns_copy_and_does_not_mutate_source():
     first["atr_period"] = 99
     assert DEFAULT_GUI_CONFIG["atr_period"] == 14
     assert second["atr_period"] == 14
+
+
+def test_configurable_timeframes_are_passed_to_backtest_config(tmp_path):
+    cfg = build_backtest_config({
+        **base(tmp_path),
+        "strategy_timeframe_minutes": 60,
+        "intrabar_timeframe_minutes": 5,
+        "telemetry_interval_minutes": 60,
+    })
+
+    assert cfg.strategy_timeframe_minutes == 60
+    assert cfg.intrabar_timeframe_minutes == 5
+
+
+def test_intrabar_timeframe_must_be_lower_only_when_enabled(tmp_path):
+    values = {**base(tmp_path), "strategy_timeframe_minutes": 5, "intrabar_timeframe_minutes": 5}
+    with pytest.raises(ValueError, match="Intrabar timeframe must be less"):
+        build_backtest_config(values)
+
+    cfg = build_backtest_config({**values, "use_intrabar_data": False})
+    assert cfg.use_intrabar_data is False
