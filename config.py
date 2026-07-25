@@ -31,6 +31,10 @@ class TradeDirectionMode(str, Enum):
     BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"; BOTH_INDEPENDENT = "BOTH_INDEPENDENT"
 class DailyEntryMissedPolicy(str, Enum):
     SKIP_DAY = "SKIP_DAY"; NEXT_AVAILABLE_CANDLE = "NEXT_AVAILABLE_CANDLE"
+class TrailApplyTo(str, Enum):
+    BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"
+class TrailIntrabarMode(str, Enum):
+    PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -50,6 +54,11 @@ class BacktestConfig:
     intrabar_missing_policy: IntrabarMissingPolicy = IntrabarMissingPolicy.WARN_AND_USE_15M
     zero_cost_comparison: bool = False
     trade_direction: TradeDirectionMode = TradeDirectionMode.BOTH
+    enable_trailing_profit: bool = False
+    trail_activation_r: float = 3.0
+    trail_distance_r: float = 1.0
+    trail_apply_to: TrailApplyTo = TrailApplyTo.BOTH
+    trail_intrabar_mode: TrailIntrabarMode = TrailIntrabarMode.PESSIMISTIC
     enable_both_open_timeout: bool = False
     max_both_open_minutes: int = 480
     enable_be_after_opposite_sl: bool = False
@@ -110,6 +119,8 @@ class BacktestConfig:
         if not 0 < self.risk_per_leg < 1: raise ValueError("risk_per_leg must be between 0 and 1")
         if self.atr_period <= 0: raise ValueError("atr_period must be positive")
         if self.atr_multiplier <= 0: raise ValueError("atr_multiplier must be positive")
+        if self.trail_activation_r <= 0: raise ValueError("trail_activation_r must be greater than 0")
+        if self.trail_distance_r <= 0: raise ValueError("trail_distance_r must be greater than 0")
         if self.adx_period <= 0: raise ValueError("adx_period must be positive")
         if self.adx_maximum < 0 or self.adx_minimum < 0: raise ValueError("ADX thresholds must be non-negative")
         if self.bb_period <= 0: raise ValueError("BB period must be positive")
@@ -134,6 +145,8 @@ class BacktestConfig:
         if isinstance(self.bb_width_filter_mode, str): object.__setattr__(self, "bb_width_filter_mode", BBWidthFilterMode(self.bb_width_filter_mode))
         if isinstance(self.di_spread_filter_mode, str): object.__setattr__(self, "di_spread_filter_mode", DISpreadFilterMode(self.di_spread_filter_mode))
         if isinstance(self.trade_direction, str): object.__setattr__(self, "trade_direction", TradeDirectionMode(self.trade_direction))
+        if isinstance(self.trail_apply_to, str): object.__setattr__(self, "trail_apply_to", TrailApplyTo(self.trail_apply_to))
+        if isinstance(self.trail_intrabar_mode, str): object.__setattr__(self, "trail_intrabar_mode", TrailIntrabarMode(self.trail_intrabar_mode))
         if isinstance(self.daily_entry_missed_policy, str): object.__setattr__(self, "daily_entry_missed_policy", DailyEntryMissedPolicy(self.daily_entry_missed_policy))
         try:
             hh, mm = [int(part) for part in str(self.daily_entry_time).split(":", 1)]

@@ -19,7 +19,7 @@ def _series(frame: pd.DataFrame, column: str, dtype=float) -> pd.Series:
     return values
 
 MILESTONES = {15:"15m",30:"30m",45:"45m",60:"60m",120:"2h",240:"4h",480:"8h"}
-BASE_TELEMETRY_COLUMNS = ["pair_id","timestamp","elapsed_minutes","elapsed_strategy_bars","close","high","low","atr","adx","plus_di","minus_di","di_spread","di_ratio","bb_middle","bb_upper","bb_lower","bb_width","bb_width_pct","long_is_open","short_is_open","long_unrealized_pnl","short_unrealized_pnl","pair_unrealized_pnl","long_distance_to_sl","long_distance_to_tp","short_distance_to_sl","short_distance_to_tp","long_distance_to_sl_r","long_distance_to_tp_r","short_distance_to_sl_r","short_distance_to_tp_r","long_current_sl","short_current_sl","long_tp","short_tp"]
+BASE_TELEMETRY_COLUMNS = ["pair_id","timestamp","elapsed_minutes","elapsed_strategy_bars","close","high","low","atr","adx","plus_di","minus_di","di_spread","di_ratio","bb_middle","bb_upper","bb_lower","bb_width","bb_width_pct","long_is_open","short_is_open","long_unrealized_pnl","short_unrealized_pnl","pair_unrealized_pnl","long_distance_to_sl","long_distance_to_tp","short_distance_to_sl","short_distance_to_tp","long_distance_to_sl_r","long_distance_to_tp_r","short_distance_to_sl_r","short_distance_to_tp_r","long_current_sl","short_current_sl","long_tp","short_tp","long_trailing_enabled","long_trailing_active","long_trailing_activation_price","long_current_trailing_stop","long_current_active_stop","long_highest_price_since_entry","long_distance_to_activation_r","long_distance_to_trailing_stop_r","long_unrealized_profit_r","short_trailing_enabled","short_trailing_active","short_trailing_activation_price","short_current_trailing_stop","short_current_active_stop","short_lowest_price_since_entry","short_distance_to_activation_r","short_distance_to_trailing_stop_r","short_unrealized_profit_r"]
 
 TELEMETRY_COLUMNS = BASE_TELEMETRY_COLUMNS
 
@@ -164,3 +164,19 @@ def save_journey_charts(trades: pd.DataFrame, telemetry: pd.DataFrame, charts_di
             fig,ax=plt.subplots(); _series(trades, f"{ind}_change_first_hour").dropna().plot(kind="hist", bins=30, ax=ax); ax.set_title(f"{ind} first-hour change distribution"); fig.tight_layout(); fig.savefig(charts_dir / f"{ind}_first_hour_change_distribution.png"); plt.close(fig)
         except Exception as exc: warnings.append(f"Chart generation failed for {ind} first-hour distribution: {exc}\n{traceback.format_exc()}")
     return warnings
+
+def trailing_profit_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    """Return a tidy, one-row trailing-profit performance report."""
+    t = trades.copy()
+    def col(name, default=np.nan):
+        return t[name] if name in t else pd.Series([default] * len(t), index=t.index)
+    la, sa = col("long_trailing_activated", False).fillna(False).astype(bool), col("short_trailing_activated", False).fillna(False).astype(bool)
+    le, se = col("long_trailing_enabled", False).fillna(False).astype(bool), col("short_trailing_enabled", False).fillna(False).astype(bool)
+    lr, sr = pd.to_numeric(col("long_trailing_profit_r"), errors="coerce"), pd.to_numeric(col("short_trailing_profit_r"), errors="coerce")
+    reasons = pd.concat([col("long_exit_reason", None), col("short_exit_reason", None)])
+    profits = pd.concat([lr, sr]).dropna(); net = pd.to_numeric(col("pair_net_pnl", 0), errors="coerce").fillna(0)
+    categories={"neither":~la&~sa,"only_long":la&~sa,"only_short":~la&sa,"both":la&sa}
+    gross_profit=float(net[net>0].sum()); gross_loss=float(net[net<0].sum())
+    row={"total_legs":int(col("long_entry_price").notna().sum()+col("short_entry_price").notna().sum()),"total_pairs":int(t.pair_id.nunique()) if "pair_id" in t else len(t),"eligible_legs":int(le.sum()+se.sum()),"trailing_activations":int(la.sum()+sa.sum()),"trailing_activation_percentage":100*(la.sum()+sa.sum())/max(1,le.sum()+se.sum()),"trailing_stop_exits":int((reasons=="TRAILING_STOP").sum()),"activated_other_exit":int(la.sum()+sa.sum()-(reasons=="TRAILING_STOP").sum()),"average_trailing_exit_profit_r":profits.mean(),"median_trailing_exit_profit_r":profits.median(),"maximum_trailing_exit_profit_r":profits.max(),"minimum_trailing_exit_profit_r":profits.min(),"gross_profit":gross_profit,"gross_loss":gross_loss,"fees":pd.to_numeric(col("pair_total_fees",0),errors="coerce").sum(),"net_pnl":net.sum(),"profit_factor":gross_profit/abs(gross_loss) if gross_loss else np.inf,"eligible_long_legs":int(le.sum()),"long_trailing_activations":int(la.sum()),"long_trailing_exits":int((col("long_exit_reason",None)=="TRAILING_STOP").sum()),"average_long_trailing_profit_r":lr.mean(),"median_long_trailing_profit_r":lr.median(),"maximum_long_trailing_profit_r":lr.max(),"long_net_pnl":pd.to_numeric(col("long_net_pnl",0),errors="coerce").sum(),"eligible_short_legs":int(se.sum()),"short_trailing_activations":int(sa.sum()),"short_trailing_exits":int((col("short_exit_reason",None)=="TRAILING_STOP").sum()),"average_short_trailing_profit_r":sr.mean(),"median_short_trailing_profit_r":sr.median(),"maximum_short_trailing_profit_r":sr.max(),"short_net_pnl":pd.to_numeric(col("short_net_pnl",0),errors="coerce").sum(),"net_pair_pnl":net.sum(),"pair_win_rate":100*(net>0).mean() if len(net) else np.nan}
+    for name,mask in categories.items(): row[f"pairs_{name}_activated"]=int(mask.sum()); row[f"average_pair_pnl_{name}"]=net[mask].mean()
+    return pd.DataFrame([row])
