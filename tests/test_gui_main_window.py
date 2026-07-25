@@ -29,6 +29,30 @@ def test_gui_default_atr_period_matches_backtest_config():
         window.close()
 
 
+def test_strategy_and_intrabar_timeframe_controls_default_and_update():
+    app()
+    window = MainWindow()
+    try:
+        assert [window.strategy_timeframe.itemText(i) for i in range(window.strategy_timeframe.count())] == ["1m", "5m", "15m", "30m", "1h", "4h"]
+        assert window.strategy_timeframe.currentText() == "15m"
+        assert window.intrabar_timeframe.currentText() == "1m"
+        assert window.use_intrabar.isChecked()
+        assert window.values()["strategy_timeframe_minutes"] == 15
+        assert window.values()["intrabar_timeframe_minutes"] == 1
+
+        window.strategy_timeframe.setCurrentText("1h")
+        window.intrabar_timeframe.setCurrentText("5m")
+        assert window.values()["strategy_timeframe_minutes"] == 60
+        assert window.values()["intrabar_timeframe_minutes"] == 5
+
+        window.strategy_timeframe.setCurrentText("1m")
+        assert not window.use_intrabar.isChecked()
+        assert not window.use_intrabar.isEnabled()
+        assert window.values()["use_intrabar_data"] is False
+    finally:
+        window.close()
+
+
 def test_saved_and_loaded_gui_config_preserves_atr_period(tmp_path):
     path = tmp_path / "backtest_config.json"
     save_config_json(path, {"atr_period": 21})
