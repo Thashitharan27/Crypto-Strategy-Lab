@@ -1,0 +1,4 @@
+{
+  "enable_remaining_leg_timeout_after_first_sl": false,
+  "remaining_leg_timeout_after_first_sl_minutes": 240
+}

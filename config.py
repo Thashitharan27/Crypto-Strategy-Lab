@@ -78,6 +78,8 @@ class BacktestConfig:
     trail_intrabar_mode: TrailIntrabarMode = TrailIntrabarMode.PESSIMISTIC
     enable_both_open_timeout: bool = False
     max_both_open_minutes: int = 480
+    enable_remaining_leg_timeout_after_first_sl: bool = False
+    remaining_leg_timeout_after_first_sl_minutes: int = 240
     enable_be_after_opposite_sl: bool = False
     be_mode: BreakEvenMode = BreakEvenMode.ENTRY_PRICE
     be_offset_r: float = 0.0
@@ -177,6 +179,7 @@ class BacktestConfig:
         if self.max_effective_leverage_per_leg is not None and self.max_effective_leverage_per_leg <= 0: raise ValueError("max leverage per leg must be positive")
         if self.max_combined_effective_leverage is not None and self.max_combined_effective_leverage <= 0: raise ValueError("max combined leverage must be positive")
         if self.enable_both_open_timeout and self.max_both_open_minutes <= 0: raise ValueError("max_both_open_minutes must be > 0 when both-open timeout is enabled")
+        if self.enable_remaining_leg_timeout_after_first_sl and self.remaining_leg_timeout_after_first_sl_minutes <= 0: raise ValueError("remaining_leg_timeout_after_first_sl_minutes must be > 0 when remaining-leg timeout is enabled")
         if self.be_offset_r < 0: raise ValueError("be_offset_r must be >= 0")
         if isinstance(self.intrabar_missing_policy, str): object.__setattr__(self, "intrabar_missing_policy", IntrabarMissingPolicy(self.intrabar_missing_policy))
         if isinstance(self.position_sizing_mode, str): object.__setattr__(self, "position_sizing_mode", PositionSizingMode(self.position_sizing_mode))

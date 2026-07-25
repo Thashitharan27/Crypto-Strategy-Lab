@@ -20,6 +20,7 @@ class BacktestEngine:
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
+        self.remaining_leg_timeout_delta=pd.Timedelta(minutes=config.remaining_leg_timeout_after_first_sl_minutes)
         self.last_timeout_exit_time=None
         self.trading_start=pd.Timestamp(config.trading_start_date, tz="UTC") if config.trading_start_date else None
         self.trading_end=pd.Timestamp(config.trading_end_date, tz="UTC") if config.trading_end_date else None
@@ -202,14 +203,14 @@ class BacktestEngine:
     def _update_positions_to_strategy_index(self,i):
         for pair in self.active_pairs:
             first = pair.positions()[0]
-            if i > first.entry_index and self._maybe_timeout_pair(pair, i):
-                continue
             if i > first.entry_index:
                 self._scan_pair_exit(pair,i)
     def _scan_pair_exit(self,pair,i):
         if not self.config.use_intrabar_data or self.intrabar_data is None:
+            if self._maybe_timeout_pair_at(pair, i, pd.Timestamp(self.times[i]), float(self.open[i]), ExitSource.FALLBACK_15M): return
+            if self._maybe_timeout_remaining_leg(pair, i, pd.Timestamp(self.times[i]), float(self.open[i]), ExitSource.FALLBACK_15M): return
             for pos in pair.positions():
-                if pos.is_open: self._scan_exit(pos,i); self._maybe_apply_be(pair,pos,None,None,None,None)
+                if pos.is_open: self._scan_exit(pos,i); self._after_position_scan(pair,pos,None,None,None,None)
             return
         # Only inspect the strategy interval currently being processed. Starting
         # every scan at pair entry replays old intrabars with today's ratcheted
@@ -217,25 +218,29 @@ class BacktestEngine:
         start=max(pd.Timestamp(pair.strategy_entry_time), pd.Timestamp(self.times[i])); end=pd.Timestamp(self.times[i])+self.entry_delta
         if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
             for pos in pair.positions():
-                if pos.is_open: self._fallback_exit(pos,i,"timestamp_alignment_failure"); self._maybe_apply_be(pair,pos,None,None,None,None)
+                if pos.is_open: self._fallback_exit(pos,i,"timestamp_alignment_failure"); self._after_position_scan(pair,pos,None,None,None,None)
             return
         sub=self.intrabar_data[(self.intrabar_data.timestamp>=start)&(self.intrabar_data.timestamp<end)]
         if sub.empty or (sub.timestamp.iloc[0] > start + pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)) or self._has_missing_intrabar(sub,start,end):
             reason="no_overlapping_intrabar_rows" if sub.empty else "intrabar_gap"
             for pos in pair.positions():
-                if pos.is_open: pos.missing_intrabar_data=True; self._fallback_exit(pos,i,reason); self._maybe_apply_be(pair,pos,None,None,None,None)
+                if pos.is_open: pos.missing_intrabar_data=True; self._fallback_exit(pos,i,reason); self._after_position_scan(pair,pos,None,None,None,None)
             return
         for j,row in sub.iterrows():
+            if self._maybe_timeout_pair_at(pair, j, pd.Timestamp(row.timestamp), float(row.open), ExitSource.INTRABAR):
+                break
+            if self._maybe_timeout_remaining_leg(pair, j, pd.Timestamp(row.timestamp), float(row.open), ExitSource.INTRABAR):
+                break
             before=tuple(pos.is_open for pos in pair.positions())
             for pos in pair.positions():
                 if pos.is_open and not (pos.be_active_after is not None and pd.Timestamp(row.timestamp) < pd.Timestamp(pos.be_active_after)):
                     self._maybe_exit_bar(pos,j,row.high,row.low,row.timestamp,ExitSource.INTRABAR)
-                    self._maybe_apply_be(pair,pos,j,row.high,row.low,row.timestamp)
+                    self._after_position_scan(pair,pos,j,row.high,row.low,row.timestamp)
             if not pair.is_open or before != tuple(pos.is_open for pos in pair.positions()):
                 pass
         if self.intrabar_data.timestamp.max() < end - pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes):
             for pos in pair.positions():
-                if pos.is_open: self._fallback_exit(pos,i,"end_of_intrabar_data"); self._maybe_apply_be(pair,pos,None,None,None,None)
+                if pos.is_open: self._fallback_exit(pos,i,"end_of_intrabar_data"); self._after_position_scan(pair,pos,None,None,None,None)
 
     def _scan_exit(self,pos,i):
         # Trailing state is stateful; never apply its current stop to a candle
@@ -297,30 +302,52 @@ class BacktestEngine:
                 slip=1-self.config.slippage if other.side==Side.LONG else 1+self.config.slippage
                 self._close_position(other,bar_index,new_sl*slip,other.be_exit_reason,ExitSource.INTRABAR,timestamp)
         return True
-    def _timeout_source(self):
-        return ExitSource.INTRABAR if self.config.use_intrabar_data and self.intrabar_data is not None else ExitSource.FALLBACK_15M
-    def _maybe_timeout_pair(self,pair,i):
+    def _after_position_scan(self,pair,position,bar_index,high,low,timestamp):
+        """Run first-normal-SL reactions once, keeping BE and timeout independent."""
+        self._maybe_start_remaining_leg_timeout(pair, position)
+        self._maybe_apply_be(pair,position,bar_index,high,low,timestamp)
+
+    def _maybe_start_remaining_leg_timeout(self,pair,closed_pos):
+        if (not self.config.enable_remaining_leg_timeout_after_first_sl
+                or pair.remaining_leg_timeout_after_first_sl_started
+                or closed_pos.exit_reason != ExitReason.SL):
+            return False
+        other=pair.short if closed_pos.side==Side.LONG else pair.long
+        if other is None or not other.is_open: return False
+        first_sl_time=pd.Timestamp(closed_pos.exit_time)
+        pair.remaining_leg_timeout_after_first_sl_started=True
+        pair.first_sl_side=closed_pos.side
+        pair.first_sl_time=first_sl_time
+        pair.remaining_leg_timeout_deadline=first_sl_time+self.remaining_leg_timeout_delta
+        return True
+
+    def _maybe_timeout_remaining_leg(self,pair,i,timestamp,raw_open,source):
+        deadline=pair.remaining_leg_timeout_deadline
+        if not pair.remaining_leg_timeout_after_first_sl_started or pair.remaining_leg_timeout_triggered or deadline is None:
+            return False
+        timestamp=pd.Timestamp(timestamp)
+        if timestamp < pd.Timestamp(deadline): return False
+        open_positions=[p for p in pair.positions() if p.is_open]
+        if len(open_positions) != 1: return False
+        pos=open_positions[0]
+        if source == ExitSource.FALLBACK_15M:
+            pos.missing_intrabar_data=True
+            pos.fallback_reason="remaining_leg_timeout_intrabar_unavailable"
+            self.fallback_reasons.append(pos.fallback_reason)
+        slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
+        self._close_position(pos,i,float(raw_open)*slip,ExitReason.REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL,source,timestamp)
+        pair.remaining_leg_timeout_triggered=True
+        pair.remaining_leg_timeout_exit_time=timestamp
+        pair.remaining_leg_timeout_exit_side=pos.side
+        return True
+    def _maybe_timeout_pair_at(self,pair,i,timestamp,raw_open,source):
         if not self.config.enable_both_open_timeout or pair.long is None or pair.short is None or not (pair.long.is_open and pair.short.is_open): return False
         timeout_at=pd.Timestamp(pair.strategy_entry_time) + self.timeout_delta
-        interval_end=pd.Timestamp(self.times[i]) + self.entry_delta
-        if interval_end < timeout_at: return False
-        source=self._timeout_source()
-        raw=None; ts=None; idx=i
-        if source==ExitSource.INTRABAR:
-            sub=self.intrabar_data[self.intrabar_data.timestamp>=timeout_at]
-            sub=sub[sub.timestamp<=interval_end]
-            if not sub.empty:
-                row=sub.iloc[0]; raw=float(row.open); ts=pd.Timestamp(row.timestamp); idx=int(row.name)
-            else:
-                source=ExitSource.FALLBACK_15M
-        if raw is None:
-            future=self.data[self.data.timestamp>=timeout_at]
-            row=future.iloc[0] if not future.empty else self.data.iloc[i]
-            raw=float(row.open); ts=pd.Timestamp(row.timestamp); idx=int(row.name)
-        long_exit=raw*(1-self.config.slippage); short_exit=raw*(1+self.config.slippage)
-        self._close_position(pair.long,idx,long_exit,ExitReason.BOTH_OPEN_TIMEOUT,source,ts)
-        self._close_position(pair.short,idx,short_exit,ExitReason.BOTH_OPEN_TIMEOUT,source,ts)
-        pair.both_open_timeout_triggered=True; pair.timeout_minutes=int(self.config.max_both_open_minutes); pair.timeout_exit_time=ts; self.last_timeout_exit_time=ts
+        timestamp=pd.Timestamp(timestamp)
+        if timestamp < timeout_at: return False
+        self._close_position(pair.long,i,float(raw_open)*(1-self.config.slippage),ExitReason.BOTH_OPEN_TIMEOUT,source,timestamp)
+        self._close_position(pair.short,i,float(raw_open)*(1+self.config.slippage),ExitReason.BOTH_OPEN_TIMEOUT,source,timestamp)
+        pair.both_open_timeout_triggered=True; pair.timeout_minutes=int(self.config.max_both_open_minutes); pair.timeout_exit_time=timestamp; self.last_timeout_exit_time=timestamp
         return True
     def _fallback_exit(self,pos,i,reason):
         pos.fallback_reason=reason; self.fallback_reasons.append(reason)
@@ -484,7 +511,7 @@ class BacktestEngine:
                 exp=(self.config.tp_mult-self.config.sl_mult)*sum(pos.risk*pos.quantity for pos in positions)/len(positions)
                 est=comb*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp else np.inf
                 all_in_stop_risk = sum(self._estimated_stop_loss(pos) for pos in positions) / len(positions) / p.equity_before_trade
-                row={"partial_tp_enabled":self.config.enable_partial_take_profit,"tp1_r":self.config.tp1_r,"tp1_close_pct":self.config.tp1_close_pct,"tp2_r":self.config.tp2_r,"tp2_close_pct":self.config.tp2_close_pct,"stop_loss_r":self.config.stop_loss_r,"after_tp1_stop_mode":self.config.after_tp1_stop_mode.value,"after_tp1_stop_offset_r":self.config.after_tp1_stop_offset_r,"tp2_exit_mode":self.config.tp2_exit_mode.value,"intrabar_partial_tp_ordering":("STOP_FIRST" if self.config.tie_policy==TiePolicy.PESSIMISTIC else "TP1_THEN_TP2_THEN_STOP"),"pair_id":p.pair_id,"trade_id":f"{p.pair_id}-{row_kind}" if row_kind != "pair" else p.pair_id,"trade_direction":self.config.trade_direction.value,"trailing_profit_enabled":self.config.enable_trailing_profit,"trail_activation_r":self.config.trail_activation_r,"trail_distance_r":self.config.trail_distance_r,"trail_apply_to":self.config.trail_apply_to.value,"trail_intrabar_mode":self.config.trail_intrabar_mode.value,"result_type":row_kind,"side":primary.side.value if len(positions)==1 else "BOTH","position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":primary.entry_price if len(positions)==1 else p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":primary.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),"indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.","bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_entry_5bar_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),"daily_schedule_enabled":getattr(p,"daily_schedule_enabled",False),"scheduled_entry_time":getattr(p,"scheduled_entry_time",None),"scheduled_entry_timezone":getattr(p,"scheduled_entry_timezone",None),"scheduled_entry_timestamp":getattr(p,"scheduled_entry_timestamp",None),"actual_entry_timestamp":getattr(p,"actual_entry_timestamp",p.strategy_entry_time),"entry_delay_minutes":((pd.Timestamp(getattr(p,"actual_entry_timestamp",p.strategy_entry_time))-pd.Timestamp(getattr(p,"scheduled_entry_timestamp",p.strategy_entry_time))).total_seconds()/60 if getattr(p,"scheduled_entry_timestamp",None) is not None else 0),"entry_schedule_status":getattr(p,"entry_schedule_status",None),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":primary.risk,"equity_before_trade":p.equity_before_trade,"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":sum(pos.price_r for pos in positions),"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":sum(pos.gross_r for pos in positions),"pair_fee_r":fees/primary.risk_amount,"pair_net_r":sum(pos.net_r for pos in positions),"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"exit_time":exit_t,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":any(pos.ambiguous for pos in positions),"ambiguous_candle":any(pos.ambiguous for pos in positions),"missing_intrabar_data":any(pos.missing_intrabar_data for pos in positions)}
+                row={"partial_tp_enabled":self.config.enable_partial_take_profit,"tp1_r":self.config.tp1_r,"tp1_close_pct":self.config.tp1_close_pct,"tp2_r":self.config.tp2_r,"tp2_close_pct":self.config.tp2_close_pct,"stop_loss_r":self.config.stop_loss_r,"after_tp1_stop_mode":self.config.after_tp1_stop_mode.value,"after_tp1_stop_offset_r":self.config.after_tp1_stop_offset_r,"tp2_exit_mode":self.config.tp2_exit_mode.value,"intrabar_partial_tp_ordering":("STOP_FIRST" if self.config.tie_policy==TiePolicy.PESSIMISTIC else "TP1_THEN_TP2_THEN_STOP"),"pair_id":p.pair_id,"trade_id":f"{p.pair_id}-{row_kind}" if row_kind != "pair" else p.pair_id,"trade_direction":self.config.trade_direction.value,"trailing_profit_enabled":self.config.enable_trailing_profit,"trail_activation_r":self.config.trail_activation_r,"trail_distance_r":self.config.trail_distance_r,"trail_apply_to":self.config.trail_apply_to.value,"trail_intrabar_mode":self.config.trail_intrabar_mode.value,"result_type":row_kind,"side":primary.side.value if len(positions)==1 else "BOTH","position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":primary.entry_price if len(positions)==1 else p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"remaining_leg_timeout_after_first_sl_enabled":self.config.enable_remaining_leg_timeout_after_first_sl,"remaining_leg_timeout_after_first_sl_minutes":self.config.remaining_leg_timeout_after_first_sl_minutes,"remaining_leg_timeout_after_first_sl_started":p.remaining_leg_timeout_after_first_sl_started,"first_sl_side":p.first_sl_side.value if p.first_sl_side else None,"first_sl_time":p.first_sl_time,"remaining_leg_timeout_deadline":p.remaining_leg_timeout_deadline,"remaining_leg_timeout_triggered":p.remaining_leg_timeout_triggered,"remaining_leg_timeout_exit_time":p.remaining_leg_timeout_exit_time,"remaining_leg_timeout_exit_side":p.remaining_leg_timeout_exit_side.value if p.remaining_leg_timeout_exit_side else None,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":primary.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),"indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.","bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_entry_5bar_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),"daily_schedule_enabled":getattr(p,"daily_schedule_enabled",False),"scheduled_entry_time":getattr(p,"scheduled_entry_time",None),"scheduled_entry_timezone":getattr(p,"scheduled_entry_timezone",None),"scheduled_entry_timestamp":getattr(p,"scheduled_entry_timestamp",None),"actual_entry_timestamp":getattr(p,"actual_entry_timestamp",p.strategy_entry_time),"entry_delay_minutes":((pd.Timestamp(getattr(p,"actual_entry_timestamp",p.strategy_entry_time))-pd.Timestamp(getattr(p,"scheduled_entry_timestamp",p.strategy_entry_time))).total_seconds()/60 if getattr(p,"scheduled_entry_timestamp",None) is not None else 0),"entry_schedule_status":getattr(p,"entry_schedule_status",None),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":primary.risk,"equity_before_trade":p.equity_before_trade,"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":sum(pos.price_r for pos in positions),"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":sum(pos.gross_r for pos in positions),"pair_fee_r":fees/primary.risk_amount,"pair_net_r":sum(pos.net_r for pos in positions),"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"exit_time":exit_t,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":any(pos.ambiguous for pos in positions),"ambiguous_candle":any(pos.ambiguous for pos in positions),"missing_intrabar_data":any(pos.missing_intrabar_data for pos in positions)}
                 rd=getattr(p,"random_decision",None)
                 row.update({"random_entry_enabled":self.random_entry_active,"random_seed":self.config.random_seed if self.random_entry_active else None,"random_entry_probability":self.config.random_entry_probability if self.random_entry_active else None,"randomize_first_entry":self.config.randomize_first_entry,"max_random_wait_candles":self.config.max_random_wait_candles,"random_decision_id":rd.get("decision_id") if rd else None,"random_draw_that_opened_trade":rd.get("random_draw") if rd else None,"random_decision_timestamp":rd.get("candle_timestamp") if rd else None,"candles_waited_before_entry":rd.get("candles_waited_since_close") if rd else None,"minutes_waited_before_entry":rd.get("candles_waited_since_close",0)*self.config.strategy_timeframe_minutes if rd else None,"previous_pair_close_time":getattr(p,"previous_pair_close_time",None),"random_entry_forced":rd.get("forced_entry",False) if rd else False,"entry_timing_mode":self.config.entry_timing_mode.value if self.random_entry_active else EntryTimingMode.CURRENT.value})
                 if p.long is not None and (len(positions)>1 or primary.side==Side.LONG): row.update(self._pos_cols('long', p.long))

@@ -50,6 +50,14 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     source_values = pd.concat([trades[c] for c in exit_source_cols], ignore_index=True) if exit_source_cols else trades.get("exit_source", pd.Series(dtype=object))
     source_counts = {"1M_INTRABAR": int((source_values == "1M_INTRABAR").sum()), "15M_FALLBACK": int((source_values == "15M_FALLBACK").sum()), "END_OF_DATA": int((source_values == "END_OF_DATA").sum())}
     timeout_pairs = trades[trades.get("both_open_timeout_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)]
+    remaining_started_mask = trades.get("remaining_leg_timeout_after_first_sl_started", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)
+    remaining_triggered_mask = trades.get("remaining_leg_timeout_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)
+    remaining_timeout_pairs = trades[remaining_started_mask]
+    remaining_reason = pd.Series(index=trades.index, dtype=object)
+    if "first_sl_side" in trades:
+        remaining_reason = trades.get("short_exit_reason", remaining_reason).where(trades["first_sl_side"].eq("LONG"), trades.get("long_exit_reason", remaining_reason))
+    remaining_tp_before = remaining_started_mask & remaining_reason.eq("TP")
+    remaining_sl_be_before = remaining_started_mask & remaining_reason.isin(["SL", "BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"])
     be_pairs = trades[trades.get("pair_be_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)]
     exit_reason_cols = [c for c in ("long_exit_reason", "short_exit_reason") if c in trades]
     exit_reasons = pd.concat([trades[c] for c in exit_reason_cols], ignore_index=True) if exit_reason_cols else pd.Series(dtype=object)
@@ -109,6 +117,14 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
         "average_holding_time": float(trades["holding_hours"].mean()),
         "total_fees": float(trades["pair_total_fees"].sum()),
         "pairs_closed_by_both_open_timeout": int(len(timeout_pairs)),
+        "pairs_where_remaining_leg_timeout_started": int(remaining_started_mask.sum()),
+        "pairs_closed_by_remaining_leg_timeout": int(remaining_triggered_mask.sum()),
+        "remaining_legs_reaching_tp_before_timeout": int(remaining_tp_before.sum()),
+        "remaining_legs_hitting_sl_or_be_before_timeout": int(remaining_sl_be_before.sum()),
+        "average_pnl_of_remaining_leg_timeout_pairs": float(remaining_timeout_pairs["pair_net_pnl"].mean()) if not remaining_timeout_pairs.empty else 0.0,
+        "total_pnl_of_remaining_leg_timeout_pairs": float(remaining_timeout_pairs["pair_net_pnl"].sum()) if not remaining_timeout_pairs.empty else 0.0,
+        "profitable_remaining_leg_timeout_pairs": int((remaining_timeout_pairs["pair_net_pnl"] > 0).sum()),
+        "losing_remaining_leg_timeout_pairs": int((remaining_timeout_pairs["pair_net_pnl"] < 0).sum()),
         "pairs_where_be_was_triggered": int(len(be_pairs)),
         "remaining_legs_stopped_at_be": int(be_exit_mask.sum()),
         "remaining_legs_reaching_tp_after_be_move": int(tp_after_be.sum()),

@@ -63,6 +63,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tp2-exit-mode", type=enum_value(TP2ExitMode), choices=list(TP2ExitMode))
     parser.add_argument("--enable-both-open-timeout", action="store_true", default=None)
     parser.add_argument("--max-both-open-minutes", type=int)
+    parser.add_argument("--enable-remaining-leg-timeout-after-first-sl", action="store_true", default=None)
+    parser.add_argument("--remaining-leg-timeout-after-first-sl-minutes", type=int)
     parser.add_argument("--timeout-comparison", action="store_true", help="Compare no timeout plus 2/4/6/8/12 hour both-open timeout runs")
     parser.add_argument("--output-dir", type=Path, help="Directory for reports and charts")
     parser.add_argument("--run-name", default=None, help="Optional run name prefix for the timestamped output folder")

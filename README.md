@@ -64,8 +64,18 @@ Defaults live in `config.py` and can be overridden from the CLI:
 - `sl_mult = 2.0`
 - `tp_mult = 3.0`
 - `risk_per_leg = 0.005`
+- `enable_remaining_leg_timeout_after_first_sl = False`
+- `remaining_leg_timeout_after_first_sl_minutes = 240`
 
 Validation enforces positive initial equity, positive ATR multiplier, non-negative fees/slippage, and `0 < risk_per_leg < 1`.
+
+### Remaining Leg Timeout After First SL
+
+This optional rule is disabled by default. When enabled, the first leg that exits specifically at its normal `SL` records its side and exact exit timestamp and starts a separate timer for the still-open opposite leg. A TP, break-even, trailing-stop, partial-TP, both-open-timeout, or other special exit never starts the timer. The remaining leg keeps its target and active stop throughout the waiting period, so it may still close naturally at TP, SL, break-even, or trailing stop before the deadline.
+
+The deadline is the first normal-SL timestamp plus `remaining_leg_timeout_after_first_sl_minutes`. If the leg is still open, intrabar execution uses the open (with normal direction-specific exit slippage and fees) of the first intrabar candle at or after the exact deadline. Without usable intrabar data, execution uses the first strategy-candle open at or after the deadline and records the normal 15-minute fallback source and reason. If data ends before the deadline, the ordinary `END_OF_DATA` exit remains in force. Break-even-after-opposite-SL can run alongside this timer, while the existing both-open timeout stops applying as soon as either leg closes.
+
+The desktop GUI exposes the duration in Minutes or Hours but stores and serializes it in minutes. CLI users can pass `--enable-remaining-leg-timeout-after-first-sl --remaining-leg-timeout-after-first-sl-minutes 240`.
 
 ## Position sizing and PnL
 
