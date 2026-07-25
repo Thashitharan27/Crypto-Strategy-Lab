@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 from config import BacktestConfig, RiskMode, TrailApplyTo, TrailIntrabarMode
 from engine import BacktestEngine
-from trade import ExitReason, ExitSource, Position, Side
+from trade import ExitReason, ExitSource, Position, Side, TradePair
 
 
 def engine(mode="PESSIMISTIC", enabled=True):
@@ -47,3 +47,58 @@ def test_apply_to_is_independent_and_reuses_stored_r():
     e._open_pair(0); pair=e.active_pairs[0]
     assert pair.long.trailing_enabled and not pair.short.trailing_enabled
     assert pair.long.trailing_activation_price == pair.long.entry_price + pair.long.risk*3
+
+
+@pytest.mark.parametrize("side", [Side.LONG, Side.SHORT])
+@pytest.mark.parametrize("activation_offset,exit_offset", [(5, 10), (45, 75), (3 * 24 * 60, 4 * 24 * 60)])
+def test_trailing_exit_reports_trigger_time_for_same_candle_later_candles_and_days(side, activation_offset, exit_offset):
+    e=engine("PESSIMISTIC"); p=position(side)
+    activation=p.entry_time + pd.Timedelta(minutes=activation_offset)
+    exit_time=p.entry_time + pd.Timedelta(minutes=exit_offset)
+    favourable=(104, 102) if side == Side.LONG else (98, 96)
+    reversal=(103, 101) if side == Side.LONG else (99, 97)
+
+    assert not e._maybe_exit_bar(p, 1, *favourable, activation, ExitSource.INTRABAR)
+    assert e._maybe_exit_bar(p, 2, *reversal, exit_time, ExitSource.INTRABAR)
+
+    assert p.exit_reason == ExitReason.TRAILING_STOP
+    assert p.trailing_activation_time == activation
+    assert p.exit_time == exit_time
+    assert p.exit_time >= p.trailing_activation_time
+
+
+def test_pessimistic_scan_does_not_replay_historical_intrabar_candles():
+    e=engine("PESSIMISTIC")
+    start=pd.Timestamp("2024-01-01 00:00", tz="UTC")
+    e.intrabar_data=pd.DataFrame({
+        "timestamp":pd.date_range(start, periods=61, freq="1min"),
+        "open":[100.0]*61, "high":[101.0]*61, "low":[99.0]*61, "close":[100.0]*61,
+    })
+    e.config=BacktestConfig(use_intrabar_data=True,enable_trade_telemetry=False,risk_mode=RiskMode.FIXED,fixed_r=1,enable_trailing_profit=True,trail_intrabar_mode=TrailIntrabarMode.PESSIMISTIC,maker_fee=0,taker_fee=0,slippage=0)
+    p=position(); p.entry_time=start + pd.Timedelta(minutes=15)
+    e.intrabar_data.loc[31:45, ["high", "low"]]=[104.0, 104.0]
+    e.intrabar_data.loc[46, ["high", "low"]]=[103.0, 102.0]
+
+    assert not e._scan_exit(p, 2)
+    assert p.trailing_activation_time == start + pd.Timedelta(minutes=31)
+    assert e._scan_exit(p, 3)
+    assert p.exit_time == start + pd.Timedelta(minutes=46)
+
+
+def test_pair_holding_uses_final_leg_exit_and_timestamp_validations_are_clear():
+    e=engine(); entry=pd.Timestamp("2024-01-01", tz="UTC")
+    long=position(Side.LONG); short=position(Side.SHORT)
+    long.exit_time=entry + pd.Timedelta(hours=1); short.exit_time=entry + pd.Timedelta(hours=3)
+    for p in (long, short):
+        p.exit_reason=ExitReason.TRAILING_STOP; p.trailing_active=True; p.trailing_activation_time=entry + pd.Timedelta(minutes=30)
+        p.exit_price=p.entry_price; p.price_r=p.gross_pnl=p.net_pnl=p.gross_r=p.net_r=p.exit_fee=0; p.fees=p.entry_fee
+    pair=TradePair(1,long,short,1000,entry,entry,100)
+    pair.equity_after_trade=1000; e.completed_pairs=[pair]
+
+    row=e.results_frame().iloc[0]
+    assert row.exit_time == short.exit_time
+    assert row.holding_minutes == 180
+    assert row.holding_hours == 3
+    assert row.holding_bars == 12
+    assert row.holding_time == pd.Timedelta(hours=3)
+    assert not row.timestamp_validation_failed
