@@ -6,11 +6,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, AfterTP1StopMode, TP2ExitMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, AfterTP1StopMode, TP2ExitMode, EntryTimingMode, RandomEntryStartMode
 
 DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output", "run_name": "",
     "sl_mult": 2.0, "tp_mult": 3.0, "entry_mode": "WAIT_UNTIL_CLOSED",
+    "enable_random_entry": False, "entry_timing_mode": "CURRENT", "random_entry_probability": 0.50, "random_seed": 42, "random_entry_start_mode": "NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE", "randomize_first_entry": True, "max_random_wait_candles": 0, "enable_random_entry_batch": False, "random_seed_start": 1, "random_seed_count": 100,
     "entry_interval": 1, "enable_daily_entry_schedule": False, "daily_entry_time": "00:00", "daily_entry_timezone": "UTC", "daily_entry_missed_policy": "SKIP_DAY", "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
     "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0, "enable_adx_filter": False, "adx_period": 14, "adx_filter_mode": "Disabled", "adx_maximum": 25.0, "adx_minimum": 20.0, "enable_bb_width_filter": False, "bb_width_filter_mode": "Disabled", "bb_width_maximum": 0.03, "bb_width_minimum": 0.0, "enable_di_spread_filter": False, "di_spread_filter_mode": "Disabled", "di_spread_maximum": 10.0, "di_spread_minimum": 0.0,
     "percent_r": 0.002, "fixed_r": 100.0, "initial_equity": 1000.0,
@@ -90,6 +91,17 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("after_tp1_stop_mode") not in [e.value for e in AfterTP1StopMode]: errors.append("Invalid AFTER_TP1_STOP_MODE.")
     if values.get("tp2_exit_mode") not in [e.value for e in TP2ExitMode]: errors.append("Invalid TP2_EXIT_MODE.")
     if values.get("entry_mode") not in [e.value for e in EntryMode]: errors.append("Invalid entry mode.")
+    if values.get("entry_timing_mode") not in [e.value for e in EntryTimingMode]: errors.append("Invalid entry timing mode.")
+    if values.get("random_entry_start_mode") not in [e.value for e in RandomEntryStartMode]: errors.append("Invalid Random Entry Start Mode.")
+    try:
+        if not 0 < float(values.get("random_entry_probability")) <= 1: errors.append("Entry Probability must be greater than 0 and less than or equal to 1.")
+    except (TypeError, ValueError): errors.append("Entry Probability must be greater than 0 and less than or equal to 1.")
+    try: int(values.get("random_seed"))
+    except (TypeError, ValueError): errors.append("Random Seed must be an integer.")
+    for key, label in (("max_random_wait_candles","Maximum Random Wait Candles"),("random_seed_count","Random Seed Count")):
+        try:
+            if int(values.get(key)) < (1 if key == "random_seed_count" else 0): errors.append(f"{label} is invalid.")
+        except (TypeError, ValueError): errors.append(f"{label} is invalid.")
     if values.get("tie_policy") not in [TiePolicy.PESSIMISTIC.value, TiePolicy.OPTIMISTIC.value]: errors.append("Invalid tie policy.")
     if values.get("risk_mode") not in [e.value for e in RiskMode]: errors.append("Invalid risk mode.")
     if values.get("trade_direction") not in [e.value for e in TradeDirectionMode]: errors.append("Invalid trade direction mode.")
@@ -136,7 +148,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
     return BacktestConfig(
         input_csv=Path(merged["input_csv"]), strategy_csv=Path(merged["input_csv"] if merged.get("strategy_csv") == DEFAULT_GUI_CONFIG.get("strategy_csv") else (merged.get("strategy_csv") or merged["input_csv"])), intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") else None, output_dir=Path(merged["output_dir"]),
         sl_mult=float(merged["sl_mult"]), tp_mult=float(merged["tp_mult"]),
-        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]), enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]), daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]), daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]),
+        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]), enable_random_entry=bool(merged["enable_random_entry"]), entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]), random_entry_probability=float(merged["random_entry_probability"]), random_seed=int(merged["random_seed"]), random_entry_start_mode=RandomEntryStartMode(merged["random_entry_start_mode"]), randomize_first_entry=bool(merged["randomize_first_entry"]), max_random_wait_candles=int(merged["max_random_wait_candles"]), enable_random_entry_batch=bool(merged["enable_random_entry_batch"]), random_seed_start=int(merged["random_seed_start"]), random_seed_count=int(merged["random_seed_count"]), enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]), daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]), daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]),
         max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),
         risk_mode=RiskMode(merged["risk_mode"]), atr_period=int(merged["atr_period"]),
         atr_multiplier=float(merged["atr_multiplier"]), enable_adx_filter=bool(merged["enable_adx_filter"]), adx_period=int(merged["adx_period"]), adx_filter_mode=AdxFilterMode(merged["adx_filter_mode"]), adx_maximum=float(merged["adx_maximum"]), adx_minimum=float(merged["adx_minimum"]), enable_bb_width_filter=bool(merged["enable_bb_width_filter"]), bb_width_filter_mode=BBWidthFilterMode(merged["bb_width_filter_mode"]), bb_width_maximum=float(merged["bb_width_maximum"]), bb_width_minimum=float(merged["bb_width_minimum"]), enable_di_spread_filter=bool(merged["enable_di_spread_filter"]), di_spread_filter_mode=DISpreadFilterMode(merged["di_spread_filter_mode"]), di_spread_maximum=float(merged["di_spread_maximum"]), di_spread_minimum=float(merged["di_spread_minimum"]), percent_r=float(merged["percent_r"]),

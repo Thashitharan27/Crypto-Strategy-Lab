@@ -220,3 +220,19 @@ python main.py ^
 ```
 
 Additional CLI options include `--strategy-timeframe`, `--intrabar-timeframe`, `--atr-period`, `--atr-multiplier`, `--data-start`, `--trading-start`, `--trading-end`, `--max-leverage-per-leg`, `--max-combined-leverage`, `--intrabar-missing-policy`, and `--zero-cost-comparison`.
+
+## Reproducible random-entry timing experiment
+
+Random timing is opt-in and is active only when both **Enable Random Entry Timing** is checked and **Entry Timing Mode** is `RANDOM_AFTER_PAIR_CLOSE`. `CURRENT` (or a disabled checkbox) follows the original entry path and does not instantiate or consume a random generator.
+
+The random sequence is intentionally narrow:
+
+1. The engine finishes processing exits for a 15-minute strategy candle and confirms every quantity on every enabled leg is closed.
+2. The candle in which that happened is never reused for an entry. At the next eligible candle open, the engine uses indicators from the preceding completed candle only.
+3. Exactly one value is drawn from a dedicated `random.Random(Random Seed)` instance. A value **strictly below** Entry Probability is `OPEN`; a value equal to or above it is `SKIP`.
+4. `OPEN` sends the existing configured direction mode through the normal pair creation, sizing, risk, fees, stops, targets, partial/trailing, break-even, timeout, telemetry, and equity paths. In `BOTH`, one draw opens both legs; direction is never randomized.
+5. A positive Maximum Random Wait forces an entry on the eligible candle after that many consecutive skips. The forced candle still has one audit draw but is recorded as `FORCED_OPEN`, not Heads. Zero never forces.
+
+Because execution occurs at the eligible candle's open, its open is the unslipped strategy entry price and its high, low, and close are not used for entry. `NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE` is the default. With this event loop both start modes advance to a later strategy candle; the full-candle mode explicitly prohibits close-and-reopen in the candle that resolves the prior pair.
+
+Single runs write `random_entry_decisions.csv`, `random_entry_analysis.csv`, and `random_vs_baseline_comparison.csv`. Trade rows contain the decision id/draw/time, wait, prior close, forcing flag, seed, probability, and effective timing mode. Batch mode resets the engine, starting equity, and seeded generator for every seed, then writes `random_entry_batch_summary.csv` and `random_entry_batch_statistics.csv`.
