@@ -35,6 +35,10 @@ class TrailApplyTo(str, Enum):
     BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"
 class TrailIntrabarMode(str, Enum):
     PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"
+class AfterTP1StopMode(str, Enum):
+    KEEP_ORIGINAL_SL = "KEEP_ORIGINAL_SL"; MOVE_TO_ENTRY = "MOVE_TO_ENTRY"; MOVE_TO_R_OFFSET = "MOVE_TO_R_OFFSET"
+class TP2ExitMode(str, Enum):
+    FIXED_TP2 = "FIXED_TP2"; TRAILING_AFTER_TP1 = "TRAILING_AFTER_TP1"
 
 @dataclass(frozen=True)
 class BacktestConfig:
@@ -55,6 +59,15 @@ class BacktestConfig:
     zero_cost_comparison: bool = False
     trade_direction: TradeDirectionMode = TradeDirectionMode.BOTH
     enable_trailing_profit: bool = False
+    enable_partial_take_profit: bool = False
+    tp1_r: float = 3.0
+    tp1_close_pct: float = 50.0
+    tp2_r: float = 12.0
+    tp2_close_pct: float = 50.0
+    stop_loss_r: float = 10.0
+    after_tp1_stop_mode: AfterTP1StopMode = AfterTP1StopMode.KEEP_ORIGINAL_SL
+    after_tp1_stop_offset_r: float = 0.0
+    tp2_exit_mode: TP2ExitMode = TP2ExitMode.FIXED_TP2
     trail_activation_r: float = 3.0
     trail_distance_r: float = 1.0
     trail_apply_to: TrailApplyTo = TrailApplyTo.BOTH
@@ -121,6 +134,11 @@ class BacktestConfig:
         if self.atr_multiplier <= 0: raise ValueError("atr_multiplier must be positive")
         if self.trail_activation_r <= 0: raise ValueError("trail_activation_r must be greater than 0")
         if self.trail_distance_r <= 0: raise ValueError("trail_distance_r must be greater than 0")
+        if self.tp1_r <= 0: raise ValueError("TP1_R must be greater than zero")
+        if self.tp2_r <= self.tp1_r: raise ValueError("TP2_R must be greater than TP1_R")
+        if self.stop_loss_r <= 0: raise ValueError("STOP_LOSS_R must be greater than zero")
+        if self.tp1_close_pct <= 0 or self.tp2_close_pct <= 0: raise ValueError("TP close percentages must be greater than zero")
+        if abs(self.tp1_close_pct + self.tp2_close_pct - 100.0) > 1e-9: raise ValueError("TP1_CLOSE_PCT + TP2_CLOSE_PCT must equal 100%")
         if self.adx_period <= 0: raise ValueError("adx_period must be positive")
         if self.adx_maximum < 0 or self.adx_minimum < 0: raise ValueError("ADX thresholds must be non-negative")
         if self.bb_period <= 0: raise ValueError("BB period must be positive")
@@ -147,6 +165,8 @@ class BacktestConfig:
         if isinstance(self.trade_direction, str): object.__setattr__(self, "trade_direction", TradeDirectionMode(self.trade_direction))
         if isinstance(self.trail_apply_to, str): object.__setattr__(self, "trail_apply_to", TrailApplyTo(self.trail_apply_to))
         if isinstance(self.trail_intrabar_mode, str): object.__setattr__(self, "trail_intrabar_mode", TrailIntrabarMode(self.trail_intrabar_mode))
+        if isinstance(self.after_tp1_stop_mode, str): object.__setattr__(self, "after_tp1_stop_mode", AfterTP1StopMode(self.after_tp1_stop_mode))
+        if isinstance(self.tp2_exit_mode, str): object.__setattr__(self, "tp2_exit_mode", TP2ExitMode(self.tp2_exit_mode))
         if isinstance(self.daily_entry_missed_policy, str): object.__setattr__(self, "daily_entry_missed_policy", DailyEntryMissedPolicy(self.daily_entry_missed_policy))
         try:
             hh, mm = [int(part) for part in str(self.daily_entry_time).split(":", 1)]

@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, AfterTP1StopMode, TP2ExitMode
 
 DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output", "run_name": "",
@@ -19,6 +19,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "strategy_timeframe_minutes": 15, "intrabar_timeframe_minutes": 1, "use_intrabar_data": True,
     "trading_start_date": None, "trading_end_date": None, "max_effective_leverage_per_leg": None,
     "max_combined_effective_leverage": None, "intrabar_missing_policy": "WARN_AND_USE_15M", "zero_cost_comparison": False, "trade_direction": "BOTH", "enable_trailing_profit": False, "trail_activation_r": 3.0, "trail_distance_r": 1.0, "trail_apply_to": "BOTH", "trail_intrabar_mode": "PESSIMISTIC",
+    "enable_partial_take_profit": False, "tp1_r": 3.0, "tp1_close_pct": 50.0, "tp2_r": 12.0, "tp2_close_pct": 50.0, "stop_loss_r": 10.0, "after_tp1_stop_mode": "KEEP_ORIGINAL_SL", "after_tp1_stop_offset_r": 0.0, "tp2_exit_mode": "FIXED_TP2",
     "enable_both_open_timeout": False, "max_both_open_minutes": 480, "enable_trade_telemetry": True, "save_full_telemetry_csv": True, "save_trade_journey_summary": True, "save_trade_journey_charts": True, "telemetry_interval_minutes": 15, "both_open_timeout_unit": "Hours", "enable_be_after_opposite_sl": False, "be_mode": "ENTRY_PRICE", "be_offset_r": 0.0, "be_same_candle_policy": "NEXT_CANDLE",
 }
 
@@ -67,7 +68,7 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         ("sl_mult", 0, "SL multiple must be > 0."), ("tp_mult", 0, "TP multiple must be > 0."),
         ("initial_equity", 0, "Starting equity must be > 0."), ("risk_per_leg", 0, "Risk per leg must be > 0."),
         ("atr_multiplier", 0, "ATR multiplier must be > 0."), ("strategy_timeframe_minutes", 0, "Strategy timeframe must be > 0."), ("intrabar_timeframe_minutes", 0, "Intrabar timeframe must be > 0."), ("percent_r", 0, "Percentage R must be > 0."),
-        ("fixed_r", 0, "Fixed R must be > 0."), ("trail_activation_r", 0, "Trailing Activation (R) must be > 0."), ("trail_distance_r", 0, "Trailing Distance (R) must be > 0."),
+        ("fixed_r", 0, "Fixed R must be > 0."), ("tp1_r", 0, "TP1_R must be greater than zero."), ("tp2_r", 0, "TP2_R must be greater than zero."), ("stop_loss_r", 0, "STOP_LOSS_R must be greater than zero."), ("tp1_close_pct", 0, "TP1_CLOSE_PCT must be greater than zero."), ("tp2_close_pct", 0, "TP2_CLOSE_PCT must be greater than zero."), ("trail_activation_r", 0, "Trailing Activation (R) must be > 0."), ("trail_distance_r", 0, "Trailing Distance (R) must be > 0."),
     ]
     for key, limit, msg in checks:
         try:
@@ -82,6 +83,12 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         try:
             if float(values.get(key, 0)) < 0: errors.append(f"{label} must be >= 0.")
         except (TypeError, ValueError): errors.append(f"{label} must be >= 0.")
+    try:
+        if float(values.get("tp2_r")) <= float(values.get("tp1_r")): errors.append("TP2_R must be greater than TP1_R.")
+        if abs(float(values.get("tp1_close_pct")) + float(values.get("tp2_close_pct")) - 100.0) > 1e-9: errors.append("TP1_CLOSE_PCT + TP2_CLOSE_PCT must equal 100%.")
+    except (TypeError, ValueError): errors.append("Partial take-profit values cannot be blank and must be numeric.")
+    if values.get("after_tp1_stop_mode") not in [e.value for e in AfterTP1StopMode]: errors.append("Invalid AFTER_TP1_STOP_MODE.")
+    if values.get("tp2_exit_mode") not in [e.value for e in TP2ExitMode]: errors.append("Invalid TP2_EXIT_MODE.")
     if values.get("entry_mode") not in [e.value for e in EntryMode]: errors.append("Invalid entry mode.")
     if values.get("tie_policy") not in [TiePolicy.PESSIMISTIC.value, TiePolicy.OPTIMISTIC.value]: errors.append("Invalid tie policy.")
     if values.get("risk_mode") not in [e.value for e in RiskMode]: errors.append("Invalid risk mode.")
@@ -141,7 +148,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         use_intrabar_data=bool(merged["use_intrabar_data"]), trading_start_date=merged.get("trading_start_date"), trading_end_date=merged.get("trading_end_date"),
         max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
         max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
-        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]), trade_direction=TradeDirectionMode(merged["trade_direction"]), enable_trailing_profit=bool(merged["enable_trailing_profit"]), trail_activation_r=float(merged["trail_activation_r"]), trail_distance_r=float(merged["trail_distance_r"]), trail_apply_to=TrailApplyTo(merged["trail_apply_to"]), trail_intrabar_mode=TrailIntrabarMode(merged["trail_intrabar_mode"]),
+        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]), trade_direction=TradeDirectionMode(merged["trade_direction"]), enable_partial_take_profit=bool(merged["enable_partial_take_profit"]), tp1_r=float(merged["tp1_r"]), tp1_close_pct=float(merged["tp1_close_pct"]), tp2_r=float(merged["tp2_r"]), tp2_close_pct=float(merged["tp2_close_pct"]), stop_loss_r=float(merged["stop_loss_r"]), after_tp1_stop_mode=AfterTP1StopMode(merged["after_tp1_stop_mode"]), after_tp1_stop_offset_r=float(merged["after_tp1_stop_offset_r"]), tp2_exit_mode=TP2ExitMode(merged["tp2_exit_mode"]), enable_trailing_profit=bool(merged["enable_trailing_profit"]), trail_activation_r=float(merged["trail_activation_r"]), trail_distance_r=float(merged["trail_distance_r"]), trail_apply_to=TrailApplyTo(merged["trail_apply_to"]), trail_intrabar_mode=TrailIntrabarMode(merged["trail_intrabar_mode"]),
         enable_both_open_timeout=bool(merged["enable_both_open_timeout"]), max_both_open_minutes=int(merged["max_both_open_minutes"]),
         enable_be_after_opposite_sl=bool(merged["enable_be_after_opposite_sl"]), be_mode=BreakEvenMode(merged["be_mode"]), be_offset_r=float(merged["be_offset_r"]), be_same_candle_policy=BreakEvenSameCandlePolicy(merged["be_same_candle_policy"]),
         run_name=str(merged.get("run_name", "")), enable_trade_telemetry=bool(merged["enable_trade_telemetry"]), save_full_telemetry_csv=bool(merged["save_full_telemetry_csv"]), save_trade_journey_summary=bool(merged["save_trade_journey_summary"]), save_trade_journey_charts=bool(merged["save_trade_journey_charts"]), telemetry_interval_minutes=int(merged["telemetry_interval_minutes"]),

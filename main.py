@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy, AfterTP1StopMode, TP2ExitMode
 from engine import BacktestEngine
 from loader import load_backtest_data, load_ohlcv_csv
 from plots import save_plots
 from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
-from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis
+from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, partial_take_profit_analysis
 from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 
 
@@ -49,6 +49,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--zero-cost-comparison", action="store_true", default=None)
     parser.add_argument("--trade-direction", type=enum_value(TradeDirectionMode), choices=list(TradeDirectionMode))
     parser.add_argument("--trade-direction-comparison", action="store_true", help="Run BOTH, LONG_ONLY, and SHORT_ONLY comparison report")
+    parser.add_argument("--enable-partial-take-profit", action="store_true", default=None)
+    parser.add_argument("--tp1-r", type=float)
+    parser.add_argument("--tp1-close-pct", type=float)
+    parser.add_argument("--tp2-r", type=float)
+    parser.add_argument("--tp2-close-pct", type=float)
+    parser.add_argument("--stop-loss-r", type=float)
+    parser.add_argument("--after-tp1-stop-mode", type=enum_value(AfterTP1StopMode), choices=list(AfterTP1StopMode))
+    parser.add_argument("--after-tp1-stop-offset-r", type=float)
+    parser.add_argument("--tp2-exit-mode", type=enum_value(TP2ExitMode), choices=list(TP2ExitMode))
     parser.add_argument("--enable-both-open-timeout", action="store_true", default=None)
     parser.add_argument("--max-both-open-minutes", type=int)
     parser.add_argument("--timeout-comparison", action="store_true", help="Compare no timeout plus 2/4/6/8/12 hour both-open timeout runs")
@@ -138,6 +147,7 @@ def main() -> None:
             return None
 
     run_output_step("Saving trade_list.csv", lambda: trades.to_csv(run_dir / "trade_list.csv", index=False))
+    run_output_step("Building partial_take_profit_analysis", lambda: partial_take_profit_analysis(trades).to_csv(run_dir / "partial_take_profit_analysis.csv", index=False))
     if config.enable_trade_telemetry:
         if config.save_full_telemetry_csv:
             run_output_step("Saving telemetry", lambda: telemetry.to_csv(run_dir / "trade_telemetry.csv", index=False))
