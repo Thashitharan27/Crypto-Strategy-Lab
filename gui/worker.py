@@ -13,6 +13,7 @@ from loader import load_backtest_data
 from plots import save_plots
 from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
 from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, trailing_profit_analysis, partial_take_profit_analysis
+from lifecycle import export_lifecycle_reports
 from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 from random_entry import decisions_frame, random_analysis, run_batch, comparison_row
 from config import EntryTimingMode
@@ -130,6 +131,8 @@ class BacktestWorker(QObject):
                     run_output_step("Building trade_journey_analysis", lambda: trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False))
                     run_output_step("Building winner_loser_journey_analysis", lambda: winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False))
                     run_output_step("Building double_sl_journey_analysis", lambda: double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False))
+                if self.config.enable_indicator_lifecycle_analysis:
+                    run_output_step("Building indicator lifecycle reports", lambda: export_lifecycle_reports(trades, telemetry, run_dir, phases=self.config.lifecycle_phases, checkpoints=self.config.lifecycle_early_checkpoints, minimum_sample=self.config.lifecycle_minimum_bucket_sample, charts=self.config.create_lifecycle_charts, flat_threshold_pct=self.config.lifecycle_flat_pattern_threshold_pct))
             run_output_step("Saving skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
             run_output_step("Saving skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
             run_output_step("Saving telemetry summaries", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
