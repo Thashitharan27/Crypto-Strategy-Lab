@@ -53,6 +53,13 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     remaining_started_mask = trades.get("remaining_leg_timeout_after_first_sl_started", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)
     remaining_triggered_mask = trades.get("remaining_leg_timeout_triggered", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)
     remaining_timeout_pairs = trades[remaining_started_mask]
+    extension_counts = pd.to_numeric(trades.get("remaining_leg_timeout_extension_count", pd.Series(np.zeros(len(trades.index)), index=trades.index)), errors="coerce").fillna(0)
+    checkpoint_counts = pd.to_numeric(trades.get("remaining_leg_timeout_checkpoint_count", pd.Series(np.zeros(len(trades.index)), index=trades.index)), errors="coerce").fillna(0)
+    reentry_gate_started = trades.get("checkpoint_reentry_gate_started", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)
+    reentry_gate_release_reason = trades.get("checkpoint_reentry_gate_release_reason", pd.Series(index=trades.index, dtype=object))
+    first_sl_partial_mask = trades.get("first_sl_survivor_partial_taken", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)
+    zero_confirmed_mask = trades.get("checkpoint_zero_score_confirmed_close", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool)
+    extension_mask = extension_counts > 0
     remaining_reason = pd.Series(index=trades.index, dtype=object)
     if "first_sl_side" in trades:
         remaining_reason = trades.get("short_exit_reason", remaining_reason).where(trades["first_sl_side"].eq("LONG"), trades.get("long_exit_reason", remaining_reason))
@@ -66,6 +73,11 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     double_sl_prevented = ((trades.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (trades.get("short_exit_reason", pd.Series(dtype=object)).isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"]))) | ((trades.get("short_exit_reason", pd.Series(dtype=object)) == "SL") & (trades.get("long_exit_reason", pd.Series(dtype=object)).isin(["BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"])))
     fallback_cols = [c for c in ("long_fallback_reason", "short_fallback_reason") if c in trades]
     fallback_reasons = (pd.concat([trades[c] for c in fallback_cols], ignore_index=True) if fallback_cols else pd.Series(dtype=object)).dropna().value_counts().to_dict()
+    be_same_candle_ambiguity_count = 0
+    for side in ("long", "short"):
+        ambiguous = trades.get(f"{side}_be_same_candle_ambiguous", pd.Series(False, index=trades.index)).fillna(False).astype(bool)
+        enabled = trades.get(f"{side}_be_enabled", pd.Series(False, index=trades.index)).fillna(False).astype(bool)
+        be_same_candle_ambiguity_count += int((ambiguous & enabled).sum())
     combos = {}
     def combo_label(row):
         lr = row.get("long_exit_reason")
@@ -96,6 +108,7 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
         "expectancy": float(trades["pair_net_pnl"].mean()),
         "signals_evaluated": int(trades.get("signals_evaluated", pd.Series([len(trades)])).iloc[0]) if "signals_evaluated" in trades else int(len(trades)),
         "signals_skipped_by_adx": int(trades.get("signals_skipped_by_adx", pd.Series([0])).iloc[0]) if "signals_skipped_by_adx" in trades else 0,
+        "signals_skipped_by_filters": int(trades.get("signals_skipped_by_filters", pd.Series([0])).iloc[0]) if "signals_skipped_by_filters" in trades else 0,
         "signals_traded": int(trades.get("signals_traded", pd.Series([len(trades)])).iloc[0]) if "signals_traded" in trades else int(len(trades)),
         "wins": int(wins.sum()),
         "losses": int(losses.sum()),
@@ -125,13 +138,25 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
         "total_pnl_of_remaining_leg_timeout_pairs": float(remaining_timeout_pairs["pair_net_pnl"].sum()) if not remaining_timeout_pairs.empty else 0.0,
         "profitable_remaining_leg_timeout_pairs": int((remaining_timeout_pairs["pair_net_pnl"] > 0).sum()),
         "losing_remaining_leg_timeout_pairs": int((remaining_timeout_pairs["pair_net_pnl"] < 0).sum()),
+        "pairs_with_remaining_leg_timeout_extension": int(extension_mask.sum()),
+        "remaining_leg_timeout_checkpoint_count": int(checkpoint_counts.sum()),
+        "remaining_leg_timeout_extension_count": int(extension_counts.sum()),
+        "remaining_legs_reaching_tp_after_extension": int((extension_mask & remaining_reason.eq("TP")).sum()),
+        "checkpoint_reentry_gates_started": int(reentry_gate_started.sum()),
+        "checkpoint_reentry_gates_released_by_tp": int((reentry_gate_started & reentry_gate_release_reason.eq("TP")).sum()),
+        "checkpoint_reentry_gates_released_by_sl": int((reentry_gate_started & reentry_gate_release_reason.eq("SL")).sum()),
+        "checkpoint_reentry_gates_released_by_tp_and_sl": int((reentry_gate_started & reentry_gate_release_reason.eq("TP_AND_SL")).sum()),
+        "checkpoint_reentry_gates_unreleased_at_end": int((reentry_gate_started & reentry_gate_release_reason.isna()).sum()),
+        "first_sl_survivor_partial_closes": int(trades.loc[first_sl_partial_mask].drop_duplicates("pair_id").shape[0]),
+        "first_sl_survivor_partial_net_pnl": float(pd.to_numeric(trades.loc[first_sl_partial_mask].drop_duplicates("pair_id").get("first_sl_survivor_partial_net_pnl", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()),
+        "checkpoint_zero_score_confirmed_closes": int(trades.loc[zero_confirmed_mask].drop_duplicates("pair_id").shape[0]),
         "pairs_where_be_was_triggered": int(len(be_pairs)),
         "remaining_legs_stopped_at_be": int(be_exit_mask.sum()),
         "remaining_legs_reaching_tp_after_be_move": int(tp_after_be.sum()),
         "average_pnl_of_be_triggered_pairs": float(be_pairs["pair_net_pnl"].mean()) if not be_pairs.empty else 0.0,
         "total_pnl_of_be_triggered_pairs": float(be_pairs["pair_net_pnl"].sum()) if not be_pairs.empty else 0.0,
         "double_sl_count_prevented": int(double_sl_prevented.sum()),
-        "be_same_candle_ambiguity_count": int(trades.get("long_be_same_candle_ambiguous", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool).sum() + trades.get("short_be_same_candle_ambiguous", pd.Series(np.full(len(trades.index), False), index=trades.index)).astype(bool).sum()),
+        "be_same_candle_ambiguity_count": be_same_candle_ambiguity_count,
         "average_timeout_pair_pnl": float(timeout_pairs["pair_net_pnl"].mean()) if not timeout_pairs.empty else 0.0,
         "total_timeout_pair_pnl": float(timeout_pairs["pair_net_pnl"].sum()) if not timeout_pairs.empty else 0.0,
         "timeout_pairs_profitable": int((timeout_pairs["pair_net_pnl"] > 0).sum()) if not timeout_pairs.empty else 0,

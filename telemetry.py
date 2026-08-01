@@ -81,9 +81,12 @@ def _at_or_before(group: pd.DataFrame, minutes: float, col: str):
 
 
 def add_journey_columns(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.DataFrame:
+    source_attrs = dict(trades.attrs)
     trades = trades.copy()
     if trades.empty or telemetry.empty:
-        return _ensure_journey_columns(trades)
+        result = _ensure_journey_columns(trades)
+        result.attrs.update(source_attrs)
+        return result
     by_pair = {pid: g.sort_values("elapsed_minutes") for pid, g in telemetry.groupby("pair_id", sort=False)}
     updates = []
     for _, row in trades.iterrows():
@@ -108,7 +111,9 @@ def add_journey_columns(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.Dat
                 out[f"{ind}_{label}"] = _at_or_before(g, mins, ind) if holding >= mins else np.nan
         updates.append(out)
     journey = pd.DataFrame(updates, index=trades.index)
-    return pd.concat([trades, journey], axis=1)
+    result = pd.concat([trades, journey], axis=1)
+    result.attrs.update(source_attrs)
+    return result
 
 
 def _ensure_journey_columns(trades: pd.DataFrame) -> pd.DataFrame:

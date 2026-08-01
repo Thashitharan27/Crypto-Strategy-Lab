@@ -9,6 +9,7 @@ from config import BacktestConfig, EntryMode, RiskMode, TiePolicy, TradeDirectio
 from engine import BacktestEngine
 from loader import load_ohlcv_csv
 from statistics import equity_curve, summarize
+from trade import Position, Side
 
 
 def candles(rows):
@@ -27,6 +28,150 @@ def cfg(**kw):
                 entry_mode=EntryMode.WAIT_UNTIL_CLOSED)
     base.update(kw)
     return BacktestConfig(**base)
+
+
+def test_atr_checkpoint_extends_biased_tp_and_locks_profit():
+    df = candles([(100, 100, 100, 100)] * 4)
+    engine = BacktestEngine(
+        df,
+        cfg(
+            enable_di_direction_sizing=True,
+            enable_atr_checkpoint_tp_extension=True,
+            atr_checkpoint_di_spread_minimum=30,
+            atr_checkpoint_bb_width_minimum=0.03,
+        ),
+    )
+    engine.plus_di_values[:] = 50
+    engine.minus_di_values[:] = 10
+    engine.bb_width[:] = 0.04
+    pos = Position(Side.LONG, df.timestamp.iloc[0], 0, 100, 10, 80, 120, 1, 10, 100, 10)
+    pos.original_sl = 80
+    pos.atr_checkpoint_extension_enabled = True
+    pos.atr_checkpoint_initial_tp = 120
+    pos.atr_checkpoint_final_tp_r = 2
+
+    engine._apply_atr_checkpoint_extensions(pos, 130, 100, df.timestamp.iloc[2])
+
+    assert pos.atr_checkpoint_pass_count == 3
+    assert pos.tp == pytest.approx(150)  # +3 ATR checkpoint extends TP to +5 ATR
+    assert pos.sl == pytest.approx(120)  # profit floor trails one ATR behind
+    assert pos.atr_checkpoint_profit_lock_r == pytest.approx(2)
+
+
+def test_atr_checkpoint_failure_leaves_original_exit_levels():
+    df = candles([(100, 100, 100, 100)] * 4)
+    engine = BacktestEngine(
+        df,
+        cfg(enable_di_direction_sizing=True, enable_atr_checkpoint_tp_extension=True),
+    )
+    engine.plus_di_values[:] = 35
+    engine.minus_di_values[:] = 10
+    engine.bb_width[:] = 0.04
+    pos = Position(Side.LONG, df.timestamp.iloc[0], 0, 100, 10, 80, 120, 1, 10, 100, 10)
+    pos.original_sl = 80
+    pos.atr_checkpoint_extension_enabled = True
+
+    engine._apply_atr_checkpoint_extensions(pos, 110, 100, df.timestamp.iloc[2])
+
+    assert pos.atr_checkpoint_fail_count == 1
+    assert pos.tp == pytest.approx(120)
+    assert pos.sl == pytest.approx(80)
+
+
+def test_bull_long_r_step_staircase_advances_stop_and_ignores_fixed_tp():
+    df = candles([(100, 100, 100, 100)] * 5)
+    engine = BacktestEngine(
+        df,
+        cfg(
+            enable_di_direction_sizing=True,
+            enable_di_regime_reward_risk=True,
+            enable_bull_long_r_step_trailing=True,
+            bull_long_r_step_activation_r=2,
+            bull_long_r_step_distance_r=2,
+            bull_long_r_step_size_r=1,
+            bull_long_r_step_maximum_r=0,
+        ),
+    )
+    pos = Position(Side.LONG, df.timestamp.iloc[0], 0, 100, 10, 90, 120, 1, 10, 100, 10)
+    pos.original_sl = 90
+    pos.r_step_trailing_enabled = True
+    pos.r_step_initial_tp = 120
+
+    assert not engine._maybe_r_step_trailing_exit(pos, 1, 120, 101, df.timestamp.iloc[1], None)
+    assert pos.is_open
+    assert pos.sl == pytest.approx(100)
+    assert pos.r_step_checkpoint_count == 1
+
+    assert not engine._maybe_r_step_trailing_exit(pos, 2, 130, 111, df.timestamp.iloc[2], None)
+    assert pos.sl == pytest.approx(110)
+    assert pos.r_step_last_checkpoint_r == pytest.approx(3)
+
+    assert engine._maybe_r_step_trailing_exit(pos, 3, 115, 109, df.timestamp.iloc[3], None)
+    assert pos.exit_reason.value == "R_STEP_TRAILING_STOP"
+    assert pos.exit_price == pytest.approx(110)
+
+
+def test_bull_long_r_step_staircase_banks_partial_at_activation():
+    df = candles([(100, 100, 100, 100)] * 4)
+    engine = BacktestEngine(
+        df,
+        cfg(
+            enable_di_direction_sizing=True,
+            enable_di_regime_reward_risk=True,
+            enable_bull_long_r_step_trailing=True,
+            bull_long_r_step_activation_close_pct=80,
+        ),
+    )
+    pos = Position(Side.LONG, df.timestamp.iloc[0], 0, 100, 10, 90, 120, 1, 10, 100, 10)
+    pos.original_sl = 90
+    pos.r_step_trailing_enabled = True
+    pos.r_step_activation_close_pct = 80
+    pos.partial_tp_enabled = True
+    pos.original_quantity = 1
+    pos.remaining_quantity = 1
+    pos.tp1_quantity = 0.8
+    pos.tp1_price = 120
+    pos.r_step_activation_quantity = 0.8
+    pos.r_step_runner_quantity = 0.2
+
+    assert not engine._maybe_r_step_trailing_exit(pos, 1, 120, 101, df.timestamp.iloc[1], None)
+    assert pos.r_step_activation_partial_taken
+    assert pos.remaining_quantity == pytest.approx(0.2)
+    assert pos.tp1_gross_pnl == pytest.approx(16)
+    assert pos.sl == pytest.approx(100)
+
+    assert engine._maybe_r_step_trailing_exit(pos, 2, 105, 99, df.timestamp.iloc[2], None)
+    assert pos.exit_reason.value == "R_STEP_TRAILING_STOP"
+    assert pos.gross_r == pytest.approx(1.6)
+    assert pos.final_exit_reason == "TP1_THEN_R_STEP_TRAILING_STOP"
+
+
+def test_biased_short_adx_cap_rejects_only_high_adx_shorts():
+    df = candles([(100, 100, 100, 100)] * 4)
+    engine = BacktestEngine(
+        df,
+        cfg(
+            enable_di_direction_sizing=True,
+            enable_biased_short_adx_cap=True,
+            biased_short_adx_maximum=50,
+        ),
+    )
+    engine.plus_di_values[:] = 10
+    engine.minus_di_values[:] = 45
+    engine.di_spread[:] = 35
+    engine.adx_values[:] = 50
+    passed, reason = engine._entry_filter_result(1)
+    assert not passed
+    assert "at or above maximum 50" in reason
+
+    engine.adx_values[:] = 49.999
+    assert engine._entry_filter_result(1)[0]
+
+    engine.plus_di_values[:] = 45
+    engine.minus_di_values[:] = 10
+    engine.di_spread[:] = 35
+    engine.adx_values[:] = 60
+    assert engine._entry_filter_result(1)[0]
 
 
 def test_loading_binance_open_time_ms_extra_columns_gap(capsys, tmp_path):
@@ -88,6 +233,31 @@ def test_end_of_data_closure_no_lookahead():
     assert row.long_exit_reason == "END_OF_DATA"
     assert row.short_exit_reason == "END_OF_DATA"
     assert row.holding_bars == 0
+
+
+def test_skip_monday_entries_uses_actual_entry_time_and_timezone():
+    monday = candles([(100,100,100,100), (100,100,100,100)])
+
+    utc_engine = BacktestEngine(
+        monday,
+        cfg(enable_skip_monday_entries=True, skip_monday_timezone="UTC"),
+    )
+    utc_trades = utc_engine.run()
+    assert utc_trades.empty
+    assert utc_engine.skipped_signals
+    assert all("Monday entry skipped in UTC" in row["entry_filter_reason"] for row in utc_engine.skipped_signals)
+
+    new_york_trades = BacktestEngine(
+        monday,
+        cfg(enable_skip_monday_entries=True, skip_monday_timezone="America/New_York"),
+    ).run()
+    assert len(new_york_trades) == 1
+    assert pd.Timestamp(new_york_trades.iloc[0].entry_time).day_name() == "Monday"
+
+
+def test_invalid_skip_monday_timezone_is_rejected():
+    with pytest.raises(ValueError, match="skip_monday_timezone"):
+        cfg(enable_skip_monday_entries=True, skip_monday_timezone="Not/A_Zone")
 
 
 def test_equity_and_drawdown():

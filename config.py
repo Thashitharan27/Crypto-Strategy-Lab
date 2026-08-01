@@ -29,12 +29,16 @@ class DISpreadFilterMode(str, Enum):
     DISABLED = "Disabled"; MAXIMUM = "Maximum Spread"; MINIMUM = "Minimum Spread"; RANGE = "Range"
 class TradeDirectionMode(str, Enum):
     BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"; BOTH_INDEPENDENT = "BOTH_INDEPENDENT"
+class DIExecutionMode(str, Enum):
+    BOTH_SIDES = "BOTH_SIDES"; PREFERRED_SIDE_ONLY = "PREFERRED_SIDE_ONLY"
 class DailyEntryMissedPolicy(str, Enum):
     SKIP_DAY = "SKIP_DAY"; NEXT_AVAILABLE_CANDLE = "NEXT_AVAILABLE_CANDLE"
 class TrailApplyTo(str, Enum):
     BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"
 class TrailIntrabarMode(str, Enum):
     PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"
+class TrailActivationTrigger(str, Enum):
+    PRICE_REACHES_R = "PRICE_REACHES_R"; AFTER_TP1 = "AFTER_TP1"; AFTER_SL1 = "AFTER_SL1"; AFTER_TP1_OR_SL1 = "AFTER_TP1_OR_SL1"
 class AfterTP1StopMode(str, Enum):
     KEEP_ORIGINAL_SL = "KEEP_ORIGINAL_SL"; MOVE_TO_ENTRY = "MOVE_TO_ENTRY"; MOVE_TO_R_OFFSET = "MOVE_TO_R_OFFSET"
 class TP2ExitMode(str, Enum):
@@ -64,6 +68,10 @@ class BacktestConfig:
     trade_direction: TradeDirectionMode = TradeDirectionMode.BOTH
     enable_trailing_profit: bool = False
     enable_partial_take_profit: bool = False
+    enable_partial_stop_loss: bool = False
+    sl1_r: float = 0.5
+    sl1_close_pct: float = 50.0
+    sl2_r: float = 8.0
     tp1_r: float = 3.0
     tp1_close_pct: float = 50.0
     tp2_r: float = 12.0
@@ -73,6 +81,7 @@ class BacktestConfig:
     after_tp1_stop_offset_r: float = 0.0
     tp2_exit_mode: TP2ExitMode = TP2ExitMode.FIXED_TP2
     trail_activation_r: float = 3.0
+    trail_activation_trigger: TrailActivationTrigger = TrailActivationTrigger.PRICE_REACHES_R
     trail_distance_r: float = 1.0
     trail_apply_to: TrailApplyTo = TrailApplyTo.BOTH
     trail_intrabar_mode: TrailIntrabarMode = TrailIntrabarMode.PESSIMISTIC
@@ -80,6 +89,24 @@ class BacktestConfig:
     max_both_open_minutes: int = 480
     enable_remaining_leg_timeout_after_first_sl: bool = False
     remaining_leg_timeout_after_first_sl_minutes: int = 240
+    enable_remaining_leg_timeout_profit_extension: bool = False
+    remaining_leg_timeout_profit_threshold_r: float = 10.0
+    enable_remaining_leg_checkpoint_score_extension: bool = False
+    checkpoint_score_use_profit: bool = True
+    checkpoint_score_min_profit_r: float = 0.85
+    checkpoint_score_use_atr_pct: bool = True
+    checkpoint_score_max_atr_pct: float = 0.08
+    checkpoint_score_use_directional_di: bool = True
+    checkpoint_score_min_directional_di: float = 2.3
+    checkpoint_score_use_bb_width_pct: bool = True
+    checkpoint_score_max_bb_width_pct: float = 0.349
+    checkpoint_score_min_conditions: int = 3
+    enable_first_sl_survivor_partial_close: bool = False
+    first_sl_survivor_partial_close_pct: float = 25.0
+    enable_checkpoint_zero_score_confirmation: bool = False
+    checkpoint_zero_score_confirmations_required: int = 2
+    checkpoint_zero_score_recheck_minutes: int = 120
+    enable_reentry_gate_after_remaining_leg_timeout: bool = False
     enable_be_after_opposite_sl: bool = False
     be_mode: BreakEvenMode = BreakEvenMode.ENTRY_PRICE
     be_offset_r: float = 0.0
@@ -101,7 +128,9 @@ class BacktestConfig:
     enable_bb_width_filter: bool = False
     bb_width_filter_mode: BBWidthFilterMode = BBWidthFilterMode.DISABLED
     bb_width_maximum: float = 0.03
-    bb_width_minimum: float = 0.0
+    bb_width_minimum: float = 0.012
+    enable_skip_monday_entries: bool = False
+    skip_monday_timezone: str = "UTC"
     enable_di_spread_filter: bool = False
     di_spread_filter_mode: DISpreadFilterMode = DISpreadFilterMode.DISABLED
     di_spread_maximum: float = 10.0
@@ -114,6 +143,73 @@ class BacktestConfig:
     entry_timing_mode: EntryTimingMode = EntryTimingMode.CURRENT
     random_entry_probability: float = 0.50
     random_seed: int = 42
+    enable_coin_flip_sizing: bool = False
+    coin_flip_seed: int = 42
+    coin_flip_large_multiplier: float = 3.0
+    coin_flip_small_multiplier: float = 1.0
+    enable_di_direction_sizing: bool = False
+    di_direction_minimum_spread: float = 30.0
+    di_direction_long_minimum_spread: Optional[float] = None
+    di_direction_short_minimum_spread: Optional[float] = None
+    di_execution_mode: DIExecutionMode = DIExecutionMode.BOTH_SIDES
+    di_reward_risk_ratio: float = 1.0
+    di_long_reward_risk_ratio: Optional[float] = None
+    di_short_reward_risk_ratio: Optional[float] = None
+    enable_di_regime_reward_risk: bool = False
+    di_regime_bear_return_threshold: float = -0.20
+    di_long_bull_reward_risk_ratio: float = 2.0
+    di_long_bear_reward_risk_ratio: float = 1.0
+    di_long_sideways_reward_risk_ratio: float = 2.0
+    di_short_bull_reward_risk_ratio: float = 1.0
+    di_short_bear_reward_risk_ratio: float = 1.0
+    di_short_sideways_reward_risk_ratio: float = 2.0
+    enable_bull_long_conditional_reward_risk: bool = False
+    bull_long_conditional_bb_width_minimum: float = 0.05
+    bull_long_conditional_adx_maximum: float = 40.0
+    bull_long_conditional_reward_risk_ratio: float = 1.0
+    enable_bull_long_momentum_confirmation: bool = False
+    bull_long_confirmation_lookback_days: int = 60
+    bull_long_confirmation_return_threshold: float = 0.20
+    bull_long_unconfirmed_reward_risk_ratio: float = 1.0
+    enable_bull_long_momentum_target_extension: bool = False
+    bull_long_momentum_extension_lookback_days: int = 30
+    bull_long_momentum_extension_return_threshold: float = 0.10
+    enable_bull_long_momentum_extension_return_maximum: bool = False
+    bull_long_momentum_extension_return_maximum: float = 0.40
+    bull_long_momentum_extended_reward_risk_ratio: float = 4.0
+    enable_bull_long_structural_confirmation: bool = False
+    bull_long_structural_sma_days: int = 200
+    bull_long_structural_slope_lookback_days: int = 30
+    bull_long_structural_unconfirmed_reward_risk_ratio: float = 1.0
+    enable_bull_long_r_step_trailing: bool = False
+    bull_long_r_step_activation_r: float = 2.0
+    bull_long_r_step_distance_r: float = 2.0
+    bull_long_r_step_size_r: float = 1.0
+    bull_long_r_step_maximum_r: float = 0.0
+    bull_long_r_step_activation_close_pct: float = 0.0
+    enable_sideways_long_conditional_reward_risk: bool = False
+    sideways_long_conditional_adx_maximum: float = 35.0
+    sideways_long_conditional_reward_risk_ratio: float = 1.0
+    enable_sideways_short_conditional_reward_risk: bool = False
+    sideways_short_conditional_di_spread_minimum: float = 35.0
+    sideways_short_conditional_di_spread_maximum: float = 40.0
+    sideways_short_conditional_reward_risk_ratio: float = 1.0
+    enable_bear_short_conditional_reward_risk: bool = False
+    bear_short_conditional_di_spread_maximum: float = 35.0
+    bear_short_conditional_reward_risk_ratio: float = 1.0
+    enable_directional_adx_filter: bool = False
+    directional_long_adx_maximum: float = 60.0
+    directional_short_adx_minimum: float = 25.0
+    enable_atr_checkpoint_tp_extension: bool = False
+    atr_checkpoint_di_spread_minimum: float = 30.0
+    atr_checkpoint_bb_width_minimum: float = 0.03
+    atr_checkpoint_profit_lock_start: float = 3.0
+    atr_checkpoint_profit_lock_distance: float = 1.0
+    enable_biased_short_adx_cap: bool = False
+    biased_short_adx_maximum: float = 50.0
+    enable_bull_regime_short_filter: bool = False
+    bull_regime_lookback_days: int = 90
+    bull_regime_return_threshold: float = 0.20
     random_entry_start_mode: RandomEntryStartMode = RandomEntryStartMode.NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE
     randomize_first_entry: bool = True
     max_random_wait_candles: int = 0
@@ -144,6 +240,14 @@ class BacktestConfig:
     lifecycle_flat_pattern_threshold_pct: float = 5.0
 
     def __post_init__(self) -> None:
+        if self.di_direction_long_minimum_spread is None:
+            object.__setattr__(self, "di_direction_long_minimum_spread", self.di_direction_minimum_spread)
+        if self.di_direction_short_minimum_spread is None:
+            object.__setattr__(self, "di_direction_short_minimum_spread", self.di_direction_minimum_spread)
+        if self.di_long_reward_risk_ratio is None:
+            object.__setattr__(self, "di_long_reward_risk_ratio", self.di_reward_risk_ratio)
+        if self.di_short_reward_risk_ratio is None:
+            object.__setattr__(self, "di_short_reward_risk_ratio", self.di_reward_risk_ratio)
         if self.input_csv != Path("data/binance_ohlcv.csv") and self.strategy_csv == Path("data/BTCUSDT_15m.csv"):
             object.__setattr__(self, "strategy_csv", self.input_csv)
         if self.initial_equity <= 0: raise ValueError("initial_equity must be positive")
@@ -159,6 +263,9 @@ class BacktestConfig:
         if self.tp1_r <= 0: raise ValueError("TP1_R must be greater than zero")
         if self.tp2_r <= self.tp1_r: raise ValueError("TP2_R must be greater than TP1_R")
         if self.stop_loss_r <= 0: raise ValueError("STOP_LOSS_R must be greater than zero")
+        if self.sl1_r <= 0: raise ValueError("SL1_R must be greater than zero")
+        if self.sl2_r <= self.sl1_r: raise ValueError("SL2_R must be greater than SL1_R")
+        if not 0 < self.sl1_close_pct < 100: raise ValueError("SL1_CLOSE_PCT must be between 0 and 100")
         if self.tp1_close_pct <= 0 or self.tp2_close_pct <= 0: raise ValueError("TP close percentages must be greater than zero")
         if abs(self.tp1_close_pct + self.tp2_close_pct - 100.0) > 1e-9: raise ValueError("TP1_CLOSE_PCT + TP2_CLOSE_PCT must equal 100%")
         if self.adx_period <= 0: raise ValueError("adx_period must be positive")
@@ -170,6 +277,83 @@ class BacktestConfig:
         if self.entry_interval <= 0: raise ValueError("entry_interval must be positive")
         if not 0 < self.random_entry_probability <= 1: raise ValueError("random_entry_probability must be greater than 0 and less than or equal to 1")
         if isinstance(self.random_seed, bool) or not isinstance(self.random_seed, int): raise ValueError("random_seed must be an integer")
+        if isinstance(self.coin_flip_seed, bool) or not isinstance(self.coin_flip_seed, int): raise ValueError("coin_flip_seed must be an integer")
+        if self.coin_flip_large_multiplier <= 0 or self.coin_flip_small_multiplier <= 0: raise ValueError("coin-flip size multipliers must be positive")
+        if self.coin_flip_large_multiplier <= self.coin_flip_small_multiplier: raise ValueError("coin_flip_large_multiplier must be greater than coin_flip_small_multiplier")
+        if self.di_direction_minimum_spread < 0: raise ValueError("di_direction_minimum_spread must be non-negative")
+        if self.di_direction_long_minimum_spread < 0: raise ValueError("di_direction_long_minimum_spread must be non-negative")
+        if self.di_direction_short_minimum_spread < 0: raise ValueError("di_direction_short_minimum_spread must be non-negative")
+        if self.di_reward_risk_ratio <= 0: raise ValueError("di_reward_risk_ratio must be positive")
+        if self.di_long_reward_risk_ratio <= 0: raise ValueError("di_long_reward_risk_ratio must be positive")
+        if self.di_short_reward_risk_ratio <= 0: raise ValueError("di_short_reward_risk_ratio must be positive")
+        regime_ratios = (
+            self.di_long_bull_reward_risk_ratio, self.di_long_bear_reward_risk_ratio,
+            self.di_long_sideways_reward_risk_ratio, self.di_short_bull_reward_risk_ratio,
+            self.di_short_bear_reward_risk_ratio, self.di_short_sideways_reward_risk_ratio,
+        )
+        if any(value <= 0 for value in regime_ratios): raise ValueError("DI regime reward/risk ratios must be positive")
+        if self.bull_long_conditional_bb_width_minimum < 0: raise ValueError("bull_long_conditional_bb_width_minimum must be non-negative")
+        if self.bull_long_conditional_adx_maximum < 0: raise ValueError("bull_long_conditional_adx_maximum must be non-negative")
+        if self.bull_long_conditional_reward_risk_ratio <= 0: raise ValueError("bull_long_conditional_reward_risk_ratio must be positive")
+        if self.bull_long_r_step_activation_r <= 0: raise ValueError("bull_long_r_step_activation_r must be positive")
+        if self.bull_long_r_step_distance_r <= 0: raise ValueError("bull_long_r_step_distance_r must be positive")
+        if self.bull_long_r_step_size_r <= 0: raise ValueError("bull_long_r_step_size_r must be positive")
+        if self.bull_long_r_step_maximum_r < 0: raise ValueError("bull_long_r_step_maximum_r cannot be negative")
+        if 0 < self.bull_long_r_step_maximum_r <= self.bull_long_r_step_activation_r: raise ValueError("bull_long_r_step_maximum_r must be zero or above the activation R")
+        if not 0 <= self.bull_long_r_step_activation_close_pct < 100: raise ValueError("bull_long_r_step_activation_close_pct must be from 0 up to, but not including, 100")
+        if self.bull_long_confirmation_lookback_days <= 0: raise ValueError("bull_long_confirmation_lookback_days must be positive")
+        if self.bull_long_confirmation_return_threshold <= -1: raise ValueError("bull_long_confirmation_return_threshold must be greater than -100%")
+        if self.bull_long_momentum_extension_lookback_days <= 0: raise ValueError("bull_long_momentum_extension_lookback_days must be positive")
+        if self.bull_long_momentum_extension_return_threshold <= -1: raise ValueError("bull_long_momentum_extension_return_threshold must be greater than -100%")
+        if self.bull_long_momentum_extension_return_maximum <= -1: raise ValueError("bull_long_momentum_extension_return_maximum must be greater than -100%")
+        if self.enable_bull_long_momentum_extension_return_maximum and self.bull_long_momentum_extension_return_maximum <= self.bull_long_momentum_extension_return_threshold: raise ValueError("bull_long_momentum_extension_return_maximum must exceed the minimum threshold")
+        if self.bull_long_momentum_extended_reward_risk_ratio <= 0: raise ValueError("bull_long_momentum_extended_reward_risk_ratio must be positive")
+        if self.bull_long_structural_sma_days <= 0: raise ValueError("bull_long_structural_sma_days must be positive")
+        if self.bull_long_structural_slope_lookback_days <= 0: raise ValueError("bull_long_structural_slope_lookback_days must be positive")
+        if self.bull_long_structural_unconfirmed_reward_risk_ratio <= 0: raise ValueError("bull_long_structural_unconfirmed_reward_risk_ratio must be positive")
+        if self.bull_long_unconfirmed_reward_risk_ratio <= 0: raise ValueError("bull_long_unconfirmed_reward_risk_ratio must be positive")
+        if self.sideways_long_conditional_adx_maximum < 0: raise ValueError("sideways_long_conditional_adx_maximum must be non-negative")
+        if self.sideways_long_conditional_reward_risk_ratio <= 0: raise ValueError("sideways_long_conditional_reward_risk_ratio must be positive")
+        if self.sideways_short_conditional_di_spread_minimum < 0 or self.sideways_short_conditional_di_spread_maximum < 0: raise ValueError("sideways-short conditional DI spread thresholds must be non-negative")
+        if self.sideways_short_conditional_di_spread_minimum >= self.sideways_short_conditional_di_spread_maximum: raise ValueError("sideways-short conditional DI spread minimum must be below maximum")
+        if self.sideways_short_conditional_reward_risk_ratio <= 0: raise ValueError("sideways_short_conditional_reward_risk_ratio must be positive")
+        if self.bear_short_conditional_di_spread_maximum < 0: raise ValueError("bear_short_conditional_di_spread_maximum must be non-negative")
+        if self.bear_short_conditional_reward_risk_ratio <= 0: raise ValueError("bear_short_conditional_reward_risk_ratio must be positive")
+        if self.di_regime_bear_return_threshold <= -1: raise ValueError("di_regime_bear_return_threshold must be greater than -100%")
+        if self.enable_di_regime_reward_risk and self.di_regime_bear_return_threshold >= self.bull_regime_return_threshold: raise ValueError("DI bear threshold must be below bull threshold")
+        if self.enable_di_regime_reward_risk and not self.enable_di_direction_sizing: raise ValueError("regime-specific DI reward/risk requires DI-direction sizing")
+        if self.enable_bull_long_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional bull-long reward/risk requires regime-specific DI reward/risk")
+        if self.enable_bull_long_r_step_trailing and not self.enable_di_regime_reward_risk: raise ValueError("bull-long R-step trailing requires regime-specific DI reward/risk")
+        if self.enable_bull_long_r_step_trailing and self.enable_partial_take_profit: raise ValueError("bull-long R-step trailing cannot be combined with partial take profit")
+        if self.enable_bull_long_r_step_trailing and self.enable_atr_checkpoint_tp_extension: raise ValueError("bull-long R-step trailing cannot be combined with ATR checkpoint TP extension")
+        if self.enable_bull_long_r_step_trailing and self.enable_trailing_profit: raise ValueError("bull-long R-step trailing cannot be combined with the independent trailing stop")
+        if self.enable_bull_long_momentum_confirmation and not self.enable_di_regime_reward_risk: raise ValueError("bull-long momentum confirmation requires regime-specific DI reward/risk")
+        if self.enable_bull_long_momentum_target_extension and not self.enable_di_regime_reward_risk: raise ValueError("bull-long momentum target extension requires regime-specific DI reward/risk")
+        if self.enable_bull_long_structural_confirmation and not self.enable_di_regime_reward_risk: raise ValueError("bull-long structural confirmation requires regime-specific DI reward/risk")
+        if self.enable_sideways_long_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional sideways-long reward/risk requires regime-specific DI reward/risk")
+        if self.enable_sideways_short_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional sideways-short reward/risk requires regime-specific DI reward/risk")
+        if self.enable_bear_short_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional bear-short reward/risk requires regime-specific DI reward/risk")
+        if self.directional_long_adx_maximum < 0: raise ValueError("directional_long_adx_maximum must be non-negative")
+        if self.directional_short_adx_minimum < 0: raise ValueError("directional_short_adx_minimum must be non-negative")
+        if self.enable_directional_adx_filter and not self.enable_di_direction_sizing: raise ValueError("direction-specific ADX filter requires DI-direction sizing")
+        if self.atr_checkpoint_di_spread_minimum < 0: raise ValueError("atr_checkpoint_di_spread_minimum must be non-negative")
+        if self.atr_checkpoint_bb_width_minimum < 0: raise ValueError("atr_checkpoint_bb_width_minimum must be non-negative")
+        if self.atr_checkpoint_profit_lock_start < 1: raise ValueError("atr_checkpoint_profit_lock_start must be at least 1 ATR")
+        if self.atr_checkpoint_profit_lock_distance <= 0: raise ValueError("atr_checkpoint_profit_lock_distance must be positive")
+        if self.biased_short_adx_maximum < 0: raise ValueError("biased_short_adx_maximum must be non-negative")
+        if self.enable_biased_short_adx_cap and not self.enable_di_direction_sizing: raise ValueError("biased-short ADX cap requires DI-direction sizing")
+        if self.enable_atr_checkpoint_tp_extension and not self.enable_di_direction_sizing: raise ValueError("ATR checkpoint TP extension requires DI-direction sizing")
+        if self.enable_atr_checkpoint_tp_extension and self.enable_partial_take_profit: raise ValueError("ATR checkpoint TP extension cannot be combined with partial take profit")
+        if self.bull_regime_lookback_days <= 0: raise ValueError("bull_regime_lookback_days must be positive")
+        if self.bull_regime_return_threshold <= -1: raise ValueError("bull_regime_return_threshold must be greater than -100%")
+        if self.enable_bull_regime_short_filter and not self.enable_di_direction_sizing: raise ValueError("bull-regime short filter requires DI-direction sizing")
+        if self.enable_coin_flip_sizing and self.enable_di_direction_sizing: raise ValueError("coin-flip sizing and DI-direction sizing cannot both be enabled")
+        if self.enable_coin_flip_sizing and self.trade_direction not in (TradeDirectionMode.BOTH, TradeDirectionMode.BOTH_INDEPENDENT): raise ValueError("coin-flip sizing requires both long and short positions")
+        if self.enable_coin_flip_sizing and (self.enable_partial_take_profit or self.enable_partial_stop_loss): raise ValueError("coin-flip sizing cannot be combined with partial TP or partial SL")
+        if self.enable_di_direction_sizing and self.trade_direction not in (TradeDirectionMode.BOTH, TradeDirectionMode.BOTH_INDEPENDENT): raise ValueError("DI-direction sizing requires both long and short positions")
+        if self.enable_di_direction_sizing and (self.enable_partial_take_profit or self.enable_partial_stop_loss): raise ValueError("DI-direction sizing cannot be combined with partial TP or partial SL")
+        di_execution_value = self.di_execution_mode.value if isinstance(self.di_execution_mode, DIExecutionMode) else self.di_execution_mode
+        if di_execution_value == DIExecutionMode.PREFERRED_SIDE_ONLY.value and not self.enable_di_direction_sizing: raise ValueError("preferred-side-only execution requires DI-direction sizing")
         if self.max_random_wait_candles < 0: raise ValueError("max_random_wait_candles must be >= 0")
         if self.random_seed_count <= 0: raise ValueError("random_seed_count must be positive")
         if self.max_active_pairs <= 0: raise ValueError("max_active_pairs must be positive")
@@ -180,6 +364,22 @@ class BacktestConfig:
         if self.max_combined_effective_leverage is not None and self.max_combined_effective_leverage <= 0: raise ValueError("max combined leverage must be positive")
         if self.enable_both_open_timeout and self.max_both_open_minutes <= 0: raise ValueError("max_both_open_minutes must be > 0 when both-open timeout is enabled")
         if self.enable_remaining_leg_timeout_after_first_sl and self.remaining_leg_timeout_after_first_sl_minutes <= 0: raise ValueError("remaining_leg_timeout_after_first_sl_minutes must be > 0 when remaining-leg timeout is enabled")
+        if self.enable_remaining_leg_timeout_profit_extension and not self.enable_remaining_leg_timeout_after_first_sl: raise ValueError("remaining-leg profit extension requires remaining-leg timeout to be enabled")
+        if self.enable_remaining_leg_checkpoint_score_extension and not self.enable_remaining_leg_timeout_after_first_sl: raise ValueError("checkpoint score extension requires remaining-leg timeout to be enabled")
+        if self.enable_remaining_leg_checkpoint_score_extension and self.enable_remaining_leg_timeout_profit_extension: raise ValueError("use either profit-only extension or checkpoint score extension, not both")
+        if self.enable_first_sl_survivor_partial_close and self.enable_partial_take_profit: raise ValueError("first-SL survivor partial close cannot be combined with partial take profit")
+        if self.enable_first_sl_survivor_partial_close and not (0 < self.first_sl_survivor_partial_close_pct < 100): raise ValueError("first_sl_survivor_partial_close_pct must be between 0 and 100")
+        if self.enable_checkpoint_zero_score_confirmation and not self.enable_remaining_leg_checkpoint_score_extension: raise ValueError("zero-score confirmation requires checkpoint score extension")
+        if self.enable_checkpoint_zero_score_confirmation and self.checkpoint_zero_score_confirmations_required < 2: raise ValueError("checkpoint_zero_score_confirmations_required must be at least 2")
+        if self.enable_checkpoint_zero_score_confirmation and self.checkpoint_zero_score_recheck_minutes <= 0: raise ValueError("checkpoint_zero_score_recheck_minutes must be positive")
+        if self.enable_reentry_gate_after_remaining_leg_timeout and not self.enable_remaining_leg_timeout_after_first_sl: raise ValueError("checkpoint re-entry gate requires remaining-leg timeout to be enabled")
+        if self.remaining_leg_timeout_profit_threshold_r < 0: raise ValueError("remaining_leg_timeout_profit_threshold_r must be >= 0")
+        if self.checkpoint_score_min_profit_r < 0: raise ValueError("checkpoint_score_min_profit_r must be >= 0")
+        if self.checkpoint_score_max_atr_pct < 0: raise ValueError("checkpoint_score_max_atr_pct must be >= 0")
+        if self.checkpoint_score_max_bb_width_pct < 0: raise ValueError("checkpoint_score_max_bb_width_pct must be >= 0")
+        score_conditions = sum((self.checkpoint_score_use_profit, self.checkpoint_score_use_atr_pct, self.checkpoint_score_use_directional_di, self.checkpoint_score_use_bb_width_pct))
+        if self.enable_remaining_leg_checkpoint_score_extension and score_conditions == 0: raise ValueError("checkpoint score extension requires at least one enabled condition")
+        if self.enable_remaining_leg_checkpoint_score_extension and (self.checkpoint_score_min_conditions <= 0 or self.checkpoint_score_min_conditions > score_conditions): raise ValueError("checkpoint_score_min_conditions must be between 1 and the number of enabled checkpoint conditions")
         if self.be_offset_r < 0: raise ValueError("be_offset_r must be >= 0")
         if isinstance(self.intrabar_missing_policy, str): object.__setattr__(self, "intrabar_missing_policy", IntrabarMissingPolicy(self.intrabar_missing_policy))
         if isinstance(self.position_sizing_mode, str): object.__setattr__(self, "position_sizing_mode", PositionSizingMode(self.position_sizing_mode))
@@ -190,10 +390,25 @@ class BacktestConfig:
         if isinstance(self.bb_width_filter_mode, str): object.__setattr__(self, "bb_width_filter_mode", BBWidthFilterMode(self.bb_width_filter_mode))
         if isinstance(self.di_spread_filter_mode, str): object.__setattr__(self, "di_spread_filter_mode", DISpreadFilterMode(self.di_spread_filter_mode))
         if isinstance(self.trade_direction, str): object.__setattr__(self, "trade_direction", TradeDirectionMode(self.trade_direction))
+        if isinstance(self.di_execution_mode, str): object.__setattr__(self, "di_execution_mode", DIExecutionMode(self.di_execution_mode))
         if isinstance(self.trail_apply_to, str): object.__setattr__(self, "trail_apply_to", TrailApplyTo(self.trail_apply_to))
         if isinstance(self.trail_intrabar_mode, str): object.__setattr__(self, "trail_intrabar_mode", TrailIntrabarMode(self.trail_intrabar_mode))
+        if isinstance(self.trail_activation_trigger, str): object.__setattr__(self, "trail_activation_trigger", TrailActivationTrigger(self.trail_activation_trigger))
+        if self.enable_trailing_profit and self.trail_activation_trigger == TrailActivationTrigger.AFTER_TP1 and not self.enable_partial_take_profit:
+            raise ValueError("AFTER_TP1 trailing requires Partial Take Profit")
+        if self.enable_trailing_profit and self.trail_activation_trigger == TrailActivationTrigger.AFTER_SL1 and not self.enable_partial_stop_loss:
+            raise ValueError("AFTER_SL1 trailing requires Partial Stop Loss")
+        if self.enable_trailing_profit and self.trail_activation_trigger == TrailActivationTrigger.AFTER_TP1_OR_SL1 and not (self.enable_partial_take_profit or self.enable_partial_stop_loss):
+            raise ValueError("AFTER_TP1_OR_SL1 trailing requires a partial TP or SL ladder")
         if isinstance(self.after_tp1_stop_mode, str): object.__setattr__(self, "after_tp1_stop_mode", AfterTP1StopMode(self.after_tp1_stop_mode))
         if isinstance(self.tp2_exit_mode, str): object.__setattr__(self, "tp2_exit_mode", TP2ExitMode(self.tp2_exit_mode))
+        # Migrate saved configurations from the former "TP2 replaced by
+        # trailing" model. TP2 is now always terminal and trailing is an
+        # independent protective stop activated after TP1.
+        if self.tp2_exit_mode == TP2ExitMode.TRAILING_AFTER_TP1:
+            object.__setattr__(self, "enable_trailing_profit", True)
+            object.__setattr__(self, "trail_activation_trigger", TrailActivationTrigger.AFTER_TP1)
+            object.__setattr__(self, "tp2_exit_mode", TP2ExitMode.FIXED_TP2)
         if isinstance(self.daily_entry_missed_policy, str): object.__setattr__(self, "daily_entry_missed_policy", DailyEntryMissedPolicy(self.daily_entry_missed_policy))
         if isinstance(self.entry_timing_mode, str): object.__setattr__(self, "entry_timing_mode", EntryTimingMode(self.entry_timing_mode))
         if isinstance(self.random_entry_start_mode, str): object.__setattr__(self, "random_entry_start_mode", RandomEntryStartMode(self.random_entry_start_mode))
@@ -208,6 +423,10 @@ class BacktestConfig:
             ZoneInfo(self.daily_entry_timezone)
         except ZoneInfoNotFoundError as exc:
             raise ValueError("daily_entry_timezone must be a valid IANA timezone") from exc
+        try:
+            ZoneInfo(self.skip_monday_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("skip_monday_timezone must be a valid IANA timezone") from exc
         if self.telemetry_interval_minutes <= 0: raise ValueError("telemetry interval must be > 0")
         if self.lifecycle_phases != 4: raise ValueError("lifecycle_phases must currently be 4")
         if self.lifecycle_minimum_bucket_sample <= 0: raise ValueError("lifecycle minimum bucket sample must be positive")
