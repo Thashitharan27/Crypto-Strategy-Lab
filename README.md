@@ -2,34 +2,6 @@
 
 A modular Python backtesting tool for dual long/short crypto strategies on Binance OHLCV CSV files.
 
-## Live volatility paper bot
-
-`live_paper_bot.py` is a separate forward-testing tool. It scans active Binance
-USD-M USDT perpetual contracts, removes illiquid/new/stablecoin markets, ranks
-the remaining contracts by volatility and liquidity, and paper-trades breakout,
-trend, and mean-reversion signals in independent $1,000 comparison accounts. It uses public market data only: it has no API
-key option and cannot submit a real order.
-
-Run one diagnostic scan:
-
-```powershell
-python live_paper_bot.py --config Config/live_paper_bot.json --once
-```
-
-Run continuously (leave the terminal open):
-
-```powershell
-python live_paper_bot.py --config Config/live_paper_bot.json
-```
-
-Forward-test output is written to `paper_output/`: `rankings.csv` is the
-point-in-time audit trail, `trades.csv` contains paper opens/closes, and
-`state.json` allows the bot to resume. The defaults use a $1,000 paper account,
-0.5% risk per trade, at most two positions per strategy, and a 2x notional cap. Stops and
-targets are simulated conservatively with taker fees and slippage. Open
-positions continue receiving fresh candles even after their symbols drop out
-of the top-five volatility ranking.
-
 ## Features
 
 - Opens one long and one short position per entry signal.
