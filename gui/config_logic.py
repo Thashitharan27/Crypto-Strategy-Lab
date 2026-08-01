@@ -6,22 +6,42 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, AfterTP1StopMode, TP2ExitMode, EntryTimingMode, RandomEntryStartMode
+from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DIExecutionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, TrailActivationTrigger, AfterTP1StopMode, TP2ExitMode, EntryTimingMode, RandomEntryStartMode
 
 DEFAULT_GUI_CONFIG: dict[str, Any] = {
-    "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/BTCUSDT_15m.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output", "run_name": "",
+    "input_csv": "data/binance_ohlcv.csv", "strategy_csv": "data/binance_ohlcv.csv", "intrabar_csv": "data/BTCUSDT_1m.csv", "output_dir": "output", "run_name": "",
     "sl_mult": 2.0, "tp_mult": 3.0, "entry_mode": "WAIT_UNTIL_CLOSED",
     "enable_random_entry": False, "entry_timing_mode": "CURRENT", "random_entry_probability": 0.50, "random_seed": 42, "random_entry_start_mode": "NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE", "randomize_first_entry": True, "max_random_wait_candles": 0, "enable_random_entry_batch": False, "random_seed_start": 1, "random_seed_count": 100,
-    "entry_interval": 1, "enable_daily_entry_schedule": False, "daily_entry_time": "00:00", "daily_entry_timezone": "UTC", "daily_entry_missed_policy": "SKIP_DAY", "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
-    "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0, "enable_adx_filter": False, "adx_period": 14, "adx_filter_mode": "Disabled", "adx_maximum": 25.0, "adx_minimum": 20.0, "enable_bb_width_filter": False, "bb_width_filter_mode": "Disabled", "bb_width_maximum": 0.03, "bb_width_minimum": 0.0, "enable_di_spread_filter": False, "di_spread_filter_mode": "Disabled", "di_spread_maximum": 10.0, "di_spread_minimum": 0.0,
+    "enable_coin_flip_sizing": False, "coin_flip_seed": 42, "coin_flip_large_multiplier": 3.0, "coin_flip_small_multiplier": 1.0,
+    "enable_di_direction_sizing": False, "di_direction_minimum_spread": 30.0, "di_direction_long_minimum_spread": 30.0, "di_direction_short_minimum_spread": 30.0, "di_execution_mode": "BOTH_SIDES", "di_reward_risk_ratio": 1.0, "di_long_reward_risk_ratio": 1.0, "di_short_reward_risk_ratio": 1.0,
+    "enable_di_regime_reward_risk": False, "di_regime_bear_return_threshold": -0.20,
+    "di_long_bull_reward_risk_ratio": 2.0, "di_long_bear_reward_risk_ratio": 1.0, "di_long_sideways_reward_risk_ratio": 2.0,
+    "di_short_bull_reward_risk_ratio": 1.0, "di_short_bear_reward_risk_ratio": 1.0, "di_short_sideways_reward_risk_ratio": 2.0,
+    "enable_bull_long_conditional_reward_risk": False, "bull_long_conditional_bb_width_minimum": 0.05, "bull_long_conditional_adx_maximum": 40.0, "bull_long_conditional_reward_risk_ratio": 1.0,
+    "enable_bull_long_r_step_trailing": False, "bull_long_r_step_activation_r": 2.0, "bull_long_r_step_distance_r": 2.0, "bull_long_r_step_size_r": 1.0, "bull_long_r_step_maximum_r": 0.0, "bull_long_r_step_activation_close_pct": 0.0,
+    "enable_bull_long_momentum_confirmation": False, "bull_long_confirmation_lookback_days": 60, "bull_long_confirmation_return_threshold": 0.20, "bull_long_unconfirmed_reward_risk_ratio": 1.0,
+    "enable_bull_long_momentum_target_extension": False, "bull_long_momentum_extension_lookback_days": 30, "bull_long_momentum_extension_return_threshold": 0.10, "enable_bull_long_momentum_extension_return_maximum": False, "bull_long_momentum_extension_return_maximum": 0.40, "bull_long_momentum_extended_reward_risk_ratio": 4.0,
+    "enable_bull_long_structural_confirmation": False, "bull_long_structural_sma_days": 200, "bull_long_structural_slope_lookback_days": 30, "bull_long_structural_unconfirmed_reward_risk_ratio": 1.0,
+    "enable_sideways_long_conditional_reward_risk": False, "sideways_long_conditional_adx_maximum": 35.0, "sideways_long_conditional_reward_risk_ratio": 1.0,
+    "enable_sideways_short_conditional_reward_risk": False, "sideways_short_conditional_di_spread_minimum": 35.0, "sideways_short_conditional_di_spread_maximum": 40.0, "sideways_short_conditional_reward_risk_ratio": 1.0,
+    "enable_bear_short_conditional_reward_risk": False, "bear_short_conditional_di_spread_maximum": 35.0, "bear_short_conditional_reward_risk_ratio": 1.0,
+    "enable_directional_adx_filter": False, "directional_long_adx_maximum": 60.0, "directional_short_adx_minimum": 25.0,
+    "enable_atr_checkpoint_tp_extension": False, "atr_checkpoint_di_spread_minimum": 30.0, "atr_checkpoint_bb_width_minimum": 0.03, "atr_checkpoint_profit_lock_start": 3.0, "atr_checkpoint_profit_lock_distance": 1.0,
+    "enable_biased_short_adx_cap": False, "biased_short_adx_maximum": 50.0,
+    "enable_bull_regime_short_filter": False, "bull_regime_lookback_days": 90, "bull_regime_return_threshold": 0.20,
+    "entry_interval": 1, "enable_daily_entry_schedule": False, "daily_entry_time": "00:00", "daily_entry_timezone": "UTC", "daily_entry_missed_policy": "SKIP_DAY", "enable_skip_monday_entries": False, "skip_monday_timezone": "UTC", "max_active_pairs": 1, "tie_policy": "PESSIMISTIC",
+    "risk_mode": "ATR", "atr_period": 14, "atr_multiplier": 1.0, "enable_adx_filter": False, "adx_period": 14, "adx_filter_mode": "Disabled", "adx_maximum": 25.0, "adx_minimum": 20.0, "enable_bb_width_filter": False, "bb_width_filter_mode": "Disabled", "bb_width_maximum": 0.03, "bb_width_minimum": 0.012, "enable_di_spread_filter": False, "di_spread_filter_mode": "Disabled", "di_spread_maximum": 10.0, "di_spread_minimum": 0.0,
     "percent_r": 0.002, "fixed_r": 100.0, "initial_equity": 1000.0,
     "risk_per_leg": 0.005, "maker_fee": 0.0002, "taker_fee": 0.0005,
     "use_maker_entry": False, "use_maker_exit": False, "slippage": 0.0001,
     "strategy_timeframe_minutes": 15, "intrabar_timeframe_minutes": 1, "use_intrabar_data": True,
     "trading_start_date": None, "trading_end_date": None, "max_effective_leverage_per_leg": None,
-    "max_combined_effective_leverage": None, "intrabar_missing_policy": "WARN_AND_USE_15M", "zero_cost_comparison": False, "trade_direction": "BOTH", "enable_trailing_profit": False, "trail_activation_r": 3.0, "trail_distance_r": 1.0, "trail_apply_to": "BOTH", "trail_intrabar_mode": "PESSIMISTIC",
-    "enable_partial_take_profit": False, "tp1_r": 3.0, "tp1_close_pct": 50.0, "tp2_r": 12.0, "tp2_close_pct": 50.0, "stop_loss_r": 10.0, "after_tp1_stop_mode": "KEEP_ORIGINAL_SL", "after_tp1_stop_offset_r": 0.0, "tp2_exit_mode": "FIXED_TP2",
-    "enable_both_open_timeout": False, "max_both_open_minutes": 480, "enable_remaining_leg_timeout_after_first_sl": False, "remaining_leg_timeout_after_first_sl_minutes": 240, "remaining_leg_timeout_after_first_sl_unit": "Hours", "enable_trade_telemetry": True, "save_full_telemetry_csv": True, "save_trade_journey_summary": True, "save_trade_journey_charts": True, "telemetry_interval_minutes": 15, "enable_indicator_lifecycle_analysis": True, "lifecycle_phases": 4, "lifecycle_early_checkpoints": [15, 30, 60], "lifecycle_minimum_bucket_sample": 20, "create_lifecycle_charts": True, "lifecycle_flat_pattern_threshold_pct": 5.0, "both_open_timeout_unit": "Hours", "enable_be_after_opposite_sl": False, "be_mode": "ENTRY_PRICE", "be_offset_r": 0.0, "be_same_candle_policy": "NEXT_CANDLE",
+    "max_combined_effective_leverage": None, "intrabar_missing_policy": "WARN_AND_USE_15M", "zero_cost_comparison": False, "trade_direction": "BOTH", "enable_trailing_profit": False, "trail_activation_trigger": "PRICE_REACHES_R", "trail_activation_r": 3.0, "trail_distance_r": 1.0, "trail_apply_to": "BOTH", "trail_intrabar_mode": "PESSIMISTIC",
+    "enable_partial_take_profit": False, "enable_partial_stop_loss": False, "sl1_r": 0.5, "sl1_close_pct": 50.0, "sl2_r": 8.0, "tp1_r": 3.0, "tp1_close_pct": 50.0, "tp2_r": 12.0, "tp2_close_pct": 50.0, "stop_loss_r": 10.0, "after_tp1_stop_mode": "KEEP_ORIGINAL_SL", "after_tp1_stop_offset_r": 0.0, "tp2_exit_mode": "FIXED_TP2",
+    "enable_both_open_timeout": False, "max_both_open_minutes": 480, "enable_remaining_leg_timeout_after_first_sl": False, "remaining_leg_timeout_after_first_sl_minutes": 240, "remaining_leg_timeout_after_first_sl_unit": "Hours", "enable_remaining_leg_timeout_profit_extension": False, "remaining_leg_timeout_profit_threshold_r": 10.0, "enable_trade_telemetry": True, "save_full_telemetry_csv": True, "save_trade_journey_summary": True, "save_trade_journey_charts": True, "telemetry_interval_minutes": 15, "enable_indicator_lifecycle_analysis": True, "lifecycle_phases": 4, "lifecycle_early_checkpoints": [15, 30, 60], "lifecycle_minimum_bucket_sample": 20, "create_lifecycle_charts": True, "lifecycle_flat_pattern_threshold_pct": 5.0, "both_open_timeout_unit": "Hours", "enable_be_after_opposite_sl": False, "be_mode": "ENTRY_PRICE", "be_offset_r": 0.0, "be_same_candle_policy": "NEXT_CANDLE",
+    "enable_reentry_gate_after_remaining_leg_timeout": False,
+    "enable_remaining_leg_checkpoint_score_extension": False, "checkpoint_score_use_profit": True, "checkpoint_score_min_profit_r": 0.85, "checkpoint_score_use_atr_pct": True, "checkpoint_score_max_atr_pct": 0.08, "checkpoint_score_use_directional_di": True, "checkpoint_score_min_directional_di": 2.3, "checkpoint_score_use_bb_width_pct": True, "checkpoint_score_max_bb_width_pct": 0.349, "checkpoint_score_min_conditions": 3,
+    "enable_first_sl_survivor_partial_close": False, "first_sl_survivor_partial_close_pct": 25.0, "enable_checkpoint_zero_score_confirmation": False, "checkpoint_zero_score_confirmations_required": 2, "checkpoint_zero_score_recheck_minutes": 120, "checkpoint_zero_score_recheck_unit": "Hours",
 }
 
 
@@ -55,6 +75,7 @@ def theoretical_break_even(sl_mult: float, tp_mult: float) -> float:
 
 
 def validate_config_values(values: dict[str, Any], require_paths: bool = True) -> list[str]:
+    values = {**default_gui_config(), **values}
     errors: list[str] = []
     if require_paths:
         strategy_path = values.get("strategy_csv") if values.get("strategy_csv") != DEFAULT_GUI_CONFIG.get("strategy_csv") else values.get("input_csv")
@@ -69,7 +90,7 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         ("sl_mult", 0, "SL multiple must be > 0."), ("tp_mult", 0, "TP multiple must be > 0."),
         ("initial_equity", 0, "Starting equity must be > 0."), ("risk_per_leg", 0, "Risk per leg must be > 0."),
         ("atr_multiplier", 0, "ATR multiplier must be > 0."), ("strategy_timeframe_minutes", 0, "Strategy timeframe must be > 0."), ("intrabar_timeframe_minutes", 0, "Intrabar timeframe must be > 0."), ("percent_r", 0, "Percentage R must be > 0."),
-        ("fixed_r", 0, "Fixed R must be > 0."), ("tp1_r", 0, "TP1_R must be greater than zero."), ("tp2_r", 0, "TP2_R must be greater than zero."), ("stop_loss_r", 0, "STOP_LOSS_R must be greater than zero."), ("tp1_close_pct", 0, "TP1_CLOSE_PCT must be greater than zero."), ("tp2_close_pct", 0, "TP2_CLOSE_PCT must be greater than zero."), ("trail_activation_r", 0, "Trailing Activation (R) must be > 0."), ("trail_distance_r", 0, "Trailing Distance (R) must be > 0."),
+        ("fixed_r", 0, "Fixed R must be > 0."), ("sl1_r", 0, "SL1_R must be greater than zero."), ("sl2_r", 0, "SL2_R must be greater than zero."), ("sl1_close_pct", 0, "SL1 close percentage must be greater than zero."), ("tp1_r", 0, "TP1_R must be greater than zero."), ("tp2_r", 0, "TP2_R must be greater than zero."), ("stop_loss_r", 0, "STOP_LOSS_R must be greater than zero."), ("tp1_close_pct", 0, "TP1_CLOSE_PCT must be greater than zero."), ("tp2_close_pct", 0, "TP2_CLOSE_PCT must be greater than zero."), ("trail_activation_r", 0, "Trailing Activation (R) must be > 0."), ("trail_distance_r", 0, "Trailing Distance (R) must be > 0."),
     ]
     for key, limit, msg in checks:
         try:
@@ -98,6 +119,106 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     except (TypeError, ValueError): errors.append("Entry Probability must be greater than 0 and less than or equal to 1.")
     try: int(values.get("random_seed"))
     except (TypeError, ValueError): errors.append("Random Seed must be an integer.")
+    try: int(values.get("coin_flip_seed"))
+    except (TypeError, ValueError): errors.append("Coin Flip Seed must be an integer.")
+    try:
+        if float(values.get("coin_flip_small_multiplier", 0)) <= 0 or float(values.get("coin_flip_large_multiplier", 0)) <= float(values.get("coin_flip_small_multiplier", 0)): errors.append("Coin-flip multipliers must be positive and large must exceed small.")
+    except (TypeError, ValueError): errors.append("Coin-flip multipliers must be numeric.")
+    if values.get("enable_coin_flip_sizing") and values.get("trade_direction") not in ("BOTH", "BOTH_INDEPENDENT"): errors.append("Coin-flip sizing requires both long and short positions.")
+    if values.get("enable_coin_flip_sizing") and (values.get("enable_partial_take_profit") or values.get("enable_partial_stop_loss")): errors.append("Coin-flip sizing cannot be combined with partial TP or partial SL.")
+    if values.get("enable_coin_flip_sizing") and values.get("enable_di_direction_sizing"): errors.append("Coin-flip sizing and DI-direction sizing cannot both be enabled.")
+    try:
+        if float(values.get("di_direction_minimum_spread", -1)) < 0: errors.append("DI direction minimum spread must be non-negative.")
+    except (TypeError, ValueError): errors.append("DI direction minimum spread must be numeric.")
+    for key, label in (("di_direction_long_minimum_spread", "Long DI direction minimum spread"), ("di_direction_short_minimum_spread", "Short DI direction minimum spread")):
+        try:
+            if float(values.get(key, -1)) < 0: errors.append(f"{label} must be non-negative.")
+        except (TypeError, ValueError): errors.append(f"{label} must be numeric.")
+    try:
+        if float(values.get("di_reward_risk_ratio", 0)) <= 0: errors.append("DI reward/risk ratio must be positive.")
+    except (TypeError, ValueError): errors.append("DI reward/risk ratio must be numeric.")
+    for key, label in (("di_long_reward_risk_ratio", "Long DI reward/risk ratio"), ("di_short_reward_risk_ratio", "Short DI reward/risk ratio")):
+        try:
+            if float(values.get(key, 0)) <= 0: errors.append(f"{label} must be positive.")
+        except (TypeError, ValueError): errors.append(f"{label} must be numeric.")
+    regime_ratio_keys = (
+        "di_long_bull_reward_risk_ratio", "di_long_bear_reward_risk_ratio", "di_long_sideways_reward_risk_ratio",
+        "di_short_bull_reward_risk_ratio", "di_short_bear_reward_risk_ratio", "di_short_sideways_reward_risk_ratio",
+    )
+    for key in regime_ratio_keys:
+        try:
+            if float(values.get(key, 0)) <= 0: errors.append("DI regime reward/risk ratios must be positive.")
+        except (TypeError, ValueError): errors.append("DI regime reward/risk ratios must be numeric.")
+    try:
+        bear_threshold = float(values.get("di_regime_bear_return_threshold", -1))
+        bull_threshold = float(values.get("bull_regime_return_threshold", 0.20))
+        if bear_threshold <= -1: errors.append("DI bear threshold must be greater than -100%.")
+        if values.get("enable_di_regime_reward_risk") and bear_threshold >= bull_threshold: errors.append("DI bear threshold must be below bull threshold.")
+    except (TypeError, ValueError): errors.append("DI regime return thresholds must be numeric.")
+    if values.get("enable_di_regime_reward_risk") and not values.get("enable_di_direction_sizing"): errors.append("Regime-specific DI reward/risk requires DI-direction sizing.")
+    if values.get("enable_bull_long_conditional_reward_risk") and not values.get("enable_di_regime_reward_risk"): errors.append("Conditional bull-long reward/risk requires regime-specific DI reward/risk.")
+    if float(values.get("bull_long_conditional_bb_width_minimum", 0)) < 0: errors.append("Bull-long conditional BB width minimum must be non-negative.")
+    if float(values.get("bull_long_conditional_adx_maximum", 0)) < 0: errors.append("Bull-long conditional ADX maximum must be non-negative.")
+    if float(values.get("bull_long_conditional_reward_risk_ratio", 0)) <= 0: errors.append("Bull-long conditional reward/risk must be positive.")
+    if values.get("enable_bull_long_r_step_trailing") and not values.get("enable_di_regime_reward_risk"): errors.append("Bull-long staircase requires regime-specific DI reward/risk.")
+    if values.get("enable_bull_long_r_step_trailing") and values.get("enable_partial_take_profit"): errors.append("Bull-long staircase cannot be combined with Partial Take Profit.")
+    if values.get("enable_bull_long_r_step_trailing") and values.get("enable_atr_checkpoint_tp_extension"): errors.append("Bull-long staircase cannot be combined with ATR checkpoint TP extension.")
+    if values.get("enable_bull_long_r_step_trailing") and values.get("enable_trailing_profit"): errors.append("Bull-long staircase cannot be combined with the independent trailing stop.")
+    if float(values.get("bull_long_r_step_activation_r", 0)) <= 0: errors.append("Bull-long staircase activation must be positive.")
+    if float(values.get("bull_long_r_step_distance_r", 0)) <= 0: errors.append("Bull-long staircase distance must be positive.")
+    if float(values.get("bull_long_r_step_size_r", 0)) <= 0: errors.append("Bull-long staircase step size must be positive.")
+    staircase_max=float(values.get("bull_long_r_step_maximum_r",0))
+    if staircase_max < 0: errors.append("Bull-long staircase maximum cannot be negative.")
+    if 0 < staircase_max <= float(values.get("bull_long_r_step_activation_r",0)): errors.append("Bull-long staircase maximum must be zero or above activation.")
+    staircase_close=float(values.get("bull_long_r_step_activation_close_pct",0))
+    if not 0 <= staircase_close < 100: errors.append("Bull-long staircase activation close must be from 0% up to, but not including, 100%.")
+    if values.get("enable_bull_long_momentum_confirmation") and not values.get("enable_di_regime_reward_risk"): errors.append("Bull-long momentum confirmation requires regime-specific DI reward/risk.")
+    if int(values.get("bull_long_confirmation_lookback_days", 0)) <= 0: errors.append("Bull-long confirmation lookback must be positive.")
+    if float(values.get("bull_long_confirmation_return_threshold", -1)) <= -1: errors.append("Bull-long confirmation return threshold must be greater than -100%.")
+    if float(values.get("bull_long_unconfirmed_reward_risk_ratio", 0)) <= 0: errors.append("Bull-long unconfirmed reward/risk must be positive.")
+    if values.get("enable_bull_long_momentum_target_extension") and not values.get("enable_di_regime_reward_risk"): errors.append("Bull-long momentum target extension requires regime-specific DI reward/risk.")
+    if int(values.get("bull_long_momentum_extension_lookback_days", 0)) <= 0: errors.append("Bull-long momentum extension lookback must be positive.")
+    if float(values.get("bull_long_momentum_extension_return_threshold", -1)) <= -1: errors.append("Bull-long momentum extension return threshold must be greater than -100%.")
+    if float(values.get("bull_long_momentum_extension_return_maximum", -1)) <= -1: errors.append("Bull-long momentum extension return maximum must be greater than -100%.")
+    if values.get("enable_bull_long_momentum_extension_return_maximum") and float(values.get("bull_long_momentum_extension_return_maximum", 0)) <= float(values.get("bull_long_momentum_extension_return_threshold", 0)): errors.append("Bull-long momentum extension return maximum must exceed its minimum threshold.")
+    if float(values.get("bull_long_momentum_extended_reward_risk_ratio", 0)) <= 0: errors.append("Bull-long momentum extended reward/risk must be positive.")
+    if values.get("enable_bull_long_structural_confirmation") and not values.get("enable_di_regime_reward_risk"): errors.append("Bull-long structural confirmation requires regime-specific DI reward/risk.")
+    if int(values.get("bull_long_structural_sma_days", 0)) <= 0: errors.append("Bull-long structural SMA days must be positive.")
+    if int(values.get("bull_long_structural_slope_lookback_days", 0)) <= 0: errors.append("Bull-long structural SMA slope lookback must be positive.")
+    if float(values.get("bull_long_structural_unconfirmed_reward_risk_ratio", 0)) <= 0: errors.append("Bull-long structural unconfirmed reward/risk must be positive.")
+    for key, label in (
+        ("enable_sideways_long_conditional_reward_risk", "sideways-long"),
+        ("enable_sideways_short_conditional_reward_risk", "sideways-short"),
+        ("enable_bear_short_conditional_reward_risk", "bear-short"),
+    ):
+        if values.get(key) and not values.get("enable_di_regime_reward_risk"): errors.append(f"Conditional {label} reward/risk requires regime-specific DI reward/risk.")
+    if float(values.get("sideways_long_conditional_adx_maximum", 0)) < 0: errors.append("Sideways-long conditional ADX maximum must be non-negative.")
+    if float(values.get("sideways_long_conditional_reward_risk_ratio", 0)) <= 0: errors.append("Sideways-long conditional reward/risk must be positive.")
+    side_short_min = float(values.get("sideways_short_conditional_di_spread_minimum", 0))
+    side_short_max = float(values.get("sideways_short_conditional_di_spread_maximum", 0))
+    if side_short_min < 0 or side_short_max < 0: errors.append("Sideways-short conditional DI spread thresholds must be non-negative.")
+    if side_short_min >= side_short_max: errors.append("Sideways-short conditional DI spread minimum must be below maximum.")
+    if float(values.get("sideways_short_conditional_reward_risk_ratio", 0)) <= 0: errors.append("Sideways-short conditional reward/risk must be positive.")
+    if float(values.get("bear_short_conditional_di_spread_maximum", 0)) < 0: errors.append("Bear-short conditional DI spread maximum must be non-negative.")
+    if float(values.get("bear_short_conditional_reward_risk_ratio", 0)) <= 0: errors.append("Bear-short conditional reward/risk must be positive.")
+    for key, label in (("directional_long_adx_maximum", "Long ADX maximum"), ("directional_short_adx_minimum", "Short ADX minimum")):
+        try:
+            if float(values.get(key, -1)) < 0: errors.append(f"{label} must be non-negative.")
+        except (TypeError, ValueError): errors.append(f"{label} must be numeric.")
+    if values.get("enable_directional_adx_filter") and not values.get("enable_di_direction_sizing"): errors.append("Direction-specific ADX filter requires DI-direction sizing.")
+    if values.get("enable_di_direction_sizing") and values.get("trade_direction") not in ("BOTH", "BOTH_INDEPENDENT"): errors.append("DI-direction sizing requires both long and short positions.")
+    if values.get("enable_di_direction_sizing") and (values.get("enable_partial_take_profit") or values.get("enable_partial_stop_loss")): errors.append("DI-direction sizing cannot be combined with partial TP or partial SL.")
+    if values.get("di_execution_mode") not in [e.value for e in DIExecutionMode]: errors.append("Invalid DI execution mode.")
+    if values.get("di_execution_mode") == DIExecutionMode.PREFERRED_SIDE_ONLY.value and not values.get("enable_di_direction_sizing"): errors.append("Preferred-side-only execution requires DI-direction sizing.")
+    if values.get("enable_bull_regime_short_filter") and not values.get("enable_di_direction_sizing"): errors.append("Bull-regime short filter requires DI-direction sizing.")
+    if values.get("enable_biased_short_adx_cap") and not values.get("enable_di_direction_sizing"): errors.append("Biased-short ADX cap requires DI-direction sizing.")
+    try:
+        if float(values.get("biased_short_adx_maximum", -1)) < 0: errors.append("Biased-short ADX maximum must be non-negative.")
+    except (TypeError, ValueError): errors.append("Biased-short ADX maximum must be numeric.")
+    try:
+        if int(values.get("bull_regime_lookback_days", 0)) <= 0: errors.append("Bull-regime lookback days must be positive.")
+        if float(values.get("bull_regime_return_threshold", 0)) <= -1: errors.append("Bull-regime return threshold must be greater than -100%.")
+    except (TypeError, ValueError): errors.append("Bull-regime settings must be numeric and positive.")
     for key, label in (("max_random_wait_candles","Maximum Random Wait Candles"),("random_seed_count","Random Seed Count")):
         try:
             if int(values.get(key)) < (1 if key == "random_seed_count" else 0): errors.append(f"{label} is invalid.")
@@ -107,6 +228,10 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("trade_direction") not in [e.value for e in TradeDirectionMode]: errors.append("Invalid trade direction mode.")
     if values.get("trail_apply_to") not in [e.value for e in TrailApplyTo]: errors.append("Apply Trailing To must be BOTH, LONG_ONLY, or SHORT_ONLY.")
     if values.get("trail_intrabar_mode") not in [e.value for e in TrailIntrabarMode]: errors.append("Intrabar Trailing Mode must be PESSIMISTIC or OPTIMISTIC.")
+    if values.get("trail_activation_trigger") not in [e.value for e in TrailActivationTrigger]: errors.append("Invalid trailing activation trigger.")
+    if values.get("enable_trailing_profit") and values.get("trail_activation_trigger")=="AFTER_TP1" and not values.get("enable_partial_take_profit"): errors.append("AFTER_TP1 trailing requires Partial Take Profit.")
+    if values.get("enable_trailing_profit") and values.get("trail_activation_trigger")=="AFTER_SL1" and not values.get("enable_partial_stop_loss"): errors.append("AFTER_SL1 trailing requires Partial Stop Loss.")
+    if values.get("enable_trailing_profit") and values.get("trail_activation_trigger")=="AFTER_TP1_OR_SL1" and not (values.get("enable_partial_take_profit") or values.get("enable_partial_stop_loss")): errors.append("AFTER_TP1_OR_SL1 trailing requires a partial TP or SL ladder.")
     if values.get("daily_entry_missed_policy") not in [e.value for e in DailyEntryMissedPolicy]: errors.append("Invalid daily entry missed policy.")
     try:
         hh, mm = [int(part) for part in str(values.get("daily_entry_time", "00:00")).split(":", 1)]
@@ -136,6 +261,43 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         try:
             if int(values.get("remaining_leg_timeout_after_first_sl_minutes", 0)) <= 0: errors.append("Remaining-Leg Timeout After First SL must be > 0 when enabled.")
         except (TypeError, ValueError): errors.append("Remaining-Leg Timeout After First SL must be > 0 when enabled.")
+    if values.get("enable_remaining_leg_timeout_profit_extension") and not values.get("enable_remaining_leg_timeout_after_first_sl"):
+        errors.append("Profit-based timeout extension requires Remaining-Leg Timeout After First SL to be enabled.")
+    if values.get("enable_remaining_leg_checkpoint_score_extension") and not values.get("enable_remaining_leg_timeout_after_first_sl"):
+        errors.append("Checkpoint score extension requires Remaining-Leg Timeout After First SL to be enabled.")
+    if values.get("enable_remaining_leg_checkpoint_score_extension") and values.get("enable_remaining_leg_timeout_profit_extension"):
+        errors.append("Choose either profit-only extension or checkpoint score extension, not both.")
+    if values.get("enable_first_sl_survivor_partial_close") and values.get("enable_partial_take_profit"):
+        errors.append("First-SL survivor partial close cannot be combined with Partial Take Profit.")
+    if float(values.get("sl2_r", 8)) <= float(values.get("sl1_r", 0.5)):
+        errors.append("SL2_R must be greater than SL1_R.")
+    if not 0 < float(values.get("sl1_close_pct", 50)) < 100:
+        errors.append("SL1 close percentage must be between 0% and 100%.")
+    if values.get("enable_first_sl_survivor_partial_close"):
+        try:
+            pct=float(values.get("first_sl_survivor_partial_close_pct", 0))
+            if pct <= 0 or pct >= 100: errors.append("First-SL survivor partial close must be between 0% and 100%.")
+        except (TypeError, ValueError): errors.append("First-SL survivor partial close must be between 0% and 100%.")
+    if values.get("enable_checkpoint_zero_score_confirmation") and not values.get("enable_remaining_leg_checkpoint_score_extension"):
+        errors.append("Consecutive zero-score confirmation requires the checkpoint score extension.")
+    if values.get("enable_checkpoint_zero_score_confirmation"):
+        try:
+            if int(values.get("checkpoint_zero_score_confirmations_required", 0)) < 2: errors.append("Zero-score confirmations required must be at least 2.")
+        except (TypeError, ValueError): errors.append("Zero-score confirmations required must be a whole number.")
+        try:
+            if int(values.get("checkpoint_zero_score_recheck_minutes", 0)) <= 0: errors.append("Zero-score recheck interval must be positive.")
+        except (TypeError, ValueError): errors.append("Zero-score recheck interval must be positive.")
+    if values.get("enable_reentry_gate_after_remaining_leg_timeout") and not values.get("enable_remaining_leg_timeout_after_first_sl"):
+        errors.append("Checkpoint re-entry gate requires Remaining-Leg Timeout After First SL to be enabled.")
+    try:
+        if float(values.get("remaining_leg_timeout_profit_threshold_r", 0)) < 0: errors.append("Timeout Extension Threshold (R) must be >= 0.")
+    except (TypeError, ValueError): errors.append("Timeout Extension Threshold (R) must be >= 0.")
+    if values.get("enable_remaining_leg_checkpoint_score_extension"):
+        condition_count = sum(bool(values.get(key)) for key in ("checkpoint_score_use_profit", "checkpoint_score_use_atr_pct", "checkpoint_score_use_directional_di", "checkpoint_score_use_bb_width_pct"))
+        try:
+            required = int(values.get("checkpoint_score_min_conditions", 0))
+            if condition_count == 0 or required < 1 or required > condition_count: errors.append("Checkpoint score required conditions must be between 1 and the number of enabled conditions.")
+        except (TypeError, ValueError): errors.append("Checkpoint score required conditions must be a whole number.")
     if values.get("enable_both_open_timeout"):
         try:
             if int(values.get("max_both_open_minutes", 0)) <= 0: errors.append("Maximum Both-Open Time must be > 0 when enabled.")
@@ -145,13 +307,27 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
 
 def build_backtest_config(values: dict[str, Any], require_paths: bool = True) -> BacktestConfig:
     merged = {**default_gui_config(), **values}
+    legacy_di_minimum = float(values.get("di_direction_minimum_spread", DEFAULT_GUI_CONFIG["di_direction_minimum_spread"]))
+    if "di_direction_long_minimum_spread" not in values:
+        merged["di_direction_long_minimum_spread"] = legacy_di_minimum
+    if "di_direction_short_minimum_spread" not in values:
+        merged["di_direction_short_minimum_spread"] = legacy_di_minimum
+    legacy_di_ratio = float(values.get("di_reward_risk_ratio", DEFAULT_GUI_CONFIG["di_reward_risk_ratio"]))
+    if "di_long_reward_risk_ratio" not in values:
+        merged["di_long_reward_risk_ratio"] = legacy_di_ratio
+    if "di_short_reward_risk_ratio" not in values:
+        merged["di_short_reward_risk_ratio"] = legacy_di_ratio
     errors = validate_config_values(merged, require_paths=require_paths)
     if errors:
         raise ValueError("\n".join(errors))
     return BacktestConfig(
         input_csv=Path(merged["input_csv"]), strategy_csv=Path(merged["input_csv"] if merged.get("strategy_csv") == DEFAULT_GUI_CONFIG.get("strategy_csv") else (merged.get("strategy_csv") or merged["input_csv"])), intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") else None, output_dir=Path(merged["output_dir"]),
         sl_mult=float(merged["sl_mult"]), tp_mult=float(merged["tp_mult"]),
-        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]), enable_random_entry=bool(merged["enable_random_entry"]), entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]), random_entry_probability=float(merged["random_entry_probability"]), random_seed=int(merged["random_seed"]), random_entry_start_mode=RandomEntryStartMode(merged["random_entry_start_mode"]), randomize_first_entry=bool(merged["randomize_first_entry"]), max_random_wait_candles=int(merged["max_random_wait_candles"]), enable_random_entry_batch=bool(merged["enable_random_entry_batch"]), random_seed_start=int(merged["random_seed_start"]), random_seed_count=int(merged["random_seed_count"]), enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]), daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]), daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]),
+        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]), enable_random_entry=bool(merged["enable_random_entry"]), entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]), random_entry_probability=float(merged["random_entry_probability"]), random_seed=int(merged["random_seed"]), enable_coin_flip_sizing=bool(merged["enable_coin_flip_sizing"]), coin_flip_seed=int(merged["coin_flip_seed"]), coin_flip_large_multiplier=float(merged["coin_flip_large_multiplier"]), coin_flip_small_multiplier=float(merged["coin_flip_small_multiplier"]), enable_di_direction_sizing=bool(merged["enable_di_direction_sizing"]), di_direction_minimum_spread=float(merged["di_direction_minimum_spread"]), di_direction_long_minimum_spread=float(merged["di_direction_long_minimum_spread"]), di_direction_short_minimum_spread=float(merged["di_direction_short_minimum_spread"]), di_execution_mode=DIExecutionMode(merged["di_execution_mode"]), di_reward_risk_ratio=float(merged["di_reward_risk_ratio"]), di_long_reward_risk_ratio=float(merged["di_long_reward_risk_ratio"]), di_short_reward_risk_ratio=float(merged["di_short_reward_risk_ratio"]), enable_di_regime_reward_risk=bool(merged["enable_di_regime_reward_risk"]), di_regime_bear_return_threshold=float(merged["di_regime_bear_return_threshold"]), di_long_bull_reward_risk_ratio=float(merged["di_long_bull_reward_risk_ratio"]), di_long_bear_reward_risk_ratio=float(merged["di_long_bear_reward_risk_ratio"]), di_long_sideways_reward_risk_ratio=float(merged["di_long_sideways_reward_risk_ratio"]), di_short_bull_reward_risk_ratio=float(merged["di_short_bull_reward_risk_ratio"]), di_short_bear_reward_risk_ratio=float(merged["di_short_bear_reward_risk_ratio"]), di_short_sideways_reward_risk_ratio=float(merged["di_short_sideways_reward_risk_ratio"]), enable_bull_long_conditional_reward_risk=bool(merged["enable_bull_long_conditional_reward_risk"]), bull_long_conditional_bb_width_minimum=float(merged["bull_long_conditional_bb_width_minimum"]), bull_long_conditional_adx_maximum=float(merged["bull_long_conditional_adx_maximum"]), bull_long_conditional_reward_risk_ratio=float(merged["bull_long_conditional_reward_risk_ratio"]), enable_sideways_long_conditional_reward_risk=bool(merged["enable_sideways_long_conditional_reward_risk"]), sideways_long_conditional_adx_maximum=float(merged["sideways_long_conditional_adx_maximum"]), sideways_long_conditional_reward_risk_ratio=float(merged["sideways_long_conditional_reward_risk_ratio"]), enable_sideways_short_conditional_reward_risk=bool(merged["enable_sideways_short_conditional_reward_risk"]), sideways_short_conditional_di_spread_minimum=float(merged["sideways_short_conditional_di_spread_minimum"]), sideways_short_conditional_di_spread_maximum=float(merged["sideways_short_conditional_di_spread_maximum"]), sideways_short_conditional_reward_risk_ratio=float(merged["sideways_short_conditional_reward_risk_ratio"]), enable_bear_short_conditional_reward_risk=bool(merged["enable_bear_short_conditional_reward_risk"]), bear_short_conditional_di_spread_maximum=float(merged["bear_short_conditional_di_spread_maximum"]), bear_short_conditional_reward_risk_ratio=float(merged["bear_short_conditional_reward_risk_ratio"]), enable_directional_adx_filter=bool(merged["enable_directional_adx_filter"]), directional_long_adx_maximum=float(merged["directional_long_adx_maximum"]), directional_short_adx_minimum=float(merged["directional_short_adx_minimum"]), enable_atr_checkpoint_tp_extension=bool(merged["enable_atr_checkpoint_tp_extension"]), atr_checkpoint_di_spread_minimum=float(merged["atr_checkpoint_di_spread_minimum"]), atr_checkpoint_bb_width_minimum=float(merged["atr_checkpoint_bb_width_minimum"]), atr_checkpoint_profit_lock_start=float(merged["atr_checkpoint_profit_lock_start"]), atr_checkpoint_profit_lock_distance=float(merged["atr_checkpoint_profit_lock_distance"]), enable_biased_short_adx_cap=bool(merged["enable_biased_short_adx_cap"]), biased_short_adx_maximum=float(merged["biased_short_adx_maximum"]), enable_bull_regime_short_filter=bool(merged["enable_bull_regime_short_filter"]), bull_regime_lookback_days=int(merged["bull_regime_lookback_days"]), bull_regime_return_threshold=float(merged["bull_regime_return_threshold"]), random_entry_start_mode=RandomEntryStartMode(merged["random_entry_start_mode"]), randomize_first_entry=bool(merged["randomize_first_entry"]), max_random_wait_candles=int(merged["max_random_wait_candles"]), enable_random_entry_batch=bool(merged["enable_random_entry_batch"]), random_seed_start=int(merged["random_seed_start"]), random_seed_count=int(merged["random_seed_count"]), enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]), daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]), daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]), enable_skip_monday_entries=bool(merged["enable_skip_monday_entries"]), skip_monday_timezone=str(merged["skip_monday_timezone"]),
+        enable_bull_long_momentum_confirmation=bool(merged["enable_bull_long_momentum_confirmation"]), bull_long_confirmation_lookback_days=int(merged["bull_long_confirmation_lookback_days"]), bull_long_confirmation_return_threshold=float(merged["bull_long_confirmation_return_threshold"]), bull_long_unconfirmed_reward_risk_ratio=float(merged["bull_long_unconfirmed_reward_risk_ratio"]),
+        enable_bull_long_momentum_target_extension=bool(merged["enable_bull_long_momentum_target_extension"]), bull_long_momentum_extension_lookback_days=int(merged["bull_long_momentum_extension_lookback_days"]), bull_long_momentum_extension_return_threshold=float(merged["bull_long_momentum_extension_return_threshold"]), enable_bull_long_momentum_extension_return_maximum=bool(merged["enable_bull_long_momentum_extension_return_maximum"]), bull_long_momentum_extension_return_maximum=float(merged["bull_long_momentum_extension_return_maximum"]), bull_long_momentum_extended_reward_risk_ratio=float(merged["bull_long_momentum_extended_reward_risk_ratio"]),
+        enable_bull_long_structural_confirmation=bool(merged["enable_bull_long_structural_confirmation"]), bull_long_structural_sma_days=int(merged["bull_long_structural_sma_days"]), bull_long_structural_slope_lookback_days=int(merged["bull_long_structural_slope_lookback_days"]), bull_long_structural_unconfirmed_reward_risk_ratio=float(merged["bull_long_structural_unconfirmed_reward_risk_ratio"]),
+        enable_bull_long_r_step_trailing=bool(merged["enable_bull_long_r_step_trailing"]), bull_long_r_step_activation_r=float(merged["bull_long_r_step_activation_r"]), bull_long_r_step_distance_r=float(merged["bull_long_r_step_distance_r"]), bull_long_r_step_size_r=float(merged["bull_long_r_step_size_r"]), bull_long_r_step_maximum_r=float(merged["bull_long_r_step_maximum_r"]), bull_long_r_step_activation_close_pct=float(merged["bull_long_r_step_activation_close_pct"]),
         max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),
         risk_mode=RiskMode(merged["risk_mode"]), atr_period=int(merged["atr_period"]),
         atr_multiplier=float(merged["atr_multiplier"]), enable_adx_filter=bool(merged["enable_adx_filter"]), adx_period=int(merged["adx_period"]), adx_filter_mode=AdxFilterMode(merged["adx_filter_mode"]), adx_maximum=float(merged["adx_maximum"]), adx_minimum=float(merged["adx_minimum"]), enable_bb_width_filter=bool(merged["enable_bb_width_filter"]), bb_width_filter_mode=BBWidthFilterMode(merged["bb_width_filter_mode"]), bb_width_maximum=float(merged["bb_width_maximum"]), bb_width_minimum=float(merged["bb_width_minimum"]), enable_di_spread_filter=bool(merged["enable_di_spread_filter"]), di_spread_filter_mode=DISpreadFilterMode(merged["di_spread_filter_mode"]), di_spread_maximum=float(merged["di_spread_maximum"]), di_spread_minimum=float(merged["di_spread_minimum"]), percent_r=float(merged["percent_r"]),
@@ -163,8 +339,8 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         use_intrabar_data=bool(merged["use_intrabar_data"]), trading_start_date=merged.get("trading_start_date"), trading_end_date=merged.get("trading_end_date"),
         max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
         max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
-        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]), trade_direction=TradeDirectionMode(merged["trade_direction"]), enable_partial_take_profit=bool(merged["enable_partial_take_profit"]), tp1_r=float(merged["tp1_r"]), tp1_close_pct=float(merged["tp1_close_pct"]), tp2_r=float(merged["tp2_r"]), tp2_close_pct=float(merged["tp2_close_pct"]), stop_loss_r=float(merged["stop_loss_r"]), after_tp1_stop_mode=AfterTP1StopMode(merged["after_tp1_stop_mode"]), after_tp1_stop_offset_r=float(merged["after_tp1_stop_offset_r"]), tp2_exit_mode=TP2ExitMode(merged["tp2_exit_mode"]), enable_trailing_profit=bool(merged["enable_trailing_profit"]), trail_activation_r=float(merged["trail_activation_r"]), trail_distance_r=float(merged["trail_distance_r"]), trail_apply_to=TrailApplyTo(merged["trail_apply_to"]), trail_intrabar_mode=TrailIntrabarMode(merged["trail_intrabar_mode"]),
-        enable_both_open_timeout=bool(merged["enable_both_open_timeout"]), max_both_open_minutes=int(merged["max_both_open_minutes"]), enable_remaining_leg_timeout_after_first_sl=bool(merged["enable_remaining_leg_timeout_after_first_sl"]), remaining_leg_timeout_after_first_sl_minutes=int(merged["remaining_leg_timeout_after_first_sl_minutes"]),
+        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]), trade_direction=TradeDirectionMode(merged["trade_direction"]), enable_partial_take_profit=bool(merged["enable_partial_take_profit"]), enable_partial_stop_loss=bool(merged["enable_partial_stop_loss"]), sl1_r=float(merged["sl1_r"]), sl1_close_pct=float(merged["sl1_close_pct"]), sl2_r=float(merged["sl2_r"]), tp1_r=float(merged["tp1_r"]), tp1_close_pct=float(merged["tp1_close_pct"]), tp2_r=float(merged["tp2_r"]), tp2_close_pct=float(merged["tp2_close_pct"]), stop_loss_r=float(merged["stop_loss_r"]), after_tp1_stop_mode=AfterTP1StopMode(merged["after_tp1_stop_mode"]), after_tp1_stop_offset_r=float(merged["after_tp1_stop_offset_r"]), tp2_exit_mode=TP2ExitMode(merged["tp2_exit_mode"]), enable_trailing_profit=bool(merged["enable_trailing_profit"]), trail_activation_trigger=TrailActivationTrigger(merged["trail_activation_trigger"]), trail_activation_r=float(merged["trail_activation_r"]), trail_distance_r=float(merged["trail_distance_r"]), trail_apply_to=TrailApplyTo(merged["trail_apply_to"]), trail_intrabar_mode=TrailIntrabarMode(merged["trail_intrabar_mode"]),
+        enable_both_open_timeout=bool(merged["enable_both_open_timeout"]), max_both_open_minutes=int(merged["max_both_open_minutes"]), enable_remaining_leg_timeout_after_first_sl=bool(merged["enable_remaining_leg_timeout_after_first_sl"]), remaining_leg_timeout_after_first_sl_minutes=int(merged["remaining_leg_timeout_after_first_sl_minutes"]), enable_remaining_leg_timeout_profit_extension=bool(merged["enable_remaining_leg_timeout_profit_extension"]), remaining_leg_timeout_profit_threshold_r=float(merged["remaining_leg_timeout_profit_threshold_r"]), enable_remaining_leg_checkpoint_score_extension=bool(merged["enable_remaining_leg_checkpoint_score_extension"]), checkpoint_score_use_profit=bool(merged["checkpoint_score_use_profit"]), checkpoint_score_min_profit_r=float(merged["checkpoint_score_min_profit_r"]), checkpoint_score_use_atr_pct=bool(merged["checkpoint_score_use_atr_pct"]), checkpoint_score_max_atr_pct=float(merged["checkpoint_score_max_atr_pct"]), checkpoint_score_use_directional_di=bool(merged["checkpoint_score_use_directional_di"]), checkpoint_score_min_directional_di=float(merged["checkpoint_score_min_directional_di"]), checkpoint_score_use_bb_width_pct=bool(merged["checkpoint_score_use_bb_width_pct"]), checkpoint_score_max_bb_width_pct=float(merged["checkpoint_score_max_bb_width_pct"]), checkpoint_score_min_conditions=int(merged["checkpoint_score_min_conditions"]), enable_first_sl_survivor_partial_close=bool(merged["enable_first_sl_survivor_partial_close"]), first_sl_survivor_partial_close_pct=float(merged["first_sl_survivor_partial_close_pct"]), enable_checkpoint_zero_score_confirmation=bool(merged["enable_checkpoint_zero_score_confirmation"]), checkpoint_zero_score_confirmations_required=int(merged["checkpoint_zero_score_confirmations_required"]), checkpoint_zero_score_recheck_minutes=int(merged["checkpoint_zero_score_recheck_minutes"]), enable_reentry_gate_after_remaining_leg_timeout=bool(merged["enable_reentry_gate_after_remaining_leg_timeout"]),
         enable_be_after_opposite_sl=bool(merged["enable_be_after_opposite_sl"]), be_mode=BreakEvenMode(merged["be_mode"]), be_offset_r=float(merged["be_offset_r"]), be_same_candle_policy=BreakEvenSameCandlePolicy(merged["be_same_candle_policy"]),
         run_name=str(merged.get("run_name", "")), enable_trade_telemetry=bool(merged["enable_trade_telemetry"]), save_full_telemetry_csv=bool(merged["save_full_telemetry_csv"]), save_trade_journey_summary=bool(merged["save_trade_journey_summary"]), save_trade_journey_charts=bool(merged["save_trade_journey_charts"]), telemetry_interval_minutes=int(merged["telemetry_interval_minutes"]), enable_indicator_lifecycle_analysis=bool(merged["enable_indicator_lifecycle_analysis"]), lifecycle_phases=int(merged["lifecycle_phases"]), lifecycle_early_checkpoints=tuple(int(v) for v in merged["lifecycle_early_checkpoints"]), lifecycle_minimum_bucket_sample=int(merged["lifecycle_minimum_bucket_sample"]), create_lifecycle_charts=bool(merged["create_lifecycle_charts"]), lifecycle_flat_pattern_threshold_pct=float(merged["lifecycle_flat_pattern_threshold_pct"]),
     )
@@ -175,4 +351,11 @@ def save_config_json(path: str | Path, values: dict[str, Any]) -> None:
 
 
 def load_config_json(path: str | Path) -> dict[str, Any]:
-    return {**default_gui_config(), **json.loads(Path(path).read_text())}
+    loaded = json.loads(Path(path).read_text())
+    legacy_di_minimum = loaded.get("di_direction_minimum_spread", DEFAULT_GUI_CONFIG["di_direction_minimum_spread"])
+    loaded.setdefault("di_direction_long_minimum_spread", legacy_di_minimum)
+    loaded.setdefault("di_direction_short_minimum_spread", legacy_di_minimum)
+    legacy_di_ratio = loaded.get("di_reward_risk_ratio", DEFAULT_GUI_CONFIG["di_reward_risk_ratio"])
+    loaded.setdefault("di_long_reward_risk_ratio", legacy_di_ratio)
+    loaded.setdefault("di_short_reward_risk_ratio", legacy_di_ratio)
+    return {**default_gui_config(), **loaded}

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from config import AfterTP1StopMode, BacktestConfig, RiskMode, TP2ExitMode, TiePolicy, TradeDirectionMode
+from config import AfterTP1StopMode, BacktestConfig, RiskMode, TrailActivationTrigger, TiePolicy, TradeDirectionMode
 from engine import BacktestEngine
 
 
@@ -59,12 +59,16 @@ def test_after_tp1_stop_modes(mode,offset,expected):
     engine.run(); assert engine.completed_pairs[0].long.sl == expected
 
 
-def test_trailing_after_tp1_disables_fixed_tp2_double_close():
-    row=run([(100,100),(111,100),(125,115)],tp2_exit_mode=TP2ExitMode.TRAILING_AFTER_TP1,
-            enable_trailing_profit=True,trail_activation_r=1,trail_distance_r=1,tie_policy=TiePolicy.OPTIMISTIC)
-    assert row.long_tp1_hit and not row.long_tp2_hit
-    assert row.long_stop_exit_quantity == pytest.approx(row.long_tp2_quantity)
-    assert row.long_stop_exit_quantity <= row.long_original_quantity
+def test_trailing_after_tp1_coexists_with_fixed_tp2():
+    row=run(
+        [(100,100),(111,100),(121,110)],
+        enable_trailing_profit=True,
+        trail_activation_trigger=TrailActivationTrigger.AFTER_TP1,
+        trail_distance_r=1,
+        tie_policy=TiePolicy.PESSIMISTIC,
+    )
+    assert row.long_tp1_hit and row.long_tp2_hit
+    assert row.long_remaining_quantity == 0
 
 
 def test_disabled_mode_is_identical_to_legacy_configuration():
@@ -74,3 +78,31 @@ def test_disabled_mode_is_identical_to_legacy_configuration():
     baseline=BacktestEngine(data,BacktestConfig(**common)).run()
     disabled=BacktestEngine(data,BacktestConfig(**common,enable_partial_take_profit=False)).run()
     pd.testing.assert_frame_equal(baseline,disabled)
+
+
+def test_combined_ladders_allow_sl1_then_tp1_then_tp2():
+    row=run(
+        [(100,100),(100,94),(111,100),(121,100)],
+        enable_partial_stop_loss=True,
+        sl1_r=.5,
+        sl1_close_pct=25,
+        sl2_r=2,
+    )
+    assert row.long_sl1_hit and row.long_tp1_hit and row.long_tp2_hit
+    assert row.long_sl1_quantity + row.long_tp1_quantity + row.long_tp2_quantity == pytest.approx(row.long_original_quantity)
+    assert row.long_remaining_quantity == 0
+
+
+def test_combined_move_to_entry_after_tp1_overrides_pending_sl_ladder():
+    row=run(
+        [(100,100),(111,100),(100,99)],
+        enable_partial_stop_loss=True,
+        sl1_r=.5,
+        sl1_close_pct=25,
+        sl2_r=2,
+        after_tp1_stop_mode=AfterTP1StopMode.MOVE_TO_ENTRY,
+    )
+    assert row.long_tp1_hit
+    assert not row.long_sl1_hit
+    assert row.long_stop_exit_price == pytest.approx(100)
+    assert row.long_stop_exit_quantity == pytest.approx(row.long_original_quantity/2)

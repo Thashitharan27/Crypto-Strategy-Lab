@@ -23,6 +23,38 @@ def _format_number(value: float) -> str:
     return f"{value:g}".replace(".", "p")
 
 
+def _stop_label(config: BacktestConfig) -> str:
+    if config.enable_partial_stop_loss:
+        closed = _format_number(config.sl1_close_pct)
+        return (
+            f"PSL{_format_number(config.sl1_r)}x{closed}"
+            f"-SL{_format_number(config.sl2_r)}"
+        )
+    if config.enable_partial_take_profit:
+        return f"SL{_format_number(config.stop_loss_r)}"
+    return f"SL{_format_number(config.sl_mult)}"
+
+
+def _target_label(config: BacktestConfig) -> str:
+    if config.enable_partial_take_profit:
+        closed = _format_number(config.tp1_close_pct)
+        return (
+            f"PTP{_format_number(config.tp1_r)}x{closed}"
+            f"-TP{_format_number(config.tp2_r)}"
+        )
+    if config.enable_di_direction_sizing and config.enable_di_regime_reward_risk:
+        return "RRREGIME"
+    if config.enable_di_direction_sizing:
+        long_target = config.sl_mult * config.di_long_reward_risk_ratio
+        short_target = config.sl_mult * config.di_short_reward_risk_ratio
+        if long_target != short_target:
+            return f"LTP{_format_number(long_target)}-STP{_format_number(short_target)}"
+        target_multiple = long_target
+    else:
+        target_multiple = config.tp_mult
+    return f"TP{_format_number(target_multiple)}"
+
+
 def infer_symbol(config: BacktestConfig) -> str:
     stem = Path(config.strategy_csv or config.input_csv).stem.upper()
     match = re.match(r"([A-Z]+?)(?:USDT|USD|BTC|ETH)?(?:_|-|$)", stem)
@@ -35,8 +67,8 @@ def run_folder_name(config: BacktestConfig, timestamp: datetime | None = None) -
         infer_symbol(config),
         f"{config.strategy_timeframe_minutes}m",
         f"ATR{config.atr_period}",
-        f"SL{_format_number(config.sl_mult)}",
-        f"TP{_format_number(config.tp_mult)}",
+        _stop_label(config),
+        _target_label(config),
         stamp,
     ])
     run_name = _safe_part(config.run_name or "")
@@ -87,6 +119,15 @@ def write_summary_txt(summary: dict[str, Any], run_dir: Path) -> None:
 
 
 def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Path) -> None:
+    if config.enable_partial_stop_loss:
+        stop_description = (
+            f"Partial stop: {config.sl1_close_pct}% at {config.sl1_r}R; "
+            f"remainder at {config.sl2_r}R (Core SL ignored)"
+        )
+    elif config.enable_partial_take_profit:
+        stop_description = f"Partial TP stop: {config.stop_loss_r}R (Core SL ignored)"
+    else:
+        stop_description = f"Stop loss multiple: {config.sl_mult}R"
     lines = [
         "Backtest Run Information",
         "========================",
@@ -98,8 +139,97 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
         f"Strategy timeframe: {config.strategy_timeframe_minutes}m",
         f"Risk mode: {config.risk_mode.value}",
         f"ATR period/multiplier: {config.atr_period} / {config.atr_multiplier}",
-        f"SL/TP multiples: {config.sl_mult} / {config.tp_mult}",
-        f"Partial TP: {config.enable_partial_take_profit}; TP1/TP2: {config.tp1_r}R / {config.tp2_r}R; stop: {config.stop_loss_r}R",
+        stop_description,
+        (
+            f"Partial take profit: {config.tp1_close_pct}% at {config.tp1_r}R; "
+            + f"remainder at {config.tp2_r}R"
+            + " (Core TP ignored)"
+            if config.enable_partial_take_profit
+            else (
+                (
+                    f"DI regime reward/risk enabled: bull at or above {config.bull_regime_return_threshold:.2%}, "
+                    f"bear at or below {config.di_regime_bear_return_threshold:.2%}; "
+                    f"long bull/bear/sideways {config.di_long_bull_reward_risk_ratio}/"
+                    f"{config.di_long_bear_reward_risk_ratio}/{config.di_long_sideways_reward_risk_ratio}; "
+                    f"short bull/bear/sideways {config.di_short_bull_reward_risk_ratio}/"
+                    f"{config.di_short_bear_reward_risk_ratio}/{config.di_short_sideways_reward_risk_ratio}"
+                    + (
+                        f"; bull-long conditional target {config.bull_long_conditional_reward_risk_ratio} "
+                        f"when BB width >= {config.bull_long_conditional_bb_width_minimum:.2%} "
+                        f"and ADX < {config.bull_long_conditional_adx_maximum}"
+                        if config.enable_bull_long_conditional_reward_risk
+                        else ""
+                    )
+                    + (
+                        f"; bull-long momentum confirmation requires "
+                        f"{config.bull_long_confirmation_lookback_days}-day return >= "
+                        f"{config.bull_long_confirmation_return_threshold:.2%} for the base bull target; "
+                        f"otherwise target {config.bull_long_unconfirmed_reward_risk_ratio}"
+                        if config.enable_bull_long_momentum_confirmation else ""
+                    )
+                    + (
+                        f"; bull-long recent-momentum target {config.bull_long_momentum_extended_reward_risk_ratio} "
+                        f"when {config.bull_long_momentum_extension_lookback_days}-day return >= "
+                        f"{config.bull_long_momentum_extension_return_threshold:.2%}"
+                        + (
+                            f" and <= {config.bull_long_momentum_extension_return_maximum:.2%}"
+                            if config.enable_bull_long_momentum_extension_return_maximum else ""
+                        )
+                        if config.enable_bull_long_momentum_target_extension else ""
+                    )
+                    + (
+                        f"; bull-long structural confirmation requires price above a rising "
+                        f"{config.bull_long_structural_sma_days}-day SMA "
+                        f"(compared with {config.bull_long_structural_slope_lookback_days} days earlier); "
+                        f"otherwise target {config.bull_long_structural_unconfirmed_reward_risk_ratio}"
+                        if config.enable_bull_long_structural_confirmation else ""
+                    )
+                    + (
+                        f"; sideways-long conditional target {config.sideways_long_conditional_reward_risk_ratio} "
+                        f"when ADX < {config.sideways_long_conditional_adx_maximum}"
+                        if config.enable_sideways_long_conditional_reward_risk else ""
+                    )
+                    + (
+                        f"; sideways-short conditional target {config.sideways_short_conditional_reward_risk_ratio} "
+                        f"when DI spread >= {config.sideways_short_conditional_di_spread_minimum} "
+                        f"and < {config.sideways_short_conditional_di_spread_maximum}"
+                        if config.enable_sideways_short_conditional_reward_risk else ""
+                    )
+                    + (
+                        f"; bear-short conditional target {config.bear_short_conditional_reward_risk_ratio} "
+                        f"when DI spread < {config.bear_short_conditional_di_spread_maximum}"
+                        if config.enable_bear_short_conditional_reward_risk else ""
+                    )
+                    if config.enable_di_regime_reward_risk
+                    else
+                    f"DI take profit: long {config.di_long_reward_risk_ratio}:1, "
+                    f"short {config.di_short_reward_risk_ratio}:1 reward/risk "
+                    f"(target distances: long {config.sl_mult * config.di_long_reward_risk_ratio}R, "
+                    f"short {config.sl_mult * config.di_short_reward_risk_ratio}R)"
+                )
+                if config.enable_di_direction_sizing
+                else f"Take profit multiple: {config.tp_mult}R"
+            )
+        ),
+        (
+            f"Trailing stop: enabled; trigger {config.trail_activation_trigger.value}; "
+            f"activation {config.trail_activation_r}R; distance {config.trail_distance_r}R; "
+            f"apply to {config.trail_apply_to.value}; fixed final targets remain active"
+            if config.enable_trailing_profit
+            else "Trailing stop: disabled"
+        ),
+        (
+            f"Bull-long R-step staircase: enabled; activate at {config.bull_long_r_step_activation_r}R; "
+            f"distance {config.bull_long_r_step_distance_r}R; step {config.bull_long_r_step_size_r}R; "
+            f"close {config.bull_long_r_step_activation_close_pct}% at activation; "
+            + (
+                f"maximum target {config.bull_long_r_step_maximum_r}R"
+                if config.bull_long_r_step_maximum_r > 0
+                else "no fixed target"
+            )
+            if config.enable_bull_long_r_step_trailing
+            else "Bull-long R-step staircase: disabled"
+        ),
         f"Partial intrabar ordering: {'STOP_FIRST' if config.tie_policy.value == 'PESSIMISTIC' else 'TP1_THEN_TP2_THEN_STOP'}",
         f"Initial equity: {config.initial_equity}",
         f"Total pairs: {summary.get('total_pairs')}",
@@ -117,8 +247,18 @@ def compatible_resample_freq(freq: str) -> str:
 def periodic_results(trades: pd.DataFrame, freq: str) -> pd.DataFrame:
     if trades.empty:
         return pd.DataFrame(columns=["period", "pair_count", "net_pnl", "net_r"])
-    exits = pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1))
+    exits = pd.to_datetime(trades.get("exit_time", pd.Series(pd.NaT, index=trades.index)), errors="coerce", utc=True)
+    side_exit_columns = [column for column in ("long_exit_time", "short_exit_time") if column in trades]
+    if side_exit_columns and exits.isna().any():
+        side_exits = pd.concat(
+            [pd.to_datetime(trades[column], errors="coerce", utc=True) for column in side_exit_columns],
+            axis=1,
+        ).max(axis=1)
+        exits = exits.fillna(side_exits)
+    if exits.isna().all():
+        raise ValueError("Periodic results require at least one valid trade exit timestamp.")
     frame = trades.assign(exit_time=exits).set_index("exit_time")
+    frame = frame.loc[frame.index.notna()]
     candidates = [compatible_resample_freq(freq)]
     fallback = {"ME": "M", "YE": "Y", "M": "ME", "Y": "YE"}.get(candidates[0])
     if fallback and fallback not in candidates:
@@ -158,9 +298,11 @@ TRADE_R_COLUMN_METADATA = {
     "pair_gross_account_r": "Pair gross cash PnL divided by combined planned risk_amount for both legs.",
     "pair_fee_account_r": "Pair fees divided by combined planned risk_amount for both legs.",
     "pair_net_account_r": "Pair net cash PnL divided by combined planned risk_amount for both legs.",
-    "pair_gross_r": "Sum of leg gross_r values.",
-    "pair_fee_r": "Pair fees divided by one leg's planned risk_amount for legacy pair-R comparison.",
-    "pair_net_r": "Sum of leg net_r values; legacy pair R where two stopped legs equal roughly -2 before costs.",
+    "pair_gross_r": "Pair gross cash PnL divided by the pair's combined planned risk_amount.",
+    "pair_fee_r": "Pair fees divided by the pair's combined planned risk_amount.",
+    "pair_net_r": "Pair net cash PnL divided by the pair's combined planned risk_amount; valid for equal and asymmetric leg sizing.",
+    "pair_leg_gross_r_sum": "Legacy diagnostic: sum of each leg's independently normalized gross_r.",
+    "pair_leg_net_r_sum": "Legacy diagnostic: sum of each leg's independently normalized net_r.",
     "adx": "Wilder ADX value from the 15-minute strategy candle evaluated before pair entry.",
     "plus_di": "Wilder +DI value from the 15-minute strategy candle evaluated before pair entry.",
     "minus_di": "Wilder -DI value from the 15-minute strategy candle evaluated before pair entry.",
@@ -193,6 +335,36 @@ TRADE_R_COLUMN_METADATA = {
     "remaining_leg_timeout_triggered": "True when the opposite leg was still open and was market-closed at the deadline's first available execution candle.",
     "remaining_leg_timeout_exit_time": "Timestamp of the intrabar or fallback strategy candle used for a triggered remaining-leg timeout.",
     "remaining_leg_timeout_exit_side": "Side closed by the remaining-leg timeout.",
+    "remaining_leg_timeout_profit_extension_enabled": "Whether a remaining leg at or above the configured unrealized-profit R threshold receives another full timeout interval.",
+    "remaining_leg_timeout_profit_threshold_r": "Minimum unrealized price R required at a timeout checkpoint to keep the remaining leg open.",
+    "remaining_leg_timeout_checkpoint_count": "Number of timeout checkpoints evaluated for the remaining leg.",
+    "remaining_leg_timeout_extension_count": "Number of checkpoints that qualified for another full timeout interval.",
+    "remaining_leg_timeout_last_checkpoint_time": "Timestamp of the most recent remaining-leg timeout checkpoint.",
+    "remaining_leg_timeout_last_checkpoint_profit_r": "Remaining leg unrealized price R at its most recent timeout checkpoint.",
+    "checkpoint_reentry_gate_started": "True when a checkpoint timeout started a virtual TP/SL gate that blocks replacement entries.",
+    "checkpoint_reentry_gate_side": "Side of the virtually monitored leg.",
+    "checkpoint_reentry_gate_tp": "TP boundary monitored after the checkpoint close.",
+    "checkpoint_reentry_gate_sl": "Active SL boundary monitored after the checkpoint close.",
+    "checkpoint_reentry_gate_start_time": "Checkpoint close time when virtual monitoring began.",
+    "checkpoint_reentry_gate_release_time": "Candle time when TP or SL released the entry gate.",
+    "checkpoint_reentry_gate_release_reason": "TP, SL, or TP_AND_SL boundary that released the gate.",
+    "remaining_leg_checkpoint_score_extension_enabled": "Whether the configurable checkpoint condition score controls timeout extensions.",
+    "checkpoint_score_last_atr_pct": "ATR as a percentage of checkpoint price using the last completed strategy candle.",
+    "checkpoint_score_last_directional_di": "Direction-adjusted DI at the checkpoint: +DI-minus--DI for long, reversed for short.",
+    "checkpoint_score_last_bb_width_pct": "Bollinger Band width percentage at the checkpoint.",
+    "checkpoint_score_last_pass_count": "Number of enabled checkpoint conditions that passed at the most recent checkpoint.",
+    "checkpoint_score_last_condition_count": "Number of checkpoint score conditions enabled.",
+    "checkpoint_score_last_passed": "Whether the most recent checkpoint score reached the required condition count.",
+    "first_sl_survivor_partial_taken": "Whether part of the surviving leg was realized when the opposite leg hit its first normal SL.",
+    "first_sl_survivor_partial_side": "Side of the surviving leg that was partially closed.",
+    "first_sl_survivor_partial_time": "Execution time of the first-SL survivor partial close.",
+    "first_sl_survivor_partial_pct": "Configured percentage of the survivor closed at the first SL.",
+    "first_sl_survivor_partial_exit_price": "Executed partial-close price after normal directional slippage.",
+    "first_sl_survivor_partial_net_pnl": "Net realized PnL from the first-SL partial close after its exit fee.",
+    "checkpoint_zero_score_streak": "Current consecutive zero-score checkpoint count.",
+    "checkpoint_zero_score_max_streak": "Largest consecutive zero-score count reached by the pair.",
+    "checkpoint_zero_score_last_time": "Most recent zero-score checkpoint time.",
+    "checkpoint_zero_score_confirmed_close": "Whether the remaining leg closed after reaching the configured zero-score confirmation count.",
     "*_original_sl": "The leg stop loss at entry before any break-even replacement.",
     "*_current_sl": "The final active stop loss after any break-even replacement.",
     "*_be_*": "Break-even-after-opposite-SL audit fields. COST_ADJUSTED estimates a zero-net exit using entry fee, estimated exit fee, and configured slippage; final realized net PnL may differ slightly because exit fee depends on actual exit notional.",
