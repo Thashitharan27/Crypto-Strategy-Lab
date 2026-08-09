@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import warnings
 
-from lifecycle import build_lifecycle_analysis, early_warning_analysis, lifecycle_summary, phase_comparison
+from crypto_strategy_lab.lifecycle import build_lifecycle_analysis, early_warning_analysis, lifecycle_summary, phase_comparison
 
 
 def fixtures(side="LONG", minutes=60, duplicate=False):

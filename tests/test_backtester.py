@@ -4,12 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from atr import atr
-from config import BacktestConfig, EntryMode, RiskMode, TiePolicy, TradeDirectionMode
-from engine import BacktestEngine
-from loader import load_ohlcv_csv
-from statistics import equity_curve, summarize
-from trade import Position, Side
+from crypto_strategy_lab.atr import atr
+from crypto_strategy_lab.config import AdxFilterMode, BacktestConfig, DIExecutionMode, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, TradeDirectionMode, VWAPConfirmationMode
+from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.loader import load_ohlcv_csv
+from crypto_strategy_lab.statistics import equity_curve, summarize
+from crypto_strategy_lab.trade import Position, Side
 
 
 def candles(rows):
@@ -28,6 +28,95 @@ def cfg(**kw):
                 entry_mode=EntryMode.WAIT_UNTIL_CLOSED)
     base.update(kw)
     return BacktestConfig(**base)
+
+
+def test_vwap_volume_breakout_enters_long_at_next_candle_open_without_lookahead():
+    df = candles([
+        (100, 101, 99, 100),
+        (100, 102, 100, 101),
+        (101, 102, 100, 101),
+        (101, 106, 101, 105),
+        (106, 107, 105, 106),
+    ])
+    df["volume"] = [10, 10, 10, 30, 10]
+    trades = BacktestEngine(df, cfg(
+        entry_mode=EntryMode.VWAP_VOLUME_BREAKOUT,
+        vwap_breakout_lookback_hours=0.5,
+        vwap_volume_lookback=2,
+        vwap_volume_multiplier=1.5,
+        vwap_slope_lookback=1,
+        atr_period=2,
+    )).run()
+
+    assert len(trades) == 1
+    assert trades.iloc[0]["side"] == "LONG"
+    assert trades.iloc[0]["entry_price"] == pytest.approx(106)
+    assert trades.iloc[0]["strategy_candle_open_time"] == df.timestamp.iloc[4]
+
+
+def test_vwap_volume_breakout_rejects_current_candle_from_range_and_volume_baselines():
+    df = candles([(100, 101, 99, 100)] * 6)
+    df.loc[3, ["high", "close", "volume"]] = [110, 109, 30]
+    engine = BacktestEngine(df, cfg(
+        entry_mode=EntryMode.VWAP_VOLUME_BREAKOUT,
+        vwap_breakout_lookback_hours=0.5,
+        vwap_volume_lookback=2,
+        vwap_volume_multiplier=1.5,
+        atr_period=2,
+    ))
+
+    assert engine._vwap_breakout_direction(3) == "LONG"
+
+
+def test_vwap_retest_waits_for_hold_then_enters_at_following_open():
+    df = candles([
+        (100, 101, 99, 100),
+        (100, 102, 100, 101),
+        (101, 102, 100, 101),
+        (101, 106, 101, 105),
+        (104, 105, 101.9, 103),
+        (104, 105, 103, 104),
+    ])
+    df["volume"] = [10, 10, 10, 30, 10, 10]
+    trades = BacktestEngine(df, cfg(
+        entry_mode=EntryMode.VWAP_VOLUME_BREAKOUT,
+        vwap_breakout_lookback_hours=0.5,
+        vwap_volume_lookback=2,
+        vwap_volume_multiplier=1.5,
+        vwap_confirmation_mode=VWAPConfirmationMode.RETEST,
+        vwap_retest_window_candles=4,
+        vwap_retest_tolerance_atr=0.25,
+        atr_period=2,
+    )).run()
+
+    assert len(trades) == 1
+    assert trades.iloc[0]["side"] == "LONG"
+    assert trades.iloc[0]["entry_price"] == pytest.approx(104)
+    assert trades.iloc[0]["vwap_confirmation_mode"] == "RETEST"
+    assert trades.iloc[0]["vwap_confirmation_bars"] == 1
+    assert trades.iloc[0]["vwap_breakout_level"] == pytest.approx(102)
+
+
+def test_vwap_retest_cancels_when_confirmation_candle_closes_inside_range():
+    df = candles([
+        (100, 101, 99, 100),
+        (100, 102, 100, 101),
+        (101, 102, 100, 101),
+        (101, 106, 101, 105),
+        (104, 105, 100, 101),
+        (101, 102, 100, 101),
+    ])
+    df["volume"] = [10, 10, 10, 30, 10, 10]
+    trades = BacktestEngine(df, cfg(
+        entry_mode=EntryMode.VWAP_VOLUME_BREAKOUT,
+        vwap_breakout_lookback_hours=0.5,
+        vwap_volume_lookback=2,
+        vwap_volume_multiplier=1.5,
+        vwap_confirmation_mode=VWAPConfirmationMode.RETEST,
+        atr_period=2,
+    )).run()
+
+    assert trades.empty
 
 
 def test_atr_checkpoint_extends_biased_tp_and_locks_profit():
@@ -172,6 +261,162 @@ def test_biased_short_adx_cap_rejects_only_high_adx_shorts():
     engine.di_spread[:] = 35
     engine.adx_values[:] = 60
     assert engine._entry_filter_result(1)[0]
+
+
+def test_short_vwap_distance_filter_rejects_only_shorts_below_threshold():
+    df = candles([(100, 100, 100, 100)] * 4)
+    engine = BacktestEngine(
+        df,
+        cfg(
+            enable_di_direction_sizing=True,
+            enable_short_vwap_distance_filter=True,
+            short_vwap_minimum_distance_atr=2,
+        ),
+    )
+    engine.plus_di_values[:] = 10
+    engine.minus_di_values[:] = 45
+    engine.di_spread[:] = 35
+    engine.atr_values[:] = 5
+    engine.session_vwap[:] = 109.99
+    passed, reason = engine._entry_filter_result(1)
+    assert not passed
+    assert "below minimum 2" in reason
+
+    engine.session_vwap[:] = 110
+    assert engine._entry_filter_result(1)[0]
+
+    engine.plus_di_values[:] = 45
+    engine.minus_di_values[:] = 10
+    engine.di_spread[:] = 35
+    engine.session_vwap[:] = 100
+    assert engine._entry_filter_result(1)[0]
+
+
+def test_long_momentum_filter_rejects_only_unconfirmed_longs():
+    df = candles([(100, 100, 100, 100)] * 4)
+    engine = BacktestEngine(
+        df,
+        cfg(
+            enable_di_direction_sizing=True,
+            enable_long_momentum_filter=True,
+            long_momentum_lookback_hours=24,
+            long_momentum_minimum_return=0.06,
+        ),
+    )
+    engine.plus_di_values[:] = 45
+    engine.minus_di_values[:] = 10
+    engine.di_spread[:] = 35
+    engine.long_momentum_return_values[:] = 0.0599
+    passed, reason = engine._entry_filter_result(1)
+    assert not passed
+    assert "below minimum 6.00%" in reason
+
+    engine.long_momentum_return_values[:] = 0.06
+    assert engine._entry_filter_result(1)[0]
+
+    engine.plus_di_values[:] = 10
+    engine.minus_di_values[:] = 45
+    engine.di_spread[:] = 35
+    engine.long_momentum_return_values[:] = -0.50
+    assert engine._entry_filter_result(1)[0]
+
+
+def test_long_momentum_return_uses_only_completed_24_hour_history():
+    rows = [(100, 100, 100, 100)] * 96 + [(106, 106, 106, 106)]
+    engine = BacktestEngine(candles(rows), cfg(long_momentum_lookback_hours=24))
+    assert np.isnan(engine.long_momentum_return_values[95])
+    assert engine.long_momentum_return_values[96] == pytest.approx(0.06)
+
+
+def test_directional_regime_and_indicator_ranges_filter_the_selected_side():
+    engine = BacktestEngine(candles([(100, 101, 99, 100)] * 40), cfg(
+        enable_di_direction_sizing=True,
+        di_direction_long_minimum_spread=0,
+        di_direction_short_minimum_spread=0,
+        enable_regime_direction_filter=True,
+        allow_bull_long=False,
+        enable_directional_di_spread_range=True,
+        directional_short_di_spread_minimum=15,
+        directional_short_di_spread_maximum=23,
+        enable_directional_atr_pct_range=True,
+        directional_short_atr_pct_minimum=.01,
+        directional_short_atr_pct_maximum=.03,
+        enable_directional_rsi_range=True,
+        directional_short_rsi_minimum=33.6,
+        directional_short_rsi_maximum=40.2,
+        enable_directional_close_location_range=True,
+        directional_short_close_location_minimum=.23,
+        directional_short_close_location_maximum=.37,
+        enable_directional_momentum_range=True,
+        directional_short_momentum_minimum=-.025,
+        directional_short_momentum_maximum=-.007,
+    ))
+    engine.plus_di_values[:] = 10; engine.minus_di_values[:] = 30; engine.di_spread[:] = 20
+    engine.bull_regime_return_values[:] = .25; engine.atr_pct_values[:] = .02
+    engine.directional_rsi_values[:] = 36; engine.close_location_values[:] = .30
+    engine.directional_momentum_return_values[:] = -.015
+    assert engine._entry_filter_result(20)[0]
+
+    engine.di_spread[:] = 24
+    passed, reason = engine._entry_filter_result(20)
+    assert not passed and "outside range 15 to 23" in reason
+
+    engine.di_spread[:] = 20; engine.plus_di_values[:] = 30; engine.minus_di_values[:] = 10
+    passed, reason = engine._entry_filter_result(20)
+    assert not passed and "disabled in bull regime" in reason
+
+
+def test_rsi_uses_only_completed_candles_and_has_warmup():
+    close = np.arange(100.0, 140.0)
+    engine = BacktestEngine(candles([(v, v, v, v) for v in close]), cfg(directional_rsi_period=14))
+    assert np.isnan(engine.directional_rsi_values[10])
+    assert engine.directional_rsi_values[20] == pytest.approx(100.0)
+
+
+def test_di_direction_long_only_rejects_short_selected_signals():
+    engine = BacktestEngine(
+        candles([(100, 100, 100, 100)] * 4),
+        cfg(enable_di_direction_sizing=True, trade_direction=TradeDirectionMode.LONG_ONLY),
+    )
+    engine.plus_di_values[:] = 10
+    engine.minus_di_values[:] = 45
+    engine.di_spread[:] = 35
+    passed, reason = engine._entry_filter_result(1)
+    assert not passed
+    assert "LONG_ONLY" in reason
+
+    engine.plus_di_values[:] = 45
+    engine.minus_di_values[:] = 10
+    assert engine._entry_filter_result(1)[0]
+
+
+def test_filtered_di_direction_can_be_flipped_after_adx_filter_passes():
+    engine = BacktestEngine(
+        candles([(100, 100, 100, 100), (100, 101, 99, 100)]),
+        cfg(
+            enable_di_direction_sizing=True,
+            di_direction_long_minimum_spread=0,
+            di_direction_short_minimum_spread=0,
+            di_execution_mode=DIExecutionMode.PREFERRED_SIDE_ONLY,
+            flip_filtered_di_direction=True,
+            enable_adx_filter=True,
+            adx_filter_mode=AdxFilterMode.MAXIMUM,
+            adx_maximum=10,
+        ),
+    )
+    engine.plus_di_values[:] = 30
+    engine.minus_di_values[:] = 10
+    engine.di_spread[:] = 20
+    engine.adx_values[:] = 5
+    engine.risk[:] = 1
+
+    passed, reason = engine._entry_filter_result(1)
+    assert passed
+    engine._open_pair(1, passed, reason)
+
+    pair = engine.active_pairs[0]
+    assert pair.long is None
+    assert pair.short is not None
 
 
 def test_loading_binance_open_time_ms_extra_columns_gap(capsys, tmp_path):
@@ -334,6 +579,23 @@ def test_missing_intrabar_fallback_policy_records_flag():
     assert row.missing_intrabar_data
     assert row.long_exit_source == "15M_FALLBACK"
 
+
+def test_missing_intrabar_error_policy_stops_run():
+    strat = candles([(100,100,100,100), (100,111,100,100)])
+    intra = one_minute(pd.Timestamp("2024-01-01 00:16", tz="UTC"), [(100,100,100,100), (100,100,100,100), (100,100,100,100)])
+    intra.loc[2, "timestamp"] = pd.Timestamp("2024-01-01 00:20", tz="UTC")
+    with pytest.raises(ValueError,match="Missing 1-minute intrabar candles"):
+        BacktestEngine(strat, cfg(use_intrabar_data=True,intrabar_missing_policy=IntrabarMissingPolicy.ERROR), intra).run()
+
+
+def test_missing_intrabar_continue_policy_does_not_use_strategy_fallback():
+    strat = candles([(100,100,100,100), (100,111,100,100)])
+    intra = one_minute(pd.Timestamp("2024-01-01 00:16", tz="UTC"), [(100,100,100,100), (100,100,100,100), (100,100,100,100)])
+    intra.loc[2, "timestamp"] = pd.Timestamp("2024-01-01 00:20", tz="UTC")
+    row = BacktestEngine(strat, cfg(use_intrabar_data=True,intrabar_missing_policy=IntrabarMissingPolicy.WARN_AND_CONTINUE), intra).run().iloc[0]
+    assert row.missing_intrabar_data
+    assert row.long_fallback_reason is None
+
 def test_matching_intrabar_candles_record_intrabar_exit_source():
     strat = candles([(100,100,100,100), (100,100,100,100), (100,100,100,100)])
     start = pd.Timestamp("2024-01-01 00:15", tz="UTC")
@@ -355,7 +617,7 @@ def test_summary_counts_intrabar_fallback_and_end_of_data_sources():
 
 
 def test_plot_frequency_aliases_fall_back_for_older_pandas(monkeypatch):
-    import plots
+    from crypto_strategy_lab import plots
 
     returns = pd.DataFrame({
         "exit_time": [pd.Timestamp("2024-01-31")],
@@ -376,7 +638,7 @@ def test_plot_frequency_aliases_fall_back_for_older_pandas(monkeypatch):
 
 
 def test_save_plots_reports_failed_chart_without_raising(monkeypatch, tmp_path):
-    import plots
+    from crypto_strategy_lab import plots
 
     trades = pd.DataFrame({
         "pair_net_r": [1.0],
@@ -416,7 +678,7 @@ def test_price_risk_leg_loses_more_than_configured_after_fees_and_slippage():
 
 
 def test_all_in_risk_sizing_keeps_stop_loss_near_configured_risk():
-    from config import PositionSizingMode
+    from crypto_strategy_lab.config import PositionSizingMode
 
     df = candles([(100,100,100,100), (100,100,89,100)])
     row = BacktestEngine(df, cfg(risk_per_leg=0.005, taker_fee=0.001, slippage=0.001, position_sizing_mode=PositionSizingMode.ALL_IN_STOP_RISK)).run().iloc[0]
@@ -561,7 +823,7 @@ def test_be_same_candle_next_candle_vs_pessimistic_policy():
 
 
 def test_adx_matches_tradingview_reference_values():
-    from adx import adx
+    from crypto_strategy_lab.adx import adx
     rows = [(100+i, 102+i+(i%3), 99+i-(i%2), 101+i+((i%4)-1)*0.3) for i in range(40)]
     df = candles(rows)
     out, plus, minus = adx(df.high.to_numpy(float), df.low.to_numpy(float), df.close.to_numpy(float), 14)
@@ -598,7 +860,7 @@ def test_adx_filter_skips_entries_records_signals_and_outputs_stats():
     assert {"adx", "plus_di", "minus_di", "adx_filter_passed", "adx_filter_reason"}.issubset(filtered.columns)
     summary = summarize(filtered, 1000)
     assert "signals_evaluated" in summary and "average_adx_of_winning_trades" in summary
-    from statistics import adx_analysis
+    from crypto_strategy_lab.statistics import adx_analysis
     analysis = adx_analysis(filtered)
     assert list(analysis.columns) == ["Bucket", "Trades", "Wins", "Losses", "Win rate", "Average PnL", "Average duration", "Double SL count", "TP/SL count"]
 
@@ -674,7 +936,7 @@ def test_trade_telemetry_records_break_even_current_stop():
 
 
 def test_journey_summaries_milestones_and_winner_loser_analysis():
-    from telemetry import add_journey_columns, winner_loser_journey_analysis
+    from crypto_strategy_lab.telemetry import add_journey_columns, winner_loser_journey_analysis
     trades = pd.DataFrame({"pair_id":[1,2],"entry_time":[pd.Timestamp("2024-01-01", tz="UTC")]*2,"long_exit_reason":["TP","SL"],"short_exit_reason":["SL","SL"],"holding_minutes":[30,75],"holding_hours":[0.5,1.25],"pair_net_pnl":[10.0,-20.0]})
     tel = pd.DataFrame({"pair_id":[1,1,1,2,2,2,2,2,2],"timestamp":pd.date_range("2024-01-01", periods=9, freq="15min", tz="UTC"),"elapsed_minutes":[0,15,30,0,15,30,45,60,75],"adx":[10,11,12,20,21,22,23,24,25],"di_spread":[1,2,3,4,5,6,7,8,9],"bb_width":[.1,.2,.3,.4,.5,.6,.7,.8,.9],"atr":[5,6,7,8,9,10,11,12,13]})
     out = add_journey_columns(trades, tel)
@@ -691,7 +953,7 @@ def test_journey_summaries_milestones_and_winner_loser_analysis():
 
 
 def test_double_sl_report_identifies_first_and_second_sl_times():
-    from telemetry import add_journey_columns, double_sl_journey_analysis
+    from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey_analysis
     trades = pd.DataFrame({"pair_id":[1],"entry_time":[pd.Timestamp("2024-01-01", tz="UTC")],"long_exit_reason":["SL"],"short_exit_reason":["SL"],"long_exit_time":[pd.Timestamp("2024-01-01 00:20", tz="UTC")],"short_exit_time":[pd.Timestamp("2024-01-01 00:35", tz="UTC")],"holding_minutes":[35],"holding_hours":[35/60],"pair_net_pnl":[-2.0]})
     tel = pd.DataFrame({"pair_id":[1,1,1],"timestamp":[pd.Timestamp("2024-01-01", tz="UTC"),pd.Timestamp("2024-01-01 00:15", tz="UTC"),pd.Timestamp("2024-01-01 00:30", tz="UTC")],"elapsed_minutes":[0,15,30],"adx":[10,20,30],"di_spread":[1,2,3],"bb_width":[.1,.2,.3],"atr":[5,6,7]})
     out = double_sl_journey_analysis(add_journey_columns(trades, tel), tel).iloc[0]

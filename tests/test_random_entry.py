@@ -2,8 +2,8 @@ from dataclasses import replace
 import pandas as pd
 import pandas.testing as pdt
 import pytest
-from config import BacktestConfig, EntryTimingMode, RandomEntryStartMode, RiskMode, TradeDirectionMode
-from engine import BacktestEngine
+from crypto_strategy_lab.config import BacktestConfig, EntryTimingMode, RandomEntryStartMode, RiskMode, TradeDirectionMode
+from crypto_strategy_lab.engine import BacktestEngine
 
 
 def candles(n=8):

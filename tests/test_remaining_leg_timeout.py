@@ -1,9 +1,9 @@
 import pandas as pd
 import pytest
 
-from config import BacktestConfig, EntryMode, RiskMode
-from engine import BacktestEngine
-from statistics import summarize
+from crypto_strategy_lab.config import BacktestConfig, EntryMode, RiskMode
+from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.statistics import summarize
 
 
 def strategy(rows):

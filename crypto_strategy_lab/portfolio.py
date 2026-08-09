@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from engine import BacktestEngine
-from gui.config_logic import build_backtest_config, load_config_json
-from loader import load_backtest_data
+from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.gui.config_logic import build_backtest_config, load_config_json
+from crypto_strategy_lab.loader import load_backtest_data
 
 
 def _component_run(label, config_path, initial_equity, risk_fraction, progress=None):
@@ -41,7 +41,7 @@ def _component_run(label, config_path, initial_equity, risk_fraction, progress=N
     return config, trades, telemetry
 
 
-def _shared_equity_replay(trades, initial_equity, risk_fraction):
+def _shared_equity_replay(trades, initial_equity, risk_fraction, maximum_total_risk=0.05):
     events = []
     for row in trades.itertuples():
         events.append((row.entry_time, 0, "entry", row.portfolio_trade_key, row.asset, row.pair_net_r))
@@ -55,16 +55,32 @@ def _shared_equity_replay(trades, initial_equity, risk_fraction):
     assignments = {}
     realized_rows = []
     maximum_open_trades = 0
+    maximum_open_risk_fraction = 0.0
+    blocked_entries = 0
 
     for timestamp, _, kind, key, asset, result_multiple in events:
         if kind == "entry":
             risk_amount = equity * risk_fraction
+            open_risk = sum(active.values())
+            risk_limit = equity * maximum_total_risk
+            if open_risk + risk_amount > risk_limit + 1e-12:
+                assignments[key] = {
+                    "portfolio_accepted": False,
+                    "portfolio_block_reason": "MAXIMUM_TOTAL_PORTFOLIO_RISK",
+                }
+                blocked_entries += 1
+                continue
             active[key] = risk_amount
             assignments[key] = {
+                "portfolio_accepted": True,
+                "portfolio_block_reason": "",
                 "portfolio_entry_equity": equity,
                 "portfolio_risk_amount": risk_amount,
             }
             maximum_open_trades = max(maximum_open_trades, len(active))
+            maximum_open_risk_fraction = max(maximum_open_risk_fraction, sum(active.values()) / equity)
+            continue
+        if key not in active:
             continue
         risk_amount = active.pop(key)
         pnl = risk_amount * float(result_multiple)
@@ -83,7 +99,7 @@ def _shared_equity_replay(trades, initial_equity, risk_fraction):
                 "portfolio_drawdown": drawdown,
             }
         )
-    return pd.DataFrame(realized_rows), assignments, maximum_open_trades, maximum_drawdown
+    return pd.DataFrame(realized_rows), assignments, maximum_open_trades, maximum_drawdown, maximum_open_risk_fraction, blocked_entries
 
 
 def _mark_to_market_curve(trades, telemetries, realized, assignments, initial_equity):
@@ -165,11 +181,14 @@ def run_portfolio(
     output_root="output",
     initial_equity=1000.0,
     risk_per_asset=0.01,
+    maximum_total_risk=0.05,
     progress=None,
 ):
     """Run component configs and replay their trades against one shared account."""
     if len(components) < 2:
         raise ValueError("Portfolio mode requires at least two component configurations.")
+    if not 0 < float(risk_per_asset) <= float(maximum_total_risk) < 1:
+        raise ValueError("Portfolio risk settings must satisfy: 0 < risk per asset <= maximum total risk < 100%.")
     configs = {}
     trade_frames = []
     telemetry_frames = []
@@ -187,8 +206,8 @@ def run_portfolio(
     trades["entry_time"] = pd.to_datetime(trades["entry_time"], utc=True)
     trades["exit_time"] = pd.to_datetime(trades["exit_time"], utc=True)
     trades = trades.sort_values(["entry_time", "asset", "pair_id"]).reset_index(drop=True)
-    realized, assignments, max_open, closed_dd = _shared_equity_replay(
-        trades, initial_equity, risk_per_asset
+    realized, assignments, max_open, closed_dd, max_open_risk, blocked_entries = _shared_equity_replay(
+        trades, initial_equity, risk_per_asset, maximum_total_risk
     )
     for key, values in assignments.items():
         mask = trades["portfolio_trade_key"].eq(key)
@@ -198,9 +217,12 @@ def run_portfolio(
     equity_map = realized.set_index("portfolio_trade_key")["portfolio_equity"]
     trades["portfolio_pnl"] = trades["portfolio_trade_key"].map(pnl_map)
     trades["portfolio_equity_after_exit"] = trades["portfolio_trade_key"].map(equity_map)
+    trades["portfolio_accepted"] = trades["portfolio_trade_key"].map(lambda key: bool(assignments.get(key,{}).get("portfolio_accepted",False)))
+    trades["portfolio_block_reason"] = trades["portfolio_trade_key"].map(lambda key: assignments.get(key,{}).get("portfolio_block_reason",""))
+    accepted_trades=trades.loc[trades["portfolio_accepted"]].copy()
 
     mtm = _mark_to_market_curve(
-        trades, telemetry_frames, realized, assignments, initial_equity
+        accepted_trades, telemetry_frames, realized, assignments, initial_equity
     )
     ending_equity = float(realized.iloc[-1]["portfolio_equity"])
     mtm_dd = float(mtm["mark_to_market_drawdown"].min())
@@ -215,9 +237,12 @@ def run_portfolio(
         "portfolio_assets": [label for label, _ in components],
         "initial_equity": float(initial_equity),
         "risk_per_asset": float(risk_per_asset),
-        "maximum_configured_concurrent_risk": float(risk_per_asset * max_open),
+        "maximum_total_portfolio_risk": float(maximum_total_risk),
+        "maximum_observed_open_risk": float(max_open_risk),
         "maximum_open_trades": int(max_open),
-        "total_trades": int(len(trades)),
+        "candidate_trades": int(len(trades)),
+        "trades_blocked_by_portfolio_risk": int(blocked_entries),
+        "total_trades": int(len(accepted_trades)),
         "ending_equity": ending_equity,
         "total_return_percentage": (ending_equity / initial_equity - 1.0) * 100.0,
         "closed_equity_maximum_drawdown_percentage": float(closed_dd * 100.0),

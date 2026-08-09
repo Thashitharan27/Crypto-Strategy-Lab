@@ -1,8 +1,8 @@
 import pandas as pd
 import pytest
 
-from config import BacktestConfig, RiskMode, TiePolicy, TrailActivationTrigger, TradeDirectionMode
-from engine import BacktestEngine
+from crypto_strategy_lab.config import BacktestConfig, RiskMode, TiePolicy, TrailActivationTrigger, TradeDirectionMode
+from crypto_strategy_lab.engine import BacktestEngine
 
 
 def candles(*bars):

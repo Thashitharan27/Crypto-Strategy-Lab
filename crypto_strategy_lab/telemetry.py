@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import traceback
+from collections.abc import Callable
 import numpy as np
 import pandas as pd
 
@@ -80,7 +81,11 @@ def _at_or_before(group: pd.DataFrame, minutes: float, col: str):
     return finite(_series(eligible, col).iloc[-1])
 
 
-def add_journey_columns(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.DataFrame:
+def add_journey_columns(
+    trades: pd.DataFrame,
+    telemetry: pd.DataFrame,
+    progress: Callable[[int, int], None] | None = None,
+) -> pd.DataFrame:
     source_attrs = dict(trades.attrs)
     trades = trades.copy()
     if trades.empty or telemetry.empty:
@@ -89,7 +94,8 @@ def add_journey_columns(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.Dat
         return result
     by_pair = {pid: g.sort_values("elapsed_minutes") for pid, g in telemetry.groupby("pair_id", sort=False)}
     updates = []
-    for _, row in trades.iterrows():
+    total = len(trades)
+    for current, (_, row) in enumerate(trades.iterrows(), start=1):
         g = by_pair.get(row["pair_id"], pd.DataFrame())
         out = {}
         holding = float(row.get("holding_minutes", 0) or 0)
@@ -110,6 +116,8 @@ def add_journey_columns(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.Dat
             for mins, label in MILESTONES.items():
                 out[f"{ind}_{label}"] = _at_or_before(g, mins, ind) if holding >= mins else np.nan
         updates.append(out)
+        if progress is not None:
+            progress(current, total)
     journey = pd.DataFrame(updates, index=trades.index)
     result = pd.concat([trades, journey], axis=1)
     result.attrs.update(source_attrs)

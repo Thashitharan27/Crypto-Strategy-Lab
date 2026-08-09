@@ -21,3 +21,13 @@ def lag(values: np.ndarray, bars: int) -> np.ndarray:
     if bars < len(values):
         out[bars:] = values[:-bars]
     return out
+
+
+def rsi(close: np.ndarray, period: int = 14) -> np.ndarray:
+    """Wilder RSI calculated from completed strategy candles."""
+    s = pd.Series(close, dtype="float64")
+    delta = s.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    rs = gain / loss
+    return (100.0 - (100.0 / (1.0 + rs))).to_numpy(float)

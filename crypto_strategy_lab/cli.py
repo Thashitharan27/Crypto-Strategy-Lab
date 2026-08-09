@@ -10,16 +10,16 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy, AfterTP1StopMode, TP2ExitMode
-from engine import BacktestEngine
-from loader import load_backtest_data, load_ohlcv_csv
-from plots import save_plots
-from statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
-from telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, partial_take_profit_analysis
-from lifecycle import export_lifecycle_reports
-from output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
-from random_entry import decisions_frame, random_analysis, run_batch, comparison_row
-from config import EntryTimingMode
+from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, AdxFilterMode, BBWidthFilterMode, DISpreadFilterMode, TradeDirectionMode, DailyEntryMissedPolicy, AfterTP1StopMode, TP2ExitMode
+from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.loader import load_backtest_data, load_ohlcv_csv
+from crypto_strategy_lab.plots import save_plots
+from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
+from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, partial_take_profit_analysis
+from crypto_strategy_lab.lifecycle import export_lifecycle_reports
+from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
+from crypto_strategy_lab.random_entry import decisions_frame, random_analysis, run_batch, comparison_row
+from crypto_strategy_lab.config import EntryTimingMode
 
 
 def enum_value(enum_cls):

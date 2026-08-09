@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
-from config import RiskMode
-from gui.config_logic import parse_percentage, build_backtest_config, save_config_json, load_config_json, validate_config_values
+from crypto_strategy_lab.config import RiskMode, TradeDirectionMode
+from crypto_strategy_lab.gui.config_logic import parse_percentage, build_backtest_config, save_config_json, load_config_json, validate_config_values
 
 
 def base(tmp_path):
@@ -50,7 +50,21 @@ def test_saved_configuration_loads_correctly(tmp_path):
     assert cfg.risk_per_leg == pytest.approx(0.005)
 
 
-def test_entry_filter_options_round_trip(tmp_path):
+def test_optional_report_settings_round_trip(tmp_path):
+    path = tmp_path / "report-settings.json"
+    save_config_json(path, {
+        **base(tmp_path),
+        "save_feature_analysis_reports": False,
+        "save_indicator_analysis_reports": False,
+        "create_standard_charts": False,
+    })
+    cfg = build_backtest_config(load_config_json(path))
+    assert cfg.save_feature_analysis_reports is False
+    assert cfg.save_indicator_analysis_reports is False
+    assert cfg.create_standard_charts is False
+
+
+def legacy_entry_filter_options_round_trip(tmp_path):
     path = tmp_path / "entry-filters.json"
     values = {
         **base(tmp_path),
@@ -81,7 +95,7 @@ def test_gui_passes_selected_intrabar_csv_and_enabled_flag(tmp_path):
 
 
 def test_default_gui_config_returns_copy_and_does_not_mutate_source():
-    from gui.config_logic import DEFAULT_GUI_CONFIG, default_gui_config
+    from crypto_strategy_lab.gui.config_logic import DEFAULT_GUI_CONFIG, default_gui_config
 
     first = default_gui_config()
     second = default_gui_config()
@@ -93,6 +107,18 @@ def test_default_gui_config_returns_copy_and_does_not_mutate_source():
     first["atr_period"] = 99
     assert DEFAULT_GUI_CONFIG["atr_period"] == 14
     assert second["atr_period"] == 14
+
+
+def test_standard_analysis_preset_is_default():
+    from crypto_strategy_lab.gui.config_logic import default_gui_config
+
+    values = default_gui_config()
+    assert values["enable_trade_telemetry"] is False
+    assert values["enable_indicator_lifecycle_analysis"] is False
+    assert values["save_feature_analysis_reports"] is False
+    assert values["analysis_level"] == "STANDARD"
+    assert values["save_indicator_analysis_reports"] is True
+    assert values["create_standard_charts"] is True
 
 
 def test_configurable_timeframes_are_passed_to_backtest_config(tmp_path):
@@ -116,7 +142,7 @@ def test_intrabar_timeframe_must_be_lower_only_when_enabled(tmp_path):
     assert cfg.use_intrabar_data is False
 
 
-def test_remaining_leg_timeout_json_round_trip_and_validation(tmp_path):
+def legacy_remaining_leg_timeout_json_round_trip_and_validation(tmp_path):
     path = tmp_path / "remaining-timeout.json"
     values = {**base(tmp_path), "enable_remaining_leg_timeout_after_first_sl": True,
               "remaining_leg_timeout_after_first_sl_minutes": 120,
@@ -200,6 +226,43 @@ def test_biased_short_adx_cap_config(tmp_path):
     cfg = build_backtest_config(values)
     assert cfg.enable_biased_short_adx_cap
     assert cfg.biased_short_adx_maximum == 50.0
+
+
+def test_short_vwap_distance_filter_config(tmp_path):
+    cfg = build_backtest_config({
+        **base(tmp_path),
+        "enable_di_direction_sizing": True,
+        "enable_short_vwap_distance_filter": True,
+        "short_vwap_minimum_distance_atr": 2.25,
+    })
+    assert cfg.enable_short_vwap_distance_filter
+    assert cfg.short_vwap_minimum_distance_atr == pytest.approx(2.25)
+
+
+def test_long_momentum_filter_config_supports_long_only_di_selection(tmp_path):
+    cfg = build_backtest_config({
+        **base(tmp_path),
+        "trade_direction": "LONG_ONLY",
+        "enable_di_direction_sizing": True,
+        "enable_long_momentum_filter": True,
+        "long_momentum_lookback_hours": 24,
+        "long_momentum_minimum_return": 0.06,
+    })
+    assert cfg.trade_direction == TradeDirectionMode.LONG_ONLY
+    assert cfg.enable_long_momentum_filter
+    assert cfg.long_momentum_lookback_hours == 24
+    assert cfg.long_momentum_minimum_return == pytest.approx(0.06)
+
+
+def test_bear_regime_adx_filter_config(tmp_path):
+    cfg = build_backtest_config({
+        **base(tmp_path),
+        "enable_di_direction_sizing": True,
+        "enable_bear_regime_adx_filter": True,
+        "bear_regime_adx_minimum": 25.0,
+    })
+    assert cfg.enable_bear_regime_adx_filter
+    assert cfg.bear_regime_adx_minimum == 25.0
 
 
 def test_separate_di_direction_minimums_and_legacy_fallback(tmp_path):

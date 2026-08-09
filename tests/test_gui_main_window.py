@@ -1,15 +1,17 @@
+import json
 import os
 import sys
+from dataclasses import replace
 
 import pytest
 
-from config import BacktestConfig
-from gui.config_logic import load_config_json, save_config_json
+from crypto_strategy_lab.config import BacktestConfig
+from crypto_strategy_lab.gui.config_logic import load_config_json, save_config_json
 
 qtwidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
 QApplication = qtwidgets.QApplication
 
-from gui.main_window import MainWindow
+from crypto_strategy_lab.gui.main_window import MainWindow
 
 
 def app():
@@ -17,18 +19,191 @@ def app():
     return QApplication.instance() or QApplication(sys.argv)
 
 
-def test_di_strategy_controls_have_a_dedicated_tab():
+def test_completion_sound_uses_system_notification(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(QApplication,"beep",lambda: calls.append(True))
+    MainWindow._play_completion_sound()
+    assert calls == [True]
+
+
+def test_completion_sound_failure_is_non_fatal(monkeypatch):
+    def unavailable(): raise RuntimeError("No audio device")
+    monkeypatch.setattr(QApplication,"beep",unavailable)
+    MainWindow._play_completion_sound()
+
+
+def test_missing_intrabar_policy_uses_friendly_labels_and_stable_values():
+    app(); window=MainWindow()
+    try:
+        assert window.missing_policy.itemText(0)=="Use strategy candle for affected interval"
+        assert window.missing_policy.currentText()=="WARN_AND_USE_15M"
+        window.missing_policy.setCurrentText("ERROR")
+        window.update_dynamic()
+        assert window.missing_policy.itemText(window.missing_policy.currentIndex())=="Stop the run"
+        assert window.values()["intrabar_missing_policy"]=="ERROR"
+        assert "run stops" in window.data_help.text()
+    finally: window.close()
+
+
+def test_market_ready_tabs_use_profile_only_strategy_workflow():
     app()
     window = MainWindow()
     try:
         tab_names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
-        assert tab_names[:3] == ["Configuration", "DI Direction Strategy", "Summary"]
-        di_page = window.tabs.widget(tab_names.index("DI Direction Strategy"))
-        assert di_page.isAncestorOf(window.enable_di_direction_sizing)
-        assert di_page.isAncestorOf(window.di_long_reward_risk_ratio)
-        assert di_page.isAncestorOf(window.enable_directional_adx_filter)
-        assert di_page.isAncestorOf(window.enable_bull_regime_short_filter)
-        assert di_page.isAncestorOf(window.enable_bull_long_conditional_reward_risk)
+        assert tab_names == ["Backtest Setup", "Direction Voting", "Strategy Profiles", "Summary", "Portfolio", "Trades", "Charts", "Log"]
+        assert "Legacy Strategy" not in tab_names
+        values=window.values()
+        assert values["enable_strategy_profiles"] is True
+        assert values["di_execution_mode"] == "PREFERRED_SIDE_ONLY"
+    finally:
+        window.close()
+
+
+def test_profile_workspace_round_trip_includes_regime_definition(tmp_path):
+    path=tmp_path/"profile.json"; app(); window=MainWindow()
+    try:
+        window.profile_editor.regime_lookback.setValue(60); window.profile_editor.bull_threshold.setValue(15); window.profile_editor.bear_threshold.setValue(-12)
+        window.profile_editor.profiles["bull_long"]=replace(window.profile_editor.profiles["bull_long"],enabled=True,reward_risk_ratio=2.5,adx_enabled=True,adx_minimum=20,adx_maximum=45)
+        save_config_json(path,window.values()); saved=json.loads(path.read_text())
+        assert saved["enable_strategy_profiles"] is True
+        assert "enable_directional_adx_filter" not in saved
+        window.apply_values(load_config_json(path)); values=window.values()
+        assert values["bull_regime_lookback_days"]==60
+        assert values["bull_regime_return_threshold"]==pytest.approx(.15)
+        assert values["strategy_profiles"]["bull_long"]["reward_risk_ratio"]==pytest.approx(2.5)
+    finally: window.close()
+
+
+def test_profile_trade_management_uses_one_switch_per_feature():
+    app(); window=MainWindow()
+    try:
+        controls=window.profile_editor.controls
+        assert "trailing_override" not in controls and "break_even_override" not in controls and "timeout_override" not in controls
+        assert not controls["trailing_activation_r"].isEnabled()
+        assert not controls["break_even_activation_r"].isEnabled()
+        assert not controls["timeout_minutes"].isEnabled()
+        controls["trailing_enabled"].setChecked(True); controls["break_even_enabled"].setChecked(True); controls["timeout_enabled"].setChecked(True)
+        assert controls["trailing_activation_r"].isEnabled()
+        assert controls["break_even_activation_r"].isEnabled()
+        assert controls["timeout_minutes"].isEnabled()
+    finally: window.close()
+
+
+def test_profile_test_mode_help_explains_actual_execution():
+    app(); window=MainWindow()
+    try:
+        editor=window.profile_editor
+        editor.mode.setCurrentIndex(editor.mode.findData("ISOLATED_PROFILES"))
+        assert "no shared-account run" in editor.mode_help.text()
+        editor.mode.setCurrentIndex(editor.mode.findData("BOTH"))
+        assert "shared account first" in editor.mode_help.text()
+    finally: window.close()
+
+
+def test_profile_editor_supports_unified_action_rules():
+    app(); window=MainWindow()
+    try:
+        editor=window.profile_editor; editor.list.setCurrentRow(3)
+        editor._add_entry_rule(rule={"action":"FLIP","indicator":"CLOSE_LOCATION","condition":"INSIDE","minimum":.45,"maximum":.68})
+        editor._add_entry_rule(rule={"action":"REJECT","indicator":"ADX","condition":"OUTSIDE","minimum":10,"maximum":17})
+        rules=editor.values()["strategy_profiles"]["bear_short"]["entry_rules"]
+        assert len(rules)==2
+        assert rules[0]=={"action":"FLIP","indicator":"CLOSE_LOCATION","condition":"INSIDE","minimum":.45,"maximum":.68}
+        assert rules[1]=={"action":"REJECT","indicator":"ADX","condition":"OUTSIDE","minimum":10.0,"maximum":17.0}
+        editor.entry_rules_table.selectRow(0); editor._remove_entry_rule()
+        assert len(editor.values()["strategy_profiles"]["bear_short"]["entry_rules"])==1
+    finally: window.close()
+
+
+def test_profile_feature_details_follow_switches_and_rules_table_is_visible():
+    app(); window=MainWindow()
+    try:
+        controls=window.profile_editor.controls
+        form=window.profile_editor.control_forms["trailing_enabled"]
+        assert form is window.profile_editor.control_forms["partial_profit_enabled"]
+        assert form.parentWidget().title()=="Exit & Trade Management"
+        assert form.getWidgetPosition(controls["trailing_activation_r"])[0] == form.getWidgetPosition(controls["trailing_enabled"])[0] + 1
+        assert window.profile_editor.entry_rules_table.columnCount()==5
+        assert window.profile_editor.add_rule_btn.text()=="+ Add rule"
+    finally: window.close()
+
+
+def test_analysis_presets_hide_advanced_controls_and_apply_expected_outputs():
+    app(); window=MainWindow()
+    try:
+        assert window.analysis_level.currentText()=="Standard (Recommended)"
+        assert window.enable_trade_telemetry.isHidden()
+        assert window.save_indicator_reports.isChecked() and window.create_standard_charts.isChecked()
+        window.analysis_level.setCurrentText("Fast")
+        assert not window.save_indicator_reports.isChecked() and not window.create_standard_charts.isChecked()
+        window.analysis_level.setCurrentText("Research")
+        assert window.enable_trade_telemetry.isChecked() and window.enable_lifecycle.isChecked() and window.save_feature_reports.isChecked()
+        window.analysis_advanced.setChecked(True)
+        assert not window.enable_trade_telemetry.isHidden() and not window.enable_lifecycle.parentWidget().isHidden()
+    finally: window.close()
+
+
+def test_setup_separates_sizing_period_intrabar_and_cost_controls():
+    app(); window=MainWindow()
+    try:
+        assert window.account_form.parentWidget().title()=="Account & Position Sizing"
+        assert window.period_form.parentWidget().title()=="Backtest Period"
+        assert window.intrabar_form.parentWidget().title()=="Intrabar Execution Rules"
+        assert window.binance_dataset_btn.text()=="Download / Update Binance Dataset"
+        assert window.market_symbol.currentText()=="XRPUSDT"
+        assert window.risk_leg.text()=="1%"
+        assert window.max_lev_leg.text()=="3.0"
+        assert window.max_lev_combined.text()=="5.0"
+        assert window.slippage.text()=="0.05%"
+        assert "one trade (entry + final exit): 0.2%" in window.cost.text()
+        window.maker_entry.setChecked(True); window.maker_exit.setChecked(True)
+        assert "one trade (entry + final exit): 0.14%" in window.cost.text()
+        assert window.zero_cost.parentWidget() is window.cost.parentWidget()
+        assert window.account_form.labelForField(window.max_lev_leg).text()=="Maximum Leverage Per Trade"
+        assert window.account_form.isRowVisible(window.atr_period)
+        assert not window.account_form.isRowVisible(window.percent_r)
+        window.risk_mode.setCurrentText("PERCENT")
+        assert not window.account_form.isRowVisible(window.atr_period)
+        assert window.account_form.isRowVisible(window.percent_r)
+        assert not window.period_form.isRowVisible(window.trading_start)
+        window.entire_dataset.setChecked(False)
+        assert window.period_form.isRowVisible(window.trading_start)
+        window.trading_start.setText("2024-01-01")
+        assert window.values()["trading_start_date"]=="2024-01-01"
+    finally: window.close()
+
+
+def test_pair_and_timeframe_changes_select_matching_local_dataset(tmp_path):
+    app(); window=MainWindow()
+    try:
+        strategy=tmp_path/"SOLUSDT_1h.csv"; intrabar=tmp_path/"SOLUSDT_1m.csv"
+        strategy.write_text("timestamp,open,high,low,close,volume\n"); intrabar.write_text("timestamp,open,high,low,close,volume\n")
+        window.market_data_folder=tmp_path
+        window.market_symbol.setCurrentText("SOLUSDT"); window.strategy_timeframe.setCurrentText("1h"); window.intrabar_timeframe.setCurrentText("1m")
+        assert window.input_csv.text()==str(strategy.resolve())
+        assert window.intrabar_csv.text()==str(intrabar.resolve())
+        window.market_symbol.setCurrentText("ETHUSDT")
+        assert window.input_csv.text()=="" and window.intrabar_csv.text()==""
+        assert "No matching local strategy file" in window.dataset_info.text()
+    finally: window.close()
+
+
+def test_portfolio_tab_uses_dynamic_asset_rows():
+    app()
+    window = MainWindow()
+    try:
+        tab_names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
+        portfolio_page = window.tabs.widget(tab_names.index("Portfolio"))
+        assert len(window.portfolio_assets)==4
+        assert [row["pair"].currentText() for row in window.portfolio_assets]==["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT"]
+        assert all(portfolio_page.isAncestorOf(row["config"]) for row in window.portfolio_assets)
+        assert window.portfolio_run_btn.text()=="Run Portfolio Backtest"
+        assert window.portfolio_maximum_total_risk.text()=="5%"
+        assert "approximately 4%" in window.portfolio_help.text()
+        window._add_portfolio_asset("ADAUSDT"); assert len(window.portfolio_assets)==5
+        window.portfolio_assets[-1]["enabled"].setChecked(False); assert "4 assets enabled" in window.portfolio_help.text()
+        window._remove_portfolio_asset(window.portfolio_assets[-1]); assert len(window.portfolio_assets)==4
+        assert window.portfolio_status.text()=="Select configurations for at least two enabled assets."
     finally:
         window.close()
 
@@ -41,6 +216,33 @@ def test_gui_default_atr_period_matches_backtest_config():
         window.atr_period.setValue(7)
         window.reset_defaults()
         assert window.atr_period.value() == BacktestConfig().atr_period == 14
+    finally:
+        window.close()
+
+
+def legacy_vwap_volume_breakout_controls_round_trip():
+    app()
+    window = MainWindow()
+    try:
+        assert "VWAP_VOLUME_BREAKOUT" in [window.entry_mode.itemText(i) for i in range(window.entry_mode.count())]
+        window.entry_mode.setCurrentText("VWAP_VOLUME_BREAKOUT")
+        window.vwap_breakout_hours.setValue(6)
+        window.vwap_volume_multiplier.setValue(2.25)
+        window.vwap_confirmation_mode.setCurrentText("RETEST")
+        window.vwap_retest_window.setValue(6)
+        window.vwap_retest_tolerance.setValue(0.4)
+        values = window.values()
+        assert values["entry_mode"] == "VWAP_VOLUME_BREAKOUT"
+        assert values["vwap_breakout_lookback_hours"] == pytest.approx(6)
+        assert values["vwap_volume_multiplier"] == pytest.approx(2.25)
+        assert values["vwap_confirmation_mode"] == "RETEST"
+        assert values["vwap_retest_window_candles"] == 6
+        assert values["vwap_retest_tolerance_atr"] == pytest.approx(0.4)
+        window.reset_defaults()
+        assert window.vwap_breakout_hours.value() == pytest.approx(4)
+        assert window.vwap_volume_multiplier.value() == pytest.approx(1.5)
+        assert window.vwap_confirmation_mode.currentText() == "IMMEDIATE"
+        assert not window.vwap_retest_window.isEnabled()
     finally:
         window.close()
 
@@ -138,7 +340,7 @@ def test_saved_and_loaded_gui_config_preserves_atr_period(tmp_path):
         window.close()
 
 
-def test_entry_filter_controls_save_and_load(tmp_path):
+def legacy_entry_filter_controls_save_and_load(tmp_path):
     path = tmp_path / "entry-filters.json"
     app()
     window = MainWindow()
@@ -168,7 +370,7 @@ def test_entry_filter_controls_save_and_load(tmp_path):
 
 
 def test_gui_reset_restores_all_default_values_and_run_name():
-    from gui.config_logic import default_gui_config, format_percentage
+    from crypto_strategy_lab.gui.config_logic import default_gui_config, format_percentage
 
     app()
     window = MainWindow()
@@ -210,16 +412,16 @@ def test_gui_reset_restores_all_default_values_and_run_name():
         assert window.sl.value() == 2.0
         assert window.tp.value() == 3.0
         assert window.equity.value() == 1000
-        assert window.risk_leg.text() == format_percentage(0.005)
+        assert window.risk_leg.text() == format_percentage(0.01)
         assert window.maker.text() == format_percentage(0.0002)
         assert window.taker.text() == format_percentage(0.0005)
-        assert window.slippage.text() == format_percentage(0.0001)
+        assert window.slippage.text() == format_percentage(0.0005)
         assert values["use_intrabar_data"] is True
     finally:
         window.close()
 
 
-def test_remaining_leg_timeout_gui_hours_save_load_round_trip(tmp_path):
+def legacy_remaining_leg_timeout_gui_hours_save_load_round_trip(tmp_path):
     path = tmp_path / "timeout.json"
     app()
     window = MainWindow()

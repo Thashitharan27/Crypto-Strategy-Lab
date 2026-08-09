@@ -4,22 +4,28 @@ from collections.abc import Callable
 from random import Random
 import numpy as np, pandas as pd
 from zoneinfo import ZoneInfo
-from atr import atr
-from adx import adx
-from config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode, DIExecutionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, TrailActivationTrigger, AfterTP1StopMode, TP2ExitMode, EntryTimingMode, RandomEntryStartMode
-from entry_filters import ADXFilter, BBWidthFilter, DISpreadFilter
-from indicators import bollinger_bands, lag
-from strategy import custom_entry_signal
-from trade import ExitReason, ExitSource, Position, Side, TradePair
+from crypto_strategy_lab.atr import atr
+from crypto_strategy_lab.adx import adx
+from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode, DIExecutionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, TrailActivationTrigger, AfterTP1StopMode, TP2ExitMode, EntryTimingMode, RandomEntryStartMode, VWAPConfirmationMode
+from crypto_strategy_lab.entry_filters import ADXFilter, BBWidthFilter, DISpreadFilter
+from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
+from crypto_strategy_lab.strategy import custom_entry_signal
+from crypto_strategy_lab.strategy_profiles import profile_key
+from crypto_strategy_lab.trade import ExitReason, ExitSource, Position, Side, TradePair
 
 class BacktestEngine:
     def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
-        self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.times=self.data.timestamp.to_numpy()
-        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.bull_long_confirmation_return_values=self._trailing_return_array(config.bull_long_confirmation_lookback_days); self.bull_long_momentum_extension_return_values=self._trailing_return_array(config.bull_long_momentum_extension_lookback_days); self.risk=self._risk_array(); self.entry_filters=[ADXFilter(self.config,self.adx_values),BBWidthFilter(self.config,self.bb_width),DISpreadFilter(self.config,self.di_spread)]
+        self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.volume=self.data["volume"].to_numpy(float) if "volume" in self.data else np.ones(len(self.data),float); self.times=self.data.timestamp.to_numpy()
+        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.bull_long_confirmation_return_values=self._trailing_return_array(config.bull_long_confirmation_lookback_days); self.bull_long_momentum_extension_return_values=self._trailing_return_array(config.bull_long_momentum_extension_lookback_days); self.long_momentum_return_values=self._trailing_return_hours_array(config.long_momentum_lookback_hours); self.directional_momentum_return_values=self._trailing_return_hours_array(config.directional_momentum_lookback_hours); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); self.directional_rsi_values=rsi(self.close,config.directional_rsi_period); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array(); self.entry_filters=[ADXFilter(self.config,self.adx_values),BBWidthFilter(self.config,self.bb_width),DISpreadFilter(self.config,self.di_spread)]
         self.bull_long_structural_sma_values,self.bull_long_structural_prior_sma_values=self._structural_sma_arrays(config.bull_long_structural_sma_days,config.bull_long_structural_slope_lookback_days)
-        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_vwap_breakout=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
+        self.session_vwap=self._utc_session_vwap()
+        self.direction_vote_momentum_values=self._trailing_return_hours_array(config.direction_vote_momentum_lookback_hours)
+        self.direction_vote_higher_timeframe_values=self._higher_timeframe_trend_array()
+        self.profile_rsi_values={period:rsi(self.close,period) for period in {p.rsi_period for p in self.config.strategy_profiles.values()}}
+        self.profile_momentum_values={hours:self._trailing_return_hours_array(hours) for hours in {p.momentum_lookback_hours for p in self.config.strategy_profiles.values()}}
         self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
         self.remaining_leg_timeout_delta=pd.Timedelta(minutes=config.remaining_leg_timeout_after_first_sl_minutes)
         self.checkpoint_zero_score_recheck_delta=pd.Timedelta(minutes=config.checkpoint_zero_score_recheck_minutes)
@@ -37,9 +43,108 @@ class BacktestEngine:
         # A separate stream keeps sizing flips independent from random-entry draws.
         self.coin_flip_rng = Random(config.coin_flip_seed) if config.enable_coin_flip_sizing else None
         self.random_entry_decisions=[]; self.random_skips=0; self.last_closed_pair_id=None; self.previous_pair_close_time=None; self.pair_closed_index=None; self.reentry_gates=[]; self.reentry_gate_release_index=None
+
+    def _higher_timeframe_trend_array(self):
+        """Direction of the last fully completed higher-timeframe candle and its SMA."""
+        out=np.full(len(self.data),np.nan,float)
+        if not self.config.direction_vote_use_higher_timeframe or not len(self.data): return out
+        timestamps=pd.to_datetime(self.data.timestamp,utc=True)
+        frame=pd.DataFrame({"open_time":timestamps,"close":self.close})
+        rule=f"{self.config.direction_vote_higher_timeframe_hours}h"
+        higher=frame.set_index("open_time")["close"].resample(rule,label="left",closed="left").last().dropna().to_frame()
+        higher["available_time"]=higher.index+pd.Timedelta(hours=self.config.direction_vote_higher_timeframe_hours)
+        period=self.config.direction_vote_higher_timeframe_sma_period
+        higher["sma"]=higher["close"].rolling(period,min_periods=period).mean()
+        higher["prior_sma"]=higher["sma"].shift(1)
+        available=pd.DataFrame({"available_time":timestamps+pd.Timedelta(minutes=self.config.strategy_timeframe_minutes),"row":np.arange(len(self.data))})
+        merged=pd.merge_asof(available.sort_values("available_time"),higher.reset_index(drop=True).sort_values("available_time"),on="available_time",direction="backward")
+        long=(merged["close"]>merged["sma"]) & (merged["sma"]>merged["prior_sma"])
+        short=(merged["close"]<merged["sma"]) & (merged["sma"]<merged["prior_sma"])
+        out[merged.loc[long,"row"].to_numpy(int)]=1; out[merged.loc[short,"row"].to_numpy(int)]=-1
+        return out
+
+    def _direction_vote(self, i):
+        votes={}
+        def set_vote(name,value): votes[name]="LONG" if value>0 else ("SHORT" if value<0 else "ABSTAIN")
+        if self.config.direction_vote_use_di:
+            plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i])
+            set_vote("di", plus-minus if np.isfinite(plus) and np.isfinite(minus) else 0)
+        if self.config.direction_vote_use_structure:
+            n=self.config.direction_vote_structure_lookback; half=max(1,n//2)
+            if i>=n:
+                old_hi=np.max(self.high[i-n:i-half]); new_hi=np.max(self.high[i-half:i+1]); old_lo=np.min(self.low[i-n:i-half]); new_lo=np.min(self.low[i-half:i+1])
+                set_vote("structure",1 if new_hi>old_hi and new_lo>old_lo else (-1 if new_hi<old_hi and new_lo<old_lo else 0))
+            else: set_vote("structure",0)
+        if self.config.direction_vote_use_momentum:
+            value=float(self.direction_vote_momentum_values[i]); threshold=self.config.direction_vote_momentum_threshold
+            set_vote("momentum",1 if np.isfinite(value) and value>threshold else (-1 if np.isfinite(value) and value < -threshold else 0))
+        if self.config.direction_vote_use_volume_pressure:
+            n=self.config.direction_vote_volume_lookback
+            if i+1>=n:
+                returns=np.divide(self.close[i-n+1:i+1]-self.open[i-n+1:i+1],self.open[i-n+1:i+1],out=np.zeros(n),where=self.open[i-n+1:i+1]!=0); weighted=returns*self.volume[i-n+1:i+1]; denom=np.sum(np.abs(weighted)); score=float(np.sum(weighted)/denom) if denom else 0.0; threshold=self.config.direction_vote_volume_threshold
+                set_vote("volume_pressure",1 if score>threshold else (-1 if score < -threshold else 0))
+            else: set_vote("volume_pressure",0)
+        if self.config.direction_vote_use_higher_timeframe:
+            value=float(self.direction_vote_higher_timeframe_values[i]); set_vote("higher_timeframe",value if np.isfinite(value) else 0)
+        long_count=sum(v=="LONG" for v in votes.values()); short_count=sum(v=="SHORT" for v in votes.values()); abstain_count=sum(v=="ABSTAIN" for v in votes.values())
+        winner="LONG" if long_count>short_count else ("SHORT" if short_count>long_count else None)
+        if winner and max(long_count,short_count)<self.config.direction_vote_minimum_votes: winner=None
+        return winner,{"long":long_count,"short":short_count,"abstain":abstain_count,"votes":votes}
+
+    def _selected_direction(self,i):
+        if self.config.enable_direction_voting: return self._direction_vote(i)[0]
+        plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i])
+        return ("LONG" if plus>minus else "SHORT") if np.isfinite(plus) and np.isfinite(minus) else None
     def _first_valid_atr_timestamp(self):
         idx=np.where(np.isfinite(self.atr_values))[0]
         return self.data.timestamp.iloc[int(idx[0])] if len(idx) else None
+    def _utc_session_vwap(self):
+        """UTC-midnight anchored VWAP, calculated only from each completed candle."""
+        timestamps=pd.to_datetime(self.data.timestamp,utc=True)
+        typical=(self.high+self.low+self.close)/3.0
+        weighted=typical*self.volume
+        sessions=timestamps.dt.floor("D")
+        cumulative_weighted=pd.Series(weighted).groupby(sessions).cumsum().to_numpy(float)
+        cumulative_volume=pd.Series(self.volume).groupby(sessions).cumsum().to_numpy(float)
+        return np.divide(cumulative_weighted,cumulative_volume,out=np.full(len(self.data),np.nan),where=cumulative_volume>0)
+    def _vwap_breakout_signal(self, i):
+        bars=max(1,int(np.ceil(self.config.vwap_breakout_lookback_hours*60/self.config.strategy_timeframe_minutes)))
+        volume_bars=self.config.vwap_volume_lookback
+        slope=self.config.vwap_slope_lookback
+        warmup=max(bars,volume_bars,slope)
+        if i < warmup or not np.isfinite(self.atr_values[i]) or not np.isfinite(self.session_vwap[i]) or not np.isfinite(self.session_vwap[i-slope]): return None
+        prior_high=float(np.max(self.high[i-bars:i])); prior_low=float(np.min(self.low[i-bars:i])); average_volume=float(np.mean(self.volume[i-volume_bars:i]))
+        if average_volume <= 0 or self.volume[i] < average_volume*self.config.vwap_volume_multiplier: return None
+        atr_pct=float(self.atr_values[i]/self.close[i]) if self.close[i] else np.nan
+        if not np.isfinite(atr_pct) or not self.config.vwap_atr_pct_minimum <= atr_pct <= self.config.vwap_atr_pct_maximum: return None
+        if self.close[i] > prior_high and self.close[i] > self.session_vwap[i] and self.session_vwap[i] > self.session_vwap[i-slope]: return {"direction":"LONG","level":prior_high,"signal_index":i}
+        if self.close[i] < prior_low and self.close[i] < self.session_vwap[i] and self.session_vwap[i] < self.session_vwap[i-slope]: return {"direction":"SHORT","level":prior_low,"signal_index":i}
+        return None
+    def _vwap_breakout_direction(self, i):
+        signal=self._vwap_breakout_signal(i)
+        return signal["direction"] if signal else None
+    def _vwap_retest_decision(self, execution_i):
+        candidate_i=execution_i-1
+        pending=self.pending_vwap_breakout
+        if pending is not None and candidate_i > pending["signal_index"]:
+            elapsed=candidate_i-pending["signal_index"]
+            if elapsed > self.config.vwap_retest_window_candles:
+                self.pending_vwap_breakout=None
+            else:
+                level=pending["level"]; direction=pending["direction"]
+                if (direction == "LONG" and self.close[candidate_i] <= level) or (direction == "SHORT" and self.close[candidate_i] >= level):
+                    self.pending_vwap_breakout=None
+                else:
+                    tolerance=self.config.vwap_retest_tolerance_atr*self.atr_values[candidate_i]
+                    touched=(self.low[candidate_i] <= level+tolerance) if direction == "LONG" else (self.high[candidate_i] >= level-tolerance)
+                    if touched:
+                        self.pending_vwap_breakout=None
+                        return {"execution_index":execution_i,"indicator_index":candidate_i,"scheduled_timestamp":None,"actual_entry_timestamp":pd.Timestamp(self.times[execution_i]),"entry_schedule_status":None,"signal_direction":direction,"vwap_breakout_signal_time":pd.Timestamp(self.times[pending["signal_index"]]),"vwap_breakout_level":level,"vwap_confirmation_time":pd.Timestamp(self.times[candidate_i]),"vwap_confirmation_bars":elapsed}
+        if self.pending_vwap_breakout is None:
+            signal=self._vwap_breakout_signal(candidate_i)
+            if signal is not None:
+                self.pending_vwap_breakout=signal
+        return None
     def run(self)->pd.DataFrame:
         total=len(self.data)
         self._emit_progress(0,total)
@@ -72,6 +177,15 @@ class BacktestEngine:
         result=np.full(len(self.data),np.nan,float)
         times=pd.DatetimeIndex(pd.to_datetime(self.times,utc=True))
         targets=times-pd.Timedelta(days=lookback_days)
+        prior=np.searchsorted(times.asi8,targets.asi8,side="right")-1
+        valid=prior>=0
+        result[valid]=self.close[valid]/self.close[prior[valid]]-1.0
+        return result
+    def _trailing_return_hours_array(self, lookback_hours):
+        """Trailing close-to-close return using only candles known at each index."""
+        result=np.full(len(self.data),np.nan,float)
+        times=pd.DatetimeIndex(pd.to_datetime(self.times,utc=True))
+        targets=times-pd.Timedelta(hours=lookback_hours)
         prior=np.searchsorted(times.asi8,targets.asi8,side="right")-1
         valid=prior>=0
         result[valid]=self.close[valid]/self.close[prior[valid]]-1.0
@@ -137,6 +251,13 @@ class BacktestEngine:
             return self._random_entry_decision(i, active_at_candle_start)
         if self.config.enable_daily_entry_schedule:
             return self._daily_entry_decision(i, active_at_candle_start)
+        if self.config.entry_mode == EntryMode.VWAP_VOLUME_BREAKOUT:
+            if i <= 0 or not self._base_entry_allowed(i): return None
+            if self.config.vwap_confirmation_mode == VWAPConfirmationMode.RETEST:
+                return self._vwap_retest_decision(i)
+            signal=self._vwap_breakout_signal(i-1)
+            if signal is None: return None
+            return {"execution_index":i,"indicator_index":i-1,"scheduled_timestamp":None,"actual_entry_timestamp":pd.Timestamp(self.times[i]),"entry_schedule_status":None,"signal_direction":signal["direction"],"vwap_breakout_signal_time":pd.Timestamp(self.times[i-1]),"vwap_breakout_level":signal["level"],"vwap_confirmation_time":None,"vwap_confirmation_bars":0}
         return {"execution_index": i, "indicator_index": i, "scheduled_timestamp": None, "actual_entry_timestamp": self._entry_time(i), "entry_schedule_status": None} if self._should_enter(i) else None
     def _random_entry_decision(self, i, active_at_candle_start=False):
         """Flip at an eligible candle open using indicators completed at i-1."""
@@ -164,15 +285,33 @@ class BacktestEngine:
         return False
     def _entry_filter_result(self, i, execution_i=None):
         reasons=[]
+        if self.config.enable_strategy_profiles:
+            return self._strategy_profile_filter_result(i, execution_i)
         if self.config.enable_di_direction_sizing:
             plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i]); spread=float(self.di_spread[i])
             if not np.isfinite(plus) or not np.isfinite(minus) or not np.isfinite(spread):
                 return False, "DI-direction sizing indicator warm-up incomplete"
-            direction = "LONG" if plus > minus else "SHORT"
+            direction = self._selected_direction(i)
+            if direction is None:
+                _, vote_result=self._direction_vote(i)
+                return False, f"Direction vote has no majority: {vote_result['long']} long, {vote_result['short']} short, {vote_result['abstain']} abstain"
+            if self.config.trade_direction == TradeDirectionMode.LONG_ONLY and direction != "LONG":
+                return False, "DI selected short, but trade direction is LONG_ONLY"
+            if self.config.trade_direction == TradeDirectionMode.SHORT_ONLY and direction != "SHORT":
+                return False, "DI selected long, but trade direction is SHORT_ONLY"
             minimum = self.config.di_direction_long_minimum_spread if direction == "LONG" else self.config.di_direction_short_minimum_spread
             if spread < minimum:
                 return False, f"DI spread {spread:.6g} below direction-sizing minimum {minimum:.6g} for {direction.lower()}"
-            reasons.append(f"DI direction sizing passed: {direction} stronger, spread {spread:.6g} >= minimum {minimum:.6g}")
+            if self.config.enable_direction_voting:
+                _, vote_result=self._direction_vote(i); reasons.append(f"Direction majority passed: {vote_result['long']} long, {vote_result['short']} short, {vote_result['abstain']} abstain -> {direction}; DI spread {spread:.6g} >= minimum {minimum:.6g}")
+            else: reasons.append(f"DI direction sizing passed: {direction} stronger, spread {spread:.6g} >= minimum {minimum:.6g}")
+            if self.config.enable_long_momentum_filter and direction == "LONG":
+                momentum_return=float(self.long_momentum_return_values[i])
+                if not np.isfinite(momentum_return):
+                    return False, f"Long momentum filter warming up: {self.config.long_momentum_lookback_hours}-hour return unavailable"
+                if momentum_return < self.config.long_momentum_minimum_return:
+                    return False, f"Long DI signal skipped: {self.config.long_momentum_lookback_hours}-hour return {momentum_return:.2%} below minimum {self.config.long_momentum_minimum_return:.2%}"
+                reasons.append(f"Long momentum passed: {self.config.long_momentum_lookback_hours}-hour return {momentum_return:.2%} >= minimum {self.config.long_momentum_minimum_return:.2%}")
             if self.config.enable_directional_adx_filter:
                 adx_value=float(self.adx_values[i])
                 if not np.isfinite(adx_value):
@@ -191,7 +330,45 @@ class BacktestEngine:
                 if adx_value >= self.config.biased_short_adx_maximum:
                     return False, f"Biased short skipped: ADX {adx_value:.6g} at or above maximum {self.config.biased_short_adx_maximum:.6g}"
                 reasons.append(f"Biased-short ADX cap passed: ADX {adx_value:.6g} below {self.config.biased_short_adx_maximum:.6g}")
+            if self.config.enable_short_vwap_distance_filter and direction == "SHORT":
+                atr_value=float(self.atr_values[i]); vwap_value=float(self.session_vwap[i])
+                if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap_value):
+                    return False, "Short VWAP-distance filter indicator warm-up incomplete"
+                distance_atr=(vwap_value-float(self.close[i]))/atr_value
+                if distance_atr < self.config.short_vwap_minimum_distance_atr:
+                    return False, f"Short DI signal skipped: price is {distance_atr:.6g} ATR below UTC session VWAP, below minimum {self.config.short_vwap_minimum_distance_atr:.6g}"
+                reasons.append(f"Short VWAP-distance passed: price is {distance_atr:.6g} ATR below UTC session VWAP >= minimum {self.config.short_vwap_minimum_distance_atr:.6g}")
             regime_return=float(self.bull_regime_return_values[i])
+            if self.config.enable_regime_direction_filter:
+                if not np.isfinite(regime_return):
+                    return False, f"Regime-direction filter warming up: {self.config.bull_regime_lookback_days}-day return unavailable"
+                regime = "BULL" if regime_return >= self.config.bull_regime_return_threshold else ("BEAR" if regime_return <= self.config.di_regime_bear_return_threshold else "SIDEWAYS")
+                allowed = getattr(self.config, f"allow_{regime.lower()}_{direction.lower()}")
+                if not allowed:
+                    return False, f"{direction.title()} DI signal disabled in {regime.lower()} regime"
+                reasons.append(f"Regime-direction passed: {direction} allowed in {regime}")
+            if self.config.enable_directional_di_spread_range:
+                minimum=getattr(self.config,f"directional_{direction.lower()}_di_spread_minimum"); maximum=getattr(self.config,f"directional_{direction.lower()}_di_spread_maximum")
+                if not minimum <= spread <= maximum: return False, f"{direction.title()} DI spread {spread:.6g} outside range {minimum:.6g} to {maximum:.6g}"
+                reasons.append(f"Directional DI-spread range passed: {spread:.6g}")
+            if self.config.enable_directional_adx_range:
+                adx_value=float(self.adx_values[i]); prefix=f"directional_{direction.lower()}_adx"
+                minimum=getattr(self.config, prefix+("_minimum" if direction=="LONG" else "_range_minimum")); maximum=getattr(self.config, prefix+("_range_maximum" if direction=="LONG" else "_maximum"))
+                if not np.isfinite(adx_value): return False, "Directional ADX-range filter indicator warm-up incomplete"
+                if not minimum <= adx_value <= maximum: return False, f"{direction.title()} ADX {adx_value:.6g} outside range {minimum:.6g} to {maximum:.6g}"
+                reasons.append(f"Directional ADX range passed: {adx_value:.6g}")
+            for enabled, label, values, minimum_suffix, maximum_suffix, formatter in (
+                (self.config.enable_directional_atr_pct_range,"ATR percentage",self.atr_pct_values,"atr_pct_minimum","atr_pct_maximum","pct"),
+                (self.config.enable_directional_rsi_range,"RSI",self.directional_rsi_values,"rsi_minimum","rsi_maximum","num"),
+                (self.config.enable_directional_close_location_range,"candle close location",self.close_location_values,"close_location_minimum","close_location_maximum","pct"),
+                (self.config.enable_directional_momentum_range,f"{self.config.directional_momentum_lookback_hours}-hour return",self.directional_momentum_return_values,"momentum_minimum","momentum_maximum","pct")):
+                if not enabled: continue
+                value=float(values[i]); minimum=getattr(self.config,f"directional_{direction.lower()}_{minimum_suffix}"); maximum=getattr(self.config,f"directional_{direction.lower()}_{maximum_suffix}")
+                if not np.isfinite(value): return False, f"Directional {label} filter indicator warm-up incomplete"
+                if not minimum <= value <= maximum:
+                    shown=f"{value:.2%}" if formatter=="pct" else f"{value:.3f}"; lo=f"{minimum:.2%}" if formatter=="pct" else f"{minimum:.3f}"; hi=f"{maximum:.2%}" if formatter=="pct" else f"{maximum:.3f}"
+                    return False, f"{direction.title()} {label} {shown} outside range {lo} to {hi}"
+                reasons.append(f"Directional {label} range passed")
             if self.config.enable_bull_regime_short_filter:
                 if not np.isfinite(regime_return):
                     reasons.append(f"Bull-regime filter not applied: {self.config.bull_regime_lookback_days}-day return still warming up")
@@ -199,6 +376,18 @@ class BacktestEngine:
                     return False, f"Short DI signal skipped in bull regime: {self.config.bull_regime_lookback_days}-day return {regime_return:.2%}"
                 else:
                     reasons.append(f"Bull-regime filter passed: trailing return {regime_return:.2%}")
+            if self.config.enable_bear_regime_adx_filter:
+                if not np.isfinite(regime_return):
+                    reasons.append(f"Bear-regime ADX filter not applied: {self.config.bull_regime_lookback_days}-day return still warming up")
+                elif regime_return <= self.config.di_regime_bear_return_threshold:
+                    adx_value = float(self.adx_values[i])
+                    if not np.isfinite(adx_value):
+                        return False, "Bear-regime ADX filter indicator warm-up incomplete"
+                    if adx_value < self.config.bear_regime_adx_minimum:
+                        return False, f"DI signal skipped in bear regime: ADX {adx_value:.6g} below minimum {self.config.bear_regime_adx_minimum:.6g}"
+                    reasons.append(f"Bear-regime ADX passed: ADX {adx_value:.6g} >= minimum {self.config.bear_regime_adx_minimum:.6g}")
+                else:
+                    reasons.append(f"Bear-regime ADX filter not applied outside bear regime: trailing return {regime_return:.2%}")
         if self.config.enable_skip_monday_entries:
             execution_i = i if execution_i is None else execution_i
             entry_time = self._execution_time(execution_i)
@@ -214,6 +403,141 @@ class BacktestEngine:
             if not result.passed:
                 return False, "; ".join(reasons)
         return True, "; ".join(reasons)
+
+    def _profile_context(self, i):
+        plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i]); regime_return=float(self.bull_regime_return_values[i])
+        if not all(np.isfinite(v) for v in (plus,minus,regime_return)):
+            return None
+        direction=self._selected_direction(i)
+        if direction is None: return None
+        regime="BULL" if regime_return >= self.config.bull_regime_return_threshold else ("BEAR" if regime_return <= self.config.di_regime_bear_return_threshold else "SIDEWAYS")
+        key=profile_key(regime,direction)
+        return regime,direction,key,self.config.strategy_profiles[key]
+
+    def _strategy_profile_filter_result(self, i, execution_i=None):
+        context=self._profile_context(i)
+        if context is None:
+            return False,"Strategy profile classification indicator warm-up incomplete"
+        regime,direction,key,profile=context
+        if self.config.trade_direction == TradeDirectionMode.LONG_ONLY and direction != "LONG": return False,"Profile selected short, but trade direction is LONG_ONLY"
+        if self.config.trade_direction == TradeDirectionMode.SHORT_ONLY and direction != "SHORT": return False,"Profile selected long, but trade direction is SHORT_ONLY"
+        if not profile.enabled: return False,f"Strategy profile {key} is disabled"
+        if profile.entry_rules:
+            rejected=self._strategy_profile_rule_group_match(i,direction,profile,"REJECT",profile.reject_rule_match_mode)
+            if rejected: return False,f"Strategy profile {key} rejected by entry rules"
+            flipped=self._strategy_profile_rule_group_match(i,direction,profile,"FLIP",profile.flip_rule_match_mode)
+            action="will be flipped" if flipped else "will trade in its normal direction"
+            if self.config.enable_skip_monday_entries:
+                execution_i=i if execution_i is None else execution_i; entry_time=self._execution_time(execution_i)
+                if entry_time.tzinfo is None: entry_time=entry_time.tz_localize("UTC")
+                if entry_time.tz_convert(self.skip_monday_tz).weekday()==0: return False,f"Monday entry skipped in {self.config.skip_monday_timezone}"
+            return True,f"Strategy profile {key} passed; flip rules {'matched' if flipped else 'did not match'}: entry {action}"
+        if profile.filter_action == "FLIP":
+            matched=self._strategy_profile_conditional_flip_match(i,direction,profile)
+            action="will be flipped" if matched else "will trade in its normal direction"
+            if self.config.enable_skip_monday_entries:
+                execution_i=i if execution_i is None else execution_i; entry_time=self._execution_time(execution_i)
+                if entry_time.tzinfo is None: entry_time=entry_time.tz_localize("UTC")
+                if entry_time.tz_convert(self.skip_monday_tz).weekday()==0: return False,f"Monday entry skipped in {self.config.skip_monday_timezone}"
+            return True,f"Strategy profile {key} passed; conditional flip filters {'matched' if matched else 'did not match'}: entry {action}"
+        values=(
+            (profile.di_spread_enabled,"DI spread",float(self.di_spread[i]),profile.di_spread_minimum,profile.di_spread_maximum),
+            (profile.adx_enabled,"ADX",float(self.adx_values[i]),profile.adx_minimum,profile.adx_maximum),
+            (profile.atr_pct_enabled,"ATR percentage",float(self.atr_pct_values[i]),profile.atr_pct_minimum,profile.atr_pct_maximum),
+            (profile.rsi_enabled,f"RSI({profile.rsi_period})",float(self.profile_rsi_values[profile.rsi_period][i]),profile.rsi_minimum,profile.rsi_maximum),
+            (profile.bb_width_enabled,"BB width",float(self.bb_width[i]),profile.bb_width_minimum,profile.bb_width_maximum),
+            (profile.close_location_enabled,"close location",float(self.close_location_values[i]),profile.close_location_minimum,profile.close_location_maximum),
+            (profile.momentum_enabled,f"{profile.momentum_lookback_hours}-hour return",float(self.profile_momentum_values[profile.momentum_lookback_hours][i]),profile.momentum_minimum,profile.momentum_maximum),
+        )
+        passed=[]
+        for enabled,label,value,minimum,maximum in values:
+            if not enabled: continue
+            if not np.isfinite(value): return False,f"{key} {label} indicator warm-up incomplete"
+            if not minimum <= value <= maximum: return False,f"{key} {label} {value:.6g} outside range {minimum:.6g} to {maximum:.6g}"
+            passed.append(label)
+        if profile.vwap_distance_enabled:
+            atr_value=float(self.atr_values[i]); vwap=float(self.session_vwap[i])
+            if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap): return False,f"{key} VWAP distance indicator warm-up incomplete"
+            distance=((float(self.close[i])-vwap) if direction=="LONG" else (vwap-float(self.close[i])))/atr_value
+            if not profile.vwap_distance_minimum <= distance <= profile.vwap_distance_maximum: return False,f"{key} directional VWAP distance {distance:.6g} ATR outside range {profile.vwap_distance_minimum:.6g} to {profile.vwap_distance_maximum:.6g}"
+            passed.append("VWAP distance")
+        if self.config.enable_skip_monday_entries:
+            execution_i=i if execution_i is None else execution_i; entry_time=self._execution_time(execution_i)
+            if entry_time.tzinfo is None: entry_time=entry_time.tz_localize("UTC")
+            if entry_time.tz_convert(self.skip_monday_tz).weekday()==0: return False,f"Monday entry skipped in {self.config.skip_monday_timezone}"
+        return True,f"Strategy profile {key} passed"+(f": {', '.join(passed)}" if passed else "")
+
+    def _strategy_profile_flip_match(self, i, direction, profile):
+        """True when every enabled profile filter matches the current signal."""
+        values=(
+            (profile.di_spread_enabled,float(self.di_spread[i]),profile.di_spread_minimum,profile.di_spread_maximum),
+            (profile.adx_enabled,float(self.adx_values[i]),profile.adx_minimum,profile.adx_maximum),
+            (profile.atr_pct_enabled,float(self.atr_pct_values[i]),profile.atr_pct_minimum,profile.atr_pct_maximum),
+            (profile.rsi_enabled,float(self.profile_rsi_values[profile.rsi_period][i]),profile.rsi_minimum,profile.rsi_maximum),
+            (profile.bb_width_enabled,float(self.bb_width[i]),profile.bb_width_minimum,profile.bb_width_maximum),
+            (profile.close_location_enabled,float(self.close_location_values[i]),profile.close_location_minimum,profile.close_location_maximum),
+            (profile.momentum_enabled,float(self.profile_momentum_values[profile.momentum_lookback_hours][i]),profile.momentum_minimum,profile.momentum_maximum),
+        )
+        enabled=False
+        for active,value,minimum,maximum in values:
+            if not active: continue
+            enabled=True
+            if not np.isfinite(value) or not minimum <= value <= maximum: return False
+        if profile.vwap_distance_enabled:
+            enabled=True; atr_value=float(self.atr_values[i]); vwap=float(self.session_vwap[i])
+            if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap): return False
+            distance=((float(self.close[i])-vwap) if direction=="LONG" else (vwap-float(self.close[i])))/atr_value
+            if not profile.vwap_distance_minimum <= distance <= profile.vwap_distance_maximum: return False
+        return enabled
+
+    def _strategy_profile_secondary_flip_match(self, i, direction, profile):
+        if not profile.secondary_flip_enabled: return False
+        indicator=profile.secondary_flip_indicator
+        if indicator=="DI_SPREAD": value=float(self.di_spread[i])
+        elif indicator=="ADX": value=float(self.adx_values[i])
+        elif indicator=="ATR_PCT": value=float(self.atr_pct_values[i])
+        elif indicator=="RSI": value=float(self.profile_rsi_values[profile.rsi_period][i])
+        elif indicator=="BB_WIDTH": value=float(self.bb_width[i])
+        elif indicator=="CLOSE_LOCATION": value=float(self.close_location_values[i])
+        elif indicator=="MOMENTUM": value=float(self.profile_momentum_values[profile.momentum_lookback_hours][i])
+        else:
+            atr_value=float(self.atr_values[i]); vwap=float(self.session_vwap[i])
+            if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap): return False
+            value=((float(self.close[i])-vwap) if direction=="LONG" else (vwap-float(self.close[i])))/atr_value
+        return np.isfinite(value) and profile.secondary_flip_minimum <= value <= profile.secondary_flip_maximum
+
+    def _strategy_profile_rule_value(self, i, direction, profile, indicator):
+        if indicator=="DI_SPREAD": return float(self.di_spread[i])
+        if indicator=="ADX": return float(self.adx_values[i])
+        if indicator=="ATR_PCT": return float(self.atr_pct_values[i])
+        if indicator=="RSI": return float(self.profile_rsi_values[profile.rsi_period][i])
+        if indicator=="BB_WIDTH": return float(self.bb_width[i])
+        if indicator=="CLOSE_LOCATION": return float(self.close_location_values[i])
+        if indicator=="MOMENTUM": return float(self.profile_momentum_values[profile.momentum_lookback_hours][i])
+        atr_value=float(self.atr_values[i]); vwap=float(self.session_vwap[i])
+        if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap): return np.nan
+        return ((float(self.close[i])-vwap) if direction=="LONG" else (vwap-float(self.close[i])))/atr_value
+
+    def _strategy_profile_entry_rule_matches(self, i, direction, profile, rule):
+        value=self._strategy_profile_rule_value(i,direction,profile,rule["indicator"])
+        if not np.isfinite(value): return False
+        inside=float(rule["minimum"]) <= value <= float(rule["maximum"])
+        return inside if rule.get("condition","INSIDE")=="INSIDE" else not inside
+
+    def _strategy_profile_rule_group_match(self, i, direction, profile, action, mode):
+        rules=[rule for rule in profile.entry_rules if rule.get("action")==action]
+        if not rules: return False
+        matches=[self._strategy_profile_entry_rule_matches(i,direction,profile,rule) for rule in rules]
+        return all(matches) if mode=="ALL" else any(matches)
+
+    def _strategy_profile_additional_flip_match(self, i, direction, profile):
+        for rule in profile.additional_flip_rules:
+            value=self._strategy_profile_rule_value(i,direction,profile,rule["indicator"])
+            if np.isfinite(value) and float(rule["minimum"]) <= value <= float(rule["maximum"]): return True
+        return False
+
+    def _strategy_profile_conditional_flip_match(self, i, direction, profile):
+        return self._strategy_profile_flip_match(i,direction,profile) or self._strategy_profile_secondary_flip_match(i,direction,profile) or self._strategy_profile_additional_flip_match(i,direction,profile)
 
     def _adx_filter_result(self, i):
         result = self.entry_filters[0].evaluate(i)
@@ -234,23 +558,42 @@ class BacktestEngine:
         return pair.positions()
 
     def _open_pair(self,i, adx_filter_passed=True, adx_filter_reason="ADX filter disabled", schedule=None):
-        ind_i = schedule["indicator_index"] if schedule else i; raw=(self.open[i] if (self.config.enable_daily_entry_schedule or self.random_entry_active) else self.close[i]); direction_sizing=self.config.enable_coin_flip_sizing or self.config.enable_di_direction_sizing
-        di_direction = ("LONG" if self.plus_di_values[ind_i] > self.minus_di_values[ind_i] else "SHORT") if self.config.enable_di_direction_sizing else None
-        preferred_only = self.config.enable_di_direction_sizing and self.config.di_execution_mode == DIExecutionMode.PREFERRED_SIDE_ONLY
+        ind_i = schedule["indicator_index"] if schedule else i; signal_direction=(schedule or {}).get("signal_direction"); raw=(self.open[i] if (self.config.enable_daily_entry_schedule or self.random_entry_active or signal_direction) else self.close[i]); direction_sizing=self.config.enable_coin_flip_sizing or self.config.enable_di_direction_sizing or bool(signal_direction)
+        raw_di_direction = ("LONG" if self.plus_di_values[ind_i] > self.minus_di_values[ind_i] else "SHORT") if (self.config.enable_di_direction_sizing or self.config.enable_strategy_profiles) else None
+        di_direction = self._selected_direction(ind_i) if (self.config.enable_di_direction_sizing or self.config.enable_strategy_profiles) else None
+        original_di_direction = di_direction
+        profile_context=self._profile_context(ind_i) if self.config.enable_strategy_profiles else None
+        active_profile=profile_context[3] if profile_context else None; active_profile_key=profile_context[2] if profile_context else None
+        if active_profile and active_profile.entry_rules:
+            profile_filter_flip=self._strategy_profile_rule_group_match(ind_i,original_di_direction,active_profile,"FLIP",active_profile.flip_rule_match_mode)
+        else:
+            profile_filter_flip = bool(active_profile and active_profile.filter_action == "FLIP" and self._strategy_profile_conditional_flip_match(ind_i, original_di_direction, active_profile))
+        profile_flip = bool(active_profile and (active_profile.flip_direction or profile_filter_flip))
+        if (self.config.flip_filtered_di_direction or profile_flip) and di_direction is not None and signal_direction is None:
+            di_direction = "SHORT" if di_direction == "LONG" else "LONG"
+            adx_filter_reason = f"{adx_filter_reason}; direction flipped after filters passed: {original_di_direction} -> {di_direction}"
+        preferred_only = self.config.enable_strategy_profiles or (self.config.enable_di_direction_sizing and self.config.di_execution_mode == DIExecutionMode.PREFERRED_SIDE_ONLY) or bool(signal_direction)
         if preferred_only:
             long_entry = raw*(1+self.config.slippage) if di_direction == "LONG" else raw
             short_entry = raw*(1-self.config.slippage) if di_direction == "SHORT" else raw
         else:
             long_entry=raw if direction_sizing else raw*(1+self.config.slippage); short_entry=raw if direction_sizing else raw*(1-self.config.slippage)
-        r=float(self.risk[ind_i]); stop_mult=(self.config.sl2_r if self.config.enable_partial_stop_loss else (self.config.stop_loss_r if self.config.enable_partial_take_profit else self.config.sl_mult)); stop=stop_mult*r; risk_amt=self.current_equity*self.config.risk_per_leg
+        partial_sl_enabled=active_profile.partial_stop_enabled if active_profile else self.config.enable_partial_stop_loss
+        partial_tp_enabled=active_profile.partial_profit_enabled if active_profile else self.config.enable_partial_take_profit
+        sl1_r=active_profile.sl1_r if active_profile else self.config.sl1_r; sl1_close_pct=active_profile.sl1_close_pct if active_profile else self.config.sl1_close_pct
+        sl2_r=active_profile.sl2_r if active_profile else self.config.sl2_r; tp1_r=active_profile.tp1_r if active_profile else self.config.tp1_r
+        tp1_close_pct=active_profile.tp1_close_pct if active_profile else self.config.tp1_close_pct; tp2_r=active_profile.tp2_r if active_profile else self.config.tp2_r
+        base_stop_multiple=active_profile.stop_loss_multiple if active_profile else (self.config.stop_loss_r if partial_tp_enabled else self.config.sl_mult)
+        after_tp1_stop_mode=active_profile.after_tp1_stop_mode if active_profile else self.config.after_tp1_stop_mode.value; after_tp1_stop_offset_r=active_profile.after_tp1_stop_offset_r if active_profile else self.config.after_tp1_stop_offset_r
+        r=float(self.risk[ind_i]); stop_mult=sl2_r if partial_sl_enabled else base_stop_multiple; stop=stop_mult*r; risk_amt=self.current_equity*self.config.risk_per_leg*(active_profile.risk_multiplier if active_profile else 1.0)
         entry_fee_rate=self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee; exit_fee_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
         long_stop_exit=(long_entry-stop)*(1-self.config.slippage); short_stop_exit=(short_entry+stop)*(1+self.config.slippage)
         long_stop_loss_per_unit=(long_entry-long_stop_exit)+(long_entry*entry_fee_rate)+(long_stop_exit*exit_fee_rate)
         short_stop_loss_per_unit=(short_stop_exit-short_entry)+(short_entry*entry_fee_rate)+(short_stop_exit*exit_fee_rate)
-        if self.config.enable_partial_stop_loss:
-            first=self.config.sl1_close_pct/100.0; remainder=1-first
-            long_sl1_exit=(long_entry-self.config.sl1_r*r)*(1-self.config.slippage)
-            short_sl1_exit=(short_entry+self.config.sl1_r*r)*(1+self.config.slippage)
+        if partial_sl_enabled:
+            first=sl1_close_pct/100.0; remainder=1-first
+            long_sl1_exit=(long_entry-sl1_r*r)*(1-self.config.slippage)
+            short_sl1_exit=(short_entry+sl1_r*r)*(1+self.config.slippage)
             long_stop_loss_per_unit=(long_entry*entry_fee_rate)+first*((long_entry-long_sl1_exit)+long_sl1_exit*exit_fee_rate)+remainder*((long_entry-long_stop_exit)+long_stop_exit*exit_fee_rate)
             short_stop_loss_per_unit=(short_entry*entry_fee_rate)+first*((short_sl1_exit-short_entry)+short_sl1_exit*exit_fee_rate)+remainder*((short_stop_exit-short_entry)+short_stop_exit*exit_fee_rate)
         sizing_loss_per_unit=max(long_stop_loss_per_unit, short_stop_loss_per_unit) if self.config.position_sizing_mode==PositionSizingMode.ALL_IN_STOP_RISK else stop
@@ -258,7 +601,7 @@ class BacktestEngine:
         coin_draw = self.coin_flip_rng.random() if self.coin_flip_rng is not None else None
         coin_result = "HEADS" if coin_draw is not None and coin_draw < 0.5 else ("TAILS" if coin_draw is not None else None)
         large=self.config.coin_flip_large_multiplier; small=self.config.coin_flip_small_multiplier
-        sizing_direction = ("LONG" if coin_result == "HEADS" else "SHORT") if coin_result else di_direction
+        sizing_direction = ("LONG" if coin_result == "HEADS" else "SHORT") if coin_result else (signal_direction or di_direction)
         if preferred_only:
             long_mult = 1.0 if sizing_direction == "LONG" else 0.0
             short_mult = 1.0 if sizing_direction == "SHORT" else 0.0
@@ -269,7 +612,7 @@ class BacktestEngine:
         lqty,lc=self._cap_qty(l_uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(s_uncapped,short_entry,self.current_equity); fee_rate=entry_fee_rate
         # In coin-flip mode, TP distance equals stop distance. With zero slippage,
         # each leg's TP is exactly the opposite leg's SL.
-        if self.config.enable_di_direction_sizing:
+        if self.config.enable_di_direction_sizing or self.config.enable_strategy_profiles:
             applied_regime = "BASE"
             bull_long_conditional_applied = False
             bull_long_momentum_unconfirmed_applied = False
@@ -283,8 +626,12 @@ class BacktestEngine:
             bear_short_conditional_applied = False
             long_reward_risk = self.config.di_long_reward_risk_ratio
             short_reward_risk = self.config.di_short_reward_risk_ratio
+            if active_profile is not None:
+                applied_regime=profile_context[0]
+                if sizing_direction == "LONG": long_reward_risk=active_profile.reward_risk_ratio
+                else: short_reward_risk=active_profile.reward_risk_ratio
             regime_return = float(self.bull_regime_return_values[ind_i])
-            if self.config.enable_di_regime_reward_risk and np.isfinite(regime_return):
+            if active_profile is None and self.config.enable_di_regime_reward_risk and np.isfinite(regime_return):
                 if regime_return >= self.config.bull_regime_return_threshold:
                     applied_regime = "BULL"
                     long_reward_risk = self.config.di_long_bull_reward_risk_ratio
@@ -380,7 +727,7 @@ class BacktestEngine:
                     ):
                         short_reward_risk = self.config.sideways_short_conditional_reward_risk_ratio
                         sideways_short_conditional_applied = True
-            elif self.config.enable_di_regime_reward_risk:
+            elif active_profile is None and self.config.enable_di_regime_reward_risk:
                 applied_regime = "WARMUP"
             long_target_distance = stop * long_reward_risk
             short_target_distance = stop * short_reward_risk
@@ -420,24 +767,32 @@ class BacktestEngine:
                     pos.r_step_runner_quantity = pos.quantity - pos.tp1_quantity
                 if self.config.bull_long_r_step_maximum_r > 0:
                     pos.tp = pos.entry_price + self.config.bull_long_r_step_maximum_r * pos.risk
-            if self.config.enable_partial_take_profit:
+            pos.after_tp1_stop_mode=after_tp1_stop_mode; pos.after_tp1_stop_offset_r=after_tp1_stop_offset_r
+            if partial_tp_enabled:
                 direction = 1 if pos.side == Side.LONG else -1
                 pos.partial_tp_enabled=True; pos.original_quantity=pos.quantity; pos.remaining_quantity=pos.quantity
-                pos.tp1_quantity=pos.quantity*self.config.tp1_close_pct/100.0
+                pos.tp1_quantity=pos.quantity*tp1_close_pct/100.0
                 pos.tp2_quantity=pos.quantity-pos.tp1_quantity # any precision remainder belongs to TP2
-                pos.tp1_price=pos.entry_price+direction*self.config.tp1_r*r; pos.tp2_price=pos.entry_price+direction*self.config.tp2_r*r
+                target_unit=stop if active_profile else r
+                pos.tp1_price=pos.entry_price+direction*tp1_r*target_unit; pos.tp2_price=pos.entry_price+direction*tp2_r*target_unit
                 pos.tp=pos.tp2_price; pos.final_active_stop=pos.sl
-            if self.config.enable_partial_stop_loss:
+            if partial_sl_enabled:
                 direction = 1 if pos.side == Side.LONG else -1
                 pos.partial_sl_enabled=True; pos.original_quantity=pos.quantity; pos.remaining_quantity=pos.quantity
-                pos.sl1_quantity=pos.quantity*self.config.sl1_close_pct/100.0
-                pos.sl1_price=pos.entry_price-direction*self.config.sl1_r*r
-                pos.sl2_price=pos.entry_price-direction*self.config.sl2_r*r
+                pos.sl1_quantity=pos.quantity*sl1_close_pct/100.0
+                pos.sl1_price=pos.entry_price-direction*sl1_r*r
+                pos.sl2_price=pos.entry_price-direction*sl2_r*r
                 pos.sl=pos.sl2_price; pos.original_sl=pos.sl2_price; pos.final_active_stop=pos.sl2_price
-            pos.trailing_enabled = self.config.enable_trailing_profit and (self.config.trail_apply_to == TrailApplyTo.BOTH or self.config.trail_apply_to.value == f"{pos.side.value}_ONLY")
+            profile_for_position=active_profile if active_profile is not None and pos.side.value==sizing_direction else None
+            pos.be_enabled=bool(profile_for_position.break_even_enabled) if profile_for_position else self.config.enable_be_after_opposite_sl
+            pos.be_offset_r=profile_for_position.break_even_offset_r if profile_for_position else self.config.be_offset_r
+            pos.profile_break_even_activation_r=(profile_for_position.break_even_activation_r if profile_for_position and profile_for_position.break_even_enabled else None)
+            pos.trailing_enabled=bool(profile_for_position.trailing_enabled) if profile_for_position else (self.config.enable_trailing_profit and (self.config.trail_apply_to == TrailApplyTo.BOTH or self.config.trail_apply_to.value == f"{pos.side.value}_ONLY"))
             if pos.trailing_enabled:
                 direction = 1 if pos.side == Side.LONG else -1
-                pos.trailing_activation_price = (pos.entry_price + direction * pos.risk * self.config.trail_activation_r if self.config.trail_activation_trigger == TrailActivationTrigger.PRICE_REACHES_R else None)
+                activation_r=profile_for_position.trailing_activation_r if profile_for_position else self.config.trail_activation_r
+                pos.trailing_distance_r=profile_for_position.trailing_distance_r if profile_for_position else self.config.trail_distance_r
+                pos.trailing_activation_price = (pos.entry_price + direction * pos.risk * activation_r if self.config.trail_activation_trigger == TrailActivationTrigger.PRICE_REACHES_R else None)
                 pos.favourable_price = pos.entry_price
         if preferred_only:
             if sizing_direction == "LONG":
@@ -449,9 +804,20 @@ class BacktestEngine:
         elif self.config.trade_direction == TradeDirectionMode.SHORT_ONLY:
             long = None
         pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._execution_time(i),raw,(lc if long is not None else False) or (sc if short is not None else False)); pair.trade_direction=self.config.trade_direction.value; pair.daily_schedule_enabled=self.config.enable_daily_entry_schedule; pair.scheduled_entry_time=self.config.daily_entry_time; pair.scheduled_entry_timezone=self.config.daily_entry_timezone; pair.scheduled_entry_timestamp=(schedule or {}).get("scheduled_timestamp"); pair.actual_entry_timestamp=(schedule or {}).get("actual_entry_timestamp", self._execution_time(i)); pair.entry_schedule_status=(schedule or {}).get("entry_schedule_status");
-        pair.coin_flip_result=coin_result; pair.coin_flip_draw=coin_draw; pair.di_sizing_direction=di_direction; pair.sizing_direction=sizing_direction; pair.long_size_multiplier=long_mult; pair.short_size_multiplier=short_mult
+        pair.strategy_profile_key=active_profile_key
+        pair.applied_stop_loss_multiple=stop_mult; pair.applied_partial_sl_enabled=partial_sl_enabled; pair.applied_sl1_r=sl1_r; pair.applied_sl1_close_pct=sl1_close_pct; pair.applied_sl2_r=sl2_r
+        pair.applied_partial_tp_enabled=partial_tp_enabled; pair.applied_tp1_r=tp1_r; pair.applied_tp1_close_pct=tp1_close_pct; pair.applied_tp2_r=tp2_r; pair.applied_after_tp1_stop_mode=after_tp1_stop_mode; pair.applied_after_tp1_stop_offset_r=after_tp1_stop_offset_r
+        pair.profile_timeout_enabled=bool(active_profile and active_profile.timeout_enabled)
+        pair.profile_timeout_minutes=int(active_profile.timeout_minutes) if pair.profile_timeout_enabled else None
+        pair.vwap_confirmation_mode=self.config.vwap_confirmation_mode.value if self.config.entry_mode == EntryMode.VWAP_VOLUME_BREAKOUT else None; pair.vwap_breakout_signal_time=(schedule or {}).get("vwap_breakout_signal_time"); pair.vwap_breakout_level=(schedule or {}).get("vwap_breakout_level"); pair.vwap_confirmation_time=(schedule or {}).get("vwap_confirmation_time"); pair.vwap_confirmation_bars=(schedule or {}).get("vwap_confirmation_bars")
+        pair.coin_flip_result=coin_result; pair.coin_flip_draw=coin_draw; pair.di_sizing_direction=raw_di_direction; pair.sizing_direction=sizing_direction; pair.long_size_multiplier=long_mult; pair.short_size_multiplier=short_mult
+        pair.direction_voting_enabled=self.config.enable_direction_voting
+        if self.config.enable_direction_voting:
+            _, vote_result=self._direction_vote(ind_i); pair.direction_vote_long_count=vote_result["long"]; pair.direction_vote_short_count=vote_result["short"]; pair.direction_vote_abstain_count=vote_result["abstain"]; pair.direction_vote_details=vote_result["votes"]
         pair.di_reward_risk_regime=applied_regime; pair.di_applied_long_reward_risk_ratio=long_reward_risk; pair.di_applied_short_reward_risk_ratio=short_reward_risk; pair.bull_long_conditional_reward_risk_applied=bull_long_conditional_applied; pair.bull_long_momentum_unconfirmed_applied=bull_long_momentum_unconfirmed_applied; pair.bull_long_confirmation_return=float(self.bull_long_confirmation_return_values[ind_i]) if np.isfinite(self.bull_long_confirmation_return_values[ind_i]) else np.nan; pair.bull_long_momentum_target_extension_applied=bull_long_momentum_target_extension_applied; pair.bull_long_momentum_extension_return=float(self.bull_long_momentum_extension_return_values[ind_i]) if np.isfinite(self.bull_long_momentum_extension_return_values[ind_i]) else np.nan; pair.bull_long_structural_unconfirmed_applied=bull_long_structural_unconfirmed_applied; pair.bull_long_structural_sma=structural_sma if self.config.enable_di_direction_sizing else np.nan; pair.bull_long_structural_prior_sma=structural_prior_sma if self.config.enable_di_direction_sizing else np.nan; pair.bull_long_structural_confirmed=structural_confirmed if self.config.enable_di_direction_sizing else False; pair.sideways_long_conditional_reward_risk_applied=sideways_long_conditional_applied; pair.sideways_short_conditional_reward_risk_applied=sideways_short_conditional_applied; pair.bear_short_conditional_reward_risk_applied=bear_short_conditional_applied
         pair.market_regime_return=float(self.bull_regime_return_values[ind_i]) if np.isfinite(self.bull_regime_return_values[ind_i]) else np.nan
+        pair.entry_atr_pct=float(self.atr_pct_values[ind_i]) if np.isfinite(self.atr_pct_values[ind_i]) else np.nan; pair.entry_rsi=float(self.directional_rsi_values[ind_i]) if np.isfinite(self.directional_rsi_values[ind_i]) else np.nan; pair.entry_close_location=float(self.close_location_values[ind_i]) if np.isfinite(self.close_location_values[ind_i]) else np.nan; pair.directional_momentum_return=float(self.directional_momentum_return_values[ind_i]) if np.isfinite(self.directional_momentum_return_values[ind_i]) else np.nan
+        pair.long_momentum_return=float(self.long_momentum_return_values[ind_i]) if np.isfinite(self.long_momentum_return_values[ind_i]) else np.nan
         pair.bull_regime=bool(np.isfinite(pair.market_regime_return) and pair.market_regime_return >= self.config.bull_regime_return_threshold)
         rd=(schedule or {}).get("random_decision")
         pair.random_decision=rd; pair.previous_pair_close_time=self.previous_pair_close_time
@@ -461,11 +827,12 @@ class BacktestEngine:
         pair.adx=float(self.adx_values[ind_i]) if np.isfinite(self.adx_values[ind_i]) else np.nan; pair.plus_di=float(self.plus_di_values[ind_i]) if np.isfinite(self.plus_di_values[ind_i]) else np.nan; pair.minus_di=float(self.minus_di_values[ind_i]) if np.isfinite(self.minus_di_values[ind_i]) else np.nan; self._attach_market_state(pair,ind_i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self._record_pair_telemetry(pair, i); self.next_pair_id+=1
 
     def _attach_market_state(self, pair, i):
-        fields = {"bb_middle":self.bb_middle,"bb_upper":self.bb_upper,"bb_lower":self.bb_lower,"bb_width":self.bb_width,"bb_width_pct":self.bb_width_pct,"bb_width_1":self.bb_width_1,"bb_width_3":self.bb_width_3,"bb_width_5":self.bb_width_5,"bb_width_entry_5bar_change":self.bb_width_change,"bb_width_entry_5bar_change_pct":self.bb_width_change_pct,"di_spread":self.di_spread,"di_ratio":self.di_ratio,"di_spread_1":self.di_spread_1,"di_spread_3":self.di_spread_3,"di_spread_5":self.di_spread_5,"di_spread_entry_5bar_change":self.di_spread_change}
+        fields = {"bb_middle":self.bb_middle,"bb_upper":self.bb_upper,"bb_lower":self.bb_lower,"bb_width":self.bb_width,"bb_width_pct":self.bb_width_pct,"bb_width_1":self.bb_width_1,"bb_width_3":self.bb_width_3,"bb_width_5":self.bb_width_5,"bb_width_entry_5bar_change":self.bb_width_change,"bb_width_entry_5bar_change_pct":self.bb_width_change_pct,"di_spread":self.di_spread,"di_ratio":self.di_ratio,"di_spread_1":self.di_spread_1,"di_spread_3":self.di_spread_3,"di_spread_5":self.di_spread_5,"di_spread_entry_5bar_change":self.di_spread_change,"utc_session_vwap":self.session_vwap}
         for name, arr in fields.items():
             setattr(pair, name, float(arr[i]) if np.isfinite(arr[i]) else np.nan)
         # Backward-compatible alias used by the compact result-row builder.
         pair.bb_width_change = pair.bb_width_entry_5bar_change
+        pair.short_vwap_distance_atr = ((pair.utc_session_vwap-float(self.close[i]))/float(self.atr_values[i])) if np.isfinite(pair.utc_session_vwap) and np.isfinite(self.atr_values[i]) and self.atr_values[i] > 0 else np.nan
     def _update_positions_to_strategy_index(self,i):
         for pair in self.active_pairs:
             first = pair.positions()[0]
@@ -487,11 +854,18 @@ class BacktestEngine:
                 if pos.is_open: self._fallback_exit(pos,i,"timestamp_alignment_failure"); self._after_position_scan(pair,pos,None,None,None,None)
             return
         sub=self.intrabar_data[(self.intrabar_data.timestamp>=start)&(self.intrabar_data.timestamp<end)]
-        if sub.empty or (sub.timestamp.iloc[0] > start + pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)) or self._has_missing_intrabar(sub,start,end):
+        incomplete=sub.empty or (sub.timestamp.iloc[0] > start + pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)) or self._has_missing_intrabar(sub,start,end)
+        if incomplete:
             reason="no_overlapping_intrabar_rows" if sub.empty else "intrabar_gap"
             for pos in pair.positions():
-                if pos.is_open: pos.missing_intrabar_data=True; self._fallback_exit(pos,i,reason); self._after_position_scan(pair,pos,None,None,None,None)
-            return
+                if pos.is_open: pos.missing_intrabar_data=True
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR:
+                raise ValueError(f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade")
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M:
+                for pos in pair.positions():
+                    if pos.is_open: self._fallback_exit(pos,i,reason); self._after_position_scan(pair,pos,None,None,None,None)
+                return
+            if sub.empty: return
         for j,row in sub.iterrows():
             if self._maybe_timeout_pair_at(pair, j, pd.Timestamp(row.timestamp), float(row.open), ExitSource.INTRABAR):
                 break
@@ -506,7 +880,12 @@ class BacktestEngine:
                 pass
         if self.intrabar_data.timestamp.max() < end - pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes):
             for pos in pair.positions():
-                if pos.is_open: self._fallback_exit(pos,i,"end_of_intrabar_data"); self._after_position_scan(pair,pos,None,None,None,None)
+                if pos.is_open: pos.missing_intrabar_data=True
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR:
+                raise ValueError(f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade")
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M:
+                for pos in pair.positions():
+                    if pos.is_open: self._fallback_exit(pos,i,"end_of_intrabar_data"); self._after_position_scan(pair,pos,None,None,None,None)
 
     def _scan_exit(self,pos,i):
         # Trailing state is stateful; never apply its current stop to a candle
@@ -521,10 +900,15 @@ class BacktestEngine:
         sub=self.intrabar_data[(self.intrabar_data.timestamp>=start)&(self.intrabar_data.timestamp<end)]
         if sub.empty:
             reason="end_of_intrabar_data" if self.intrabar_data.timestamp.max() < start else "no_overlapping_intrabar_rows"
-            return self._fallback_exit(pos,i,reason)
+            pos.missing_intrabar_data=True
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR: raise ValueError(f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade")
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M: return self._fallback_exit(pos,i,reason)
+            return False
         expected=pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
         if sub.timestamp.iloc[0] > start + expected:
-            return self._fallback_exit(pos,i,"timestamp_alignment_failure")
+            pos.missing_intrabar_data=True
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR: raise ValueError(f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade")
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M: return self._fallback_exit(pos,i,"timestamp_alignment_failure")
         if self._has_missing_intrabar(sub,start,end):
             pos.missing_intrabar_data=True
             if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR: raise ValueError("Missing intrabar candles during open trade")
@@ -532,7 +916,9 @@ class BacktestEngine:
         for j,row in sub.iterrows():
             if self._maybe_exit_bar(pos,j,row.high,row.low,row.timestamp,ExitSource.INTRABAR): return True
         if self.intrabar_data.timestamp.max() < end - pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes):
-            return self._fallback_exit(pos,i,"end_of_intrabar_data")
+            pos.missing_intrabar_data=True
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.ERROR: raise ValueError(f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade")
+            if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M: return self._fallback_exit(pos,i,"end_of_intrabar_data")
         return False
 
 
@@ -719,13 +1105,18 @@ class BacktestEngine:
             self.reentry_gate_release_index=i
         self.reentry_gates=remaining
     def _maybe_timeout_pair_at(self,pair,i,timestamp,raw_open,source):
-        if not self.config.enable_both_open_timeout or pair.long is None or pair.short is None or not (pair.long.is_open and pair.short.is_open): return False
-        timeout_at=pd.Timestamp(pair.strategy_entry_time) + self.timeout_delta
+        profile_timeout=bool(getattr(pair,"profile_timeout_enabled",False))
+        both_timeout=bool(self.config.enable_both_open_timeout and pair.long is not None and pair.short is not None and pair.long.is_open and pair.short.is_open)
+        if not profile_timeout and not both_timeout: return False
+        minutes=getattr(pair,"profile_timeout_minutes",None) if profile_timeout else self.config.max_both_open_minutes
+        timeout_at=pd.Timestamp(pair.strategy_entry_time) + pd.Timedelta(minutes=minutes)
         timestamp=pd.Timestamp(timestamp)
         if timestamp < timeout_at: return False
-        self._close_position(pair.long,i,float(raw_open)*(1-self.config.slippage),ExitReason.BOTH_OPEN_TIMEOUT,source,timestamp)
-        self._close_position(pair.short,i,float(raw_open)*(1+self.config.slippage),ExitReason.BOTH_OPEN_TIMEOUT,source,timestamp)
-        pair.both_open_timeout_triggered=True; pair.timeout_minutes=int(self.config.max_both_open_minutes); pair.timeout_exit_time=timestamp; self.last_timeout_exit_time=timestamp
+        for pos in pair.positions():
+            if pos.is_open:
+                slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
+                self._close_position(pos,i,float(raw_open)*slip,ExitReason.BOTH_OPEN_TIMEOUT,source,timestamp)
+        pair.both_open_timeout_triggered=True; pair.timeout_minutes=int(minutes); pair.timeout_exit_time=timestamp; self.last_timeout_exit_time=timestamp
         return True
     def _fallback_exit(self,pos,i,reason):
         pos.fallback_reason=reason; self.fallback_reasons.append(reason)
@@ -752,7 +1143,15 @@ class BacktestEngine:
             # threshold activates/ratchets the trail; it is not itself an exit.
             return self._maybe_trailing_exit(pos,i,float(high),float(low),timestamp,source)
         hit_tp=high>=pos.tp if pos.side==Side.LONG else low<=pos.tp; hit_sl=low<=pos.sl if pos.side==Side.LONG else high>=pos.sl
-        if not(hit_tp or hit_sl): return False
+        if not(hit_tp or hit_sl):
+            if pos.profile_break_even_activation_r is not None and not pos.be_triggered:
+                reached=high>=pos.entry_price+pos.profile_break_even_activation_r*pos.risk if pos.side==Side.LONG else low<=pos.entry_price-pos.profile_break_even_activation_r*pos.risk
+                if reached:
+                    new_sl=pos.entry_price+pos.be_offset_r*pos.risk if pos.side==Side.LONG else pos.entry_price-pos.be_offset_r*pos.risk
+                    improves=new_sl>pos.sl if pos.side==Side.LONG else new_sl<pos.sl
+                    if improves:
+                        pos.sl=new_sl; pos.be_triggered=True; pos.be_trigger_time=pd.Timestamp(timestamp); pos.be_stop_price=new_sl; pos.be_exit_reason=ExitReason.BE_R_OFFSET if pos.be_offset_r else ExitReason.BE
+            return False
         if hit_tp and hit_sl: pos.ambiguous=True; use_tp=self.config.tie_policy==TiePolicy.OPTIMISTIC
         else: use_tp=hit_tp
         raw=pos.tp if use_tp else pos.sl; slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
@@ -886,7 +1285,8 @@ class BacktestEngine:
         pos.trailing_activation_time=pd.Timestamp(timestamp)
         pos.favourable_price=price
         is_long=pos.side==Side.LONG
-        candidate=price-pos.risk*self.config.trail_distance_r if is_long else price+pos.risk*self.config.trail_distance_r
+        distance_r=pos.trailing_distance_r if pos.trailing_distance_r is not None else self.config.trail_distance_r
+        candidate=price-pos.risk*distance_r if is_long else price+pos.risk*distance_r
         pos.trailing_stop=candidate
         pos.sl=max(pos.sl,candidate) if is_long else min(pos.sl,candidate)
         pos.final_active_stop=pos.sl
@@ -970,7 +1370,7 @@ class BacktestEngine:
                 return True
             self._after_tp1(pos)
             self._activate_trailing_from_event(pos,"TP1",timestamp,pos.tp1_price)
-            if self.config.after_tp1_stop_mode!=AfterTP1StopMode.KEEP_ORIGINAL_SL:
+            if pos.after_tp1_stop_mode!=AfterTP1StopMode.KEEP_ORIGINAL_SL.value:
                 pos.partial_sl_overridden_after_tp1=True
                 moved_stop_hit=adverse(pos.sl)
                 sl1_hit=sl2_hit=False
@@ -1026,13 +1426,13 @@ class BacktestEngine:
         return True
 
     def _after_tp1(self,pos):
-        if self.config.after_tp1_stop_mode==AfterTP1StopMode.MOVE_TO_ENTRY: candidate=pos.entry_price
-        elif self.config.after_tp1_stop_mode==AfterTP1StopMode.MOVE_TO_R_OFFSET:
-            candidate=pos.entry_price+self.config.after_tp1_stop_offset_r*pos.risk if pos.side==Side.LONG else pos.entry_price-self.config.after_tp1_stop_offset_r*pos.risk
+        if pos.after_tp1_stop_mode==AfterTP1StopMode.MOVE_TO_ENTRY.value: candidate=pos.entry_price
+        elif pos.after_tp1_stop_mode==AfterTP1StopMode.MOVE_TO_R_OFFSET.value:
+            candidate=pos.entry_price+pos.after_tp1_stop_offset_r*pos.risk if pos.side==Side.LONG else pos.entry_price-pos.after_tp1_stop_offset_r*pos.risk
         else: candidate=pos.original_sl
         pos.sl=max(pos.sl,candidate) if pos.side==Side.LONG else min(pos.sl,candidate)
         pos.final_active_stop=pos.sl
-        if pos.partial_sl_enabled and self.config.after_tp1_stop_mode!=AfterTP1StopMode.KEEP_ORIGINAL_SL:
+        if pos.partial_sl_enabled and pos.after_tp1_stop_mode!=AfterTP1StopMode.KEEP_ORIGINAL_SL.value:
             pos.partial_sl_overridden_after_tp1=True
 
     def _maybe_partial_exit(self,pos,i,high,low,timestamp,source):
@@ -1107,7 +1507,8 @@ class BacktestEngine:
         if pos.trailing_active:
             extreme = high if is_long else low
             pos.favourable_price = max(pos.favourable_price, extreme) if is_long else min(pos.favourable_price, extreme)
-            candidate = pos.favourable_price - pos.risk*self.config.trail_distance_r if is_long else pos.favourable_price + pos.risk*self.config.trail_distance_r
+            distance_r=pos.trailing_distance_r if pos.trailing_distance_r is not None else self.config.trail_distance_r
+            candidate = pos.favourable_price - pos.risk*distance_r if is_long else pos.favourable_price + pos.risk*distance_r
             pos.trailing_stop = max(pos.trailing_stop or -np.inf,candidate) if is_long else min(pos.trailing_stop or np.inf,candidate)
             active = max(pos.sl,pos.be_stop_price or -np.inf,pos.trailing_stop) if is_long else min(pos.sl,pos.be_stop_price or np.inf,pos.trailing_stop)
             pos.sl=active; pos.final_active_stop=active
@@ -1191,7 +1592,7 @@ class BacktestEngine:
                 exp=(expected_pair_mult*sum(pos.risk*pos.quantity for pos in positions)/len(positions) if expected_pair_mult is not None else np.nan)
                 est=comb*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=(fees/exp*100 if exp > 0 else np.nan) if np.isfinite(exp) else np.nan
                 all_in_stop_risk = sum(self._estimated_stop_loss(pos) for pos in positions) / len(positions) / p.equity_before_trade
-                partial_sl_config={"partial_sl_enabled":self.config.enable_partial_stop_loss,"sl1_r":self.config.sl1_r,"sl1_close_pct":self.config.sl1_close_pct,"sl2_r":self.config.sl2_r}
+                partial_sl_config={"partial_sl_enabled":self.config.enable_partial_stop_loss,"sl1_r":self.config.sl1_r,"sl1_close_pct":self.config.sl1_close_pct,"sl2_r":self.config.sl2_r,"vwap_confirmation_mode":getattr(p,"vwap_confirmation_mode",None),"vwap_breakout_signal_time":getattr(p,"vwap_breakout_signal_time",None),"vwap_breakout_level":getattr(p,"vwap_breakout_level",None),"vwap_confirmation_time":getattr(p,"vwap_confirmation_time",None),"vwap_confirmation_bars":getattr(p,"vwap_confirmation_bars",None)}
                 row={"partial_tp_enabled":self.config.enable_partial_take_profit,"tp1_r":self.config.tp1_r,"tp1_close_pct":self.config.tp1_close_pct,"tp2_r":self.config.tp2_r,"tp2_close_pct":self.config.tp2_close_pct,"stop_loss_r":self.config.stop_loss_r,"after_tp1_stop_mode":self.config.after_tp1_stop_mode.value,"after_tp1_stop_offset_r":self.config.after_tp1_stop_offset_r,"tp2_exit_mode":self.config.tp2_exit_mode.value,"intrabar_partial_tp_ordering":("STOP_FIRST" if self.config.tie_policy==TiePolicy.PESSIMISTIC else "TP1_THEN_TP2_THEN_STOP"),"pair_id":p.pair_id,"trade_id":f"{p.pair_id}-{row_kind}" if row_kind != "pair" else p.pair_id,"trade_direction":self.config.trade_direction.value,"trailing_profit_enabled":self.config.enable_trailing_profit,"trail_activation_r":self.config.trail_activation_r,"trail_distance_r":self.config.trail_distance_r,"trail_apply_to":self.config.trail_apply_to.value,"trail_intrabar_mode":self.config.trail_intrabar_mode.value,"result_type":row_kind,"side":primary.side.value if len(positions)==1 else "BOTH","position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,"strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":primary.entry_price if len(positions)==1 else p.strategy_entry_price,"strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,"both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"remaining_leg_timeout_after_first_sl_enabled":self.config.enable_remaining_leg_timeout_after_first_sl,"remaining_leg_timeout_after_first_sl_minutes":self.config.remaining_leg_timeout_after_first_sl_minutes,"remaining_leg_timeout_after_first_sl_started":p.remaining_leg_timeout_after_first_sl_started,"first_sl_side":p.first_sl_side.value if p.first_sl_side else None,"first_sl_time":p.first_sl_time,"remaining_leg_timeout_deadline":p.remaining_leg_timeout_deadline,"remaining_leg_timeout_triggered":p.remaining_leg_timeout_triggered,"remaining_leg_timeout_exit_time":p.remaining_leg_timeout_exit_time,"remaining_leg_timeout_exit_side":p.remaining_leg_timeout_exit_side.value if p.remaining_leg_timeout_exit_side else None,"pair_be_triggered":p.pair_be_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":primary.atr_at_entry,"adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),"indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.","bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),"daily_schedule_enabled":getattr(p,"daily_schedule_enabled",False),"scheduled_entry_time":getattr(p,"scheduled_entry_time",None),"scheduled_entry_timezone":getattr(p,"scheduled_entry_timezone",None),"scheduled_entry_timestamp":getattr(p,"scheduled_entry_timestamp",None),"actual_entry_timestamp":getattr(p,"actual_entry_timestamp",p.strategy_entry_time),"entry_delay_minutes":((pd.Timestamp(getattr(p,"actual_entry_timestamp",p.strategy_entry_time))-pd.Timestamp(getattr(p,"scheduled_entry_timestamp",p.strategy_entry_time))).total_seconds()/60 if getattr(p,"scheduled_entry_timestamp",None) is not None else 0),"entry_schedule_status":getattr(p,"entry_schedule_status",None),"entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),"r_distance":primary.risk,"equity_before_trade":p.equity_before_trade,"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,"pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":sum(pos.price_r for pos in positions),"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":gross/risk_base,"pair_fee_r":fees/risk_base,"pair_net_r":net/risk_base,"pair_leg_gross_r_sum":sum(pos.gross_r for pos in positions),"pair_leg_net_r_sum":sum(pos.net_r for pos in positions),"expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"exit_time":exit_t,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,"ambiguous_intrabar":any(pos.ambiguous for pos in positions),"ambiguous_candle":any(pos.ambiguous for pos in positions),"missing_intrabar_data":any(pos.missing_intrabar_data for pos in positions)}
                 row.update({"remaining_leg_timeout_profit_extension_enabled":self.config.enable_remaining_leg_timeout_profit_extension,"remaining_leg_timeout_profit_threshold_r":self.config.remaining_leg_timeout_profit_threshold_r,"remaining_leg_timeout_checkpoint_count":p.remaining_leg_timeout_checkpoint_count,"remaining_leg_timeout_extension_count":p.remaining_leg_timeout_extension_count,"remaining_leg_timeout_last_checkpoint_time":p.remaining_leg_timeout_last_checkpoint_time,"remaining_leg_timeout_last_checkpoint_profit_r":p.remaining_leg_timeout_last_checkpoint_profit_r})
                 row.update(partial_sl_config)
@@ -1201,7 +1602,12 @@ class BacktestEngine:
                 rd=getattr(p,"random_decision",None)
                 row.update({"random_entry_enabled":self.random_entry_active,"random_seed":self.config.random_seed if self.random_entry_active else None,"random_entry_probability":self.config.random_entry_probability if self.random_entry_active else None,"randomize_first_entry":self.config.randomize_first_entry,"max_random_wait_candles":self.config.max_random_wait_candles,"random_decision_id":rd.get("decision_id") if rd else None,"random_draw_that_opened_trade":rd.get("random_draw") if rd else None,"random_decision_timestamp":rd.get("candle_timestamp") if rd else None,"candles_waited_before_entry":rd.get("candles_waited_since_close") if rd else None,"minutes_waited_before_entry":rd.get("candles_waited_since_close",0)*self.config.strategy_timeframe_minutes if rd else None,"previous_pair_close_time":getattr(p,"previous_pair_close_time",None),"random_entry_forced":rd.get("forced_entry",False) if rd else False,"entry_timing_mode":self.config.entry_timing_mode.value if self.random_entry_active else EntryTimingMode.CURRENT.value})
                 row.update({"coin_flip_sizing_enabled":self.config.enable_coin_flip_sizing,"coin_flip_seed":self.config.coin_flip_seed if self.config.enable_coin_flip_sizing else None,"coin_flip_draw":getattr(p,"coin_flip_draw",None),"coin_flip_result":getattr(p,"coin_flip_result",None),"long_size_multiplier":getattr(p,"long_size_multiplier",1.0),"short_size_multiplier":getattr(p,"short_size_multiplier",1.0)})
-                row.update({"di_direction_sizing_enabled":self.config.enable_di_direction_sizing,"di_direction_minimum_spread":self.config.di_direction_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_long_minimum_spread":self.config.di_direction_long_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_short_minimum_spread":self.config.di_direction_short_minimum_spread if self.config.enable_di_direction_sizing else None,"di_execution_mode":self.config.di_execution_mode.value if self.config.enable_di_direction_sizing else None,"di_reward_risk_ratio":self.config.di_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_long_reward_risk_ratio":self.config.di_long_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_short_reward_risk_ratio":self.config.di_short_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_regime_reward_risk_enabled":self.config.enable_di_regime_reward_risk,"di_reward_risk_regime":getattr(p,"di_reward_risk_regime",None),"di_applied_long_reward_risk_ratio":getattr(p,"di_applied_long_reward_risk_ratio",None),"di_applied_short_reward_risk_ratio":getattr(p,"di_applied_short_reward_risk_ratio",None),"bull_long_conditional_reward_risk_enabled":self.config.enable_bull_long_conditional_reward_risk,"bull_long_conditional_reward_risk_applied":getattr(p,"bull_long_conditional_reward_risk_applied",False),"sideways_long_conditional_reward_risk_enabled":self.config.enable_sideways_long_conditional_reward_risk,"sideways_long_conditional_reward_risk_applied":getattr(p,"sideways_long_conditional_reward_risk_applied",False),"sideways_short_conditional_reward_risk_enabled":self.config.enable_sideways_short_conditional_reward_risk,"sideways_short_conditional_reward_risk_applied":getattr(p,"sideways_short_conditional_reward_risk_applied",False),"bear_short_conditional_reward_risk_enabled":self.config.enable_bear_short_conditional_reward_risk,"bear_short_conditional_reward_risk_applied":getattr(p,"bear_short_conditional_reward_risk_applied",False),"directional_adx_filter_enabled":self.config.enable_directional_adx_filter,"directional_long_adx_maximum":self.config.directional_long_adx_maximum if self.config.enable_directional_adx_filter else None,"directional_short_adx_minimum":self.config.directional_short_adx_minimum if self.config.enable_directional_adx_filter else None,"di_sizing_direction":getattr(p,"di_sizing_direction",None),"sizing_direction":getattr(p,"sizing_direction",None)})
+                row.update({"di_direction_sizing_enabled":self.config.enable_di_direction_sizing,"di_direction_minimum_spread":self.config.di_direction_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_long_minimum_spread":self.config.di_direction_long_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_short_minimum_spread":self.config.di_direction_short_minimum_spread if self.config.enable_di_direction_sizing else None,"di_execution_mode":self.config.di_execution_mode.value if self.config.enable_di_direction_sizing else None,"di_reward_risk_ratio":self.config.di_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_long_reward_risk_ratio":self.config.di_long_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_short_reward_risk_ratio":self.config.di_short_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_regime_reward_risk_enabled":self.config.enable_di_regime_reward_risk,"di_reward_risk_regime":getattr(p,"di_reward_risk_regime",None),"di_applied_long_reward_risk_ratio":getattr(p,"di_applied_long_reward_risk_ratio",None),"di_applied_short_reward_risk_ratio":getattr(p,"di_applied_short_reward_risk_ratio",None),"bull_long_conditional_reward_risk_enabled":self.config.enable_bull_long_conditional_reward_risk,"bull_long_conditional_reward_risk_applied":getattr(p,"bull_long_conditional_reward_risk_applied",False),"sideways_long_conditional_reward_risk_enabled":self.config.enable_sideways_long_conditional_reward_risk,"sideways_long_conditional_reward_risk_applied":getattr(p,"sideways_long_conditional_reward_risk_applied",False),"sideways_short_conditional_reward_risk_enabled":self.config.enable_sideways_short_conditional_reward_risk,"sideways_short_conditional_reward_risk_applied":getattr(p,"sideways_short_conditional_reward_risk_applied",False),"bear_short_conditional_reward_risk_enabled":self.config.enable_bear_short_conditional_reward_risk,"bear_short_conditional_reward_risk_applied":getattr(p,"bear_short_conditional_reward_risk_applied",False),"directional_adx_filter_enabled":self.config.enable_directional_adx_filter,"directional_long_adx_maximum":self.config.directional_long_adx_maximum if self.config.enable_directional_adx_filter else None,"directional_short_adx_minimum":self.config.directional_short_adx_minimum if self.config.enable_directional_adx_filter else None,"di_sizing_direction":getattr(p,"di_sizing_direction",None),"sizing_direction":getattr(p,"sizing_direction",None),"direction_voting_enabled":getattr(p,"direction_voting_enabled",False),"direction_vote_long_count":getattr(p,"direction_vote_long_count",0),"direction_vote_short_count":getattr(p,"direction_vote_short_count",0),"direction_vote_abstain_count":getattr(p,"direction_vote_abstain_count",0),"direction_vote_details":getattr(p,"direction_vote_details",None)})
+                row.update({"short_vwap_distance_filter_enabled":self.config.enable_short_vwap_distance_filter,"short_vwap_minimum_distance_atr":self.config.short_vwap_minimum_distance_atr if self.config.enable_short_vwap_distance_filter else None,"utc_session_vwap":getattr(p,"utc_session_vwap",np.nan),"short_vwap_distance_atr":getattr(p,"short_vwap_distance_atr",np.nan)})
+                row.update({"long_momentum_filter_enabled":self.config.enable_long_momentum_filter,"long_momentum_lookback_hours":self.config.long_momentum_lookback_hours if self.config.enable_long_momentum_filter else None,"long_momentum_minimum_return":self.config.long_momentum_minimum_return if self.config.enable_long_momentum_filter else None,"long_momentum_return_at_entry":getattr(p,"long_momentum_return",np.nan)})
+                row.update({"regime_direction_filter_enabled":self.config.enable_regime_direction_filter,"directional_di_spread_range_enabled":self.config.enable_directional_di_spread_range,"directional_atr_pct_range_enabled":self.config.enable_directional_atr_pct_range,"directional_rsi_range_enabled":self.config.enable_directional_rsi_range,"directional_close_location_range_enabled":self.config.enable_directional_close_location_range,"directional_momentum_range_enabled":self.config.enable_directional_momentum_range,"entry_atr_pct":getattr(p,"entry_atr_pct",np.nan),"entry_rsi":getattr(p,"entry_rsi",np.nan),"entry_close_location":getattr(p,"entry_close_location",np.nan),"directional_momentum_return_at_entry":getattr(p,"directional_momentum_return",np.nan)})
+                row.update({"strategy_profiles_enabled":self.config.enable_strategy_profiles,"strategy_profile_key":getattr(p,"strategy_profile_key",None),"strategy_profile_run_mode":self.config.strategy_profile_run_mode})
+                row.update({"stop_loss_multiple":getattr(p,"applied_stop_loss_multiple",self.config.sl_mult),"partial_sl_enabled":getattr(p,"applied_partial_sl_enabled",self.config.enable_partial_stop_loss),"sl1_r":getattr(p,"applied_sl1_r",self.config.sl1_r),"sl1_close_pct":getattr(p,"applied_sl1_close_pct",self.config.sl1_close_pct),"sl2_r":getattr(p,"applied_sl2_r",self.config.sl2_r),"partial_tp_enabled":getattr(p,"applied_partial_tp_enabled",self.config.enable_partial_take_profit),"tp1_r":getattr(p,"applied_tp1_r",self.config.tp1_r),"tp1_close_pct":getattr(p,"applied_tp1_close_pct",self.config.tp1_close_pct),"tp2_r":getattr(p,"applied_tp2_r",self.config.tp2_r),"after_tp1_stop_mode":getattr(p,"applied_after_tp1_stop_mode",self.config.after_tp1_stop_mode.value),"after_tp1_stop_offset_r":getattr(p,"applied_after_tp1_stop_offset_r",self.config.after_tp1_stop_offset_r)})
                 row.update({"bull_long_r_step_trailing_enabled":self.config.enable_bull_long_r_step_trailing,"bull_long_r_step_activation_r":self.config.bull_long_r_step_activation_r if self.config.enable_bull_long_r_step_trailing else None,"bull_long_r_step_distance_r":self.config.bull_long_r_step_distance_r if self.config.enable_bull_long_r_step_trailing else None,"bull_long_r_step_size_r":self.config.bull_long_r_step_size_r if self.config.enable_bull_long_r_step_trailing else None,"bull_long_r_step_maximum_r":self.config.bull_long_r_step_maximum_r if self.config.enable_bull_long_r_step_trailing else None,"bull_long_r_step_activation_close_pct":self.config.bull_long_r_step_activation_close_pct if self.config.enable_bull_long_r_step_trailing else None})
                 row.update({"bull_regime_short_filter_enabled":self.config.enable_bull_regime_short_filter,"bull_regime_lookback_days":self.config.bull_regime_lookback_days,"bull_regime_return_threshold":self.config.bull_regime_return_threshold,"market_regime_return":getattr(p,"market_regime_return",np.nan),"bull_regime":getattr(p,"bull_regime",False)})
                 row.update({"bull_long_momentum_confirmation_enabled":self.config.enable_bull_long_momentum_confirmation,"bull_long_confirmation_lookback_days":self.config.bull_long_confirmation_lookback_days,"bull_long_confirmation_return_threshold":self.config.bull_long_confirmation_return_threshold,"bull_long_confirmation_return":getattr(p,"bull_long_confirmation_return",np.nan),"bull_long_momentum_unconfirmed_applied":getattr(p,"bull_long_momentum_unconfirmed_applied",False)})
@@ -1242,7 +1648,7 @@ class BacktestEngine:
         return frame
 
     def telemetry_frame(self):
-        from telemetry import telemetry_columns_for_direction
+        from crypto_strategy_lab.telemetry import telemetry_columns_for_direction
         return pd.DataFrame(self.telemetry_rows, columns=telemetry_columns_for_direction(self.config.trade_direction))
 
     def _num(self, arr, i):

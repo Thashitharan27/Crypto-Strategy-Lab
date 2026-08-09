@@ -3,14 +3,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import BacktestConfig
-from output_manager import periodic_results, run_folder_name
+from crypto_strategy_lab.config import BacktestConfig
+from crypto_strategy_lab.output_manager import periodic_results, run_folder_name
 
 
 def test_run_folder_name_uses_required_parts_and_run_name():
     cfg = BacktestConfig(strategy_csv=Path("data/BTCUSDT_15m.csv"), run_name="My Run", atr_period=14, sl_mult=2, tp_mult=3)
     name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "My_Run_BTC_15m_ATR14_SL2_TP3_2026-07-23_12-34-56"
+    assert name == "My_Run_BTC_15m_ATR14x1_SL2_TP3_2026-07-23_12-34-56"
 
 
 def test_run_folder_name_uses_effective_di_reward_risk_target():
@@ -24,7 +24,7 @@ def test_run_folder_name_uses_effective_di_reward_risk_target():
         di_reward_risk_ratio=2,
     )
     name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "BTC_240m_ATR14_SL2_TP4_2026-07-23_12-34-56"
+    assert name == "BTC_240m_ATR14x1_SL2_TP4_2026-07-23_12-34-56"
 
 
 def test_run_folder_name_uses_asymmetric_di_targets():
@@ -38,7 +38,7 @@ def test_run_folder_name_uses_asymmetric_di_targets():
         di_short_reward_risk_ratio=1,
     )
     name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "BTC_240m_ATR14_SL2_LTP4-STP2_2026-07-23_12-34-56"
+    assert name == "BTC_240m_ATR14x1_SL2_LTP4-STP2_2026-07-23_12-34-56"
 
 
 def test_run_folder_name_marks_regime_specific_di_targets():
@@ -50,7 +50,7 @@ def test_run_folder_name_marks_regime_specific_di_targets():
         enable_di_regime_reward_risk=True,
     )
     name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "BTC_60m_ATR14_SL2_RRREGIME_2026-07-23_12-34-56"
+    assert name == "BTC_60m_ATR14x1_SL2_RRREGIME_2026-07-23_12-34-56"
 
 
 def test_run_folder_name_describes_partial_stop_instead_of_ignored_core_stop():
@@ -64,7 +64,7 @@ def test_run_folder_name_describes_partial_stop_instead_of_ignored_core_stop():
         tp_mult=10,
     )
     name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "BTC_15m_ATR14_PSL2x75-SL10_TP10_2026-07-23_12-34-56"
+    assert name == "BTC_15m_ATR14x1_PSL2x75-SL10_TP10_2026-07-23_12-34-56"
 
 
 def test_run_folder_name_describes_partial_take_profit():
@@ -80,7 +80,30 @@ def test_run_folder_name_describes_partial_take_profit():
         tp2_close_pct=50,
     )
     name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "BTC_15m_ATR14_SL10_PTP3x50-TP12_2026-07-23_12-34-56"
+    assert name == "BTC_15m_ATR14x1_SL10_PTP3x50-TP12_2026-07-23_12-34-56"
+
+
+def test_run_folder_name_describes_identical_isolated_profiles():
+    cfg = BacktestConfig(
+        strategy_csv=Path("data/XRPUSDT_1h.csv"),
+        strategy_timeframe_minutes=60,
+        telemetry_interval_minutes=60,
+        enable_strategy_profiles=True,
+        strategy_profile_run_mode="ISOLATED_PROFILES",
+    )
+    name = run_folder_name(cfg, datetime(2026, 8, 5, 19, 24, 49))
+    assert name == "XRP_60m_ATR14x1_PROFILES-ISOLATED_SL2_TP2_2026-08-05_19-24-49"
+
+
+def test_run_folder_name_marks_different_profile_exits_as_mixed():
+    from dataclasses import replace
+
+    cfg = BacktestConfig(enable_strategy_profiles=True, strategy_profile_run_mode="BOTH")
+    profiles = dict(cfg.strategy_profiles)
+    profiles["bull_long"] = replace(profiles["bull_long"], reward_risk_ratio=2)
+    cfg = replace(cfg, strategy_profiles=profiles)
+    name = run_folder_name(cfg, datetime(2026, 8, 5, 19, 24, 49))
+    assert "_PROFILES-BOTH_MIXED_EXITS_" in name
 
 
 def test_periodic_results_groups_by_exit_period():
@@ -117,7 +140,7 @@ def test_periodic_results_does_not_use_reset_index_names_keyword(monkeypatch):
     assert list(monthly["net_pnl"]) == [10.0, 5.0]
 
 def test_create_run_dir_creates_timestamped_folder_and_latest_pointer(tmp_path):
-    from output_manager import create_run_dir, update_latest
+    from crypto_strategy_lab.output_manager import create_run_dir, update_latest
 
     cfg = BacktestConfig(output_dir=tmp_path, strategy_csv=Path("data/BTCUSDT_15m.csv"), atr_period=14, sl_mult=2, tp_mult=3)
     run_dir = create_run_dir(cfg)

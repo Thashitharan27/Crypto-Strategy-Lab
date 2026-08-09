@@ -6,10 +6,10 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from engine import BacktestEngine
-from gui.config_logic import build_backtest_config
-from loader import load_backtest_data
-from statistics import summarize
+from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.gui.config_logic import build_backtest_config
+from crypto_strategy_lab.loader import load_backtest_data
+from crypto_strategy_lab.statistics import summarize
 
 
 def main() -> None:

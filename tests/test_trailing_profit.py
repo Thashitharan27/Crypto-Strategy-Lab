@@ -1,8 +1,8 @@
 import pandas as pd
 import pytest
-from config import BacktestConfig, RiskMode, TrailApplyTo, TrailIntrabarMode
-from engine import BacktestEngine
-from trade import ExitReason, ExitSource, Position, Side, TradePair
+from crypto_strategy_lab.config import BacktestConfig, RiskMode, TrailApplyTo, TrailIntrabarMode
+from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.trade import ExitReason, ExitSource, Position, Side, TradePair
 
 
 def engine(mode="PESSIMISTIC", enabled=True):

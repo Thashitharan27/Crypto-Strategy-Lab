@@ -5,7 +5,7 @@ import traceback
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from portfolio import run_portfolio
+from crypto_strategy_lab.portfolio import run_portfolio
 
 
 class PortfolioWorker(QObject):
@@ -14,12 +14,13 @@ class PortfolioWorker(QObject):
     finished = Signal(dict, object, object, object)
     failed = Signal(str, str)
 
-    def __init__(self, components, output_root, initial_equity, risk_per_asset):
+    def __init__(self, components, output_root, initial_equity, risk_per_asset, maximum_total_risk=0.05):
         super().__init__()
         self.components = components
         self.output_root = output_root
         self.initial_equity = initial_equity
         self.risk_per_asset = risk_per_asset
+        self.maximum_total_risk = maximum_total_risk
 
     @Slot()
     def run(self):
@@ -48,6 +49,7 @@ class PortfolioWorker(QObject):
                 self.output_root,
                 self.initial_equity,
                 self.risk_per_asset,
+                self.maximum_total_risk,
                 progress,
             )
             self.status.emit("Portfolio reports saved", 100)

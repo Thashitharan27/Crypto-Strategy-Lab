@@ -7,7 +7,10 @@ class PandasTableModel(QAbstractTableModel):
     def __init__(self, df: pd.DataFrame | None = None):
         super().__init__(); self._df = df if df is not None else pd.DataFrame()
     def set_dataframe(self, df: pd.DataFrame) -> None:
-        self.beginResetModel(); self._df = df.copy(); self.endResetModel()
+        # Results are immutable after the worker emits them. Keeping that frame
+        # avoids a large, synchronous copy of hundreds of report columns in the
+        # GUI thread at the end of every run.
+        self.beginResetModel(); self._df = df; self.endResetModel()
     def rowCount(self, parent=QModelIndex()): return 0 if parent.isValid() else len(self._df)
     def columnCount(self, parent=QModelIndex()): return 0 if parent.isValid() else len(self._df.columns)
     def data(self, index, role=Qt.DisplayRole):

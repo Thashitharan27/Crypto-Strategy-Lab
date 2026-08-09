@@ -3,7 +3,7 @@ import zipfile
 
 import pytest
 
-from combine_binance_data import BINANCE_COLUMNS, combine
+from tools.combine_binance_data import BINANCE_COLUMNS, combine
 
 
 def _write_zip(path, member, rows, header=True):

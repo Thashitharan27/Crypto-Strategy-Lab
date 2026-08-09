@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from config import BacktestConfig
+from crypto_strategy_lab.config import BacktestConfig
 
 
 def _safe_part(value: str) -> str:
@@ -21,6 +21,64 @@ def _safe_part(value: str) -> str:
 
 def _format_number(value: float) -> str:
     return f"{value:g}".replace(".", "p")
+
+
+def _risk_label(config: BacktestConfig) -> str:
+    mode = getattr(config.risk_mode, "value", config.risk_mode)
+    if mode == "ATR":
+        return f"ATR{config.atr_period}x{_format_number(config.atr_multiplier)}"
+    if mode == "PERCENT":
+        return f"PCT{_format_number(config.percent_r * 100)}"
+    return f"FIXED{_format_number(config.fixed_r)}"
+
+
+def _profile_exit_labels(config: BacktestConfig) -> tuple[str, str]:
+    profiles = [profile for profile in config.strategy_profiles.values() if profile.enabled]
+    signatures = {
+        (
+            profile.partial_stop_enabled,
+            profile.sl1_r,
+            profile.sl1_close_pct,
+            profile.sl2_r,
+            profile.stop_loss_multiple,
+            profile.partial_profit_enabled,
+            profile.tp1_r,
+            profile.tp1_close_pct,
+            profile.tp2_r,
+            profile.reward_risk_ratio,
+        )
+        for profile in profiles
+    }
+    if not profiles or len(signatures) != 1:
+        return "MIXED", "EXITS"
+
+    profile = profiles[0]
+    if profile.partial_stop_enabled:
+        stop = (
+            f"PSL{_format_number(profile.sl1_r)}x{_format_number(profile.sl1_close_pct)}"
+            f"-SL{_format_number(profile.sl2_r)}"
+        )
+    else:
+        stop = f"SL{_format_number(profile.stop_loss_multiple)}"
+    if profile.partial_profit_enabled:
+        target = (
+            f"PTP{_format_number(profile.tp1_r)}x{_format_number(profile.tp1_close_pct)}"
+            f"-TP{_format_number(profile.tp2_r)}"
+        )
+    else:
+        target = f"TP{_format_number(profile.stop_loss_multiple * profile.reward_risk_ratio)}"
+    return stop, target
+
+
+def _profile_mode_label(config: BacktestConfig) -> str | None:
+    if not config.enable_strategy_profiles:
+        return None
+    labels = {
+        "ISOLATED_PROFILES": "PROFILES-ISOLATED",
+        "COMBINED_SHARED_CAPITAL": "PROFILES-COMBINED",
+        "BOTH": "PROFILES-BOTH",
+    }
+    return labels.get(config.strategy_profile_run_mode, f"PROFILES-{_safe_part(config.strategy_profile_run_mode)}")
 
 
 def _stop_label(config: BacktestConfig) -> str:
@@ -63,14 +121,25 @@ def infer_symbol(config: BacktestConfig) -> str:
 
 def run_folder_name(config: BacktestConfig, timestamp: datetime | None = None) -> str:
     stamp = (timestamp or datetime.now()).strftime("%Y-%m-%d_%H-%M-%S")
-    base = "_".join([
+    stop, target = (
+        _profile_exit_labels(config)
+        if config.enable_strategy_profiles
+        else (_stop_label(config), _target_label(config))
+    )
+    parts = [
         infer_symbol(config),
         f"{config.strategy_timeframe_minutes}m",
-        f"ATR{config.atr_period}",
-        _stop_label(config),
-        _target_label(config),
+        _risk_label(config),
+    ]
+    profile_mode = _profile_mode_label(config)
+    if profile_mode:
+        parts.append(profile_mode)
+    parts.extend([
+        stop,
+        target,
         stamp,
     ])
+    base = "_".join(parts)
     run_name = _safe_part(config.run_name or "")
     return f"{run_name}_{base}" if run_name else base
 
@@ -212,6 +281,12 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
             )
         ),
         (
+            f"Long momentum entry filter: {config.long_momentum_lookback_hours}-hour return >= "
+            f"{config.long_momentum_minimum_return:.2%}"
+            if config.enable_long_momentum_filter
+            else "Long momentum entry filter: disabled"
+        ),
+        (
             f"Trailing stop: enabled; trigger {config.trail_activation_trigger.value}; "
             f"activation {config.trail_activation_r}R; distance {config.trail_distance_r}R; "
             f"apply to {config.trail_apply_to.value}; fixed final targets remain active"
@@ -306,6 +381,11 @@ TRADE_R_COLUMN_METADATA = {
     "adx": "Wilder ADX value from the 15-minute strategy candle evaluated before pair entry.",
     "plus_di": "Wilder +DI value from the 15-minute strategy candle evaluated before pair entry.",
     "minus_di": "Wilder -DI value from the 15-minute strategy candle evaluated before pair entry.",
+    "direction_voting_enabled": "Whether independent majority-vote direction selection was enabled.",
+    "direction_vote_long_count": "Number of enabled direction voters that selected Long.",
+    "direction_vote_short_count": "Number of enabled direction voters that selected Short.",
+    "direction_vote_abstain_count": "Number of enabled direction voters without a sufficiently clear reading.",
+    "direction_vote_details": "Individual DI, structure, momentum, volume-pressure, and higher-timeframe votes used at entry.",
     "di_spread": "Absolute difference between +DI and -DI on the 15-minute strategy candle.",
     "di_ratio": "max(+DI, -DI) divided by min(+DI, -DI), with division by zero protected as NaN.",
     "di_spread_entry_5bar_change": "DI spread change at entry versus five strategy candles ago.",

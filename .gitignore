@@ -7,4 +7,6 @@ __pycache__/
 data/
 output/
 outputs/
-paper_output/
+
+# Atomic Binance downloads can leave a temporary file if the desktop process is terminated.
+data/.*.tmp

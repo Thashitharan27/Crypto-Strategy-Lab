@@ -1,7 +1,7 @@
 """GUI entry point for the Long-Short Crypto Backtester."""
 import sys
 from PySide6.QtWidgets import QApplication
-from gui.main_window import MainWindow
+from crypto_strategy_lab.gui.main_window import MainWindow
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

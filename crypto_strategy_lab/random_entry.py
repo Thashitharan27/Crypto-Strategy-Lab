@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 import numpy as np
 import pandas as pd
-from config import EntryTimingMode
-from engine import BacktestEngine
-from statistics import summarize
+from crypto_strategy_lab.config import EntryTimingMode
+from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.statistics import summarize
 
 DECISION_COLUMNS = ["decision_id","candle_timestamp","candle_open_time","candle_close_time","pair_id_previously_closed","previous_pair_close_time","candles_waited_since_close","random_seed","random_draw","entry_probability","decision","forced_entry","entry_created","new_pair_id","entry_timestamp","entry_price","equity_before_entry","entry_timing_mode"]
 

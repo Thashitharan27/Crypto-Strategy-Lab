@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from output_manager import compatible_resample_freq
+from crypto_strategy_lab.output_manager import compatible_resample_freq
 
 logger = logging.getLogger(__name__)
 

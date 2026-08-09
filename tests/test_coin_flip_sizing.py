@@ -2,8 +2,8 @@ import pandas as pd
 import pandas.testing as pdt
 import pytest
 
-from config import BacktestConfig, RiskMode, TradeDirectionMode, DIExecutionMode
-from engine import BacktestEngine
+from crypto_strategy_lab.config import BacktestConfig, RiskMode, TradeDirectionMode, DIExecutionMode
+from crypto_strategy_lab.engine import BacktestEngine
 
 
 def candles():
@@ -238,7 +238,7 @@ def test_preferred_side_only_requires_di_selection():
 
 
 def test_one_sided_rows_do_not_create_false_be_same_candle_ambiguities():
-    from statistics import summarize
+    from crypto_strategy_lab.statistics import summarize
 
     long_engine = di_engine(50, 15)
     long_engine.config = BacktestConfig(
@@ -266,7 +266,7 @@ def test_coin_and_di_direction_modes_are_mutually_exclusive():
 
 
 def test_journey_enrichment_preserves_skipped_signal_metadata():
-    from telemetry import INDICATORS, add_journey_columns
+    from crypto_strategy_lab.telemetry import INDICATORS, add_journey_columns
 
     trades = pd.DataFrame({"pair_id": [1], "holding_minutes": [0]})
     skipped = [{"entry_filter_reason": "DI spread below minimum"}]
@@ -274,6 +274,20 @@ def test_journey_enrichment_preserves_skipped_signal_metadata():
     telemetry = pd.DataFrame({"pair_id": [1], "elapsed_minutes": [0], **{name: [1.0] for name in INDICATORS}})
     enriched = add_journey_columns(trades, telemetry)
     assert enriched.attrs["skipped_signals"] == skipped
+
+
+def test_journey_enrichment_reports_each_completed_trade():
+    from crypto_strategy_lab.telemetry import INDICATORS, add_journey_columns
+
+    trades = pd.DataFrame({"pair_id": [1, 2], "holding_minutes": [0, 0]})
+    telemetry = pd.DataFrame({
+        "pair_id": [1, 2],
+        "elapsed_minutes": [0, 0],
+        **{name: [1.0, 1.0] for name in INDICATORS},
+    })
+    calls = []
+    add_journey_columns(trades, telemetry, progress=lambda current, total: calls.append((current, total)))
+    assert calls == [(1, 2), (2, 2)]
 
 
 def test_bull_regime_filter_skips_short_di_signal():
@@ -362,3 +376,33 @@ def test_bull_regime_filter_allows_short_outside_bull_regime():
     row = engine.run().iloc[0]
     assert row.sizing_direction == "SHORT"
     assert not row.bull_regime
+
+
+def test_bear_regime_adx_filter_rejects_below_minimum_and_accepts_boundary():
+    for adx_value, should_trade in ((24.99, False), (25.0, True)):
+        engine = di_engine(50, 15)
+        engine.config = BacktestConfig(**{
+            **engine.config.__dict__,
+            "enable_bear_regime_adx_filter": True,
+            "bear_regime_adx_minimum": 25,
+            "di_regime_bear_return_threshold": -0.20,
+        })
+        engine.bull_regime_return_values[:] = -0.25
+        engine.adx_values[:] = adx_value
+        trades = engine.run()
+        assert (not trades.empty) is should_trade
+        if not should_trade:
+            assert all("DI signal skipped in bear regime" in row["entry_filter_reason"] for row in engine.skipped_signals)
+
+
+def test_bear_regime_adx_filter_does_not_reject_outside_bear_regime():
+    engine = di_engine(50, 15)
+    engine.config = BacktestConfig(**{
+        **engine.config.__dict__,
+        "enable_bear_regime_adx_filter": True,
+        "bear_regime_adx_minimum": 25,
+        "di_regime_bear_return_threshold": -0.20,
+    })
+    engine.bull_regime_return_values[:] = 0.0
+    engine.adx_values[:] = 10
+    assert not engine.run().empty

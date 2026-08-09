@@ -1,14 +1,17 @@
 """Default configuration for the dual long/short backtester."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from crypto_strategy_lab.strategy_profiles import StrategyProfile, default_profiles, normalize_profiles
 
 class RiskMode(str, Enum):
     FIXED = "FIXED"; PERCENT = "PERCENT"; ATR = "ATR"
 class EntryMode(str, Enum):
-    WAIT_UNTIL_CLOSED = "WAIT_UNTIL_CLOSED"; EVERY_N_CANDLES = "EVERY_N_CANDLES"; CUSTOM = "CUSTOM"
+    WAIT_UNTIL_CLOSED = "WAIT_UNTIL_CLOSED"; EVERY_N_CANDLES = "EVERY_N_CANDLES"; CUSTOM = "CUSTOM"; VWAP_VOLUME_BREAKOUT = "VWAP_VOLUME_BREAKOUT"
+class VWAPConfirmationMode(str, Enum):
+    IMMEDIATE = "IMMEDIATE"; RETEST = "RETEST"
 class TiePolicy(str, Enum):
     PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"; INTRABAR = "INTRABAR"
 class IntrabarMissingPolicy(str, Enum):
@@ -66,6 +69,9 @@ class BacktestConfig:
     intrabar_missing_policy: IntrabarMissingPolicy = IntrabarMissingPolicy.WARN_AND_USE_15M
     zero_cost_comparison: bool = False
     trade_direction: TradeDirectionMode = TradeDirectionMode.BOTH
+    enable_strategy_profiles: bool = False
+    strategy_profile_run_mode: str = "COMBINED_SHARED_CAPITAL"
+    strategy_profiles: dict[str, StrategyProfile] = field(default_factory=default_profiles)
     enable_trailing_profit: bool = False
     enable_partial_take_profit: bool = False
     enable_partial_stop_loss: bool = False
@@ -139,6 +145,15 @@ class BacktestConfig:
     position_sizing_mode: PositionSizingMode = PositionSizingMode.PRICE_RISK
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
     entry_interval: int = 1
+    vwap_breakout_lookback_hours: float = 4.0
+    vwap_volume_lookback: int = 20
+    vwap_volume_multiplier: float = 1.5
+    vwap_slope_lookback: int = 1
+    vwap_atr_pct_minimum: float = 0.0
+    vwap_atr_pct_maximum: float = 1.0
+    vwap_confirmation_mode: VWAPConfirmationMode = VWAPConfirmationMode.IMMEDIATE
+    vwap_retest_window_candles: int = 4
+    vwap_retest_tolerance_atr: float = 0.25
     enable_random_entry: bool = False
     entry_timing_mode: EntryTimingMode = EntryTimingMode.CURRENT
     random_entry_probability: float = 0.50
@@ -148,6 +163,21 @@ class BacktestConfig:
     coin_flip_large_multiplier: float = 3.0
     coin_flip_small_multiplier: float = 1.0
     enable_di_direction_sizing: bool = False
+    enable_direction_voting: bool = False
+    direction_vote_use_di: bool = True
+    direction_vote_use_structure: bool = True
+    direction_vote_structure_lookback: int = 20
+    direction_vote_use_momentum: bool = True
+    direction_vote_momentum_lookback_hours: int = 24
+    direction_vote_momentum_threshold: float = 0.0
+    direction_vote_use_volume_pressure: bool = True
+    direction_vote_volume_lookback: int = 20
+    direction_vote_volume_threshold: float = 0.10
+    direction_vote_use_higher_timeframe: bool = True
+    direction_vote_higher_timeframe_hours: int = 4
+    direction_vote_higher_timeframe_sma_period: int = 20
+    direction_vote_minimum_votes: int = 2
+    flip_filtered_di_direction: bool = False
     di_direction_minimum_spread: float = 30.0
     di_direction_long_minimum_spread: Optional[float] = None
     di_direction_short_minimum_spread: Optional[float] = None
@@ -200,6 +230,48 @@ class BacktestConfig:
     enable_directional_adx_filter: bool = False
     directional_long_adx_maximum: float = 60.0
     directional_short_adx_minimum: float = 25.0
+    enable_long_momentum_filter: bool = False
+    long_momentum_lookback_hours: int = 24
+    long_momentum_minimum_return: float = 0.06
+    enable_regime_direction_filter: bool = False
+    allow_bull_long: bool = True
+    allow_bull_short: bool = True
+    allow_bear_long: bool = True
+    allow_bear_short: bool = True
+    allow_sideways_long: bool = True
+    allow_sideways_short: bool = True
+    enable_directional_di_spread_range: bool = False
+    directional_long_di_spread_minimum: float = 0.0
+    directional_long_di_spread_maximum: float = 1000.0
+    directional_short_di_spread_minimum: float = 0.0
+    directional_short_di_spread_maximum: float = 1000.0
+    enable_directional_adx_range: bool = False
+    directional_long_adx_minimum: float = 0.0
+    directional_long_adx_range_maximum: float = 1000.0
+    directional_short_adx_range_minimum: float = 0.0
+    directional_short_adx_maximum: float = 1000.0
+    enable_directional_atr_pct_range: bool = False
+    directional_long_atr_pct_minimum: float = 0.0
+    directional_long_atr_pct_maximum: float = 1.0
+    directional_short_atr_pct_minimum: float = 0.0
+    directional_short_atr_pct_maximum: float = 1.0
+    enable_directional_rsi_range: bool = False
+    directional_rsi_period: int = 14
+    directional_long_rsi_minimum: float = 0.0
+    directional_long_rsi_maximum: float = 100.0
+    directional_short_rsi_minimum: float = 0.0
+    directional_short_rsi_maximum: float = 100.0
+    enable_directional_close_location_range: bool = False
+    directional_long_close_location_minimum: float = 0.0
+    directional_long_close_location_maximum: float = 1.0
+    directional_short_close_location_minimum: float = 0.0
+    directional_short_close_location_maximum: float = 1.0
+    enable_directional_momentum_range: bool = False
+    directional_momentum_lookback_hours: int = 24
+    directional_long_momentum_minimum: float = -10.0
+    directional_long_momentum_maximum: float = 10.0
+    directional_short_momentum_minimum: float = -10.0
+    directional_short_momentum_maximum: float = 10.0
     enable_atr_checkpoint_tp_extension: bool = False
     atr_checkpoint_di_spread_minimum: float = 30.0
     atr_checkpoint_bb_width_minimum: float = 0.03
@@ -207,9 +279,13 @@ class BacktestConfig:
     atr_checkpoint_profit_lock_distance: float = 1.0
     enable_biased_short_adx_cap: bool = False
     biased_short_adx_maximum: float = 50.0
+    enable_short_vwap_distance_filter: bool = False
+    short_vwap_minimum_distance_atr: float = 2.0
     enable_bull_regime_short_filter: bool = False
     bull_regime_lookback_days: int = 90
     bull_regime_return_threshold: float = 0.20
+    enable_bear_regime_adx_filter: bool = False
+    bear_regime_adx_minimum: float = 25.0
     random_entry_start_mode: RandomEntryStartMode = RandomEntryStartMode.NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE
     randomize_first_entry: bool = True
     max_random_wait_candles: int = 0
@@ -238,8 +314,14 @@ class BacktestConfig:
     lifecycle_minimum_bucket_sample: int = 20
     create_lifecycle_charts: bool = True
     lifecycle_flat_pattern_threshold_pct: float = 5.0
+    save_feature_analysis_reports: bool = True
+    save_indicator_analysis_reports: bool = True
+    create_standard_charts: bool = True
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "strategy_profiles", normalize_profiles(self.strategy_profiles))
+        if self.strategy_profile_run_mode not in ("ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"):
+            raise ValueError("invalid strategy_profile_run_mode")
         if self.di_direction_long_minimum_spread is None:
             object.__setattr__(self, "di_direction_long_minimum_spread", self.di_direction_minimum_spread)
         if self.di_direction_short_minimum_spread is None:
@@ -283,6 +365,26 @@ class BacktestConfig:
         if self.di_direction_minimum_spread < 0: raise ValueError("di_direction_minimum_spread must be non-negative")
         if self.di_direction_long_minimum_spread < 0: raise ValueError("di_direction_long_minimum_spread must be non-negative")
         if self.di_direction_short_minimum_spread < 0: raise ValueError("di_direction_short_minimum_spread must be non-negative")
+        if self.enable_direction_voting and not self.enable_di_direction_sizing: raise ValueError("direction voting requires DI-direction sizing")
+        if self.enable_direction_voting and not any((self.direction_vote_use_di, self.direction_vote_use_structure, self.direction_vote_use_momentum, self.direction_vote_use_volume_pressure, self.direction_vote_use_higher_timeframe)): raise ValueError("direction voting requires at least one enabled voter")
+        for name, value in (("structure lookback", self.direction_vote_structure_lookback), ("momentum lookback", self.direction_vote_momentum_lookback_hours), ("volume lookback", self.direction_vote_volume_lookback), ("higher timeframe", self.direction_vote_higher_timeframe_hours), ("higher-timeframe SMA period", self.direction_vote_higher_timeframe_sma_period), ("minimum votes", self.direction_vote_minimum_votes)):
+            if value <= 0: raise ValueError(f"direction vote {name} must be positive")
+        if self.direction_vote_momentum_threshold < 0 or not 0 <= self.direction_vote_volume_threshold <= 1: raise ValueError("direction vote thresholds are invalid")
+        if self.long_momentum_lookback_hours <= 0: raise ValueError("long_momentum_lookback_hours must be positive")
+        if self.long_momentum_minimum_return <= -1: raise ValueError("long_momentum_minimum_return must be greater than -100%")
+        if self.enable_long_momentum_filter and not self.enable_di_direction_sizing: raise ValueError("long momentum filter requires DI-direction sizing")
+        if any((self.enable_regime_direction_filter, self.enable_directional_di_spread_range, self.enable_directional_adx_range, self.enable_directional_atr_pct_range, self.enable_directional_rsi_range, self.enable_directional_close_location_range, self.enable_directional_momentum_range)) and not self.enable_di_direction_sizing: raise ValueError("directional entry filters require DI-direction sizing")
+        for name, minimum, maximum in (
+            ("long DI spread", self.directional_long_di_spread_minimum, self.directional_long_di_spread_maximum), ("short DI spread", self.directional_short_di_spread_minimum, self.directional_short_di_spread_maximum),
+            ("long ADX", self.directional_long_adx_minimum, self.directional_long_adx_range_maximum), ("short ADX", self.directional_short_adx_range_minimum, self.directional_short_adx_maximum),
+            ("long ATR percentage", self.directional_long_atr_pct_minimum, self.directional_long_atr_pct_maximum), ("short ATR percentage", self.directional_short_atr_pct_minimum, self.directional_short_atr_pct_maximum),
+            ("long RSI", self.directional_long_rsi_minimum, self.directional_long_rsi_maximum), ("short RSI", self.directional_short_rsi_minimum, self.directional_short_rsi_maximum),
+            ("long close location", self.directional_long_close_location_minimum, self.directional_long_close_location_maximum), ("short close location", self.directional_short_close_location_minimum, self.directional_short_close_location_maximum),
+            ("long momentum", self.directional_long_momentum_minimum, self.directional_long_momentum_maximum), ("short momentum", self.directional_short_momentum_minimum, self.directional_short_momentum_maximum)):
+            if minimum > maximum: raise ValueError(f"directional {name} minimum must not exceed maximum")
+        if self.directional_rsi_period < 1 or self.directional_momentum_lookback_hours < 1: raise ValueError("directional indicator periods must be positive")
+        if not (0 <= self.directional_long_rsi_minimum <= 100 and 0 <= self.directional_long_rsi_maximum <= 100 and 0 <= self.directional_short_rsi_minimum <= 100 and 0 <= self.directional_short_rsi_maximum <= 100): raise ValueError("directional RSI bounds must be between 0 and 100")
+        if not (0 <= self.directional_long_close_location_minimum <= 1 and 0 <= self.directional_long_close_location_maximum <= 1 and 0 <= self.directional_short_close_location_minimum <= 1 and 0 <= self.directional_short_close_location_maximum <= 1): raise ValueError("directional close-location bounds must be between 0 and 1")
         if self.di_reward_risk_ratio <= 0: raise ValueError("di_reward_risk_ratio must be positive")
         if self.di_long_reward_risk_ratio <= 0: raise ValueError("di_long_reward_risk_ratio must be positive")
         if self.di_short_reward_risk_ratio <= 0: raise ValueError("di_short_reward_risk_ratio must be positive")
@@ -342,15 +444,19 @@ class BacktestConfig:
         if self.atr_checkpoint_profit_lock_distance <= 0: raise ValueError("atr_checkpoint_profit_lock_distance must be positive")
         if self.biased_short_adx_maximum < 0: raise ValueError("biased_short_adx_maximum must be non-negative")
         if self.enable_biased_short_adx_cap and not self.enable_di_direction_sizing: raise ValueError("biased-short ADX cap requires DI-direction sizing")
+        if self.short_vwap_minimum_distance_atr < 0: raise ValueError("short_vwap_minimum_distance_atr must be non-negative")
+        if self.enable_short_vwap_distance_filter and not self.enable_di_direction_sizing: raise ValueError("short VWAP-distance filter requires DI-direction sizing")
         if self.enable_atr_checkpoint_tp_extension and not self.enable_di_direction_sizing: raise ValueError("ATR checkpoint TP extension requires DI-direction sizing")
         if self.enable_atr_checkpoint_tp_extension and self.enable_partial_take_profit: raise ValueError("ATR checkpoint TP extension cannot be combined with partial take profit")
         if self.bull_regime_lookback_days <= 0: raise ValueError("bull_regime_lookback_days must be positive")
         if self.bull_regime_return_threshold <= -1: raise ValueError("bull_regime_return_threshold must be greater than -100%")
         if self.enable_bull_regime_short_filter and not self.enable_di_direction_sizing: raise ValueError("bull-regime short filter requires DI-direction sizing")
+        if self.bear_regime_adx_minimum < 0: raise ValueError("bear_regime_adx_minimum must be non-negative")
+        if self.enable_bear_regime_adx_filter and not self.enable_di_direction_sizing: raise ValueError("bear-regime ADX filter requires DI-direction sizing")
         if self.enable_coin_flip_sizing and self.enable_di_direction_sizing: raise ValueError("coin-flip sizing and DI-direction sizing cannot both be enabled")
+        if self.flip_filtered_di_direction and not (self.enable_di_direction_sizing or self.enable_strategy_profiles): raise ValueError("filtered direction flip requires DI-direction sizing or strategy profiles")
         if self.enable_coin_flip_sizing and self.trade_direction not in (TradeDirectionMode.BOTH, TradeDirectionMode.BOTH_INDEPENDENT): raise ValueError("coin-flip sizing requires both long and short positions")
         if self.enable_coin_flip_sizing and (self.enable_partial_take_profit or self.enable_partial_stop_loss): raise ValueError("coin-flip sizing cannot be combined with partial TP or partial SL")
-        if self.enable_di_direction_sizing and self.trade_direction not in (TradeDirectionMode.BOTH, TradeDirectionMode.BOTH_INDEPENDENT): raise ValueError("DI-direction sizing requires both long and short positions")
         if self.enable_di_direction_sizing and (self.enable_partial_take_profit or self.enable_partial_stop_loss): raise ValueError("DI-direction sizing cannot be combined with partial TP or partial SL")
         di_execution_value = self.di_execution_mode.value if isinstance(self.di_execution_mode, DIExecutionMode) else self.di_execution_mode
         if di_execution_value == DIExecutionMode.PREFERRED_SIDE_ONLY.value and not self.enable_di_direction_sizing: raise ValueError("preferred-side-only execution requires DI-direction sizing")
