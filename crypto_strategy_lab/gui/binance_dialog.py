@@ -1,4 +1,4 @@
-"""Non-blocking Binance strategy + intrabar dataset download dialog."""
+"""Non-blocking Binance strategy + intrabar + 4h dataset download dialog."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,14 +21,21 @@ class DatasetWorker(QObject):
         symbol,strategy_tf,intrabar_tf,include_intrabar,folder,start,end=self.args
         try:
             results={}
+            # Always keep the real Binance 4h candles locally. Direction voting
+            # uses this file directly instead of rebuilding 4h closes from the
+            # strategy dataset.
             jobs=[("strategy",strategy_tf)]
             if include_intrabar and intrabar_tf != strategy_tf: jobs.append(("intrabar",intrabar_tf))
             elif include_intrabar: results["intrabar_same_as_strategy"]=True
+            if strategy_tf != "4h" and (not include_intrabar or intrabar_tf != "4h"):
+                jobs.append(("higher_timeframe","4h"))
             for role,timeframe in jobs:
                 path=folder/f"{symbol}_{timeframe}.csv"
                 results[role]=download_klines(symbol,timeframe,path,start,end,progress=lambda count,date,r=role:self.progress.emit(r,count,date),cancelled=lambda:self.cancelled)
             if include_intrabar and results.get("intrabar_same_as_strategy"):
                 results["intrabar"]=results["strategy"]
+            if strategy_tf == "4h": results["higher_timeframe"]=results["strategy"]
+            elif include_intrabar and intrabar_tf == "4h": results["higher_timeframe"]=results["intrabar"]
             self.finished.emit(results)
         except InterruptedError:
             self.failed.emit("Download cancelled. Completed pages were saved and the next download will resume from that checkpoint.")
@@ -38,9 +45,9 @@ class DatasetWorker(QObject):
 
 class BinanceDownloadDialog(QDialog):
     def __init__(self,parent=None,*,symbol="XRPUSDT",strategy_timeframe="1h",intrabar_timeframe="1m",use_intrabar=True,data_folder="data"):
-        super().__init__(parent); self.setWindowTitle("Download / Update Binance Dataset"); self.resize(620,330); self.result_data=None; self.thread=None; self.worker=None
+        super().__init__(parent); self.setWindowTitle("Download / Update Binance Dataset"); self.resize(620,350); self.result_data=None; self.thread=None; self.worker=None
         form=QFormLayout(self)
-        note=QLabel("Downloads one matched Binance Spot dataset. You can close this window and continue running backtests while it downloads. Completed pages are checkpointed, so cancellation or application shutdown can resume later."); note.setWordWrap(True); form.addRow(note)
+        note=QLabel("Downloads matched Binance Spot datasets, including the real Binance 4h candles used by the higher-timeframe direction voter. You can close this window and continue running backtests while it downloads. Completed pages are checkpointed, so cancellation or application shutdown can resume later."); note.setWordWrap(True); form.addRow(note)
         self.symbol=QComboBox(); self.symbol.setEditable(True); self.symbol.addItems(["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT"]); self.symbol.setCurrentText(symbol)
         self.strategy_tf=QComboBox(); self.strategy_tf.addItems(["1m","5m","15m","30m","1h","4h","1d"]); self.strategy_tf.setCurrentText(strategy_timeframe)
         self.include_intrabar=QCheckBox("Download matching intrabar data"); self.include_intrabar.setChecked(use_intrabar)
@@ -59,7 +66,8 @@ class BinanceDownloadDialog(QDialog):
         symbol=self.symbol.currentText().strip().upper().replace("/",""); folder=Path(self.folder.text() or ".")
         files=[str(folder/f"{symbol}_{self.strategy_tf.currentText()}.csv")]
         if self.include_intrabar.isChecked(): files.append(str(folder/f"{symbol}_{self.intrabar_tf.currentText()}.csv"))
-        self.preview.setText("\n".join(files))
+        files.append(str(folder/f"{symbol}_4h.csv")+"  (higher-timeframe voter)")
+        self.preview.setText("\n".join(dict.fromkeys(files)))
 
     def _browse(self):
         folder=QFileDialog.getExistingDirectory(self,"Select candle-data folder",self.folder.text())
@@ -74,12 +82,12 @@ class BinanceDownloadDialog(QDialog):
         if not symbol or not symbol.isalnum(): QMessageBox.warning(self,"Invalid Pair","Enter a Binance pair such as XRPUSDT."); return
         self._set_running(True); self.status.setText("Connecting to Binance…")
         self.thread=QThread(self); self.worker=DatasetWorker(symbol,self.strategy_tf.currentText(),self.intrabar_tf.currentText(),self.include_intrabar.isChecked(),self.folder.text(),self.start.text().strip() or None,self.end.text().strip() or None); self.worker.moveToThread(self.thread)
-        self.thread.started.connect(self.worker.run); self.worker.progress.connect(lambda role,count,date:self.status.setText(f"{role.title()}: downloaded {count:,} new candles… latest {date}")); self.worker.finished.connect(self._finished); self.worker.failed.connect(self._failed); self.worker.finished.connect(self.thread.quit); self.worker.failed.connect(self.thread.quit); self.thread.start()
+        self.thread.started.connect(self.worker.run); self.worker.progress.connect(lambda role,count,date:self.status.setText(f"{role.replace('_',' ').title()}: downloaded {count:,} new candles… latest {date}")); self.worker.finished.connect(self._finished); self.worker.failed.connect(self._failed); self.worker.finished.connect(self.thread.quit); self.worker.failed.connect(self.thread.quit); self.thread.start()
 
     def _finished(self,result):
         self.result_data=result; messages=[]
-        for role in ("strategy","intrabar"):
-            if role in result: messages.append(f"{role.title()}: {result[role]['total']:,} candles ({result[role]['added']:,} new)")
+        for role in ("strategy","intrabar","higher_timeframe"):
+            if role in result: messages.append(f"{role.replace('_',' ').title()}: {result[role]['total']:,} candles ({result[role]['added']:,} new)")
         self.status.setText(" | ".join(messages)); self._set_running(False); self.download.setText("Done"); self.download.setEnabled(False); self.cancel.setText("Use Dataset")
 
     def _failed(self,message): self.status.setText(message); self._set_running(False)
