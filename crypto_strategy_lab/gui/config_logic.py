@@ -153,7 +153,10 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("enable_coin_flip_sizing") and (values.get("enable_partial_take_profit") or values.get("enable_partial_stop_loss")): errors.append("Coin-flip sizing cannot be combined with partial TP or partial SL.")
     if values.get("enable_coin_flip_sizing") and values.get("enable_di_direction_sizing"): errors.append("Coin-flip sizing and DI-direction sizing cannot both be enabled.")
     if values.get("enable_direction_voting") and not values.get("enable_di_direction_sizing"): errors.append("Direction voting requires direction selection.")
-    if values.get("enable_direction_voting") and not any(values.get(k) for k in ("direction_vote_use_di","direction_vote_use_structure","direction_vote_use_momentum","direction_vote_use_volume_pressure","direction_vote_use_higher_timeframe")): errors.append("Direction voting requires at least one voter.")
+    direction_voter_keys=("direction_vote_use_di","direction_vote_use_structure","direction_vote_use_momentum","direction_vote_use_volume_pressure","direction_vote_use_higher_timeframe")
+    enabled_direction_voters=sum(bool(values.get(k)) for k in direction_voter_keys)
+    if values.get("enable_direction_voting") and not enabled_direction_voters: errors.append("Direction voting requires at least one voter.")
+    if values.get("enable_direction_voting") and int(values.get("direction_vote_minimum_votes",1))>enabled_direction_voters: errors.append("Minimum Winning Votes cannot exceed the number of enabled direction voters.")
     if values.get("flip_filtered_di_direction") and not (values.get("enable_di_direction_sizing") or values.get("enable_strategy_profiles")): errors.append("Direction flip requires DI-direction selection.")
     try:
         if float(values.get("di_direction_minimum_spread", -1)) < 0: errors.append("DI direction minimum spread must be non-negative.")

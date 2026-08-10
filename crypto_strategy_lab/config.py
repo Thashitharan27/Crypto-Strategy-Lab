@@ -366,9 +366,12 @@ class BacktestConfig:
         if self.di_direction_long_minimum_spread < 0: raise ValueError("di_direction_long_minimum_spread must be non-negative")
         if self.di_direction_short_minimum_spread < 0: raise ValueError("di_direction_short_minimum_spread must be non-negative")
         if self.enable_direction_voting and not self.enable_di_direction_sizing: raise ValueError("direction voting requires DI-direction sizing")
-        if self.enable_direction_voting and not any((self.direction_vote_use_di, self.direction_vote_use_structure, self.direction_vote_use_momentum, self.direction_vote_use_volume_pressure, self.direction_vote_use_higher_timeframe)): raise ValueError("direction voting requires at least one enabled voter")
+        enabled_direction_voters=sum((self.direction_vote_use_di, self.direction_vote_use_structure, self.direction_vote_use_momentum, self.direction_vote_use_volume_pressure, self.direction_vote_use_higher_timeframe))
+        if self.enable_direction_voting and not enabled_direction_voters: raise ValueError("direction voting requires at least one enabled voter")
+        if self.enable_direction_voting and self.direction_vote_minimum_votes>enabled_direction_voters: raise ValueError("minimum direction votes cannot exceed enabled voters")
         for name, value in (("structure lookback", self.direction_vote_structure_lookback), ("momentum lookback", self.direction_vote_momentum_lookback_hours), ("volume lookback", self.direction_vote_volume_lookback), ("higher timeframe", self.direction_vote_higher_timeframe_hours), ("higher-timeframe SMA period", self.direction_vote_higher_timeframe_sma_period), ("minimum votes", self.direction_vote_minimum_votes)):
             if value <= 0: raise ValueError(f"direction vote {name} must be positive")
+        if self.direction_vote_structure_lookback < 10: raise ValueError("direction vote structure lookback must be at least 10 candles for confirmed swing pivots")
         if self.direction_vote_momentum_threshold < 0 or not 0 <= self.direction_vote_volume_threshold <= 1: raise ValueError("direction vote thresholds are invalid")
         if self.long_momentum_lookback_hours <= 0: raise ValueError("long_momentum_lookback_hours must be positive")
         if self.long_momentum_minimum_return <= -1: raise ValueError("long_momentum_minimum_return must be greater than -100%")

@@ -43,6 +43,7 @@ class TradePair:
     first_sl_survivor_partial_taken: bool = False; first_sl_survivor_partial_side: Optional[Side] = None; first_sl_survivor_partial_time: Optional[object] = None; first_sl_survivor_partial_pct: float = 0.0; first_sl_survivor_partial_quantity: float = 0.0; first_sl_survivor_partial_exit_price: Optional[float] = None; first_sl_survivor_partial_gross_pnl: float = 0.0; first_sl_survivor_partial_fee: float = 0.0; first_sl_survivor_partial_net_pnl: float = 0.0
     checkpoint_reentry_gate_started: bool = False; checkpoint_reentry_gate_side: Optional[Side] = None; checkpoint_reentry_gate_tp: Optional[float] = None; checkpoint_reentry_gate_sl: Optional[float] = None; checkpoint_reentry_gate_start_time: Optional[object] = None; checkpoint_reentry_gate_release_time: Optional[object] = None; checkpoint_reentry_gate_release_reason: Optional[str] = None
     direction_voting_enabled: bool = False; direction_vote_long_count: int = 0; direction_vote_short_count: int = 0; direction_vote_abstain_count: int = 0; direction_vote_details: Optional[dict] = None
+    market_structure: Optional[dict] = None
     def positions(self):
         return tuple(p for p in (self.long, self.short) if p is not None)
     @property

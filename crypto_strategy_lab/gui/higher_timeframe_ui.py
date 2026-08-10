@@ -83,6 +83,12 @@ def install_higher_timeframe_ui(MainWindow) -> None:
                     f"{path}  [unsupported Binance interval — choose 1h, 4h, or 1d]"
                 )
 
+        def update_visibility(*_):
+            visible = self.enable_direction_voting.isChecked() and self.direction_vote_use_htf.isChecked()
+            layout.setRowVisible(combo, visible)
+            layout.setRowVisible(self.direction_vote_htf_dataset, visible)
+            layout.setRowVisible(self.direction_vote_htf_download, visible)
+
         def download_htf():
             if combo.value() not in (1, 4, 24):
                 return
@@ -112,7 +118,10 @@ def install_higher_timeframe_ui(MainWindow) -> None:
         combo.currentIndexChanged.connect(update_path)
         self.market_symbol.currentTextChanged.connect(update_path)
         self.direction_vote_htf_download.clicked.connect(download_htf)
+        self.enable_direction_voting.toggled.connect(update_visibility)
+        self.direction_vote_use_htf.toggled.connect(update_visibility)
         update_path()
+        update_visibility()
 
     MainWindow.__init__ = patched_init
     MainWindow._binance_htf_ui_patch = True

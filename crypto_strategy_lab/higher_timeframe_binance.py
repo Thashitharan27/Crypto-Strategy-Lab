@@ -38,7 +38,7 @@ def _higher_timeframe_path(config) -> Path:
 def _binance_higher_timeframe_trend_array(self):
     """Vote from the last fully completed downloaded Binance HTF candle."""
     out = np.full(len(self.data), np.nan, float)
-    if not self.config.direction_vote_use_higher_timeframe or not len(self.data):
+    if not self.config.enable_direction_voting or not self.config.direction_vote_use_higher_timeframe or not len(self.data):
         return out
 
     hours = int(self.config.direction_vote_higher_timeframe_hours)

@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from crypto_strategy_lab.config import BacktestConfig
-from crypto_strategy_lab.gui.config_logic import load_config_json, save_config_json
+from crypto_strategy_lab.gui.config_logic import load_config_json, save_config_json, validate_config_values
 
 qtwidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
 QApplication = qtwidgets.QApplication
@@ -216,6 +216,76 @@ def test_gui_default_atr_period_matches_backtest_config():
         window.atr_period.setValue(7)
         window.reset_defaults()
         assert window.atr_period.value() == BacktestConfig().atr_period == 14
+    finally:
+        window.close()
+
+
+def test_single_voter_test_selector_creates_runnable_one_vote_config():
+    app(); window=MainWindow()
+    try:
+        voter_keys={
+            "di":"direction_vote_use_di",
+            "structure":"direction_vote_use_structure",
+            "momentum":"direction_vote_use_momentum",
+            "volume":"direction_vote_use_volume_pressure",
+            "higher_timeframe":"direction_vote_use_higher_timeframe",
+        }
+        for selected,selected_key in voter_keys.items():
+            window.direction_vote_test_mode.setCurrentIndex(
+                window.direction_vote_test_mode.findData(selected)
+            )
+            values=window.values()
+            assert values["enable_direction_voting"] is True
+            assert values["direction_vote_minimum_votes"]==1
+            assert [key for key in voter_keys.values() if values[key]]==[selected_key]
+            assert validate_config_values(values, require_paths=False)==[]
+        window.direction_vote_use_di.setChecked(True)
+        assert window.direction_vote_test_mode.currentData()==""
+        window.reset_defaults()
+        assert window.direction_vote_test_mode.currentData()==""
+    finally:
+        window.close()
+
+
+def test_direction_voting_tab_only_shows_settings_that_affect_the_run():
+    app(); window=MainWindow()
+    try:
+        form=window.direction_voting_form
+        assert "Direction voting is OFF" in window.direction_vote_status.text()
+        assert not window.direction_vote_use_structure.isEnabled()
+        assert not form.isRowVisible(window.direction_vote_structure_lookback)
+        assert not form.isRowVisible(window.direction_vote_htf_dataset)
+
+        window.direction_vote_test_mode.setCurrentIndex(window.direction_vote_test_mode.findData("structure"))
+        assert "market structure alone" in window.direction_vote_status.text()
+        assert form.isRowVisible(window.direction_vote_structure_lookback)
+        assert not form.isRowVisible(window.direction_vote_momentum_lookback)
+        assert not form.isRowVisible(window.direction_vote_minimum)
+        assert not form.isRowVisible(window.direction_vote_htf_dataset)
+
+        window.direction_vote_use_di.setChecked(True)
+        assert window.direction_vote_test_mode.currentData()==""
+        assert form.isRowVisible(window.direction_vote_minimum)
+        assert "Active combination" in window.direction_vote_status.text()
+
+        window.direction_vote_test_mode.setCurrentIndex(window.direction_vote_test_mode.findData("higher_timeframe"))
+        assert form.isRowVisible(window.direction_vote_htf_dataset)
+        assert form.isRowVisible(window.direction_vote_htf_download)
+    finally:
+        window.close()
+
+
+def test_direction_vote_required_count_is_clamped_to_enabled_signals():
+    app(); window=MainWindow()
+    try:
+        window.enable_direction_voting.setChecked(True)
+        window.direction_vote_minimum.setValue(5)
+        window.direction_vote_use_structure.setChecked(False)
+        window.direction_vote_use_momentum.setChecked(False)
+        window.direction_vote_use_volume.setChecked(False)
+        window.direction_vote_use_htf.setChecked(False)
+        assert window.direction_vote_minimum.value()==1
+        assert "DI pressure alone" in window.direction_vote_status.text()
     finally:
         window.close()
 
