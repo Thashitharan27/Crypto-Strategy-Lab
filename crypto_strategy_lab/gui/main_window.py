@@ -155,6 +155,7 @@ class MainWindow(QMainWindow):
         self.enable_coin_flip_sizing=QCheckBox("Enable 3:1 Coin-Flip Sizing (1:1 SL/TP)"); self.coin_flip_seed=QLineEdit("42")
         random_group.addRow("",self.enable_coin_flip_sizing); random_group.addRow("Coin Flip Seed",self.coin_flip_seed)
         self.enable_di_direction_sizing=QCheckBox("Enable DI-Direction Selection"); self.flip_filtered_di_direction=QCheckBox("Flip direction after filters pass (Long ↔ Short)"); self.di_direction_long_min_spread=self._spin(30,0,1000,3); self.di_direction_short_min_spread=self._spin(30,0,1000,3); self.di_long_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_short_reward_risk_ratio=self._spin(1,0.01,100,3)
+        self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.sr_filter_mode=QComboBox(); self.sr_filter_mode.addItems(["ANALYSIS_ONLY","BLOCK_BAD_LOCATION","REQUIRE_GOOD_LOCATION"])
         self.enable_direction_voting=QCheckBox("Enable direction voting for entries")
         self.direction_vote_test_mode=QComboBox()
         self.direction_vote_test_mode.addItem("Custom combination", "")
@@ -381,13 +382,25 @@ class MainWindow(QMainWindow):
         self.tp.setVisible(False); tp_label=strat.labelForField(self.tp)
         if tp_label: tp_label.setVisible(False)
         risk.setRowVisible(self.trade_direction,False)
-        scroll.setWidget(inner); outer.addWidget(scroll); self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self.tabs.removeTab(self.tabs.indexOf(self.di_strategy_page)); self._build_direction_voting_tab(); self.update_dynamic()
+        scroll.setWidget(inner); outer.addWidget(scroll); self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_direction_voting_tab(); self.update_dynamic()
 
     def _build_direction_voting_tab(self):
         page=QWidget(); layout=QVBoxLayout(page)
         intro=QLabel("DI pressure is the validated default direction signal. +DI above -DI selects Long; -DI above +DI selects Short.")
         intro.setWordWrap(True); layout.addWidget(intro)
-        self.direction_voting_box.setParent(page); layout.addWidget(self.direction_voting_box); layout.addStretch(1)
+        self.direction_voting_box.setParent(page); layout.addWidget(self.direction_voting_box)
+        sr_box=QGroupBox("Support / Resistance Analysis"); sr_form=QFormLayout(sr_box)
+        for lab,w in [
+            ("",self.enable_support_resistance_analysis),
+            ("Pivot Left",self.sr_pivot_left),
+            ("Pivot Right",self.sr_pivot_right),
+            ("Lookback Bars",self.sr_lookback_bars),
+            ("Zone Width (ATR)",self.sr_zone_width_atr),
+            ("Near Distance (ATR)",self.sr_near_distance_atr),
+            ("Filter Mode",self.sr_filter_mode),
+        ]: sr_form.addRow(lab,w)
+        layout.addWidget(sr_box)
+        layout.addStretch(1)
         self.tabs.addTab(page,"Direction Voting")
         self.analysis_level.setCurrentText("Standard (Recommended)"); self._apply_analysis_preset(); self._set_analysis_advanced(False)
     def _build_di_strategy_tab(self):
@@ -405,6 +418,17 @@ class MainWindow(QMainWindow):
             ("Short Reward/Risk Ratio",self.di_short_reward_risk_ratio),
         ]: selection.addRow(lab,w)
         form.addWidget(selection_box)
+        sr_box=QGroupBox("Support / Resistance Analysis"); sr_form=QFormLayout(sr_box)
+        for lab,w in [
+            ("",self.enable_support_resistance_analysis),
+            ("Pivot Left",self.sr_pivot_left),
+            ("Pivot Right",self.sr_pivot_right),
+            ("Lookback Bars",self.sr_lookback_bars),
+            ("Zone Width (ATR)",self.sr_zone_width_atr),
+            ("Near Distance (ATR)",self.sr_near_distance_atr),
+            ("Filter Mode",self.sr_filter_mode),
+        ]: sr_form.addRow(lab,w)
+        form.addWidget(sr_box)
         voting_box=QGroupBox("Direction Selection"); self.direction_voting_box=voting_box; voting=QFormLayout(voting_box); self.direction_voting_form=voting
         self.direction_vote_status=QLabel(); self.direction_vote_status.setWordWrap(True); self.direction_vote_status.setMinimumHeight(42)
         voting_help=QLabel("Other experimental voters were removed from this screen because they did not add a dependable improvement. Legacy config fields remain readable for compatibility."); voting_help.setWordWrap(True)
@@ -504,7 +528,7 @@ class MainWindow(QMainWindow):
             ("Profit Lock Distance (ATR)",self.atr_checkpoint_profit_lock_distance),
         ]: checkpoint.addRow(lab,w)
         form.addWidget(checkpoint_box); form.addStretch(1)
-        scroll.setWidget(inner); outer.addWidget(scroll); self.di_strategy_page=page; self.tabs.addTab(page,"Legacy Strategy")
+        scroll.setWidget(inner); outer.addWidget(scroll); self.di_strategy_page=page
         self.config_controls += inner.findChildren(QWidget)
     def _build_portfolio_tab(self):
         page=QWidget(); layout=QVBoxLayout(page); box=QGroupBox("Shared-Equity Portfolio"); form=QFormLayout(box)
@@ -606,6 +630,7 @@ class MainWindow(QMainWindow):
         values.update({"vwap_breakout_lookback_hours":self.vwap_breakout_hours.value(),"vwap_volume_lookback":self.vwap_volume_lookback.value(),"vwap_volume_multiplier":self.vwap_volume_multiplier.value(),"vwap_slope_lookback":self.vwap_slope_lookback.value(),"vwap_atr_pct_minimum":self.vwap_atr_min.value(),"vwap_atr_pct_maximum":self.vwap_atr_max.value(),"vwap_confirmation_mode":self.vwap_confirmation_mode.currentText(),"vwap_retest_window_candles":self.vwap_retest_window.value(),"vwap_retest_tolerance_atr":self.vwap_retest_tolerance.value()})
         values.update({"enable_coin_flip_sizing":self.enable_coin_flip_sizing.isChecked(),"coin_flip_seed":self.coin_flip_seed.text().strip(),"coin_flip_large_multiplier":3.0,"coin_flip_small_multiplier":1.0})
         values.update({"enable_di_direction_sizing":self.enable_di_direction_sizing.isChecked(),"flip_filtered_di_direction":self.flip_filtered_di_direction.isChecked(),"di_direction_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_long_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_short_minimum_spread":self.di_direction_short_min_spread.value(),"di_execution_mode":self.di_execution_mode.currentText(),"di_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_long_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_short_reward_risk_ratio":self.di_short_reward_risk_ratio.value()})
+        values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"sr_filter_mode":self.sr_filter_mode.currentText()})
         values.update({"enable_direction_voting":self.enable_direction_voting.isChecked(),"direction_vote_use_di":self.direction_vote_use_di.isChecked(),"direction_vote_use_structure":False,"direction_vote_structure_lookback":self.direction_vote_structure_lookback.value(),"direction_vote_use_momentum":False,"direction_vote_momentum_lookback_hours":self.direction_vote_momentum_lookback.value(),"direction_vote_momentum_threshold":self.direction_vote_momentum_threshold.value(),"direction_vote_use_volume_pressure":False,"direction_vote_volume_lookback":self.direction_vote_volume_lookback.value(),"direction_vote_volume_threshold":self.direction_vote_volume_threshold.value(),"direction_vote_use_higher_timeframe":False,"direction_vote_higher_timeframe_hours":self.direction_vote_htf_hours.value(),"direction_vote_higher_timeframe_sma_period":self.direction_vote_htf_sma.value(),"direction_vote_minimum_votes":1})
         values.update({"enable_di_regime_reward_risk":self.enable_di_regime_reward_risk.isChecked(),"di_regime_bear_return_threshold":parse_percentage(self.di_regime_bear_return_threshold.text()),"di_long_bull_reward_risk_ratio":self.di_long_bull_reward_risk_ratio.value(),"di_long_bear_reward_risk_ratio":self.di_long_bear_reward_risk_ratio.value(),"di_long_sideways_reward_risk_ratio":self.di_long_sideways_reward_risk_ratio.value(),"di_short_bull_reward_risk_ratio":self.di_short_bull_reward_risk_ratio.value(),"di_short_bear_reward_risk_ratio":self.di_short_bear_reward_risk_ratio.value(),"di_short_sideways_reward_risk_ratio":self.di_short_sideways_reward_risk_ratio.value()})
         values.update({"enable_bull_long_conditional_reward_risk":self.enable_bull_long_conditional_reward_risk.isChecked(),"bull_long_conditional_bb_width_minimum":parse_percentage(self.bull_long_conditional_bb_width_minimum.text()),"bull_long_conditional_adx_maximum":self.bull_long_conditional_adx_maximum.value(),"bull_long_conditional_reward_risk_ratio":self.bull_long_conditional_reward_risk_ratio.value()})
@@ -1015,6 +1040,7 @@ class MainWindow(QMainWindow):
         self.enable_random_entry.setChecked(bool(values.get("enable_random_entry",False))); self.entry_timing_mode.setCurrentText(str(values.get("entry_timing_mode","CURRENT"))); self.random_probability.setValue(float(values.get("random_entry_probability",0.5))); self.random_seed.setText(str(values.get("random_seed",42))); self.random_start_mode.setCurrentText(str(values.get("random_entry_start_mode","NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE"))); self.randomize_first.setChecked(bool(values.get("randomize_first_entry",True))); self.max_random_wait.setValue(int(values.get("max_random_wait_candles",0))); self.enable_random_batch.setChecked(bool(values.get("enable_random_entry_batch",False))); self.random_seed_start.setValue(int(values.get("random_seed_start",1))); self.random_seed_count.setValue(int(values.get("random_seed_count",100)))
         self.enable_coin_flip_sizing.setChecked(bool(values.get("enable_coin_flip_sizing",False))); self.coin_flip_seed.setText(str(values.get("coin_flip_seed",42)))
         legacy_di_minimum=float(values.get("di_direction_minimum_spread",30.0)); legacy_di_ratio=float(values.get("di_reward_risk_ratio",1.0)); self.enable_di_direction_sizing.setChecked(bool(values.get("enable_di_direction_sizing",False))); self.flip_filtered_di_direction.setChecked(bool(values.get("flip_filtered_di_direction",False))); self.di_direction_long_min_spread.setValue(float(values.get("di_direction_long_minimum_spread",legacy_di_minimum))); self.di_direction_short_min_spread.setValue(float(values.get("di_direction_short_minimum_spread",legacy_di_minimum))); self.di_execution_mode.setCurrentText(str(values.get("di_execution_mode","BOTH_SIDES"))); self.di_long_reward_risk_ratio.setValue(float(values.get("di_long_reward_risk_ratio",legacy_di_ratio))); self.di_short_reward_risk_ratio.setValue(float(values.get("di_short_reward_risk_ratio",legacy_di_ratio)))
+        self.enable_support_resistance_analysis.setChecked(bool(values.get("enable_support_resistance_analysis",False))); self.sr_pivot_left.setValue(int(values.get("sr_pivot_left",5))); self.sr_pivot_right.setValue(int(values.get("sr_pivot_right",5))); self.sr_lookback_bars.setValue(int(values.get("sr_lookback_bars",200))); self.sr_zone_width_atr.setValue(float(values.get("sr_zone_width_atr",0.5))); self.sr_near_distance_atr.setValue(float(values.get("sr_near_distance_atr",0.75))); self.sr_filter_mode.setCurrentText(str(values.get("sr_filter_mode","ANALYSIS_ONLY")))
         self.enable_direction_voting.setChecked(bool(values.get("enable_direction_voting",True))); self.direction_vote_use_di.setChecked(bool(values.get("direction_vote_use_di",True))); self.direction_vote_use_structure.setChecked(False); self.direction_vote_structure_lookback.setValue(int(values.get("direction_vote_structure_lookback",20))); self.direction_vote_use_momentum.setChecked(False); self.direction_vote_momentum_lookback.setValue(int(values.get("direction_vote_momentum_lookback_hours",24))); self.direction_vote_momentum_threshold.setValue(float(values.get("direction_vote_momentum_threshold",0))); self.direction_vote_use_volume.setChecked(False); self.direction_vote_volume_lookback.setValue(int(values.get("direction_vote_volume_lookback",20))); self.direction_vote_volume_threshold.setValue(float(values.get("direction_vote_volume_threshold",.10))); self.direction_vote_use_htf.setChecked(False); self.direction_vote_htf_hours.setValue(int(values.get("direction_vote_higher_timeframe_hours",4))); self.direction_vote_htf_sma.setValue(int(values.get("direction_vote_higher_timeframe_sma_period",20))); self.direction_vote_minimum.setValue(1)
         self.enable_di_regime_reward_risk.setChecked(bool(values.get("enable_di_regime_reward_risk",False))); self.di_regime_bear_return_threshold.setText(format_percentage(float(values.get("di_regime_bear_return_threshold",-0.20)),2)); self.di_long_bull_reward_risk_ratio.setValue(float(values.get("di_long_bull_reward_risk_ratio",2.0))); self.di_long_bear_reward_risk_ratio.setValue(float(values.get("di_long_bear_reward_risk_ratio",1.0))); self.di_long_sideways_reward_risk_ratio.setValue(float(values.get("di_long_sideways_reward_risk_ratio",2.0))); self.di_short_bull_reward_risk_ratio.setValue(float(values.get("di_short_bull_reward_risk_ratio",1.0))); self.di_short_bear_reward_risk_ratio.setValue(float(values.get("di_short_bear_reward_risk_ratio",1.0))); self.di_short_sideways_reward_risk_ratio.setValue(float(values.get("di_short_sideways_reward_risk_ratio",2.0)))
         self.enable_bull_long_conditional_reward_risk.setChecked(bool(values.get("enable_bull_long_conditional_reward_risk",False))); self.bull_long_conditional_bb_width_minimum.setText(format_percentage(float(values.get("bull_long_conditional_bb_width_minimum",0.05)),2)); self.bull_long_conditional_adx_maximum.setValue(float(values.get("bull_long_conditional_adx_maximum",40.0))); self.bull_long_conditional_reward_risk_ratio.setValue(float(values.get("bull_long_conditional_reward_risk_ratio",1.0)))
