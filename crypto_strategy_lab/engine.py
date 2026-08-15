@@ -34,6 +34,11 @@ class BacktestEngine:
             lookback_bars=config.sr_lookback_bars,
             zone_width_atr=config.sr_zone_width_atr,
             near_distance_atr=config.sr_near_distance_atr,
+            enable_hold_confirmation=config.enable_sr_hold_confirmation,
+            hold_confirmation_bars=config.sr_hold_confirmation_bars,
+            hold_confirmation_atr=config.sr_hold_confirmation_atr,
+            break_tolerance_atr=config.sr_break_tolerance_atr,
+            break_basis=config.sr_break_basis,
         ) if config.enable_support_resistance_analysis else None
         self._pending_sr_context = None
         self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
@@ -579,6 +584,16 @@ class BacktestEngine:
             if rating_value not in {"GOOD_LOCATION", "GOOD"}:
                 return True, "SR_NOT_GOOD_LOCATION"
             return False, None
+        if mode in {"REQUIRE_CONFIRMED_HOLD", "REQUIRE_CONFIRMED_HOLDING"}:
+            held = bool(sr_context.support_held if direction == "LONG" else sr_context.resistance_held)
+            if not held:
+                return True, "SR_LONG_SUPPORT_NOT_CONFIRMED" if direction == "LONG" else "SR_SHORT_RESISTANCE_NOT_CONFIRMED"
+            return False, None
+        if mode in {"BLOCK_BROKEN_STRUCTURE", "BLOCK_BROKEN"}:
+            broken = (sr_context.support_state == "SUPPORT_BROKEN") if direction == "LONG" else (sr_context.resistance_state == "RESISTANCE_BROKEN")
+            if broken:
+                return True, "SR_LONG_SUPPORT_BROKEN" if direction == "LONG" else "SR_SHORT_RESISTANCE_BROKEN"
+            return False, None
         return False, None
 
     def _profile_context(self, i):
@@ -987,23 +1002,43 @@ class BacktestEngine:
         # Capture support/resistance data
         if self.config.enable_support_resistance_analysis:
             pending = self._pending_sr_context
-            sr_context = pending[2] if pending is not None and pending[0] == ind_i else self._analyze_support_resistance(ind_i, "LONG")
-            if sr_context is not None:
-                for pos in [long, short]:
-                    if pos is not None:
-                        pos.sr_nearest_support = sr_context.nearest_support_price
-                        pos.sr_nearest_resistance = sr_context.nearest_resistance_price
-                        pos.sr_support_distance_atr = sr_context.nearest_support_distance_atr
-                        pos.sr_resistance_distance_atr = sr_context.nearest_resistance_distance_atr
-                        pos.sr_support_distance_price = sr_context.nearest_support_distance_price
-                        pos.sr_resistance_distance_price = sr_context.nearest_resistance_distance_price
-                        pos.sr_near_support = sr_context.near_support
-                        pos.sr_near_resistance = sr_context.near_resistance
-                        pos.sr_inside_support_zone = sr_context.inside_support_zone
-                        pos.sr_inside_resistance_zone = sr_context.inside_resistance_zone
-                        pos.sr_location = sr_context.price_location.value
-                        pos.sr_trade_location_rating = sr_context.trade_location_rating.value
-                        pos.sr_room_in_direction_atr = sr_context.room_in_direction_atr
+            for pos in [long, short]:
+                if pos is None:
+                    continue
+                direction = pos.side.value
+                sr_context = pending[2] if pending is not None and pending[0] == ind_i and pending[1] == direction else self._analyze_support_resistance(ind_i, direction)
+                if sr_context is None:
+                    continue
+                pos.sr_nearest_support = sr_context.nearest_support_price
+                pos.sr_nearest_resistance = sr_context.nearest_resistance_price
+                pos.sr_support_distance_atr = sr_context.nearest_support_distance_atr
+                pos.sr_resistance_distance_atr = sr_context.nearest_resistance_distance_atr
+                pos.sr_support_distance_price = sr_context.nearest_support_distance_price
+                pos.sr_resistance_distance_price = sr_context.nearest_resistance_distance_price
+                pos.sr_near_support = sr_context.near_support
+                pos.sr_near_resistance = sr_context.near_resistance
+                pos.sr_inside_support_zone = sr_context.inside_support_zone
+                pos.sr_inside_resistance_zone = sr_context.inside_resistance_zone
+                pos.sr_location = sr_context.price_location.value
+                pos.sr_trade_location_rating = sr_context.trade_location_rating.value
+                pos.sr_room_in_direction_atr = sr_context.room_in_direction_atr
+                pos.sr_support_state = sr_context.support_state
+                pos.sr_resistance_state = sr_context.resistance_state
+                pos.sr_support_tested = sr_context.support_tested
+                pos.sr_resistance_tested = sr_context.resistance_tested
+                pos.sr_support_held = sr_context.support_held
+                pos.sr_resistance_held = sr_context.resistance_held
+                pos.sr_support_rejection_atr = sr_context.support_rejection_atr
+                pos.sr_resistance_rejection_atr = sr_context.resistance_rejection_atr
+                pos.sr_support_test_count = sr_context.support_test_count
+                pos.sr_resistance_test_count = sr_context.resistance_test_count
+                pos.sr_bars_since_support_test = sr_context.bars_since_support_test
+                pos.sr_bars_since_resistance_test = sr_context.bars_since_resistance_test
+                pos.sr_support_last_test_index = sr_context.support_last_test_index
+                pos.sr_resistance_last_test_index = sr_context.resistance_last_test_index
+                pos.sr_support_last_test_time = pd.Timestamp(self.times[sr_context.support_last_test_index]) if sr_context.support_last_test_index is not None else None
+                pos.sr_resistance_last_test_time = pd.Timestamp(self.times[sr_context.resistance_last_test_index]) if sr_context.resistance_last_test_index is not None else None
+                pos.sr_confirmation_rating = sr_context.confirmation_rating
         
         if preferred_only:
             if sizing_direction == "LONG":
@@ -1954,4 +1989,5 @@ class BacktestEngine:
         cols.update({f"{prefix}_atr_checkpoint_enabled":pos.atr_checkpoint_extension_enabled or pos.atr_checkpoint_count>0,f"{prefix}_atr_checkpoint_count":pos.atr_checkpoint_count,f"{prefix}_atr_checkpoint_pass_count":pos.atr_checkpoint_pass_count,f"{prefix}_atr_checkpoint_fail_count":pos.atr_checkpoint_fail_count,f"{prefix}_atr_checkpoint_last_time":pos.atr_checkpoint_last_time,f"{prefix}_atr_checkpoint_last_r":pos.atr_checkpoint_last_r,f"{prefix}_atr_checkpoint_last_di_spread":pos.atr_checkpoint_last_di_spread,f"{prefix}_atr_checkpoint_last_bb_width":pos.atr_checkpoint_last_bb_width,f"{prefix}_atr_checkpoint_last_passed":pos.atr_checkpoint_last_passed,f"{prefix}_atr_checkpoint_initial_tp":pos.atr_checkpoint_initial_tp,f"{prefix}_atr_checkpoint_final_tp_r":pos.atr_checkpoint_final_tp_r,f"{prefix}_atr_checkpoint_profit_lock_r":pos.atr_checkpoint_profit_lock_r})
         cols.update({f"{prefix}_r_step_trailing_enabled":pos.r_step_trailing_enabled,f"{prefix}_r_step_trailing_active":pos.r_step_trailing_active,f"{prefix}_r_step_checkpoint_count":pos.r_step_checkpoint_count,f"{prefix}_r_step_last_checkpoint_r":pos.r_step_last_checkpoint_r,f"{prefix}_r_step_last_checkpoint_time":pos.r_step_last_checkpoint_time,f"{prefix}_r_step_locked_r":pos.r_step_locked_r,f"{prefix}_r_step_initial_tp":pos.r_step_initial_tp,f"{prefix}_r_step_activation_partial_taken":pos.r_step_activation_partial_taken,f"{prefix}_r_step_activation_close_pct":pos.r_step_activation_close_pct,f"{prefix}_r_step_activation_quantity":pos.r_step_activation_quantity,f"{prefix}_r_step_runner_quantity":pos.r_step_runner_quantity})
         cols.update({f"{prefix}_sr_nearest_support":pos.sr_nearest_support,f"{prefix}_sr_nearest_resistance":pos.sr_nearest_resistance,f"{prefix}_sr_support_distance_atr":pos.sr_support_distance_atr,f"{prefix}_sr_resistance_distance_atr":pos.sr_resistance_distance_atr,f"{prefix}_sr_support_distance_price":pos.sr_support_distance_price,f"{prefix}_sr_resistance_distance_price":pos.sr_resistance_distance_price,f"{prefix}_sr_near_support":pos.sr_near_support,f"{prefix}_sr_near_resistance":pos.sr_near_resistance,f"{prefix}_sr_inside_support_zone":pos.sr_inside_support_zone,f"{prefix}_sr_inside_resistance_zone":pos.sr_inside_resistance_zone,f"{prefix}_sr_location":pos.sr_location,f"{prefix}_sr_trade_location_rating":pos.sr_trade_location_rating,f"{prefix}_sr_room_in_direction_atr":pos.sr_room_in_direction_atr})
+        cols.update({f"{prefix}_sr_support_state":pos.sr_support_state, f"{prefix}_sr_resistance_state":pos.sr_resistance_state, f"{prefix}_sr_support_tested":pos.sr_support_tested, f"{prefix}_sr_resistance_tested":pos.sr_resistance_tested, f"{prefix}_sr_support_held":pos.sr_support_held, f"{prefix}_sr_resistance_held":pos.sr_resistance_held, f"{prefix}_sr_support_rejection_atr":pos.sr_support_rejection_atr, f"{prefix}_sr_resistance_rejection_atr":pos.sr_resistance_rejection_atr, f"{prefix}_sr_support_test_count":pos.sr_support_test_count, f"{prefix}_sr_resistance_test_count":pos.sr_resistance_test_count, f"{prefix}_sr_bars_since_support_test":pos.sr_bars_since_support_test, f"{prefix}_sr_bars_since_resistance_test":pos.sr_bars_since_resistance_test, f"{prefix}_sr_support_last_test_index":pos.sr_support_last_test_index, f"{prefix}_sr_resistance_last_test_index":pos.sr_resistance_last_test_index, f"{prefix}_sr_support_last_test_time":pos.sr_support_last_test_time, f"{prefix}_sr_resistance_last_test_time":pos.sr_resistance_last_test_time, f"{prefix}_sr_confirmation_rating":pos.sr_confirmation_rating})
         return cols

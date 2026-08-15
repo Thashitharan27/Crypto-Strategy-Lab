@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import copy
 import re
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +21,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "enable_coin_flip_sizing": False, "coin_flip_seed": 42, "coin_flip_large_multiplier": 3.0, "coin_flip_small_multiplier": 1.0,
     "enable_di_direction_sizing": False, "flip_filtered_di_direction": False, "di_direction_minimum_spread": 30.0, "di_direction_long_minimum_spread": 30.0, "di_direction_short_minimum_spread": 30.0, "di_execution_mode": "BOTH_SIDES", "di_reward_risk_ratio": 1.0, "di_long_reward_risk_ratio": 1.0, "di_short_reward_risk_ratio": 1.0,
     "enable_direction_voting": False, "direction_vote_use_di": True, "direction_vote_use_structure": True, "direction_vote_structure_lookback": 20, "direction_vote_use_momentum": True, "direction_vote_momentum_lookback_hours": 24, "direction_vote_momentum_threshold": 0.0, "direction_vote_use_volume_pressure": True, "direction_vote_volume_lookback": 20, "direction_vote_volume_threshold": 0.10, "direction_vote_use_higher_timeframe": True, "direction_vote_higher_timeframe_hours": 4, "direction_vote_higher_timeframe_sma_period": 20, "direction_vote_minimum_votes": 2,
-    "enable_support_resistance_analysis": False, "sr_pivot_left": 5, "sr_pivot_right": 5, "sr_lookback_bars": 200, "sr_zone_width_atr": 0.5, "sr_near_distance_atr": 0.75, "sr_filter_mode": "ANALYSIS_ONLY",
+    "enable_support_resistance_analysis": False, "sr_pivot_left": 5, "sr_pivot_right": 5, "sr_lookback_bars": 200, "sr_zone_width_atr": 0.5, "sr_near_distance_atr": 0.75, "enable_sr_hold_confirmation": False, "sr_hold_confirmation_bars": 3, "sr_hold_confirmation_atr": 0.25, "sr_break_tolerance_atr": 0.25, "sr_break_basis": "CLOSE", "sr_filter_mode": "ANALYSIS_ONLY",
     "enable_di_regime_reward_risk": False, "di_regime_bear_return_threshold": -0.20,
     "di_long_bull_reward_risk_ratio": 2.0, "di_long_bear_reward_risk_ratio": 1.0, "di_long_sideways_reward_risk_ratio": 2.0,
     "di_short_bull_reward_risk_ratio": 1.0, "di_short_bear_reward_risk_ratio": 1.0, "di_short_sideways_reward_risk_ratio": 2.0,
@@ -161,10 +161,14 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         try:
             if float(values.get("sr_zone_width_atr", -1)) < 0: errors.append("Support/resistance zone width ATR must be non-negative.")
             if float(values.get("sr_near_distance_atr", -1)) < 0: errors.append("Support/resistance near-distance ATR must be non-negative.")
+            if int(values.get("sr_hold_confirmation_bars", 0)) <= 0: errors.append("Support/resistance hold-confirmation bars must be positive.")
+            if float(values.get("sr_hold_confirmation_atr", -1)) < 0: errors.append("Support/resistance hold-confirmation ATR must be non-negative.")
+            if float(values.get("sr_break_tolerance_atr", -1)) < 0: errors.append("Support/resistance break-tolerance ATR must be non-negative.")
         except (TypeError, ValueError): errors.append("Support/resistance ATR thresholds must be numeric.")
-        allowed_sr_modes = {"ANALYSIS_ONLY", "BLOCK_BAD_LOCATION", "REQUIRE_GOOD_LOCATION"}
+        if str(values.get("sr_break_basis", "CLOSE")).upper() not in {"CLOSE", "WICK"}: errors.append("Support/resistance break basis must be CLOSE or WICK.")
+        allowed_sr_modes = {"ANALYSIS_ONLY", "BLOCK_BAD_LOCATION", "REQUIRE_GOOD_LOCATION", "REQUIRE_CONFIRMED_HOLD", "BLOCK_BROKEN_STRUCTURE"}
         mode = str(values.get("sr_filter_mode", "ANALYSIS_ONLY")).upper().replace("-", "_").replace(" ", "_")
-        if mode not in allowed_sr_modes: errors.append("Support/resistance filter mode must be ANALYSIS_ONLY, BLOCK_BAD_LOCATION, or REQUIRE_GOOD_LOCATION.")
+        if mode not in allowed_sr_modes: errors.append("Support/resistance filter mode is invalid.")
     direction_voter_keys=("direction_vote_use_di","direction_vote_use_structure","direction_vote_use_momentum","direction_vote_use_volume_pressure","direction_vote_use_higher_timeframe")
     enabled_direction_voters=sum(bool(values.get(k)) for k in direction_voter_keys)
     if values.get("enable_direction_voting") and not enabled_direction_voters: errors.append("Direction voting requires at least one voter.")
@@ -375,7 +379,11 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
     errors = validate_config_values(merged, require_paths=require_paths)
     if errors:
         raise ValueError("\n".join(errors))
-    return BacktestConfig(
+    merged["sr_hold_confirmation_bars"] = int(merged.get("sr_hold_confirmation_bars", 3))
+    merged["sr_hold_confirmation_atr"] = float(merged.get("sr_hold_confirmation_atr", 0.25))
+    merged["sr_break_tolerance_atr"] = float(merged.get("sr_break_tolerance_atr", 0.25))
+    merged["sr_break_basis"] = str(merged.get("sr_break_basis", "CLOSE")).upper()
+    config = BacktestConfig(
         input_csv=Path(merged["input_csv"]), strategy_csv=Path(merged["input_csv"] if merged.get("strategy_csv") == DEFAULT_GUI_CONFIG.get("strategy_csv") else (merged.get("strategy_csv") or merged["input_csv"])), intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") else None, output_dir=Path(merged["output_dir"]),
         enable_strategy_profiles=bool(merged["enable_strategy_profiles"]), strategy_profile_run_mode=str(merged["strategy_profile_run_mode"]), strategy_profiles=merged["strategy_profiles"],
         vwap_confirmation_mode=VWAPConfirmationMode(merged["vwap_confirmation_mode"]), vwap_retest_window_candles=int(merged["vwap_retest_window_candles"]), vwap_retest_tolerance_atr=float(merged["vwap_retest_tolerance_atr"]),
@@ -412,6 +420,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         enable_be_after_opposite_sl=bool(merged["enable_be_after_opposite_sl"]), be_mode=BreakEvenMode(merged["be_mode"]), be_offset_r=float(merged["be_offset_r"]), be_same_candle_policy=BreakEvenSameCandlePolicy(merged["be_same_candle_policy"]),
         run_name=str(merged.get("run_name", "")), enable_trade_telemetry=bool(merged["enable_trade_telemetry"]), save_full_telemetry_csv=bool(merged["save_full_telemetry_csv"]), save_trade_journey_summary=bool(merged["save_trade_journey_summary"]), save_trade_journey_charts=bool(merged["save_trade_journey_charts"]), telemetry_interval_minutes=int(merged["telemetry_interval_minutes"]), enable_indicator_lifecycle_analysis=bool(merged["enable_indicator_lifecycle_analysis"]), lifecycle_phases=int(merged["lifecycle_phases"]), lifecycle_early_checkpoints=tuple(int(v) for v in merged["lifecycle_early_checkpoints"]), lifecycle_minimum_bucket_sample=int(merged["lifecycle_minimum_bucket_sample"]), create_lifecycle_charts=bool(merged["create_lifecycle_charts"]), lifecycle_flat_pattern_threshold_pct=float(merged["lifecycle_flat_pattern_threshold_pct"]), save_feature_analysis_reports=bool(merged["save_feature_analysis_reports"]), save_indicator_analysis_reports=bool(merged["save_indicator_analysis_reports"]), create_standard_charts=bool(merged["create_standard_charts"]),
     )
+    return replace(config, enable_sr_hold_confirmation=bool(merged.get("enable_sr_hold_confirmation", False)), sr_hold_confirmation_bars=int(merged["sr_hold_confirmation_bars"]), sr_hold_confirmation_atr=float(merged["sr_hold_confirmation_atr"]), sr_break_tolerance_atr=float(merged["sr_break_tolerance_atr"]), sr_break_basis=str(merged["sr_break_basis"]).upper())
 
 
 def save_config_json(path: str | Path, values: dict[str, Any]) -> None:

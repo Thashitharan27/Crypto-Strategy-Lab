@@ -661,6 +661,75 @@ class TestSupportResistanceDetector:
         assert elapsed < 15.0
         assert detector._last_processed_index == count - 1
 
+    def test_support_test_hold_is_confirmed_only_after_bounce(self):
+        detector = SupportResistanceDetector(
+            pivot_left=1, pivot_right=1, lookback_bars=20,
+            hold_confirmation_bars=3, hold_confirmation_atr=0.25,
+            break_tolerance_atr=0.25,
+        )
+        close = np.array([105, 105, 100, 105, 100.5, 100.5, 101.5], dtype=float)
+        high = np.array([106, 106, 101, 106, 101.5, 101.5, 102], dtype=float)
+        low = np.array([104, 104, 100, 104, 100, 100.5, 101], dtype=float)
+        atrs = np.full(len(close), 4.0)
+        contexts = [detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert contexts[4].support_state == "SUPPORT_TESTING"
+        assert not contexts[4].support_held
+        assert contexts[5].support_state == "SUPPORT_TESTING"
+        assert not contexts[5].support_held
+        assert contexts[6].support_state == "SUPPORT_HELD"
+        assert contexts[6].support_held
+        assert contexts[6].support_rejection_atr >= 0.25
+        assert contexts[4].support_state != "SUPPORT_HELD"
+        assert contexts[5].support_state != "SUPPORT_HELD"
+
+    def test_resistance_test_hold_is_causal(self):
+        detector = SupportResistanceDetector(
+            pivot_left=1, pivot_right=1, lookback_bars=20,
+            hold_confirmation_bars=3, hold_confirmation_atr=0.25,
+        )
+        close = np.array([95, 95, 100, 95, 99.5, 99.5, 98.5], dtype=float)
+        high = np.array([96, 96, 100, 96, 100, 99.5, 99], dtype=float)
+        low = np.array([94, 94, 99, 94, 99, 98.5, 98], dtype=float)
+        atrs = np.full(len(close), 4.0)
+        contexts = [detector.analyze_price_location(i, close, high, low, close, atrs, "SHORT") for i in range(len(close))]
+        assert contexts[4].resistance_state == "RESISTANCE_TESTING"
+        assert contexts[5].resistance_state == "RESISTANCE_TESTING"
+        assert contexts[6].resistance_state == "RESISTANCE_HELD"
+        assert contexts[6].resistance_held
+
+    def test_support_break_timeout_wick_basis_and_expiry(self):
+        close = np.array([105, 105, 100, 105, 100.5, 100.5, 100.5, 100.5, 98.5], dtype=float)
+        high = np.array([106, 106, 101, 106, 101.5, 101.5, 101.5, 101.5, 100.5], dtype=float)
+        low = np.array([104, 104, 100, 104, 100, 100.5, 100.5, 100.5, 98.0], dtype=float)
+        atrs = np.full(len(close), 4.0)
+        close_detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=20, hold_confirmation_bars=2)
+        close_contexts = [close_detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert close_contexts[7].support_state == "APPROACHING_SUPPORT"
+        assert close_contexts[8].support_state == "SUPPORT_BROKEN"
+
+        wick_detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=20, break_basis="WICK")
+        wick_contexts = [wick_detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert wick_contexts[8].support_state == "SUPPORT_BROKEN"
+
+        timeout_detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=20, hold_confirmation_bars=1)
+        timeout_contexts = [timeout_detector.analyze_price_location(i, close[:8], high[:8], low[:8], close[:8], atrs[:8], "LONG") for i in range(8)]
+        assert timeout_contexts[7].support_state == "APPROACHING_SUPPORT"
+
+        expiry_detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=2)
+        expiry_contexts = [expiry_detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert expiry_contexts[8].support_state == "NO_SUPPORT_NEARBY"
+
+    def test_multiple_support_tests_increment_count(self):
+        detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=30, hold_confirmation_bars=2, hold_confirmation_atr=0.25)
+        close = np.array([105, 105, 100, 105, 100, 101.5, 100, 101.5], dtype=float)
+        high = np.array([106, 106, 101, 106, 101, 102, 101, 102], dtype=float)
+        low = np.array([104, 104, 100, 104, 99.5, 101, 99.5, 101], dtype=float)
+        atrs = np.full(len(close), 4.0)
+        contexts = [detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert contexts[4].support_test_count == 1
+        assert contexts[6].support_test_count == 2
+        assert contexts[6].support_last_test_index == 6
+
 
 class TestIntegrationNoLookAhead:
     """Integration tests ensuring no look-ahead bias."""
