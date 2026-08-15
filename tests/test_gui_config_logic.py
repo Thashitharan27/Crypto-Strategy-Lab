@@ -218,6 +218,35 @@ def test_zero_bull_regime_threshold_is_valid(tmp_path):
     assert cfg.bull_regime_return_threshold == 0.0
 
 
+def test_support_resistance_settings_round_trip_and_validation(tmp_path):
+    values = {
+        **base(tmp_path),
+        "enable_support_resistance_analysis": True,
+        "sr_pivot_left": 5,
+        "sr_pivot_right": 5,
+        "sr_lookback_bars": 200,
+        "sr_zone_width_atr": 0.5,
+        "sr_near_distance_atr": 0.75,
+        "sr_filter_mode": "BLOCK_BAD_LOCATION",
+    }
+    assert not validate_config_values(values)
+    cfg = build_backtest_config(values)
+    assert cfg.enable_support_resistance_analysis is True
+    assert cfg.sr_pivot_left == 5
+    assert cfg.sr_pivot_right == 5
+    assert cfg.sr_lookback_bars == 200
+    assert cfg.sr_zone_width_atr == pytest.approx(0.5)
+    assert cfg.sr_near_distance_atr == pytest.approx(0.75)
+    assert cfg.sr_filter_mode == "BLOCK_BAD_LOCATION"
+
+    path = tmp_path / "sr-config.json"
+    save_config_json(path, values)
+    loaded = load_config_json(path)
+    cfg2 = build_backtest_config(loaded)
+    assert cfg2.enable_support_resistance_analysis is True
+    assert cfg2.sr_filter_mode == "BLOCK_BAD_LOCATION"
+
+
 def test_negative_bull_regime_threshold_is_valid(tmp_path):
     values = {
         **base(tmp_path),

@@ -1,0 +1,563 @@
+"""Support and resistance level detection with ATR-based zones and no look-ahead bias."""
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional
+import numpy as np
+from numpy.typing import NDArray
+
+
+class SRLevelType(Enum):
+    """Type of support/resistance level."""
+    SUPPORT = "SUPPORT"
+    RESISTANCE = "RESISTANCE"
+
+
+class LocationClassification(Enum):
+    """Structural location classification."""
+    NEAR_SUPPORT = "NEAR_SUPPORT"
+    NEAR_RESISTANCE = "NEAR_RESISTANCE"
+    BETWEEN_LEVELS = "BETWEEN_LEVELS"
+    NO_STRUCTURE = "NO_STRUCTURE"
+
+
+class TradeLocationRating(Enum):
+    """Trade location quality relative to direction."""
+    GOOD_LOCATION = "GOOD_LOCATION"
+    NEUTRAL_LOCATION = "NEUTRAL_LOCATION"
+    BAD_LOCATION = "BAD_LOCATION"
+
+
+@dataclass
+class SRLevel:
+    """A single support or resistance level."""
+    price: float
+    level_type: SRLevelType
+    bar_index: int  # where it was confirmed
+    first_touch_index: int  # earliest touch
+    touch_count: int = 1
+    confirmed_at_index: Optional[int] = None  # after pivot_right delay
+    zone_bottom: Optional[float] = None
+    zone_top: Optional[float] = None
+    
+    def __post_init__(self):
+        if self.zone_bottom is None:
+            self.zone_bottom = self.price
+        if self.zone_top is None:
+            self.zone_top = self.price
+
+
+@dataclass
+class SRContext:
+    """Support/resistance context for an entry candidate."""
+    nearest_support_price: Optional[float]
+    nearest_support_bar_index: Optional[int]
+    nearest_support_distance_atr: float
+    nearest_support_distance_price: float
+    
+    nearest_resistance_price: Optional[float]
+    nearest_resistance_bar_index: Optional[int]
+    nearest_resistance_distance_atr: float
+    nearest_resistance_distance_price: float
+    
+    price_location: LocationClassification
+    trade_location_rating: TradeLocationRating
+    
+    near_support: bool  # within near_distance_atr of support
+    near_resistance: bool  # within near_distance_atr of resistance
+    
+    inside_support_zone: bool
+    inside_resistance_zone: bool
+    
+    room_in_direction_atr: float  # ATR distance to opposing structure
+
+
+class SwingDetector:
+    """Detects swing highs and swing lows with no look-ahead bias."""
+    
+    def __init__(
+        self,
+        pivot_left: int = 5,
+        pivot_right: int = 5,
+        min_bars_between: int = 1
+    ):
+        """
+        Args:
+            pivot_left: candles to left of candidate peak/valley
+            pivot_right: candles to right of candidate peak/valley (enforces confirmation delay)
+            min_bars_between: minimum bars between adjacent swings
+        """
+        self.pivot_left = pivot_left
+        self.pivot_right = pivot_right
+        self.min_bars_between = min_bars_between
+        
+    def detect_swing_highs(
+        self, high: NDArray[np.float64], index: int
+    ) -> list[int]:
+        """
+        Detect swing highs available at candle index.
+        
+        A swing high at bar i is only available from bar i + pivot_right onward.
+        This prevents look-ahead bias.
+        
+        Example:
+            pivot_left=2, pivot_right=2
+            Swing high at bar 100 only available from bar 102 onward
+        
+        Args:
+            high: numpy array of high prices (full history)
+            index: current candle index (where we're evaluating)
+            
+        Returns:
+            List of bar indices where swing highs were confirmed
+        """
+        swings = []
+        # Scan from pivot_left to current - pivot_right (cutoff for confirmation)
+        cutoff = index - self.pivot_right
+        if cutoff < self.pivot_left:
+            return swings
+            
+        for i in range(self.pivot_left, cutoff + 1):
+            # Check if high[i] is the highest within the pivot window
+            # Left: from i-pivot_left to i-1
+            # Right: from i+1 to i+pivot_right
+            left_start = max(0, i - self.pivot_left)
+            right_end = min(len(high), i + self.pivot_right + 1)
+            
+            left_slice = high[left_start:i]
+            right_slice = high[i + 1:right_end]
+            
+            if len(left_slice) == 0 or len(right_slice) == 0:
+                continue
+            
+            left_max = np.max(left_slice)
+            right_max = np.max(right_slice)
+            
+            # high[i] must be > at least one of left/right (strict for one)
+            # and >= all values (non-strict for other)
+            if high[i] > left_max and high[i] >= right_max:
+                # Ensure min gap from previous swing
+                if not swings or (i - swings[-1] >= self.min_bars_between):
+                    swings.append(i)
+            elif high[i] >= left_max and high[i] > right_max:
+                # Ensure min gap from previous swing
+                if not swings or (i - swings[-1] >= self.min_bars_between):
+                    swings.append(i)
+        
+        return swings
+    
+    def detect_swing_lows(
+        self, low: NDArray[np.float64], index: int
+    ) -> list[int]:
+        """
+        Detect swing lows available at candle index.
+        
+        Mirrors detect_swing_highs() logic but for lows.
+        A swing low at bar i is only available from bar i + pivot_right onward.
+        
+        Args:
+            low: numpy array of low prices (full history)
+            index: current candle index
+            
+        Returns:
+            List of bar indices where swing lows were confirmed
+        """
+        swings = []
+        cutoff = index - self.pivot_right
+        if cutoff < self.pivot_left:
+            return swings
+            
+        for i in range(self.pivot_left, cutoff + 1):
+            left_start = max(0, i - self.pivot_left)
+            right_end = min(len(low), i + self.pivot_right + 1)
+            
+            left_slice = low[left_start:i]
+            right_slice = low[i + 1:right_end]
+            
+            if len(left_slice) == 0 or len(right_slice) == 0:
+                continue
+            
+            left_min = np.min(left_slice)
+            right_min = np.min(right_slice)
+            
+            # low[i] must be < at least one of left/right (strict for one)
+            # and <= all values (non-strict for other)
+            if low[i] < left_min and low[i] <= right_min:
+                if not swings or (i - swings[-1] >= self.min_bars_between):
+                    swings.append(i)
+            elif low[i] <= left_min and low[i] < right_min:
+                if not swings or (i - swings[-1] >= self.min_bars_between):
+                    swings.append(i)
+        
+        return swings
+
+
+class SRZoneMerger:
+    """Merges nearby SR levels into zones."""
+    
+    def __init__(self, zone_width_atr: float = 0.5):
+        """
+        Args:
+            zone_width_atr: merge levels within this many ATRs of each other
+        """
+        self.zone_width_atr = zone_width_atr
+    
+    def merge_levels(
+        self, levels: list[SRLevel], atr: float
+    ) -> list[SRLevel]:
+        """
+        Merge levels that are close together into zones.
+        
+        Args:
+            levels: list of SRLevel objects
+            atr: current ATR value for distance calculation
+            
+        Returns:
+            List of merged SRLevel objects with zone_bottom/zone_top set
+        """
+        if not levels:
+            return []
+        
+        if atr <= 0:
+            return levels
+        
+        # Sort by price
+        sorted_levels = sorted(levels, key=lambda x: x.price)
+        merged = []
+        current_zone = [sorted_levels[0]]
+        
+        merge_distance = self.zone_width_atr * atr
+        
+        for level in sorted_levels[1:]:
+            # If within merge distance, add to current zone
+            if abs(level.price - current_zone[-1].price) <= merge_distance:
+                current_zone.append(level)
+            else:
+                # Finalize current zone and start new one
+                merged.append(self._finalize_zone(current_zone))
+                current_zone = [level]
+        
+        # Finalize last zone
+        merged.append(self._finalize_zone(current_zone))
+        return merged
+    
+    def _finalize_zone(self, zone_levels: list[SRLevel]) -> SRLevel:
+        """Create a zone from multiple levels."""
+        prices = [l.price for l in zone_levels]
+        level_type = zone_levels[0].level_type
+        
+        # Use extreme of zone as price
+        if level_type == SRLevelType.SUPPORT:
+            zone_price = min(prices)  # lowest point
+        else:
+            zone_price = max(prices)  # highest point
+        
+        # Combine metadata
+        result = SRLevel(
+            price=zone_price,
+            level_type=level_type,
+            bar_index=max(l.bar_index for l in zone_levels),
+            first_touch_index=min(l.first_touch_index for l in zone_levels),
+            touch_count=sum(l.touch_count for l in zone_levels),
+        )
+        result.zone_bottom = min(prices)
+        result.zone_top = max(prices)
+        return result
+
+
+class SupportResistanceDetector:
+    """Detects and manages support/resistance levels."""
+    
+    def __init__(
+        self,
+        pivot_left: int = 5,
+        pivot_right: int = 5,
+        lookback_bars: int = 200,
+        zone_width_atr: float = 0.5,
+        near_distance_atr: float = 0.75,
+    ):
+        """
+        Args:
+            pivot_left: bars to left for swing detection
+            pivot_right: bars to right for swing detection (delays level availability)
+            lookback_bars: how many historical bars to scan for levels
+            zone_width_atr: merge levels within this ATR distance
+            near_distance_atr: distance to be considered "near" a level
+        """
+        self.swing_detector = SwingDetector(
+            pivot_left=pivot_left, pivot_right=pivot_right
+        )
+        self.zone_merger = SRZoneMerger(zone_width_atr=zone_width_atr)
+        self.lookback_bars = lookback_bars
+        self.zone_width_atr = zone_width_atr
+        self.near_distance_atr = near_distance_atr
+    
+    def analyze_price_location(
+        self,
+        index: int,
+        open_prices: NDArray,
+        high_prices: NDArray,
+        low_prices: NDArray,
+        close_prices: NDArray,
+        atr_values: NDArray,
+        direction: str,  # "LONG" or "SHORT"
+    ) -> SRContext:
+        """
+        Analyze price location relative to support/resistance.
+        
+        Args:
+            index: current candle index
+            open_prices, high_prices, low_prices, close_prices: OHLC arrays
+            atr_values: ATR array
+            direction: "LONG" or "SHORT"
+            
+        Returns:
+            SRContext with all structural metrics
+        """
+        if index < self.swing_detector.pivot_left + self.swing_detector.pivot_right:
+            # Not enough data for proper confirmation delay
+            return self._default_context()
+        
+        current_price = close_prices[index]
+        current_atr = atr_values[index]
+        
+        if current_atr <= 0:
+            return self._default_context()
+        
+        # Find support/resistance levels
+        support_levels = self._find_support_levels(
+            high_prices, low_prices, index, current_atr
+        )
+        resistance_levels = self._find_resistance_levels(
+            high_prices, low_prices, index, current_atr
+        )
+        
+        # Find nearest levels
+        nearest_support = self._nearest_level(
+            support_levels, current_price, below=True
+        )
+        nearest_resistance = self._nearest_level(
+            resistance_levels, current_price, below=False
+        )
+        
+        # Calculate distances
+        support_dist_price, support_dist_atr = self._calculate_distance(
+            current_price, nearest_support, current_atr
+        )
+        resistance_dist_price, resistance_dist_atr = self._calculate_distance(
+            current_price, nearest_resistance, current_atr
+        )
+        
+        # Classify location
+        location = self._classify_location(
+            nearest_support, nearest_resistance, support_dist_atr, resistance_dist_atr
+        )
+        
+        rating = self._rate_location(location, direction)
+        
+        # Calculate room in direction
+        room = self._calculate_room_in_direction(
+            nearest_support, nearest_resistance, current_price, direction, current_atr
+        )
+        
+        return SRContext(
+            nearest_support_price=nearest_support.price if nearest_support else None,
+            nearest_support_bar_index=nearest_support.bar_index if nearest_support else None,
+            nearest_support_distance_atr=support_dist_atr,
+            nearest_support_distance_price=support_dist_price,
+            
+            nearest_resistance_price=nearest_resistance.price if nearest_resistance else None,
+            nearest_resistance_bar_index=nearest_resistance.bar_index if nearest_resistance else None,
+            nearest_resistance_distance_atr=resistance_dist_atr,
+            nearest_resistance_distance_price=resistance_dist_price,
+            
+            price_location=location,
+            trade_location_rating=rating,
+            
+            near_support=support_dist_atr <= self.near_distance_atr,
+            near_resistance=resistance_dist_atr <= self.near_distance_atr,
+            
+            inside_support_zone=(
+                nearest_support and
+                nearest_support.zone_bottom <= current_price <= nearest_support.zone_top
+            ),
+            inside_resistance_zone=(
+                nearest_resistance and
+                nearest_resistance.zone_bottom <= current_price <= nearest_resistance.zone_top
+            ),
+            
+            room_in_direction_atr=room,
+        )
+    
+    def _find_support_levels(
+        self, high: NDArray, low: NDArray, index: int, atr: float
+    ) -> list[SRLevel]:
+        """Find all support levels visible at index."""
+        start = max(0, index - self.lookback_bars)
+        
+        # Detect swings in the lookback window
+        swing_indices = self.swing_detector.detect_swing_lows(
+            low, index
+        )
+        
+        # Filter to only those in lookback window
+        swing_indices = [i for i in swing_indices if i >= start]
+        
+        levels = [
+            SRLevel(
+                price=low[i],
+                level_type=SRLevelType.SUPPORT,
+                bar_index=i,
+                first_touch_index=i,
+            )
+            for i in swing_indices
+        ]
+        
+        # Merge into zones
+        return self.zone_merger.merge_levels(levels, atr)
+    
+    def _find_resistance_levels(
+        self, high: NDArray, low: NDArray, index: int, atr: float
+    ) -> list[SRLevel]:
+        """Find all resistance levels visible at index."""
+        start = max(0, index - self.lookback_bars)
+        
+        # Detect swings in the lookback window
+        swing_indices = self.swing_detector.detect_swing_highs(
+            high, index
+        )
+        
+        # Filter to only those in lookback window
+        swing_indices = [i for i in swing_indices if i >= start]
+        
+        levels = [
+            SRLevel(
+                price=high[i],
+                level_type=SRLevelType.RESISTANCE,
+                bar_index=i,
+                first_touch_index=i,
+            )
+            for i in swing_indices
+        ]
+        
+        return self.zone_merger.merge_levels(levels, atr)
+    
+    def _nearest_level(
+        self, levels: list[SRLevel], price: float, below: bool
+    ) -> Optional[SRLevel]:
+        """Find nearest support (below) or resistance (above)."""
+        if not levels:
+            return None
+        
+        if below:
+            # Support: find highest level below price
+            candidates = [l for l in levels if l.price <= price]
+            return max(candidates, key=lambda x: x.price) if candidates else None
+        else:
+            # Resistance: find lowest level above price
+            candidates = [l for l in levels if l.price >= price]
+            return min(candidates, key=lambda x: x.price) if candidates else None
+    
+    def _calculate_distance(
+        self, price: float, level: Optional[SRLevel], atr: float
+    ) -> tuple[float, float]:
+        """Calculate distance in price and ATR units."""
+        if level is None or atr <= 0:
+            return np.nan, np.nan
+        
+        price_dist = abs(price - level.price)
+        atr_dist = price_dist / atr
+        return price_dist, atr_dist
+    
+    def _classify_location(
+        self,
+        support: Optional[SRLevel],
+        resistance: Optional[SRLevel],
+        support_dist_atr: float,
+        resistance_dist_atr: float,
+    ) -> LocationClassification:
+        """Classify price location."""
+        near_support = (
+            support is not None and 
+            np.isfinite(support_dist_atr) and
+            support_dist_atr <= self.near_distance_atr
+        )
+        near_resistance = (
+            resistance is not None and
+            np.isfinite(resistance_dist_atr) and
+            resistance_dist_atr <= self.near_distance_atr
+        )
+        
+        if near_support:
+            return LocationClassification.NEAR_SUPPORT
+        elif near_resistance:
+            return LocationClassification.NEAR_RESISTANCE
+        elif support is not None and resistance is not None:
+            return LocationClassification.BETWEEN_LEVELS
+        else:
+            return LocationClassification.NO_STRUCTURE
+    
+    def _rate_location(
+        self, location: LocationClassification, direction: str
+    ) -> TradeLocationRating:
+        """Rate whether location is good for the direction."""
+        if location == LocationClassification.NO_STRUCTURE:
+            return TradeLocationRating.NEUTRAL_LOCATION
+        
+        if direction == "LONG":
+            if location == LocationClassification.NEAR_SUPPORT:
+                return TradeLocationRating.GOOD_LOCATION
+            elif location == LocationClassification.NEAR_RESISTANCE:
+                return TradeLocationRating.BAD_LOCATION
+            else:
+                return TradeLocationRating.NEUTRAL_LOCATION
+        else:  # SHORT
+            if location == LocationClassification.NEAR_RESISTANCE:
+                return TradeLocationRating.GOOD_LOCATION
+            elif location == LocationClassification.NEAR_SUPPORT:
+                return TradeLocationRating.BAD_LOCATION
+            else:
+                return TradeLocationRating.NEUTRAL_LOCATION
+    
+    def _calculate_room_in_direction(
+        self,
+        support: Optional[SRLevel],
+        resistance: Optional[SRLevel],
+        price: float,
+        direction: str,
+        atr: float,
+    ) -> float:
+        """Calculate room in trade direction before opposing structure blocks."""
+        if atr <= 0:
+            return np.nan
+        
+        if direction == "LONG":
+            if resistance is not None:
+                room_price = resistance.zone_bottom - price
+                return room_price / atr if room_price > 0 else np.nan
+        else:  # SHORT
+            if support is not None:
+                room_price = price - support.zone_top
+                return room_price / atr if room_price > 0 else np.nan
+        
+        return np.nan
+    
+    def _default_context(self) -> SRContext:
+        """Return default context (no structure detected)."""
+        return SRContext(
+            nearest_support_price=None,
+            nearest_support_bar_index=None,
+            nearest_support_distance_atr=np.nan,
+            nearest_support_distance_price=np.nan,
+            nearest_resistance_price=None,
+            nearest_resistance_bar_index=None,
+            nearest_resistance_distance_atr=np.nan,
+            nearest_resistance_distance_price=np.nan,
+            price_location=LocationClassification.NO_STRUCTURE,
+            trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
+            near_support=False,
+            near_resistance=False,
+            inside_support_zone=False,
+            inside_resistance_zone=False,
+            room_in_direction_atr=np.nan,
+        )

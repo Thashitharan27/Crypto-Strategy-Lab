@@ -1,0 +1,251 @@
+"""Support/Resistance analysis report generation."""
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+from pathlib import Path
+
+
+def generate_sr_analysis_reports(trades: pd.DataFrame, run_dir: Path) -> dict[str, pd.DataFrame]:
+    """Generate support/resistance analysis reports from trade data.
+    
+    Args:
+        trades: Trade results DataFrame from engine.results_frame()
+        run_dir: Output directory for CSV files
+        
+    Returns:
+        Dictionary of report_name -> DataFrame
+    """
+    if trades.empty or "long_sr_location" not in trades.columns:
+        return {}
+    
+    reports = {}
+    
+    # Report 1: Support/Resistance Analysis by Location and Direction
+    sr_analysis = _build_sr_analysis(trades)
+    if not sr_analysis.empty:
+        reports["support_resistance_analysis.csv"] = sr_analysis
+        sr_analysis.to_csv(run_dir / "support_resistance_analysis.csv", index=False)
+    
+    # Report 2: Support/Resistance Regime Analysis
+    if "market_regime" in trades.columns:
+        sr_regime = _build_sr_regime_analysis(trades)
+        if not sr_regime.empty:
+            reports["support_resistance_regime_analysis.csv"] = sr_regime
+            sr_regime.to_csv(run_dir / "support_resistance_regime_analysis.csv", index=False)
+    
+    # Report 3: Support/Resistance Distance Buckets
+    sr_distance = _build_sr_distance_buckets(trades)
+    if not sr_distance.empty:
+        reports["support_resistance_distance_buckets.csv"] = sr_distance
+        sr_distance.to_csv(run_dir / "support_resistance_distance_buckets.csv", index=False)
+    
+    return reports
+
+
+def _build_sr_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    """Build support/resistance analysis grouped by location and direction."""
+    rows = []
+    
+    # Identify SR location columns for LONG and SHORT
+    long_sr_cols = [c for c in trades.columns if c.startswith("long_sr_")]
+    short_sr_cols = [c for c in trades.columns if c.startswith("short_sr_")]
+    
+    if not long_sr_cols or not short_sr_cols:
+        return pd.DataFrame()
+    
+    # Process LONG trades
+    if "long_sr_location" in trades.columns:
+        long_trades = trades[trades["side"].isin(["LONG", "BOTH"])].copy()
+        if not long_trades.empty:
+            location_groups = long_trades.groupby("long_sr_location", observed=True)
+            for location, group in location_groups:
+                if pd.isna(location):
+                    continue
+                rows.append(_sr_stats_row(location, "LONG", group, "long_"))
+    
+    # Process SHORT trades
+    if "short_sr_location" in trades.columns:
+        short_trades = trades[trades["side"].isin(["SHORT", "BOTH"])].copy()
+        if not short_trades.empty:
+            location_groups = short_trades.groupby("short_sr_location", observed=True)
+            for location, group in location_groups:
+                if pd.isna(location):
+                    continue
+                rows.append(_sr_stats_row(location, "SHORT", group, "short_"))
+    
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def _build_sr_regime_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    """Build support/resistance analysis by regime, location, and direction."""
+    rows = []
+    
+    if "market_regime" not in trades.columns:
+        return pd.DataFrame()
+    
+    # Process LONG trades by regime and location
+    if "long_sr_location" in trades.columns:
+        long_trades = trades[trades["side"].isin(["LONG", "BOTH"])].copy()
+        if not long_trades.empty:
+            for regime in long_trades["market_regime"].dropna().unique():
+                regime_trades = long_trades[long_trades["market_regime"] == regime]
+                location_groups = regime_trades.groupby("long_sr_location", observed=True)
+                for location, group in location_groups:
+                    if pd.isna(location):
+                        continue
+                    row = _sr_stats_row(location, "LONG", group, "long_")
+                    row["regime"] = regime
+                    rows.append(row)
+    
+    # Process SHORT trades by regime and location
+    if "short_sr_location" in trades.columns:
+        short_trades = trades[trades["side"].isin(["SHORT", "BOTH"])].copy()
+        if not short_trades.empty:
+            for regime in short_trades["market_regime"].dropna().unique():
+                regime_trades = short_trades[short_trades["market_regime"] == regime]
+                location_groups = regime_trades.groupby("short_sr_location", observed=True)
+                for location, group in location_groups:
+                    if pd.isna(location):
+                        continue
+                    row = _sr_stats_row(location, "SHORT", group, "short_")
+                    row["regime"] = regime
+                    rows.append(row)
+    
+    if rows:
+        result = pd.DataFrame(rows)
+        # Reorder columns
+        cols = ["regime", "location", "direction"] + [c for c in result.columns if c not in ["regime", "location", "direction"]]
+        return result[cols]
+    
+    return pd.DataFrame()
+
+
+def _build_sr_distance_buckets(trades: pd.DataFrame) -> pd.DataFrame:
+    """Build support/resistance analysis by ATR distance buckets."""
+    rows = []
+    
+    # Define distance buckets (in ATR units)
+    buckets = [(0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0), (1.0, 1.5), (1.5, 2.0), (2.0, np.inf)]
+    bucket_labels = ["0.00-0.25", "0.25-0.50", "0.50-0.75", "0.75-1.00", "1.00-1.50", "1.50-2.00", "2.00+"]
+    
+    # Process LONG trades - support distances
+    if "long_sr_support_distance_atr" in trades.columns:
+        long_trades = trades[trades["side"].isin(["LONG", "BOTH"])].copy()
+        if not long_trades.empty:
+            for (lower, upper), bucket_label in zip(buckets, bucket_labels):
+                mask = (long_trades["long_sr_support_distance_atr"] >= lower) & \
+                       (long_trades["long_sr_support_distance_atr"] < upper) & \
+                       (long_trades["long_sr_support_distance_atr"].notna())
+                if mask.any():
+                    group = long_trades[mask]
+                    row = _sr_stats_row(f"Support {bucket_label} ATR", "LONG", group, "long_")
+                    rows.append(row)
+    
+    # Process LONG trades - resistance distances
+    if "long_sr_resistance_distance_atr" in trades.columns:
+        long_trades = trades[trades["side"].isin(["LONG", "BOTH"])].copy()
+        if not long_trades.empty:
+            for (lower, upper), bucket_label in zip(buckets, bucket_labels):
+                mask = (long_trades["long_sr_resistance_distance_atr"] >= lower) & \
+                       (long_trades["long_sr_resistance_distance_atr"] < upper) & \
+                       (long_trades["long_sr_resistance_distance_atr"].notna())
+                if mask.any():
+                    group = long_trades[mask]
+                    row = _sr_stats_row(f"Resistance {bucket_label} ATR", "LONG", group, "long_")
+                    rows.append(row)
+    
+    # Process SHORT trades - support distances
+    if "short_sr_support_distance_atr" in trades.columns:
+        short_trades = trades[trades["side"].isin(["SHORT", "BOTH"])].copy()
+        if not short_trades.empty:
+            for (lower, upper), bucket_label in zip(buckets, bucket_labels):
+                mask = (short_trades["short_sr_support_distance_atr"] >= lower) & \
+                       (short_trades["short_sr_support_distance_atr"] < upper) & \
+                       (short_trades["short_sr_support_distance_atr"].notna())
+                if mask.any():
+                    group = short_trades[mask]
+                    row = _sr_stats_row(f"Support {bucket_label} ATR", "SHORT", group, "short_")
+                    rows.append(row)
+    
+    # Process SHORT trades - resistance distances
+    if "short_sr_resistance_distance_atr" in trades.columns:
+        short_trades = trades[trades["side"].isin(["SHORT", "BOTH"])].copy()
+        if not short_trades.empty:
+            for (lower, upper), bucket_label in zip(buckets, bucket_labels):
+                mask = (short_trades["short_sr_resistance_distance_atr"] >= lower) & \
+                       (short_trades["short_sr_resistance_distance_atr"] < upper) & \
+                       (short_trades["short_sr_resistance_distance_atr"].notna())
+                if mask.any():
+                    group = short_trades[mask]
+                    row = _sr_stats_row(f"Resistance {bucket_label} ATR", "SHORT", group, "short_")
+                    rows.append(row)
+    
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def _sr_stats_row(location: str, direction: str, group: pd.DataFrame, prefix: str) -> dict:
+    """Calculate statistics for a group of trades."""
+    
+    # Identify which columns contain PnL data (handles both LONG and SHORT prefixes)
+    if f"{prefix}pair_net_r" in group.columns:
+        r_col = f"{prefix}pair_net_r"
+    elif "pair_net_r" in group.columns:
+        r_col = "pair_net_r"
+    else:
+        r_col = None
+    
+    if f"{prefix}pair_net_pnl" in group.columns:
+        pnl_col = f"{prefix}pair_net_pnl"
+    elif "pair_net_pnl" in group.columns:
+        pnl_col = "pair_net_pnl"
+    else:
+        pnl_col = None
+    
+    if f"{prefix}holding_minutes" in group.columns:
+        hold_col = f"{prefix}holding_minutes"
+    elif "holding_minutes" in group.columns:
+        hold_col = "holding_minutes"
+    else:
+        hold_col = None
+    
+    # Calculate win/loss metrics
+    trade_count = len(group)
+    if pnl_col and pnl_col in group.columns:
+        winners = (group[pnl_col] > 0).sum()
+        losers = (group[pnl_col] < 0).sum()
+        breakeven = trade_count - winners - losers
+        win_rate = winners / trade_count if trade_count > 0 else np.nan
+        avg_pnl = group[pnl_col].mean()
+        total_pnl = group[pnl_col].sum()
+    else:
+        winners = losers = breakeven = 0
+        win_rate = avg_pnl = total_pnl = np.nan
+    
+    # Calculate R metrics
+    if r_col and r_col in group.columns:
+        avg_r = group[r_col].mean()
+        total_r = group[r_col].sum()
+    else:
+        avg_r = total_r = np.nan
+    
+    # Calculate holding time
+    if hold_col and hold_col in group.columns:
+        avg_holding_minutes = group[hold_col].mean()
+    else:
+        avg_holding_minutes = np.nan
+    
+    return {
+        "location": location,
+        "direction": direction,
+        "trade_count": trade_count,
+        "winners": winners,
+        "losers": losers,
+        "breakeven": breakeven,
+        "win_rate": win_rate,
+        "total_pnl": total_pnl,
+        "avg_pnl": avg_pnl,
+        "total_r": total_r,
+        "avg_r": avg_r,
+        "avg_holding_minutes": avg_holding_minutes,
+    }

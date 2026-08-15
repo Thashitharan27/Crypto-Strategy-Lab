@@ -17,6 +17,7 @@ from crypto_strategy_lab.plots import save_plots
 from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
 from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, partial_take_profit_analysis
 from crypto_strategy_lab.lifecycle import export_lifecycle_reports
+from crypto_strategy_lab.support_resistance_analysis import generate_sr_analysis_reports
 from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 from crypto_strategy_lab.random_entry import decisions_frame, random_analysis, run_batch, comparison_row
 from crypto_strategy_lab.config import EntryTimingMode
@@ -201,6 +202,7 @@ def main() -> None:
     run_output_step("Saving telemetry summaries", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
     run_output_step("Saving BB width analysis", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
     run_output_step("Saving DI spread analysis", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
+    run_output_step("Building support/resistance analysis", lambda: generate_sr_analysis_reports(trades, run_dir))
     run_output_step("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir))
     equity = equity_curve(trades, config.initial_equity)
     run_output_step("Saving equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False))
