@@ -152,7 +152,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values.get("enable_coin_flip_sizing") and values.get("trade_direction") not in ("BOTH", "BOTH_INDEPENDENT"): errors.append("Coin-flip sizing requires both long and short positions.")
     if values.get("enable_coin_flip_sizing") and (values.get("enable_partial_take_profit") or values.get("enable_partial_stop_loss")): errors.append("Coin-flip sizing cannot be combined with partial TP or partial SL.")
     if values.get("enable_coin_flip_sizing") and values.get("enable_di_direction_sizing"): errors.append("Coin-flip sizing and DI-direction sizing cannot both be enabled.")
-    if values.get("enable_direction_voting") and not values.get("enable_di_direction_sizing"): errors.append("Direction voting requires direction selection.")
     direction_voter_keys=("direction_vote_use_di","direction_vote_use_structure","direction_vote_use_momentum","direction_vote_use_volume_pressure","direction_vote_use_higher_timeframe")
     enabled_direction_voters=sum(bool(values.get(k)) for k in direction_voter_keys)
     if values.get("enable_direction_voting") and not enabled_direction_voters: errors.append("Direction voting requires at least one voter.")
