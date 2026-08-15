@@ -39,8 +39,98 @@ def generate_sr_analysis_reports(trades: pd.DataFrame, run_dir: Path) -> dict[st
     if not sr_distance.empty:
         reports["support_resistance_distance_buckets.csv"] = sr_distance
         sr_distance.to_csv(run_dir / "support_resistance_distance_buckets.csv", index=False)
+
+    for filename, builder in (
+        ("support_resistance_hold_analysis.csv", _build_sr_hold_analysis),
+        ("support_resistance_rejection_analysis.csv", _build_sr_rejection_analysis),
+        ("support_resistance_test_count_analysis.csv", _build_sr_test_count_analysis),
+    ):
+        report = builder(trades)
+        if not report.empty:
+            reports[filename] = report
+            report.to_csv(run_dir / filename, index=False)
     
     return reports
+
+
+def _interaction_rows(trades: pd.DataFrame, metric: str) -> list[dict]:
+    rows = []
+    for direction, prefix, side_values in (("LONG", "long_", {"LONG", "BOTH"}), ("SHORT", "short_", {"SHORT", "BOTH"})):
+        if "side" not in trades.columns:
+            continue
+        selected = trades[trades["side"].isin(side_values)]
+        for structure, state_col, value_col in (("Support", f"{prefix}sr_support_state", f"{prefix}sr_support_{metric}"), ("Resistance", f"{prefix}sr_resistance_state", f"{prefix}sr_resistance_{metric}")):
+            if state_col not in selected.columns:
+                continue
+            group_columns = [state_col] + (["market_regime"] if "market_regime" in selected.columns else [])
+            for keys, group in selected.groupby(group_columns, dropna=False, observed=True):
+                keys = (keys,) if not isinstance(keys, tuple) else keys
+                state = keys[0]
+                if pd.isna(state):
+                    continue
+                row = _sr_stats_row(str(state), direction, group, prefix)
+                row["structure_type"] = structure
+                row["state"] = state
+                if "market_regime" in selected.columns:
+                    row["market_regime"] = keys[1]
+                if value_col in group.columns:
+                    row[f"average_{metric}"] = group[value_col].mean()
+                rows.append(row)
+    return rows
+
+
+def _build_sr_hold_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    rows = _interaction_rows(trades, "held")
+    if not rows:
+        return pd.DataFrame()
+    result = pd.DataFrame(rows)
+    columns = ["direction", "market_regime", "structure_type", "state", "trade_count", "winners", "losers", "win_rate", "total_r", "avg_r", "total_pnl", "avg_pnl"]
+    return result[[column for column in columns if column in result.columns]]
+
+
+def _build_sr_rejection_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    buckets = [(0.0, 0.25, "0-0.25 ATR"), (0.25, 0.50, "0.25-0.50 ATR"), (0.50, 0.75, "0.50-0.75 ATR"), (0.75, 1.00, "0.75-1.00 ATR"), (1.00, 1.50, "1.00-1.50 ATR"), (1.50, np.inf, "1.50+ ATR")]
+    for direction, prefix, side_values in (("LONG", "long_", {"LONG", "BOTH"}), ("SHORT", "short_", {"SHORT", "BOTH"})):
+        selected = trades[trades["side"].isin(side_values)] if "side" in trades.columns else trades
+        for structure in ("Support", "Resistance"):
+            value_col = f"{prefix}sr_{structure.lower()}_rejection_atr"
+            if value_col not in selected.columns:
+                continue
+            for lower, upper, label in buckets:
+                mask = selected[value_col].notna() & (selected[value_col] >= lower) & (selected[value_col] < upper)
+                bucket_trades = selected[mask]
+                if bucket_trades.empty:
+                    continue
+                grouped = bucket_trades.groupby("market_regime", dropna=False, observed=True) if "market_regime" in bucket_trades.columns else [(None, bucket_trades)]
+                for regime, group in grouped:
+                    row = _sr_stats_row(label, direction, group, prefix)
+                    row.update({"market_regime": regime, "structure_type": structure, "rejection_bucket": label})
+                    rows.append(row)
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def _build_sr_test_count_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for direction, prefix, side_values in (("LONG", "long_", {"LONG", "BOTH"}), ("SHORT", "short_", {"SHORT", "BOTH"})):
+        selected = trades[trades["side"].isin(side_values)] if "side" in trades.columns else trades
+        for structure in ("Support", "Resistance"):
+            count_col = f"{prefix}sr_{structure.lower()}_test_count"
+            state_col = f"{prefix}sr_{structure.lower()}_state"
+            if count_col not in selected.columns:
+                continue
+            bucket = selected[count_col].fillna(0).astype(int).map(lambda count: "1st test" if count == 1 else ("2nd test" if count == 2 else ("3rd test" if count == 3 else ("4+ tests" if count >= 4 else "No test"))))
+            group_columns = ["_sr_test_bucket"] + ([state_col] if state_col in selected.columns else []) + (["market_regime"] if "market_regime" in selected.columns else [])
+            grouped = selected.assign(_sr_test_bucket=bucket).groupby(group_columns, dropna=False, observed=True)
+            for keys, group in grouped:
+                if not isinstance(keys, tuple):
+                    keys = (keys, None)
+                row = _sr_stats_row(str(keys[0]), direction, group, prefix)
+                state_index = 1 if state_col in selected.columns else None
+                regime_index = (state_index + 1) if state_index is not None and "market_regime" in selected.columns else (1 if "market_regime" in selected.columns else None)
+                row.update({"market_regime": keys[regime_index] if regime_index is not None else None, "structure_type": structure, "test_bucket": keys[0], "state": keys[state_index] if state_index is not None else None})
+                rows.append(row)
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
 
 
 def _build_sr_analysis(trades: pd.DataFrame) -> pd.DataFrame:

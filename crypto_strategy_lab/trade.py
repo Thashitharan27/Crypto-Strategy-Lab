@@ -37,6 +37,15 @@ class Position:
     sr_inside_support_zone: bool = False; sr_inside_resistance_zone: bool = False
     sr_location: str = "NO_STRUCTURE"; sr_trade_location_rating: str = "NEUTRAL"
     sr_room_in_direction_atr: float = float('nan')
+    sr_support_state: str = "NO_SUPPORT_NEARBY"; sr_resistance_state: str = "NO_RESISTANCE_NEARBY"
+    sr_support_tested: bool = False; sr_resistance_tested: bool = False
+    sr_support_held: bool = False; sr_resistance_held: bool = False
+    sr_support_rejection_atr: float = float('nan'); sr_resistance_rejection_atr: float = float('nan')
+    sr_support_test_count: int = 0; sr_resistance_test_count: int = 0
+    sr_bars_since_support_test: Optional[int] = None; sr_bars_since_resistance_test: Optional[int] = None
+    sr_support_last_test_index: Optional[int] = None; sr_resistance_last_test_index: Optional[int] = None
+    sr_support_last_test_time: Optional[object] = None; sr_resistance_last_test_time: Optional[object] = None
+    sr_confirmation_rating: str = "NEUTRAL"
     @property
     def is_open(self) -> bool: return self.exit_time is None
 

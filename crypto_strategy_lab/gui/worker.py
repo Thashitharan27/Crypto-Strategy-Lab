@@ -17,6 +17,7 @@ from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey
 from crypto_strategy_lab.lifecycle import export_lifecycle_reports
 from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
 from crypto_strategy_lab.random_entry import decisions_frame, random_analysis, run_batch, comparison_row
+from crypto_strategy_lab.support_resistance_analysis import generate_sr_analysis_reports
 from crypto_strategy_lab.config import EntryTimingMode
 from dataclasses import replace
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS
@@ -277,6 +278,7 @@ class BacktestWorker(QObject):
             run_output_step("writing skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
             parallel_reports = [
                 ("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir), 98),
+                ("writing support/resistance analysis reports", lambda: generate_sr_analysis_reports(trades, run_dir), 98),
                 ("writing equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False), 98),
                 ("writing monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False), 98),
                 ("writing yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False), 98),

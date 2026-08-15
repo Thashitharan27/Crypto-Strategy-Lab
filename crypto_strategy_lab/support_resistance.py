@@ -28,6 +28,20 @@ class TradeLocationRating(Enum):
     BAD_LOCATION = "BAD_LOCATION"
 
 
+class SRInteractionState(Enum):
+    """Causal interaction state for an active support or resistance zone."""
+    NO_SUPPORT_NEARBY = "NO_SUPPORT_NEARBY"
+    APPROACHING_SUPPORT = "APPROACHING_SUPPORT"
+    SUPPORT_TESTING = "SUPPORT_TESTING"
+    SUPPORT_HELD = "SUPPORT_HELD"
+    SUPPORT_BROKEN = "SUPPORT_BROKEN"
+    NO_RESISTANCE_NEARBY = "NO_RESISTANCE_NEARBY"
+    APPROACHING_RESISTANCE = "APPROACHING_RESISTANCE"
+    RESISTANCE_TESTING = "RESISTANCE_TESTING"
+    RESISTANCE_HELD = "RESISTANCE_HELD"
+    RESISTANCE_BROKEN = "RESISTANCE_BROKEN"
+
+
 @dataclass
 class SRLevel:
     """A single support or resistance level."""
@@ -39,6 +53,7 @@ class SRLevel:
     confirmed_at_index: Optional[int] = None  # after pivot_right delay
     zone_bottom: Optional[float] = None
     zone_top: Optional[float] = None
+    source_bar_indices: tuple[int, ...] = ()
     
     def __post_init__(self):
         if self.zone_bottom is None:
@@ -70,6 +85,21 @@ class SRContext:
     inside_resistance_zone: bool
     
     room_in_direction_atr: float  # ATR distance to opposing structure
+    support_state: str = SRInteractionState.NO_SUPPORT_NEARBY.value
+    resistance_state: str = SRInteractionState.NO_RESISTANCE_NEARBY.value
+    support_tested: bool = False
+    resistance_tested: bool = False
+    support_held: bool = False
+    resistance_held: bool = False
+    support_rejection_atr: float = float("nan")
+    resistance_rejection_atr: float = float("nan")
+    support_test_count: int = 0
+    resistance_test_count: int = 0
+    bars_since_support_test: Optional[int] = None
+    bars_since_resistance_test: Optional[int] = None
+    support_last_test_index: Optional[int] = None
+    resistance_last_test_index: Optional[int] = None
+    confirmation_rating: str = "NEUTRAL"
 
 
 class SwingDetector:
@@ -259,6 +289,7 @@ class SRZoneMerger:
             bar_index=max(l.bar_index for l in zone_levels),
             first_touch_index=min(l.first_touch_index for l in zone_levels),
             touch_count=sum(l.touch_count for l in zone_levels),
+            source_bar_indices=tuple(l.bar_index for l in zone_levels),
         )
         result.zone_bottom = min(prices)
         result.zone_top = max(prices)
@@ -266,7 +297,7 @@ class SRZoneMerger:
 
 
 class SupportResistanceDetector:
-    """Detects and manages support/resistance levels."""
+    """Detects and manages support/resistance levels incrementally."""
     
     def __init__(
         self,
@@ -275,6 +306,11 @@ class SupportResistanceDetector:
         lookback_bars: int = 200,
         zone_width_atr: float = 0.5,
         near_distance_atr: float = 0.75,
+        enable_hold_confirmation: bool = True,
+        hold_confirmation_bars: int = 3,
+        hold_confirmation_atr: float = 0.25,
+        break_tolerance_atr: float = 0.25,
+        break_basis: str = "CLOSE",
     ):
         """
         Args:
@@ -291,6 +327,143 @@ class SupportResistanceDetector:
         self.lookback_bars = lookback_bars
         self.zone_width_atr = zone_width_atr
         self.near_distance_atr = near_distance_atr
+        self.enable_hold_confirmation = bool(enable_hold_confirmation)
+        self.hold_confirmation_bars = max(1, int(hold_confirmation_bars))
+        self.hold_confirmation_atr = max(0.0, float(hold_confirmation_atr))
+        self.break_tolerance_atr = max(0.0, float(break_tolerance_atr))
+        self.break_basis = str(break_basis).upper()
+        self._confirmed_highs: list[SRLevel] = []
+        self._confirmed_lows: list[SRLevel] = []
+        self._last_processed_index = -1
+        self._base_context_cache: dict[int, tuple] = {}
+        self._context_cache: dict[tuple[int, str], SRContext] = {}
+        self._context_input_cache: dict[int, tuple[float, float]] = {}
+        self._interaction_state: dict[tuple[str, tuple[int, ...]], dict] = {}
+
+    def _reset_incremental_state(self) -> None:
+        self._confirmed_highs.clear()
+        self._confirmed_lows.clear()
+        self._last_processed_index = -1
+        self._base_context_cache.clear()
+        self._context_cache.clear()
+        self._context_input_cache.clear()
+        self._interaction_state.clear()
+
+    def _is_swing_high(self, high: NDArray[np.float64], index: int) -> bool:
+        left = high[index - self.swing_detector.pivot_left:index]
+        right = high[index + 1:index + self.swing_detector.pivot_right + 1]
+        if len(left) == 0 or len(right) == 0:
+            return False
+        return (high[index] > np.max(left) and high[index] >= np.max(right)) or (
+            high[index] >= np.max(left) and high[index] > np.max(right)
+        )
+
+    def _is_swing_low(self, low: NDArray[np.float64], index: int) -> bool:
+        left = low[index - self.swing_detector.pivot_left:index]
+        right = low[index + 1:index + self.swing_detector.pivot_right + 1]
+        if len(left) == 0 or len(right) == 0:
+            return False
+        return (low[index] < np.min(left) and low[index] <= np.min(right)) or (
+            low[index] <= np.min(left) and low[index] < np.min(right)
+        )
+
+    def _append_confirmed_level(self, levels: list[SRLevel], level: SRLevel) -> None:
+        if levels and level.bar_index - levels[-1].bar_index < self.swing_detector.min_bars_between:
+            return
+        levels.append(level)
+
+    def _expire_levels(self, index: int) -> None:
+        cutoff = index - self.lookback_bars
+        self._confirmed_highs = [level for level in self._confirmed_highs if level.bar_index >= cutoff]
+        self._confirmed_lows = [level for level in self._confirmed_lows if level.bar_index >= cutoff]
+
+    def _zone_key(self, level: SRLevel) -> tuple[str, tuple[int, ...]]:
+        sources = level.source_bar_indices or (level.bar_index,)
+        return level.level_type.value, tuple(sorted(sources))
+
+    def _update_zone_interaction(self, level: SRLevel, index: int, open_prices: NDArray, high: NDArray, low: NDArray, close: NDArray, atr: float) -> None:
+        key = self._zone_key(level)
+        state = self._interaction_state.get(key)
+        if state is None:
+            level_sources = set(key[1])
+            for existing_key, existing_state in self._interaction_state.items():
+                if existing_key[0] == key[0] and level_sources.intersection(existing_key[1]):
+                    state = dict(existing_state)
+                    self._interaction_state[key] = state
+                    break
+        if state is None:
+            state = {
+            "state": SRInteractionState.APPROACHING_SUPPORT.value if level.level_type == SRLevelType.SUPPORT else SRInteractionState.APPROACHING_RESISTANCE.value,
+            "last_test_index": None, "test_count": 0, "pending_test_index": None,
+            "rejection_atr": np.nan, "held_index": None,
+            }
+            self._interaction_state[key] = state
+        if not np.isfinite(atr) or atr <= 0:
+            return
+        support = level.level_type == SRLevelType.SUPPORT
+        break_price = low[index] if self.break_basis == "WICK" else close[index]
+        broken = (break_price < level.zone_bottom - atr * self.break_tolerance_atr) if support else (break_price > level.zone_top + atr * self.break_tolerance_atr)
+        if broken:
+            state.update(state=SRInteractionState.SUPPORT_BROKEN.value if support else SRInteractionState.RESISTANCE_BROKEN.value, pending_test_index=None)
+            return
+        tested = low[index] <= level.zone_top and high[index] >= level.zone_bottom
+        if tested:
+            if state["pending_test_index"] is None:
+                state.update(
+                    last_test_index=index, test_count=state["test_count"] + 1,
+                    pending_test_index=index, rejection_atr=0.0,
+                )
+            state["state"] = SRInteractionState.SUPPORT_TESTING.value if support else SRInteractionState.RESISTANCE_TESTING.value
+            return
+        pending = state["pending_test_index"]
+        if pending is None:
+            if state["state"] not in {SRInteractionState.SUPPORT_HELD.value, SRInteractionState.RESISTANCE_HELD.value, SRInteractionState.SUPPORT_BROKEN.value, SRInteractionState.RESISTANCE_BROKEN.value}:
+                state["state"] = SRInteractionState.APPROACHING_SUPPORT.value if support else SRInteractionState.APPROACHING_RESISTANCE.value
+            return
+        bars_since = index - pending
+        if bars_since > self.hold_confirmation_bars:
+            state.update(state=SRInteractionState.APPROACHING_SUPPORT.value if support else SRInteractionState.APPROACHING_RESISTANCE.value, pending_test_index=None)
+            return
+        rejection = max(0.0, (close[index] - level.zone_top) / atr) if support else max(0.0, (level.zone_bottom - close[index]) / atr)
+        state["rejection_atr"] = max(float(state.get("rejection_atr", 0.0)), rejection)
+        if self.enable_hold_confirmation and rejection >= self.hold_confirmation_atr:
+            state.update(state=SRInteractionState.SUPPORT_HELD.value if support else SRInteractionState.RESISTANCE_HELD.value, held_index=index, pending_test_index=None)
+
+    def _advance_to(self, index: int, open_prices: NDArray, high: NDArray[np.float64], low: NDArray[np.float64], close: NDArray, atr_values: NDArray) -> None:
+        if index < self._last_processed_index:
+            self._reset_incremental_state()
+        for current_index in range(self._last_processed_index + 1, index + 1):
+            candidate_index = current_index - self.swing_detector.pivot_right
+            if candidate_index >= self.swing_detector.pivot_left:
+                if self._is_swing_high(high, candidate_index):
+                    self._append_confirmed_level(
+                        self._confirmed_highs,
+                        SRLevel(
+                            price=float(high[candidate_index]),
+                            level_type=SRLevelType.RESISTANCE,
+                            bar_index=candidate_index,
+                            first_touch_index=candidate_index,
+                            confirmed_at_index=current_index,
+                        ),
+                    )
+                if self._is_swing_low(low, candidate_index):
+                    self._append_confirmed_level(
+                        self._confirmed_lows,
+                        SRLevel(
+                            price=float(low[candidate_index]),
+                            level_type=SRLevelType.SUPPORT,
+                            bar_index=candidate_index,
+                            first_touch_index=candidate_index,
+                            confirmed_at_index=current_index,
+                        ),
+                    )
+            self._expire_levels(current_index)
+            current_atr = float(atr_values[current_index]) if current_index < len(atr_values) else np.nan
+            for zone in self._find_support_levels(high, low, current_index, current_atr):
+                self._update_zone_interaction(zone, current_index, open_prices, high, low, close, current_atr)
+            for zone in self._find_resistance_levels(high, low, current_index, current_atr):
+                self._update_zone_interaction(zone, current_index, open_prices, high, low, close, current_atr)
+        self._last_processed_index = index
     
     def analyze_price_location(
         self,
@@ -314,39 +487,49 @@ class SupportResistanceDetector:
         Returns:
             SRContext with all structural metrics
         """
+        direction = str(direction).upper()
+        cache_key = (index, direction)
+        input_signature = (float(close_prices[index]), float(atr_values[index]))
+        if self._context_input_cache.get(index) != input_signature:
+            self._base_context_cache.pop(index, None)
+            for key in ((index, "LONG"), (index, "SHORT")):
+                self._context_cache.pop(key, None)
+            self._context_input_cache[index] = input_signature
+        if cache_key in self._context_cache:
+            return self._context_cache[cache_key]
+
         if index < self.swing_detector.pivot_left + self.swing_detector.pivot_right:
-            # Not enough data for proper confirmation delay
-            return self._default_context()
+            context = self._default_context()
+            self._context_cache[cache_key] = context
+            return context
         
         current_price = close_prices[index]
         current_atr = atr_values[index]
         
-        if current_atr <= 0:
-            return self._default_context()
-        
-        # Find support/resistance levels
-        support_levels = self._find_support_levels(
-            high_prices, low_prices, index, current_atr
-        )
-        resistance_levels = self._find_resistance_levels(
-            high_prices, low_prices, index, current_atr
-        )
-        
-        # Find nearest levels
-        nearest_support = self._nearest_level(
-            support_levels, current_price, below=True
-        )
-        nearest_resistance = self._nearest_level(
-            resistance_levels, current_price, below=False
-        )
-        
-        # Calculate distances
-        support_dist_price, support_dist_atr = self._calculate_distance(
-            current_price, nearest_support, current_atr
-        )
-        resistance_dist_price, resistance_dist_atr = self._calculate_distance(
-            current_price, nearest_resistance, current_atr
-        )
+        if not np.isfinite(current_atr) or current_atr <= 0:
+            context = self._default_context()
+            self._context_cache[cache_key] = context
+            return context
+
+        self._advance_to(index, open_prices, high_prices, low_prices, close_prices, atr_values)
+
+        if index not in self._base_context_cache:
+            support_levels = self._find_support_levels(high_prices, low_prices, index, current_atr)
+            resistance_levels = self._find_resistance_levels(high_prices, low_prices, index, current_atr)
+            nearest_support = self._nearest_level(support_levels, current_price, below=True)
+            nearest_resistance = self._nearest_level(resistance_levels, current_price, below=False)
+            support_dist_price, support_dist_atr = self._calculate_distance(current_price, nearest_support, current_atr)
+            resistance_dist_price, resistance_dist_atr = self._calculate_distance(current_price, nearest_resistance, current_atr)
+            self._base_context_cache[index] = (
+                nearest_support, nearest_resistance,
+                support_dist_price, support_dist_atr,
+                resistance_dist_price, resistance_dist_atr,
+            )
+        (
+            nearest_support, nearest_resistance,
+            support_dist_price, support_dist_atr,
+            resistance_dist_price, resistance_dist_atr,
+        ) = self._base_context_cache[index]
         
         # Classify location
         location = self._classify_location(
@@ -359,8 +542,15 @@ class SupportResistanceDetector:
         room = self._calculate_room_in_direction(
             nearest_support, nearest_resistance, current_price, direction, current_atr
         )
+        support_metrics = self._interaction_metrics(nearest_support, index, True)
+        resistance_metrics = self._interaction_metrics(nearest_resistance, index, False)
+        if nearest_support is None:
+            support_metrics = self._interaction_metrics_for_active_state(index, True, SRInteractionState.SUPPORT_BROKEN.value, current_atr)
+        if nearest_resistance is None:
+            resistance_metrics = self._interaction_metrics_for_active_state(index, False, SRInteractionState.RESISTANCE_BROKEN.value, current_atr)
+        confirmation_rating = self._confirmation_rating(direction, support_metrics["state"], resistance_metrics["state"])
         
-        return SRContext(
+        context = SRContext(
             nearest_support_price=nearest_support.price if nearest_support else None,
             nearest_support_bar_index=nearest_support.bar_index if nearest_support else None,
             nearest_support_distance_atr=support_dist_atr,
@@ -374,73 +564,74 @@ class SupportResistanceDetector:
             price_location=location,
             trade_location_rating=rating,
             
-            near_support=support_dist_atr <= self.near_distance_atr,
-            near_resistance=resistance_dist_atr <= self.near_distance_atr,
+            near_support=np.isfinite(support_dist_atr) and support_dist_atr <= self.near_distance_atr,
+            near_resistance=np.isfinite(resistance_dist_atr) and resistance_dist_atr <= self.near_distance_atr,
             
-            inside_support_zone=(
+            inside_support_zone=bool(
                 nearest_support and
                 nearest_support.zone_bottom <= current_price <= nearest_support.zone_top
             ),
-            inside_resistance_zone=(
+            inside_resistance_zone=bool(
                 nearest_resistance and
                 nearest_resistance.zone_bottom <= current_price <= nearest_resistance.zone_top
             ),
             
             room_in_direction_atr=room,
+            support_state=support_metrics["state"],
+            resistance_state=resistance_metrics["state"],
+            support_tested=support_metrics["tested"], resistance_tested=resistance_metrics["tested"],
+            support_held=support_metrics["held"], resistance_held=resistance_metrics["held"],
+            support_rejection_atr=support_metrics["rejection_atr"], resistance_rejection_atr=resistance_metrics["rejection_atr"],
+            support_test_count=support_metrics["test_count"], resistance_test_count=resistance_metrics["test_count"],
+            bars_since_support_test=support_metrics["bars_since_test"], bars_since_resistance_test=resistance_metrics["bars_since_test"],
+            support_last_test_index=support_metrics["last_test_index"], resistance_last_test_index=resistance_metrics["last_test_index"],
+            confirmation_rating=confirmation_rating,
         )
+        self._context_cache[cache_key] = context
+        return context
+
+    def _interaction_metrics(self, level: Optional[SRLevel], index: int, support: bool) -> dict:
+        default_state = SRInteractionState.NO_SUPPORT_NEARBY.value if support else SRInteractionState.NO_RESISTANCE_NEARBY.value
+        if level is None:
+            return {"state": default_state, "tested": False, "held": False, "rejection_atr": np.nan, "test_count": 0, "bars_since_test": None, "last_test_index": None}
+        state = self._interaction_state.get(self._zone_key(level), {})
+        state_value = state.get("state", SRInteractionState.APPROACHING_SUPPORT.value if support else SRInteractionState.APPROACHING_RESISTANCE.value)
+        last_test = state.get("last_test_index")
+        held_value = SRInteractionState.SUPPORT_HELD.value if support else SRInteractionState.RESISTANCE_HELD.value
+        return {"state": state_value, "tested": bool(state.get("test_count", 0)), "held": state_value == held_value, "rejection_atr": state.get("rejection_atr", np.nan), "test_count": int(state.get("test_count", 0)), "bars_since_test": index - last_test if last_test is not None else None, "last_test_index": last_test}
+
+    def _interaction_metrics_for_active_state(self, index: int, support: bool, wanted_state: str, atr: float) -> dict:
+        levels = self._confirmed_lows if support else self._confirmed_highs
+        zones = self.zone_merger.merge_levels(levels, atr) if levels else []
+        for level in zones:
+            state = self._interaction_state.get(self._zone_key(level), {})
+            if state.get("state") == wanted_state:
+                return self._interaction_metrics(level, index, support)
+        return self._interaction_metrics(None, index, support)
+
+    def _confirmation_rating(self, direction: str, support_state: str, resistance_state: str) -> str:
+        held = SRInteractionState.SUPPORT_HELD.value if direction == "LONG" else SRInteractionState.RESISTANCE_HELD.value
+        broken = SRInteractionState.SUPPORT_BROKEN.value if direction == "LONG" else SRInteractionState.RESISTANCE_BROKEN.value
+        relevant = support_state if direction == "LONG" else resistance_state
+        if relevant == held:
+            return "CONFIRMED_GOOD"
+        if relevant == broken:
+            return "CONFIRMED_BAD"
+        if relevant in {SRInteractionState.SUPPORT_TESTING.value, SRInteractionState.RESISTANCE_TESTING.value}:
+            return "UNCONFIRMED"
+        return "NEUTRAL"
     
     def _find_support_levels(
         self, high: NDArray, low: NDArray, index: int, atr: float
     ) -> list[SRLevel]:
-        """Find all support levels visible at index."""
-        start = max(0, index - self.lookback_bars)
-        
-        # Detect swings in the lookback window
-        swing_indices = self.swing_detector.detect_swing_lows(
-            low, index
-        )
-        
-        # Filter to only those in lookback window
-        swing_indices = [i for i in swing_indices if i >= start]
-        
-        levels = [
-            SRLevel(
-                price=low[i],
-                level_type=SRLevelType.SUPPORT,
-                bar_index=i,
-                first_touch_index=i,
-            )
-            for i in swing_indices
-        ]
-        
-        # Merge into zones
-        return self.zone_merger.merge_levels(levels, atr)
+        """Merge only the active, already-confirmed support levels."""
+        return self.zone_merger.merge_levels(self._confirmed_lows, atr)
     
     def _find_resistance_levels(
         self, high: NDArray, low: NDArray, index: int, atr: float
     ) -> list[SRLevel]:
-        """Find all resistance levels visible at index."""
-        start = max(0, index - self.lookback_bars)
-        
-        # Detect swings in the lookback window
-        swing_indices = self.swing_detector.detect_swing_highs(
-            high, index
-        )
-        
-        # Filter to only those in lookback window
-        swing_indices = [i for i in swing_indices if i >= start]
-        
-        levels = [
-            SRLevel(
-                price=high[i],
-                level_type=SRLevelType.RESISTANCE,
-                bar_index=i,
-                first_touch_index=i,
-            )
-            for i in swing_indices
-        ]
-        
-        return self.zone_merger.merge_levels(levels, atr)
+        """Merge only the active, already-confirmed resistance levels."""
+        return self.zone_merger.merge_levels(self._confirmed_highs, atr)
     
     def _nearest_level(
         self, levels: list[SRLevel], price: float, below: bool
@@ -464,8 +655,13 @@ class SupportResistanceDetector:
         """Calculate distance in price and ATR units."""
         if level is None or atr <= 0:
             return np.nan, np.nan
-        
-        price_dist = abs(price - level.price)
+
+        if level.zone_bottom <= price <= level.zone_top:
+            price_dist = 0.0
+        elif price > level.zone_top:
+            price_dist = price - level.zone_top
+        else:
+            price_dist = level.zone_bottom - price
         atr_dist = price_dist / atr
         return price_dist, atr_dist
     

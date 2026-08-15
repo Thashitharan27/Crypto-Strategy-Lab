@@ -193,6 +193,11 @@ class BacktestConfig:
     sr_lookback_bars: int = 200
     sr_zone_width_atr: float = 0.5
     sr_near_distance_atr: float = 0.75
+    enable_sr_hold_confirmation: bool = False
+    sr_hold_confirmation_bars: int = 3
+    sr_hold_confirmation_atr: float = 0.25
+    sr_break_tolerance_atr: float = 0.25
+    sr_break_basis: str = "CLOSE"
     sr_filter_mode: str = "ANALYSIS_ONLY"
     di_long_bull_reward_risk_ratio: float = 2.0
     di_long_bear_reward_risk_ratio: float = 1.0

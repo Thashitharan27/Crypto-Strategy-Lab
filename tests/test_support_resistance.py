@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+import time
 from crypto_strategy_lab.config import BacktestConfig
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.support_resistance import (
@@ -580,6 +581,154 @@ class TestSupportResistanceDetector:
         
         # Should return default (no errors)
         assert context.price_location == LocationClassification.NO_STRUCTURE
+
+    def test_incremental_levels_match_legacy_swing_scan(self):
+        """Incremental active levels match the original causal scan."""
+        rng = np.random.default_rng(42)
+        close = 100.0 + np.cumsum(rng.normal(0.0, 0.5, 120))
+        high = close + rng.uniform(0.1, 1.0, len(close))
+        low = close - rng.uniform(0.1, 1.0, len(close))
+        opens = close.copy()
+        atrs = np.full(len(close), 1.5)
+        detector = SupportResistanceDetector(pivot_left=3, pivot_right=2, lookback_bars=40)
+
+        for index in range(len(close)):
+            context = detector.analyze_price_location(index, opens, high, low, close, atrs, "LONG")
+            high_indices = detector.swing_detector.detect_swing_highs(high, index)
+            low_indices = detector.swing_detector.detect_swing_lows(low, index)
+            start = max(0, index - detector.lookback_bars)
+            expected_highs = [
+                SRLevel(float(high[i]), SRLevelType.RESISTANCE, i, i)
+                for i in high_indices if i >= start
+            ]
+            expected_lows = [
+                SRLevel(float(low[i]), SRLevelType.SUPPORT, i, i)
+                for i in low_indices if i >= start
+            ]
+            expected_resistance = detector.zone_merger.merge_levels(expected_highs, atrs[index])
+            expected_support = detector.zone_merger.merge_levels(expected_lows, atrs[index])
+            expected_nearest_support = detector._nearest_level(expected_support, close[index], below=True)
+            expected_nearest_resistance = detector._nearest_level(expected_resistance, close[index], below=False)
+            assert context.nearest_support_bar_index == (
+                expected_nearest_support.bar_index if expected_nearest_support else None
+            )
+            assert context.nearest_resistance_bar_index == (
+                expected_nearest_resistance.bar_index if expected_nearest_resistance else None
+            )
+
+    def test_context_cache_and_directional_derivation(self):
+        """Repeated requests reuse structural work and only derive direction-specific fields."""
+        close = np.array([100, 100, 105, 100, 95, 100, 105, 100, 100, 100], dtype=float)
+        high = close + 1
+        low = close - 1
+        context_detector = SupportResistanceDetector(
+            pivot_left=1, pivot_right=1, lookback_bars=20, near_distance_atr=1.1
+        )
+        long_context = context_detector.analyze_price_location(8, close, high, low, close, np.ones(10), "LONG")
+        short_context = context_detector.analyze_price_location(8, close, high, low, close, np.ones(10), "SHORT")
+        assert context_detector.analyze_price_location(8, close, high, low, close, np.ones(10), "LONG") is long_context
+        assert context_detector.analyze_price_location(8, close, high, low, close, np.ones(10), "SHORT") is short_context
+        assert long_context.nearest_support_price == short_context.nearest_support_price
+        assert long_context.nearest_resistance_price == short_context.nearest_resistance_price
+        assert long_context.trade_location_rating != short_context.trade_location_rating
+
+    def test_zone_distance_uses_near_zone_edge(self):
+        """Distances are measured to the nearest edge, not the extreme level price."""
+        detector = SupportResistanceDetector()
+        support = SRLevel(90.0, SRLevelType.SUPPORT, 1, 1)
+        support.zone_bottom = 90.0
+        support.zone_top = 95.0
+        resistance = SRLevel(110.0, SRLevelType.RESISTANCE, 2, 2)
+        resistance.zone_bottom = 105.0
+        resistance.zone_top = 110.0
+        assert detector._calculate_distance(100.0, support, 1.0) == (5.0, 5.0)
+        assert detector._calculate_distance(100.0, resistance, 1.0) == (5.0, 5.0)
+        assert detector._calculate_distance(93.0, support, 1.0) == (0.0, 0.0)
+        assert detector._calculate_distance(107.0, resistance, 1.0) == (0.0, 0.0)
+
+    def test_incremental_detector_scales_to_60000_candles(self):
+        """A large causal run remains bounded by the active lookback set."""
+        count = 60_000
+        close = 100.0 + np.sin(np.arange(count, dtype=float) / 17.0)
+        high = close + 0.25
+        low = close - 0.25
+        atrs = np.ones(count, dtype=float)
+        detector = SupportResistanceDetector(pivot_left=5, pivot_right=5, lookback_bars=200)
+        started = time.perf_counter()
+        for index in range(count):
+            detector.analyze_price_location(index, close, high, low, close, atrs, "LONG")
+        elapsed = time.perf_counter() - started
+        assert elapsed < 15.0
+        assert detector._last_processed_index == count - 1
+
+    def test_support_test_hold_is_confirmed_only_after_bounce(self):
+        detector = SupportResistanceDetector(
+            pivot_left=1, pivot_right=1, lookback_bars=20,
+            hold_confirmation_bars=3, hold_confirmation_atr=0.25,
+            break_tolerance_atr=0.25,
+        )
+        close = np.array([105, 105, 100, 105, 100.5, 100.5, 101.5], dtype=float)
+        high = np.array([106, 106, 101, 106, 101.5, 101.5, 102], dtype=float)
+        low = np.array([104, 104, 100, 104, 100, 100.5, 101], dtype=float)
+        atrs = np.full(len(close), 4.0)
+        contexts = [detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert contexts[4].support_state == "SUPPORT_TESTING"
+        assert not contexts[4].support_held
+        assert contexts[5].support_state == "SUPPORT_TESTING"
+        assert not contexts[5].support_held
+        assert contexts[6].support_state == "SUPPORT_HELD"
+        assert contexts[6].support_held
+        assert contexts[6].support_rejection_atr >= 0.25
+        assert contexts[4].support_state != "SUPPORT_HELD"
+        assert contexts[5].support_state != "SUPPORT_HELD"
+
+    def test_resistance_test_hold_is_causal(self):
+        detector = SupportResistanceDetector(
+            pivot_left=1, pivot_right=1, lookback_bars=20,
+            hold_confirmation_bars=3, hold_confirmation_atr=0.25,
+        )
+        close = np.array([95, 95, 100, 95, 99.5, 99.5, 98.5], dtype=float)
+        high = np.array([96, 96, 100, 96, 100, 99.5, 99], dtype=float)
+        low = np.array([94, 94, 99, 94, 99, 98.5, 98], dtype=float)
+        atrs = np.full(len(close), 4.0)
+        contexts = [detector.analyze_price_location(i, close, high, low, close, atrs, "SHORT") for i in range(len(close))]
+        assert contexts[4].resistance_state == "RESISTANCE_TESTING"
+        assert contexts[5].resistance_state == "RESISTANCE_TESTING"
+        assert contexts[6].resistance_state == "RESISTANCE_HELD"
+        assert contexts[6].resistance_held
+
+    def test_support_break_timeout_wick_basis_and_expiry(self):
+        close = np.array([105, 105, 100, 105, 100.5, 100.5, 100.5, 100.5, 98.5], dtype=float)
+        high = np.array([106, 106, 101, 106, 101.5, 101.5, 101.5, 101.5, 100.5], dtype=float)
+        low = np.array([104, 104, 100, 104, 100, 100.5, 100.5, 100.5, 98.0], dtype=float)
+        atrs = np.full(len(close), 4.0)
+        close_detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=20, hold_confirmation_bars=2)
+        close_contexts = [close_detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert close_contexts[7].support_state == "APPROACHING_SUPPORT"
+        assert close_contexts[8].support_state == "SUPPORT_BROKEN"
+
+        wick_detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=20, break_basis="WICK")
+        wick_contexts = [wick_detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert wick_contexts[8].support_state == "SUPPORT_BROKEN"
+
+        timeout_detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=20, hold_confirmation_bars=1)
+        timeout_contexts = [timeout_detector.analyze_price_location(i, close[:8], high[:8], low[:8], close[:8], atrs[:8], "LONG") for i in range(8)]
+        assert timeout_contexts[7].support_state == "APPROACHING_SUPPORT"
+
+        expiry_detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=2)
+        expiry_contexts = [expiry_detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert expiry_contexts[8].support_state == "NO_SUPPORT_NEARBY"
+
+    def test_multiple_support_tests_increment_count(self):
+        detector = SupportResistanceDetector(pivot_left=1, pivot_right=1, lookback_bars=30, hold_confirmation_bars=2, hold_confirmation_atr=0.25)
+        close = np.array([105, 105, 100, 105, 100, 101.5, 100, 101.5], dtype=float)
+        high = np.array([106, 106, 101, 106, 101, 102, 101, 102], dtype=float)
+        low = np.array([104, 104, 100, 104, 99.5, 101, 99.5, 101], dtype=float)
+        atrs = np.full(len(close), 4.0)
+        contexts = [detector.analyze_price_location(i, close, high, low, close, atrs, "LONG") for i in range(len(close))]
+        assert contexts[4].support_test_count == 1
+        assert contexts[6].support_test_count == 2
+        assert contexts[6].support_last_test_index == 6
 
 
 class TestIntegrationNoLookAhead:
