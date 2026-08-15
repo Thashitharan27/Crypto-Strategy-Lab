@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json, time, traceback, threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 from pathlib import Path
 
@@ -19,6 +20,15 @@ from crypto_strategy_lab.random_entry import decisions_frame, random_analysis, r
 from crypto_strategy_lab.config import EntryTimingMode
 from dataclasses import replace
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS
+
+
+def _pop_heavy_trade_attrs(trades: pd.DataFrame) -> dict[str, object]:
+    """Remove export-only metadata that pandas would copy during analysis."""
+    detached: dict[str, object] = {}
+    for key in ("skipped_signals",):
+        if key in trades.attrs:
+            detached[key] = trades.attrs.pop(key)
+    return detached
 
 class BacktestWorker(QObject):
     status = Signal(str, int)
@@ -104,7 +114,22 @@ class BacktestWorker(QObject):
             self._log(f"Running isolated profile: {profile_name}")
             profiles={key:replace(value,enabled=(key==profile_name)) for key,value in self.config.strategy_profiles.items()}
             config=replace(self.config,strategy_profile_run_mode="COMBINED_SHARED_CAPITAL",strategy_profiles=profiles)
-            trades=BacktestEngine(data,config,intrabar).run(); profile_dir=isolated_dir/profile_name; profile_dir.mkdir(parents=True,exist_ok=True)
+            profile_started=time.monotonic()
+            profile_count=max(1,len(enabled))
+            def isolated_progress(processed: int, total: int, completed: int, opened: int, *, _number=number, _name=profile_name, _started=profile_started) -> None:
+                self._check()
+                ratio=processed/total if total else 1.0
+                percent=20+round(70*((_number-1)+ratio)/profile_count)
+                elapsed=max(0.0,time.monotonic()-_started)
+                remaining=(elapsed/ratio)-elapsed if ratio>0 else None
+                self._emit_stage(
+                    f"Isolated profile {_number}/{profile_count}: {_name.replace('_',' ').title()}",
+                    percent,processed,total,completed,opened,remaining,
+                )
+            progress_interval=250 if config.strategy_timeframe_minutes<=1 else 50
+            trades=BacktestEngine(data,config,intrabar,progress_callback=isolated_progress,progress_interval=progress_interval).run()
+            _pop_heavy_trade_attrs(trades)
+            profile_dir=isolated_dir/profile_name; profile_dir.mkdir(parents=True,exist_ok=True)
             summary=summarize(trades,self.config.initial_equity); equity=equity_curve(trades,self.config.initial_equity)
             trades.to_csv(profile_dir/"trade_list.csv",index=False); equity.to_csv(profile_dir/"equity_curve.csv",index=False)
             (profile_dir/"summary.json").write_text(json.dumps(summary,indent=2,default=str))
@@ -137,9 +162,14 @@ class BacktestWorker(QObject):
             if self.config.enable_strategy_profiles and self.config.strategy_profile_run_mode=="ISOLATED_PROFILES":
                 self._run_isolated_only(data,intrabar)
                 return
-            engine = BacktestEngine(data, self.config, intrabar, progress_callback=self._backtest_progress, progress_interval=50)
+            # Minute data contains many more candles. Less frequent GUI-only
+            # updates reduce cross-thread overhead without changing simulation
+            # resolution, ordering, trades, or any saved output.
+            progress_interval = 250 if self.config.strategy_timeframe_minutes <= 1 else 50
+            engine = BacktestEngine(data, self.config, intrabar, progress_callback=self._backtest_progress, progress_interval=progress_interval)
             self._check(); self._emit_stage("ATR calculation", 20, 0, len(data))
             trades = engine.run()
+            detached_trade_attrs = _pop_heavy_trade_attrs(trades)
             heartbeat_stop = threading.Event()
             initial_detail = f"Building telemetry table for {len(trades):,} completed trades" if self.config.enable_trade_telemetry else "Preparing core results"
             self._output_status = (initial_detail, 91)
@@ -155,6 +185,9 @@ class BacktestWorker(QObject):
             else:
                 telemetry = pd.DataFrame()
             self._check(); self._output_progress("Calculating performance statistics", 94)
+            # skipped_signals can contain tens of thousands of dictionaries. Pandas
+            # deep-copies DataFrame.attrs during ordinary Series/frame operations,
+            # although calculations and reports do not use that export-only payload.
             equity = equity_curve(trades, self.config.initial_equity)
             summary = summarize(trades, self.config.initial_equity)
             summary.update({"trade_direction": self.config.trade_direction.value, "use_intrabar_data": self.config.use_intrabar_data, "intrabar_csv": str(self.config.intrabar_csv) if self.config.intrabar_csv else None, "strategy_timeframe": self.config.strategy_timeframe_minutes, "intrabar_timeframe": self.config.intrabar_timeframe_minutes, "atr_period": self.config.atr_period, "atr_multiplier": self.config.atr_multiplier})
@@ -239,19 +272,31 @@ class BacktestWorker(QObject):
                             self._output_progress(*self._output_status)
                         self._check()
                     run_output_step("lifecycle analysis", lambda: export_lifecycle_reports(trades, telemetry, run_dir, phases=self.config.lifecycle_phases, checkpoints=self.config.lifecycle_early_checkpoints, minimum_sample=self.config.lifecycle_minimum_bucket_sample, charts=self.config.create_lifecycle_charts, flat_threshold_pct=self.config.lifecycle_flat_pattern_threshold_pct, progress=lifecycle_progress), 97)
-            run_output_step("writing skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
+            skipped_signals = detached_trade_attrs.get("skipped_signals", [])
+            run_output_step("writing skipped_signals.csv", lambda: pd.DataFrame(skipped_signals).to_csv(run_dir / "skipped_signals.csv", index=False))
             run_output_step("writing skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
+            parallel_reports = [
+                ("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir), 98),
+                ("writing equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False), 98),
+                ("writing monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False), 98),
+                ("writing yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False), 98),
+            ]
             if self.config.save_indicator_analysis_reports:
-                run_output_step("writing adx_analysis.csv", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
-                run_output_step("writing bb_width_analysis.csv", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
-                run_output_step("writing di_spread_analysis.csv", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
-            run_output_step("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir))
-            run_output_step("writing equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False))
-            run_output_step("writing monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False))
-            run_output_step("writing yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False))
-            chart_warnings = []
+                parallel_reports.extend([
+                    ("writing adx_analysis.csv", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False), 98),
+                    ("writing bb_width_analysis.csv", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False), 98),
+                    ("writing di_spread_analysis.csv", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False), 98),
+                ])
             if self.config.create_standard_charts:
-                chart_warnings = run_output_step("creating charts", lambda: save_plots(trades, equity, run_dir / "charts"), 99) or []
+                parallel_reports.append(("creating charts", lambda: save_plots(trades, equity, run_dir / "charts"), 99))
+            report_results = {}
+            self._output_progress(f"creating {len(parallel_reports)} reports in parallel", 98)
+            with ThreadPoolExecutor(max_workers=min(4, len(parallel_reports)), thread_name_prefix="report") as pool:
+                pending = {pool.submit(run_output_step, label, action, percent): label for label, action, percent in parallel_reports}
+                for future in as_completed(pending):
+                    self._check()
+                    report_results[pending[future]] = future.result()
+            chart_warnings = report_results.get("creating charts") or []
             if self.config.enable_trade_telemetry and self.config.save_trade_journey_charts:
                 chart_warnings.extend(run_output_step("creating journey charts", lambda: save_journey_charts(trades, telemetry, run_dir / "charts")) or [])
             for warning in chart_warnings:
@@ -274,6 +319,7 @@ class BacktestWorker(QObject):
             self._log(f"Completed {len(trades):,} trade pairs")
             self._log(f"Results saved to {run_dir}")
             (run_dir / "log.txt").write_text("\n".join(self._log_lines + ["Backtest completed from GUI worker."]) + "\n")
+            trades.attrs.update(detached_trade_attrs)
             self.finished.emit(summary, trades, equity, run_dir)
         except Exception as exc:
             if "heartbeat_stop" in locals(): heartbeat_stop.set()

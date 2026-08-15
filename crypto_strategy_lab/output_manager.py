@@ -332,7 +332,9 @@ def periodic_results(trades: pd.DataFrame, freq: str) -> pd.DataFrame:
         exits = exits.fillna(side_exits)
     if exits.isna().all():
         raise ValueError("Periodic results require at least one valid trade exit timestamp.")
-    frame = trades.assign(exit_time=exits).set_index("exit_time")
+    # Keep this narrow. Copying the full telemetry-rich trade frame also deep
+    # copies its large attrs (notably skipped_signals) in recent pandas.
+    frame = pd.DataFrame({"exit_time": exits, "pair_net_pnl": trades["pair_net_pnl"], "pair_net_r": trades["pair_net_r"]}).set_index("exit_time")
     frame = frame.loc[frame.index.notna()]
     candidates = [compatible_resample_freq(freq)]
     fallback = {"ME": "M", "YE": "Y", "M": "ME", "Y": "YE"}.get(candidates[0])

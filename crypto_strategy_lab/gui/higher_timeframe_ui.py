@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QComboBox, QLabel, QPushButton
-
-from .binance_dialog import BinanceDownloadDialog
+from PySide6.QtWidgets import QComboBox, QLabel
 
 
 class BinanceHigherTimeframeCombo(QComboBox):
@@ -40,7 +38,7 @@ class BinanceHigherTimeframeCombo(QComboBox):
 
 
 def install_higher_timeframe_ui(MainWindow) -> None:
-    """Add a Binance HTF selector, path preview, and dedicated download button."""
+    """Add a Binance HTF selector and shared-data path preview."""
     if getattr(MainWindow, "_binance_htf_ui_patch", False):
         return
 
@@ -66,9 +64,6 @@ def install_higher_timeframe_ui(MainWindow) -> None:
         self.direction_vote_htf_dataset.setWordWrap(True)
         layout.addRow("HTF Dataset", self.direction_vote_htf_dataset)
 
-        self.direction_vote_htf_download = QPushButton("Download / Update HTF Dataset", self)
-        layout.addRow("", self.direction_vote_htf_download)
-        self.htf_download_dialog = None
 
         def update_path(*_):
             symbol = self.market_symbol.currentText().strip().upper().replace("/", "")
@@ -77,7 +72,6 @@ def install_higher_timeframe_ui(MainWindow) -> None:
             status = "available" if path.is_file() else "missing"
             self.direction_vote_htf_dataset.setText(f"{path}  [{status}]")
             supported = combo.value() in (1, 4, 24)
-            self.direction_vote_htf_download.setEnabled(supported)
             if not supported:
                 self.direction_vote_htf_dataset.setText(
                     f"{path}  [unsupported Binance interval — choose 1h, 4h, or 1d]"
@@ -87,37 +81,9 @@ def install_higher_timeframe_ui(MainWindow) -> None:
             visible = self.enable_direction_voting.isChecked() and self.direction_vote_use_htf.isChecked()
             layout.setRowVisible(combo, visible)
             layout.setRowVisible(self.direction_vote_htf_dataset, visible)
-            layout.setRowVisible(self.direction_vote_htf_download, visible)
-
-        def download_htf():
-            if combo.value() not in (1, 4, 24):
-                return
-            if self.htf_download_dialog is not None:
-                self.htf_download_dialog.show()
-                self.htf_download_dialog.raise_()
-                self.htf_download_dialog.activateWindow()
-                return
-            dialog = BinanceDownloadDialog(
-                self,
-                symbol=self.market_symbol.currentText(),
-                strategy_timeframe=combo.interval(),
-                intrabar_timeframe="1m",
-                use_intrabar=False,
-                data_folder=str(self.market_data_folder),
-            )
-            dialog.setWindowTitle("Download / Update Higher-Timeframe Dataset")
-            self.htf_download_dialog = dialog
-
-            def finished(_code, d=dialog):
-                self.htf_download_dialog = None
-                update_path()
-
-            dialog.finished.connect(finished)
-            dialog.show()
 
         combo.currentIndexChanged.connect(update_path)
         self.market_symbol.currentTextChanged.connect(update_path)
-        self.direction_vote_htf_download.clicked.connect(download_htf)
         self.enable_direction_voting.toggled.connect(update_visibility)
         self.direction_vote_use_htf.toggled.connect(update_visibility)
         update_path()

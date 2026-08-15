@@ -669,6 +669,38 @@ def test_save_plots_reports_failed_chart_without_raising(monkeypatch, tmp_path):
     assert (tmp_path / "r_distribution.png").exists()
 
 
+def test_indicator_reports_work_with_large_trade_attrs_detached():
+    from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis
+
+    trades = pd.DataFrame({
+        "adx": [20.0, 40.0], "bb_width_pct": [2.0, 8.0], "di_spread": [10.0, 35.0],
+        "pair_net_pnl": [-1.0, 1.0], "holding_minutes": [60.0, 120.0],
+        "long_exit_reason": ["SL", "TP"], "short_exit_reason": [None, None],
+    })
+    trades.attrs["skipped_signals"] = [{"reason": "FILTER_REJECTED"}]
+
+    detached = trades.attrs.pop("skipped_signals")
+    try:
+        assert int(adx_analysis(trades)["Trades"].sum()) == 2
+        assert int(bb_width_analysis(trades)["Trades"].sum()) == 2
+        assert int(di_spread_analysis(trades)["Trades"].sum()) == 2
+    finally:
+        trades.attrs["skipped_signals"] = detached
+
+
+def test_save_plots_accepts_csv_style_exit_time_strings(tmp_path):
+    from crypto_strategy_lab.plots import save_plots
+
+    trades = pd.DataFrame({
+        "pair_net_r": [1.0], "holding_hours": [2.0], "pair_net_pnl": [100.0],
+        "long_exit_time": ["2024-01-31 00:00:00+00:00"], "short_exit_time": [None],
+    })
+    warnings = save_plots(trades, pd.DataFrame(), tmp_path)
+    assert not any("return charts" in warning for warning in warnings)
+    assert (tmp_path / "monthly_returns.png").exists()
+    assert (tmp_path / "yearly_returns.png").exists()
+
+
 def test_price_risk_leg_loses_more_than_configured_after_fees_and_slippage():
     df = candles([(100,100,100,100), (100,100,89,100)])
     row = BacktestEngine(df, cfg(risk_per_leg=0.005, taker_fee=0.001, slippage=0.001)).run().iloc[0]

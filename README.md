@@ -60,12 +60,12 @@ python app.py
 
 1. In **Backtest Setup**, choose the Binance pair and strategy timeframe.
 2. Enable intrabar data when lower-timeframe exit ordering is required.
-3. Use **Download / Update Binance Dataset** to create or extend both matching CSV files.
+3. Use the separate `C:\CryptoBots\Binance Data Hub` application to create or update shared candle files.
 4. Configure Bull Long, Bull Short, Bear Long, Bear Short, Sideways Long, and Sideways Short under **Strategy Profiles**.
 5. Save the configuration and run the backtest.
 6. Review the Summary, Trades, Charts, and generated output folder.
 
-Public Binance Spot candle downloads require no API key. Existing datasets are updated incrementally, incomplete current candles are excluded, and files are replaced atomically only after a successful update.
+Crypto Strategy Lab reads Binance USD-M Futures candles from `C:\CryptoBots\Binance Market Data\futures\usdm`. Downloading is handled by the separate Binance Data Hub so it can continue in the background and serve every bot. The older Spot cache is kept isolated and is not selected.
 
 ## Portfolio workflow
 
@@ -88,7 +88,6 @@ crypto_strategy_lab/      Installable application package
   engine.py               Trade simulation engine
   portfolio.py            Shared-equity portfolio replay
   strategy_profiles.py    Six market-regime strategy profiles
-  binance_data.py         Binance Spot candle downloader/updater
   loader.py               OHLCV loading and validation
   output_manager.py       Reports and run-folder management
 Config/                   Saved user strategy configurations

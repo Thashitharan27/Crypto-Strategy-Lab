@@ -49,7 +49,7 @@ def _binance_higher_timeframe_trend_array(self):
     if not path.is_file():
         raise FileNotFoundError(
             f"Higher-timeframe Binance dataset not found: {path}. "
-            "Use 'Download / Update Binance Dataset' before running the backtest."
+            "Open Binance Data Hub and download/update the required shared dataset."
         )
 
     higher = load_ohlcv_csv(

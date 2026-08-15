@@ -50,7 +50,7 @@ def test_market_ready_tabs_use_profile_only_strategy_workflow():
     window = MainWindow()
     try:
         tab_names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
-        assert tab_names == ["Backtest Setup", "Direction Voting", "Strategy Profiles", "Summary", "Portfolio", "Trades", "Charts", "Log"]
+        assert tab_names == ["Backtest Setup", "Direction Voting", "Strategy Profiles", "Summary", "Portfolio"]
         assert "Legacy Strategy" not in tab_names
         values=window.values()
         assert values["enable_strategy_profiles"] is True
@@ -149,7 +149,7 @@ def test_setup_separates_sizing_period_intrabar_and_cost_controls():
         assert window.account_form.parentWidget().title()=="Account & Position Sizing"
         assert window.period_form.parentWidget().title()=="Backtest Period"
         assert window.intrabar_form.parentWidget().title()=="Intrabar Execution Rules"
-        assert window.binance_dataset_btn.text()=="Download / Update Binance Dataset"
+        assert "Binance Market Data" in window.shared_data_note.text()
         assert window.market_symbol.currentText()=="XRPUSDT"
         assert window.risk_leg.text()=="1%"
         assert window.max_lev_leg.text()=="3.0"
@@ -184,7 +184,8 @@ def test_pair_and_timeframe_changes_select_matching_local_dataset(tmp_path):
         assert window.intrabar_csv.text()==str(intrabar.resolve())
         window.market_symbol.setCurrentText("ETHUSDT")
         assert window.input_csv.text()=="" and window.intrabar_csv.text()==""
-        assert "No matching local strategy file" in window.dataset_info.text()
+        assert "No matching dataset" in window.dataset_info.text()
+        assert "Binance Data Hub" in window.dataset_info.text()
     finally: window.close()
 
 
@@ -220,29 +221,19 @@ def test_gui_default_atr_period_matches_backtest_config():
         window.close()
 
 
-def test_single_voter_test_selector_creates_runnable_one_vote_config():
+def test_direction_voting_defaults_to_runnable_di_only_config():
     app(); window=MainWindow()
     try:
-        voter_keys={
-            "di":"direction_vote_use_di",
-            "structure":"direction_vote_use_structure",
-            "momentum":"direction_vote_use_momentum",
-            "volume":"direction_vote_use_volume_pressure",
-            "higher_timeframe":"direction_vote_use_higher_timeframe",
-        }
-        for selected,selected_key in voter_keys.items():
-            window.direction_vote_test_mode.setCurrentIndex(
-                window.direction_vote_test_mode.findData(selected)
-            )
-            values=window.values()
-            assert values["enable_direction_voting"] is True
-            assert values["direction_vote_minimum_votes"]==1
-            assert [key for key in voter_keys.values() if values[key]]==[selected_key]
-            assert validate_config_values(values, require_paths=False)==[]
-        window.direction_vote_use_di.setChecked(True)
-        assert window.direction_vote_test_mode.currentData()==""
-        window.reset_defaults()
-        assert window.direction_vote_test_mode.currentData()==""
+        values=window.values()
+        assert values["enable_direction_voting"] is True
+        assert values["direction_vote_use_di"] is True
+        assert values["direction_vote_minimum_votes"]==1
+        assert values["direction_vote_use_structure"] is False
+        assert values["direction_vote_use_momentum"] is False
+        assert values["direction_vote_use_volume_pressure"] is False
+        assert values["direction_vote_use_higher_timeframe"] is False
+        assert window.direction_vote_test_mode.currentData()=="di"
+        assert validate_config_values(values, require_paths=False)==[]
     finally:
         window.close()
 
@@ -251,26 +242,14 @@ def test_direction_voting_tab_only_shows_settings_that_affect_the_run():
     app(); window=MainWindow()
     try:
         form=window.direction_voting_form
-        assert "Direction voting is OFF" in window.direction_vote_status.text()
-        assert not window.direction_vote_use_structure.isEnabled()
+        assert "DI pressure alone" in window.direction_vote_status.text()
+        assert form.isRowVisible(window.direction_vote_use_di)
+        assert not form.isRowVisible(window.direction_vote_use_structure)
+        assert not form.isRowVisible(window.direction_vote_use_momentum)
+        assert not form.isRowVisible(window.direction_vote_use_volume)
+        assert not form.isRowVisible(window.direction_vote_use_htf)
         assert not form.isRowVisible(window.direction_vote_structure_lookback)
         assert not form.isRowVisible(window.direction_vote_htf_dataset)
-
-        window.direction_vote_test_mode.setCurrentIndex(window.direction_vote_test_mode.findData("structure"))
-        assert "market structure alone" in window.direction_vote_status.text()
-        assert form.isRowVisible(window.direction_vote_structure_lookback)
-        assert not form.isRowVisible(window.direction_vote_momentum_lookback)
-        assert not form.isRowVisible(window.direction_vote_minimum)
-        assert not form.isRowVisible(window.direction_vote_htf_dataset)
-
-        window.direction_vote_use_di.setChecked(True)
-        assert window.direction_vote_test_mode.currentData()==""
-        assert form.isRowVisible(window.direction_vote_minimum)
-        assert "Active combination" in window.direction_vote_status.text()
-
-        window.direction_vote_test_mode.setCurrentIndex(window.direction_vote_test_mode.findData("higher_timeframe"))
-        assert form.isRowVisible(window.direction_vote_htf_dataset)
-        assert form.isRowVisible(window.direction_vote_htf_download)
     finally:
         window.close()
 

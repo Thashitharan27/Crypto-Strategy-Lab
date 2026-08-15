@@ -121,6 +121,23 @@ def test_standard_analysis_preset_is_default():
     assert values["create_standard_charts"] is True
 
 
+def test_new_gui_defaults_to_btc_structural_regime():
+    from crypto_strategy_lab.gui.config_logic import default_gui_config
+
+    values = default_gui_config()
+    assert values["market_regime_method"] == "BTC_STRUCTURAL"
+    assert values["structural_regime_sma_days"] == 200
+    assert values["structural_regime_slope_lookback_days"] == 30
+
+
+def test_old_saved_config_keeps_legacy_return_regime(tmp_path):
+    from crypto_strategy_lab.gui.config_logic import load_config_json
+
+    path = tmp_path / "old.json"
+    path.write_text('{"bull_regime_lookback_days": 90}')
+    assert load_config_json(path)["market_regime_method"] == "ASSET_RETURN"
+
+
 def test_configurable_timeframes_are_passed_to_backtest_config(tmp_path):
     cfg = build_backtest_config({
         **base(tmp_path),
