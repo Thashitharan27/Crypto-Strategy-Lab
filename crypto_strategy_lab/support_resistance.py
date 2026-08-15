@@ -266,7 +266,7 @@ class SRZoneMerger:
 
 
 class SupportResistanceDetector:
-    """Detects and manages support/resistance levels."""
+    """Detects and manages support/resistance levels incrementally."""
     
     def __init__(
         self,
@@ -291,6 +291,79 @@ class SupportResistanceDetector:
         self.lookback_bars = lookback_bars
         self.zone_width_atr = zone_width_atr
         self.near_distance_atr = near_distance_atr
+        self._confirmed_highs: list[SRLevel] = []
+        self._confirmed_lows: list[SRLevel] = []
+        self._last_processed_index = -1
+        self._base_context_cache: dict[int, tuple] = {}
+        self._context_cache: dict[tuple[int, str], SRContext] = {}
+        self._context_input_cache: dict[int, tuple[float, float]] = {}
+
+    def _reset_incremental_state(self) -> None:
+        self._confirmed_highs.clear()
+        self._confirmed_lows.clear()
+        self._last_processed_index = -1
+        self._base_context_cache.clear()
+        self._context_cache.clear()
+        self._context_input_cache.clear()
+
+    def _is_swing_high(self, high: NDArray[np.float64], index: int) -> bool:
+        left = high[index - self.swing_detector.pivot_left:index]
+        right = high[index + 1:index + self.swing_detector.pivot_right + 1]
+        if len(left) == 0 or len(right) == 0:
+            return False
+        return (high[index] > np.max(left) and high[index] >= np.max(right)) or (
+            high[index] >= np.max(left) and high[index] > np.max(right)
+        )
+
+    def _is_swing_low(self, low: NDArray[np.float64], index: int) -> bool:
+        left = low[index - self.swing_detector.pivot_left:index]
+        right = low[index + 1:index + self.swing_detector.pivot_right + 1]
+        if len(left) == 0 or len(right) == 0:
+            return False
+        return (low[index] < np.min(left) and low[index] <= np.min(right)) or (
+            low[index] <= np.min(left) and low[index] < np.min(right)
+        )
+
+    def _append_confirmed_level(self, levels: list[SRLevel], level: SRLevel) -> None:
+        if levels and level.bar_index - levels[-1].bar_index < self.swing_detector.min_bars_between:
+            return
+        levels.append(level)
+
+    def _expire_levels(self, index: int) -> None:
+        cutoff = index - self.lookback_bars
+        self._confirmed_highs = [level for level in self._confirmed_highs if level.bar_index >= cutoff]
+        self._confirmed_lows = [level for level in self._confirmed_lows if level.bar_index >= cutoff]
+
+    def _advance_to(self, index: int, high: NDArray[np.float64], low: NDArray[np.float64]) -> None:
+        if index < self._last_processed_index:
+            self._reset_incremental_state()
+        for current_index in range(self._last_processed_index + 1, index + 1):
+            candidate_index = current_index - self.swing_detector.pivot_right
+            if candidate_index >= self.swing_detector.pivot_left:
+                if self._is_swing_high(high, candidate_index):
+                    self._append_confirmed_level(
+                        self._confirmed_highs,
+                        SRLevel(
+                            price=float(high[candidate_index]),
+                            level_type=SRLevelType.RESISTANCE,
+                            bar_index=candidate_index,
+                            first_touch_index=candidate_index,
+                            confirmed_at_index=current_index,
+                        ),
+                    )
+                if self._is_swing_low(low, candidate_index):
+                    self._append_confirmed_level(
+                        self._confirmed_lows,
+                        SRLevel(
+                            price=float(low[candidate_index]),
+                            level_type=SRLevelType.SUPPORT,
+                            bar_index=candidate_index,
+                            first_touch_index=candidate_index,
+                            confirmed_at_index=current_index,
+                        ),
+                    )
+            self._expire_levels(current_index)
+        self._last_processed_index = index
     
     def analyze_price_location(
         self,
@@ -314,39 +387,49 @@ class SupportResistanceDetector:
         Returns:
             SRContext with all structural metrics
         """
+        direction = str(direction).upper()
+        cache_key = (index, direction)
+        input_signature = (float(close_prices[index]), float(atr_values[index]))
+        if self._context_input_cache.get(index) != input_signature:
+            self._base_context_cache.pop(index, None)
+            for key in ((index, "LONG"), (index, "SHORT")):
+                self._context_cache.pop(key, None)
+            self._context_input_cache[index] = input_signature
+        if cache_key in self._context_cache:
+            return self._context_cache[cache_key]
+
         if index < self.swing_detector.pivot_left + self.swing_detector.pivot_right:
-            # Not enough data for proper confirmation delay
-            return self._default_context()
+            context = self._default_context()
+            self._context_cache[cache_key] = context
+            return context
         
         current_price = close_prices[index]
         current_atr = atr_values[index]
         
-        if current_atr <= 0:
-            return self._default_context()
-        
-        # Find support/resistance levels
-        support_levels = self._find_support_levels(
-            high_prices, low_prices, index, current_atr
-        )
-        resistance_levels = self._find_resistance_levels(
-            high_prices, low_prices, index, current_atr
-        )
-        
-        # Find nearest levels
-        nearest_support = self._nearest_level(
-            support_levels, current_price, below=True
-        )
-        nearest_resistance = self._nearest_level(
-            resistance_levels, current_price, below=False
-        )
-        
-        # Calculate distances
-        support_dist_price, support_dist_atr = self._calculate_distance(
-            current_price, nearest_support, current_atr
-        )
-        resistance_dist_price, resistance_dist_atr = self._calculate_distance(
-            current_price, nearest_resistance, current_atr
-        )
+        if not np.isfinite(current_atr) or current_atr <= 0:
+            context = self._default_context()
+            self._context_cache[cache_key] = context
+            return context
+
+        self._advance_to(index, high_prices, low_prices)
+
+        if index not in self._base_context_cache:
+            support_levels = self._find_support_levels(high_prices, low_prices, index, current_atr)
+            resistance_levels = self._find_resistance_levels(high_prices, low_prices, index, current_atr)
+            nearest_support = self._nearest_level(support_levels, current_price, below=True)
+            nearest_resistance = self._nearest_level(resistance_levels, current_price, below=False)
+            support_dist_price, support_dist_atr = self._calculate_distance(current_price, nearest_support, current_atr)
+            resistance_dist_price, resistance_dist_atr = self._calculate_distance(current_price, nearest_resistance, current_atr)
+            self._base_context_cache[index] = (
+                nearest_support, nearest_resistance,
+                support_dist_price, support_dist_atr,
+                resistance_dist_price, resistance_dist_atr,
+            )
+        (
+            nearest_support, nearest_resistance,
+            support_dist_price, support_dist_atr,
+            resistance_dist_price, resistance_dist_atr,
+        ) = self._base_context_cache[index]
         
         # Classify location
         location = self._classify_location(
@@ -360,7 +443,7 @@ class SupportResistanceDetector:
             nearest_support, nearest_resistance, current_price, direction, current_atr
         )
         
-        return SRContext(
+        context = SRContext(
             nearest_support_price=nearest_support.price if nearest_support else None,
             nearest_support_bar_index=nearest_support.bar_index if nearest_support else None,
             nearest_support_distance_atr=support_dist_atr,
@@ -374,73 +457,34 @@ class SupportResistanceDetector:
             price_location=location,
             trade_location_rating=rating,
             
-            near_support=support_dist_atr <= self.near_distance_atr,
-            near_resistance=resistance_dist_atr <= self.near_distance_atr,
+            near_support=np.isfinite(support_dist_atr) and support_dist_atr <= self.near_distance_atr,
+            near_resistance=np.isfinite(resistance_dist_atr) and resistance_dist_atr <= self.near_distance_atr,
             
-            inside_support_zone=(
+            inside_support_zone=bool(
                 nearest_support and
                 nearest_support.zone_bottom <= current_price <= nearest_support.zone_top
             ),
-            inside_resistance_zone=(
+            inside_resistance_zone=bool(
                 nearest_resistance and
                 nearest_resistance.zone_bottom <= current_price <= nearest_resistance.zone_top
             ),
             
             room_in_direction_atr=room,
         )
+        self._context_cache[cache_key] = context
+        return context
     
     def _find_support_levels(
         self, high: NDArray, low: NDArray, index: int, atr: float
     ) -> list[SRLevel]:
-        """Find all support levels visible at index."""
-        start = max(0, index - self.lookback_bars)
-        
-        # Detect swings in the lookback window
-        swing_indices = self.swing_detector.detect_swing_lows(
-            low, index
-        )
-        
-        # Filter to only those in lookback window
-        swing_indices = [i for i in swing_indices if i >= start]
-        
-        levels = [
-            SRLevel(
-                price=low[i],
-                level_type=SRLevelType.SUPPORT,
-                bar_index=i,
-                first_touch_index=i,
-            )
-            for i in swing_indices
-        ]
-        
-        # Merge into zones
-        return self.zone_merger.merge_levels(levels, atr)
+        """Merge only the active, already-confirmed support levels."""
+        return self.zone_merger.merge_levels(self._confirmed_lows, atr)
     
     def _find_resistance_levels(
         self, high: NDArray, low: NDArray, index: int, atr: float
     ) -> list[SRLevel]:
-        """Find all resistance levels visible at index."""
-        start = max(0, index - self.lookback_bars)
-        
-        # Detect swings in the lookback window
-        swing_indices = self.swing_detector.detect_swing_highs(
-            high, index
-        )
-        
-        # Filter to only those in lookback window
-        swing_indices = [i for i in swing_indices if i >= start]
-        
-        levels = [
-            SRLevel(
-                price=high[i],
-                level_type=SRLevelType.RESISTANCE,
-                bar_index=i,
-                first_touch_index=i,
-            )
-            for i in swing_indices
-        ]
-        
-        return self.zone_merger.merge_levels(levels, atr)
+        """Merge only the active, already-confirmed resistance levels."""
+        return self.zone_merger.merge_levels(self._confirmed_highs, atr)
     
     def _nearest_level(
         self, levels: list[SRLevel], price: float, below: bool
@@ -464,8 +508,13 @@ class SupportResistanceDetector:
         """Calculate distance in price and ATR units."""
         if level is None or atr <= 0:
             return np.nan, np.nan
-        
-        price_dist = abs(price - level.price)
+
+        if level.zone_bottom <= price <= level.zone_top:
+            price_dist = 0.0
+        elif price > level.zone_top:
+            price_dist = price - level.zone_top
+        else:
+            price_dist = level.zone_bottom - price
         atr_dist = price_dist / atr
         return price_dist, atr_dist
     

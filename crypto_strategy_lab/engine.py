@@ -35,6 +35,7 @@ class BacktestEngine:
             zone_width_atr=config.sr_zone_width_atr,
             near_distance_atr=config.sr_near_distance_atr,
         ) if config.enable_support_resistance_analysis else None
+        self._pending_sr_context = None
         self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
         self.remaining_leg_timeout_delta=pd.Timedelta(minutes=config.remaining_leg_timeout_after_first_sl_minutes)
         self.checkpoint_zero_score_recheck_delta=pd.Timedelta(minutes=config.checkpoint_zero_score_recheck_minutes)
@@ -418,6 +419,7 @@ class BacktestEngine:
         if self.config.entry_mode==EntryMode.CUSTOM: return custom_entry_signal(i,{"open":self.open,"high":self.high,"low":self.low,"close":self.close},len(self.active_pairs))
         return False
     def _entry_filter_result(self, i, execution_i=None):
+        self._pending_sr_context = None
         reasons=[]
         if self.config.enable_strategy_profiles:
             profile_result = self._strategy_profile_filter_result(i, execution_i)
@@ -559,6 +561,7 @@ class BacktestEngine:
             if direction is None:
                 return False, None
             sr_context = self._analyze_support_resistance(i, direction)
+            self._pending_sr_context = (i, direction, sr_context)
         if sr_context is None:
             return False, None
 
@@ -983,7 +986,8 @@ class BacktestEngine:
         
         # Capture support/resistance data
         if self.config.enable_support_resistance_analysis:
-            sr_context = self._analyze_support_resistance(ind_i, "LONG")
+            pending = self._pending_sr_context
+            sr_context = pending[2] if pending is not None and pending[0] == ind_i else self._analyze_support_resistance(ind_i, "LONG")
             if sr_context is not None:
                 for pos in [long, short]:
                     if pos is not None:
