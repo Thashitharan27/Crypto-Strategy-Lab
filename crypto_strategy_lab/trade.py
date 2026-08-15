@@ -30,6 +30,13 @@ class Position:
     stop_exit_time: Optional[object] = None; stop_exit_price: Optional[float] = None; stop_exit_quantity: Optional[float] = None; stop_gross_pnl: Optional[float] = None; stop_fees: Optional[float] = None; stop_net_pnl: Optional[float] = None
     realized_pnl: float = 0.0; final_exit_reason: Optional[str] = None
     first_sl_partial_original_quantity: float = 0.0; first_sl_partial_quantity: float = 0.0; first_sl_partial_gross_pnl: float = 0.0; first_sl_partial_fee: float = 0.0; first_sl_partial_net_pnl: float = 0.0
+    sr_nearest_support: Optional[float] = None; sr_nearest_resistance: Optional[float] = None
+    sr_support_distance_atr: float = float('nan'); sr_resistance_distance_atr: float = float('nan')
+    sr_support_distance_price: float = float('nan'); sr_resistance_distance_price: float = float('nan')
+    sr_near_support: bool = False; sr_near_resistance: bool = False
+    sr_inside_support_zone: bool = False; sr_inside_resistance_zone: bool = False
+    sr_location: str = "NO_STRUCTURE"; sr_trade_location_rating: str = "NEUTRAL"
+    sr_room_in_direction_atr: float = float('nan')
     @property
     def is_open(self) -> bool: return self.exit_time is None
 

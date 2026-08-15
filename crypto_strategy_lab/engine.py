@@ -12,6 +12,7 @@ from crypto_strategy_lab.entry_filters import ADXFilter, BBWidthFilter, DISpread
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
 from crypto_strategy_lab.strategy import custom_entry_signal
 from crypto_strategy_lab.strategy_profiles import profile_key
+from crypto_strategy_lab.support_resistance import SupportResistanceDetector
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Position, Side, TradePair
 
 class BacktestEngine:
@@ -27,6 +28,13 @@ class BacktestEngine:
         self.direction_vote_higher_timeframe_values=self._higher_timeframe_trend_array()
         self.profile_rsi_values={period:rsi(self.close,period) for period in {p.rsi_period for p in self.config.strategy_profiles.values()}}
         self.profile_momentum_values={hours:self._trailing_return_hours_array(hours) for hours in {p.momentum_lookback_hours for p in self.config.strategy_profiles.values()}}
+        self.sr_detector = SupportResistanceDetector(
+            pivot_left=config.sr_pivot_left,
+            pivot_right=config.sr_pivot_right,
+            lookback_bars=config.sr_lookback_bars,
+            zone_width_atr=config.sr_zone_width_atr,
+            near_distance_atr=config.sr_near_distance_atr,
+        ) if config.enable_support_resistance_analysis else None
         self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
         self.remaining_leg_timeout_delta=pd.Timedelta(minutes=config.remaining_leg_timeout_after_first_sl_minutes)
         self.checkpoint_zero_score_recheck_delta=pd.Timedelta(minutes=config.checkpoint_zero_score_recheck_minutes)
@@ -128,6 +136,24 @@ class BacktestEngine:
             "market_structure_breakout_confirmed_by_close":bool((direction=="LONG" and self.close[i]>previous_high) or (direction=="SHORT" and self.close[i]<previous_low)),
         })
         return result
+
+    def _analyze_support_resistance(self, i, direction):
+        """Analyze price location relative to support/resistance levels."""
+        if self.sr_detector is None:
+            return None
+        try:
+            return self.sr_detector.analyze_price_location(
+                i,
+                self.open,
+                self.high,
+                self.low,
+                self.close,
+                self.atr_values,
+                direction,
+            )
+        except Exception as e:
+            self.log(f"SR analysis failed at index {i}: {e}")
+            return None
 
     def _direction_vote(self, i):
         votes={}
@@ -394,7 +420,15 @@ class BacktestEngine:
     def _entry_filter_result(self, i, execution_i=None):
         reasons=[]
         if self.config.enable_strategy_profiles:
-            return self._strategy_profile_filter_result(i, execution_i)
+            profile_result = self._strategy_profile_filter_result(i, execution_i)
+            if not profile_result[0]:
+                return profile_result
+            if self.config.enable_support_resistance_analysis:
+                direction = self._selected_direction(i)
+                sr_reject, sr_reason = self._should_reject_for_sr(i, direction, None)
+                if sr_reject:
+                    return False, sr_reason
+            return True, profile_result[1]
         if self.config.enable_di_direction_sizing:
             plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i]); spread=float(self.di_spread[i])
             if not np.isfinite(plus) or not np.isfinite(minus) or not np.isfinite(spread):
@@ -510,7 +544,39 @@ class BacktestEngine:
             reasons.append(result.reason)
             if not result.passed:
                 return False, "; ".join(reasons)
+        if self.config.enable_support_resistance_analysis:
+            direction = self._selected_direction(i)
+            sr_reject, sr_reason = self._should_reject_for_sr(i, direction, None)
+            if sr_reject:
+                return False, sr_reason
         return True, "; ".join(reasons)
+
+    def _should_reject_for_sr(self, i, direction, sr_context=None):
+        """Apply the configured SR entry filter policy for the selected direction."""
+        if not self.config.enable_support_resistance_analysis:
+            return False, None
+        if sr_context is None:
+            if direction is None:
+                return False, None
+            sr_context = self._analyze_support_resistance(i, direction)
+        if sr_context is None:
+            return False, None
+
+        mode = str(self.config.sr_filter_mode).upper().replace("-", "_").replace(" ", "_")
+        rating = getattr(sr_context, "trade_location_rating", None)
+        rating_value = str(getattr(rating, "value", rating or "")).upper().replace("-", "_").replace(" ", "_")
+
+        if mode in {"ANALYSIS_ONLY", "ANALYSISONLY"}:
+            return False, None
+        if mode == "BLOCK_BAD_LOCATION":
+            if rating_value in {"BAD_LOCATION", "BAD"}:
+                return True, "SR_BAD_LOCATION"
+            return False, None
+        if mode == "REQUIRE_GOOD_LOCATION":
+            if rating_value not in {"GOOD_LOCATION", "GOOD"}:
+                return True, "SR_NOT_GOOD_LOCATION"
+            return False, None
+        return False, None
 
     def _profile_context(self, i):
         plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i]); regime=self._regime_at(i)
@@ -914,6 +980,27 @@ class BacktestEngine:
                 pos.trailing_distance_r=profile_for_position.trailing_distance_r if profile_for_position else self.config.trail_distance_r
                 pos.trailing_activation_price = (pos.entry_price + direction * pos.risk * activation_r if self.config.trail_activation_trigger == TrailActivationTrigger.PRICE_REACHES_R else None)
                 pos.favourable_price = pos.entry_price
+        
+        # Capture support/resistance data
+        if self.config.enable_support_resistance_analysis:
+            sr_context = self._analyze_support_resistance(ind_i, "LONG")
+            if sr_context is not None:
+                for pos in [long, short]:
+                    if pos is not None:
+                        pos.sr_nearest_support = sr_context.nearest_support_price
+                        pos.sr_nearest_resistance = sr_context.nearest_resistance_price
+                        pos.sr_support_distance_atr = sr_context.nearest_support_distance_atr
+                        pos.sr_resistance_distance_atr = sr_context.nearest_resistance_distance_atr
+                        pos.sr_support_distance_price = sr_context.nearest_support_distance_price
+                        pos.sr_resistance_distance_price = sr_context.nearest_resistance_distance_price
+                        pos.sr_near_support = sr_context.near_support
+                        pos.sr_near_resistance = sr_context.near_resistance
+                        pos.sr_inside_support_zone = sr_context.inside_support_zone
+                        pos.sr_inside_resistance_zone = sr_context.inside_resistance_zone
+                        pos.sr_location = sr_context.price_location.value
+                        pos.sr_trade_location_rating = sr_context.trade_location_rating.value
+                        pos.sr_room_in_direction_atr = sr_context.room_in_direction_atr
+        
         if preferred_only:
             if sizing_direction == "LONG":
                 short = None
@@ -1862,4 +1949,5 @@ class BacktestEngine:
         cols={f"{prefix}_original_quantity":pos.original_quantity if pos.partial_tp_enabled else pos.quantity,f"{prefix}_remaining_quantity":pos.remaining_quantity if pos.partial_tp_enabled else 0.0,f"{prefix}_tp1_quantity":pos.tp1_quantity if pos.partial_tp_enabled else None,f"{prefix}_tp2_quantity":pos.tp2_quantity if pos.partial_tp_enabled else None,f"{prefix}_tp1_price":pos.tp1_price,f"{prefix}_tp2_price":pos.tp2_price,f"{prefix}_sl_price":pos.original_sl,f"{prefix}_tp1_hit":pos.tp1_hit,f"{prefix}_tp1_exit_time":pos.tp1_exit_time,f"{prefix}_tp1_exit_price":pos.tp1_exit_price,f"{prefix}_tp1_gross_pnl":pos.tp1_gross_pnl,f"{prefix}_tp1_fees":pos.tp1_fees,f"{prefix}_tp1_net_pnl":pos.tp1_net_pnl,f"{prefix}_tp2_hit":pos.tp2_hit,f"{prefix}_tp2_exit_time":pos.tp2_exit_time,f"{prefix}_tp2_exit_price":pos.tp2_exit_price,f"{prefix}_tp2_gross_pnl":pos.tp2_gross_pnl,f"{prefix}_tp2_fees":pos.tp2_fees,f"{prefix}_tp2_net_pnl":pos.tp2_net_pnl,f"{prefix}_stop_exit_time":pos.stop_exit_time,f"{prefix}_stop_exit_price":pos.stop_exit_price,f"{prefix}_stop_exit_quantity":pos.stop_exit_quantity,f"{prefix}_stop_gross_pnl":pos.stop_gross_pnl,f"{prefix}_stop_fees":pos.stop_fees,f"{prefix}_stop_net_pnl":pos.stop_net_pnl,f"{prefix}_total_gross_pnl":pos.gross_pnl,f"{prefix}_total_net_pnl":pos.net_pnl,f"{prefix}_final_exit_reason":pos.final_exit_reason or (pos.exit_reason.value if pos.exit_reason else None),f"{prefix}_existing_r":pos.risk,f"{prefix}_trailing_enabled":pos.trailing_enabled,f"{prefix}_trailing_activated":pos.trailing_active,f"{prefix}_trailing_activation_time":pos.trailing_activation_time,f"{prefix}_trailing_activation_price":pos.trailing_activation_price,f"{prefix}_{'highest' if pos.side==Side.LONG else 'lowest'}_favourable_price":pos.favourable_price if pos.trailing_active else None,f"{prefix}_final_trailing_stop":pos.trailing_stop,f"{prefix}_final_active_stop":pos.final_active_stop,f"{prefix}_trailing_exit_price":pos.trailing_exit_price,f"{prefix}_trailing_profit_r":pos.trailing_profit_r,f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_configured_price_risk_percentage":self.config.risk_per_leg,f"{prefix}_estimated_all_in_stop_risk_percentage":est_stop_loss/pos.risk_amount*self.config.risk_per_leg if pos.risk_amount else 0,f"{prefix}_original_sl":pos.original_sl,f"{prefix}_current_sl":pos.sl,f"{prefix}_sl":pos.sl,f"{prefix}_tp":(None if pos.r_step_trailing_enabled and self.config.bull_long_r_step_maximum_r==0 else pos.tp),f"{prefix}_be_enabled":pos.be_enabled,f"{prefix}_be_triggered":pos.be_triggered,f"{prefix}_be_trigger_time":pos.be_trigger_time,f"{prefix}_be_triggered_by_side":pos.be_triggered_by_side.value if pos.be_triggered_by_side else None,f"{prefix}_be_mode":pos.be_mode,f"{prefix}_be_offset_r":pos.be_offset_r,f"{prefix}_be_stop_price":pos.be_stop_price,f"{prefix}_be_exit_reason":pos.be_exit_reason.value if pos.be_exit_reason else None,f"{prefix}_be_same_candle_ambiguous":pos.be_same_candle_ambiguous,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
         cols.update({f"{prefix}_atr_checkpoint_enabled":pos.atr_checkpoint_extension_enabled or pos.atr_checkpoint_count>0,f"{prefix}_atr_checkpoint_count":pos.atr_checkpoint_count,f"{prefix}_atr_checkpoint_pass_count":pos.atr_checkpoint_pass_count,f"{prefix}_atr_checkpoint_fail_count":pos.atr_checkpoint_fail_count,f"{prefix}_atr_checkpoint_last_time":pos.atr_checkpoint_last_time,f"{prefix}_atr_checkpoint_last_r":pos.atr_checkpoint_last_r,f"{prefix}_atr_checkpoint_last_di_spread":pos.atr_checkpoint_last_di_spread,f"{prefix}_atr_checkpoint_last_bb_width":pos.atr_checkpoint_last_bb_width,f"{prefix}_atr_checkpoint_last_passed":pos.atr_checkpoint_last_passed,f"{prefix}_atr_checkpoint_initial_tp":pos.atr_checkpoint_initial_tp,f"{prefix}_atr_checkpoint_final_tp_r":pos.atr_checkpoint_final_tp_r,f"{prefix}_atr_checkpoint_profit_lock_r":pos.atr_checkpoint_profit_lock_r})
         cols.update({f"{prefix}_r_step_trailing_enabled":pos.r_step_trailing_enabled,f"{prefix}_r_step_trailing_active":pos.r_step_trailing_active,f"{prefix}_r_step_checkpoint_count":pos.r_step_checkpoint_count,f"{prefix}_r_step_last_checkpoint_r":pos.r_step_last_checkpoint_r,f"{prefix}_r_step_last_checkpoint_time":pos.r_step_last_checkpoint_time,f"{prefix}_r_step_locked_r":pos.r_step_locked_r,f"{prefix}_r_step_initial_tp":pos.r_step_initial_tp,f"{prefix}_r_step_activation_partial_taken":pos.r_step_activation_partial_taken,f"{prefix}_r_step_activation_close_pct":pos.r_step_activation_close_pct,f"{prefix}_r_step_activation_quantity":pos.r_step_activation_quantity,f"{prefix}_r_step_runner_quantity":pos.r_step_runner_quantity})
+        cols.update({f"{prefix}_sr_nearest_support":pos.sr_nearest_support,f"{prefix}_sr_nearest_resistance":pos.sr_nearest_resistance,f"{prefix}_sr_support_distance_atr":pos.sr_support_distance_atr,f"{prefix}_sr_resistance_distance_atr":pos.sr_resistance_distance_atr,f"{prefix}_sr_support_distance_price":pos.sr_support_distance_price,f"{prefix}_sr_resistance_distance_price":pos.sr_resistance_distance_price,f"{prefix}_sr_near_support":pos.sr_near_support,f"{prefix}_sr_near_resistance":pos.sr_near_resistance,f"{prefix}_sr_inside_support_zone":pos.sr_inside_support_zone,f"{prefix}_sr_inside_resistance_zone":pos.sr_inside_resistance_zone,f"{prefix}_sr_location":pos.sr_location,f"{prefix}_sr_trade_location_rating":pos.sr_trade_location_rating,f"{prefix}_sr_room_in_direction_atr":pos.sr_room_in_direction_atr})
         return cols

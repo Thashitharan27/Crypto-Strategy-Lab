@@ -187,6 +187,13 @@ class BacktestConfig:
     di_short_reward_risk_ratio: Optional[float] = None
     enable_di_regime_reward_risk: bool = False
     di_regime_bear_return_threshold: float = -0.20
+    enable_support_resistance_analysis: bool = False
+    sr_pivot_left: int = 5
+    sr_pivot_right: int = 5
+    sr_lookback_bars: int = 200
+    sr_zone_width_atr: float = 0.5
+    sr_near_distance_atr: float = 0.75
+    sr_filter_mode: str = "ANALYSIS_ONLY"
     di_long_bull_reward_risk_ratio: float = 2.0
     di_long_bear_reward_risk_ratio: float = 1.0
     di_long_sideways_reward_risk_ratio: float = 2.0
