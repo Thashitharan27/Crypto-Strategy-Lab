@@ -243,4 +243,20 @@ def bb_width_analysis(trades: pd.DataFrame) -> pd.DataFrame:
 
 
 def di_spread_analysis(trades: pd.DataFrame) -> pd.DataFrame:
-    return bucket_analysis(trades, "di_spread", [(0,5),(5,10),(10,15),(15,20),(20,30),(30,None)])
+    return bucket_analysis(
+        trades,
+        "di_spread",
+        [
+            (0, 5),
+            (5, 10),
+            (10, 15),
+            (15, 20),
+            (20, 25),
+            (25, 30),
+            (30, 35),
+            (35, 40),
+            (40, 45),
+            (45, 50),
+            (50, None),
+        ],
+    )
