@@ -112,8 +112,8 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
         def adx_distribution_chart() -> None:
             fig, ax = plt.subplots()
             try:
-                _series(trades.loc[_series(trades, "pair_net_pnl") > 0], "adx").dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
-                _series(trades.loc[_series(trades, "pair_net_pnl") < 0], "adx").dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Losing trades")
+                _series(trades, "adx").loc[_series(trades, "pair_net_pnl") > 0].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
+                _series(trades, "adx").loc[_series(trades, "pair_net_pnl") < 0].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Losing trades")
                 ax.set_title("ADX Distribution"); ax.set_xlabel("ADX"); ax.legend(); fig.tight_layout(); fig.savefig(output_dir / "adx_distribution.png")
             finally:
                 plt.close(fig)
@@ -135,8 +135,8 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
             def market_histogram(column: str = column, title: str = title, filename: str = filename, xlabel: str = xlabel) -> None:
                 fig, ax = plt.subplots()
                 try:
-                    _series(trades.loc[win_mask], column).dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
-                    _series(trades.loc[double_sl_mask], column).dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Double SL trades")
+                    _series(trades, column).loc[win_mask].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Winning trades")
+                    _series(trades, column).loc[double_sl_mask].dropna().plot(kind="hist", bins=20, alpha=0.6, ax=ax, label="Double SL trades")
                     ax.set_title(title); ax.set_xlabel(xlabel); ax.legend(); fig.tight_layout(); fig.savefig(output_dir / filename)
                 finally:
                     plt.close(fig)
@@ -152,7 +152,18 @@ def save_plots(trades: pd.DataFrame, equity: pd.DataFrame, output_dir: Path) -> 
                     plt.close(fig)
             _save_chart(filename, market_scatter, warnings)
 
-    returns = trades.assign(exit_time=pd.to_datetime(trades[["long_exit_time", "short_exit_time"]].max(axis=1)))
+    exit_columns = [column for column in ("long_exit_time", "short_exit_time") if column in trades]
+    parsed_exits = [pd.to_datetime(trades[column], errors="coerce", utc=True) for column in exit_columns]
+    if parsed_exits:
+        exit_times = parsed_exits[0]
+        for candidate in parsed_exits[1:]:
+            exit_times = exit_times.where(candidate.isna() | (exit_times.notna() & exit_times.ge(candidate)), candidate)
+    else:
+        exit_times = pd.to_datetime(trades.get("exit_time", pd.Series(pd.NaT, index=trades.index)), errors="coerce", utc=True)
+    returns = pd.DataFrame({
+        "exit_time": exit_times,
+        "pair_net_pnl": _series(trades, "pair_net_pnl"),
+    }).dropna(subset=["exit_time"])
     try:
         monthly_freq, yearly_freq = _month_year_frequencies(returns)
     except Exception as exc:  # noqa: BLE001 - chart export must not fail the backtest.

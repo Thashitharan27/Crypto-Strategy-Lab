@@ -191,12 +191,14 @@ def adx_analysis(trades: pd.DataFrame) -> pd.DataFrame:
     for lo, hi in buckets:
         label = f"{lo}+" if hi is None else f"{lo}-{hi}"
         mask = adx_values >= lo if hi is None else ((adx_values >= lo) & (adx_values < hi))
-        g = trades[mask]
-        wins = g.get("pair_net_pnl", pd.Series(dtype=float)) > 0
-        losses = g.get("pair_net_pnl", pd.Series(dtype=float)) < 0
-        double_sl = ((g.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (g.get("short_exit_reason", pd.Series(dtype=object)) == "SL"))
-        tp_sl = (((g.get("long_exit_reason", pd.Series(dtype=object)) == "TP") & (g.get("short_exit_reason", pd.Series(dtype=object)) == "SL")) | ((g.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (g.get("short_exit_reason", pd.Series(dtype=object)) == "TP")))
-        rows.append({"Bucket": label, "Trades": int(len(g)), "Wins": int(wins.sum()), "Losses": int(losses.sum()), "Win rate": float(wins.mean()) if len(g) else 0.0, "Average PnL": float(g["pair_net_pnl"].mean()) if len(g) else 0.0, "Average duration": float(g["holding_minutes"].mean()) if len(g) else 0.0, "Double SL count": int(double_sl.sum()), "TP/SL count": int(tp_sl.sum())})
+        pnl = pd.to_numeric(trades.get("pair_net_pnl", pd.Series(index=trades.index, dtype=float)), errors="coerce").loc[mask]
+        duration = pd.to_numeric(trades.get("holding_minutes", pd.Series(index=trades.index, dtype=float)), errors="coerce").loc[mask]
+        long_reason = trades.get("long_exit_reason", pd.Series(index=trades.index, dtype=object)).loc[mask]
+        short_reason = trades.get("short_exit_reason", pd.Series(index=trades.index, dtype=object)).loc[mask]
+        wins = pnl > 0; losses = pnl < 0
+        double_sl = long_reason.eq("SL") & short_reason.eq("SL")
+        tp_sl = (long_reason.eq("TP") & short_reason.eq("SL")) | (long_reason.eq("SL") & short_reason.eq("TP"))
+        rows.append({"Bucket": label, "Trades": int(mask.sum()), "Wins": int(wins.sum()), "Losses": int(losses.sum()), "Win rate": float(wins.mean()) if len(pnl) else 0.0, "Average PnL": float(pnl.mean()) if len(pnl) else 0.0, "Average duration": float(duration.mean()) if len(duration) else 0.0, "Double SL count": int(double_sl.sum()), "TP/SL count": int(tp_sl.sum())})
     return pd.DataFrame(rows)
 
 
@@ -205,7 +207,13 @@ def equity_curve(trades: pd.DataFrame, initial_equity: float = 1000.0) -> pd.Dat
         return pd.DataFrame(columns=["time", "equity", "drawdown"])
     equity = trades["equity_after_trade"]
     exit_cols=[c for c in ("long_exit_time","short_exit_time") if c in trades]
-    times = trades[exit_cols].max(axis=1) if exit_cols else trades.get("exit_time", trades["entry_time"])
+    if exit_cols:
+        parsed = [pd.to_datetime(trades[c], errors="coerce", utc=True) for c in exit_cols]
+        times = parsed[0]
+        for candidate in parsed[1:]:
+            times = times.where(candidate.isna() | (times.notna() & times.ge(candidate)), candidate)
+    else:
+        times = pd.to_datetime(trades.get("exit_time", trades["entry_time"]),errors="coerce",utc=True)
     return pd.DataFrame({
         "time": pd.to_datetime(times),
         "equity": equity,
@@ -213,17 +221,20 @@ def equity_curve(trades: pd.DataFrame, initial_equity: float = 1000.0) -> pd.Dat
     })
 
 def bucket_analysis(trades: pd.DataFrame, column: str, buckets: list[tuple[float, float | None]], pct_labels: bool = False) -> pd.DataFrame:
-    rows=[]; values=pd.to_numeric(trades.get(column, pd.Series(dtype=float)), errors="coerce")
+    rows=[]; values=pd.to_numeric(trades.get(column, pd.Series(index=trades.index, dtype=float)), errors="coerce")
+    all_pnl=pd.to_numeric(trades.get("pair_net_pnl",pd.Series(index=trades.index,dtype=float)),errors="coerce")
+    all_holding=pd.to_numeric(trades.get("holding_minutes",pd.Series(index=trades.index,dtype=float)),errors="coerce")
+    all_long=trades.get("long_exit_reason",pd.Series(index=trades.index,dtype=object))
+    all_short=trades.get("short_exit_reason",pd.Series(index=trades.index,dtype=object))
     for lo, hi in buckets:
         label = f"{lo:g}+" if hi is None else f"{lo:g}-{hi:g}"
         if pct_labels:
             label = f"{lo:g}%+" if hi is None else f"{lo:g}-{hi:g}%"
         mask = values >= lo if hi is None else ((values >= lo) & (values < hi))
-        g=trades[mask]
-        wins=g.get("pair_net_pnl", pd.Series(dtype=float)) > 0
-        losses=g.get("pair_net_pnl", pd.Series(dtype=float)) < 0
-        double_sl=((g.get("long_exit_reason", pd.Series(dtype=object)) == "SL") & (g.get("short_exit_reason", pd.Series(dtype=object)) == "SL"))
-        rows.append({"Bucket":label,"Trades":int(len(g)),"Wins":int(wins.sum()),"Losses":int(losses.sum()),"Win Rate":float(wins.mean()) if len(g) else 0.0,"Average Net PnL":float(g["pair_net_pnl"].mean()) if len(g) else 0.0,"Average Holding Time":float(g["holding_minutes"].mean()) if len(g) else 0.0,"Double SL Count":int(double_sl.sum())})
+        pnl=all_pnl.loc[mask]; holding=all_holding.loc[mask]
+        wins=pnl>0; losses=pnl<0
+        double_sl=all_long.loc[mask].eq("SL") & all_short.loc[mask].eq("SL")
+        rows.append({"Bucket":label,"Trades":int(mask.sum()),"Wins":int(wins.sum()),"Losses":int(losses.sum()),"Win Rate":float(wins.mean()) if len(pnl) else 0.0,"Average Net PnL":float(pnl.mean()) if len(pnl) else 0.0,"Average Holding Time":float(holding.mean()) if len(holding) else 0.0,"Double SL Count":int(double_sl.sum())})
     return pd.DataFrame(rows)
 
 
@@ -232,4 +243,20 @@ def bb_width_analysis(trades: pd.DataFrame) -> pd.DataFrame:
 
 
 def di_spread_analysis(trades: pd.DataFrame) -> pd.DataFrame:
-    return bucket_analysis(trades, "di_spread", [(0,5),(5,10),(10,15),(15,20),(20,30),(30,None)])
+    return bucket_analysis(
+        trades,
+        "di_spread",
+        [
+            (0, 5),
+            (5, 10),
+            (10, 15),
+            (15, 20),
+            (20, 25),
+            (25, 30),
+            (30, 35),
+            (35, 40),
+            (40, 45),
+            (45, 50),
+            (50, None),
+        ],
+    )

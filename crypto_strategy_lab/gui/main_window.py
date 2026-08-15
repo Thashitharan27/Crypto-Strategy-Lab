@@ -5,17 +5,15 @@ from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
-from PySide6.QtCore import QSettings, QThread, QTimer, Qt, QSortFilterProxyModel, QUrl
-from PySide6.QtGui import QPixmap, QDesktopServices
+from PySide6.QtCore import QSettings, QThread, QTimer, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import *
 
 from crypto_strategy_lab.loader import load_ohlcv_csv
 from .config_logic import *
-from .table_model import PandasTableModel
 from .worker import BacktestWorker
 from .portfolio_worker import PortfolioWorker
 from .profile_editor import StrategyProfilesWidget
-from .binance_dialog import BinanceDownloadDialog
 from crypto_strategy_lab.output_manager import planned_run_dir
 from ..paths import DATA_DIR
 
@@ -30,11 +28,11 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__(); self.setWindowTitle("Crypto Strategy Lab"); self.resize(1280, 860)
         self.market_data_folder=DATA_DIR
-        self.settings = QSettings("LongShortCrypto", "Backtester"); self.worker=None; self.thread=None; self.portfolio_worker=None; self.portfolio_thread=None; self.binance_download_dialog=None; self.started=0; self.last_summary={}; self.output_dir=Path("output"); self._pending_ui_results=None; self._run_failed=False
+        self.settings = QSettings("LongShortCrypto", "Backtester"); self.worker=None; self.thread=None; self.portfolio_worker=None; self.portfolio_thread=None; self.started=0; self.last_summary={}; self.output_dir=Path("output"); self._pending_ui_results=None; self._run_failed=False
         self.tabs=QTabWidget(); self.setCentralWidget(self.tabs)
         self.tabs.setDocumentMode(True); self.tabs.setMovable(False)
         self.setStyleSheet("QGroupBox{font-weight:600;margin-top:10px;padding-top:10px} QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px} QPushButton{padding:6px 12px} QTabBar::tab{padding:8px 14px} QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{min-height:24px}")
-        self._build_config(); self._build_profiles(); self._build_summary(); self._build_portfolio_tab(); self._build_trades(); self._build_charts(); self._build_log(); self.reset_defaults(); self._restore_settings()
+        self._build_config(); self._build_profiles(); self._build_summary(); self._build_portfolio_tab(); self._build_log(); self.reset_defaults(); self._restore_settings()
     def _build_profiles(self):
         self.profile_editor=StrategyProfilesWidget(); self.tabs.addTab(self.profile_editor,"Strategy Profiles")
         self.profile_editor.changed.connect(self.update_dynamic)
@@ -43,6 +41,41 @@ class MainWindow(QMainWindow):
         w=QLineEdit(text); return w
     def _spin(self, v, mn=-1e12, mx=1e12, dec=6):
         s=QDoubleSpinBox(); s.setRange(mn,mx); s.setDecimals(dec); s.setValue(v); return s
+    def _apply_single_voter_test(self):
+        selected=self.direction_vote_test_mode.currentData()
+        if not selected:
+            return
+        voters={
+            "di":self.direction_vote_use_di,
+            "structure":self.direction_vote_use_structure,
+            "momentum":self.direction_vote_use_momentum,
+            "volume":self.direction_vote_use_volume,
+            "higher_timeframe":self.direction_vote_use_htf,
+        }
+        self._applying_single_voter_test=True
+        try:
+            self.enable_direction_voting.setChecked(True)
+            for name,control in voters.items():
+                control.setChecked(name==selected)
+            self.direction_vote_minimum.setValue(1)
+        finally:
+            self._applying_single_voter_test=False
+        self.update_dynamic()
+    def _sync_single_voter_test_mode(self):
+        if getattr(self,"_applying_single_voter_test",False):
+            return
+        voters={
+            "di":self.direction_vote_use_di,
+            "structure":self.direction_vote_use_structure,
+            "momentum":self.direction_vote_use_momentum,
+            "volume":self.direction_vote_use_volume,
+            "higher_timeframe":self.direction_vote_use_htf,
+        }
+        enabled=[name for name,control in voters.items() if control.isChecked()]
+        selected=enabled[0] if self.enable_direction_voting.isChecked() and len(enabled)==1 and self.direction_vote_minimum.value()==1 else ""
+        self.direction_vote_test_mode.blockSignals(True)
+        self.direction_vote_test_mode.setCurrentIndex(self.direction_vote_test_mode.findData(selected))
+        self.direction_vote_test_mode.blockSignals(False)
     def _build_config(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); form=QVBoxLayout(inner); self.config_controls=[]
         def group(title): g=QGroupBox(title); l=QFormLayout(g); form.addWidget(g); return l
@@ -52,12 +85,12 @@ class MainWindow(QMainWindow):
         self.input_csv=self._line(); self.input_csv.setReadOnly(True); b=QPushButton("Browse"); b.clicked.connect(self.browse_csv); row=QHBoxLayout(); row.addWidget(self.input_csv); row.addWidget(b); data.addRow("Strategy CSV", row)
         self.intrabar_timeframe=QComboBox(); self.intrabar_timeframe.addItems(["1m","5m","15m","30m","1h","4h"])
         self.intrabar_csv=self._line(); self.intrabar_csv.setReadOnly(True); bi=QPushButton("Browse"); bi.clicked.connect(self.browse_intrabar_csv); self.intrabar_csv_row=QHBoxLayout(); self.intrabar_csv_row.addWidget(self.intrabar_csv); self.intrabar_csv_row.addWidget(bi)
-        self.input_csv.setPlaceholderText("No matching local file — download or browse for the dataset")
-        self.intrabar_csv.setPlaceholderText("No matching local file — download or browse for the dataset")
+        self.input_csv.setPlaceholderText("No matching file in the shared Binance Data Hub folder")
+        self.intrabar_csv.setPlaceholderText("No matching file in the shared Binance Data Hub folder")
         self.use_intrabar=QCheckBox("Use lower-timeframe data to resolve exits"); self.use_intrabar.setChecked(True)
         self.data_help=QLabel(); self.data_help.setWordWrap(True)
         data.addRow("",self.use_intrabar); data.addRow("Intrabar Timeframe",self.intrabar_timeframe); data.addRow("Intrabar CSV",self.intrabar_csv_row)
-        self.binance_dataset_btn=QPushButton("Download / Update Binance Dataset"); self.binance_dataset_btn.clicked.connect(self.download_binance_data); data.addRow("",self.binance_dataset_btn)
+        self.shared_data_note=QLabel(f"Shared candle library: {self.market_data_folder}"); self.shared_data_note.setWordWrap(True); data.addRow("Shared Data",self.shared_data_note)
         self.strategy_timeframe.currentTextChanged.connect(self._timeframe_changed); self.intrabar_timeframe.currentTextChanged.connect(self.update_dynamic); self.use_intrabar.toggled.connect(self.update_dynamic)
         self.market_symbol.currentTextChanged.connect(self._sync_dataset_paths); self.strategy_timeframe.currentTextChanged.connect(self._sync_dataset_paths); self.intrabar_timeframe.currentTextChanged.connect(self._sync_dataset_paths)
         self.use_intrabar.toggled.connect(self._sync_dataset_paths)
@@ -122,12 +155,22 @@ class MainWindow(QMainWindow):
         self.enable_coin_flip_sizing=QCheckBox("Enable 3:1 Coin-Flip Sizing (1:1 SL/TP)"); self.coin_flip_seed=QLineEdit("42")
         random_group.addRow("",self.enable_coin_flip_sizing); random_group.addRow("Coin Flip Seed",self.coin_flip_seed)
         self.enable_di_direction_sizing=QCheckBox("Enable DI-Direction Selection"); self.flip_filtered_di_direction=QCheckBox("Flip direction after filters pass (Long ↔ Short)"); self.di_direction_long_min_spread=self._spin(30,0,1000,3); self.di_direction_short_min_spread=self._spin(30,0,1000,3); self.di_long_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_short_reward_risk_ratio=self._spin(1,0.01,100,3)
-        self.enable_direction_voting=QCheckBox("Use Majority-Vote Direction")
-        self.direction_vote_use_di=QCheckBox("DI pressure"); self.direction_vote_use_di.setChecked(True)
-        self.direction_vote_use_structure=QCheckBox("Market structure"); self.direction_vote_use_structure.setChecked(True); self.direction_vote_structure_lookback=QSpinBox(); self.direction_vote_structure_lookback.setRange(2,10000); self.direction_vote_structure_lookback.setValue(20)
-        self.direction_vote_use_momentum=QCheckBox("Momentum"); self.direction_vote_use_momentum.setChecked(True); self.direction_vote_momentum_lookback=QSpinBox(); self.direction_vote_momentum_lookback.setRange(1,10000); self.direction_vote_momentum_lookback.setValue(24); self.direction_vote_momentum_threshold=self._spin(0,0,1,6)
-        self.direction_vote_use_volume=QCheckBox("Candle / volume pressure"); self.direction_vote_use_volume.setChecked(True); self.direction_vote_volume_lookback=QSpinBox(); self.direction_vote_volume_lookback.setRange(1,10000); self.direction_vote_volume_lookback.setValue(20); self.direction_vote_volume_threshold=self._spin(.10,0,1,3)
-        self.direction_vote_use_htf=QCheckBox("Higher-timeframe trend"); self.direction_vote_use_htf.setChecked(True); self.direction_vote_htf_hours=QSpinBox(); self.direction_vote_htf_hours.setRange(1,168); self.direction_vote_htf_hours.setValue(4); self.direction_vote_htf_sma=QSpinBox(); self.direction_vote_htf_sma.setRange(2,1000); self.direction_vote_htf_sma.setValue(20); self.direction_vote_minimum=QSpinBox(); self.direction_vote_minimum.setRange(1,5); self.direction_vote_minimum.setValue(2)
+        self.enable_direction_voting=QCheckBox("Enable direction voting for entries")
+        self.direction_vote_test_mode=QComboBox()
+        self.direction_vote_test_mode.addItem("Custom combination", "")
+        self.direction_vote_test_mode.addItem("DI pressure only", "di")
+        self.direction_vote_test_mode.setToolTip("DI pressure is the supported direction voter.")
+        self.direction_vote_use_di=QCheckBox("DI pressure (directional strength)"); self.direction_vote_use_di.setChecked(True)
+        self.direction_vote_use_structure=QCheckBox("Market structure (confirmed swing highs/lows)"); self.direction_vote_use_structure.setChecked(False); self.direction_vote_structure_lookback=QSpinBox(); self.direction_vote_structure_lookback.setRange(10,10000); self.direction_vote_structure_lookback.setValue(20); self.direction_vote_structure_lookback.setToolTip("Legacy configuration compatibility; no longer exposed in the GUI.")
+        self.direction_vote_use_momentum=QCheckBox("Momentum (trailing return)"); self.direction_vote_use_momentum.setChecked(False); self.direction_vote_momentum_lookback=QSpinBox(); self.direction_vote_momentum_lookback.setRange(1,10000); self.direction_vote_momentum_lookback.setValue(24); self.direction_vote_momentum_threshold=self._spin(0,0,1,6)
+        self.direction_vote_use_volume=QCheckBox("Candle / volume pressure (weighted buying vs selling)"); self.direction_vote_use_volume.setChecked(False); self.direction_vote_volume_lookback=QSpinBox(); self.direction_vote_volume_lookback.setRange(1,10000); self.direction_vote_volume_lookback.setValue(20); self.direction_vote_volume_threshold=self._spin(.10,0,1,3)
+        self.direction_vote_use_htf=QCheckBox("Higher-timeframe trend (completed HTF candles)"); self.direction_vote_use_htf.setChecked(False); self.direction_vote_htf_hours=QSpinBox(); self.direction_vote_htf_hours.setRange(1,168); self.direction_vote_htf_hours.setValue(4); self.direction_vote_htf_sma=QSpinBox(); self.direction_vote_htf_sma.setRange(2,1000); self.direction_vote_htf_sma.setValue(20); self.direction_vote_minimum=QSpinBox(); self.direction_vote_minimum.setRange(1,5); self.direction_vote_minimum.setValue(1)
+        self.direction_vote_test_mode.currentIndexChanged.connect(self._apply_single_voter_test)
+        for control in (self.enable_direction_voting,self.direction_vote_use_di,self.direction_vote_use_structure,self.direction_vote_use_momentum,self.direction_vote_use_volume,self.direction_vote_use_htf):
+            control.toggled.connect(self._sync_single_voter_test_mode)
+            control.toggled.connect(self.update_dynamic)
+        self.direction_vote_minimum.valueChanged.connect(self._sync_single_voter_test_mode)
+        self.direction_vote_minimum.valueChanged.connect(self.update_dynamic)
         self.di_execution_mode=QComboBox(); self.di_execution_mode.addItems(["BOTH_SIDES","PREFERRED_SIDE_ONLY"])
         self.enable_di_regime_reward_risk=QCheckBox("Enable Regime-Specific Reward/Risk")
         self.di_regime_bear_return_threshold=self._line("-20%")
@@ -342,7 +385,7 @@ class MainWindow(QMainWindow):
 
     def _build_direction_voting_tab(self):
         page=QWidget(); layout=QVBoxLayout(page)
-        intro=QLabel("Choose Long or Short from independent majority votes. Each enabled voter may choose Long, Short, or Abstain; ties are skipped.")
+        intro=QLabel("DI pressure is the validated default direction signal. +DI above -DI selects Long; -DI above +DI selects Short.")
         intro.setWordWrap(True); layout.addWidget(intro)
         self.direction_voting_box.setParent(page); layout.addWidget(self.direction_voting_box); layout.addStretch(1)
         self.tabs.addTab(page,"Direction Voting")
@@ -362,9 +405,10 @@ class MainWindow(QMainWindow):
             ("Short Reward/Risk Ratio",self.di_short_reward_risk_ratio),
         ]: selection.addRow(lab,w)
         form.addWidget(selection_box)
-        voting_box=QGroupBox("Independent Direction Voting"); self.direction_voting_box=voting_box; voting=QFormLayout(voting_box)
-        voting_help=QLabel("Enabled voters choose Long, Short, or Abstain. The side with more votes wins; ties and results below Minimum Winning Votes are skipped."); voting_help.setWordWrap(True)
-        for lab,w in [("",self.enable_direction_voting),("",self.direction_vote_use_di),("",self.direction_vote_use_structure),("Structure Lookback (candles)",self.direction_vote_structure_lookback),("",self.direction_vote_use_momentum),("Momentum Lookback (hours)",self.direction_vote_momentum_lookback),("Momentum Abstain Threshold",self.direction_vote_momentum_threshold),("",self.direction_vote_use_volume),("Volume Lookback (candles)",self.direction_vote_volume_lookback),("Volume Pressure Threshold",self.direction_vote_volume_threshold),("",self.direction_vote_use_htf),("Higher Timeframe (hours)",self.direction_vote_htf_hours),("Higher-Timeframe SMA Period",self.direction_vote_htf_sma),("Minimum Winning Votes",self.direction_vote_minimum),("",voting_help)]: voting.addRow(lab,w)
+        voting_box=QGroupBox("Direction Selection"); self.direction_voting_box=voting_box; voting=QFormLayout(voting_box); self.direction_voting_form=voting
+        self.direction_vote_status=QLabel(); self.direction_vote_status.setWordWrap(True); self.direction_vote_status.setMinimumHeight(42)
+        voting_help=QLabel("Other experimental voters were removed from this screen because they did not add a dependable improvement. Legacy config fields remain readable for compatibility."); voting_help.setWordWrap(True)
+        for lab,w in [("",self.enable_direction_voting),("",self.direction_vote_status),("",self.direction_vote_use_di),("",voting_help)]: voting.addRow(lab,w)
         form.addWidget(voting_box)
         regime_targets_box=QGroupBox("Regime-Specific Reward/Risk"); regime_targets=QFormLayout(regime_targets_box)
         regime_targets_help=QLabel("Bull uses the Bull Return Threshold below. Bear uses the separate bear threshold; returns between them are sideways. Warm-up trades use the base long/short ratios above.")
@@ -531,14 +575,10 @@ class MainWindow(QMainWindow):
         if thread is not None: thread.deleteLater()
     def _build_summary(self):
         page=QWidget(); l=QVBoxLayout(page); self.summary_table=QTableWidget(0,2); self.summary_table.setHorizontalHeaderLabels(["Metric","Value"]); self.summary_table.horizontalHeader().setStretchLastSection(True); self.combo_table=QTableWidget(0,5); self.combo_table.setHorizontalHeaderLabels(["Exit Combination","Count","Percentage","Average Net R","Total Net R"]); self.combo_table.setSortingEnabled(True); self.comparison_heading=QLabel("Exit outcomes"); l.addWidget(QLabel("Performance overview")); l.addWidget(self.summary_table); l.addWidget(self.comparison_heading); l.addWidget(self.combo_table); self.tabs.addTab(page,"Summary")
-    def _build_trades(self):
-        page=QWidget(); l=QVBoxLayout(page); self.filter=QLineEdit(); self.filter.setPlaceholderText("Text filter"); self.trade_model=PandasTableModel(); self.proxy=QSortFilterProxyModel(); self.proxy.setSourceModel(self.trade_model); self.proxy.setFilterCaseSensitivity(Qt.CaseInsensitive); self.proxy.setFilterKeyColumn(-1); self.filter.textChanged.connect(self.proxy.setFilterFixedString); self.trade_view=QTableView(); self.trade_view.setModel(self.proxy); self.trade_view.setSortingEnabled(True); exp=QPushButton("Export Filtered Trades"); exp.clicked.connect(self.export_filtered); l.addWidget(self.filter); l.addWidget(self.trade_view); l.addWidget(exp); self.tabs.addTab(page,"Trades")
-    def _build_charts(self):
-        page=QWidget(); l=QVBoxLayout(page); self.chart_select=QComboBox(); self.chart_select.addItems(["equity_curve.png","drawdown.png","r_distribution.png","holding_time_distribution.png","adx_distribution.png","adx_vs_pnl.png","bb_width_histogram.png","di_spread_histogram.png","bb_width_vs_pnl.png","di_spread_vs_pnl.png","monthly_returns.png"]); self.chart=QLabel(alignment=Qt.AlignCenter); self.chart.setMinimumHeight(400); r=QPushButton("Refresh Charts"); o=QPushButton("Open Chart File"); r.clicked.connect(self.refresh_chart); o.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.output_dir/"charts"/self.chart_select.currentText())))); self.chart_select.currentTextChanged.connect(self.refresh_chart); l.addWidget(self.chart_select); l.addWidget(self.chart); l.addWidget(r); l.addWidget(o); self.tabs.addTab(page,"Charts")
     def _build_log(self):
-        page=QWidget(); l=QVBoxLayout(page); self.log=QTextEdit(readOnly=True); l.addWidget(self.log); row=QHBoxLayout();
-        for name,fn in [("Copy Log",lambda:self.log.selectAll() or self.log.copy()),("Clear Log",self.log.clear),("Save Log",self.save_log)]: btn=QPushButton(name); btn.clicked.connect(fn); row.addWidget(btn)
-        l.addLayout(row); self.tabs.addTab(page,"Log")
+        # Keep an internal buffer for diagnostics and saved log files without
+        # constructing a large interactive Log tab that the workflow does not use.
+        self.log=QTextEdit(readOnly=True)
     @staticmethod
     def _timeframe_minutes(label):
         return int(label[:-1]) * (60 if label.endswith("h") else 1)
@@ -566,7 +606,7 @@ class MainWindow(QMainWindow):
         values.update({"vwap_breakout_lookback_hours":self.vwap_breakout_hours.value(),"vwap_volume_lookback":self.vwap_volume_lookback.value(),"vwap_volume_multiplier":self.vwap_volume_multiplier.value(),"vwap_slope_lookback":self.vwap_slope_lookback.value(),"vwap_atr_pct_minimum":self.vwap_atr_min.value(),"vwap_atr_pct_maximum":self.vwap_atr_max.value(),"vwap_confirmation_mode":self.vwap_confirmation_mode.currentText(),"vwap_retest_window_candles":self.vwap_retest_window.value(),"vwap_retest_tolerance_atr":self.vwap_retest_tolerance.value()})
         values.update({"enable_coin_flip_sizing":self.enable_coin_flip_sizing.isChecked(),"coin_flip_seed":self.coin_flip_seed.text().strip(),"coin_flip_large_multiplier":3.0,"coin_flip_small_multiplier":1.0})
         values.update({"enable_di_direction_sizing":self.enable_di_direction_sizing.isChecked(),"flip_filtered_di_direction":self.flip_filtered_di_direction.isChecked(),"di_direction_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_long_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_short_minimum_spread":self.di_direction_short_min_spread.value(),"di_execution_mode":self.di_execution_mode.currentText(),"di_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_long_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_short_reward_risk_ratio":self.di_short_reward_risk_ratio.value()})
-        values.update({"enable_direction_voting":self.enable_direction_voting.isChecked(),"direction_vote_use_di":self.direction_vote_use_di.isChecked(),"direction_vote_use_structure":self.direction_vote_use_structure.isChecked(),"direction_vote_structure_lookback":self.direction_vote_structure_lookback.value(),"direction_vote_use_momentum":self.direction_vote_use_momentum.isChecked(),"direction_vote_momentum_lookback_hours":self.direction_vote_momentum_lookback.value(),"direction_vote_momentum_threshold":self.direction_vote_momentum_threshold.value(),"direction_vote_use_volume_pressure":self.direction_vote_use_volume.isChecked(),"direction_vote_volume_lookback":self.direction_vote_volume_lookback.value(),"direction_vote_volume_threshold":self.direction_vote_volume_threshold.value(),"direction_vote_use_higher_timeframe":self.direction_vote_use_htf.isChecked(),"direction_vote_higher_timeframe_hours":self.direction_vote_htf_hours.value(),"direction_vote_higher_timeframe_sma_period":self.direction_vote_htf_sma.value(),"direction_vote_minimum_votes":self.direction_vote_minimum.value()})
+        values.update({"enable_direction_voting":self.enable_direction_voting.isChecked(),"direction_vote_use_di":self.direction_vote_use_di.isChecked(),"direction_vote_use_structure":False,"direction_vote_structure_lookback":self.direction_vote_structure_lookback.value(),"direction_vote_use_momentum":False,"direction_vote_momentum_lookback_hours":self.direction_vote_momentum_lookback.value(),"direction_vote_momentum_threshold":self.direction_vote_momentum_threshold.value(),"direction_vote_use_volume_pressure":False,"direction_vote_volume_lookback":self.direction_vote_volume_lookback.value(),"direction_vote_volume_threshold":self.direction_vote_volume_threshold.value(),"direction_vote_use_higher_timeframe":False,"direction_vote_higher_timeframe_hours":self.direction_vote_htf_hours.value(),"direction_vote_higher_timeframe_sma_period":self.direction_vote_htf_sma.value(),"direction_vote_minimum_votes":1})
         values.update({"enable_di_regime_reward_risk":self.enable_di_regime_reward_risk.isChecked(),"di_regime_bear_return_threshold":parse_percentage(self.di_regime_bear_return_threshold.text()),"di_long_bull_reward_risk_ratio":self.di_long_bull_reward_risk_ratio.value(),"di_long_bear_reward_risk_ratio":self.di_long_bear_reward_risk_ratio.value(),"di_long_sideways_reward_risk_ratio":self.di_long_sideways_reward_risk_ratio.value(),"di_short_bull_reward_risk_ratio":self.di_short_bull_reward_risk_ratio.value(),"di_short_bear_reward_risk_ratio":self.di_short_bear_reward_risk_ratio.value(),"di_short_sideways_reward_risk_ratio":self.di_short_sideways_reward_risk_ratio.value()})
         values.update({"enable_bull_long_conditional_reward_risk":self.enable_bull_long_conditional_reward_risk.isChecked(),"bull_long_conditional_bb_width_minimum":parse_percentage(self.bull_long_conditional_bb_width_minimum.text()),"bull_long_conditional_adx_maximum":self.bull_long_conditional_adx_maximum.value(),"bull_long_conditional_reward_risk_ratio":self.bull_long_conditional_reward_risk_ratio.value()})
         values.update({"enable_bull_long_momentum_confirmation":self.enable_bull_long_momentum_confirmation.isChecked(),"bull_long_confirmation_lookback_days":self.bull_long_confirmation_lookback_days.value(),"bull_long_confirmation_return_threshold":parse_percentage(self.bull_long_confirmation_return_threshold.text()),"bull_long_unconfirmed_reward_risk_ratio":self.bull_long_unconfirmed_reward_risk_ratio.value()})
@@ -636,9 +676,11 @@ class MainWindow(QMainWindow):
         self.enable_lifecycle.parentWidget().setVisible(shown); self.save_feature_reports.parentWidget().setVisible(shown)
 
     def reset_defaults(self):
-        self.apply_values(default_gui_config())
+        defaults=default_gui_config()
+        defaults.update({"enable_di_direction_sizing":True,"enable_direction_voting":True,"direction_vote_use_di":True})
+        self.apply_values(defaults)
     def _restore_settings(self):
-        self.input_csv.setText(self.settings.value("last_csv", self.input_csv.text())); self.output_folder.setText(self.settings.value("last_output", self.output_folder.text()))
+        self.output_folder.setText(self.settings.value("last_output", self.output_folder.text())); self._sync_dataset_paths()
     def browse_csv(self):
         p,_=QFileDialog.getOpenFileName(self,"Select CSV",self.input_csv.text(),"CSV files (*.csv)");
         if p:
@@ -664,23 +706,8 @@ class MainWindow(QMainWindow):
             return ""
         self.input_csv.setText(matching_file(self.strategy_timeframe.currentText()))
         self.intrabar_csv.setText(matching_file(self.intrabar_timeframe.currentText()) if self.use_intrabar.isChecked() else "")
-        if hasattr(self,"dataset_info"): self.dataset_info.setText("Matching local dataset selected." if self.input_csv.text() else "No matching local strategy file. Use Download / Update Binance Dataset.")
+        if hasattr(self,"dataset_info"): self.dataset_info.setText("Matching shared dataset selected." if self.input_csv.text() else f"No matching dataset in {self.market_data_folder}. Open Binance Data Hub to download it.")
         if hasattr(self,"planned_output"): self.update_planned_output()
-    def download_binance_data(self):
-        if self.binance_download_dialog is not None:
-            self.binance_download_dialog.show(); self.binance_download_dialog.raise_(); self.binance_download_dialog.activateWindow(); return
-        dialog=BinanceDownloadDialog(self,symbol=self.market_symbol.currentText(),strategy_timeframe=self.strategy_timeframe.currentText(),intrabar_timeframe=self.intrabar_timeframe.currentText(),use_intrabar=self.use_intrabar.isChecked(),data_folder=str(self.market_data_folder))
-        self.binance_download_dialog=dialog
-        dialog.finished.connect(lambda code,d=dialog:self._binance_download_finished(d,code))
-        dialog.show()
-    def _binance_download_finished(self,dialog,code):
-        if code==QDialog.Accepted and dialog.result_data:
-            result=dialog.result_data; strategy_path=result["strategy"]["path"]; self.input_csv.setText(strategy_path); self.settings.setValue("last_csv",strategy_path)
-            self.market_symbol.setCurrentText(dialog.symbol.currentText().strip().upper().replace("/","")); self.strategy_timeframe.setCurrentText(dialog.strategy_tf.currentText())
-            self.use_intrabar.setChecked(dialog.include_intrabar.isChecked())
-            if dialog.include_intrabar.isChecked(): self.intrabar_timeframe.setCurrentText(dialog.intrabar_tf.currentText()); self.intrabar_csv.setText(result["intrabar"]["path"])
-            self.validate_data()
-        self.binance_download_dialog=None; dialog.deleteLater()
     def browse_output(self):
         p=QFileDialog.getExistingDirectory(self,"Select Output Folder",self.output_folder.text());
         if p: self.output_folder.setText(p); self.settings.setValue("last_output",p)
@@ -699,6 +726,41 @@ class MainWindow(QMainWindow):
     def update_dynamic(self):
         self.entry_interval.setEnabled(self.entry_mode.currentData()=="EVERY_N_CANDLES")
         self.max_pairs.setEnabled(self.entry_mode.currentData()=="EVERY_N_CANDLES")
+        if hasattr(self,"direction_voting_form"):
+            voting_enabled=self.enable_direction_voting.isChecked()
+            voter_controls=(self.direction_vote_use_di,self.direction_vote_use_structure,self.direction_vote_use_momentum,self.direction_vote_use_volume,self.direction_vote_use_htf)
+            for control in voter_controls: control.setEnabled(voting_enabled)
+            enabled_names=[label for control,label in (
+                (self.direction_vote_use_di,"DI pressure"),(self.direction_vote_use_structure,"market structure"),
+                (self.direction_vote_use_momentum,"momentum"),(self.direction_vote_use_volume,"candle/volume pressure"),
+                (self.direction_vote_use_htf,"higher-timeframe trend"),
+            ) if control.isChecked()]
+            enabled_count=len(enabled_names)
+            if voting_enabled and enabled_count and self.direction_vote_minimum.value()>enabled_count:
+                self.direction_vote_minimum.setValue(enabled_count)
+            single_test=bool(self.direction_vote_test_mode.currentData())
+            self.direction_voting_form.setRowVisible(self.direction_vote_structure_lookback,voting_enabled and self.direction_vote_use_structure.isChecked())
+            self.direction_voting_form.setRowVisible(self.direction_vote_momentum_lookback,voting_enabled and self.direction_vote_use_momentum.isChecked())
+            self.direction_voting_form.setRowVisible(self.direction_vote_momentum_threshold,voting_enabled and self.direction_vote_use_momentum.isChecked())
+            self.direction_voting_form.setRowVisible(self.direction_vote_volume_lookback,voting_enabled and self.direction_vote_use_volume.isChecked())
+            self.direction_voting_form.setRowVisible(self.direction_vote_volume_threshold,voting_enabled and self.direction_vote_use_volume.isChecked())
+            self.direction_voting_form.setRowVisible(self.direction_vote_htf_sma,voting_enabled and self.direction_vote_use_htf.isChecked())
+            self.direction_voting_form.setRowVisible(self.direction_vote_minimum,voting_enabled and not single_test)
+            if not voting_enabled:
+                message="Direction voting is OFF. These signal settings will not affect entries until voting is enabled."
+                color="#8a5a00"
+            elif not enabled_count:
+                message="Choose at least one direction signal before running the backtest."
+                color="#b42318"
+            elif single_test:
+                message=f"Active test: {enabled_names[0]} alone selects Long or Short. If it abstains, the signal is skipped."
+                color="#176b3a"
+            else:
+                votes=self.direction_vote_minimum.value()
+                message=f"Active combination: {', '.join(enabled_names)}. A direction needs {votes} matching vote{'s' if votes!=1 else ''}; ties and insufficient votes are skipped."
+                color="#176b3a"
+            self.direction_vote_status.setText(message)
+            self.direction_vote_status.setStyleSheet(f"background:#f5f7f8;border:1px solid #ccd3d8;border-left:4px solid {color};padding:8px")
         if hasattr(self,"strategy_timeframe"):
             strategy=self._timeframe_minutes(self.strategy_timeframe.currentText())
             intrabar=self._timeframe_minutes(self.intrabar_timeframe.currentText())
@@ -879,19 +941,10 @@ class MainWindow(QMainWindow):
             self.populate_summary(summary)
         except Exception:
             self.append_log("Results display warning (summary):\n"+traceback.format_exc())
-        QTimer.singleShot(0,self._finish_trade_view)
-    def _finish_trade_view(self):
-        if self._pending_ui_results is None: return
-        _,trades,_,_=self._pending_ui_results
-        try:
-            self.trade_model.set_dataframe(trades)
-        except Exception:
-            self.append_log("Results display warning (trades):\n"+traceback.format_exc())
         QTimer.singleShot(0,self._finish_results_view)
     def _finish_results_view(self):
         if self._pending_ui_results is None: return
         try:
-            self.refresh_chart()
             self.update_dynamic()
         except Exception:
             self.append_log("Results display warning (chart/window):\n"+traceback.format_exc())
@@ -935,11 +988,6 @@ class MainWindow(QMainWindow):
             self.combo_table.setHorizontalHeaderLabels(["Exit Combination","Count","Percentage","Average Net R","Total Net R"]); combos=s.get("exit_combinations",{}); self.combo_table.setRowCount(len(combos))
             for row,(key,value) in enumerate(combos.items()):
                 for column,text in enumerate([key,value['count'],format_percentage(value['percentage'],2),f"{value['average_net_r']:.4f}R",f"{value['total_net_r']:.4f}R"]): self.combo_table.setItem(row,column,QTableWidgetItem(str(text)))
-    def refresh_chart(self):
-        p=self.output_dir/"charts"/self.chart_select.currentText(); self.chart.setPixmap(QPixmap(str(p)).scaled(self.chart.size(),Qt.KeepAspectRatio,Qt.SmoothTransformation)) if p.exists() else self.chart.setText(f"Chart not found: {p}")
-    def export_filtered(self):
-        p,_=QFileDialog.getSaveFileName(self,"Export Filtered Trades","filtered_trades.csv","CSV (*.csv)");
-        if p: self.trade_model.dataframe.to_csv(p,index=False)
     def save_config(self):
         p,_=QFileDialog.getSaveFileName(self,"Save Configuration","backtest_config.json","JSON (*.json)");
         if p:
@@ -967,7 +1015,7 @@ class MainWindow(QMainWindow):
         self.enable_random_entry.setChecked(bool(values.get("enable_random_entry",False))); self.entry_timing_mode.setCurrentText(str(values.get("entry_timing_mode","CURRENT"))); self.random_probability.setValue(float(values.get("random_entry_probability",0.5))); self.random_seed.setText(str(values.get("random_seed",42))); self.random_start_mode.setCurrentText(str(values.get("random_entry_start_mode","NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE"))); self.randomize_first.setChecked(bool(values.get("randomize_first_entry",True))); self.max_random_wait.setValue(int(values.get("max_random_wait_candles",0))); self.enable_random_batch.setChecked(bool(values.get("enable_random_entry_batch",False))); self.random_seed_start.setValue(int(values.get("random_seed_start",1))); self.random_seed_count.setValue(int(values.get("random_seed_count",100)))
         self.enable_coin_flip_sizing.setChecked(bool(values.get("enable_coin_flip_sizing",False))); self.coin_flip_seed.setText(str(values.get("coin_flip_seed",42)))
         legacy_di_minimum=float(values.get("di_direction_minimum_spread",30.0)); legacy_di_ratio=float(values.get("di_reward_risk_ratio",1.0)); self.enable_di_direction_sizing.setChecked(bool(values.get("enable_di_direction_sizing",False))); self.flip_filtered_di_direction.setChecked(bool(values.get("flip_filtered_di_direction",False))); self.di_direction_long_min_spread.setValue(float(values.get("di_direction_long_minimum_spread",legacy_di_minimum))); self.di_direction_short_min_spread.setValue(float(values.get("di_direction_short_minimum_spread",legacy_di_minimum))); self.di_execution_mode.setCurrentText(str(values.get("di_execution_mode","BOTH_SIDES"))); self.di_long_reward_risk_ratio.setValue(float(values.get("di_long_reward_risk_ratio",legacy_di_ratio))); self.di_short_reward_risk_ratio.setValue(float(values.get("di_short_reward_risk_ratio",legacy_di_ratio)))
-        self.enable_direction_voting.setChecked(bool(values.get("enable_direction_voting",False))); self.direction_vote_use_di.setChecked(bool(values.get("direction_vote_use_di",True))); self.direction_vote_use_structure.setChecked(bool(values.get("direction_vote_use_structure",True))); self.direction_vote_structure_lookback.setValue(int(values.get("direction_vote_structure_lookback",20))); self.direction_vote_use_momentum.setChecked(bool(values.get("direction_vote_use_momentum",True))); self.direction_vote_momentum_lookback.setValue(int(values.get("direction_vote_momentum_lookback_hours",24))); self.direction_vote_momentum_threshold.setValue(float(values.get("direction_vote_momentum_threshold",0))); self.direction_vote_use_volume.setChecked(bool(values.get("direction_vote_use_volume_pressure",True))); self.direction_vote_volume_lookback.setValue(int(values.get("direction_vote_volume_lookback",20))); self.direction_vote_volume_threshold.setValue(float(values.get("direction_vote_volume_threshold",.10))); self.direction_vote_use_htf.setChecked(bool(values.get("direction_vote_use_higher_timeframe",True))); self.direction_vote_htf_hours.setValue(int(values.get("direction_vote_higher_timeframe_hours",4))); self.direction_vote_htf_sma.setValue(int(values.get("direction_vote_higher_timeframe_sma_period",20))); self.direction_vote_minimum.setValue(int(values.get("direction_vote_minimum_votes",2)))
+        self.enable_direction_voting.setChecked(bool(values.get("enable_direction_voting",True))); self.direction_vote_use_di.setChecked(bool(values.get("direction_vote_use_di",True))); self.direction_vote_use_structure.setChecked(False); self.direction_vote_structure_lookback.setValue(int(values.get("direction_vote_structure_lookback",20))); self.direction_vote_use_momentum.setChecked(False); self.direction_vote_momentum_lookback.setValue(int(values.get("direction_vote_momentum_lookback_hours",24))); self.direction_vote_momentum_threshold.setValue(float(values.get("direction_vote_momentum_threshold",0))); self.direction_vote_use_volume.setChecked(False); self.direction_vote_volume_lookback.setValue(int(values.get("direction_vote_volume_lookback",20))); self.direction_vote_volume_threshold.setValue(float(values.get("direction_vote_volume_threshold",.10))); self.direction_vote_use_htf.setChecked(False); self.direction_vote_htf_hours.setValue(int(values.get("direction_vote_higher_timeframe_hours",4))); self.direction_vote_htf_sma.setValue(int(values.get("direction_vote_higher_timeframe_sma_period",20))); self.direction_vote_minimum.setValue(1)
         self.enable_di_regime_reward_risk.setChecked(bool(values.get("enable_di_regime_reward_risk",False))); self.di_regime_bear_return_threshold.setText(format_percentage(float(values.get("di_regime_bear_return_threshold",-0.20)),2)); self.di_long_bull_reward_risk_ratio.setValue(float(values.get("di_long_bull_reward_risk_ratio",2.0))); self.di_long_bear_reward_risk_ratio.setValue(float(values.get("di_long_bear_reward_risk_ratio",1.0))); self.di_long_sideways_reward_risk_ratio.setValue(float(values.get("di_long_sideways_reward_risk_ratio",2.0))); self.di_short_bull_reward_risk_ratio.setValue(float(values.get("di_short_bull_reward_risk_ratio",1.0))); self.di_short_bear_reward_risk_ratio.setValue(float(values.get("di_short_bear_reward_risk_ratio",1.0))); self.di_short_sideways_reward_risk_ratio.setValue(float(values.get("di_short_sideways_reward_risk_ratio",2.0)))
         self.enable_bull_long_conditional_reward_risk.setChecked(bool(values.get("enable_bull_long_conditional_reward_risk",False))); self.bull_long_conditional_bb_width_minimum.setText(format_percentage(float(values.get("bull_long_conditional_bb_width_minimum",0.05)),2)); self.bull_long_conditional_adx_maximum.setValue(float(values.get("bull_long_conditional_adx_maximum",40.0))); self.bull_long_conditional_reward_risk_ratio.setValue(float(values.get("bull_long_conditional_reward_risk_ratio",1.0)))
         self.enable_bull_long_momentum_confirmation.setChecked(bool(values.get("enable_bull_long_momentum_confirmation",False))); self.bull_long_confirmation_lookback_days.setValue(int(values.get("bull_long_confirmation_lookback_days",60))); self.bull_long_confirmation_return_threshold.setText(format_percentage(float(values.get("bull_long_confirmation_return_threshold",0.20)),2)); self.bull_long_unconfirmed_reward_risk_ratio.setValue(float(values.get("bull_long_unconfirmed_reward_risk_ratio",1.0)))

@@ -332,7 +332,9 @@ def periodic_results(trades: pd.DataFrame, freq: str) -> pd.DataFrame:
         exits = exits.fillna(side_exits)
     if exits.isna().all():
         raise ValueError("Periodic results require at least one valid trade exit timestamp.")
-    frame = trades.assign(exit_time=exits).set_index("exit_time")
+    # Keep this narrow. Copying the full telemetry-rich trade frame also deep
+    # copies its large attrs (notably skipped_signals) in recent pandas.
+    frame = pd.DataFrame({"exit_time": exits, "pair_net_pnl": trades["pair_net_pnl"], "pair_net_r": trades["pair_net_r"]}).set_index("exit_time")
     frame = frame.loc[frame.index.notna()]
     candidates = [compatible_resample_freq(freq)]
     fallback = {"ME": "M", "YE": "Y", "M": "ME", "Y": "YE"}.get(candidates[0])
@@ -386,6 +388,13 @@ TRADE_R_COLUMN_METADATA = {
     "direction_vote_short_count": "Number of enabled direction voters that selected Short.",
     "direction_vote_abstain_count": "Number of enabled direction voters without a sufficiently clear reading.",
     "direction_vote_details": "Individual DI, structure, momentum, volume-pressure, and higher-timeframe votes used at entry.",
+    "market_structure_direction": "Confirmed swing-high/swing-low direction at entry: LONG, SHORT, or ABSTAIN.",
+    "market_structure_reason": "Specific confirmed-structure classification or abstention reason.",
+    "market_structure_pivot_span": "Candles required on each side to confirm a swing pivot; currently two.",
+    "market_structure_minimum_displacement_atr": "Smaller directional change across the latest two swing highs/lows, normalized by entry ATR; telemetry only.",
+    "market_structure_maximum_displacement_atr": "Larger directional change across the latest two swing highs/lows, normalized by entry ATR; telemetry only.",
+    "market_structure_breakout_distance_atr": "Directional close distance beyond the prior swing boundary in ATR units; negative means no close breakout.",
+    "market_structure_breakout_confirmed_by_close": "Whether the entry candle closed beyond the prior directional swing boundary.",
     "di_spread": "Absolute difference between +DI and -DI on the 15-minute strategy candle.",
     "di_ratio": "max(+DI, -DI) divided by min(+DI, -DI), with division by zero protected as NaN.",
     "di_spread_entry_5bar_change": "DI spread change at entry versus five strategy candles ago.",

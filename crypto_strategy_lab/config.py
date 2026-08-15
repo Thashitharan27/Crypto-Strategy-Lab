@@ -53,9 +53,9 @@ class RandomEntryStartMode(str, Enum):
 
 @dataclass(frozen=True)
 class BacktestConfig:
-    input_csv: Path = Path("data/binance_ohlcv.csv")
-    strategy_csv: Path = Path("data/BTCUSDT_15m.csv")
-    intrabar_csv: Optional[Path] = Path("data/BTCUSDT_1m.csv")
+    input_csv: Path = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv")
+    strategy_csv: Path = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv")
+    intrabar_csv: Optional[Path] = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_1m.csv")
     output_dir: Path = Path("output")
     timestamp_unit: Optional[str] = "ms"
     strategy_timeframe_minutes: int = 15
@@ -282,6 +282,10 @@ class BacktestConfig:
     enable_short_vwap_distance_filter: bool = False
     short_vwap_minimum_distance_atr: float = 2.0
     enable_bull_regime_short_filter: bool = False
+    market_regime_method: str = "ASSET_RETURN"
+    structural_regime_sma_days: int = 200
+    structural_regime_slope_lookback_days: int = 30
+    structural_regime_benchmark_csv: Optional[Path] = None
     bull_regime_lookback_days: int = 90
     bull_regime_return_threshold: float = 0.20
     enable_bear_regime_adx_filter: bool = False
@@ -330,7 +334,7 @@ class BacktestConfig:
             object.__setattr__(self, "di_long_reward_risk_ratio", self.di_reward_risk_ratio)
         if self.di_short_reward_risk_ratio is None:
             object.__setattr__(self, "di_short_reward_risk_ratio", self.di_reward_risk_ratio)
-        if self.input_csv != Path("data/binance_ohlcv.csv") and self.strategy_csv == Path("data/BTCUSDT_15m.csv"):
+        if self.input_csv != Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv") and self.strategy_csv == Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv"):
             object.__setattr__(self, "strategy_csv", self.input_csv)
         if self.initial_equity <= 0: raise ValueError("initial_equity must be positive")
         if self.strategy_timeframe_minutes <= 0: raise ValueError("strategy_timeframe_minutes must be positive")
@@ -366,9 +370,12 @@ class BacktestConfig:
         if self.di_direction_long_minimum_spread < 0: raise ValueError("di_direction_long_minimum_spread must be non-negative")
         if self.di_direction_short_minimum_spread < 0: raise ValueError("di_direction_short_minimum_spread must be non-negative")
         if self.enable_direction_voting and not self.enable_di_direction_sizing: raise ValueError("direction voting requires DI-direction sizing")
-        if self.enable_direction_voting and not any((self.direction_vote_use_di, self.direction_vote_use_structure, self.direction_vote_use_momentum, self.direction_vote_use_volume_pressure, self.direction_vote_use_higher_timeframe)): raise ValueError("direction voting requires at least one enabled voter")
+        enabled_direction_voters=sum((self.direction_vote_use_di, self.direction_vote_use_structure, self.direction_vote_use_momentum, self.direction_vote_use_volume_pressure, self.direction_vote_use_higher_timeframe))
+        if self.enable_direction_voting and not enabled_direction_voters: raise ValueError("direction voting requires at least one enabled voter")
+        if self.enable_direction_voting and self.direction_vote_minimum_votes>enabled_direction_voters: raise ValueError("minimum direction votes cannot exceed enabled voters")
         for name, value in (("structure lookback", self.direction_vote_structure_lookback), ("momentum lookback", self.direction_vote_momentum_lookback_hours), ("volume lookback", self.direction_vote_volume_lookback), ("higher timeframe", self.direction_vote_higher_timeframe_hours), ("higher-timeframe SMA period", self.direction_vote_higher_timeframe_sma_period), ("minimum votes", self.direction_vote_minimum_votes)):
             if value <= 0: raise ValueError(f"direction vote {name} must be positive")
+        if self.direction_vote_structure_lookback < 10: raise ValueError("direction vote structure lookback must be at least 10 candles for confirmed swing pivots")
         if self.direction_vote_momentum_threshold < 0 or not 0 <= self.direction_vote_volume_threshold <= 1: raise ValueError("direction vote thresholds are invalid")
         if self.long_momentum_lookback_hours <= 0: raise ValueError("long_momentum_lookback_hours must be positive")
         if self.long_momentum_minimum_return <= -1: raise ValueError("long_momentum_minimum_return must be greater than -100%")
@@ -449,6 +456,9 @@ class BacktestConfig:
         if self.enable_atr_checkpoint_tp_extension and not self.enable_di_direction_sizing: raise ValueError("ATR checkpoint TP extension requires DI-direction sizing")
         if self.enable_atr_checkpoint_tp_extension and self.enable_partial_take_profit: raise ValueError("ATR checkpoint TP extension cannot be combined with partial take profit")
         if self.bull_regime_lookback_days <= 0: raise ValueError("bull_regime_lookback_days must be positive")
+        if self.market_regime_method not in ("ASSET_RETURN", "BTC_STRUCTURAL", "ASSET_STRUCTURAL"): raise ValueError("market_regime_method must be ASSET_RETURN, BTC_STRUCTURAL, or ASSET_STRUCTURAL")
+        if self.structural_regime_sma_days < 2: raise ValueError("structural_regime_sma_days must be at least 2")
+        if self.structural_regime_slope_lookback_days < 1: raise ValueError("structural_regime_slope_lookback_days must be positive")
         if self.bull_regime_return_threshold <= -1: raise ValueError("bull_regime_return_threshold must be greater than -100%")
         if self.enable_bull_regime_short_filter and not self.enable_di_direction_sizing: raise ValueError("bull-regime short filter requires DI-direction sizing")
         if self.bear_regime_adx_minimum < 0: raise ValueError("bear_regime_adx_minimum must be non-negative")
