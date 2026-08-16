@@ -576,6 +576,16 @@ class BacktestEngine:
 
         if mode in {"ANALYSIS_ONLY", "ANALYSISONLY"}:
             return False, None
+        if mode == "CUSTOM_SR_STATE_FILTER":
+            requirement = str(
+                self.config.sr_long_state_requirement if direction == "LONG" else self.config.sr_short_state_requirement
+            ).upper().replace("-", "_").replace(" ", "_")
+            if requirement == "ANY":
+                return False, None
+            states = {str(sr_context.support_state), str(sr_context.resistance_state)}
+            if requirement not in states:
+                return True, "SR_LONG_STATE_REQUIREMENT_FAILED" if direction == "LONG" else "SR_SHORT_STATE_REQUIREMENT_FAILED"
+            return False, None
         if mode == "BLOCK_BAD_LOCATION":
             if rating_value in {"BAD_LOCATION", "BAD"}:
                 return True, "SR_BAD_LOCATION"

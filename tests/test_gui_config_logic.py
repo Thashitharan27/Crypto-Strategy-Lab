@@ -227,7 +227,9 @@ def test_support_resistance_settings_round_trip_and_validation(tmp_path):
         "sr_lookback_bars": 200,
         "sr_zone_width_atr": 0.5,
         "sr_near_distance_atr": 0.75,
-        "sr_filter_mode": "BLOCK_BAD_LOCATION",
+        "sr_filter_mode": "CUSTOM_SR_STATE_FILTER",
+        "sr_long_state_requirement": "ANY",
+        "sr_short_state_requirement": "SUPPORT_BROKEN",
     }
     assert not validate_config_values(values)
     cfg = build_backtest_config(values)
@@ -237,14 +239,18 @@ def test_support_resistance_settings_round_trip_and_validation(tmp_path):
     assert cfg.sr_lookback_bars == 200
     assert cfg.sr_zone_width_atr == pytest.approx(0.5)
     assert cfg.sr_near_distance_atr == pytest.approx(0.75)
-    assert cfg.sr_filter_mode == "BLOCK_BAD_LOCATION"
+    assert cfg.sr_filter_mode == "CUSTOM_SR_STATE_FILTER"
+    assert cfg.sr_long_state_requirement == "ANY"
+    assert cfg.sr_short_state_requirement == "SUPPORT_BROKEN"
 
     path = tmp_path / "sr-config.json"
     save_config_json(path, values)
     loaded = load_config_json(path)
     cfg2 = build_backtest_config(loaded)
     assert cfg2.enable_support_resistance_analysis is True
-    assert cfg2.sr_filter_mode == "BLOCK_BAD_LOCATION"
+    assert cfg2.sr_filter_mode == "CUSTOM_SR_STATE_FILTER"
+    assert cfg2.sr_long_state_requirement == "ANY"
+    assert cfg2.sr_short_state_requirement == "SUPPORT_BROKEN"
 
 
 def test_negative_bull_regime_threshold_is_valid(tmp_path):
