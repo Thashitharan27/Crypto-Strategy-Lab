@@ -199,6 +199,8 @@ class BacktestConfig:
     sr_break_tolerance_atr: float = 0.25
     sr_break_basis: str = "CLOSE"
     sr_filter_mode: str = "ANALYSIS_ONLY"
+    sr_long_state_requirement: str = "ANY"
+    sr_short_state_requirement: str = "ANY"
     di_long_bull_reward_risk_ratio: float = 2.0
     di_long_bear_reward_risk_ratio: float = 1.0
     di_long_sideways_reward_risk_ratio: float = 2.0

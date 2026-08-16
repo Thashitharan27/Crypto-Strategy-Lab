@@ -206,6 +206,31 @@ class TestSupportResistanceFiltering:
         assert rejected is False
         assert reason is None
 
+    def test_custom_state_filter_allows_independent_direction_requirements(self):
+        data = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
+            "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0,
+        })
+        engine = BacktestEngine(data, BacktestConfig(
+            enable_support_resistance_analysis=True,
+            sr_filter_mode="CUSTOM_SR_STATE_FILTER",
+            sr_long_state_requirement="ANY",
+            sr_short_state_requirement="SUPPORT_BROKEN",
+        ))
+        context = SRContext(
+            nearest_support_price=99.0, nearest_support_bar_index=1, nearest_support_distance_atr=0.1, nearest_support_distance_price=1.0,
+            nearest_resistance_price=101.0, nearest_resistance_bar_index=2, nearest_resistance_distance_atr=1.5, nearest_resistance_distance_price=1.0,
+            price_location=LocationClassification.NEAR_SUPPORT, trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
+            near_support=True, near_resistance=False, inside_support_zone=False, inside_resistance_zone=False, room_in_direction_atr=0.5,
+            support_state="SUPPORT_BROKEN", resistance_state="RESISTANCE_HELD",
+        )
+
+        assert engine._should_reject_for_sr(10, "LONG", context) == (False, None)
+        assert engine._should_reject_for_sr(10, "SHORT", context) == (False, None)
+
+        context.support_state = "SUPPORT_HELD"
+        assert engine._should_reject_for_sr(10, "SHORT", context) == (True, "SR_SHORT_STATE_REQUIREMENT_FAILED")
+
     def test_block_bad_location_mode_rejects_bad_rating(self):
         data = pd.DataFrame({
             "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
