@@ -157,7 +157,9 @@ class MainWindow(QMainWindow):
         random_group.addRow("",self.enable_coin_flip_sizing); random_group.addRow("Coin Flip Seed",self.coin_flip_seed)
         self.enable_di_direction_sizing=QCheckBox("Enable DI-Direction Selection"); self.flip_filtered_di_direction=QCheckBox("Flip direction after filters pass (Long ↔ Short)"); self.di_direction_long_min_spread=self._spin(30,0,1000,3); self.di_direction_short_min_spread=self._spin(30,0,1000,3); self.di_long_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_short_reward_risk_ratio=self._spin(1,0.01,100,3)
         self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.enable_sr_hold_confirmation=QCheckBox("Enable"); self.sr_hold_confirmation_bars=QSpinBox(); self.sr_hold_confirmation_bars.setRange(1,100); self.sr_hold_confirmation_bars.setValue(3); self.sr_hold_confirmation_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_tolerance_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_basis=QComboBox(); self.sr_break_basis.addItems(["CLOSE","WICK"]); self.sr_filter_mode=PolicyComboBox()
-        for mode_label,mode_value in [("Analysis Only","ANALYSIS_ONLY"),("Filter Entries","TRADE_CONTEXT_FILTER"),("Confirmation","REQUIRE_CONFIRMED_HOLD"),("BLOCK_BAD_LOCATION","BLOCK_BAD_LOCATION"),("REQUIRE_GOOD_LOCATION","REQUIRE_GOOD_LOCATION"),("BLOCK_BROKEN_STRUCTURE","BLOCK_BROKEN_STRUCTURE"),("CUSTOM_SR_STATE_FILTER","CUSTOM_SR_STATE_FILTER")]:
+        # This combo is deliberately not placed in the UI.  It remains the canonical,
+        # backwards-compatible value holder for old profiles and the engine.
+        for mode_label,mode_value in [("Analysis Only","ANALYSIS_ONLY"),("Apply Entry Rules","TRADE_CONTEXT_FILTER"),("Confirmation","REQUIRE_CONFIRMED_HOLD"),("Block bad location","BLOCK_BAD_LOCATION"),("Require good location","REQUIRE_GOOD_LOCATION"),("Block broken structure","BLOCK_BROKEN_STRUCTURE"),("Custom state filter","CUSTOM_SR_STATE_FILTER")]:
             self.sr_filter_mode.addItem(mode_label,mode_value)
         self.sr_long_state_requirement=QComboBox(); self.sr_short_state_requirement=QComboBox(); sr_state_options=["ANY","SUPPORT_HELD","SUPPORT_TESTING","SUPPORT_BROKEN","APPROACHING_SUPPORT","RESISTANCE_HELD","RESISTANCE_TESTING","RESISTANCE_BROKEN"]; self.sr_long_state_requirement.addItems(sr_state_options); self.sr_short_state_requirement.addItems(sr_state_options)
         self.long_sr_rule_support_bounce=QCheckBox("Support Bounce"); self.long_sr_rule_support_bounce.setChecked(True)
@@ -406,103 +408,75 @@ class MainWindow(QMainWindow):
 
     def _build_support_resistance_tab(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); layout=QVBoxLayout(inner)
-        intro=QLabel("Support/Resistance analysis detects swing-based price structure and (optionally) uses it to filter or confirm entries. Analysis Only is the recommended default: it records structure and reports on it without changing which trades are taken.")
-        intro.setWordWrap(True); layout.addWidget(intro)
 
-        enable_box=QGroupBox("Enable / Mode"); enable_form=QFormLayout(enable_box)
-        self.enable_support_resistance_analysis.setToolTip("Turns on support/resistance detection. When off, no S/R data is calculated, recorded, or reported.")
-        self.sr_filter_mode.setToolTip(
-            "Analysis Only (recommended default): S/R data is recorded and reported, but never rejects or alters trades.\n"
-            "Filter Entries: allow/reject LONG and SHORT signals using the Trade Context rules below.\n"
-            "Confirmation: acts as a confirmation gate, requiring a held support/resistance test.\n"
-            "Other legacy modes filter using the overall location rating or specific structure states."
-        )
-        enable_form.addRow("",self.enable_support_resistance_analysis)
-        enable_form.addRow("Mode",self.sr_filter_mode)
-        layout.addWidget(enable_box)
+        usage=QGroupBox("S/R Usage"); usage_layout=QVBoxLayout(usage)
+        self.enable_support_resistance_analysis.setToolTip("Calculate, store, and report support/resistance context.")
+        usage_layout.addWidget(self.enable_support_resistance_analysis)
+        usage_layout.addWidget(QLabel("Usage"))
+        self.sr_analyze_only=QRadioButton("Analyze Only")
+        self.sr_apply_entry_rules=QRadioButton("Apply Entry Rules")
+        usage_layout.addWidget(self.sr_analyze_only); usage_layout.addWidget(self.sr_apply_entry_rules)
+        self.sr_strategy_status=QLabel(); self.sr_strategy_status.setWordWrap(True)
+        status=QGroupBox("S/R Strategy Status"); QVBoxLayout(status).addWidget(self.sr_strategy_status); usage_layout.addWidget(status)
+        layout.addWidget(usage)
 
-        trade_context_box=QGroupBox("Trade Context"); trade_context_layout=QVBoxLayout(trade_context_box)
-        trade_context_form=QFormLayout(); trade_context_layout.addLayout(trade_context_form)
-        self.sr_trade_context_note=QLabel(); self.sr_trade_context_note.setWordWrap(True)
-        self.sr_long_state_requirement.setToolTip("Legacy custom-state requirement for LONG entries (used by CUSTOM_SR_STATE_FILTER mode). Only applied when Mode is not ANALYSIS_ONLY.")
-        self.sr_short_state_requirement.setToolTip("Legacy custom-state requirement for SHORT entries (used by CUSTOM_SR_STATE_FILTER mode). Only applied when Mode is not ANALYSIS_ONLY.")
-        self.sr_trade_context_match_mode.setToolTip("How enabled rules below combine when Mode is Filter Entries: Any selected condition (at least one enabled rule must match) or All selected conditions (every enabled rule must match).")
-        trade_context_form.addRow("Rule Matching",self.sr_trade_context_match_mode)
-        long_short_row=QHBoxLayout()
-        long_rules_box=QGroupBox("LONG"); long_rules_form=QFormLayout(long_rules_box)
-        for w in (self.long_sr_rule_support_bounce,self.long_sr_rule_resistance_breakout,self.long_sr_rule_near_support,self.long_sr_rule_near_resistance):
-            long_rules_form.addRow("",w)
-        short_rules_box=QGroupBox("SHORT"); short_rules_form=QFormLayout(short_rules_box)
-        for w in (self.short_sr_rule_resistance_rejection,self.short_sr_rule_support_breakdown,self.short_sr_rule_near_resistance,self.short_sr_rule_near_support):
-            short_rules_form.addRow("",w)
-        long_short_row.addWidget(long_rules_box); long_short_row.addWidget(short_rules_box)
-        trade_context_layout.addLayout(long_short_row)
-        trade_context_layout.addWidget(self.sr_trade_context_note)
-        layout.addWidget(trade_context_box)
+        entry_box=QGroupBox("Entry Rules"); entry_layout=QVBoxLayout(entry_box)
+        columns=QHBoxLayout(); long_box=QGroupBox("LONG"); lf=QFormLayout(long_box); short_box=QGroupBox("SHORT"); sf=QFormLayout(short_box)
+        # Reuse the established serialized rule fields; only trader-facing labels change.
+        self.long_sr_rule_resistance_breakout.setText("Avoid buying near resistance")
+        self.long_sr_rule_support_bounce.setText("Require price near support")
+        self.long_sr_rule_near_support.setText("Block if support structure is broken")
+        self.short_sr_rule_support_breakdown.setText("Avoid selling near support")
+        self.short_sr_rule_resistance_rejection.setText("Require price near resistance")
+        self.short_sr_rule_near_resistance.setText("Block if resistance structure is broken")
+        self.long_sr_rule_resistance_breakout.setToolTip("Reject LONG entries when price is within the configured Near-Level Threshold of resistance.")
+        self.long_sr_rule_support_bounce.setToolTip("Allow LONG entries only when price is near a valid support level.")
+        self.short_sr_rule_support_breakdown.setToolTip("Reject SHORT entries when price is within the configured Near-Level Threshold of support.")
+        self.short_sr_rule_resistance_rejection.setToolTip("Allow SHORT entries only when price is near a valid resistance level.")
+        lf.addRow(QLabel("Location")); lf.addRow(self.long_sr_rule_resistance_breakout); lf.addRow(self.long_sr_rule_support_bounce); lf.addRow(QLabel("Structure")); lf.addRow(self.long_sr_rule_near_support)
+        sf.addRow(QLabel("Location")); sf.addRow(self.short_sr_rule_support_breakdown); sf.addRow(self.short_sr_rule_resistance_rejection); sf.addRow(QLabel("Structure")); sf.addRow(self.short_sr_rule_near_resistance)
+        columns.addWidget(long_box); columns.addWidget(short_box); entry_layout.addLayout(columns)
+        self.sr_trade_context_note=QLabel("Analysis Only is active. These rules are saved but do not reject trades."); self.sr_trade_context_note.setWordWrap(True); entry_layout.addWidget(self.sr_trade_context_note)
+        self.sr_entry_rules_box=entry_box; layout.addWidget(entry_box)
 
-        proximity_box=QGroupBox("Proximity"); proximity_form=QFormLayout(proximity_box)
-        self.sr_near_distance_atr.setToolTip("Maximum ATR-normalized distance between price and an S/R zone for the signal to be classified as near that zone.")
-        self.sr_zone_width_atr.setToolTip("Half-width/tolerance used when merging detected pivot levels into Support/Resistance zones.")
-        proximity_form.addRow("Near S/R Distance (ATR)",self.sr_near_distance_atr)
-        proximity_form.addRow("Zone Width (ATR)",self.sr_zone_width_atr)
-        layout.addWidget(proximity_box)
+        proximity=QGroupBox("Proximity"); pf=QFormLayout(proximity)
+        self.sr_near_distance_atr.setSuffix(" ATR"); self.sr_zone_width_atr.setSuffix(" ATR")
+        self.sr_near_distance_atr.setToolTip("Price within this ATR distance is considered near support or resistance.")
+        pf.addRow("Near-Level Threshold",self.sr_near_distance_atr); pf.addRow("Zone Width",self.sr_zone_width_atr)
+        self.sr_proximity_box=proximity; layout.addWidget(proximity)
 
-        breakout_box=QGroupBox("Breakout Confirmation"); breakout_form=QFormLayout(breakout_box)
-        self.enable_sr_hold_confirmation.setText("Require breakout confirmation")
-        self.enable_sr_hold_confirmation.setToolTip("How long price must remain beyond/beside a level before a break or hold is confirmed.")
-        self.sr_hold_confirmation_bars.setToolTip("Number of bars price must hold beyond a level before confirmation.")
-        self.sr_hold_confirmation_atr.setToolTip("Minimum distance beyond a zone (in ATR) needed for confirmation.")
-        self.sr_break_tolerance_atr.setToolTip("Small tolerance (in ATR) around the S/R zone used when identifying breaks.")
-        self.sr_break_basis.setToolTip("Price basis used to evaluate breaks: CLOSE (candle close) or WICK (intrabar high/low).")
-        breakout_form.addRow("",self.enable_sr_hold_confirmation)
-        breakout_form.addRow("Confirmation Bars",self.sr_hold_confirmation_bars)
-        breakout_form.addRow("Confirmation Distance (ATR)",self.sr_hold_confirmation_atr)
-        breakout_form.addRow("Break Tolerance (ATR)",self.sr_break_tolerance_atr)
-        breakout_form.addRow("Break Basis",self.sr_break_basis)
-        layout.addWidget(breakout_box)
+        breaks=QGroupBox("Structure Break Detection"); bf=QFormLayout(breaks)
+        self.enable_sr_hold_confirmation.setText("Confirm break before marking a level broken")
+        self.sr_hold_confirmation_bars.setToolTip("Consecutive candles required to confirm that a level was broken.")
+        self.sr_hold_confirmation_atr.setToolTip("Minimum ATR distance beyond the level required to confirm a break.")
+        self.sr_break_basis.setToolTip("Use candle closes or intrabar wicks to evaluate structure breaks.")
+        self.sr_hold_confirmation_atr.setSuffix(" ATR"); self.sr_break_tolerance_atr.setSuffix(" ATR")
+        bf.addRow(self.enable_sr_hold_confirmation); bf.addRow("Confirmation Candles",self.sr_hold_confirmation_bars); bf.addRow("Minimum Break Distance",self.sr_hold_confirmation_atr); bf.addRow("Break Tolerance",self.sr_break_tolerance_atr); bf.addRow("Break Basis",self.sr_break_basis)
+        self.sr_break_detection_box=breaks; layout.addWidget(breaks)
 
-        advanced_box=QGroupBox("Advanced Detection Settings"); advanced_box.setCheckable(True); advanced_box.setChecked(False)
-        advanced_form=QFormLayout(advanced_box)
+        advanced=QGroupBox("Advanced Detection Settings"); advanced.setCheckable(True); advanced.setChecked(False); af=QFormLayout()
         self.sr_detection_preset=QComboBox(); self.sr_detection_preset.addItems(["Conservative","Balanced","Sensitive","Custom"]); self.sr_detection_preset.setCurrentText("Balanced")
-        self.sr_detection_preset.setToolTip("Conservative uses fewer, stronger levels. Balanced is the default. Sensitive detects more levels. Custom is selected automatically after any manual edit below.")
-        self.sr_pivot_left.setToolTip("Candles to the left of a candidate swing high/low used to confirm it as a pivot.")
-        self.sr_pivot_right.setToolTip("Candles to the right of a candidate swing high/low required before it is confirmed. A pivot is not available to the strategy until this many bars later, which prevents look-ahead bias.")
-        self.sr_lookback_bars.setToolTip("How much historical price structure (in bars) is considered when searching for levels.")
-        advanced_form.addRow("Detection Preset",self.sr_detection_preset)
-        advanced_form.addRow("Pivot Left",self.sr_pivot_left)
-        advanced_form.addRow("Pivot Right",self.sr_pivot_right)
-        advanced_form.addRow("Lookback Bars",self.sr_lookback_bars)
-        advanced_content=QWidget(); advanced_content.setLayout(advanced_form)
-        advanced_wrapper=QVBoxLayout(advanced_box); advanced_wrapper.addWidget(advanced_content)
-        advanced_box.toggled.connect(advanced_content.setVisible); advanced_content.setVisible(advanced_box.isChecked())
-        layout.addWidget(advanced_box)
+        af.addRow("Detection Preset",self.sr_detection_preset); af.addRow("Pivot Left",self.sr_pivot_left); af.addRow("Pivot Right",self.sr_pivot_right); af.addRow("Lookback Bars",self.sr_lookback_bars)
+        # Legacy state filters remain available for old profiles, but are technical settings.
+        af.addRow("LONG state filter (legacy)",self.sr_long_state_requirement); af.addRow("SHORT state filter (legacy)",self.sr_short_state_requirement); af.addRow("Rule matching",self.sr_trade_context_match_mode)
+        content=QWidget(); content.setLayout(af); wrapper=QVBoxLayout(advanced); wrapper.addWidget(content); advanced.toggled.connect(content.setVisible); content.setVisible(False)
+        self.sr_advanced_box=advanced; layout.addWidget(advanced)
 
-        summary_box=QGroupBox("Current S/R Rules"); summary_layout=QVBoxLayout(summary_box)
-        self.sr_summary_label=QLabel(); self.sr_summary_label.setWordWrap(True)
-        summary_layout.addWidget(self.sr_summary_label)
-        layout.addWidget(summary_box)
-        layout.addStretch(1)
-
-        self._sr_detection_presets={
-            "Conservative":{"pivot_left":8,"pivot_right":8,"lookback":300,"zone_width_atr":0.75,"break_tolerance_atr":0.35},
-            "Balanced":{"pivot_left":5,"pivot_right":5,"lookback":200,"zone_width_atr":0.5,"break_tolerance_atr":0.25},
-            "Sensitive":{"pivot_left":3,"pivot_right":3,"lookback":150,"zone_width_atr":0.35,"break_tolerance_atr":0.15},
-        }
+        summary=QGroupBox("Current S/R Rules"); sl=QVBoxLayout(summary); self.sr_summary_label=QLabel(); self.sr_summary_label.setWordWrap(True); sl.addWidget(self.sr_summary_label); layout.addWidget(summary); layout.addStretch(1)
+        self._sr_detection_presets={"Conservative":{"pivot_left":8,"pivot_right":8,"lookback":300,"zone_width_atr":0.75,"break_tolerance_atr":0.35},"Balanced":{"pivot_left":5,"pivot_right":5,"lookback":200,"zone_width_atr":0.5,"break_tolerance_atr":0.25},"Sensitive":{"pivot_left":3,"pivot_right":3,"lookback":150,"zone_width_atr":0.35,"break_tolerance_atr":0.15}}
         self.sr_detection_preset.currentTextChanged.connect(self._apply_sr_detection_preset)
-        for control in (self.sr_pivot_left,self.sr_pivot_right,self.sr_lookback_bars,self.sr_zone_width_atr,self.sr_break_tolerance_atr):
-            control.valueChanged.connect(self._mark_sr_preset_custom)
-        for control in (self.enable_support_resistance_analysis,self.enable_sr_hold_confirmation):
-            control.toggled.connect(self.update_dynamic)
-        for control in (self.sr_filter_mode,self.sr_long_state_requirement,self.sr_short_state_requirement,self.sr_break_basis,self.sr_trade_context_match_mode):
-            control.currentTextChanged.connect(self.update_dynamic)
-        for control in (self.sr_near_distance_atr,self.sr_zone_width_atr,self.sr_hold_confirmation_bars,self.sr_hold_confirmation_atr,self.sr_break_tolerance_atr,self.sr_pivot_left,self.sr_pivot_right,self.sr_lookback_bars):
-            control.valueChanged.connect(self.update_dynamic)
-        for control in (self.long_sr_rule_support_bounce,self.long_sr_rule_resistance_breakout,self.long_sr_rule_near_support,self.long_sr_rule_near_resistance,self.short_sr_rule_resistance_rejection,self.short_sr_rule_support_breakdown,self.short_sr_rule_near_resistance,self.short_sr_rule_near_support):
-            control.toggled.connect(self.update_dynamic)
+        for c in (self.sr_pivot_left,self.sr_pivot_right,self.sr_lookback_bars,self.sr_zone_width_atr,self.sr_break_tolerance_atr): c.valueChanged.connect(self._mark_sr_preset_custom)
+        self.sr_analyze_only.toggled.connect(lambda checked: checked and self.sr_filter_mode.setCurrentText("ANALYSIS_ONLY")); self.sr_apply_entry_rules.toggled.connect(lambda checked: checked and self.sr_filter_mode.setCurrentText("TRADE_CONTEXT_FILTER"))
+        for c in (self.enable_support_resistance_analysis,self.enable_sr_hold_confirmation,self.sr_analyze_only,self.sr_apply_entry_rules): c.toggled.connect(self.update_dynamic)
+        for c in (self.sr_filter_mode,self.sr_long_state_requirement,self.sr_short_state_requirement,self.sr_break_basis,self.sr_trade_context_match_mode): c.currentTextChanged.connect(self.update_dynamic)
+        for c in (self.sr_near_distance_atr,self.sr_zone_width_atr,self.sr_hold_confirmation_bars,self.sr_hold_confirmation_atr,self.sr_break_tolerance_atr,self.sr_pivot_left,self.sr_pivot_right,self.sr_lookback_bars): c.valueChanged.connect(self.update_dynamic)
+        for c in (self.long_sr_rule_support_bounce,self.long_sr_rule_resistance_breakout,self.long_sr_rule_near_support,self.short_sr_rule_resistance_rejection,self.short_sr_rule_support_breakdown,self.short_sr_rule_near_resistance): c.toggled.connect(self.update_dynamic)
+        outer.addWidget(scroll); scroll.setWidget(inner); self.tabs.addTab(page,"Support & Resistance"); self._update_sr_usage_radios(); self._update_sr_tab_state()
 
-        outer.addWidget(scroll); scroll.setWidget(inner)
-        self.tabs.addTab(page,"Support & Resistance")
-        self._update_sr_tab_state()
+    def _update_sr_usage_radios(self):
+        analysis=self.sr_filter_mode.currentText()=="ANALYSIS_ONLY"
+        for control,value in ((self.sr_analyze_only,analysis),(self.sr_apply_entry_rules,not analysis)):
+            control.blockSignals(True); control.setChecked(value); control.blockSignals(False)
 
     def _apply_sr_detection_preset(self,name):
         preset=self._sr_detection_presets.get(name)
@@ -530,51 +504,26 @@ class MainWindow(QMainWindow):
 
     def _update_sr_tab_state(self):
         if not hasattr(self,"sr_summary_label"): return
-        sr_enabled=self.enable_support_resistance_analysis.isChecked()
-        mode=self.sr_filter_mode.currentText()
-        mode_label={"ANALYSIS_ONLY":"Analysis Only","TRADE_CONTEXT_FILTER":"Filter Entries","REQUIRE_CONFIRMED_HOLD":"Confirmation"}.get(mode,mode)
-        match_mode_label={"ANY":"Any selected condition","ALL":"All selected conditions"}.get(self.sr_trade_context_match_mode.currentText(),self.sr_trade_context_match_mode.currentText())
-        analysis_only=mode=="ANALYSIS_ONLY"
-        context_rule_mode=mode=="TRADE_CONTEXT_FILTER"
-        for box in (self.sr_long_state_requirement,self.sr_short_state_requirement):
-            box.setEnabled(sr_enabled and mode=="CUSTOM_SR_STATE_FILTER")
-        long_rule_controls=(self.long_sr_rule_support_bounce,self.long_sr_rule_resistance_breakout,self.long_sr_rule_near_support,self.long_sr_rule_near_resistance)
-        short_rule_controls=(self.short_sr_rule_resistance_rejection,self.short_sr_rule_support_breakdown,self.short_sr_rule_near_resistance,self.short_sr_rule_near_support)
-        for control in long_rule_controls+short_rule_controls:
-            control.setEnabled(sr_enabled)
-        self.sr_trade_context_match_mode.setEnabled(sr_enabled and context_rule_mode)
-        confirmation_enabled=sr_enabled and self.enable_sr_hold_confirmation.isChecked()
-        for control in (self.sr_hold_confirmation_bars,self.sr_hold_confirmation_atr):
-            control.setEnabled(confirmation_enabled)
-        self.enable_sr_hold_confirmation.setEnabled(sr_enabled)
-        for control in (self.sr_break_tolerance_atr,self.sr_break_basis,self.sr_near_distance_atr,self.sr_zone_width_atr,self.sr_filter_mode):
-            control.setEnabled(sr_enabled)
-        if not sr_enabled:
-            self.sr_trade_context_note.setText("Support/Resistance analysis is disabled.")
-        elif analysis_only:
-            self.sr_trade_context_note.setText("Mode is Analysis Only: these requirements are visible for preparation but do not filter or reject trades.")
-        elif context_rule_mode:
-            self.sr_trade_context_note.setText(f"Mode is Filter Entries: a signal is allowed when {match_mode_label.lower()} below is true.")
+        self._update_sr_usage_radios()
+        enabled=self.enable_support_resistance_analysis.isChecked()
+        applying=self.sr_filter_mode.currentText()!="ANALYSIS_ONLY"
+        self.sr_analyze_only.setEnabled(enabled); self.sr_apply_entry_rules.setEnabled(enabled)
+        for box in (self.sr_proximity_box,self.sr_break_detection_box,self.sr_advanced_box): box.setEnabled(enabled)
+        self.sr_entry_rules_box.setEnabled(enabled and applying)
+        confirmation=enabled and self.enable_sr_hold_confirmation.isChecked()
+        self.sr_hold_confirmation_bars.setEnabled(confirmation); self.sr_hold_confirmation_atr.setEnabled(confirmation)
+        if not enabled:
+            note="Support/Resistance analysis is disabled."
+        elif not applying:
+            note="Analysis Only is active. These rules are saved but do not reject trades."
         else:
-            self.sr_trade_context_note.setText(f"These requirements filter/confirm entries because Mode is {mode_label}, not Analysis Only.")
-        if not sr_enabled:
-            summary="Support/Resistance analysis is disabled."
-        else:
-            long_rules=[label for control,label in ((self.long_sr_rule_support_bounce,"Support bounce"),(self.long_sr_rule_resistance_breakout,"Resistance breakout"),(self.long_sr_rule_near_support,"Near support"),(self.long_sr_rule_near_resistance,"Near resistance")) if control.isChecked()]
-            short_rules=[label for control,label in ((self.short_sr_rule_resistance_rejection,"Resistance rejection"),(self.short_sr_rule_support_breakdown,"Support breakdown"),(self.short_sr_rule_near_resistance,"Near resistance"),(self.short_sr_rule_near_support,"Near support")) if control.isChecked()]
-            long_lines="\n- ".join(long_rules) if long_rules else "(none enabled)"
-            short_lines="\n- ".join(short_rules) if short_rules else "(none enabled)"
-            summary=(
-                f"LONG\n- {long_lines}\n\n"
-                f"SHORT\n- {short_lines}\n\n"
-                f"Mode: {mode_label}\n"
-                f"Rule Matching: {match_mode_label}\n"
-                f"Detection: {self.sr_detection_preset.currentText()}\n"
-                f"Near Distance: {self.sr_near_distance_atr.value():.2f} ATR\n"
-                f"Zone Width: {self.sr_zone_width_atr.value():.2f} ATR\n"
-                f"Breakout Confirmation: {'Enabled' if self.enable_sr_hold_confirmation.isChecked() else 'Disabled'}"
-            )
-        self.sr_summary_label.setText(summary)
+            note="Apply Entry Rules is active. Selected rules may reject entries."
+        self.sr_trade_context_note.setText(note)
+        long_rules=[label for c,label in ((self.long_sr_rule_resistance_breakout,"Avoid Resistance"),(self.long_sr_rule_support_bounce,"Require Support"),(self.long_sr_rule_near_support,"Broken Support Structure")) if c.isChecked()]
+        short_rules=[label for c,label in ((self.short_sr_rule_support_breakdown,"Avoid Support"),(self.short_sr_rule_resistance_rejection,"Require Resistance"),(self.short_sr_rule_near_resistance,"Broken Resistance Structure")) if c.isChecked()]
+        l=", ".join(long_rules) or "None"; sh=", ".join(short_rules) or "None"
+        self.sr_strategy_status.setText(f"Analysis:        {'Enabled' if enabled else 'Disabled'}\nTrading Impact:  {'APPLYING ENTRY RULES' if enabled and applying else 'NONE'}\nLong Rules:      {l}\nShort Rules:     {sh}")
+        self.sr_summary_label.setText(f"LONG\n• {l}\n\nSHORT\n• {sh}\n\nNear-Level Threshold: {self.sr_near_distance_atr.value():.3f} ATR\nStructure Break Confirmation: {'Enabled' if self.enable_sr_hold_confirmation.isChecked() else 'Disabled'}")
     def _build_di_strategy_tab(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); form=QVBoxLayout(inner)
         intro=QLabel("DI-direction strategy settings live here. Shared data, risk, fees, execution, telemetry, and output settings remain on the Configuration tab.")
