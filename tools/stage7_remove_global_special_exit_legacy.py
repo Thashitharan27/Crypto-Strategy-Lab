@@ -35,33 +35,19 @@ p = ROOT / "crypto_strategy_lab/engine.py"
 s = p.read_text(encoding="utf-8")
 s = re.sub(
     r"pos\.atr_checkpoint_extension_enabled = bool\(\s*profile_for_special_exit\.atr_checkpoint_tp_extension_enabled\s*if profile_for_special_exit else \(self\.config\.enable_atr_checkpoint_tp_extension and sizing_direction == pos\.side\.value\)\s*\)",
-    "pos.atr_checkpoint_extension_enabled = bool(profile_for_special_exit and profile_for_special_exit.atr_checkpoint_tp_extension_enabled)",
-    s,
+    "pos.atr_checkpoint_extension_enabled = bool(profile_for_special_exit and profile_for_special_exit.atr_checkpoint_tp_extension_enabled)", s,
 )
-s = re.sub(
-    r"pos\.atr_checkpoint_di_spread_minimum = profile_for_special_exit\.atr_checkpoint_di_spread_minimum if profile_for_special_exit else self\.config\.atr_checkpoint_di_spread_minimum",
-    "pos.atr_checkpoint_di_spread_minimum = profile_for_special_exit.atr_checkpoint_di_spread_minimum",
-    s,
-)
-s = re.sub(
-    r"pos\.atr_checkpoint_bb_width_minimum = profile_for_special_exit\.atr_checkpoint_bb_width_minimum if profile_for_special_exit else self\.config\.atr_checkpoint_bb_width_minimum",
-    "pos.atr_checkpoint_bb_width_minimum = profile_for_special_exit.atr_checkpoint_bb_width_minimum",
-    s,
-)
-s = re.sub(
-    r"pos\.atr_checkpoint_profit_lock_start = profile_for_special_exit\.atr_checkpoint_profit_lock_start if profile_for_special_exit else self\.config\.atr_checkpoint_profit_lock_start",
-    "pos.atr_checkpoint_profit_lock_start = profile_for_special_exit.atr_checkpoint_profit_lock_start",
-    s,
-)
-s = re.sub(
-    r"pos\.atr_checkpoint_profit_lock_distance = profile_for_special_exit\.atr_checkpoint_profit_lock_distance if profile_for_special_exit else self\.config\.atr_checkpoint_profit_lock_distance",
-    "pos.atr_checkpoint_profit_lock_distance = profile_for_special_exit.atr_checkpoint_profit_lock_distance",
-    s,
-)
+for field in (
+    "atr_checkpoint_di_spread_minimum", "atr_checkpoint_bb_width_minimum",
+    "atr_checkpoint_profit_lock_start", "atr_checkpoint_profit_lock_distance",
+):
+    s = re.sub(
+        rf"pos\.{field} = profile_for_special_exit\.{field} if profile_for_special_exit else self\.config\.{field}",
+        f"pos.{field} = profile_for_special_exit.{field}", s,
+    )
 s = re.sub(
     r"pos\.r_step_trailing_enabled = bool\(\s*profile_for_special_exit\.r_step_trailing_enabled\s*if profile_for_special_exit else \(self\.config\.enable_bull_long_r_step_trailing and pos\.side == Side\.LONG and applied_regime == \"BULL\"\)\s*\)",
-    "pos.r_step_trailing_enabled = bool(profile_for_special_exit and profile_for_special_exit.r_step_trailing_enabled)",
-    s,
+    "pos.r_step_trailing_enabled = bool(profile_for_special_exit and profile_for_special_exit.r_step_trailing_enabled)", s,
 )
 for field, old in (
     ("r_step_activation_r", "bull_long_r_step_activation_r"),
@@ -81,11 +67,10 @@ p = ROOT / "crypto_strategy_lab/gui/config_logic.py"
 s = p.read_text(encoding="utf-8")
 for key in LEGACY_KEYS:
     s = re.sub(rf'\s*"{re.escape(key)}"\s*:\s*[^,\n]+,?', '', s)
-# clean excessive blank lines caused by deleted groups
 s = re.sub(r"\n\s*\n\s*\n", "\n\n", s)
 write(p, s)
 
-# 4. Main GUI: remove the duplicate DI-tab special-exit controls and serialization.
+# 4. Main GUI: remove duplicate DI-tab special-exit controls and serialization.
 p = ROOT / "crypto_strategy_lab/gui/main_window.py"
 s = p.read_text(encoding="utf-8")
 for name in (
@@ -97,29 +82,32 @@ for name in (
     "atr_checkpoint_profit_lock_distance",
 ):
     s = re.sub(rf"^\s*{re.escape('self.' + name)}=.*\n", "", s, flags=re.M)
-# dead help labels left behind by previously removed one-off filters
 for name in ("biased_short_adx_help", "long_momentum_help", "short_vwap_distance_help"):
     s = re.sub(rf"^\s*self\.{name}=QLabel\([^\n]*\)\n", "", s, flags=re.M)
     s = re.sub(rf"^\s*self\.{name}\.setWordWrap\(True\)\n", "", s, flags=re.M)
 s = re.sub(r"^\s*self\.enable_bull_long_r_step_trailing\.toggled\.connect\(self\.update_dynamic\)\n", "", s, flags=re.M)
-# remove old ATR checkpoint group from DI tab
-s = re.sub(r'\n\s*checkpoint_box=QGroupBox\("ATR Checkpoint TP Extension"\).*?form\.addWidget\(checkpoint_box\);', '', s, flags=re.S)
-# remove legacy keys from the giant _base_values dict
+# Remove the complete ATR Checkpoint section, preserving the following layout statement on its own line.
+s = re.sub(
+    r'\n\s*checkpoint_box=QGroupBox\("ATR Checkpoint TP Extension"\); checkpoint=QFormLayout\(checkpoint_box\).*?\n\s*form\.addWidget\(checkpoint_box\); form\.addStretch\(1\)',
+    '\n        form.addStretch(1)', s, flags=re.S,
+)
 for key in LEGACY_KEYS:
     s = re.sub(rf'"{re.escape(key)}":self\.[^,}}]+,?', '', s)
-# remove dedicated R-step values.update block
 s = re.sub(r'\n\s*values\.update\(\{"enable_bull_long_r_step_trailing".*?\}\)', '', s)
-# remove legacy load-state statements
 s = re.sub(r'^\s*self\.enable_bull_long_r_step_trailing\.setChecked\([^\n]*\)\n', '', s, flags=re.M)
 s = re.sub(r'^\s*self\.enable_atr_checkpoint_tp_extension\.setChecked\([^\n]*\)\n', '', s, flags=re.M)
 write(p, s)
 
-# 5. Output text must not advertise removed global controls.
+# 5. Output text: remove the complete legacy global R-step summary expression.
 p = ROOT / "crypto_strategy_lab/output_manager.py"
 s = p.read_text(encoding="utf-8")
+s = re.sub(
+    r'\n\s*\(\n\s*f"Bull-long R-step staircase: enabled;.*?\n\s*\),\n(?=\s*f"Partial intrabar ordering:)',
+    '\n', s, flags=re.S,
+)
+# Remove any remaining simple report line containing a retired global key.
 for key in LEGACY_KEYS:
-    # Remove simple report lines containing any retired symbol.
-    s = re.sub(rf"^.*{re.escape(key)}.*\n", "", s, flags=re.M)
+    s = re.sub(rf'^\s*f?[^\n]*config\.{re.escape(key)}[^\n]*\n', '', s, flags=re.M)
 write(p, s)
 
 # 6. Focused regression test.
