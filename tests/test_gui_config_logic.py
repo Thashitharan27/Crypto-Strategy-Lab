@@ -5,20 +5,6 @@ from crypto_strategy_lab.config import RiskMode, TradeDirectionMode
 from crypto_strategy_lab.gui.config_logic import parse_percentage, build_backtest_config, save_config_json, load_config_json, validate_config_values
 
 
-@pytest.mark.parametrize("legacy, expected", [
-    ("FILTER_ENTRIES", "TRADE_CONTEXT_FILTER"),
-    ("CONFIRMATION", "REQUIRE_CONFIRMED_HOLD"),
-    ("BLOCK_BAD_LOCATION", "BLOCK_BAD_LOCATION"),
-    ("REQUIRE_GOOD_LOCATION", "REQUIRE_GOOD_LOCATION"),
-    ("BLOCK_BROKEN_STRUCTURE", "BLOCK_BROKEN_STRUCTURE"),
-    ("CUSTOM_SR_STATE_FILTER", "CUSTOM_SR_STATE_FILTER"),
-])
-def test_legacy_sr_modes_load(tmp_path, legacy, expected):
-    path = tmp_path / "legacy.json"
-    path.write_text(json.dumps({"sr_filter_mode": legacy}))
-    assert load_config_json(path)["sr_filter_mode"] == expected
-
-
 def base(tmp_path):
     csv = tmp_path / "x.csv"
     csv.write_text("timestamp,open,high,low,close,volume\n2024-01-01,1,1,1,1,1\n")
@@ -234,94 +220,27 @@ def test_zero_bull_regime_threshold_is_valid(tmp_path):
 
 
 def test_support_resistance_settings_round_trip_and_validation(tmp_path):
-    values = {
-        **base(tmp_path),
-        "enable_support_resistance_analysis": True,
-        "sr_pivot_left": 5,
-        "sr_pivot_right": 5,
-        "sr_lookback_bars": 200,
-        "sr_zone_width_atr": 0.5,
-        "sr_near_distance_atr": 0.75,
-        "sr_filter_mode": "CUSTOM_SR_STATE_FILTER",
-        "sr_long_state_requirement": "ANY",
-        "sr_short_state_requirement": "SUPPORT_BROKEN",
+    rules = {
+        "sr_long_avoid_near_resistance": True,
+        "sr_long_require_near_support": True,
+        "sr_long_block_broken_support": True,
+        "sr_long_min_room_to_resistance_atr": 1.5,
+        "sr_short_avoid_near_support": True,
+        "sr_short_require_near_resistance": True,
+        "sr_short_block_broken_resistance": True,
+        "sr_short_min_room_to_support_atr": 1.75,
     }
+    values = {**base(tmp_path), "enable_support_resistance_analysis": True, "sr_filter_mode": "APPLY_ENTRY_RULES", **rules}
     assert not validate_config_values(values)
     cfg = build_backtest_config(values)
-    assert cfg.enable_support_resistance_analysis is True
-    assert cfg.sr_pivot_left == 5
-    assert cfg.sr_pivot_right == 5
-    assert cfg.sr_lookback_bars == 200
-    assert cfg.sr_zone_width_atr == pytest.approx(0.5)
-    assert cfg.sr_near_distance_atr == pytest.approx(0.75)
-    assert cfg.sr_filter_mode == "CUSTOM_SR_STATE_FILTER"
-    assert cfg.sr_long_state_requirement == "ANY"
-    assert cfg.sr_short_state_requirement == "SUPPORT_BROKEN"
-
+    for key, value in rules.items(): assert getattr(cfg, key) == value
     path = tmp_path / "sr-config.json"
     save_config_json(path, values)
     loaded = load_config_json(path)
+    assert loaded["sr_filter_mode"] == "APPLY_ENTRY_RULES"
+    for key, value in rules.items(): assert loaded[key] == value
     cfg2 = build_backtest_config(loaded)
-    assert cfg2.enable_support_resistance_analysis is True
-    assert cfg2.sr_filter_mode == "CUSTOM_SR_STATE_FILTER"
-    assert cfg2.sr_long_state_requirement == "ANY"
-    assert cfg2.sr_short_state_requirement == "SUPPORT_BROKEN"
-
-
-def test_legacy_sr_state_requirement_migrates_to_trade_context_rules(tmp_path):
-    """An old config saved before Trade Context checkboxes existed should still load, and its
-    single-state Long/Short requirements should map onto the new rule checkboxes."""
-    import json
-    path = tmp_path / "legacy-sr-config.json"
-    legacy_values = {
-        **base(tmp_path),
-        "enable_support_resistance_analysis": True,
-        "sr_filter_mode": "CUSTOM_SR_STATE_FILTER",
-        "sr_long_state_requirement": "RESISTANCE_BROKEN",
-        "sr_short_state_requirement": "SUPPORT_BROKEN",
-    }
-    path.write_text(json.dumps(legacy_values))
-
-    loaded = load_config_json(path)
-
-    # Legacy fields must still be present and readable.
-    assert loaded["sr_long_state_requirement"] == "RESISTANCE_BROKEN"
-    assert loaded["sr_short_state_requirement"] == "SUPPORT_BROKEN"
-
-    # RESISTANCE_BROKEN -> long resistance-breakout rule enabled, other long rules disabled.
-    assert loaded["long_sr_rule_resistance_breakout"] is True
-    assert loaded["long_sr_rule_support_bounce"] is False
-    assert loaded["long_sr_rule_near_support"] is False
-    assert loaded["long_sr_rule_near_resistance"] is False
-
-    # SUPPORT_BROKEN -> short support-breakdown rule enabled, other short rules disabled.
-    assert loaded["short_sr_rule_support_breakdown"] is True
-    assert loaded["short_sr_rule_resistance_rejection"] is False
-    assert loaded["short_sr_rule_near_resistance"] is False
-    assert loaded["short_sr_rule_near_support"] is False
-
-    cfg = build_backtest_config(loaded)
-    assert cfg.enable_support_resistance_analysis is True
-    assert cfg.long_sr_rule_resistance_breakout is True
-    assert cfg.short_sr_rule_support_breakdown is True
-
-
-def test_legacy_sr_state_requirement_of_any_keeps_new_rule_defaults(tmp_path):
-    """A legacy requirement of ANY (the old no-op default) must not overwrite the new defaults."""
-    import json
-    path = tmp_path / "legacy-sr-any.json"
-    path.write_text(json.dumps({
-        **base(tmp_path),
-        "enable_support_resistance_analysis": True,
-        "sr_long_state_requirement": "ANY",
-        "sr_short_state_requirement": "ANY",
-    }))
-
-    loaded = load_config_json(path)
-    assert loaded["long_sr_rule_support_bounce"] is True
-    assert loaded["long_sr_rule_resistance_breakout"] is True
-    assert loaded["short_sr_rule_resistance_rejection"] is True
-    assert loaded["short_sr_rule_support_breakdown"] is True
+    for key, value in rules.items(): assert getattr(cfg2, key) == value
 
 
 def test_negative_bull_regime_threshold_is_valid(tmp_path):

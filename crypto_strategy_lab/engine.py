@@ -559,7 +559,7 @@ class BacktestEngine:
         return True, "; ".join(reasons)
 
     def _should_reject_for_sr(self, i, direction, sr_context=None):
-        """Apply the configured SR entry filter policy for the selected direction."""
+        """Apply independent, trader-facing S/R entry constraints."""
         if not self.config.enable_support_resistance_analysis:
             return False, None
         if sr_context is None:
@@ -571,69 +571,32 @@ class BacktestEngine:
             return False, None
 
         mode = str(self.config.sr_filter_mode).upper().replace("-", "_").replace(" ", "_")
-        rating = getattr(sr_context, "trade_location_rating", None)
-        rating_value = str(getattr(rating, "value", rating or "")).upper().replace("-", "_").replace(" ", "_")
+        if mode == "ANALYSIS_ONLY":
+            return False, None
+        if mode != "APPLY_ENTRY_RULES":
+            return False, None
 
-        if mode in {"ANALYSIS_ONLY", "ANALYSISONLY"}:
-            return False, None
-        if mode == "CUSTOM_SR_STATE_FILTER":
-            requirement = str(
-                self.config.sr_long_state_requirement if direction == "LONG" else self.config.sr_short_state_requirement
-            ).upper().replace("-", "_").replace(" ", "_")
-            if requirement == "ANY":
-                return False, None
-            states = {str(sr_context.support_state), str(sr_context.resistance_state)}
-            if requirement not in states:
-                return True, "SR_LONG_STATE_REQUIREMENT_FAILED" if direction == "LONG" else "SR_SHORT_STATE_REQUIREMENT_FAILED"
-            return False, None
-        if mode == "TRADE_CONTEXT_FILTER":
-            labels = set(self._classify_sr_event_labels(
-                sr_context.near_support, sr_context.near_resistance,
-                sr_context.support_held, sr_context.resistance_held,
-                sr_context.support_state, sr_context.resistance_state,
-            ))
-            if direction == "LONG":
-                enabled_rules = {
-                    "SUPPORT_BOUNCE": self.config.long_sr_rule_support_bounce,
-                    "RESISTANCE_BREAKOUT": self.config.long_sr_rule_resistance_breakout,
-                    "NEAR_SUPPORT": self.config.long_sr_rule_near_support,
-                    "NEAR_RESISTANCE": self.config.long_sr_rule_near_resistance,
-                }
-            else:
-                enabled_rules = {
-                    "RESISTANCE_REJECTION": self.config.short_sr_rule_resistance_rejection,
-                    "SUPPORT_BREAKDOWN": self.config.short_sr_rule_support_breakdown,
-                    "NEAR_RESISTANCE": self.config.short_sr_rule_near_resistance,
-                    "NEAR_SUPPORT": self.config.short_sr_rule_near_support,
-                }
-            active_rules = [name for name, on in enabled_rules.items() if on]
-            if not active_rules:
-                return False, None
-            if str(self.config.sr_trade_context_match_mode).upper() == "ALL":
-                matched = all(name in labels for name in active_rules)
-            else:
-                matched = any(name in labels for name in active_rules)
-            if matched:
-                return False, None
-            return True, "SR_LONG_TRADE_CONTEXT_NOT_MET" if direction == "LONG" else "SR_SHORT_TRADE_CONTEXT_NOT_MET"
-        if mode == "BLOCK_BAD_LOCATION":
-            if rating_value in {"BAD_LOCATION", "BAD"}:
-                return True, "SR_BAD_LOCATION"
-            return False, None
-        if mode == "REQUIRE_GOOD_LOCATION":
-            if rating_value not in {"GOOD_LOCATION", "GOOD"}:
-                return True, "SR_NOT_GOOD_LOCATION"
-            return False, None
-        if mode in {"REQUIRE_CONFIRMED_HOLD", "REQUIRE_CONFIRMED_HOLDING"}:
-            held = bool(sr_context.support_held if direction == "LONG" else sr_context.resistance_held)
-            if not held:
-                return True, "SR_LONG_SUPPORT_NOT_CONFIRMED" if direction == "LONG" else "SR_SHORT_RESISTANCE_NOT_CONFIRMED"
-            return False, None
-        if mode in {"BLOCK_BROKEN_STRUCTURE", "BLOCK_BROKEN"}:
-            broken = (sr_context.support_state == "SUPPORT_BROKEN") if direction == "LONG" else (sr_context.resistance_state == "RESISTANCE_BROKEN")
-            if broken:
-                return True, "SR_LONG_SUPPORT_BROKEN" if direction == "LONG" else "SR_SHORT_RESISTANCE_BROKEN"
-            return False, None
+        room = sr_context.room_in_direction_atr
+        if direction == "LONG":
+            if self.config.sr_long_avoid_near_resistance and sr_context.near_resistance:
+                return True, "SR_LONG_NEAR_RESISTANCE"
+            if self.config.sr_long_require_near_support and not sr_context.near_support:
+                return True, "SR_LONG_NOT_NEAR_SUPPORT"
+            if self.config.sr_long_block_broken_support and sr_context.support_state == "SUPPORT_BROKEN":
+                return True, "SR_LONG_SUPPORT_BROKEN"
+            minimum = self.config.sr_long_min_room_to_resistance_atr
+            if minimum > 0 and room < minimum:
+                return True, "SR_LONG_INSUFFICIENT_ROOM_TO_RESISTANCE"
+        elif direction == "SHORT":
+            if self.config.sr_short_avoid_near_support and sr_context.near_support:
+                return True, "SR_SHORT_NEAR_SUPPORT"
+            if self.config.sr_short_require_near_resistance and not sr_context.near_resistance:
+                return True, "SR_SHORT_NOT_NEAR_RESISTANCE"
+            if self.config.sr_short_block_broken_resistance and sr_context.resistance_state == "RESISTANCE_BROKEN":
+                return True, "SR_SHORT_RESISTANCE_BROKEN"
+            minimum = self.config.sr_short_min_room_to_support_atr
+            if minimum > 0 and room < minimum:
+                return True, "SR_SHORT_INSUFFICIENT_ROOM_TO_SUPPORT"
         return False, None
 
     def _profile_context(self, i):

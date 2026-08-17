@@ -206,199 +206,43 @@ class TestSupportResistanceFiltering:
         assert rejected is False
         assert reason is None
 
-    def test_custom_state_filter_allows_independent_direction_requirements(self):
-        data = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
-            "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0,
-        })
-        engine = BacktestEngine(data, BacktestConfig(
-            enable_support_resistance_analysis=True,
-            sr_filter_mode="CUSTOM_SR_STATE_FILTER",
-            sr_long_state_requirement="ANY",
-            sr_short_state_requirement="SUPPORT_BROKEN",
-        ))
-        context = SRContext(
-            nearest_support_price=99.0, nearest_support_bar_index=1, nearest_support_distance_atr=0.1, nearest_support_distance_price=1.0,
-            nearest_resistance_price=101.0, nearest_resistance_bar_index=2, nearest_resistance_distance_atr=1.5, nearest_resistance_distance_price=1.0,
-            price_location=LocationClassification.NEAR_SUPPORT, trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
-            near_support=True, near_resistance=False, inside_support_zone=False, inside_resistance_zone=False, room_in_direction_atr=0.5,
-            support_state="SUPPORT_BROKEN", resistance_state="RESISTANCE_HELD",
-        )
+    @staticmethod
+    def _engine(**rules):
+        data = pd.DataFrame({"timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"), "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0})
+        return BacktestEngine(data, BacktestConfig(enable_support_resistance_analysis=True, sr_filter_mode="APPLY_ENTRY_RULES", **rules))
 
-        assert engine._should_reject_for_sr(10, "LONG", context) == (False, None)
-        assert engine._should_reject_for_sr(10, "SHORT", context) == (False, None)
+    @staticmethod
+    def _context(**changes):
+        values = dict(nearest_support_price=99.0, nearest_support_bar_index=1, nearest_support_distance_atr=1.0, nearest_support_distance_price=1.0, nearest_resistance_price=101.0, nearest_resistance_bar_index=2, nearest_resistance_distance_atr=1.0, nearest_resistance_distance_price=1.0, price_location=LocationClassification.BETWEEN_LEVELS, trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION, near_support=False, near_resistance=False, inside_support_zone=False, inside_resistance_zone=False, room_in_direction_atr=2.0, support_state="SUPPORT_HELD", resistance_state="RESISTANCE_HELD")
+        values.update(changes)
+        return SRContext(**values)
 
-        context.support_state = "SUPPORT_HELD"
-        assert engine._should_reject_for_sr(10, "SHORT", context) == (True, "SR_SHORT_STATE_REQUIREMENT_FAILED")
+    @pytest.mark.parametrize("field,direction,changes,reason", [
+        ("sr_long_avoid_near_resistance", "LONG", {"near_resistance": True}, "SR_LONG_NEAR_RESISTANCE"),
+        ("sr_long_require_near_support", "LONG", {"near_support": False}, "SR_LONG_NOT_NEAR_SUPPORT"),
+        ("sr_long_block_broken_support", "LONG", {"support_state": "SUPPORT_BROKEN"}, "SR_LONG_SUPPORT_BROKEN"),
+        ("sr_long_min_room_to_resistance_atr", "LONG", {"room_in_direction_atr": 1.0}, "SR_LONG_INSUFFICIENT_ROOM_TO_RESISTANCE"),
+        ("sr_short_avoid_near_support", "SHORT", {"near_support": True}, "SR_SHORT_NEAR_SUPPORT"),
+        ("sr_short_require_near_resistance", "SHORT", {"near_resistance": False}, "SR_SHORT_NOT_NEAR_RESISTANCE"),
+        ("sr_short_block_broken_resistance", "SHORT", {"resistance_state": "RESISTANCE_BROKEN"}, "SR_SHORT_RESISTANCE_BROKEN"),
+        ("sr_short_min_room_to_support_atr", "SHORT", {"room_in_direction_atr": 1.0}, "SR_SHORT_INSUFFICIENT_ROOM_TO_SUPPORT"),
+    ])
+    def test_each_entry_rule_rejects_independently(self, field, direction, changes, reason):
+        value = 1.5 if "min_room" in field else True
+        assert self._engine(**{field: value})._should_reject_for_sr(10, direction, self._context(**changes)) == (True, reason)
 
-    def test_trade_context_filter_allows_long_on_enabled_rule(self):
-        data = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
-            "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0,
-        })
-        engine = BacktestEngine(data, BacktestConfig(
-            enable_support_resistance_analysis=True,
-            sr_filter_mode="TRADE_CONTEXT_FILTER",
-            long_sr_rule_support_bounce=True, long_sr_rule_resistance_breakout=True,
-            long_sr_rule_near_support=False, long_sr_rule_near_resistance=False,
-        ))
-        context = SRContext(
-            nearest_support_price=99.0, nearest_support_bar_index=1, nearest_support_distance_atr=0.1, nearest_support_distance_price=1.0,
-            nearest_resistance_price=101.0, nearest_resistance_bar_index=2, nearest_resistance_distance_atr=1.5, nearest_resistance_distance_price=1.0,
-            price_location=LocationClassification.NEAR_SUPPORT, trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
-            near_support=False, near_resistance=False, inside_support_zone=False, inside_resistance_zone=False, room_in_direction_atr=0.5,
-            support_held=True,
-        )
-        assert engine._should_reject_for_sr(10, "LONG", context) == (False, None)
+    def test_combined_long_rules_all_must_pass(self):
+        engine = self._engine(sr_long_avoid_near_resistance=True, sr_long_require_near_support=True, sr_long_block_broken_support=True, sr_long_min_room_to_resistance_atr=1.5)
+        good = self._context(near_support=True, near_resistance=False, support_state="SUPPORT_HELD", room_in_direction_atr=2.0)
+        assert engine._should_reject_for_sr(10, "LONG", good) == (False, None)
+        assert engine._should_reject_for_sr(10, "LONG", self._context(near_support=True, near_resistance=True)) == (True, "SR_LONG_NEAR_RESISTANCE")
 
-    def test_trade_context_filter_rejects_long_when_no_rule_matches(self):
-        data = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
-            "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0,
-        })
-        engine = BacktestEngine(data, BacktestConfig(
-            enable_support_resistance_analysis=True,
-            sr_filter_mode="TRADE_CONTEXT_FILTER",
-            long_sr_rule_support_bounce=True, long_sr_rule_resistance_breakout=True,
-            long_sr_rule_near_support=False, long_sr_rule_near_resistance=False,
-        ))
-        context = SRContext(
-            nearest_support_price=99.0, nearest_support_bar_index=1, nearest_support_distance_atr=0.1, nearest_support_distance_price=1.0,
-            nearest_resistance_price=101.0, nearest_resistance_bar_index=2, nearest_resistance_distance_atr=1.5, nearest_resistance_distance_price=1.0,
-            price_location=LocationClassification.NEAR_SUPPORT, trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
-            near_support=False, near_resistance=False, inside_support_zone=False, inside_resistance_zone=False, room_in_direction_atr=0.5,
-            support_held=False, resistance_held=False, support_state="APPROACHING_SUPPORT", resistance_state="APPROACHING_RESISTANCE",
-        )
-        assert engine._should_reject_for_sr(10, "LONG", context) == (True, "SR_LONG_TRADE_CONTEXT_NOT_MET")
-
-    def test_trade_context_filter_allows_short_on_enabled_rule(self):
-        data = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
-            "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0,
-        })
-        engine = BacktestEngine(data, BacktestConfig(
-            enable_support_resistance_analysis=True,
-            sr_filter_mode="TRADE_CONTEXT_FILTER",
-            short_sr_rule_resistance_rejection=True, short_sr_rule_support_breakdown=True,
-            short_sr_rule_near_resistance=False, short_sr_rule_near_support=False,
-        ))
-        context = SRContext(
-            nearest_support_price=99.0, nearest_support_bar_index=1, nearest_support_distance_atr=0.1, nearest_support_distance_price=1.0,
-            nearest_resistance_price=101.0, nearest_resistance_bar_index=2, nearest_resistance_distance_atr=1.5, nearest_resistance_distance_price=1.0,
-            price_location=LocationClassification.NEAR_RESISTANCE, trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
-            near_support=False, near_resistance=False, inside_support_zone=False, inside_resistance_zone=False, room_in_direction_atr=0.5,
-            support_state="SUPPORT_BROKEN",
-        )
-        assert engine._should_reject_for_sr(10, "SHORT", context) == (False, None)
-
-    def test_trade_context_filter_rejects_short_when_no_rule_matches(self):
-        data = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
-            "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0,
-        })
-        engine = BacktestEngine(data, BacktestConfig(
-            enable_support_resistance_analysis=True,
-            sr_filter_mode="TRADE_CONTEXT_FILTER",
-            short_sr_rule_resistance_rejection=True, short_sr_rule_support_breakdown=True,
-            short_sr_rule_near_resistance=False, short_sr_rule_near_support=False,
-        ))
-        context = SRContext(
-            nearest_support_price=99.0, nearest_support_bar_index=1, nearest_support_distance_atr=0.1, nearest_support_distance_price=1.0,
-            nearest_resistance_price=101.0, nearest_resistance_bar_index=2, nearest_resistance_distance_atr=1.5, nearest_resistance_distance_price=1.0,
-            price_location=LocationClassification.NEAR_RESISTANCE, trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
-            near_support=False, near_resistance=False, inside_support_zone=False, inside_resistance_zone=False, room_in_direction_atr=0.5,
-            support_held=False, resistance_held=False, support_state="APPROACHING_SUPPORT", resistance_state="APPROACHING_RESISTANCE",
-        )
-        assert engine._should_reject_for_sr(10, "SHORT", context) == (True, "SR_SHORT_TRADE_CONTEXT_NOT_MET")
-
-    def test_trade_context_filter_all_match_mode_requires_every_enabled_rule(self):
-        data = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
-            "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0,
-        })
-        engine = BacktestEngine(data, BacktestConfig(
-            enable_support_resistance_analysis=True,
-            sr_filter_mode="TRADE_CONTEXT_FILTER",
-            sr_trade_context_match_mode="ALL",
-            long_sr_rule_support_bounce=True, long_sr_rule_resistance_breakout=True,
-            long_sr_rule_near_support=False, long_sr_rule_near_resistance=False,
-        ))
-        context = SRContext(
-            nearest_support_price=99.0, nearest_support_bar_index=1, nearest_support_distance_atr=0.1, nearest_support_distance_price=1.0,
-            nearest_resistance_price=101.0, nearest_resistance_bar_index=2, nearest_resistance_distance_atr=1.5, nearest_resistance_distance_price=1.0,
-            price_location=LocationClassification.NEAR_SUPPORT, trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
-            near_support=False, near_resistance=False, inside_support_zone=False, inside_resistance_zone=False, room_in_direction_atr=0.5,
-            support_held=True, resistance_state="APPROACHING_RESISTANCE",
-        )
-        # Support Bounce true but Resistance Breakout false -> ALL mode rejects
-        assert engine._should_reject_for_sr(10, "LONG", context) == (True, "SR_LONG_TRADE_CONTEXT_NOT_MET")
-        context.resistance_state = "RESISTANCE_BROKEN"
-        assert engine._should_reject_for_sr(10, "LONG", context) == (False, None)
-
-    def test_block_bad_location_mode_rejects_bad_rating(self):
-        data = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
-            "open": 100.0,
-            "high": 101.0,
-            "low": 99.0,
-            "close": 100.0,
-            "volume": 1000.0,
-        })
-        engine = BacktestEngine(data, BacktestConfig(enable_support_resistance_analysis=True, sr_filter_mode="BLOCK_BAD_LOCATION"))
-        context = SRContext(
-            nearest_support_price=99.0,
-            nearest_support_bar_index=1,
-            nearest_support_distance_atr=0.1,
-            nearest_support_distance_price=1.0,
-            nearest_resistance_price=101.0,
-            nearest_resistance_bar_index=2,
-            nearest_resistance_distance_atr=1.5,
-            nearest_resistance_distance_price=1.0,
-            price_location=LocationClassification.NEAR_RESISTANCE,
-            trade_location_rating=TradeLocationRating.BAD_LOCATION,
-            near_support=False,
-            near_resistance=True,
-            inside_support_zone=False,
-            inside_resistance_zone=False,
-            room_in_direction_atr=0.5,
-        )
-
-        rejected, reason = engine._should_reject_for_sr(10, "LONG", context)
-        assert rejected is True
-        assert reason == "SR_BAD_LOCATION"
-
-    def test_require_good_location_mode_requires_good_rating(self):
-        data = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"),
-            "open": 100.0,
-            "high": 101.0,
-            "low": 99.0,
-            "close": 100.0,
-            "volume": 1000.0,
-        })
-        engine = BacktestEngine(data, BacktestConfig(enable_support_resistance_analysis=True, sr_filter_mode="REQUIRE_GOOD_LOCATION"))
-        context = SRContext(
-            nearest_support_price=99.0,
-            nearest_support_bar_index=1,
-            nearest_support_distance_atr=0.1,
-            nearest_support_distance_price=1.0,
-            nearest_resistance_price=101.0,
-            nearest_resistance_bar_index=2,
-            nearest_resistance_distance_atr=1.5,
-            nearest_resistance_distance_price=1.0,
-            price_location=LocationClassification.BETWEEN_LEVELS,
-            trade_location_rating=TradeLocationRating.NEUTRAL_LOCATION,
-            near_support=False,
-            near_resistance=False,
-            inside_support_zone=False,
-            inside_resistance_zone=False,
-            room_in_direction_atr=0.5,
-        )
-
-        rejected, reason = engine._should_reject_for_sr(10, "LONG", context)
-        assert rejected is True
-        assert reason == "SR_NOT_GOOD_LOCATION"
-
+    def test_rules_are_direction_independent(self):
+        long_engine = self._engine(sr_long_avoid_near_resistance=True)
+        short_engine = self._engine(sr_short_avoid_near_support=True)
+        context = self._context(near_support=True, near_resistance=True)
+        assert long_engine._should_reject_for_sr(10, "SHORT", context) == (False, None)
+        assert short_engine._should_reject_for_sr(10, "LONG", context) == (False, None)
 
 class TestAnalysisOnlyRegression:
     """Enabling S/R analysis in ANALYSIS_ONLY mode must not change which trades are taken."""
