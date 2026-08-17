@@ -231,10 +231,10 @@ def resolve_output_root() -> Path:
     return candidate.resolve(strict=True)
 
 
-def create_server(reports: BacktestReports, host: str, port: int):
-    from mcp.server.fastmcp import FastMCP
+def create_server(reports: BacktestReports):
+    from mcp.server import MCPServer
 
-    server = FastMCP("Crypto Strategy Lab Reports", host=host, port=port)
+    server = MCPServer("Crypto Strategy Lab Reports")
 
     @server.tool()
     def list_runs(limit: int = 50) -> list[dict[str, Any]]:
@@ -283,7 +283,12 @@ def main() -> None:
     LOGGER.info("Host: %s", host)
     LOGGER.info("Port: %s", port)
     LOGGER.info("Available tools: list_runs, latest_run, list_run_files, read_report, query_trades, compare_runs")
-    create_server(BacktestReports(root), host, port).run(transport="streamable-http")
+    create_server(BacktestReports(root)).run(
+        transport="streamable-http",
+        host=host,
+        port=port,
+        streamable_http_path="/mcp",
+    )
 
 
 if __name__ == "__main__":
