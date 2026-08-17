@@ -11,7 +11,7 @@ from crypto_strategy_lab.gui.config_logic import load_config_json, save_config_j
 qtwidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
 QApplication = qtwidgets.QApplication
 
-from crypto_strategy_lab.gui.main_window import MainWindow
+from crypto_strategy_lab.gui.main_window import MainWindow, REPORT_TARGETS, report_button_states
 
 
 def app():
@@ -304,10 +304,69 @@ def test_sr_summary_panel_reports_best_and_worst_context():
         window._update_sr_summary_panel(trades)
         text=window.sr_summary_panel_label.text()
         assert "Best S/R Context" in text
-        assert "Worst S/R Context" in text
+        assert "Weakest S/R Context" in text
         assert "Support Bounce" in text
+        assert "Analysis Only" in text
+        assert "No trades filtered" in text
     finally:
         window.close()
+
+
+def test_summary_is_scrollable_and_creates_report_buttons():
+    app(); window=MainWindow()
+    try:
+        assert isinstance(window.summary_scroll_area, qtwidgets.QScrollArea)
+        assert window.summary_scroll_area.widgetResizable()
+        assert [button.text() for button in window.report_buttons.values()] == [
+            "Open Backtest Report", "Open Indicator Analysis", "Open S/R Analysis",
+            "Open Trade List", "Open Charts Folder", "Open Output Folder",
+        ]
+        assert all(window.summary_content.isAncestorOf(button) for button in window.report_buttons.values())
+    finally: window.close()
+
+
+def test_report_button_availability_matches_files(tmp_path):
+    (tmp_path / REPORT_TARGETS["backtest"]).touch(); (tmp_path / "charts").mkdir()
+    states=report_button_states(tmp_path)
+    assert states == {"backtest":True,"indicators":False,"sr":False,"trades":False,"charts":True,"output":True}
+    app(); window=MainWindow()
+    try:
+        window.output_dir=tmp_path; window._refresh_report_buttons()
+        assert {name:button.isEnabled() for name,button in window.report_buttons.items()} == states
+    finally: window.close()
+
+
+def test_normal_summary_uses_six_direction_regime_rows():
+    app(); window=MainWindow()
+    try:
+        trades=pd.DataFrame({"market_regime":["BULL"],"long_pair_net_pnl":[10.0],"long_pair_net_r":[1.0]})
+        window.populate_summary({"total_trades":1},trades)
+        assert window.comparison_box.title()=="Direction / Regime Performance"
+        assert window.combo_table.rowCount()==6
+        assert window.combo_table.item(0,0).text()=="Bull"
+        assert window.combo_table.item(0,1).text()=="Long"
+        assert window.combo_table.height() < 300
+    finally: window.close()
+
+
+def test_isolated_profile_summary_keeps_profile_performance():
+    app(); window=MainWindow()
+    try:
+        window.populate_summary({"isolated_profile_comparison":[{"profile":"bull_long","trades":2,"win_rate":.5,"profit_factor":1.2,"net_profit":10}]})
+        assert window.comparison_box.title()=="Profile Performance"
+        assert window.combo_table.rowCount()==1
+        assert window.combo_table.item(0,0).text()=="Bull Long"
+    finally: window.close()
+
+
+def test_sr_apply_mode_uses_friendly_summary_label():
+    app(); window=MainWindow()
+    try:
+        window.sr_filter_mode.setCurrentIndex(window.sr_filter_mode.findData("APPLY_ENTRY_RULES"))
+        window._update_sr_summary_panel(pd.DataFrame())
+        assert "Mode: Apply Entry Rules" in window.sr_summary_panel_label.text()
+        assert "APPLY_ENTRY_RULES" not in window.sr_summary_panel_label.text()
+    finally: window.close()
 
 
 def legacy_vwap_volume_breakout_controls_round_trip():
