@@ -209,7 +209,8 @@ class TestSupportResistanceFiltering:
     @staticmethod
     def _engine(**rules):
         data = pd.DataFrame({"timestamp": pd.date_range("2024-01-01", periods=30, freq="15min"), "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0, "volume": 1000.0})
-        return BacktestEngine(data, BacktestConfig(enable_support_resistance_analysis=True, sr_filter_mode="APPLY_ENTRY_RULES", **rules))
+        mode = rules.pop("sr_filter_mode", "APPLY_ENTRY_RULES")
+        return BacktestEngine(data, BacktestConfig(enable_support_resistance_analysis=True, sr_filter_mode=mode, **rules))
 
     @staticmethod
     def _context(**changes):
@@ -243,6 +244,29 @@ class TestSupportResistanceFiltering:
         context = self._context(near_support=True, near_resistance=True)
         assert long_engine._should_reject_for_sr(10, "SHORT", context) == (False, None)
         assert short_engine._should_reject_for_sr(10, "LONG", context) == (False, None)
+
+    def test_unrecognized_mode_does_not_apply_entry_rules(self):
+        engine = self._engine(sr_filter_mode="UNKNOWN", sr_long_avoid_near_resistance=True)
+        assert engine._should_reject_for_sr(
+            10, "LONG", self._context(near_resistance=True)
+        ) == (False, None)
+
+
+def test_room_in_direction_uses_opposing_structure():
+    detector = SupportResistanceDetector()
+    support = SRLevel(
+        95.0, SRLevelType.SUPPORT, 1, 1, zone_bottom=94.0, zone_top=96.0
+    )
+    resistance = SRLevel(
+        110.0, SRLevelType.RESISTANCE, 2, 2, zone_bottom=108.0, zone_top=112.0
+    )
+
+    assert detector._calculate_room_in_direction(
+        support, resistance, 100.0, "LONG", 2.0
+    ) == pytest.approx(4.0)
+    assert detector._calculate_room_in_direction(
+        support, resistance, 100.0, "SHORT", 2.0
+    ) == pytest.approx(2.0)
 
 class TestAnalysisOnlyRegression:
     """Enabling S/R analysis in ANALYSIS_ONLY mode must not change which trades are taken."""

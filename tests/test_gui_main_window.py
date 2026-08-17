@@ -281,7 +281,9 @@ def test_support_resistance_tab_exists_with_expected_sections():
         window.update_dynamic()
         assert "Avoid near resistance" in window.sr_summary_label.text()
         assert "Minimum room: 1.50 ATR" in window.sr_summary_label.text()
-        assert not hasattr(window, "sr_trade_context_match_mode")
+        assert [window.sr_filter_mode.itemData(i) for i in range(window.sr_filter_mode.count())] == [
+            "ANALYSIS_ONLY", "APPLY_ENTRY_RULES"
+        ]
     finally:
         window.close()
 
