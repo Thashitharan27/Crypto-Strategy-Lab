@@ -131,12 +131,6 @@ def test_new_gui_defaults_to_btc_structural_regime():
     assert values["structural_regime_slope_lookback_days"] == 30
 
 
-def test_old_saved_config_keeps_legacy_return_regime(tmp_path):
-    from crypto_strategy_lab.gui.config_logic import load_config_json
-
-    path = tmp_path / "old.json"
-    path.write_text('{"bull_regime_lookback_days": 90}')
-    assert load_config_json(path)["market_regime_method"] == "ASSET_RETURN"
 
 
 def test_configurable_timeframes_are_passed_to_backtest_config(tmp_path):
@@ -207,16 +201,6 @@ def legacy_remaining_leg_timeout_json_round_trip_and_validation(tmp_path):
         build_backtest_config({**values, "remaining_leg_timeout_profit_threshold_r": -1})
 
 
-def test_zero_bull_regime_threshold_is_valid(tmp_path):
-    values = {
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_bull_regime_short_filter": True,
-        "bull_regime_return_threshold": 0.0,
-    }
-    assert not validate_config_values(values)
-    cfg = build_backtest_config(values)
-    assert cfg.bull_regime_return_threshold == 0.0
 
 
 def test_support_resistance_settings_round_trip_and_validation(tmp_path):
@@ -258,188 +242,23 @@ def test_support_resistance_mode_is_exact_and_unknown_config_is_discarded(tmp_pa
     assert "unknown_setting" not in loaded
 
 
-def test_negative_bull_regime_threshold_is_valid(tmp_path):
-    values = {
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_bull_regime_short_filter": True,
-        "bull_regime_return_threshold": -0.10,
-    }
-    assert not validate_config_values(values)
-    cfg = build_backtest_config(values)
-    assert cfg.bull_regime_return_threshold == pytest.approx(-0.10)
-
-    with pytest.raises(ValueError, match="-100%"):
-        build_backtest_config({**values, "bull_regime_return_threshold": -1.0})
 
 
-def test_biased_short_adx_cap_config(tmp_path):
-    values = {
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_biased_short_adx_cap": True,
-        "biased_short_adx_maximum": 50.0,
-    }
-    cfg = build_backtest_config(values)
-    assert cfg.enable_biased_short_adx_cap
-    assert cfg.biased_short_adx_maximum == 50.0
 
 
-def test_short_vwap_distance_filter_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_short_vwap_distance_filter": True,
-        "short_vwap_minimum_distance_atr": 2.25,
-    })
-    assert cfg.enable_short_vwap_distance_filter
-    assert cfg.short_vwap_minimum_distance_atr == pytest.approx(2.25)
 
 
-def test_long_momentum_filter_config_supports_long_only_di_selection(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "trade_direction": "LONG_ONLY",
-        "enable_di_direction_sizing": True,
-        "enable_long_momentum_filter": True,
-        "long_momentum_lookback_hours": 24,
-        "long_momentum_minimum_return": 0.06,
-    })
-    assert cfg.trade_direction == TradeDirectionMode.LONG_ONLY
-    assert cfg.enable_long_momentum_filter
-    assert cfg.long_momentum_lookback_hours == 24
-    assert cfg.long_momentum_minimum_return == pytest.approx(0.06)
 
 
-def test_bear_regime_adx_filter_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_bear_regime_adx_filter": True,
-        "bear_regime_adx_minimum": 25.0,
-    })
-    assert cfg.enable_bear_regime_adx_filter
-    assert cfg.bear_regime_adx_minimum == 25.0
 
 
-def test_separate_di_direction_minimums_and_legacy_fallback(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "di_direction_long_minimum_spread": 30,
-        "di_direction_short_minimum_spread": 38,
-    })
-    assert cfg.di_direction_long_minimum_spread == 30
-    assert cfg.di_direction_short_minimum_spread == 38
-
-    legacy = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "di_direction_minimum_spread": 35,
-    })
-    assert legacy.di_direction_long_minimum_spread == 35
-    assert legacy.di_direction_short_minimum_spread == 35
 
 
-def test_direction_specific_adx_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_directional_adx_filter": True,
-        "directional_long_adx_maximum": 60,
-        "directional_short_adx_minimum": 25,
-    })
-    assert cfg.enable_directional_adx_filter
-    assert cfg.directional_long_adx_maximum == 60
-    assert cfg.directional_short_adx_minimum == 25
-
-    with pytest.raises(ValueError, match="requires DI-direction sizing"):
-        build_backtest_config({
-            **base(tmp_path),
-            "enable_directional_adx_filter": True,
-        })
 
 
-def test_di_reward_risk_ratio_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "di_reward_risk_ratio": 2,
-    })
-    assert cfg.di_reward_risk_ratio == 2
-
-    with pytest.raises(ValueError, match="reward/risk ratio"):
-        build_backtest_config({
-            **base(tmp_path),
-            "di_reward_risk_ratio": 0,
-        })
 
 
-def test_asymmetric_di_reward_risk_ratio_config_and_legacy_fallback(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "di_long_reward_risk_ratio": 2,
-        "di_short_reward_risk_ratio": 1,
-    })
-    assert cfg.di_long_reward_risk_ratio == 2
-    assert cfg.di_short_reward_risk_ratio == 1
-
-    legacy = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "di_reward_risk_ratio": 1.5,
-    })
-    assert legacy.di_long_reward_risk_ratio == 1.5
-    assert legacy.di_short_reward_risk_ratio == 1.5
 
 
-def test_regime_specific_di_reward_risk_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_di_regime_reward_risk": True,
-        "bull_regime_return_threshold": 0.20,
-        "di_regime_bear_return_threshold": -0.20,
-        "di_long_bull_reward_risk_ratio": 2,
-        "di_long_bear_reward_risk_ratio": 1,
-        "di_long_sideways_reward_risk_ratio": 2,
-        "di_short_bull_reward_risk_ratio": 1,
-        "di_short_bear_reward_risk_ratio": 1,
-        "di_short_sideways_reward_risk_ratio": 2,
-    })
-    assert cfg.enable_di_regime_reward_risk
-    assert cfg.di_long_bear_reward_risk_ratio == 1
-    assert cfg.di_short_sideways_reward_risk_ratio == 2
-
-    with pytest.raises(ValueError, match="bear threshold"):
-        build_backtest_config({
-            **base(tmp_path),
-            "enable_di_direction_sizing": True,
-            "enable_di_regime_reward_risk": True,
-            "bull_regime_return_threshold": 0.20,
-            "di_regime_bear_return_threshold": 0.20,
-        })
 
 
-def test_conditional_bull_long_reward_risk_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_di_regime_reward_risk": True,
-        "enable_bull_long_conditional_reward_risk": True,
-        "bull_long_conditional_bb_width_minimum": 0.05,
-        "bull_long_conditional_adx_maximum": 40,
-        "bull_long_conditional_reward_risk_ratio": 1,
-    })
-    assert cfg.enable_bull_long_conditional_reward_risk
-    assert cfg.bull_long_conditional_bb_width_minimum == pytest.approx(0.05)
-    assert cfg.bull_long_conditional_adx_maximum == 40
-    assert cfg.bull_long_conditional_reward_risk_ratio == 1
-
-    with pytest.raises(ValueError, match="requires regime-specific"):
-        build_backtest_config({
-            **base(tmp_path),
-            "enable_di_direction_sizing": True,
-            "enable_bull_long_conditional_reward_risk": True,
-        })

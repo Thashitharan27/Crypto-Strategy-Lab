@@ -328,11 +328,12 @@ def test_long_momentum_return_uses_only_completed_24_hour_history():
     assert engine.long_momentum_return_values[96] == pytest.approx(0.06)
 
 
-def test_rsi_uses_only_completed_candles_and_has_warmup():
+def test_profile_rsi_uses_only_completed_candles_and_has_warmup():
     close = np.arange(100.0, 140.0)
-    engine = BacktestEngine(candles([(v, v, v, v) for v in close]), cfg(directional_rsi_period=14))
-    assert np.isnan(engine.directional_rsi_values[10])
-    assert engine.directional_rsi_values[20] == pytest.approx(100.0)
+    engine = BacktestEngine(candles([(v, v, v, v) for v in close]), cfg())
+    values = engine.profile_rsi_values[14]
+    assert np.isnan(values[10])
+    assert values[20] == pytest.approx(100.0)
 
 
 def test_di_direction_long_only_rejects_short_selected_signals():

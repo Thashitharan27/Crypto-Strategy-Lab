@@ -19,20 +19,9 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "vwap_breakout_lookback_hours": 4.0, "vwap_volume_lookback": 20, "vwap_volume_multiplier": 1.5, "vwap_slope_lookback": 1, "vwap_atr_pct_minimum": 0.0, "vwap_atr_pct_maximum": 1.0, "vwap_confirmation_mode": "IMMEDIATE", "vwap_retest_window_candles": 4, "vwap_retest_tolerance_atr": 0.25,
     "enable_random_entry": False, "entry_timing_mode": "CURRENT", "random_entry_probability": 0.50, "random_seed": 42, "random_entry_start_mode": "NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE", "randomize_first_entry": True, "max_random_wait_candles": 0, "enable_random_entry_batch": False, "random_seed_start": 1, "random_seed_count": 100,
     "enable_coin_flip_sizing": False, "coin_flip_seed": 42, "coin_flip_large_multiplier": 3.0, "coin_flip_small_multiplier": 1.0,
-    "enable_di_direction_sizing": False, "flip_filtered_di_direction": False, "di_direction_minimum_spread": 30.0, "di_direction_long_minimum_spread": 30.0, "di_direction_short_minimum_spread": 30.0, "di_execution_mode": "BOTH_SIDES", "di_reward_risk_ratio": 1.0, "di_long_reward_risk_ratio": 1.0, "di_short_reward_risk_ratio": 1.0,
     "enable_di_direction_selection": True, "enable_di_pressure_analysis": True, "di_pressure_lookback": 3,
     "enable_support_resistance_analysis": False, "sr_pivot_left": 5, "sr_pivot_right": 5, "sr_lookback_bars": 200, "sr_zone_width_atr": 0.5, "sr_near_distance_atr": 0.75, "enable_sr_hold_confirmation": False, "sr_hold_confirmation_bars": 3, "sr_hold_confirmation_atr": 0.25, "sr_break_tolerance_atr": 0.25, "sr_break_basis": "CLOSE", "sr_filter_mode": "ANALYSIS_ONLY", "sr_long_avoid_near_resistance": False, "sr_long_require_near_support": False, "sr_long_block_broken_support": False, "sr_long_min_room_to_resistance_atr": 0.0, "sr_short_avoid_near_support": False, "sr_short_require_near_resistance": False, "sr_short_block_broken_resistance": False, "sr_short_min_room_to_support_atr": 0.0,
-    "enable_di_regime_reward_risk": False, "di_regime_bear_return_threshold": -0.20,
-    "di_long_bull_reward_risk_ratio": 2.0, "di_long_bear_reward_risk_ratio": 1.0, "di_long_sideways_reward_risk_ratio": 2.0,
-    "di_short_bull_reward_risk_ratio": 1.0, "di_short_bear_reward_risk_ratio": 1.0, "di_short_sideways_reward_risk_ratio": 2.0,
-    "enable_bull_long_conditional_reward_risk": False, "bull_long_conditional_bb_width_minimum": 0.05, "bull_long_conditional_adx_maximum": 40.0, "bull_long_conditional_reward_risk_ratio": 1.0,
     "enable_bull_long_r_step_trailing": False, "bull_long_r_step_activation_r": 2.0, "bull_long_r_step_distance_r": 2.0, "bull_long_r_step_size_r": 1.0, "bull_long_r_step_maximum_r": 0.0, "bull_long_r_step_activation_close_pct": 0.0,
-    "enable_bull_long_momentum_confirmation": False, "bull_long_confirmation_lookback_days": 60, "bull_long_confirmation_return_threshold": 0.20, "bull_long_unconfirmed_reward_risk_ratio": 1.0,
-    "enable_bull_long_momentum_target_extension": False, "bull_long_momentum_extension_lookback_days": 30, "bull_long_momentum_extension_return_threshold": 0.10, "enable_bull_long_momentum_extension_return_maximum": False, "bull_long_momentum_extension_return_maximum": 0.40, "bull_long_momentum_extended_reward_risk_ratio": 4.0,
-    "enable_bull_long_structural_confirmation": False, "bull_long_structural_sma_days": 200, "bull_long_structural_slope_lookback_days": 30, "bull_long_structural_unconfirmed_reward_risk_ratio": 1.0,
-    "enable_sideways_long_conditional_reward_risk": False, "sideways_long_conditional_adx_maximum": 35.0, "sideways_long_conditional_reward_risk_ratio": 1.0,
-    "enable_sideways_short_conditional_reward_risk": False, "sideways_short_conditional_di_spread_minimum": 35.0, "sideways_short_conditional_di_spread_maximum": 40.0, "sideways_short_conditional_reward_risk_ratio": 1.0,
-    "enable_bear_short_conditional_reward_risk": False, "bear_short_conditional_di_spread_maximum": 35.0, "bear_short_conditional_reward_risk_ratio": 1.0,
     "enable_directional_adx_filter": False, "directional_long_adx_maximum": 60.0, "directional_short_adx_minimum": 25.0,
     "enable_long_momentum_filter": False, "long_momentum_lookback_hours": 24, "long_momentum_minimum_return": 0.06,
     "enable_atr_checkpoint_tp_extension": False, "atr_checkpoint_di_spread_minimum": 30.0, "atr_checkpoint_bb_width_minimum": 0.03, "atr_checkpoint_profit_lock_start": 3.0, "atr_checkpoint_profit_lock_distance": 1.0,
@@ -167,40 +156,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
                 if float(values.get(key, 0)) < 0: errors.append("Support/resistance minimum room must be non-negative.")
             except (TypeError, ValueError): errors.append("Support/resistance minimum room must be numeric.")
     if values.get("flip_filtered_di_direction") and not (values.get("enable_di_direction_sizing") or values.get("enable_strategy_profiles")): errors.append("Direction flip requires DI-direction selection.")
-    try:
-        if float(values.get("di_direction_minimum_spread", -1)) < 0: errors.append("DI direction minimum spread must be non-negative.")
-    except (TypeError, ValueError): errors.append("DI direction minimum spread must be numeric.")
-    for key, label in (("di_direction_long_minimum_spread", "Long DI direction minimum spread"), ("di_direction_short_minimum_spread", "Short DI direction minimum spread")):
-        try:
-            if float(values.get(key, -1)) < 0: errors.append(f"{label} must be non-negative.")
-        except (TypeError, ValueError): errors.append(f"{label} must be numeric.")
-    try:
-        if float(values.get("di_reward_risk_ratio", 0)) <= 0: errors.append("DI reward/risk ratio must be positive.")
-    except (TypeError, ValueError): errors.append("DI reward/risk ratio must be numeric.")
-    for key, label in (("di_long_reward_risk_ratio", "Long DI reward/risk ratio"), ("di_short_reward_risk_ratio", "Short DI reward/risk ratio")):
-        try:
-            if float(values.get(key, 0)) <= 0: errors.append(f"{label} must be positive.")
-        except (TypeError, ValueError): errors.append(f"{label} must be numeric.")
-    regime_ratio_keys = (
-        "di_long_bull_reward_risk_ratio", "di_long_bear_reward_risk_ratio", "di_long_sideways_reward_risk_ratio",
-        "di_short_bull_reward_risk_ratio", "di_short_bear_reward_risk_ratio", "di_short_sideways_reward_risk_ratio",
-    )
-    for key in regime_ratio_keys:
-        try:
-            if float(values.get(key, 0)) <= 0: errors.append("DI regime reward/risk ratios must be positive.")
-        except (TypeError, ValueError): errors.append("DI regime reward/risk ratios must be numeric.")
-    try:
-        bear_threshold = float(values.get("di_regime_bear_return_threshold", -1))
-        bull_threshold = float(values.get("bull_regime_return_threshold", 0.20))
-        if bear_threshold <= -1: errors.append("DI bear threshold must be greater than -100%.")
-        if values.get("enable_di_regime_reward_risk") and bear_threshold >= bull_threshold: errors.append("DI bear threshold must be below bull threshold.")
-    except (TypeError, ValueError): errors.append("DI regime return thresholds must be numeric.")
-    if values.get("enable_di_regime_reward_risk") and not values.get("enable_di_direction_sizing"): errors.append("Regime-specific DI reward/risk requires DI-direction sizing.")
-    if values.get("enable_bull_long_conditional_reward_risk") and not values.get("enable_di_regime_reward_risk"): errors.append("Conditional bull-long reward/risk requires regime-specific DI reward/risk.")
-    if float(values.get("bull_long_conditional_bb_width_minimum", 0)) < 0: errors.append("Bull-long conditional BB width minimum must be non-negative.")
-    if float(values.get("bull_long_conditional_adx_maximum", 0)) < 0: errors.append("Bull-long conditional ADX maximum must be non-negative.")
-    if float(values.get("bull_long_conditional_reward_risk_ratio", 0)) <= 0: errors.append("Bull-long conditional reward/risk must be positive.")
-    if values.get("enable_bull_long_r_step_trailing") and not values.get("enable_di_regime_reward_risk"): errors.append("Bull-long staircase requires regime-specific DI reward/risk.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_partial_take_profit"): errors.append("Bull-long staircase cannot be combined with Partial Take Profit.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_atr_checkpoint_tp_extension"): errors.append("Bull-long staircase cannot be combined with ATR checkpoint TP extension.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_trailing_profit"): errors.append("Bull-long staircase cannot be combined with the independent trailing stop.")
@@ -212,35 +167,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if 0 < staircase_max <= float(values.get("bull_long_r_step_activation_r",0)): errors.append("Bull-long staircase maximum must be zero or above activation.")
     staircase_close=float(values.get("bull_long_r_step_activation_close_pct",0))
     if not 0 <= staircase_close < 100: errors.append("Bull-long staircase activation close must be from 0% up to, but not including, 100%.")
-    if values.get("enable_bull_long_momentum_confirmation") and not values.get("enable_di_regime_reward_risk"): errors.append("Bull-long momentum confirmation requires regime-specific DI reward/risk.")
-    if int(values.get("bull_long_confirmation_lookback_days", 0)) <= 0: errors.append("Bull-long confirmation lookback must be positive.")
-    if float(values.get("bull_long_confirmation_return_threshold", -1)) <= -1: errors.append("Bull-long confirmation return threshold must be greater than -100%.")
-    if float(values.get("bull_long_unconfirmed_reward_risk_ratio", 0)) <= 0: errors.append("Bull-long unconfirmed reward/risk must be positive.")
-    if values.get("enable_bull_long_momentum_target_extension") and not values.get("enable_di_regime_reward_risk"): errors.append("Bull-long momentum target extension requires regime-specific DI reward/risk.")
-    if int(values.get("bull_long_momentum_extension_lookback_days", 0)) <= 0: errors.append("Bull-long momentum extension lookback must be positive.")
-    if float(values.get("bull_long_momentum_extension_return_threshold", -1)) <= -1: errors.append("Bull-long momentum extension return threshold must be greater than -100%.")
-    if float(values.get("bull_long_momentum_extension_return_maximum", -1)) <= -1: errors.append("Bull-long momentum extension return maximum must be greater than -100%.")
-    if values.get("enable_bull_long_momentum_extension_return_maximum") and float(values.get("bull_long_momentum_extension_return_maximum", 0)) <= float(values.get("bull_long_momentum_extension_return_threshold", 0)): errors.append("Bull-long momentum extension return maximum must exceed its minimum threshold.")
-    if float(values.get("bull_long_momentum_extended_reward_risk_ratio", 0)) <= 0: errors.append("Bull-long momentum extended reward/risk must be positive.")
-    if values.get("enable_bull_long_structural_confirmation") and not values.get("enable_di_regime_reward_risk"): errors.append("Bull-long structural confirmation requires regime-specific DI reward/risk.")
-    if int(values.get("bull_long_structural_sma_days", 0)) <= 0: errors.append("Bull-long structural SMA days must be positive.")
-    if int(values.get("bull_long_structural_slope_lookback_days", 0)) <= 0: errors.append("Bull-long structural SMA slope lookback must be positive.")
-    if float(values.get("bull_long_structural_unconfirmed_reward_risk_ratio", 0)) <= 0: errors.append("Bull-long structural unconfirmed reward/risk must be positive.")
-    for key, label in (
-        ("enable_sideways_long_conditional_reward_risk", "sideways-long"),
-        ("enable_sideways_short_conditional_reward_risk", "sideways-short"),
-        ("enable_bear_short_conditional_reward_risk", "bear-short"),
-    ):
-        if values.get(key) and not values.get("enable_di_regime_reward_risk"): errors.append(f"Conditional {label} reward/risk requires regime-specific DI reward/risk.")
-    if float(values.get("sideways_long_conditional_adx_maximum", 0)) < 0: errors.append("Sideways-long conditional ADX maximum must be non-negative.")
-    if float(values.get("sideways_long_conditional_reward_risk_ratio", 0)) <= 0: errors.append("Sideways-long conditional reward/risk must be positive.")
-    side_short_min = float(values.get("sideways_short_conditional_di_spread_minimum", 0))
-    side_short_max = float(values.get("sideways_short_conditional_di_spread_maximum", 0))
-    if side_short_min < 0 or side_short_max < 0: errors.append("Sideways-short conditional DI spread thresholds must be non-negative.")
-    if side_short_min >= side_short_max: errors.append("Sideways-short conditional DI spread minimum must be below maximum.")
-    if float(values.get("sideways_short_conditional_reward_risk_ratio", 0)) <= 0: errors.append("Sideways-short conditional reward/risk must be positive.")
-    if float(values.get("bear_short_conditional_di_spread_maximum", 0)) < 0: errors.append("Bear-short conditional DI spread maximum must be non-negative.")
-    if float(values.get("bear_short_conditional_reward_risk_ratio", 0)) <= 0: errors.append("Bear-short conditional reward/risk must be positive.")
     for key, label in (("directional_long_adx_maximum", "Long ADX maximum"), ("directional_short_adx_minimum", "Short ADX minimum")):
         try:
             if float(values.get(key, -1)) < 0: errors.append(f"{label} must be non-negative.")
@@ -252,8 +178,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         if float(values.get("long_momentum_minimum_return", -1)) <= -1: errors.append("Long momentum minimum return must be greater than -100%.")
     except (TypeError, ValueError): errors.append("Long momentum settings must be numeric.")
     if values.get("enable_di_direction_sizing") and (values.get("enable_partial_take_profit") or values.get("enable_partial_stop_loss")): errors.append("DI-direction sizing cannot be combined with partial TP or partial SL.")
-    if values.get("di_execution_mode") not in [e.value for e in DIExecutionMode]: errors.append("Invalid DI execution mode.")
-    if values.get("di_execution_mode") == DIExecutionMode.PREFERRED_SIDE_ONLY.value and not values.get("enable_di_direction_sizing"): errors.append("Preferred-side-only execution requires DI-direction sizing.")
     if values.get("enable_bull_regime_short_filter") and not values.get("enable_di_direction_sizing"): errors.append("Bull-regime short filter requires DI-direction sizing.")
     if values.get("enable_bear_regime_adx_filter") and not values.get("enable_di_direction_sizing"): errors.append("Bear-regime ADX filter requires DI-direction sizing.")
     if values.get("enable_biased_short_adx_cap") and not values.get("enable_di_direction_sizing"): errors.append("Biased-short ADX cap requires DI-direction sizing.")
@@ -359,16 +283,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
 
 def build_backtest_config(values: dict[str, Any], require_paths: bool = True) -> BacktestConfig:
     merged = {**default_gui_config(), **values}
-    legacy_di_minimum = float(values.get("di_direction_minimum_spread", DEFAULT_GUI_CONFIG["di_direction_minimum_spread"]))
-    if "di_direction_long_minimum_spread" not in values:
-        merged["di_direction_long_minimum_spread"] = legacy_di_minimum
-    if "di_direction_short_minimum_spread" not in values:
-        merged["di_direction_short_minimum_spread"] = legacy_di_minimum
-    legacy_di_ratio = float(values.get("di_reward_risk_ratio", DEFAULT_GUI_CONFIG["di_reward_risk_ratio"]))
-    if "di_long_reward_risk_ratio" not in values:
-        merged["di_long_reward_risk_ratio"] = legacy_di_ratio
-    if "di_short_reward_risk_ratio" not in values:
-        merged["di_short_reward_risk_ratio"] = legacy_di_ratio
     errors = validate_config_values(merged, require_paths=require_paths)
     if errors:
         raise ValueError("\n".join(errors))
@@ -381,13 +295,13 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         enable_strategy_profiles=bool(merged["enable_strategy_profiles"]), strategy_profile_run_mode=str(merged["strategy_profile_run_mode"]), strategy_profiles=merged["strategy_profiles"],
         vwap_confirmation_mode=VWAPConfirmationMode(merged["vwap_confirmation_mode"]), vwap_retest_window_candles=int(merged["vwap_retest_window_candles"]), vwap_retest_tolerance_atr=float(merged["vwap_retest_tolerance_atr"]),
         sl_mult=float(merged["sl_mult"]), tp_mult=float(merged["tp_mult"]),
-        flip_filtered_di_direction=bool(merged["flip_filtered_di_direction"]),
-        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]), vwap_breakout_lookback_hours=float(merged["vwap_breakout_lookback_hours"]), vwap_volume_lookback=int(merged["vwap_volume_lookback"]), vwap_volume_multiplier=float(merged["vwap_volume_multiplier"]), vwap_slope_lookback=int(merged["vwap_slope_lookback"]), vwap_atr_pct_minimum=float(merged["vwap_atr_pct_minimum"]), vwap_atr_pct_maximum=float(merged["vwap_atr_pct_maximum"]), enable_random_entry=bool(merged["enable_random_entry"]), entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]), random_entry_probability=float(merged["random_entry_probability"]), random_seed=int(merged["random_seed"]), enable_coin_flip_sizing=bool(merged["enable_coin_flip_sizing"]), coin_flip_seed=int(merged["coin_flip_seed"]), coin_flip_large_multiplier=float(merged["coin_flip_large_multiplier"]), coin_flip_small_multiplier=float(merged["coin_flip_small_multiplier"]), enable_di_direction_sizing=bool(merged["enable_di_direction_sizing"]), enable_di_direction_selection=bool(merged["enable_di_direction_selection"]), enable_di_pressure_analysis=bool(merged["enable_di_pressure_analysis"]), di_pressure_lookback=int(merged["di_pressure_lookback"]),
-        enable_support_resistance_analysis=bool(merged["enable_support_resistance_analysis"]), sr_pivot_left=int(merged["sr_pivot_left"]), sr_pivot_right=int(merged["sr_pivot_right"]), sr_lookback_bars=int(merged["sr_lookback_bars"]), sr_zone_width_atr=float(merged["sr_zone_width_atr"]), sr_near_distance_atr=float(merged["sr_near_distance_atr"]), sr_filter_mode=str(merged["sr_filter_mode"]), di_direction_minimum_spread=float(merged["di_direction_minimum_spread"]), di_direction_long_minimum_spread=float(merged["di_direction_long_minimum_spread"]), di_direction_short_minimum_spread=float(merged["di_direction_short_minimum_spread"]), di_execution_mode=DIExecutionMode(merged["di_execution_mode"]), di_reward_risk_ratio=float(merged["di_reward_risk_ratio"]), di_long_reward_risk_ratio=float(merged["di_long_reward_risk_ratio"]), di_short_reward_risk_ratio=float(merged["di_short_reward_risk_ratio"]), enable_di_regime_reward_risk=bool(merged["enable_di_regime_reward_risk"]), di_regime_bear_return_threshold=float(merged["di_regime_bear_return_threshold"]), di_long_bull_reward_risk_ratio=float(merged["di_long_bull_reward_risk_ratio"]), di_long_bear_reward_risk_ratio=float(merged["di_long_bear_reward_risk_ratio"]), di_long_sideways_reward_risk_ratio=float(merged["di_long_sideways_reward_risk_ratio"]), di_short_bull_reward_risk_ratio=float(merged["di_short_bull_reward_risk_ratio"]), di_short_bear_reward_risk_ratio=float(merged["di_short_bear_reward_risk_ratio"]), di_short_sideways_reward_risk_ratio=float(merged["di_short_sideways_reward_risk_ratio"]), enable_bull_long_conditional_reward_risk=bool(merged["enable_bull_long_conditional_reward_risk"]), bull_long_conditional_bb_width_minimum=float(merged["bull_long_conditional_bb_width_minimum"]), bull_long_conditional_adx_maximum=float(merged["bull_long_conditional_adx_maximum"]), bull_long_conditional_reward_risk_ratio=float(merged["bull_long_conditional_reward_risk_ratio"]), enable_sideways_long_conditional_reward_risk=bool(merged["enable_sideways_long_conditional_reward_risk"]), sideways_long_conditional_adx_maximum=float(merged["sideways_long_conditional_adx_maximum"]), sideways_long_conditional_reward_risk_ratio=float(merged["sideways_long_conditional_reward_risk_ratio"]), enable_sideways_short_conditional_reward_risk=bool(merged["enable_sideways_short_conditional_reward_risk"]), sideways_short_conditional_di_spread_minimum=float(merged["sideways_short_conditional_di_spread_minimum"]), sideways_short_conditional_di_spread_maximum=float(merged["sideways_short_conditional_di_spread_maximum"]), sideways_short_conditional_reward_risk_ratio=float(merged["sideways_short_conditional_reward_risk_ratio"]), enable_bear_short_conditional_reward_risk=bool(merged["enable_bear_short_conditional_reward_risk"]), bear_short_conditional_di_spread_maximum=float(merged["bear_short_conditional_di_spread_maximum"]), bear_short_conditional_reward_risk_ratio=float(merged["bear_short_conditional_reward_risk_ratio"]), enable_directional_adx_filter=bool(merged["enable_directional_adx_filter"]), directional_long_adx_maximum=float(merged["directional_long_adx_maximum"]), directional_short_adx_minimum=float(merged["directional_short_adx_minimum"]), enable_atr_checkpoint_tp_extension=bool(merged["enable_atr_checkpoint_tp_extension"]), atr_checkpoint_di_spread_minimum=float(merged["atr_checkpoint_di_spread_minimum"]), atr_checkpoint_bb_width_minimum=float(merged["atr_checkpoint_bb_width_minimum"]), atr_checkpoint_profit_lock_start=float(merged["atr_checkpoint_profit_lock_start"]), atr_checkpoint_profit_lock_distance=float(merged["atr_checkpoint_profit_lock_distance"]), enable_biased_short_adx_cap=bool(merged["enable_biased_short_adx_cap"]), biased_short_adx_maximum=float(merged["biased_short_adx_maximum"]), enable_short_vwap_distance_filter=bool(merged["enable_short_vwap_distance_filter"]), short_vwap_minimum_distance_atr=float(merged["short_vwap_minimum_distance_atr"]), enable_bull_regime_short_filter=bool(merged["enable_bull_regime_short_filter"]), market_regime_method=str(merged["market_regime_method"]), structural_regime_sma_days=int(merged["structural_regime_sma_days"]), structural_regime_slope_lookback_days=int(merged["structural_regime_slope_lookback_days"]), structural_regime_benchmark_csv=Path(merged["structural_regime_benchmark_csv"]) if merged.get("structural_regime_benchmark_csv") else None, bull_regime_lookback_days=int(merged["bull_regime_lookback_days"]), bull_regime_return_threshold=float(merged["bull_regime_return_threshold"]), random_entry_start_mode=RandomEntryStartMode(merged["random_entry_start_mode"]), randomize_first_entry=bool(merged["randomize_first_entry"]), max_random_wait_candles=int(merged["max_random_wait_candles"]), enable_random_entry_batch=bool(merged["enable_random_entry_batch"]), random_seed_start=int(merged["random_seed_start"]), random_seed_count=int(merged["random_seed_count"]), enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]), daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]), daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]), enable_skip_monday_entries=bool(merged["enable_skip_monday_entries"]), skip_monday_timezone=str(merged["skip_monday_timezone"]),
+        
+        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]), vwap_breakout_lookback_hours=float(merged["vwap_breakout_lookback_hours"]), vwap_volume_lookback=int(merged["vwap_volume_lookback"]), vwap_volume_multiplier=float(merged["vwap_volume_multiplier"]), vwap_slope_lookback=int(merged["vwap_slope_lookback"]), vwap_atr_pct_minimum=float(merged["vwap_atr_pct_minimum"]), vwap_atr_pct_maximum=float(merged["vwap_atr_pct_maximum"]), enable_random_entry=bool(merged["enable_random_entry"]), entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]), random_entry_probability=float(merged["random_entry_probability"]), random_seed=int(merged["random_seed"]), enable_coin_flip_sizing=bool(merged["enable_coin_flip_sizing"]), coin_flip_seed=int(merged["coin_flip_seed"]), coin_flip_large_multiplier=float(merged["coin_flip_large_multiplier"]), coin_flip_small_multiplier=float(merged["coin_flip_small_multiplier"]),  enable_di_direction_selection=bool(merged["enable_di_direction_selection"]), enable_di_pressure_analysis=bool(merged["enable_di_pressure_analysis"]), di_pressure_lookback=int(merged["di_pressure_lookback"]),
+        enable_support_resistance_analysis=bool(merged["enable_support_resistance_analysis"]), sr_pivot_left=int(merged["sr_pivot_left"]), sr_pivot_right=int(merged["sr_pivot_right"]), sr_lookback_bars=int(merged["sr_lookback_bars"]), sr_zone_width_atr=float(merged["sr_zone_width_atr"]), sr_near_distance_atr=float(merged["sr_near_distance_atr"]), sr_filter_mode=str(merged["sr_filter_mode"]),                              enable_directional_adx_filter=bool(merged["enable_directional_adx_filter"]), directional_long_adx_maximum=float(merged["directional_long_adx_maximum"]), directional_short_adx_minimum=float(merged["directional_short_adx_minimum"]), enable_atr_checkpoint_tp_extension=bool(merged["enable_atr_checkpoint_tp_extension"]), atr_checkpoint_di_spread_minimum=float(merged["atr_checkpoint_di_spread_minimum"]), atr_checkpoint_bb_width_minimum=float(merged["atr_checkpoint_bb_width_minimum"]), atr_checkpoint_profit_lock_start=float(merged["atr_checkpoint_profit_lock_start"]), atr_checkpoint_profit_lock_distance=float(merged["atr_checkpoint_profit_lock_distance"]), enable_biased_short_adx_cap=bool(merged["enable_biased_short_adx_cap"]), biased_short_adx_maximum=float(merged["biased_short_adx_maximum"]), enable_short_vwap_distance_filter=bool(merged["enable_short_vwap_distance_filter"]), short_vwap_minimum_distance_atr=float(merged["short_vwap_minimum_distance_atr"]), enable_bull_regime_short_filter=bool(merged["enable_bull_regime_short_filter"]), market_regime_method=str(merged["market_regime_method"]), structural_regime_sma_days=int(merged["structural_regime_sma_days"]), structural_regime_slope_lookback_days=int(merged["structural_regime_slope_lookback_days"]), structural_regime_benchmark_csv=Path(merged["structural_regime_benchmark_csv"]) if merged.get("structural_regime_benchmark_csv") else None, bull_regime_lookback_days=int(merged["bull_regime_lookback_days"]), bull_regime_return_threshold=float(merged["bull_regime_return_threshold"]), random_entry_start_mode=RandomEntryStartMode(merged["random_entry_start_mode"]), randomize_first_entry=bool(merged["randomize_first_entry"]), max_random_wait_candles=int(merged["max_random_wait_candles"]), enable_random_entry_batch=bool(merged["enable_random_entry_batch"]), random_seed_start=int(merged["random_seed_start"]), random_seed_count=int(merged["random_seed_count"]), enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]), daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]), daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]), enable_skip_monday_entries=bool(merged["enable_skip_monday_entries"]), skip_monday_timezone=str(merged["skip_monday_timezone"]),
         enable_long_momentum_filter=bool(merged["enable_long_momentum_filter"]), long_momentum_lookback_hours=int(merged["long_momentum_lookback_hours"]), long_momentum_minimum_return=float(merged["long_momentum_minimum_return"]),
-        enable_bull_long_momentum_confirmation=bool(merged["enable_bull_long_momentum_confirmation"]), bull_long_confirmation_lookback_days=int(merged["bull_long_confirmation_lookback_days"]), bull_long_confirmation_return_threshold=float(merged["bull_long_confirmation_return_threshold"]), bull_long_unconfirmed_reward_risk_ratio=float(merged["bull_long_unconfirmed_reward_risk_ratio"]),
-        enable_bull_long_momentum_target_extension=bool(merged["enable_bull_long_momentum_target_extension"]), bull_long_momentum_extension_lookback_days=int(merged["bull_long_momentum_extension_lookback_days"]), bull_long_momentum_extension_return_threshold=float(merged["bull_long_momentum_extension_return_threshold"]), enable_bull_long_momentum_extension_return_maximum=bool(merged["enable_bull_long_momentum_extension_return_maximum"]), bull_long_momentum_extension_return_maximum=float(merged["bull_long_momentum_extension_return_maximum"]), bull_long_momentum_extended_reward_risk_ratio=float(merged["bull_long_momentum_extended_reward_risk_ratio"]),
-        enable_bull_long_structural_confirmation=bool(merged["enable_bull_long_structural_confirmation"]), bull_long_structural_sma_days=int(merged["bull_long_structural_sma_days"]), bull_long_structural_slope_lookback_days=int(merged["bull_long_structural_slope_lookback_days"]), bull_long_structural_unconfirmed_reward_risk_ratio=float(merged["bull_long_structural_unconfirmed_reward_risk_ratio"]),
+           
+             
+           
         enable_bull_long_r_step_trailing=bool(merged["enable_bull_long_r_step_trailing"]), bull_long_r_step_activation_r=float(merged["bull_long_r_step_activation_r"]), bull_long_r_step_distance_r=float(merged["bull_long_r_step_distance_r"]), bull_long_r_step_size_r=float(merged["bull_long_r_step_size_r"]), bull_long_r_step_maximum_r=float(merged["bull_long_r_step_maximum_r"]), bull_long_r_step_activation_close_pct=float(merged["bull_long_r_step_activation_close_pct"]),
         enable_bear_regime_adx_filter=bool(merged["enable_bear_regime_adx_filter"]), bear_regime_adx_minimum=float(merged["bear_regime_adx_minimum"]),
         max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),
@@ -438,15 +352,16 @@ _OBSOLETE_EXACT = {
 }
 _OBSOLETE_PREFIXES = ("di_direction_","di_reward_","di_long_","di_short_","enable_di_regime_","enable_bull_long_","bull_long_","enable_sideways_","sideways_","enable_bear_short_","bear_short_","enable_directional_","directional_","enable_long_momentum_","long_momentum_","enable_regime_direction_","allow_bull_","allow_bear_","allow_sideways_","enable_biased_","biased_","enable_short_vwap_","short_vwap_","enable_bull_regime_short_","enable_bear_regime_adx_","bear_regime_adx_","checkpoint_score_")
 
+_REGIME_CONFIG_KEYS = {"market_regime_method","structural_regime_sma_days","structural_regime_slope_lookback_days","structural_regime_benchmark_csv","bull_regime_lookback_days","bull_regime_return_threshold"}
+
 
 def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
     """Return the compact, profile-only public configuration format."""
-    keep_regime={"di_regime_bear_return_threshold","bull_regime_lookback_days","bull_regime_return_threshold"}
     result={}
     for key,value in values.items():
         if key not in DEFAULT_GUI_CONFIG:
             continue
-        if key in keep_regime or key not in _OBSOLETE_EXACT and not key.startswith(_OBSOLETE_PREFIXES): result[key]=value
+        if key in _REGIME_CONFIG_KEYS or (key not in _OBSOLETE_EXACT and not key.startswith(_OBSOLETE_PREFIXES)): result[key]=value
     result["enable_strategy_profiles"]=True
     return result
 
@@ -454,16 +369,7 @@ def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
 def load_config_json(path: str | Path) -> dict[str, Any]:
     loaded = json.loads(Path(path).read_text())
     loaded = {key: value for key, value in loaded.items() if key in DEFAULT_GUI_CONFIG}
-    # Saved configs created before structural regimes existed retain their
-    # original trailing-return semantics.
-    loaded.setdefault("market_regime_method", "ASSET_RETURN")
     if not loaded.get("market_symbol"):
         match=re.search(r"([A-Z0-9]+USDT)(?:[_-]|$)",Path(str(loaded.get("strategy_csv") or loaded.get("input_csv") or "")).stem.upper())
         if match: loaded["market_symbol"]=match.group(1)
-    legacy_di_minimum = loaded.get("di_direction_minimum_spread", DEFAULT_GUI_CONFIG["di_direction_minimum_spread"])
-    loaded.setdefault("di_direction_long_minimum_spread", legacy_di_minimum)
-    loaded.setdefault("di_direction_short_minimum_spread", legacy_di_minimum)
-    legacy_di_ratio = loaded.get("di_reward_risk_ratio", DEFAULT_GUI_CONFIG["di_reward_risk_ratio"])
-    loaded.setdefault("di_long_reward_risk_ratio", legacy_di_ratio)
-    loaded.setdefault("di_short_reward_risk_ratio", legacy_di_ratio)
     return {**default_gui_config(), **loaded}

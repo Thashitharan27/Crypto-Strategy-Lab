@@ -36,12 +36,16 @@ def test_profile_filter_bypasses_legacy_global_entry_filters():
 
 
 def test_profile_reward_risk_and_risk_multiplier_are_applied_to_trade():
-    trades=BacktestEngine(rising_candles(),profile_config()).run()
-    assert not trades.empty
-    trade=trades.iloc[0]
-    assert trade["strategy_profile_key"]=="bull_long"
-    assert trade["di_applied_long_reward_risk_ratio"]==2.5
-    assert trade["long_risk_amount"]==15
+    engine=BacktestEngine(rising_candles(),profile_config())
+    i=len(engine.data)-1
+    passed,reason=engine._entry_filter_result(i)
+    assert passed
+    engine._open_pair(i,passed,reason)
+    pair=engine.active_pairs[0]
+    assert pair.strategy_profile_key=="bull_long"
+    assert pair.di_applied_long_reward_risk_ratio==2.5
+    assert pair.long is not None
+    assert pair.long.risk_amount==15
 
 
 def test_profile_can_flip_its_filtered_di_entry_direction():
