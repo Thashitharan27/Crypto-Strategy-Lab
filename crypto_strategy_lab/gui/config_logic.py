@@ -163,10 +163,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         try:
             if float(values.get(key, -1)) < 0: errors.append(f"{label} must be non-negative.")
         except (TypeError, ValueError): errors.append(f"{label} must be numeric.")
-    for key in regime_ratio_keys:
-        try:
-            if float(values.get(key, 0)) <= 0: errors.append("DI regime reward/risk ratios must be positive.")
-        except (TypeError, ValueError): errors.append("DI regime reward/risk ratios must be numeric.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_partial_take_profit"): errors.append("Bull-long staircase cannot be combined with Partial Take Profit.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_atr_checkpoint_tp_extension"): errors.append("Bull-long staircase cannot be combined with ATR checkpoint TP extension.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_trailing_profit"): errors.append("Bull-long staircase cannot be combined with the independent trailing stop.")
@@ -178,8 +174,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if 0 < staircase_max <= float(values.get("bull_long_r_step_activation_r",0)): errors.append("Bull-long staircase maximum must be zero or above activation.")
     staircase_close=float(values.get("bull_long_r_step_activation_close_pct",0))
     if not 0 <= staircase_close < 100: errors.append("Bull-long staircase activation close must be from 0% up to, but not including, 100%.")
-    if side_short_min < 0 or side_short_max < 0: errors.append("Sideways-short conditional DI spread thresholds must be non-negative.")
-    if side_short_min >= side_short_max: errors.append("Sideways-short conditional DI spread minimum must be below maximum.")
     for key, label in (("directional_long_adx_maximum", "Long ADX maximum"), ("directional_short_adx_minimum", "Short ADX minimum")):
         try:
             if float(values.get(key, -1)) < 0: errors.append(f"{label} must be non-negative.")
@@ -298,11 +292,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
 
 def build_backtest_config(values: dict[str, Any], require_paths: bool = True) -> BacktestConfig:
     merged = {**default_gui_config(), **values}
-    legacy_di_minimum = float(values.get("di_direction_minimum_spread", DEFAULT_GUI_CONFIG["di_direction_minimum_spread"]))
-    if "di_direction_long_minimum_spread" not in values:
-        merged["di_direction_long_minimum_spread"] = legacy_di_minimum
-    if "di_direction_short_minimum_spread" not in values:
-        merged["di_direction_short_minimum_spread"] = legacy_di_minimum
     errors = validate_config_values(merged, require_paths=require_paths)
     if errors:
         raise ValueError("\n".join(errors))
@@ -310,6 +299,36 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
     merged["sr_hold_confirmation_atr"] = float(merged.get("sr_hold_confirmation_atr", 0.25))
     merged["sr_break_tolerance_atr"] = float(merged.get("sr_break_tolerance_atr", 0.25))
     merged["sr_break_basis"] = str(merged.get("sr_break_basis", "CLOSE")).upper()
+    config = BacktestConfig(
+        input_csv=Path(merged["input_csv"]), strategy_csv=Path(merged["input_csv"] if merged.get("strategy_csv") == DEFAULT_GUI_CONFIG.get("strategy_csv") else (merged.get("strategy_csv") or merged["input_csv"])), intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") else None, output_dir=Path(merged["output_dir"]),
+        enable_strategy_profiles=bool(merged["enable_strategy_profiles"]), strategy_profile_run_mode=str(merged["strategy_profile_run_mode"]), strategy_profiles=merged["strategy_profiles"],
+        vwap_confirmation_mode=VWAPConfirmationMode(merged["vwap_confirmation_mode"]), vwap_retest_window_candles=int(merged["vwap_retest_window_candles"]), vwap_retest_tolerance_atr=float(merged["vwap_retest_tolerance_atr"]),
+        sl_mult=float(merged["sl_mult"]), tp_mult=float(merged["tp_mult"]),
+        
+        entry_mode=EntryMode(merged["entry_mode"]), entry_interval=int(merged["entry_interval"]), vwap_breakout_lookback_hours=float(merged["vwap_breakout_lookback_hours"]), vwap_volume_lookback=int(merged["vwap_volume_lookback"]), vwap_volume_multiplier=float(merged["vwap_volume_multiplier"]), vwap_slope_lookback=int(merged["vwap_slope_lookback"]), vwap_atr_pct_minimum=float(merged["vwap_atr_pct_minimum"]), vwap_atr_pct_maximum=float(merged["vwap_atr_pct_maximum"]), enable_random_entry=bool(merged["enable_random_entry"]), entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]), random_entry_probability=float(merged["random_entry_probability"]), random_seed=int(merged["random_seed"]), enable_coin_flip_sizing=bool(merged["enable_coin_flip_sizing"]), coin_flip_seed=int(merged["coin_flip_seed"]), coin_flip_large_multiplier=float(merged["coin_flip_large_multiplier"]), coin_flip_small_multiplier=float(merged["coin_flip_small_multiplier"]),  enable_di_direction_selection=bool(merged["enable_di_direction_selection"]), enable_di_pressure_analysis=bool(merged["enable_di_pressure_analysis"]), di_pressure_lookback=int(merged["di_pressure_lookback"]),
+        enable_support_resistance_analysis=bool(merged["enable_support_resistance_analysis"]), sr_pivot_left=int(merged["sr_pivot_left"]), sr_pivot_right=int(merged["sr_pivot_right"]), sr_lookback_bars=int(merged["sr_lookback_bars"]), sr_zone_width_atr=float(merged["sr_zone_width_atr"]), sr_near_distance_atr=float(merged["sr_near_distance_atr"]), sr_filter_mode=str(merged["sr_filter_mode"]),                              enable_directional_adx_filter=bool(merged["enable_directional_adx_filter"]), directional_long_adx_maximum=float(merged["directional_long_adx_maximum"]), directional_short_adx_minimum=float(merged["directional_short_adx_minimum"]), enable_atr_checkpoint_tp_extension=bool(merged["enable_atr_checkpoint_tp_extension"]), atr_checkpoint_di_spread_minimum=float(merged["atr_checkpoint_di_spread_minimum"]), atr_checkpoint_bb_width_minimum=float(merged["atr_checkpoint_bb_width_minimum"]), atr_checkpoint_profit_lock_start=float(merged["atr_checkpoint_profit_lock_start"]), atr_checkpoint_profit_lock_distance=float(merged["atr_checkpoint_profit_lock_distance"]), enable_biased_short_adx_cap=bool(merged["enable_biased_short_adx_cap"]), biased_short_adx_maximum=float(merged["biased_short_adx_maximum"]), enable_short_vwap_distance_filter=bool(merged["enable_short_vwap_distance_filter"]), short_vwap_minimum_distance_atr=float(merged["short_vwap_minimum_distance_atr"]), enable_bull_regime_short_filter=bool(merged["enable_bull_regime_short_filter"]), market_regime_method=str(merged["market_regime_method"]), structural_regime_sma_days=int(merged["structural_regime_sma_days"]), structural_regime_slope_lookback_days=int(merged["structural_regime_slope_lookback_days"]), structural_regime_benchmark_csv=Path(merged["structural_regime_benchmark_csv"]) if merged.get("structural_regime_benchmark_csv") else None, bull_regime_lookback_days=int(merged["bull_regime_lookback_days"]), bull_regime_return_threshold=float(merged["bull_regime_return_threshold"]), random_entry_start_mode=RandomEntryStartMode(merged["random_entry_start_mode"]), randomize_first_entry=bool(merged["randomize_first_entry"]), max_random_wait_candles=int(merged["max_random_wait_candles"]), enable_random_entry_batch=bool(merged["enable_random_entry_batch"]), random_seed_start=int(merged["random_seed_start"]), random_seed_count=int(merged["random_seed_count"]), enable_daily_entry_schedule=bool(merged["enable_daily_entry_schedule"]), daily_entry_time=str(merged["daily_entry_time"]), daily_entry_timezone=str(merged["daily_entry_timezone"]), daily_entry_missed_policy=DailyEntryMissedPolicy(merged["daily_entry_missed_policy"]), enable_skip_monday_entries=bool(merged["enable_skip_monday_entries"]), skip_monday_timezone=str(merged["skip_monday_timezone"]),
+        enable_long_momentum_filter=bool(merged["enable_long_momentum_filter"]), long_momentum_lookback_hours=int(merged["long_momentum_lookback_hours"]), long_momentum_minimum_return=float(merged["long_momentum_minimum_return"]),
+           
+             
+           
+        enable_bull_long_r_step_trailing=bool(merged["enable_bull_long_r_step_trailing"]), bull_long_r_step_activation_r=float(merged["bull_long_r_step_activation_r"]), bull_long_r_step_distance_r=float(merged["bull_long_r_step_distance_r"]), bull_long_r_step_size_r=float(merged["bull_long_r_step_size_r"]), bull_long_r_step_maximum_r=float(merged["bull_long_r_step_maximum_r"]), bull_long_r_step_activation_close_pct=float(merged["bull_long_r_step_activation_close_pct"]),
+        enable_bear_regime_adx_filter=bool(merged["enable_bear_regime_adx_filter"]), bear_regime_adx_minimum=float(merged["bear_regime_adx_minimum"]),
+        max_active_pairs=int(merged["max_active_pairs"]), tie_policy=TiePolicy(merged["tie_policy"]),
+        risk_mode=RiskMode(merged["risk_mode"]), atr_period=int(merged["atr_period"]),
+        atr_multiplier=float(merged["atr_multiplier"]), enable_adx_filter=bool(merged["enable_adx_filter"]), adx_period=int(merged["adx_period"]), adx_filter_mode=AdxFilterMode(merged["adx_filter_mode"]), adx_maximum=float(merged["adx_maximum"]), adx_minimum=float(merged["adx_minimum"]), enable_bb_width_filter=bool(merged["enable_bb_width_filter"]), bb_width_filter_mode=BBWidthFilterMode(merged["bb_width_filter_mode"]), bb_width_maximum=float(merged["bb_width_maximum"]), bb_width_minimum=float(merged["bb_width_minimum"]), enable_di_spread_filter=bool(merged["enable_di_spread_filter"]), di_spread_filter_mode=DISpreadFilterMode(merged["di_spread_filter_mode"]), di_spread_maximum=float(merged["di_spread_maximum"]), di_spread_minimum=float(merged["di_spread_minimum"]), percent_r=float(merged["percent_r"]),
+        fixed_r=float(merged["fixed_r"]), initial_equity=float(merged["initial_equity"]),
+        risk_per_leg=float(merged["risk_per_leg"]), maker_fee=float(merged["maker_fee"]),
+        taker_fee=float(merged["taker_fee"]), use_maker_entry=bool(merged["use_maker_entry"]),
+        use_maker_exit=bool(merged["use_maker_exit"]), slippage=float(merged["slippage"]),
+        strategy_timeframe_minutes=int(merged["strategy_timeframe_minutes"]), intrabar_timeframe_minutes=int(merged["intrabar_timeframe_minutes"]),
+        use_intrabar_data=bool(merged["use_intrabar_data"]), trading_start_date=merged.get("trading_start_date"), trading_end_date=merged.get("trading_end_date"),
+        max_effective_leverage_per_leg=float(merged["max_effective_leverage_per_leg"]) if merged.get("max_effective_leverage_per_leg") not in (None, "") else None,
+        max_combined_effective_leverage=float(merged["max_combined_effective_leverage"]) if merged.get("max_combined_effective_leverage") not in (None, "") else None,
+        intrabar_missing_policy=IntrabarMissingPolicy(merged["intrabar_missing_policy"]), zero_cost_comparison=bool(merged["zero_cost_comparison"]), trade_direction=TradeDirectionMode(merged["trade_direction"]), enable_partial_take_profit=bool(merged["enable_partial_take_profit"]), enable_partial_stop_loss=bool(merged["enable_partial_stop_loss"]), sl1_r=float(merged["sl1_r"]), sl1_close_pct=float(merged["sl1_close_pct"]), sl2_r=float(merged["sl2_r"]), tp1_r=float(merged["tp1_r"]), tp1_close_pct=float(merged["tp1_close_pct"]), tp2_r=float(merged["tp2_r"]), tp2_close_pct=float(merged["tp2_close_pct"]), stop_loss_r=float(merged["stop_loss_r"]), after_tp1_stop_mode=AfterTP1StopMode(merged["after_tp1_stop_mode"]), after_tp1_stop_offset_r=float(merged["after_tp1_stop_offset_r"]), tp2_exit_mode=TP2ExitMode(merged["tp2_exit_mode"]), enable_trailing_profit=bool(merged["enable_trailing_profit"]), trail_activation_trigger=TrailActivationTrigger(merged["trail_activation_trigger"]), trail_activation_r=float(merged["trail_activation_r"]), trail_distance_r=float(merged["trail_distance_r"]), trail_apply_to=TrailApplyTo(merged["trail_apply_to"]), trail_intrabar_mode=TrailIntrabarMode(merged["trail_intrabar_mode"]),
+        enable_both_open_timeout=bool(merged["enable_both_open_timeout"]), max_both_open_minutes=int(merged["max_both_open_minutes"]), enable_remaining_leg_timeout_after_first_sl=bool(merged["enable_remaining_leg_timeout_after_first_sl"]), remaining_leg_timeout_after_first_sl_minutes=int(merged["remaining_leg_timeout_after_first_sl_minutes"]), enable_remaining_leg_timeout_profit_extension=bool(merged["enable_remaining_leg_timeout_profit_extension"]), remaining_leg_timeout_profit_threshold_r=float(merged["remaining_leg_timeout_profit_threshold_r"]), enable_remaining_leg_checkpoint_score_extension=bool(merged["enable_remaining_leg_checkpoint_score_extension"]), checkpoint_score_use_profit=bool(merged["checkpoint_score_use_profit"]), checkpoint_score_min_profit_r=float(merged["checkpoint_score_min_profit_r"]), checkpoint_score_use_atr_pct=bool(merged["checkpoint_score_use_atr_pct"]), checkpoint_score_max_atr_pct=float(merged["checkpoint_score_max_atr_pct"]), checkpoint_score_use_directional_di=bool(merged["checkpoint_score_use_directional_di"]), checkpoint_score_min_directional_di=float(merged["checkpoint_score_min_directional_di"]), checkpoint_score_use_bb_width_pct=bool(merged["checkpoint_score_use_bb_width_pct"]), checkpoint_score_max_bb_width_pct=float(merged["checkpoint_score_max_bb_width_pct"]), checkpoint_score_min_conditions=int(merged["checkpoint_score_min_conditions"]), enable_first_sl_survivor_partial_close=bool(merged["enable_first_sl_survivor_partial_close"]), first_sl_survivor_partial_close_pct=float(merged["first_sl_survivor_partial_close_pct"]), enable_checkpoint_zero_score_confirmation=bool(merged["enable_checkpoint_zero_score_confirmation"]), checkpoint_zero_score_confirmations_required=int(merged["checkpoint_zero_score_confirmations_required"]), checkpoint_zero_score_recheck_minutes=int(merged["checkpoint_zero_score_recheck_minutes"]), enable_reentry_gate_after_remaining_leg_timeout=bool(merged["enable_reentry_gate_after_remaining_leg_timeout"]),
+        enable_be_after_opposite_sl=bool(merged["enable_be_after_opposite_sl"]), be_mode=BreakEvenMode(merged["be_mode"]), be_offset_r=float(merged["be_offset_r"]), be_same_candle_policy=BreakEvenSameCandlePolicy(merged["be_same_candle_policy"]),
+        run_name=str(merged.get("run_name", "")), enable_trade_telemetry=bool(merged["enable_trade_telemetry"]), save_full_telemetry_csv=bool(merged["save_full_telemetry_csv"]), save_trade_journey_summary=bool(merged["save_trade_journey_summary"]), save_trade_journey_charts=bool(merged["save_trade_journey_charts"]), telemetry_interval_minutes=int(merged["telemetry_interval_minutes"]), enable_indicator_lifecycle_analysis=bool(merged["enable_indicator_lifecycle_analysis"]), lifecycle_phases=int(merged["lifecycle_phases"]), lifecycle_early_checkpoints=tuple(int(v) for v in merged["lifecycle_early_checkpoints"]), lifecycle_minimum_bucket_sample=int(merged["lifecycle_minimum_bucket_sample"]), create_lifecycle_charts=bool(merged["create_lifecycle_charts"]), lifecycle_flat_pattern_threshold_pct=float(merged["lifecycle_flat_pattern_threshold_pct"]), save_feature_analysis_reports=bool(merged["save_feature_analysis_reports"]), save_indicator_analysis_reports=bool(merged["save_indicator_analysis_reports"]), create_standard_charts=bool(merged["create_standard_charts"]),
+    )
     config = replace(
         config,
         sr_long_avoid_near_resistance=bool(merged["sr_long_avoid_near_resistance"]),
@@ -342,6 +361,8 @@ _OBSOLETE_EXACT = {
 }
 _OBSOLETE_PREFIXES = ("di_direction_","di_reward_","di_long_","di_short_","enable_di_regime_","enable_bull_long_","bull_long_","enable_sideways_","sideways_","enable_bear_short_","bear_short_","enable_directional_","directional_","enable_long_momentum_","long_momentum_","enable_regime_direction_","allow_bull_","allow_bear_","allow_sideways_","enable_biased_","biased_","enable_short_vwap_","short_vwap_","enable_bull_regime_short_","enable_bear_regime_adx_","bear_regime_adx_","checkpoint_score_")
 
+_REGIME_CONFIG_KEYS = {"market_regime_method","structural_regime_sma_days","structural_regime_slope_lookback_days","structural_regime_benchmark_csv","bull_regime_lookback_days","bull_regime_return_threshold"}
+
 
 def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
     """Return the compact, profile-only public configuration format."""
@@ -349,7 +370,7 @@ def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
     for key,value in values.items():
         if key not in DEFAULT_GUI_CONFIG:
             continue
-        if key in keep_regime or key not in _OBSOLETE_EXACT and not key.startswith(_OBSOLETE_PREFIXES): result[key]=value
+        if key in _REGIME_CONFIG_KEYS or (key not in _OBSOLETE_EXACT and not key.startswith(_OBSOLETE_PREFIXES)): result[key]=value
     result["enable_strategy_profiles"]=True
     return result
 
@@ -357,13 +378,7 @@ def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
 def load_config_json(path: str | Path) -> dict[str, Any]:
     loaded = json.loads(Path(path).read_text())
     loaded = {key: value for key, value in loaded.items() if key in DEFAULT_GUI_CONFIG}
-    # Saved configs created before structural regimes existed retain their
-    # original trailing-return semantics.
-    loaded.setdefault("market_regime_method", "ASSET_RETURN")
     if not loaded.get("market_symbol"):
         match=re.search(r"([A-Z0-9]+USDT)(?:[_-]|$)",Path(str(loaded.get("strategy_csv") or loaded.get("input_csv") or "")).stem.upper())
         if match: loaded["market_symbol"]=match.group(1)
-    legacy_di_minimum = loaded.get("di_direction_minimum_spread", DEFAULT_GUI_CONFIG["di_direction_minimum_spread"])
-    loaded.setdefault("di_direction_long_minimum_spread", legacy_di_minimum)
-    loaded.setdefault("di_direction_short_minimum_spread", legacy_di_minimum)
     return {**default_gui_config(), **loaded}

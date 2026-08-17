@@ -265,6 +265,9 @@ class BacktestEngine:
         result[valid]=self.close[valid]/self.close[prior[valid]]-1.0
         return result
     def _market_regime_array(self):
+        if self.config.market_regime_method == "ASSET_RETURN":
+            threshold = abs(float(self.config.bull_regime_return_threshold))
+            return np.array([None if not np.isfinite(v) else ("BULL" if v >= threshold else ("BEAR" if v <= -threshold else "SIDEWAYS")) for v in self.bull_regime_return_values], dtype=object)
         benchmark_path = self.config.structural_regime_benchmark_csv
         if benchmark_path is None:
             strategy_path = Path(self.config.strategy_csv)
