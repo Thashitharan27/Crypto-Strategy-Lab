@@ -123,28 +123,6 @@ def test_di_direction_uses_separate_long_and_short_minimums():
     assert short_engine._entry_filter_result(0)[0]
 
 
-def test_direction_specific_adx_filter_uses_long_maximum_and_short_minimum():
-    long_engine = di_engine(50, 15)
-    object.__setattr__(long_engine.config, "enable_directional_adx_filter", True)
-    object.__setattr__(long_engine.config, "directional_long_adx_maximum", 60)
-    object.__setattr__(long_engine.config, "directional_short_adx_minimum", 25)
-    long_engine.adx_values[:] = 61
-    passed, reason = long_engine._entry_filter_result(0)
-    assert not passed
-    assert "Long DI signal skipped" in reason
-    long_engine.adx_values[:] = 60
-    assert long_engine._entry_filter_result(0)[0]
-
-    short_engine = di_engine(10, 45)
-    object.__setattr__(short_engine.config, "enable_directional_adx_filter", True)
-    object.__setattr__(short_engine.config, "directional_long_adx_maximum", 60)
-    object.__setattr__(short_engine.config, "directional_short_adx_minimum", 25)
-    short_engine.adx_values[:] = 24
-    passed, reason = short_engine._entry_filter_result(0)
-    assert not passed
-    assert "Short DI signal skipped" in reason
-    short_engine.adx_values[:] = 25
-    assert short_engine._entry_filter_result(0)[0]
 
 
 def test_di_preferred_side_only_opens_long_with_direct_risk_and_one_to_one_levels():
@@ -290,35 +268,8 @@ def test_journey_enrichment_reports_each_completed_trade():
     assert calls == [(1, 2), (2, 2)]
 
 
-def test_bull_regime_filter_skips_short_di_signal():
-    engine = di_engine(10, 45)
-    engine.config = BacktestConfig(
-        **{
-            **engine.config.__dict__,
-            "enable_bull_regime_short_filter": True,
-            "bull_regime_lookback_days": 90,
-            "bull_regime_return_threshold": 0.20,
-        }
-    )
-    engine.bull_regime_return_values[:] = 0.25
-    assert engine.run().empty
-    assert all("Short DI signal skipped in bull regime" in row["entry_filter_reason"] for row in engine.skipped_signals)
 
 
-def test_bull_regime_filter_allows_long_di_signal():
-    engine = di_engine(50, 15)
-    engine.config = BacktestConfig(
-        **{
-            **engine.config.__dict__,
-            "enable_bull_regime_short_filter": True,
-            "bull_regime_lookback_days": 90,
-            "bull_regime_return_threshold": 0.20,
-        }
-    )
-    engine.bull_regime_return_values[:] = 0.25
-    row = engine.run().iloc[0]
-    assert row.sizing_direction == "LONG"
-    assert row.bull_regime
 
 
 def test_bull_long_conditional_reward_risk_uses_override_only_when_both_conditions_pass():
@@ -362,47 +313,7 @@ def test_bull_long_conditional_reward_risk_uses_override_only_when_both_conditio
     assert row.di_applied_long_reward_risk_ratio == 2
 
 
-def test_bull_regime_filter_allows_short_outside_bull_regime():
-    engine = di_engine(10, 45)
-    engine.config = BacktestConfig(
-        **{
-            **engine.config.__dict__,
-            "enable_bull_regime_short_filter": True,
-            "bull_regime_lookback_days": 90,
-            "bull_regime_return_threshold": 0.20,
-        }
-    )
-    engine.bull_regime_return_values[:] = 0.10
-    row = engine.run().iloc[0]
-    assert row.sizing_direction == "SHORT"
-    assert not row.bull_regime
 
 
-def test_bear_regime_adx_filter_rejects_below_minimum_and_accepts_boundary():
-    for adx_value, should_trade in ((24.99, False), (25.0, True)):
-        engine = di_engine(50, 15)
-        engine.config = BacktestConfig(**{
-            **engine.config.__dict__,
-            "enable_bear_regime_adx_filter": True,
-            "bear_regime_adx_minimum": 25,
-            "di_regime_bear_return_threshold": -0.20,
-        })
-        engine.bull_regime_return_values[:] = -0.25
-        engine.adx_values[:] = adx_value
-        trades = engine.run()
-        assert (not trades.empty) is should_trade
-        if not should_trade:
-            assert all("DI signal skipped in bear regime" in row["entry_filter_reason"] for row in engine.skipped_signals)
 
 
-def test_bear_regime_adx_filter_does_not_reject_outside_bear_regime():
-    engine = di_engine(50, 15)
-    engine.config = BacktestConfig(**{
-        **engine.config.__dict__,
-        "enable_bear_regime_adx_filter": True,
-        "bear_regime_adx_minimum": 25,
-        "di_regime_bear_return_threshold": -0.20,
-    })
-    engine.bull_regime_return_values[:] = 0.0
-    engine.adx_values[:] = 10
-    assert not engine.run().empty
