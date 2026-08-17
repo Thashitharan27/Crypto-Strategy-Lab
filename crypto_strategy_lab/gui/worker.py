@@ -12,7 +12,7 @@ from crypto_strategy_lab.config import BacktestConfig
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.loader import load_backtest_data
 from crypto_strategy_lab.plots import save_plots
-from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
+from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis, di_pressure_analysis, equity_curve, summarize
 from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, trailing_profit_analysis, partial_take_profit_analysis
 from crypto_strategy_lab.lifecycle import export_lifecycle_reports
 from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_trade_column_metadata
@@ -287,7 +287,7 @@ class BacktestWorker(QObject):
             ]
             if self.config.save_indicator_analysis_reports:
                 parallel_reports.extend([
-                    ("writing indicator_analysis.xlsx", lambda: build_indicator_workbook({"ADX": adx_analysis(trades), "BB Width": bb_width_analysis(trades), "DI Spread": di_spread_analysis(trades)}, run_dir), 98),
+                    ("writing indicator_analysis.xlsx", lambda: build_indicator_workbook({"ADX": adx_analysis(trades), "BB Width": bb_width_analysis(trades), "DI Spread": di_spread_analysis(trades), "DI Pressure": di_pressure_analysis(trades)}, run_dir), 98),
                 ])
             if self.config.create_standard_charts:
                 parallel_reports.append(("creating charts", lambda: save_plots(trades, equity, run_dir / "charts"), 99))

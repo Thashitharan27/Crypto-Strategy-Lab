@@ -24,8 +24,6 @@ class BacktestEngine:
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_vwap_breakout=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
-        self.direction_vote_momentum_values=self._trailing_return_hours_array(config.direction_vote_momentum_lookback_hours)
-        self.direction_vote_higher_timeframe_values=self._higher_timeframe_trend_array()
         self.profile_rsi_values={period:rsi(self.close,period) for period in {p.rsi_period for p in self.config.strategy_profiles.values()}}
         self.profile_momentum_values={hours:self._trailing_return_hours_array(hours) for hours in {p.momentum_lookback_hours for p in self.config.strategy_profiles.values()}}
         self.sr_detector = SupportResistanceDetector(
@@ -59,25 +57,6 @@ class BacktestEngine:
         self.coin_flip_rng = Random(config.coin_flip_seed) if config.enable_coin_flip_sizing else None
         self.random_entry_decisions=[]; self.random_skips=0; self.last_closed_pair_id=None; self.previous_pair_close_time=None; self.pair_closed_index=None; self.reentry_gates=[]; self.reentry_gate_release_index=None
 
-    def _higher_timeframe_trend_array(self):
-        """Direction of the last fully completed higher-timeframe candle and its SMA."""
-        out=np.full(len(self.data),np.nan,float)
-        if not self.config.direction_vote_use_higher_timeframe or not len(self.data): return out
-        timestamps=pd.to_datetime(self.data.timestamp,utc=True)
-        frame=pd.DataFrame({"open_time":timestamps,"close":self.close})
-        rule=f"{self.config.direction_vote_higher_timeframe_hours}h"
-        higher=frame.set_index("open_time")["close"].resample(rule,label="left",closed="left").last().dropna().to_frame()
-        higher["available_time"]=higher.index+pd.Timedelta(hours=self.config.direction_vote_higher_timeframe_hours)
-        period=self.config.direction_vote_higher_timeframe_sma_period
-        higher["sma"]=higher["close"].rolling(period,min_periods=period).mean()
-        higher["prior_sma"]=higher["sma"].shift(1)
-        available=pd.DataFrame({"available_time":timestamps+pd.Timedelta(minutes=self.config.strategy_timeframe_minutes),"row":np.arange(len(self.data))})
-        merged=pd.merge_asof(available.sort_values("available_time"),higher.reset_index(drop=True).sort_values("available_time"),on="available_time",direction="backward")
-        long=(merged["close"]>merged["sma"]) & (merged["sma"]>merged["prior_sma"])
-        short=(merged["close"]<merged["sma"]) & (merged["sma"]<merged["prior_sma"])
-        out[merged.loc[long,"row"].to_numpy(int)]=1; out[merged.loc[short,"row"].to_numpy(int)]=-1
-        return out
-
     def _market_structure_snapshot(self, i):
         """Confirmed 2-left/2-right swing structure known at candle ``i``.
 
@@ -85,7 +64,7 @@ class BacktestEngine:
         pivot at index ``j`` becomes available only at ``j + 2``, preventing
         future candles from leaking into the direction decision.
         """
-        span=2; lookback=self.config.direction_vote_structure_lookback
+        span=2; lookback=20
         result={
             "market_structure_direction":"ABSTAIN",
             "market_structure_reason":"INSUFFICIENT_CONFIRMED_SWINGS",
@@ -161,35 +140,36 @@ class BacktestEngine:
             self.log(f"SR analysis failed at index {i}: {e}")
             return None
 
-    def _direction_vote(self, i):
-        votes={}
-        def set_vote(name,value): votes[name]="LONG" if value>0 else ("SHORT" if value<0 else "ABSTAIN")
-        if self.config.direction_vote_use_di:
-            plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i])
-            set_vote("di", plus-minus if np.isfinite(plus) and np.isfinite(minus) else 0)
-        if self.config.direction_vote_use_structure:
-            structure=self._market_structure_snapshot(i)
-            set_vote("structure",1 if structure["market_structure_direction"]=="LONG" else (-1 if structure["market_structure_direction"]=="SHORT" else 0))
-        if self.config.direction_vote_use_momentum:
-            value=float(self.direction_vote_momentum_values[i]); threshold=self.config.direction_vote_momentum_threshold
-            set_vote("momentum",1 if np.isfinite(value) and value>threshold else (-1 if np.isfinite(value) and value < -threshold else 0))
-        if self.config.direction_vote_use_volume_pressure:
-            n=self.config.direction_vote_volume_lookback
-            if i+1>=n:
-                returns=np.divide(self.close[i-n+1:i+1]-self.open[i-n+1:i+1],self.open[i-n+1:i+1],out=np.zeros(n),where=self.open[i-n+1:i+1]!=0); weighted=returns*self.volume[i-n+1:i+1]; denom=np.sum(np.abs(weighted)); score=float(np.sum(weighted)/denom) if denom else 0.0; threshold=self.config.direction_vote_volume_threshold
-                set_vote("volume_pressure",1 if score>threshold else (-1 if score < -threshold else 0))
-            else: set_vote("volume_pressure",0)
-        if self.config.direction_vote_use_higher_timeframe:
-            value=float(self.direction_vote_higher_timeframe_values[i]); set_vote("higher_timeframe",value if np.isfinite(value) else 0)
-        long_count=sum(v=="LONG" for v in votes.values()); short_count=sum(v=="SHORT" for v in votes.values()); abstain_count=sum(v=="ABSTAIN" for v in votes.values())
-        winner="LONG" if long_count>short_count else ("SHORT" if short_count>long_count else None)
-        if winner and max(long_count,short_count)<self.config.direction_vote_minimum_votes: winner=None
-        return winner,{"long":long_count,"short":short_count,"abstain":abstain_count,"votes":votes}
-
-    def _selected_direction(self,i):
-        if self.config.enable_direction_voting: return self._direction_vote(i)[0]
+    def _selected_direction(self, i):
+        """Select direction solely from DI values known at candle ``i``."""
+        if not self.config.enable_di_direction_selection:
+            return None
         plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i])
-        return ("LONG" if plus>minus else "SHORT") if np.isfinite(plus) and np.isfinite(minus) else None
+        if not np.isfinite(plus) or not np.isfinite(minus) or plus == minus:
+            return None
+        return "LONG" if plus > minus else "SHORT"
+
+    def _di_pressure_snapshot(self, i, direction):
+        """Return analysis-only DI telemetry using candle i and i-lookback."""
+        plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i])
+        lookback=self.config.di_pressure_lookback
+        result={"plus_di":plus,"minus_di":minus,"directional_di":np.nan,"opposing_di":np.nan,
+                "plus_di_change":np.nan,"minus_di_change":np.nan,"directional_di_change":np.nan,
+                "opposing_di_change":np.nan,"di_spread":float(self.di_spread[i]),"di_spread_change":np.nan,
+                "di_pressure_state":"UNKNOWN","di_pressure_lookback":lookback}
+        if direction not in ("LONG","SHORT") or not np.isfinite(plus) or not np.isfinite(minus): return result
+        result["directional_di"],result["opposing_di"]=(plus,minus) if direction=="LONG" else (minus,plus)
+        if not self.config.enable_di_pressure_analysis or i < lookback: return result
+        old_plus=float(self.plus_di_values[i-lookback]); old_minus=float(self.minus_di_values[i-lookback])
+        if not np.isfinite(old_plus) or not np.isfinite(old_minus): return result
+        result["plus_di_change"]=plus-old_plus; result["minus_di_change"]=minus-old_minus
+        old_directional,old_opposing=(old_plus,old_minus) if direction=="LONG" else (old_minus,old_plus)
+        dc=result["directional_di_change"]=result["directional_di"]-old_directional
+        oc=result["opposing_di_change"]=result["opposing_di"]-old_opposing
+        result["di_spread_change"]=result["di_spread"]-abs(old_plus-old_minus)
+        result["di_pressure_state"]="EXPANDING" if dc>0 and oc<0 else ("CONTRACTING" if dc<0 and oc>0 else "MIXED")
+        return result
+
     def _first_valid_atr_timestamp(self):
         idx=np.where(np.isfinite(self.atr_values))[0]
         return self.data.timestamp.iloc[int(idx[0])] if len(idx) else None
@@ -442,8 +422,7 @@ class BacktestEngine:
                 return False, "DI-direction sizing indicator warm-up incomplete"
             direction = self._selected_direction(i)
             if direction is None:
-                _, vote_result=self._direction_vote(i)
-                return False, f"Direction vote has no majority: {vote_result['long']} long, {vote_result['short']} short, {vote_result['abstain']} abstain"
+                return False, "DI direction unavailable"
             if self.config.trade_direction == TradeDirectionMode.LONG_ONLY and direction != "LONG":
                 return False, "DI selected short, but trade direction is LONG_ONLY"
             if self.config.trade_direction == TradeDirectionMode.SHORT_ONLY and direction != "SHORT":
@@ -451,9 +430,7 @@ class BacktestEngine:
             minimum = self.config.di_direction_long_minimum_spread if direction == "LONG" else self.config.di_direction_short_minimum_spread
             if spread < minimum:
                 return False, f"DI spread {spread:.6g} below direction-sizing minimum {minimum:.6g} for {direction.lower()}"
-            if self.config.enable_direction_voting:
-                _, vote_result=self._direction_vote(i); reasons.append(f"Direction majority passed: {vote_result['long']} long, {vote_result['short']} short, {vote_result['abstain']} abstain -> {direction}; DI spread {spread:.6g} >= minimum {minimum:.6g}")
-            else: reasons.append(f"DI direction sizing passed: {direction} stronger, spread {spread:.6g} >= minimum {minimum:.6g}")
+            reasons.append(f"DI direction sizing passed: {direction} stronger, spread {spread:.6g} >= minimum {minimum:.6g}")
             if self.config.enable_long_momentum_filter and direction == "LONG":
                 momentum_return=float(self.long_momentum_return_values[i])
                 if not np.isfinite(momentum_return):
@@ -614,12 +591,6 @@ class BacktestEngine:
             plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i]); regime=self._regime_at(i)
             if not all(np.isfinite(v) for v in (plus,minus)) or regime is None:
                 return False,"Strategy profile classification indicator warm-up incomplete"
-            if self.config.enable_direction_voting:
-                _,vote_result=self._direction_vote(i)
-                if self.config.direction_vote_use_structure:
-                    structure=self._market_structure_snapshot(i)
-                    return False,f"Direction vote has no majority: {vote_result['long']} long, {vote_result['short']} short, {vote_result['abstain']} abstain; market structure: {structure['market_structure_reason']}"
-                return False,f"Direction vote has no majority: {vote_result['long']} long, {vote_result['short']} short, {vote_result['abstain']} abstain"
             return False,"Strategy profile direction unavailable"
         regime,direction,key,profile=context
         if self.config.trade_direction == TradeDirectionMode.LONG_ONLY and direction != "LONG": return False,"Profile selected short, but trade direction is LONG_ONLY"
@@ -747,8 +718,7 @@ class BacktestEngine:
         return result.passed, result.reason
     def _record_skipped_signal(self, i, reason):
         row={"strategy_candle_open_time": self.times[i], "strategy_entry_time": self._entry_time(i), "strategy_entry_price": float(self.close[i]), "adx": float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan, "plus_di": float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan, "minus_di": float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan, "di_spread": float(self.di_spread[i]) if np.isfinite(self.di_spread[i]) else np.nan, "market_regime_return": float(self.bull_regime_return_values[i]) if np.isfinite(self.bull_regime_return_values[i]) else np.nan, "bb_width": float(self.bb_width[i]) if np.isfinite(self.bb_width[i]) else np.nan, "entry_filter_passed": False, "entry_filter_reason": reason, "adx_filter_passed": False, "adx_filter_reason": reason}
-        if self.config.direction_vote_use_structure:
-            row.update(self._market_structure_snapshot(i))
+        row.update(self._di_pressure_snapshot(i, self._selected_direction(i)))
         self.skipped_signals.append(row)
     def _cap_qty(self, qty, entry_price, equity):
         capped=False; cap_qty=qty
@@ -1072,11 +1042,8 @@ class BacktestEngine:
         pair.profile_timeout_minutes=int(active_profile.timeout_minutes) if pair.profile_timeout_enabled else None
         pair.vwap_confirmation_mode=self.config.vwap_confirmation_mode.value if self.config.entry_mode == EntryMode.VWAP_VOLUME_BREAKOUT else None; pair.vwap_breakout_signal_time=(schedule or {}).get("vwap_breakout_signal_time"); pair.vwap_breakout_level=(schedule or {}).get("vwap_breakout_level"); pair.vwap_confirmation_time=(schedule or {}).get("vwap_confirmation_time"); pair.vwap_confirmation_bars=(schedule or {}).get("vwap_confirmation_bars")
         pair.coin_flip_result=coin_result; pair.coin_flip_draw=coin_draw; pair.di_sizing_direction=raw_di_direction; pair.sizing_direction=sizing_direction; pair.long_size_multiplier=long_mult; pair.short_size_multiplier=short_mult
-        pair.direction_voting_enabled=self.config.enable_direction_voting
-        if self.config.enable_direction_voting:
-            _, vote_result=self._direction_vote(ind_i); pair.direction_vote_long_count=vote_result["long"]; pair.direction_vote_short_count=vote_result["short"]; pair.direction_vote_abstain_count=vote_result["abstain"]; pair.direction_vote_details=vote_result["votes"]
-        if self.config.direction_vote_use_structure:
-            pair.market_structure=self._market_structure_snapshot(ind_i)
+        pressure_direction=self._selected_direction(ind_i)
+        for key,value in self._di_pressure_snapshot(ind_i,pressure_direction).items(): setattr(pair,key,value)
         pair.di_reward_risk_regime=applied_regime; pair.di_applied_long_reward_risk_ratio=long_reward_risk; pair.di_applied_short_reward_risk_ratio=short_reward_risk; pair.bull_long_conditional_reward_risk_applied=bull_long_conditional_applied; pair.bull_long_momentum_unconfirmed_applied=bull_long_momentum_unconfirmed_applied; pair.bull_long_confirmation_return=float(self.bull_long_confirmation_return_values[ind_i]) if np.isfinite(self.bull_long_confirmation_return_values[ind_i]) else np.nan; pair.bull_long_momentum_target_extension_applied=bull_long_momentum_target_extension_applied; pair.bull_long_momentum_extension_return=float(self.bull_long_momentum_extension_return_values[ind_i]) if np.isfinite(self.bull_long_momentum_extension_return_values[ind_i]) else np.nan; pair.bull_long_structural_unconfirmed_applied=bull_long_structural_unconfirmed_applied; pair.bull_long_structural_sma=structural_sma if self.config.enable_di_direction_sizing else np.nan; pair.bull_long_structural_prior_sma=structural_prior_sma if self.config.enable_di_direction_sizing else np.nan; pair.bull_long_structural_confirmed=structural_confirmed if self.config.enable_di_direction_sizing else False; pair.sideways_long_conditional_reward_risk_applied=sideways_long_conditional_applied; pair.sideways_short_conditional_reward_risk_applied=sideways_short_conditional_applied; pair.bear_short_conditional_reward_risk_applied=bear_short_conditional_applied
         pair.market_regime_return=float(self.bull_regime_return_values[ind_i]) if np.isfinite(self.bull_regime_return_values[ind_i]) else np.nan
         pair.entry_atr_pct=float(self.atr_pct_values[ind_i]) if np.isfinite(self.atr_pct_values[ind_i]) else np.nan; pair.entry_rsi=float(self.directional_rsi_values[ind_i]) if np.isfinite(self.directional_rsi_values[ind_i]) else np.nan; pair.entry_close_location=float(self.close_location_values[ind_i]) if np.isfinite(self.close_location_values[ind_i]) else np.nan; pair.directional_momentum_return=float(self.directional_momentum_return_values[ind_i]) if np.isfinite(self.directional_momentum_return_values[ind_i]) else np.nan
@@ -1867,7 +1834,7 @@ class BacktestEngine:
                 rd=getattr(p,"random_decision",None)
                 row.update({"random_entry_enabled":self.random_entry_active,"random_seed":self.config.random_seed if self.random_entry_active else None,"random_entry_probability":self.config.random_entry_probability if self.random_entry_active else None,"randomize_first_entry":self.config.randomize_first_entry,"max_random_wait_candles":self.config.max_random_wait_candles,"random_decision_id":rd.get("decision_id") if rd else None,"random_draw_that_opened_trade":rd.get("random_draw") if rd else None,"random_decision_timestamp":rd.get("candle_timestamp") if rd else None,"candles_waited_before_entry":rd.get("candles_waited_since_close") if rd else None,"minutes_waited_before_entry":rd.get("candles_waited_since_close",0)*self.config.strategy_timeframe_minutes if rd else None,"previous_pair_close_time":getattr(p,"previous_pair_close_time",None),"random_entry_forced":rd.get("forced_entry",False) if rd else False,"entry_timing_mode":self.config.entry_timing_mode.value if self.random_entry_active else EntryTimingMode.CURRENT.value})
                 row.update({"coin_flip_sizing_enabled":self.config.enable_coin_flip_sizing,"coin_flip_seed":self.config.coin_flip_seed if self.config.enable_coin_flip_sizing else None,"coin_flip_draw":getattr(p,"coin_flip_draw",None),"coin_flip_result":getattr(p,"coin_flip_result",None),"long_size_multiplier":getattr(p,"long_size_multiplier",1.0),"short_size_multiplier":getattr(p,"short_size_multiplier",1.0)})
-                row.update({"di_direction_sizing_enabled":self.config.enable_di_direction_sizing,"di_direction_minimum_spread":self.config.di_direction_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_long_minimum_spread":self.config.di_direction_long_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_short_minimum_spread":self.config.di_direction_short_minimum_spread if self.config.enable_di_direction_sizing else None,"di_execution_mode":self.config.di_execution_mode.value if self.config.enable_di_direction_sizing else None,"di_reward_risk_ratio":self.config.di_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_long_reward_risk_ratio":self.config.di_long_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_short_reward_risk_ratio":self.config.di_short_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_regime_reward_risk_enabled":self.config.enable_di_regime_reward_risk,"di_reward_risk_regime":getattr(p,"di_reward_risk_regime",None),"di_applied_long_reward_risk_ratio":getattr(p,"di_applied_long_reward_risk_ratio",None),"di_applied_short_reward_risk_ratio":getattr(p,"di_applied_short_reward_risk_ratio",None),"bull_long_conditional_reward_risk_enabled":self.config.enable_bull_long_conditional_reward_risk,"bull_long_conditional_reward_risk_applied":getattr(p,"bull_long_conditional_reward_risk_applied",False),"sideways_long_conditional_reward_risk_enabled":self.config.enable_sideways_long_conditional_reward_risk,"sideways_long_conditional_reward_risk_applied":getattr(p,"sideways_long_conditional_reward_risk_applied",False),"sideways_short_conditional_reward_risk_enabled":self.config.enable_sideways_short_conditional_reward_risk,"sideways_short_conditional_reward_risk_applied":getattr(p,"sideways_short_conditional_reward_risk_applied",False),"bear_short_conditional_reward_risk_enabled":self.config.enable_bear_short_conditional_reward_risk,"bear_short_conditional_reward_risk_applied":getattr(p,"bear_short_conditional_reward_risk_applied",False),"directional_adx_filter_enabled":self.config.enable_directional_adx_filter,"directional_long_adx_maximum":self.config.directional_long_adx_maximum if self.config.enable_directional_adx_filter else None,"directional_short_adx_minimum":self.config.directional_short_adx_minimum if self.config.enable_directional_adx_filter else None,"di_sizing_direction":getattr(p,"di_sizing_direction",None),"sizing_direction":getattr(p,"sizing_direction",None),"direction_voting_enabled":getattr(p,"direction_voting_enabled",False),"direction_vote_long_count":getattr(p,"direction_vote_long_count",0),"direction_vote_short_count":getattr(p,"direction_vote_short_count",0),"direction_vote_abstain_count":getattr(p,"direction_vote_abstain_count",0),"direction_vote_details":getattr(p,"direction_vote_details",None)})
+                row.update({"di_direction_sizing_enabled":self.config.enable_di_direction_sizing,"di_direction_minimum_spread":self.config.di_direction_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_long_minimum_spread":self.config.di_direction_long_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_short_minimum_spread":self.config.di_direction_short_minimum_spread if self.config.enable_di_direction_sizing else None,"di_execution_mode":self.config.di_execution_mode.value if self.config.enable_di_direction_sizing else None,"di_reward_risk_ratio":self.config.di_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_long_reward_risk_ratio":self.config.di_long_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_short_reward_risk_ratio":self.config.di_short_reward_risk_ratio if self.config.enable_di_direction_sizing else None,"di_regime_reward_risk_enabled":self.config.enable_di_regime_reward_risk,"di_reward_risk_regime":getattr(p,"di_reward_risk_regime",None),"di_applied_long_reward_risk_ratio":getattr(p,"di_applied_long_reward_risk_ratio",None),"di_applied_short_reward_risk_ratio":getattr(p,"di_applied_short_reward_risk_ratio",None),"bull_long_conditional_reward_risk_enabled":self.config.enable_bull_long_conditional_reward_risk,"bull_long_conditional_reward_risk_applied":getattr(p,"bull_long_conditional_reward_risk_applied",False),"sideways_long_conditional_reward_risk_enabled":self.config.enable_sideways_long_conditional_reward_risk,"sideways_long_conditional_reward_risk_applied":getattr(p,"sideways_long_conditional_reward_risk_applied",False),"sideways_short_conditional_reward_risk_enabled":self.config.enable_sideways_short_conditional_reward_risk,"sideways_short_conditional_reward_risk_applied":getattr(p,"sideways_short_conditional_reward_risk_applied",False),"bear_short_conditional_reward_risk_enabled":self.config.enable_bear_short_conditional_reward_risk,"bear_short_conditional_reward_risk_applied":getattr(p,"bear_short_conditional_reward_risk_applied",False),"directional_adx_filter_enabled":self.config.enable_directional_adx_filter,"directional_long_adx_maximum":self.config.directional_long_adx_maximum if self.config.enable_directional_adx_filter else None,"directional_short_adx_minimum":self.config.directional_short_adx_minimum if self.config.enable_directional_adx_filter else None,"di_sizing_direction":getattr(p,"di_sizing_direction",None),"sizing_direction":getattr(p,"sizing_direction",None),"di_direction_selection_enabled":self.config.enable_di_direction_selection,"directional_di":getattr(p,"directional_di",np.nan),"opposing_di":getattr(p,"opposing_di",np.nan),"plus_di_change":getattr(p,"plus_di_change",np.nan),"minus_di_change":getattr(p,"minus_di_change",np.nan),"directional_di_change":getattr(p,"directional_di_change",np.nan),"opposing_di_change":getattr(p,"opposing_di_change",np.nan),"di_spread_change":getattr(p,"di_spread_change",np.nan),"di_pressure_state":getattr(p,"di_pressure_state","UNKNOWN"),"di_pressure_lookback":getattr(p,"di_pressure_lookback",self.config.di_pressure_lookback)})
                 row.update(getattr(p,"market_structure",{}) or {})
                 row.update({"short_vwap_distance_filter_enabled":self.config.enable_short_vwap_distance_filter,"short_vwap_minimum_distance_atr":self.config.short_vwap_minimum_distance_atr if self.config.enable_short_vwap_distance_filter else None,"utc_session_vwap":getattr(p,"utc_session_vwap",np.nan),"short_vwap_distance_atr":getattr(p,"short_vwap_distance_atr",np.nan)})
                 row.update({"long_momentum_filter_enabled":self.config.enable_long_momentum_filter,"long_momentum_lookback_hours":self.config.long_momentum_lookback_hours if self.config.enable_long_momentum_filter else None,"long_momentum_minimum_return":self.config.long_momentum_minimum_return if self.config.enable_long_momentum_filter else None,"long_momentum_return_at_entry":getattr(p,"long_momentum_return",np.nan)})

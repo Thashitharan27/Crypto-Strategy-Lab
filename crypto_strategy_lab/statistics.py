@@ -260,3 +260,28 @@ def di_spread_analysis(trades: pd.DataFrame) -> pd.DataFrame:
             (50, None),
         ],
     )
+
+
+def di_pressure_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    """Build readable pressure, regime, and spread-change performance tables."""
+    columns = ["Section", "Direction", "Market Regime", "DI Pressure State", "DI Spread Change Bucket", "Trades", "Wins", "Losses", "Win Rate", "Average Net PnL", "Net PnL", "Average Net R", "Total Net R"]
+    if trades.empty or "di_pressure_state" not in trades:
+        return pd.DataFrame(columns=columns)
+    frame=trades.copy()
+    frame["Direction"]=frame.get("side", frame.get("di_sizing_direction", "UNKNOWN")).astype(str).str.upper()
+    frame["DI Pressure State"]=frame["di_pressure_state"].fillna("UNKNOWN").astype(str).str.upper()
+    frame["Market Regime"]=frame.get("market_regime", pd.Series("UNKNOWN",index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
+    pnl=pd.to_numeric(frame.get("pair_net_pnl"),errors="coerce"); net_r=pd.to_numeric(frame.get("pair_net_r"),errors="coerce")
+    frame["_pnl"]=pnl; frame["_r"]=net_r
+    change=pd.to_numeric(frame.get("di_spread_change"),errors="coerce")
+    frame["DI Spread Change Bucket"]=pd.cut(change,[-np.inf,-10,-5,0,5,10,np.inf],right=False,labels=["< -10","-10 to -5","-5 to 0","0 to +5","+5 to +10","> +10"])
+    def grouped(section, groups):
+        rows=[]
+        for keys,g in frame.groupby(groups,dropna=False,observed=True):
+            keys=keys if isinstance(keys,tuple) else (keys,); gp=g["_pnl"]; gr=g["_r"]
+            row={"Section":section,**dict(zip(groups,keys)),"Trades":len(g),"Wins":int((gp>0).sum()),"Losses":int((gp<0).sum()),"Win Rate":float((gp>0).mean()),"Average Net PnL":float(gp.mean()),"Net PnL":float(gp.sum()),"Average Net R":float(gr.mean()),"Total Net R":float(gr.sum())}; rows.append(row)
+        return rows
+    rows=grouped("Direction + Pressure",["Direction","DI Pressure State"])
+    rows+=grouped("Regime + Direction + Pressure",["Market Regime","Direction","DI Pressure State"])
+    rows+=grouped("DI Spread Change",["DI Spread Change Bucket"])
+    return pd.DataFrame(rows).reindex(columns=columns)

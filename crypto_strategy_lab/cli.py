@@ -14,7 +14,7 @@ from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissin
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.loader import load_backtest_data, load_ohlcv_csv
 from crypto_strategy_lab.plots import save_plots
-from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
+from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis, di_pressure_analysis, equity_curve, summarize
 from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, partial_take_profit_analysis
 from crypto_strategy_lab.lifecycle import export_lifecycle_reports
 from crypto_strategy_lab.support_resistance_analysis import generate_sr_analysis_reports
@@ -200,7 +200,7 @@ def main() -> None:
             run_output_step("Building indicator lifecycle reports", lambda: export_lifecycle_reports(trades, telemetry, run_dir, phases=config.lifecycle_phases, checkpoints=config.lifecycle_early_checkpoints, minimum_sample=config.lifecycle_minimum_bucket_sample, charts=config.create_lifecycle_charts, flat_threshold_pct=config.lifecycle_flat_pattern_threshold_pct))
     run_output_step("Saving skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
     run_output_step("Saving skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
-    indicator_tables = {"ADX": adx_analysis(trades), "BB Width": bb_width_analysis(trades), "DI Spread": di_spread_analysis(trades)}
+    indicator_tables = {"ADX": adx_analysis(trades), "BB Width": bb_width_analysis(trades), "DI Spread": di_spread_analysis(trades), "DI Pressure": di_pressure_analysis(trades)}
     run_output_step("Saving indicator analysis workbook", lambda: build_indicator_workbook(indicator_tables, run_dir))
     run_output_step("Building support/resistance analysis", lambda: generate_sr_analysis_reports(trades, run_dir))
     run_output_step("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir))
