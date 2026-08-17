@@ -129,3 +129,25 @@ $env:QT_QPA_PLATFORM="offscreen"
 ```
 
 Market data, generated reports, virtual environments, and Python caches are intentionally excluded from version control.
+
+## Local MCP Server
+
+A local, read-only MCP server lets an MCP client inspect existing backtest reports. Install the dependencies and launch it on Windows:
+
+```powershell
+pip install -r requirements.txt
+& '.\Start MCP Server.bat'
+```
+
+By default the server exposes only this project's `output` directory at
+`http://127.0.0.1:8765/mcp`. Set `CRYPTO_STRATEGY_LAB_OUTPUT_DIR` to select a
+different existing output root, or `CRYPTO_STRATEGY_LAB_MCP_PORT` to change the
+local port. Paths are resolved beneath that root and the server cannot edit
+files, run backtests or commands, or execute mutating SQL.
+
+The supported tools are `list_runs`, `latest_run`, `list_run_files`,
+`read_report`, `query_trades`, and `compare_runs`. They support saved CSV, XLSX,
+JSON, and TXT reports; DuckDB access is restricted to read-only queries over a
+run's `trade_list.csv`. Connecting ChatGPT or another client (and configuring a
+supported MCP tunnel when needed) is a separate step. Do not expose the local
+server directly to the public internet.
