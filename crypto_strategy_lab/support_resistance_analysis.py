@@ -4,60 +4,74 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from crypto_strategy_lab.report_workbooks import build_support_resistance_workbook
 
 
-def generate_sr_analysis_reports(trades: pd.DataFrame, run_dir: Path) -> dict[str, pd.DataFrame]:
+def build_sr_analysis_tables(trades: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """Generate support/resistance analysis reports from trade data.
 
     Args:
         trades: Trade results DataFrame from engine.results_frame()
-        run_dir: Output directory for CSV files
-        
     Returns:
-        Dictionary of report_name -> DataFrame
+        Dictionary of workbook sheet name -> DataFrame
     """
     if trades.empty or "long_sr_location" not in trades.columns:
         return {}
     
-    reports = {}
+    reports: dict[str, pd.DataFrame] = {}
     
     # Report 1: Support/Resistance Analysis by Location and Direction
     sr_analysis = _build_sr_analysis(trades)
     if not sr_analysis.empty:
-        reports["support_resistance_analysis.csv"] = sr_analysis
-        sr_analysis.to_csv(run_dir / "support_resistance_analysis.csv", index=False)
+        reports["Location"] = sr_analysis
     
-    # Report 2: Support/Resistance Regime Analysis (also written as sr_regime_analysis.csv)
+    # Report 2: Support/Resistance Regime Analysis
     if "market_regime" in trades.columns:
         sr_regime = _build_sr_regime_analysis(trades)
         if not sr_regime.empty:
-            reports["support_resistance_regime_analysis.csv"] = sr_regime
-            sr_regime.to_csv(run_dir / "support_resistance_regime_analysis.csv", index=False)
-            sr_regime.to_csv(run_dir / "sr_regime_analysis.csv", index=False)
+            reports["Regime"] = sr_regime
     
-    # Report 3: Support/Resistance Distance Buckets (also written as sr_distance_analysis.csv)
+    # Report 3: Support/Resistance Distance Buckets
     sr_distance = _build_sr_distance_buckets(trades)
     if not sr_distance.empty:
-        reports["support_resistance_distance_buckets.csv"] = sr_distance
-        sr_distance.to_csv(run_dir / "support_resistance_distance_buckets.csv", index=False)
-        sr_distance.to_csv(run_dir / "sr_distance_analysis.csv", index=False)
+        reports["Distance"] = sr_distance
 
     # Report: S/R event-context analysis (NEAR_SUPPORT/SUPPORT_BOUNCE/etc, entry-time snapshot, may be multi-label)
     sr_event_context = _build_sr_event_context_analysis(trades)
     if not sr_event_context.empty:
-        reports["sr_event_context_analysis.csv"] = sr_event_context
-        sr_event_context.to_csv(run_dir / "sr_event_context_analysis.csv", index=False)
+        reports["Event Context"] = sr_event_context
 
-    for filename, builder in (
-        ("support_resistance_hold_analysis.csv", _build_sr_hold_analysis),
-        ("support_resistance_rejection_analysis.csv", _build_sr_rejection_analysis),
-        ("support_resistance_test_count_analysis.csv", _build_sr_test_count_analysis),
+    for sheet_name, builder in (
+        ("Hold Analysis", _build_sr_hold_analysis),
+        ("Rejection Strength", _build_sr_rejection_analysis),
+        ("Test Count", _build_sr_test_count_analysis),
     ):
         report = builder(trades)
         if not report.empty:
-            reports[filename] = report
-            report.to_csv(run_dir / filename, index=False)
+            reports[sheet_name] = report
+
+    overview_parts = []
+    location = reports.get("Location")
+    if location is not None and not location.empty:
+        context_column = "location" if "location" in location else location.columns[0]
+        concise = location[location[context_column].astype(str).str.contains("SUPPORT|RESISTANCE|GOOD|NEUTRAL|BAD", case=False, regex=True)].copy()
+        concise.insert(0, "source", "Location")
+        overview_parts.append(concise.head(18))
+    events = reports.get("Event Context")
+    if events is not None and not events.empty and "context" in events:
+        key_events = {"SUPPORT_BOUNCE", "RESISTANCE_REJECTION", "RESISTANCE_BREAKOUT", "SUPPORT_BREAKDOWN"}
+        concise = events[events["context"].isin(key_events)].copy()
+        concise.insert(0, "source", "Event Context")
+        overview_parts.append(concise)
+    reports["Overview"] = pd.concat(overview_parts, ignore_index=True, sort=False) if overview_parts else pd.DataFrame()
     
+    return reports
+
+
+def generate_sr_analysis_reports(trades: pd.DataFrame, run_dir: Path) -> dict[str, pd.DataFrame]:
+    """Build S/R tables once and consolidate them into one workbook."""
+    reports = build_sr_analysis_tables(trades)
+    build_support_resistance_workbook(reports, run_dir)
     return reports
 
 
@@ -142,7 +156,7 @@ def _build_sr_test_count_analysis(trades: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_sr_event_context_summary(trades: pd.DataFrame) -> pd.DataFrame:
-    """Public entry point for GUI/report consumers: same table written to sr_event_context_analysis.csv."""
+    """Public entry point for GUI/report consumers: Event Context workbook table."""
     return _build_sr_event_context_analysis(trades)
 
 

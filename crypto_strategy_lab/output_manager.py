@@ -182,11 +182,6 @@ def write_config(config: BacktestConfig, run_dir: Path) -> None:
     (run_dir / "config.json").write_text(json.dumps(config_to_dict(config), indent=2, default=str))
 
 
-def write_summary_txt(summary: dict[str, Any], run_dir: Path) -> None:
-    lines = [f"{key}: {value}" for key, value in summary.items() if key != "exit_combinations"]
-    (run_dir / "summary.txt").write_text("\n".join(lines) + "\n")
-
-
 def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Path) -> None:
     if config.enable_partial_stop_loss:
         stop_description = (

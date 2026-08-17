@@ -15,7 +15,8 @@ from crypto_strategy_lab.plots import save_plots
 from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis, equity_curve, summarize
 from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, trailing_profit_analysis, partial_take_profit_analysis
 from crypto_strategy_lab.lifecycle import export_lifecycle_reports
-from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
+from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_trade_column_metadata
+from crypto_strategy_lab.report_workbooks import build_backtest_workbook, build_indicator_workbook, build_performance_breakdowns
 from crypto_strategy_lab.random_entry import decisions_frame, random_analysis, run_batch, comparison_row
 from crypto_strategy_lab.support_resistance_analysis import generate_sr_analysis_reports
 from crypto_strategy_lab.config import EntryTimingMode
@@ -141,7 +142,7 @@ class BacktestWorker(QObject):
         summary={"strategy_profile_run_mode":"ISOLATED_PROFILES","profiles_tested":len(comparison),"total_trades":sum(item["trades"] for item in comparison),"isolated_profile_comparison":comparison}
         pd.DataFrame(comparison).to_csv(run_dir/"strategy_profile_comparison.csv",index=False)
         all_trades.to_csv(run_dir/"isolated_trade_list.csv",index=False)
-        (run_dir/"summary.json").write_text(json.dumps(summary,indent=2,default=str)); write_summary_txt(summary,run_dir); write_run_info(self.config,summary,run_dir)
+        (run_dir/"summary.json").write_text(json.dumps(summary,indent=2,default=str)); write_run_info(self.config,summary,run_dir)
         update_latest(output_root,run_dir); self._emit_stage("Outputs saved; preparing results view",99,len(data),len(data),len(all_trades),len(all_trades),0)
         self._log(f"Completed {len(comparison)} isolated profile runs with {len(all_trades):,} total trades")
         self._log(f"Results saved to {run_dir}"); (run_dir/"log.txt").write_text("\n".join(self._log_lines+["Isolated profile tests completed from GUI worker."])+"\n")
@@ -276,18 +277,17 @@ class BacktestWorker(QObject):
             skipped_signals = detached_trade_attrs.get("skipped_signals", [])
             run_output_step("writing skipped_signals.csv", lambda: pd.DataFrame(skipped_signals).to_csv(run_dir / "skipped_signals.csv", index=False))
             run_output_step("writing skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
+            monthly, yearly = periodic_results(trades, "ME"), periodic_results(trades, "YE")
+            market_regime, direction_regime = build_performance_breakdowns(trades)
             parallel_reports = [
                 ("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir), 98),
                 ("writing support/resistance analysis reports", lambda: generate_sr_analysis_reports(trades, run_dir), 98),
                 ("writing equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False), 98),
-                ("writing monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False), 98),
-                ("writing yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False), 98),
+                ("writing backtest_report.xlsx", lambda: build_backtest_workbook(summary, self.config, run_dir, monthly, yearly, market_regime, direction_regime), 98),
             ]
             if self.config.save_indicator_analysis_reports:
                 parallel_reports.extend([
-                    ("writing adx_analysis.csv", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False), 98),
-                    ("writing bb_width_analysis.csv", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False), 98),
-                    ("writing di_spread_analysis.csv", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False), 98),
+                    ("writing indicator_analysis.xlsx", lambda: build_indicator_workbook({"ADX": adx_analysis(trades), "BB Width": bb_width_analysis(trades), "DI Spread": di_spread_analysis(trades)}, run_dir), 98),
                 ])
             if self.config.create_standard_charts:
                 parallel_reports.append(("creating charts", lambda: save_plots(trades, equity, run_dir / "charts"), 99))
@@ -307,7 +307,6 @@ class BacktestWorker(QObject):
                 summary["failed_output_reports"] = output_failures
                 self._log("WARNING: Some output reports failed: " + ", ".join(f["step"] for f in output_failures))
             run_output_step("writing summary.json", lambda: (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str)))
-            run_output_step("writing summary.txt", lambda: write_summary_txt(summary, run_dir))
             run_output_step("Saving run info", lambda: write_run_info(self.config, summary, run_dir))
             update_latest(output_root, run_dir)
             heartbeat_stop.set(); heartbeat.join(timeout=2)

@@ -18,6 +18,17 @@ from crypto_strategy_lab.output_manager import planned_run_dir
 from crypto_strategy_lab.support_resistance_analysis import build_sr_event_context_summary
 from ..paths import DATA_DIR
 
+REPORT_TARGETS = {
+    "backtest": "backtest_report.xlsx", "indicators": "indicator_analysis.xlsx",
+    "sr": "support_resistance_analysis.xlsx", "trades": "trade_list.csv",
+    "charts": "charts", "output": ".",
+}
+
+
+def report_button_states(run_dir: Path) -> dict[str, bool]:
+    """Return report availability independently of Qt for easy UI testing."""
+    return {name: (run_dir / relative).exists() for name, relative in REPORT_TARGETS.items()}
+
 class PolicyComboBox(QComboBox):
     """Show friendly policy labels while preserving stable config values."""
     def currentText(self):
@@ -317,7 +328,7 @@ class MainWindow(QMainWindow):
         for lab,w in [("",self.enable_lifecycle),("Lifecycle phases",self.lifecycle_phases),("Early checkpoints (minutes)",self.lifecycle_checkpoints),("Minimum bucket sample",self.lifecycle_min_sample),("",self.lifecycle_charts),("Flat-pattern threshold",self.lifecycle_flat_threshold)]: lifecycle.addRow(lab,w)
         reports=group("Optional Output Reports")
         self.save_feature_reports=QCheckBox("Create trailing/partial-exit diagnostic reports"); self.save_indicator_reports=QCheckBox("Create ADX/BB-width/DI-spread analysis reports"); self.create_standard_charts=QCheckBox("Create standard performance charts")
-        reports_help=QLabel("Core summary, trade list, equity curve, monthly/yearly results, configuration, and log are always saved."); reports_help.setWordWrap(True); reports.addRow(reports_help)
+        reports_help=QLabel("Core Excel report, trade list, equity curve, configuration, and log are always saved."); reports_help.setWordWrap(True); reports.addRow(reports_help)
         for w in [self.save_feature_reports,self.save_indicator_reports,self.create_standard_charts]: reports.addRow(w)
         self.analysis_level=QComboBox(); self.analysis_level.addItems(["Fast","Standard (Recommended)","Research"])
         self.analysis_description=QLabel(); self.analysis_description.setWordWrap(True)
@@ -712,7 +723,22 @@ class MainWindow(QMainWindow):
         sr_summary_box=QGroupBox("Support / Resistance"); sr_summary_layout=QVBoxLayout(sr_summary_box)
         self.sr_summary_panel_label=QLabel("No backtest run yet."); self.sr_summary_panel_label.setWordWrap(True)
         sr_summary_layout.addWidget(self.sr_summary_panel_label); l.addWidget(sr_summary_box)
+        reports_box=QGroupBox("Run Reports"); reports_layout=QGridLayout(reports_box)
+        labels={"backtest":"Open Backtest Report","indicators":"Open Indicator Analysis","sr":"Open S/R Analysis","trades":"Open Trade List","charts":"Open Charts Folder","output":"Open Output Folder"}
+        self.report_buttons={}
+        for index,(name,label) in enumerate(labels.items()):
+            button=QPushButton(label); button.setEnabled(False); button.clicked.connect(lambda _checked=False, key=name: self._open_report(key))
+            self.report_buttons[name]=button; reports_layout.addWidget(button,index//2,index%2)
+        l.addWidget(reports_box)
         self.tabs.addTab(page,"Summary")
+
+    def _refresh_report_buttons(self):
+        states=report_button_states(Path(self.output_dir))
+        for name,button in self.report_buttons.items(): button.setEnabled(states[name])
+
+    def _open_report(self,name):
+        target=(Path(self.output_dir)/REPORT_TARGETS[name]).resolve()
+        if target.exists(): QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
     def _build_log(self):
         # Keep an internal buffer for diagnostics and saved log files without
         # constructing a large interactive Log tab that the workflow does not use.
@@ -1060,6 +1086,7 @@ class MainWindow(QMainWindow):
     def on_status(self,s,p): self.status.setText(s); self.progress.setValue(p); self.elapsed.setText(f"Elapsed: {int(time.time()-self.started)}s")
     def on_finished(self,summary,trades,equity,out):
         self.last_summary=summary; self.output_dir=Path(out); self._pending_ui_results=(summary,trades,equity,out)
+        self._refresh_report_buttons()
         self.cleanup_thread()
         # The backtest and all output files are complete at this point.  Do not
         # hold the run at 99% while optional GUI views are being refreshed.
