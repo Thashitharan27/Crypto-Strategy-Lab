@@ -107,6 +107,11 @@ class MainWindow(QMainWindow):
         self.direction_vote_test_mode.blockSignals(False)
     def _build_config(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); form=QVBoxLayout(inner); self.config_controls=[]
+        toolbar=QHBoxLayout(); toolbar.setContentsMargins(0,0,0,4)
+        self.new_run_btn=QPushButton("New Run"); self.save_btn=QPushButton("Save Config"); self.load_btn=QPushButton("Load Config")
+        for button in (self.new_run_btn,self.save_btn,self.load_btn): toolbar.addWidget(button)
+        toolbar.addStretch(1); outer.addLayout(toolbar)
+        self.new_run_btn.clicked.connect(self.new_run); self.save_btn.clicked.connect(self.save_config); self.load_btn.clicked.connect(self.load_config)
         def group(title): g=QGroupBox(title); l=QFormLayout(g); form.addWidget(g); return l
         data=group("Data")
         self.market_symbol=QComboBox(); self.market_symbol.setEditable(True); self.market_symbol.addItems(["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT"]); self.market_symbol.setCurrentText("XRPUSDT"); data.addRow("Trading Pair",self.market_symbol)
@@ -408,12 +413,11 @@ class MainWindow(QMainWindow):
         be=group("Break-Even Calculator")
         self.be_label=QLabel(); self.be_label.setWordWrap(True); be.addRow(self.be_label)
         controls=group("Backtest Controls")
-        self.run_btn=QPushButton("Run Backtest"); self.cancel_btn=QPushButton("Cancel"); self.cancel_btn.setEnabled(False); self.open_btn=QPushButton("Open Output Folder"); self.save_btn=QPushButton("Save Configuration"); self.load_btn=QPushButton("Load Configuration"); self.reset_btn=QPushButton("Reset Defaults")
-        for w in [self.run_btn,self.cancel_btn,self.open_btn,self.save_btn,self.load_btn,self.reset_btn]: controls.addRow(w)
+        self.run_btn=QPushButton("Run Backtest"); self.cancel_btn=QPushButton("Cancel"); self.cancel_btn.setEnabled(False); self.open_btn=QPushButton("Open Output Folder")
+        for w in [self.run_btn,self.cancel_btn,self.open_btn]: controls.addRow(w)
         self.progress=QProgressBar(); self.status=QLabel("Ready"); self.elapsed=QLabel("Elapsed: 0s"); controls.addRow(self.progress); controls.addRow(self.status); controls.addRow(self.elapsed)
         for w in [self.run_name,self.output_folder]: w.textChanged.connect(self.update_planned_output)
         self.run_btn.clicked.connect(self.run_backtest); self.cancel_btn.clicked.connect(lambda: self.worker and self.worker.cancel()); self.open_btn.clicked.connect(lambda: os.startfile(str(self.output_dir)) if sys.platform.startswith("win") else os.system(f'xdg-open "{self.output_dir}"'))
-        self.save_btn.clicked.connect(self.save_config); self.load_btn.clicked.connect(self.load_config); self.reset_btn.clicked.connect(self.reset_defaults)
         for obsolete in (partial_sl,partial_tp,protective_stop,trailing,both_open,vwap_group,random_group,trend,compression,be_rule,remaining_timeout,be): obsolete.parentWidget().setVisible(False)
         data.parentWidget().setTitle("Data & Output"); strat.parentWidget().setTitle("Entry Timing & Simulation"); sched.parentWidget().setTitle("Scheduled Entry"); fees.parentWidget().setTitle("Execution Costs"); telemetry.parentWidget().setTitle("Reports & Analysis"); lifecycle.parentWidget().setTitle("Advanced Indicator Analysis"); reports.parentWidget().setTitle("Report Files"); controls.parentWidget().setTitle("Run Backtest")
         self.sl.setVisible(False); sl_label=strat.labelForField(self.sl)
@@ -722,7 +726,7 @@ class MainWindow(QMainWindow):
             if not risk <= maximum_total_risk < 1: raise ValueError("Maximum total portfolio risk must be at least the per-asset risk and below 100%.")
             output=self.portfolio_output_folder.text().strip() or "output"; Path(output).mkdir(parents=True,exist_ok=True)
         except Exception as exc: QMessageBox.warning(self,"Portfolio Validation",str(exc)); return
-        self.portfolio_thread=QThread(); self.portfolio_worker=PortfolioWorker(components,output,self.portfolio_initial_equity.value(),risk,maximum_total_risk); self.portfolio_worker.moveToThread(self.portfolio_thread); self.portfolio_thread.started.connect(self.portfolio_worker.run); self.portfolio_thread.finished.connect(self._portfolio_thread_finished); self.portfolio_worker.status.connect(self._on_portfolio_status); self.portfolio_worker.log.connect(self.append_log); self.portfolio_worker.finished.connect(self._on_portfolio_finished); self.portfolio_worker.failed.connect(self._on_portfolio_failed); self.portfolio_run_btn.setEnabled(False); self.portfolio_progress.setValue(0); self.portfolio_thread.start()
+        self.portfolio_thread=QThread(); self.portfolio_worker=PortfolioWorker(components,output,self.portfolio_initial_equity.value(),risk,maximum_total_risk); self.portfolio_worker.moveToThread(self.portfolio_thread); self.portfolio_thread.started.connect(self.portfolio_worker.run); self.portfolio_thread.finished.connect(self._portfolio_thread_finished); self.portfolio_worker.status.connect(self._on_portfolio_status); self.portfolio_worker.log.connect(self.append_log); self.portfolio_worker.finished.connect(self._on_portfolio_finished); self.portfolio_worker.failed.connect(self._on_portfolio_failed); self.portfolio_run_btn.setEnabled(False); self.new_run_btn.setEnabled(False); self.portfolio_progress.setValue(0); self.portfolio_thread.start()
     def _on_portfolio_status(self,text,percent): self.portfolio_status.setText(text); self.portfolio_progress.setValue(percent)
     def _on_portfolio_finished(self,summary,trades,equity,out):
         self.portfolio_output_dir=Path(out); self.portfolio_summary_table.setRowCount(len(summary))
@@ -733,7 +737,7 @@ class MainWindow(QMainWindow):
         if self.portfolio_thread is not None: self.portfolio_thread.quit()
         else: self.portfolio_run_btn.setEnabled(True)
     def _portfolio_thread_finished(self):
-        thread=self.portfolio_thread; self.portfolio_thread=None; self.portfolio_worker=None; self.portfolio_run_btn.setEnabled(True)
+        thread=self.portfolio_thread; self.portfolio_thread=None; self.portfolio_worker=None; self.portfolio_run_btn.setEnabled(True); self.new_run_btn.setEnabled(not bool(self.thread and self.thread.isRunning()))
         if thread is not None: thread.deleteLater()
     def _build_summary(self):
         page=QScrollArea(); page.setWidgetResizable(True); page.setObjectName("summaryScrollArea")
@@ -878,6 +882,33 @@ class MainWindow(QMainWindow):
         defaults=default_gui_config()
         defaults.update({"enable_di_direction_sizing":True,"enable_direction_voting":True,"direction_vote_use_di":True})
         self.apply_values(defaults)
+
+    def new_run(self):
+        """Confirm and prepare a fresh configuration without touching persisted data."""
+        if self._git_work_active(): return
+        if not self._confirm_new_run(): return
+        self.apply_values(default_gui_config())
+        self._clear_displayed_results()
+
+    def _confirm_new_run(self):
+        prompt=QMessageBox(self); prompt.setWindowTitle("Start a new run?")
+        prompt.setText("Start a new run?")
+        prompt.setInformativeText(
+            "This will reset the backtest setup and strategy settings\n"
+            "to their default values.\n\n"
+            "Existing backtest results and market data will not be deleted.")
+        prompt.addButton(QMessageBox.Cancel)
+        confirm=prompt.addButton("New Run",QMessageBox.AcceptRole)
+        prompt.setDefaultButton(QMessageBox.Cancel); prompt.exec()
+        return prompt.clickedButton() is confirm
+
+    def _clear_displayed_results(self):
+        """Clear in-memory result presentation, never persisted run artifacts."""
+        self.last_summary={}; self._pending_ui_results=None
+        self.populate_summary({},pd.DataFrame())
+        self.sr_summary_panel_label.setText("No backtest run yet.")
+        self.progress.setValue(0); self.status.setText("Ready"); self.elapsed.setText("Elapsed: 0s")
+        self.update_dynamic(); self.update_planned_output()
     def _restore_settings(self):
         self.output_folder.setText(self.settings.value("last_output", self.output_folder.text())); self._sync_dataset_paths()
     def browse_csv(self):
@@ -1120,7 +1151,7 @@ class MainWindow(QMainWindow):
         try: vals=self.values(); cfg=build_backtest_config(vals); cfg=replace(cfg, save_feature_analysis_reports=self.save_feature_reports.isChecked(), save_indicator_analysis_reports=self.save_indicator_reports.isChecked(), create_standard_charts=self.create_standard_charts.isChecked()); Path(vals['output_dir']).mkdir(parents=True,exist_ok=True); cfg=replace(cfg, output_run_dir=planned_run_dir(cfg)); self.planned_output.setText(str(cfg.output_run_dir.resolve()))
         except Exception as e: QMessageBox.warning(self,"Validation Problems",str(e)); return
         if not self.validate_data(): return
-        self._run_failed=False; self._pending_ui_results=None; self.output_dir=cfg.output_run_dir; self.thread=QThread(); self.worker=BacktestWorker(cfg, self._validated_strategy_data); self.worker.moveToThread(self.thread); self.thread.started.connect(self.worker.run); self.thread.finished.connect(self._thread_finished); self.worker.status.connect(self.on_status); self.worker.log.connect(self.append_log); self.worker.finished.connect(self.on_finished); self.worker.failed.connect(self.on_failed); self.started=time.time(); self.cancel_btn.setEnabled(True); self.run_btn.setEnabled(False); self.thread.start()
+        self._run_failed=False; self._pending_ui_results=None; self.output_dir=cfg.output_run_dir; self.thread=QThread(); self.worker=BacktestWorker(cfg, self._validated_strategy_data); self.worker.moveToThread(self.thread); self.thread.started.connect(self.worker.run); self.thread.finished.connect(self._thread_finished); self.worker.status.connect(self.on_status); self.worker.log.connect(self.append_log); self.worker.finished.connect(self.on_finished); self.worker.failed.connect(self.on_failed); self.started=time.time(); self.cancel_btn.setEnabled(True); self.run_btn.setEnabled(False); self.new_run_btn.setEnabled(False); self.thread.start()
     def on_status(self,s,p): self.status.setText(s); self.progress.setValue(p); self.elapsed.setText(f"Elapsed: {int(time.time()-self.started)}s")
     def on_finished(self,summary,trades,equity,out):
         self.last_summary=summary; self.output_dir=Path(out); self._pending_ui_results=(summary,trades,equity,out)
@@ -1172,6 +1203,7 @@ class MainWindow(QMainWindow):
     def _thread_finished(self):
         thread=self.thread
         self.thread=None; self.worker=None
+        self.new_run_btn.setEnabled(not bool(self.portfolio_thread and self.portfolio_thread.isRunning()))
         self.cancel_btn.setEnabled(False)
         if self._pending_ui_results is None:
             self.run_btn.setEnabled(True)
