@@ -1,0 +1,22 @@
+name: Stage 3 profile telemetry fix
+on:
+  push:
+    branches: ["chatgpt/stage3-remove-legacy-directional-ranges"]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.event.head_commit.message != 'Apply Stage 3 profile telemetry fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/stage3-remove-legacy-directional-ranges
+      - run: python tools/stage3_fix_profile_telemetry.py
+      - run: python -m compileall -q crypto_strategy_lab
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crypto_strategy_lab/engine.py
+          git commit -m "Apply Stage 3 profile telemetry fix"
+          git push
