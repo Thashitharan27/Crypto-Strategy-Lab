@@ -14,6 +14,7 @@ from .config_logic import *
 from .worker import BacktestWorker
 from .portfolio_worker import PortfolioWorker
 from .profile_editor import StrategyProfilesWidget
+from .chatgpt_connection import ChatGPTIntegrationWidget
 from crypto_strategy_lab.output_manager import planned_run_dir
 from crypto_strategy_lab.support_resistance_analysis import build_sr_event_context_summary
 from crypto_strategy_lab.report_workbooks import build_performance_breakdowns
@@ -46,6 +47,21 @@ class MainWindow(QMainWindow):
         self.tabs.setDocumentMode(True); self.tabs.setMovable(False)
         self.setStyleSheet("QGroupBox{font-weight:600;margin-top:10px;padding-top:10px} QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px} QPushButton{padding:6px 12px} QTabBar::tab{padding:8px 14px} QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{min-height:24px}")
         self._build_config(); self._build_profiles(); self._build_summary(); self._build_portfolio_tab(); self._build_log(); self.reset_defaults(); self._restore_settings()
+        self.chatgpt_tab=ChatGPTIntegrationWidget(self.settings, lambda: self.output_folder.text().strip() or "output", self)
+        self.tabs.addTab(self.chatgpt_tab,"ChatGPT")
+        QTimer.singleShot(0,self.chatgpt_tab.auto_start_connection)
+
+    def closeEvent(self,event):
+        if not self.chatgpt_tab.manager.owns_running_processes:
+            event.accept(); return
+        box=QMessageBox(QMessageBox.Question,"ChatGPT Connection",
+            "Stop the ChatGPT connection before exiting?\n\nFor safety, processes managed by this window cannot be left running.",
+            parent=self)
+        stop=box.addButton("Stop and Exit",QMessageBox.AcceptRole); box.addButton("Cancel",QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is stop:
+            self.chatgpt_tab.manager.stop(); event.accept()
+        else: event.ignore()
     def _build_profiles(self):
         self.profile_editor=StrategyProfilesWidget(); self.tabs.addTab(self.profile_editor,"Strategy Profiles")
         self.profile_editor.changed.connect(self.update_dynamic)

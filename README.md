@@ -151,3 +151,30 @@ JSON, and TXT reports; DuckDB access is restricted to read-only queries over a
 run's `trade_list.csv`. Connecting ChatGPT or another client (and configuring a
 supported MCP tunnel when needed) is a separate step. Do not expose the local
 server directly to the public internet.
+
+## ChatGPT Integration
+
+The desktop application's **ChatGPT** tab can run both the existing read-only
+MCP server and an OpenAI Secure Tunnel without separate command windows:
+
+1. Create the OpenAI tunnel externally once and download `tunnel-client.exe`.
+2. Open **Crypto Strategy Lab → ChatGPT**.
+3. Browse to the tunnel client executable (its location is not fixed).
+4. Paste the tunnel ID supplied when the tunnel was created.
+5. Choose **Set / Change API Key** and securely save the tunnel runtime API key.
+6. Select **Start ChatGPT Connection**. The local MCP server becomes ready
+   before the secure tunnel is started.
+7. Enable the Crypto Strategy Lab plugin in ChatGPT.
+
+The runtime API key is stored through `keyring` in Windows Credential Manager;
+it is never saved in application settings, configuration files, command-line
+arguments, or connection logs. The tunnel path, tunnel ID, auto-start choice,
+and local port are non-secret settings. **Test Configuration** performs local
+checks only and does not make a model request. The MCP endpoint remains bound to
+`127.0.0.1` and retains its read-only report-access security model.
+
+Use **Open Logs** for bounded, redacted MCP/tunnel diagnostics. Processes
+started by the GUI are stopped in tunnel-then-server order. Because Qt-owned
+child processes cannot be reliably detached on every supported platform, the
+application offers the safe choices **Stop and Exit** or **Cancel** at shutdown
+rather than risking broken orphan processes.
