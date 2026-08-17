@@ -22,14 +22,23 @@ CREATE_NO_WINDOW = 0x08000000
 
 
 def configure_hidden_process(process: QProcess) -> None:
-    """Prevent a Windows console for a child while retaining Qt pipe capture."""
+    """Best-effort suppression of a Windows console for a Qt child process.
+
+    Some PySide6 builds do not expose Qt's process-argument modifier.  Console
+    suppression is optional in that case: the child must remain launchable and
+    its Qt-managed output pipes must remain intact.
+    """
     if sys.platform != "win32":
+        return
+
+    modifier = getattr(process, "setCreateProcessArgumentsModifier", None)
+    if not callable(modifier):
         return
 
     def add_no_window_flag(arguments) -> None:
         arguments.flags |= CREATE_NO_WINDOW
 
-    process.setCreateProcessArgumentsModifier(add_no_window_flag)
+    modifier(add_no_window_flag)
 
 
 def redact_secrets(value: str) -> str:
