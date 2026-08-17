@@ -1,9 +1,11 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-from mcp_server.server import BacktestReports
+from mcp_server.server import BacktestReports, create_server
 
 
 @pytest.fixture
@@ -56,3 +58,30 @@ def test_compare_tolerates_missing_optional_fields(reports: BacktestReports):
     assert compared[0]["total_trades"] == 2
     assert compared[1]["symbol"] is None
     assert compared[1]["net_profit"] == 25
+
+
+def test_create_server_uses_v2_sdk_and_registers_six_tools(reports: BacktestReports):
+    from mcp.server import MCPServer
+
+    server = create_server(reports)
+
+    assert isinstance(server, MCPServer)
+    assert set(server._tool_manager._tools) == {
+        "list_runs",
+        "latest_run",
+        "list_run_files",
+        "read_report",
+        "query_trades",
+        "compare_runs",
+    }
+
+
+def test_package_does_not_eagerly_import_server_module():
+    result = subprocess.run(
+        [sys.executable, "-c", "import mcp_server, sys; print('mcp_server.server' in sys.modules)"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "False"
