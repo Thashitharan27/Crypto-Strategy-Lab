@@ -12,7 +12,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: chatgpt/stage5-remove-oneoff-legacy-filters
-      - run: python tools/stage5_remove_legacy_entry_filters.py
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('tools/stage5_remove_legacy_entry_filters.py')
+          s=p.read_text(encoding='utf-8')
+          old='if isinstance(node,ast.If):\n        seg="".join(lines[node.lineno-1:node.end_lineno])\n        if any(name in seg for name in REMOVED): cuts.append((node.lineno-1,node.end_lineno))'
+          new='if isinstance(node,(ast.If,ast.Try)):\n        seg="".join(lines[node.lineno-1:node.end_lineno])\n        if any(name in seg for name in REMOVED): cuts.append((node.lineno-1,node.end_lineno))'
+          if old not in s:
+              raise SystemExit('config_logic validation pattern not found')
+          p.write_text(s.replace(old,new,1),encoding='utf-8')
+          PY
+          python tools/stage5_remove_legacy_entry_filters.py
       - run: python -m compileall -q crypto_strategy_lab tests
       - run: |
           git config user.name "github-actions[bot]"
