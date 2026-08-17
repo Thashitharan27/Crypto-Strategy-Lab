@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 CONFLICT_CODES = {"DD", "AU", "UD", "UA", "DU", "AA", "UU"}
 SENSITIVE_PATTERNS = (".env", ".env.*", "*.pem", "*.key", "credentials.json", "secrets.json",
                       "*cloudflared*credential*", "*tunnel*credential*")
+CREATE_NO_WINDOW = 0x08000000
 
 
 @dataclass(frozen=True)
@@ -101,8 +102,10 @@ class GitManager:
 
     def _run(self, *args: str, check=True) -> subprocess.CompletedProcess[str]:
         try:
+            creationflags = CREATE_NO_WINDOW if os.name == "nt" else 0
             result = subprocess.run([self.git, *args], cwd=self.root, text=True,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False,
+                                    creationflags=creationflags)
         except FileNotFoundError as exc:
             raise GitError("Git is not installed or not available in PATH.") from exc
         if check and result.returncode:

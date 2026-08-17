@@ -40,19 +40,25 @@ class PolicyComboBox(QComboBox):
         self.setCurrentIndex(max(0,self.findData(value)))
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, startup_status=None):
         super().__init__(); self.setWindowTitle("Crypto Strategy Lab"); self.resize(1280, 860)
+        startup_status = startup_status or (lambda _message: None)
         self.market_data_folder=DATA_DIR
         self.settings = QSettings("LongShortCrypto", "Backtester"); self.worker=None; self.thread=None; self.portfolio_worker=None; self.portfolio_thread=None; self.started=0; self.last_summary={}; self.output_dir=Path("output"); self._pending_ui_results=None; self._run_failed=False
         self.tabs=QTabWidget(); self.setCentralWidget(self.tabs)
         self.tabs.setDocumentMode(True); self.tabs.setMovable(False)
         self.setStyleSheet("QGroupBox{font-weight:600;margin-top:10px;padding-top:10px} QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px} QPushButton{padding:6px 12px} QTabBar::tab{padding:8px 14px} QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{min-height:24px}")
+        startup_status("Building interface...")
         self._build_config(); self._build_profiles(); self._build_summary(); self._build_portfolio_tab(); self._build_log(); self.reset_defaults(); self._restore_settings()
+        startup_status("Initializing integrations...")
         self.github_tab=GitHubIntegrationWidget(self, self._git_work_active)
         self.tabs.addTab(self.github_tab,"GitHub")
         self.chatgpt_tab=ChatGPTIntegrationWidget(self.settings, lambda: self.output_folder.text().strip() or "output", self)
         self.tabs.addTab(self.chatgpt_tab,"ChatGPT")
-        QTimer.singleShot(0,self.chatgpt_tab.auto_start_connection)
+
+    def start_post_show_tasks(self):
+        """Schedule optional integrations after the main window is visible."""
+        QTimer.singleShot(0, self.chatgpt_tab.auto_start_connection)
 
     def _git_work_active(self):
         """Prevent source updates while calculation worker threads are running."""

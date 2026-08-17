@@ -18,6 +18,18 @@ KEYRING_SERVICE = "CryptoStrategyLab.OpenAITunnel"
 KEYRING_USERNAME = "runtime_api_key"
 TUNNEL_ARGUMENTS = ["run", "--log.level=info", "--log.format=struct-text"]
 _SECRET_RE = re.compile(r"(?i)(?:sk-[A-Za-z0-9_-]{8,}|CONTROL_PLANE_API_KEY\s*[=:]\s*\S+)")
+CREATE_NO_WINDOW = 0x08000000
+
+
+def configure_hidden_process(process: QProcess) -> None:
+    """Prevent a Windows console for a child while retaining Qt pipe capture."""
+    if sys.platform != "win32":
+        return
+
+    def add_no_window_flag(arguments) -> None:
+        arguments.flags |= CREATE_NO_WINDOW
+
+    process.setCreateProcessArgumentsModifier(add_no_window_flag)
 
 
 def redact_secrets(value: str) -> str:
@@ -62,6 +74,7 @@ class ChatGPTConnectionManager(QObject):
         super().__init__(parent)
         self.output_dir = output_dir
         self.mcp = QProcess(self); self.tunnel = QProcess(self)
+        configure_hidden_process(self.mcp); configure_hidden_process(self.tunnel)
         self.mcp.setProcessChannelMode(QProcess.MergedChannels)
         self.tunnel.setProcessChannelMode(QProcess.MergedChannels)
         self.mcp.readyReadStandardOutput.connect(lambda: self._read(self.mcp, "MCP"))
