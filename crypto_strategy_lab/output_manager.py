@@ -192,6 +192,21 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
         stop_description = f"Partial TP stop: {config.stop_loss_r}R (Core SL ignored)"
     else:
         stop_description = f"Stop loss multiple: {config.sl_mult}R"
+
+    if config.enable_strategy_profiles:
+        enabled_profiles = [key for key, profile in config.strategy_profiles.items() if profile.enabled]
+        target_description = (
+            "Strategy Profiles: " + (", ".join(enabled_profiles) if enabled_profiles else "none enabled")
+            + f"; run mode {config.strategy_profile_run_mode}"
+        )
+    elif config.enable_partial_take_profit:
+        target_description = (
+            f"Partial take profit: {config.tp1_close_pct}% at {config.tp1_r}R; "
+            f"remainder at {config.tp2_r}R (Core TP ignored)"
+        )
+    else:
+        target_description = f"Take profit multiple: {config.tp_mult}R"
+
     lines = [
         "Backtest Run Information",
         "========================",
@@ -204,83 +219,7 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
         f"Risk mode: {config.risk_mode.value}",
         f"ATR period/multiplier: {config.atr_period} / {config.atr_multiplier}",
         stop_description,
-        (
-            f"Partial take profit: {config.tp1_close_pct}% at {config.tp1_r}R; "
-            + f"remainder at {config.tp2_r}R"
-            + " (Core TP ignored)"
-            if config.enable_partial_take_profit
-            else (
-                (
-                    f"DI regime reward/risk enabled: bull at or above {config.bull_regime_return_threshold:.2%}, "
-                    f"bear at or below {config.di_regime_bear_return_threshold:.2%}; "
-                    f"long bull/bear/sideways {config.di_long_bull_reward_risk_ratio}/"
-                    f"{config.di_long_bear_reward_risk_ratio}/{config.di_long_sideways_reward_risk_ratio}; "
-                    f"short bull/bear/sideways {config.di_short_bull_reward_risk_ratio}/"
-                    f"{config.di_short_bear_reward_risk_ratio}/{config.di_short_sideways_reward_risk_ratio}"
-                    + (
-                        f"; bull-long conditional target {config.bull_long_conditional_reward_risk_ratio} "
-                        f"when BB width >= {config.bull_long_conditional_bb_width_minimum:.2%} "
-                        f"and ADX < {config.bull_long_conditional_adx_maximum}"
-                        if config.enable_bull_long_conditional_reward_risk
-                        else ""
-                    )
-                    + (
-                        f"; bull-long momentum confirmation requires "
-                        f"{config.bull_long_confirmation_lookback_days}-day return >= "
-                        f"{config.bull_long_confirmation_return_threshold:.2%} for the base bull target; "
-                        f"otherwise target {config.bull_long_unconfirmed_reward_risk_ratio}"
-                        if config.enable_bull_long_momentum_confirmation else ""
-                    )
-                    + (
-                        f"; bull-long recent-momentum target {config.bull_long_momentum_extended_reward_risk_ratio} "
-                        f"when {config.bull_long_momentum_extension_lookback_days}-day return >= "
-                        f"{config.bull_long_momentum_extension_return_threshold:.2%}"
-                        + (
-                            f" and <= {config.bull_long_momentum_extension_return_maximum:.2%}"
-                            if config.enable_bull_long_momentum_extension_return_maximum else ""
-                        )
-                        if config.enable_bull_long_momentum_target_extension else ""
-                    )
-                    + (
-                        f"; bull-long structural confirmation requires price above a rising "
-                        f"{config.bull_long_structural_sma_days}-day SMA "
-                        f"(compared with {config.bull_long_structural_slope_lookback_days} days earlier); "
-                        f"otherwise target {config.bull_long_structural_unconfirmed_reward_risk_ratio}"
-                        if config.enable_bull_long_structural_confirmation else ""
-                    )
-                    + (
-                        f"; sideways-long conditional target {config.sideways_long_conditional_reward_risk_ratio} "
-                        f"when ADX < {config.sideways_long_conditional_adx_maximum}"
-                        if config.enable_sideways_long_conditional_reward_risk else ""
-                    )
-                    + (
-                        f"; sideways-short conditional target {config.sideways_short_conditional_reward_risk_ratio} "
-                        f"when DI spread >= {config.sideways_short_conditional_di_spread_minimum} "
-                        f"and < {config.sideways_short_conditional_di_spread_maximum}"
-                        if config.enable_sideways_short_conditional_reward_risk else ""
-                    )
-                    + (
-                        f"; bear-short conditional target {config.bear_short_conditional_reward_risk_ratio} "
-                        f"when DI spread < {config.bear_short_conditional_di_spread_maximum}"
-                        if config.enable_bear_short_conditional_reward_risk else ""
-                    )
-                    if config.enable_di_regime_reward_risk
-                    else
-                    f"DI take profit: long {config.di_long_reward_risk_ratio}:1, "
-                    f"short {config.di_short_reward_risk_ratio}:1 reward/risk "
-                    f"(target distances: long {config.sl_mult * config.di_long_reward_risk_ratio}R, "
-                    f"short {config.sl_mult * config.di_short_reward_risk_ratio}R)"
-                )
-                if config.enable_di_direction_sizing
-                else f"Take profit multiple: {config.tp_mult}R"
-            )
-        ),
-        (
-            f"Long momentum entry filter: {config.long_momentum_lookback_hours}-hour return >= "
-            f"{config.long_momentum_minimum_return:.2%}"
-            if config.enable_long_momentum_filter
-            else "Long momentum entry filter: disabled"
-        ),
+        target_description,
         (
             f"Trailing stop: enabled; trigger {config.trail_activation_trigger.value}; "
             f"activation {config.trail_activation_r}R; distance {config.trail_distance_r}R; "

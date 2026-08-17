@@ -858,7 +858,7 @@ class BacktestEngine:
         else:
             pair.entry_rsi=np.nan
             pair.directional_momentum_return=np.nan
-        pair.long_momentum_return=float(self.long_momentum_return_values[ind_i]) if np.isfinite(self.long_momentum_return_values[ind_i]) else np.nan
+        pair.long_momentum_return=pair.directional_momentum_return
         pair.market_regime=self._regime_at(ind_i)
         pair.market_regime_method=self.config.market_regime_method
         pair.bull_regime=pair.market_regime == "BULL"

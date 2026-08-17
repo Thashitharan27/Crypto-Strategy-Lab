@@ -167,10 +167,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if 0 < staircase_max <= float(values.get("bull_long_r_step_activation_r",0)): errors.append("Bull-long staircase maximum must be zero or above activation.")
     staircase_close=float(values.get("bull_long_r_step_activation_close_pct",0))
     if not 0 <= staircase_close < 100: errors.append("Bull-long staircase activation close must be from 0% up to, but not including, 100%.")
-    for key, label in (("directional_long_adx_maximum", "Long ADX maximum"), ("directional_short_adx_minimum", "Short ADX minimum")):
-        try:
-            if float(values.get(key, -1)) < 0: errors.append(f"{label} must be non-negative.")
-        except (TypeError, ValueError): errors.append(f"{label} must be numeric.")
     if values.get("enable_di_direction_sizing") and (values.get("enable_partial_take_profit") or values.get("enable_partial_stop_loss")): errors.append("DI-direction sizing cannot be combined with partial TP or partial SL.")
     try:
         if int(values.get("bull_regime_lookback_days", 0)) <= 0: errors.append("Bull-regime lookback days must be positive.")
