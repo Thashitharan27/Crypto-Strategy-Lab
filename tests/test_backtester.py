@@ -328,44 +328,6 @@ def test_long_momentum_return_uses_only_completed_24_hour_history():
     assert engine.long_momentum_return_values[96] == pytest.approx(0.06)
 
 
-def test_directional_regime_and_indicator_ranges_filter_the_selected_side():
-    engine = BacktestEngine(candles([(100, 101, 99, 100)] * 40), cfg(
-        enable_di_direction_sizing=True,
-        di_direction_long_minimum_spread=0,
-        di_direction_short_minimum_spread=0,
-        enable_regime_direction_filter=True,
-        allow_bull_long=False,
-        enable_directional_di_spread_range=True,
-        directional_short_di_spread_minimum=15,
-        directional_short_di_spread_maximum=23,
-        enable_directional_atr_pct_range=True,
-        directional_short_atr_pct_minimum=.01,
-        directional_short_atr_pct_maximum=.03,
-        enable_directional_rsi_range=True,
-        directional_short_rsi_minimum=33.6,
-        directional_short_rsi_maximum=40.2,
-        enable_directional_close_location_range=True,
-        directional_short_close_location_minimum=.23,
-        directional_short_close_location_maximum=.37,
-        enable_directional_momentum_range=True,
-        directional_short_momentum_minimum=-.025,
-        directional_short_momentum_maximum=-.007,
-    ))
-    engine.plus_di_values[:] = 10; engine.minus_di_values[:] = 30; engine.di_spread[:] = 20
-    engine.bull_regime_return_values[:] = .25; engine.atr_pct_values[:] = .02
-    engine.directional_rsi_values[:] = 36; engine.close_location_values[:] = .30
-    engine.directional_momentum_return_values[:] = -.015
-    assert engine._entry_filter_result(20)[0]
-
-    engine.di_spread[:] = 24
-    passed, reason = engine._entry_filter_result(20)
-    assert not passed and "outside range 15 to 23" in reason
-
-    engine.di_spread[:] = 20; engine.plus_di_values[:] = 30; engine.minus_di_values[:] = 10
-    passed, reason = engine._entry_filter_result(20)
-    assert not passed and "disabled in bull regime" in reason
-
-
 def test_rsi_uses_only_completed_candles_and_has_warmup():
     close = np.arange(100.0, 140.0)
     engine = BacktestEngine(candles([(v, v, v, v) for v in close]), cfg(directional_rsi_period=14))

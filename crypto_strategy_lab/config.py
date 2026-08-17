@@ -242,38 +242,6 @@ class BacktestConfig:
     enable_long_momentum_filter: bool = False
     long_momentum_lookback_hours: int = 24
     long_momentum_minimum_return: float = 0.06
-    enable_directional_di_spread_range: bool = False
-    directional_long_di_spread_minimum: float = 0.0
-    directional_long_di_spread_maximum: float = 1000.0
-    directional_short_di_spread_minimum: float = 0.0
-    directional_short_di_spread_maximum: float = 1000.0
-    enable_directional_adx_range: bool = False
-    directional_long_adx_minimum: float = 0.0
-    directional_long_adx_range_maximum: float = 1000.0
-    directional_short_adx_range_minimum: float = 0.0
-    directional_short_adx_maximum: float = 1000.0
-    enable_directional_atr_pct_range: bool = False
-    directional_long_atr_pct_minimum: float = 0.0
-    directional_long_atr_pct_maximum: float = 1.0
-    directional_short_atr_pct_minimum: float = 0.0
-    directional_short_atr_pct_maximum: float = 1.0
-    enable_directional_rsi_range: bool = False
-    directional_rsi_period: int = 14
-    directional_long_rsi_minimum: float = 0.0
-    directional_long_rsi_maximum: float = 100.0
-    directional_short_rsi_minimum: float = 0.0
-    directional_short_rsi_maximum: float = 100.0
-    enable_directional_close_location_range: bool = False
-    directional_long_close_location_minimum: float = 0.0
-    directional_long_close_location_maximum: float = 1.0
-    directional_short_close_location_minimum: float = 0.0
-    directional_short_close_location_maximum: float = 1.0
-    enable_directional_momentum_range: bool = False
-    directional_momentum_lookback_hours: int = 24
-    directional_long_momentum_minimum: float = -10.0
-    directional_long_momentum_maximum: float = 10.0
-    directional_short_momentum_minimum: float = -10.0
-    directional_short_momentum_maximum: float = 10.0
     enable_atr_checkpoint_tp_extension: bool = False
     atr_checkpoint_di_spread_minimum: float = 30.0
     atr_checkpoint_bb_width_minimum: float = 0.03
@@ -375,18 +343,6 @@ class BacktestConfig:
         if self.long_momentum_lookback_hours <= 0: raise ValueError("long_momentum_lookback_hours must be positive")
         if self.long_momentum_minimum_return <= -1: raise ValueError("long_momentum_minimum_return must be greater than -100%")
         if self.enable_long_momentum_filter and not self.enable_di_direction_sizing: raise ValueError("long momentum filter requires DI-direction sizing")
-        if any((self.enable_directional_di_spread_range, self.enable_directional_adx_range, self.enable_directional_atr_pct_range, self.enable_directional_rsi_range, self.enable_directional_close_location_range, self.enable_directional_momentum_range)) and not self.enable_di_direction_sizing: raise ValueError("directional entry filters require DI-direction sizing")
-        for name, minimum, maximum in (
-            ("long DI spread", self.directional_long_di_spread_minimum, self.directional_long_di_spread_maximum), ("short DI spread", self.directional_short_di_spread_minimum, self.directional_short_di_spread_maximum),
-            ("long ADX", self.directional_long_adx_minimum, self.directional_long_adx_range_maximum), ("short ADX", self.directional_short_adx_range_minimum, self.directional_short_adx_maximum),
-            ("long ATR percentage", self.directional_long_atr_pct_minimum, self.directional_long_atr_pct_maximum), ("short ATR percentage", self.directional_short_atr_pct_minimum, self.directional_short_atr_pct_maximum),
-            ("long RSI", self.directional_long_rsi_minimum, self.directional_long_rsi_maximum), ("short RSI", self.directional_short_rsi_minimum, self.directional_short_rsi_maximum),
-            ("long close location", self.directional_long_close_location_minimum, self.directional_long_close_location_maximum), ("short close location", self.directional_short_close_location_minimum, self.directional_short_close_location_maximum),
-            ("long momentum", self.directional_long_momentum_minimum, self.directional_long_momentum_maximum), ("short momentum", self.directional_short_momentum_minimum, self.directional_short_momentum_maximum)):
-            if minimum > maximum: raise ValueError(f"directional {name} minimum must not exceed maximum")
-        if self.directional_rsi_period < 1 or self.directional_momentum_lookback_hours < 1: raise ValueError("directional indicator periods must be positive")
-        if not (0 <= self.directional_long_rsi_minimum <= 100 and 0 <= self.directional_long_rsi_maximum <= 100 and 0 <= self.directional_short_rsi_minimum <= 100 and 0 <= self.directional_short_rsi_maximum <= 100): raise ValueError("directional RSI bounds must be between 0 and 100")
-        if not (0 <= self.directional_long_close_location_minimum <= 1 and 0 <= self.directional_long_close_location_maximum <= 1 and 0 <= self.directional_short_close_location_minimum <= 1 and 0 <= self.directional_short_close_location_maximum <= 1): raise ValueError("directional close-location bounds must be between 0 and 1")
         if self.di_reward_risk_ratio <= 0: raise ValueError("di_reward_risk_ratio must be positive")
         if self.di_long_reward_risk_ratio <= 0: raise ValueError("di_long_reward_risk_ratio must be positive")
         if self.di_short_reward_risk_ratio <= 0: raise ValueError("di_short_reward_risk_ratio must be positive")
