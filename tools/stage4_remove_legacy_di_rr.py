@@ -1,0 +1,34 @@
+from pathlib import Path
+import re
+ROOT=Path(__file__).resolve().parents[1]
+RR_FIELDS={'di_reward_risk_ratio','di_long_reward_risk_ratio','di_short_reward_risk_ratio','enable_di_regime_reward_risk','di_regime_bear_return_threshold','di_long_bull_reward_risk_ratio','di_long_bear_reward_risk_ratio','di_long_sideways_reward_risk_ratio','di_short_bull_reward_risk_ratio','di_short_bear_reward_risk_ratio','di_short_sideways_reward_risk_ratio','enable_bull_long_conditional_reward_risk','bull_long_conditional_bb_width_minimum','bull_long_conditional_adx_maximum','bull_long_conditional_reward_risk_ratio','enable_bull_long_momentum_confirmation','bull_long_confirmation_lookback_days','bull_long_confirmation_return_threshold','bull_long_unconfirmed_reward_risk_ratio','enable_bull_long_momentum_target_extension','bull_long_momentum_extension_lookback_days','bull_long_momentum_extension_return_threshold','enable_bull_long_momentum_extension_return_maximum','bull_long_momentum_extension_return_maximum','bull_long_momentum_extended_reward_risk_ratio','enable_bull_long_structural_confirmation','bull_long_structural_sma_days','bull_long_structural_slope_lookback_days','bull_long_structural_unconfirmed_reward_risk_ratio','enable_sideways_long_conditional_reward_risk','sideways_long_conditional_adx_maximum','sideways_long_conditional_reward_risk_ratio','enable_sideways_short_conditional_reward_risk','sideways_short_conditional_di_spread_minimum','sideways_short_conditional_di_spread_maximum','sideways_short_conditional_reward_risk_ratio','enable_bear_short_conditional_reward_risk','bear_short_conditional_di_spread_maximum','bear_short_conditional_reward_risk_ratio'}
+def read(rel): return (ROOT/rel).read_text(encoding='utf-8')
+def write(rel,text): (ROOT/rel).write_text(text,encoding='utf-8')
+rel='crypto_strategy_lab/config.py'; text=read(rel)
+for name in RR_FIELDS: text=re.sub(rf'^    {re.escape(name)}: [^\n]+\n','',text,flags=re.M)
+text=re.sub(r'^        if self\.di_long_reward_risk_ratio is None:.*?object\.__setattr__\(self, "di_short_reward_risk_ratio", self\.di_reward_risk_ratio\)\n','',text,flags=re.M|re.S)
+text=re.sub(r'^        if self\.di_reward_risk_ratio <= 0:.*?(?=^        if self\.enable_bull_long_r_step_trailing|^        if self\.bull_long_r_step_)','',text,flags=re.M|re.S)
+write(rel,text)
+rel='crypto_strategy_lab/gui/config_logic.py'; text=read(rel); lines=[]
+for line in text.splitlines(True):
+    if any(f'"{n}"' in line or f'{n}=' in line for n in RR_FIELDS):
+        if line.lstrip().startswith('"') or any(line.lstrip().startswith(p) for p in ('enable_di_regime_reward_risk=','di_reward_risk_ratio=','di_long_reward_risk_ratio=','di_short_reward_risk_ratio=','di_long_bull_reward_risk_ratio=','di_short_bull_reward_risk_ratio=','enable_bull_long_','bull_long_','enable_sideways_','sideways_','enable_bear_short_','bear_short_')): continue
+    lines.append(line)
+write(rel,''.join(lines))
+rel='crypto_strategy_lab/engine.py'; text=read(rel)
+text=re.sub(r'; self\.bull_long_confirmation_return_values=self\._trailing_return_array\(config\.bull_long_confirmation_lookback_days\)','',text)
+text=re.sub(r'; self\.bull_long_momentum_extension_return_values=self\._trailing_return_array\(config\.bull_long_momentum_extension_lookback_days\)','',text)
+text=re.sub(r'^        self\.bull_long_structural_sma_values,self\.bull_long_structural_prior_sma_values=self\._structural_sma_arrays\(config\.bull_long_structural_sma_days,config\.bull_long_structural_slope_lookback_days\)\n','',text,flags=re.M)
+start='        if self.config.enable_di_direction_sizing or self.config.enable_strategy_profiles:\n'; end='        elif self.config.enable_coin_flip_sizing:\n'; base=text.find('    def _open_pair'); pos=text.find(start,base); endpos=text.find(end,pos)
+if pos<0 or endpos<0: raise SystemExit('RR block not found')
+replacement='''        if self.config.enable_di_direction_sizing or self.config.enable_strategy_profiles:\n            applied_regime = profile_context[0] if active_profile is not None else "BASE"\n            base_reward_risk = self.config.tp_mult / stop_mult\n            long_reward_risk = base_reward_risk\n            short_reward_risk = base_reward_risk\n            if active_profile is not None:\n                if sizing_direction == "LONG": long_reward_risk = active_profile.reward_risk_ratio\n                elif sizing_direction == "SHORT": short_reward_risk = active_profile.reward_risk_ratio\n            long_target_distance = stop * long_reward_risk\n            short_target_distance = stop * short_reward_risk\n'''
+text=text[:pos]+replacement+text[endpos:]
+text=re.sub(r'^        pair\.di_reward_risk_regime=applied_regime;.*?\n','        pair.di_reward_risk_regime=applied_regime; pair.di_applied_long_reward_risk_ratio=long_reward_risk; pair.di_applied_short_reward_risk_ratio=short_reward_risk\n',text,flags=re.M)
+write(rel,text)
+rel='crypto_strategy_lab/gui/main_window.py'; text=read(rel); write(rel,''.join(line for line in text.splitlines(True) if not any(f'self.{n}' in line for n in RR_FIELDS)))
+rel='tests/test_backtester.py'; text=read(rel); old='''def test_rsi_uses_only_completed_candles_and_has_warmup():\n    close = np.arange(100.0, 140.0)\n    engine = BacktestEngine(candles([(v, v, v, v) for v in close]), cfg(directional_rsi_period=14))\n    assert np.isnan(engine.directional_rsi_values[10])\n    assert engine.directional_rsi_values[20] == pytest.approx(100.0)\n'''; new='''def test_profile_rsi_uses_only_completed_candles_and_has_warmup():\n    close = np.arange(100.0, 140.0)\n    engine = BacktestEngine(candles([(v, v, v, v) for v in close]), cfg())\n    values = engine.profile_rsi_values[14]\n    assert np.isnan(values[10])\n    assert values[20] == pytest.approx(100.0)\n'''; text=text.replace(old,new)
+for marker in ('test_di_reward_risk','test_di_asymmetric_reward_risk','test_di_regime_reward_risk','test_bull_long_conditional_reward_risk','test_sideways_long_conditional_reward_risk','test_sideways_short_conditional_reward_risk','test_bear_short_conditional_reward_risk','test_bull_long_momentum_confirmation','test_bull_long_momentum_target_extension','test_bull_long_structural_confirmation'): text=re.sub(rf'^def {marker}[^\n]*\n.*?(?=^def test_|\Z)','',text,flags=re.M|re.S)
+write(rel,text)
+for rel in ('crypto_strategy_lab/config.py','crypto_strategy_lab/gui/config_logic.py','crypto_strategy_lab/engine.py','crypto_strategy_lab/gui/main_window.py'):
+    leftovers=sorted(n for n in RR_FIELDS if n in read(rel))
+    if leftovers: raise SystemExit(f'{rel}: stale Stage 4 fields remain: {leftovers}')
