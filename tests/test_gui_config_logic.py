@@ -253,6 +253,62 @@ def test_support_resistance_settings_round_trip_and_validation(tmp_path):
     assert cfg2.sr_short_state_requirement == "SUPPORT_BROKEN"
 
 
+def test_legacy_sr_state_requirement_migrates_to_trade_context_rules(tmp_path):
+    """An old config saved before Trade Context checkboxes existed should still load, and its
+    single-state Long/Short requirements should map onto the new rule checkboxes."""
+    import json
+    path = tmp_path / "legacy-sr-config.json"
+    legacy_values = {
+        **base(tmp_path),
+        "enable_support_resistance_analysis": True,
+        "sr_filter_mode": "CUSTOM_SR_STATE_FILTER",
+        "sr_long_state_requirement": "RESISTANCE_BROKEN",
+        "sr_short_state_requirement": "SUPPORT_BROKEN",
+    }
+    path.write_text(json.dumps(legacy_values))
+
+    loaded = load_config_json(path)
+
+    # Legacy fields must still be present and readable.
+    assert loaded["sr_long_state_requirement"] == "RESISTANCE_BROKEN"
+    assert loaded["sr_short_state_requirement"] == "SUPPORT_BROKEN"
+
+    # RESISTANCE_BROKEN -> long resistance-breakout rule enabled, other long rules disabled.
+    assert loaded["long_sr_rule_resistance_breakout"] is True
+    assert loaded["long_sr_rule_support_bounce"] is False
+    assert loaded["long_sr_rule_near_support"] is False
+    assert loaded["long_sr_rule_near_resistance"] is False
+
+    # SUPPORT_BROKEN -> short support-breakdown rule enabled, other short rules disabled.
+    assert loaded["short_sr_rule_support_breakdown"] is True
+    assert loaded["short_sr_rule_resistance_rejection"] is False
+    assert loaded["short_sr_rule_near_resistance"] is False
+    assert loaded["short_sr_rule_near_support"] is False
+
+    cfg = build_backtest_config(loaded)
+    assert cfg.enable_support_resistance_analysis is True
+    assert cfg.long_sr_rule_resistance_breakout is True
+    assert cfg.short_sr_rule_support_breakdown is True
+
+
+def test_legacy_sr_state_requirement_of_any_keeps_new_rule_defaults(tmp_path):
+    """A legacy requirement of ANY (the old no-op default) must not overwrite the new defaults."""
+    import json
+    path = tmp_path / "legacy-sr-any.json"
+    path.write_text(json.dumps({
+        **base(tmp_path),
+        "enable_support_resistance_analysis": True,
+        "sr_long_state_requirement": "ANY",
+        "sr_short_state_requirement": "ANY",
+    }))
+
+    loaded = load_config_json(path)
+    assert loaded["long_sr_rule_support_bounce"] is True
+    assert loaded["long_sr_rule_resistance_breakout"] is True
+    assert loaded["short_sr_rule_resistance_rejection"] is True
+    assert loaded["short_sr_rule_support_breakdown"] is True
+
+
 def test_negative_bull_regime_threshold_is_valid(tmp_path):
     values = {
         **base(tmp_path),

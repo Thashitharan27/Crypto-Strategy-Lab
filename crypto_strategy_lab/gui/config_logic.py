@@ -449,6 +449,49 @@ def save_config_json(path: str | Path, values: dict[str, Any]) -> None:
     Path(path).write_text(json.dumps(canonical_config_values({**default_gui_config(), **values}), indent=2, default=str))
 
 
+# Legacy CUSTOM_SR_STATE_FILTER single-state requirement -> new Trade Context rule label.
+_LEGACY_SR_STATE_TO_CONTEXT_LABEL = {
+    "SUPPORT_HELD": "SUPPORT_BOUNCE",
+    "SUPPORT_TESTING": "NEAR_SUPPORT",
+    "SUPPORT_BROKEN": "SUPPORT_BREAKDOWN",
+    "APPROACHING_SUPPORT": "NEAR_SUPPORT",
+    "RESISTANCE_HELD": "RESISTANCE_REJECTION",
+    "RESISTANCE_TESTING": "NEAR_RESISTANCE",
+    "RESISTANCE_BROKEN": "RESISTANCE_BREAKOUT",
+}
+_LONG_CONTEXT_LABEL_TO_RULE_KEY = {
+    "SUPPORT_BOUNCE": "long_sr_rule_support_bounce",
+    "RESISTANCE_BREAKOUT": "long_sr_rule_resistance_breakout",
+    "NEAR_SUPPORT": "long_sr_rule_near_support",
+    "NEAR_RESISTANCE": "long_sr_rule_near_resistance",
+}
+_SHORT_CONTEXT_LABEL_TO_RULE_KEY = {
+    "RESISTANCE_REJECTION": "short_sr_rule_resistance_rejection",
+    "SUPPORT_BREAKDOWN": "short_sr_rule_support_breakdown",
+    "NEAR_RESISTANCE": "short_sr_rule_near_resistance",
+    "NEAR_SUPPORT": "short_sr_rule_near_support",
+}
+
+
+def _migrate_legacy_sr_requirements(loaded: dict[str, Any]) -> None:
+    """Map an old single-state sr_long/short_state_requirement onto the new Trade Context rule
+    checkboxes, only when the config predates those fields. Mutates `loaded` in place."""
+    for direction, requirement_key, label_map, rule_keys in (
+        ("long", "sr_long_state_requirement", _LONG_CONTEXT_LABEL_TO_RULE_KEY, _LONG_CONTEXT_LABEL_TO_RULE_KEY.values()),
+        ("short", "sr_short_state_requirement", _SHORT_CONTEXT_LABEL_TO_RULE_KEY, _SHORT_CONTEXT_LABEL_TO_RULE_KEY.values()),
+    ):
+        requirement = str(loaded.get(requirement_key, "ANY")).upper().replace("-", "_").replace(" ", "_")
+        already_migrated = any(key in loaded for key in rule_keys)
+        if already_migrated or requirement in ("ANY", ""):
+            continue
+        context_label = _LEGACY_SR_STATE_TO_CONTEXT_LABEL.get(requirement)
+        target_rule_key = label_map.get(context_label) if context_label else None
+        if target_rule_key is None:
+            continue
+        for rule_key in rule_keys:
+            loaded[rule_key] = (rule_key == target_rule_key)
+
+
 _OBSOLETE_EXACT = {
     "trade_direction","sl_mult","tp_mult","enable_partial_stop_loss","sl1_r","sl1_close_pct","sl2_r","enable_partial_take_profit","tp1_r","tp1_close_pct","tp2_r","tp2_close_pct","stop_loss_r","after_tp1_stop_mode","after_tp1_stop_offset_r","tp2_exit_mode","enable_trailing_profit","trail_activation_trigger","trail_activation_r","trail_distance_r","trail_apply_to","trail_intrabar_mode",
     "enable_both_open_timeout","max_both_open_minutes","both_open_timeout_unit","enable_be_after_opposite_sl","be_mode","be_offset_r","be_same_candle_policy",
@@ -488,4 +531,5 @@ def load_config_json(path: str | Path) -> dict[str, Any]:
     legacy_di_ratio = loaded.get("di_reward_risk_ratio", DEFAULT_GUI_CONFIG["di_reward_risk_ratio"])
     loaded.setdefault("di_long_reward_risk_ratio", legacy_di_ratio)
     loaded.setdefault("di_short_reward_risk_ratio", legacy_di_ratio)
+    _migrate_legacy_sr_requirements(loaded)
     return {**default_gui_config(), **loaded}

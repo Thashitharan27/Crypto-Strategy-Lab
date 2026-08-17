@@ -156,14 +156,17 @@ class MainWindow(QMainWindow):
         self.enable_coin_flip_sizing=QCheckBox("Enable 3:1 Coin-Flip Sizing (1:1 SL/TP)"); self.coin_flip_seed=QLineEdit("42")
         random_group.addRow("",self.enable_coin_flip_sizing); random_group.addRow("Coin Flip Seed",self.coin_flip_seed)
         self.enable_di_direction_sizing=QCheckBox("Enable DI-Direction Selection"); self.flip_filtered_di_direction=QCheckBox("Flip direction after filters pass (Long ↔ Short)"); self.di_direction_long_min_spread=self._spin(30,0,1000,3); self.di_direction_short_min_spread=self._spin(30,0,1000,3); self.di_long_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_short_reward_risk_ratio=self._spin(1,0.01,100,3)
-        self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.enable_sr_hold_confirmation=QCheckBox("Enable"); self.sr_hold_confirmation_bars=QSpinBox(); self.sr_hold_confirmation_bars.setRange(1,100); self.sr_hold_confirmation_bars.setValue(3); self.sr_hold_confirmation_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_tolerance_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_basis=QComboBox(); self.sr_break_basis.addItems(["CLOSE","WICK"]); self.sr_filter_mode=QComboBox(); self.sr_filter_mode.addItems(["ANALYSIS_ONLY","BLOCK_BAD_LOCATION","REQUIRE_GOOD_LOCATION","REQUIRE_CONFIRMED_HOLD","BLOCK_BROKEN_STRUCTURE","CUSTOM_SR_STATE_FILTER","TRADE_CONTEXT_FILTER"]); self.sr_long_state_requirement=QComboBox(); self.sr_short_state_requirement=QComboBox(); sr_state_options=["ANY","SUPPORT_HELD","SUPPORT_TESTING","SUPPORT_BROKEN","APPROACHING_SUPPORT","RESISTANCE_HELD","RESISTANCE_TESTING","RESISTANCE_BROKEN"]; self.sr_long_state_requirement.addItems(sr_state_options); self.sr_short_state_requirement.addItems(sr_state_options)
+        self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.enable_sr_hold_confirmation=QCheckBox("Enable"); self.sr_hold_confirmation_bars=QSpinBox(); self.sr_hold_confirmation_bars.setRange(1,100); self.sr_hold_confirmation_bars.setValue(3); self.sr_hold_confirmation_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_tolerance_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_basis=QComboBox(); self.sr_break_basis.addItems(["CLOSE","WICK"]); self.sr_filter_mode=PolicyComboBox()
+        for mode_label,mode_value in [("Analysis Only","ANALYSIS_ONLY"),("Filter Entries","TRADE_CONTEXT_FILTER"),("Confirmation","REQUIRE_CONFIRMED_HOLD"),("BLOCK_BAD_LOCATION","BLOCK_BAD_LOCATION"),("REQUIRE_GOOD_LOCATION","REQUIRE_GOOD_LOCATION"),("BLOCK_BROKEN_STRUCTURE","BLOCK_BROKEN_STRUCTURE"),("CUSTOM_SR_STATE_FILTER","CUSTOM_SR_STATE_FILTER")]:
+            self.sr_filter_mode.addItem(mode_label,mode_value)
+        self.sr_long_state_requirement=QComboBox(); self.sr_short_state_requirement=QComboBox(); sr_state_options=["ANY","SUPPORT_HELD","SUPPORT_TESTING","SUPPORT_BROKEN","APPROACHING_SUPPORT","RESISTANCE_HELD","RESISTANCE_TESTING","RESISTANCE_BROKEN"]; self.sr_long_state_requirement.addItems(sr_state_options); self.sr_short_state_requirement.addItems(sr_state_options)
         self.long_sr_rule_support_bounce=QCheckBox("Support Bounce"); self.long_sr_rule_support_bounce.setChecked(True)
         self.long_sr_rule_resistance_breakout=QCheckBox("Resistance Breakout"); self.long_sr_rule_resistance_breakout.setChecked(True)
         self.long_sr_rule_near_support=QCheckBox("Near Support"); self.long_sr_rule_near_resistance=QCheckBox("Near Resistance")
         self.short_sr_rule_resistance_rejection=QCheckBox("Resistance Rejection"); self.short_sr_rule_resistance_rejection.setChecked(True)
         self.short_sr_rule_support_breakdown=QCheckBox("Support Breakdown"); self.short_sr_rule_support_breakdown.setChecked(True)
         self.short_sr_rule_near_resistance=QCheckBox("Near Resistance"); self.short_sr_rule_near_support=QCheckBox("Near Support")
-        self.sr_trade_context_match_mode=QComboBox(); self.sr_trade_context_match_mode.addItems(["ANY","ALL"])
+        self.sr_trade_context_match_mode=PolicyComboBox(); self.sr_trade_context_match_mode.addItem("Any selected condition","ANY"); self.sr_trade_context_match_mode.addItem("All selected conditions","ALL")
         self.enable_direction_voting=QCheckBox("Enable direction voting for entries")
         self.direction_vote_test_mode=QComboBox()
         self.direction_vote_test_mode.addItem("Custom combination", "")
@@ -409,10 +412,10 @@ class MainWindow(QMainWindow):
         enable_box=QGroupBox("Enable / Mode"); enable_form=QFormLayout(enable_box)
         self.enable_support_resistance_analysis.setToolTip("Turns on support/resistance detection. When off, no S/R data is calculated, recorded, or reported.")
         self.sr_filter_mode.setToolTip(
-            "ANALYSIS_ONLY (recommended default): S/R data is recorded and reported, but never rejects or alters trades.\n"
-            "BLOCK_BAD_LOCATION / REQUIRE_GOOD_LOCATION: filter entries using the overall location rating.\n"
-            "REQUIRE_CONFIRMED_HOLD: acts as a confirmation gate, requiring a held support/resistance test.\n"
-            "BLOCK_BROKEN_STRUCTURE / CUSTOM_SR_STATE_FILTER: filter using specific structure states (see Trade Context)."
+            "Analysis Only (recommended default): S/R data is recorded and reported, but never rejects or alters trades.\n"
+            "Filter Entries: allow/reject LONG and SHORT signals using the Trade Context rules below.\n"
+            "Confirmation: acts as a confirmation gate, requiring a held support/resistance test.\n"
+            "Other legacy modes filter using the overall location rating or specific structure states."
         )
         enable_form.addRow("",self.enable_support_resistance_analysis)
         enable_form.addRow("Mode",self.sr_filter_mode)
@@ -423,10 +426,8 @@ class MainWindow(QMainWindow):
         self.sr_trade_context_note=QLabel(); self.sr_trade_context_note.setWordWrap(True)
         self.sr_long_state_requirement.setToolTip("Legacy custom-state requirement for LONG entries (used by CUSTOM_SR_STATE_FILTER mode). Only applied when Mode is not ANALYSIS_ONLY.")
         self.sr_short_state_requirement.setToolTip("Legacy custom-state requirement for SHORT entries (used by CUSTOM_SR_STATE_FILTER mode). Only applied when Mode is not ANALYSIS_ONLY.")
-        trade_context_form.addRow("LONG requirement (legacy)",self.sr_long_state_requirement)
-        trade_context_form.addRow("SHORT requirement (legacy)",self.sr_short_state_requirement)
-        self.sr_trade_context_match_mode.setToolTip("How enabled rules below combine when Mode is TRADE_CONTEXT_FILTER: ANY (at least one enabled rule must match) or ALL (every enabled rule must match).")
-        trade_context_form.addRow("Rule Match Mode (TRADE_CONTEXT_FILTER)",self.sr_trade_context_match_mode)
+        self.sr_trade_context_match_mode.setToolTip("How enabled rules below combine when Mode is Filter Entries: Any selected condition (at least one enabled rule must match) or All selected conditions (every enabled rule must match).")
+        trade_context_form.addRow("Rule Matching",self.sr_trade_context_match_mode)
         long_short_row=QHBoxLayout()
         long_rules_box=QGroupBox("LONG"); long_rules_form=QFormLayout(long_rules_box)
         for w in (self.long_sr_rule_support_bounce,self.long_sr_rule_resistance_breakout,self.long_sr_rule_near_support,self.long_sr_rule_near_resistance):
@@ -531,6 +532,8 @@ class MainWindow(QMainWindow):
         if not hasattr(self,"sr_summary_label"): return
         sr_enabled=self.enable_support_resistance_analysis.isChecked()
         mode=self.sr_filter_mode.currentText()
+        mode_label={"ANALYSIS_ONLY":"Analysis Only","TRADE_CONTEXT_FILTER":"Filter Entries","REQUIRE_CONFIRMED_HOLD":"Confirmation"}.get(mode,mode)
+        match_mode_label={"ANY":"Any selected condition","ALL":"All selected conditions"}.get(self.sr_trade_context_match_mode.currentText(),self.sr_trade_context_match_mode.currentText())
         analysis_only=mode=="ANALYSIS_ONLY"
         context_rule_mode=mode=="TRADE_CONTEXT_FILTER"
         for box in (self.sr_long_state_requirement,self.sr_short_state_requirement):
@@ -551,9 +554,9 @@ class MainWindow(QMainWindow):
         elif analysis_only:
             self.sr_trade_context_note.setText("Mode is Analysis Only: these requirements are visible for preparation but do not filter or reject trades.")
         elif context_rule_mode:
-            self.sr_trade_context_note.setText(f"Mode is TRADE_CONTEXT_FILTER: a signal is allowed when {self.sr_trade_context_match_mode.currentText()} of its enabled rules below are true.")
+            self.sr_trade_context_note.setText(f"Mode is Filter Entries: a signal is allowed when {match_mode_label.lower()} below is true.")
         else:
-            self.sr_trade_context_note.setText("These requirements filter/confirm entries because Mode is not Analysis Only. (The legacy requirement combos above only apply in CUSTOM_SR_STATE_FILTER mode.)")
+            self.sr_trade_context_note.setText(f"These requirements filter/confirm entries because Mode is {mode_label}, not Analysis Only.")
         if not sr_enabled:
             summary="Support/Resistance analysis is disabled."
         else:
@@ -564,7 +567,8 @@ class MainWindow(QMainWindow):
             summary=(
                 f"LONG\n- {long_lines}\n\n"
                 f"SHORT\n- {short_lines}\n\n"
-                f"Mode: {mode}\n"
+                f"Mode: {mode_label}\n"
+                f"Rule Matching: {match_mode_label}\n"
                 f"Detection: {self.sr_detection_preset.currentText()}\n"
                 f"Near Distance: {self.sr_near_distance_atr.value():.2f} ATR\n"
                 f"Zone Width: {self.sr_zone_width_atr.value():.2f} ATR\n"
