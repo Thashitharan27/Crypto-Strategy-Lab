@@ -41,3 +41,9 @@ def test_production_code_has_no_removed_reward_risk_config_references():
         text = (root / rel).read_text(encoding="utf-8")
         for field in REMOVED_FIELDS:
             assert field not in text, f"stale {field} reference in {rel}"
+
+
+def test_config_has_no_stale_legacy_regime_ratio_validation_symbol():
+    root = Path(__file__).resolve().parents[1]
+    config_text = (root / "crypto_strategy_lab/config.py").read_text(encoding="utf-8")
+    assert "regime_ratios" not in config_text
