@@ -1,0 +1,22 @@
+name: Stage 4 legacy DI reward-risk cleanup
+on:
+  push:
+    branches: ["chatgpt/stage4-remove-legacy-di-rr"]
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    if: github.event.head_commit.message != 'Apply Stage 4 legacy DI reward-risk cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/stage4-remove-legacy-di-rr
+      - run: python tools/stage4_remove_legacy_di_rr.py
+      - run: python -m compileall -q crypto_strategy_lab tools
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+Thashitharan27@users.noreply.github.com"
+          git add crypto_strategy_lab/config.py crypto_strategy_lab/gui/config_logic.py crypto_strategy_lab/engine.py crypto_strategy_lab/gui/main_window.py tests/test_backtester.py
+          git commit -m "Apply Stage 4 legacy DI reward-risk cleanup"
+          git push
