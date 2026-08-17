@@ -24,8 +24,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
       - name: Compile source
-        run: python -m compileall -q crypto_strategy_lab app.py
+        run: python -m compileall -q crypto_strategy_lab mcp_server tools app.py
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: pytest -q
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest -q
