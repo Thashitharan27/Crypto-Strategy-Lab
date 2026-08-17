@@ -183,33 +183,18 @@ class MainWindow(QMainWindow):
         self.bull_long_r_step_size_r=self._spin(1,0.01,100,2)
         self.bull_long_r_step_maximum_r=self._spin(0,0,100,2)
         self.bull_long_r_step_activation_close_pct=self._spin(0,0,99.99,2)
-        self.enable_directional_adx_filter=QCheckBox("Enable Direction-Specific ADX Filter"); self.directional_long_adx_maximum=self._spin(60,0,1000,3); self.directional_short_adx_minimum=self._spin(25,0,1000,3)
         self.enable_atr_checkpoint_tp_extension=QCheckBox("Extend biased TP at ATR checkpoints")
         self.atr_checkpoint_di_spread_min=self._spin(30,0,1000,3)
         self.atr_checkpoint_bb_width_min=self._spin(0.03,0,1000,6)
         self.atr_checkpoint_profit_lock_start=self._spin(3,1,1000,2)
         self.atr_checkpoint_profit_lock_distance=self._spin(1,0.01,1000,2)
-        self.enable_biased_short_adx_cap=QCheckBox("Skip biased shorts at high ADX")
-        self.biased_short_adx_maximum=self._spin(50,0,1000,3)
         self.biased_short_adx_help=QLabel("Applies only when DI selects SHORT. ADX equal to or above this value rejects the entry; biased longs are unchanged.")
         self.biased_short_adx_help.setWordWrap(True)
-        self.enable_short_vwap_distance_filter=QCheckBox("Short: Require Minimum Distance Below UTC Session VWAP")
-        self.short_vwap_minimum_distance_atr=self._spin(2,0,1000,3)
-        self.enable_long_momentum_filter=QCheckBox("Long: Require Minimum Trailing Return")
-        self.long_momentum_lookback_hours=QSpinBox(); self.long_momentum_lookback_hours.setRange(1,87600); self.long_momentum_lookback_hours.setValue(24); self.long_momentum_lookback_hours.setSuffix(" hours")
-        self.long_momentum_minimum_return=self._line("6%")
         self.long_momentum_help=QLabel("Applies only when DI selects LONG. Uses completed strategy candles over the configured trailing hours; insufficient warm-up rejects the signal.")
         self.long_momentum_help.setWordWrap(True)
         self.short_vwap_distance_help=QLabel("Applies only when DI selects SHORT. Distance is (UTC session VWAP − completed candle close) ÷ ATR. Long entries are unchanged.")
         self.short_vwap_distance_help.setWordWrap(True)
-        self.enable_bear_regime_adx_filter=QCheckBox("Bear Regime: Require Minimum ADX"); self.bear_regime_adx_minimum=self._spin(25,0,1000,3)
-        self.enable_bull_regime_short_filter=QCheckBox("Bull Regime: Skip −DI Short Signal"); self.bull_regime_lookback_days=QSpinBox(); self.bull_regime_lookback_days.setRange(1,3650); self.bull_regime_lookback_days.setValue(90); self.bull_regime_return_threshold=self._line("20%")
         self.enable_bull_long_r_step_trailing.toggled.connect(self.update_dynamic)
-        self.enable_directional_adx_filter.toggled.connect(self.update_dynamic)
-        self.enable_biased_short_adx_cap.toggled.connect(self.update_dynamic)
-        self.enable_short_vwap_distance_filter.toggled.connect(self.update_dynamic)
-        self.enable_long_momentum_filter.toggled.connect(self.update_dynamic)
-        self.enable_bear_regime_adx_filter.toggled.connect(self.update_dynamic)
         self.di_execution_mode.currentTextChanged.connect(self.update_dynamic)
         sched=group("Entry Schedule")
         self.enable_daily_schedule=QCheckBox("Enable Daily Scheduled Entry")
@@ -469,32 +454,6 @@ class MainWindow(QMainWindow):
         bull_long_conditional_help=QLabel("During bull regimes only: when BB width is at or above the minimum AND ADX is below the maximum, the conditional target replaces Long Bull Reward/Risk. Other bull longs keep the normal bull target.")
         bull_long_conditional_help.setWordWrap(True)
         form.addWidget(regime_targets_box)
-        adx_box=QGroupBox("Direction-Specific ADX"); adx=QFormLayout(adx_box)
-        for lab,w in [
-            ("",self.enable_directional_adx_filter),
-            ("Long ADX Maximum",self.directional_long_adx_maximum),
-            ("Short ADX Minimum",self.directional_short_adx_minimum),
-        ]: adx.addRow(lab,w)
-        form.addWidget(adx_box)
-        regime_box=QGroupBox("Regime Entry Filters"); regime=QFormLayout(regime_box)
-        for lab,w in [
-            ("",self.enable_bull_regime_short_filter),
-            ("Bull Lookback Days",self.bull_regime_lookback_days),
-            ("Bull Return Threshold",self.bull_regime_return_threshold),
-            ("",self.enable_bear_regime_adx_filter),
-            ("Bear ADX Minimum",self.bear_regime_adx_minimum),
-            ("",self.enable_biased_short_adx_cap),
-            ("Biased Short ADX Maximum",self.biased_short_adx_maximum),
-            ("",self.biased_short_adx_help),
-            ("",self.enable_short_vwap_distance_filter),
-            ("Short VWAP Distance Minimum (ATR)",self.short_vwap_minimum_distance_atr),
-            ("",self.short_vwap_distance_help),
-            ("",self.enable_long_momentum_filter),
-            ("Long Momentum Lookback",self.long_momentum_lookback_hours),
-            ("Long Momentum Minimum Return",self.long_momentum_minimum_return),
-            ("",self.long_momentum_help),
-        ]: regime.addRow(lab,w)
-        form.addWidget(regime_box)
         checkpoint_box=QGroupBox("ATR Checkpoint TP Extension"); checkpoint=QFormLayout(checkpoint_box)
         for lab,w in [
             ("",self.enable_atr_checkpoint_tp_extension),
@@ -647,13 +606,7 @@ class MainWindow(QMainWindow):
         values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"enable_sr_hold_confirmation":self.enable_sr_hold_confirmation.isChecked(),"sr_hold_confirmation_bars":self.sr_hold_confirmation_bars.value(),"sr_hold_confirmation_atr":self.sr_hold_confirmation_atr.value(),"sr_break_tolerance_atr":self.sr_break_tolerance_atr.value(),"sr_break_basis":self.sr_break_basis.currentText(),"sr_filter_mode":self.sr_filter_mode.currentData(),"sr_long_avoid_near_resistance":self.sr_long_avoid_near_resistance.isChecked(),"sr_long_require_near_support":self.sr_long_require_near_support.isChecked(),"sr_long_block_broken_support":self.sr_long_block_broken_support.isChecked(),"sr_long_min_room_to_resistance_atr":self.sr_long_min_room_to_resistance_atr.value(),"sr_short_avoid_near_support":self.sr_short_avoid_near_support.isChecked(),"sr_short_require_near_resistance":self.sr_short_require_near_resistance.isChecked(),"sr_short_block_broken_resistance":self.sr_short_block_broken_resistance.isChecked(),"sr_short_min_room_to_support_atr":self.sr_short_min_room_to_support_atr.value()})
         values.update({"enable_di_direction_selection":self.enable_di_direction_selection.isChecked(),"enable_di_pressure_analysis":self.enable_di_pressure_analysis.isChecked(),"di_pressure_lookback":self.di_pressure_lookback.value()})
         values.update({"enable_bull_long_r_step_trailing":self.enable_bull_long_r_step_trailing.isChecked(),"bull_long_r_step_activation_r":self.bull_long_r_step_activation_r.value(),"bull_long_r_step_distance_r":self.bull_long_r_step_distance_r.value(),"bull_long_r_step_size_r":self.bull_long_r_step_size_r.value(),"bull_long_r_step_maximum_r":self.bull_long_r_step_maximum_r.value(),"bull_long_r_step_activation_close_pct":self.bull_long_r_step_activation_close_pct.value()})
-        values.update({"enable_directional_adx_filter":self.enable_directional_adx_filter.isChecked(),"directional_long_adx_maximum":self.directional_long_adx_maximum.value(),"directional_short_adx_minimum":self.directional_short_adx_minimum.value()})
-        values.update({"enable_biased_short_adx_cap":self.enable_biased_short_adx_cap.isChecked(),"biased_short_adx_maximum":self.biased_short_adx_maximum.value()})
-        values.update({"enable_short_vwap_distance_filter":self.enable_short_vwap_distance_filter.isChecked(),"short_vwap_minimum_distance_atr":self.short_vwap_minimum_distance_atr.value()})
-        values.update({"enable_long_momentum_filter":self.enable_long_momentum_filter.isChecked(),"long_momentum_lookback_hours":self.long_momentum_lookback_hours.value(),"long_momentum_minimum_return":parse_percentage(self.long_momentum_minimum_return.text())})
         values.update({})
-        values.update({"enable_bull_regime_short_filter":self.enable_bull_regime_short_filter.isChecked(),"bull_regime_lookback_days":self.bull_regime_lookback_days.value(),"bull_regime_return_threshold":parse_percentage(self.bull_regime_return_threshold.text())})
-        values.update({"enable_bear_regime_adx_filter":self.enable_bear_regime_adx_filter.isChecked(),"bear_regime_adx_minimum":self.bear_regime_adx_minimum.value()})
         values.update({"enable_partial_stop_loss":self.enable_partial_sl.isChecked(),"sl1_r":self.sl1_r.value(),"sl1_close_pct":self.sl1_close_pct.value(),"sl2_r":self.sl2_r.value()})
         values["enable_reentry_gate_after_remaining_leg_timeout"] = self.reentry_gate_after_timeout.isChecked()
         values.update({
@@ -1042,12 +995,6 @@ class MainWindow(QMainWindow):
         if hasattr(self,"sr_detection_preset"): self._sync_sr_preset_from_values()
         self.enable_di_direction_selection.setChecked(bool(values.get("enable_di_direction_selection",True))); self.enable_di_pressure_analysis.setChecked(bool(values.get("enable_di_pressure_analysis",True))); self.di_pressure_lookback.setValue(int(values.get("di_pressure_lookback",3)))
         self.enable_bull_long_r_step_trailing.setChecked(bool(values.get("enable_bull_long_r_step_trailing",False))); self.bull_long_r_step_activation_r.setValue(float(values.get("bull_long_r_step_activation_r",2.0))); self.bull_long_r_step_distance_r.setValue(float(values.get("bull_long_r_step_distance_r",2.0))); self.bull_long_r_step_size_r.setValue(float(values.get("bull_long_r_step_size_r",1.0))); self.bull_long_r_step_maximum_r.setValue(float(values.get("bull_long_r_step_maximum_r",0.0))); self.bull_long_r_step_activation_close_pct.setValue(float(values.get("bull_long_r_step_activation_close_pct",0.0)))
-        self.enable_directional_adx_filter.setChecked(bool(values.get("enable_directional_adx_filter",False))); self.directional_long_adx_maximum.setValue(float(values.get("directional_long_adx_maximum",60.0))); self.directional_short_adx_minimum.setValue(float(values.get("directional_short_adx_minimum",25.0)))
-        self.enable_biased_short_adx_cap.setChecked(bool(values.get("enable_biased_short_adx_cap",False))); self.biased_short_adx_maximum.setValue(float(values.get("biased_short_adx_maximum",50.0)))
-        self.enable_short_vwap_distance_filter.setChecked(bool(values.get("enable_short_vwap_distance_filter",False))); self.short_vwap_minimum_distance_atr.setValue(float(values.get("short_vwap_minimum_distance_atr",2.0)))
-        self.enable_long_momentum_filter.setChecked(bool(values.get("enable_long_momentum_filter",False))); self.long_momentum_lookback_hours.setValue(int(values.get("long_momentum_lookback_hours",24))); self.long_momentum_minimum_return.setText(format_percentage(float(values.get("long_momentum_minimum_return",0.06)),2))
-        self.enable_bull_regime_short_filter.setChecked(bool(values.get("enable_bull_regime_short_filter",False))); self.bull_regime_lookback_days.setValue(int(values.get("bull_regime_lookback_days",90))); self.bull_regime_return_threshold.setText(format_percentage(float(values.get("bull_regime_return_threshold",0.20)),2))
-        self.enable_bear_regime_adx_filter.setChecked(bool(values.get("enable_bear_regime_adx_filter",False))); self.bear_regime_adx_minimum.setValue(float(values.get("bear_regime_adx_minimum",25.0)))
         self.enable_daily_schedule.setChecked(bool(values.get("enable_daily_entry_schedule", False)))
         self.daily_entry_time.setText(str(values.get("daily_entry_time", "00:00")))
         self.daily_entry_timezone.setText(str(values.get("daily_entry_timezone", "UTC")))

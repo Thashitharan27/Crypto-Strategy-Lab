@@ -19,7 +19,7 @@ class BacktestEngine:
     def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.volume=self.data["volume"].to_numpy(float) if "volume" in self.data else np.ones(len(self.data),float); self.times=self.data.timestamp.to_numpy()
-        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.long_momentum_return_values=self._trailing_return_hours_array(config.long_momentum_lookback_hours); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array(); self.entry_filters=[ADXFilter(self.config,self.adx_values),BBWidthFilter(self.config,self.bb_width),DISpreadFilter(self.config,self.di_spread)]
+        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array(); self.entry_filters=[ADXFilter(self.config,self.adx_values),BBWidthFilter(self.config,self.bb_width),DISpreadFilter(self.config,self.di_spread)]
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_vwap_breakout=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
@@ -424,60 +424,8 @@ class BacktestEngine:
             if spread < minimum:
                 return False, f"DI spread {spread:.6g} below direction-sizing minimum {minimum:.6g} for {direction.lower()}"
             reasons.append(f"DI direction sizing passed: {direction} stronger, spread {spread:.6g} >= minimum {minimum:.6g}")
-            if self.config.enable_long_momentum_filter and direction == "LONG":
-                momentum_return=float(self.long_momentum_return_values[i])
-                if not np.isfinite(momentum_return):
-                    return False, f"Long momentum filter warming up: {self.config.long_momentum_lookback_hours}-hour return unavailable"
-                if momentum_return < self.config.long_momentum_minimum_return:
-                    return False, f"Long DI signal skipped: {self.config.long_momentum_lookback_hours}-hour return {momentum_return:.2%} below minimum {self.config.long_momentum_minimum_return:.2%}"
-                reasons.append(f"Long momentum passed: {self.config.long_momentum_lookback_hours}-hour return {momentum_return:.2%} >= minimum {self.config.long_momentum_minimum_return:.2%}")
-            if self.config.enable_directional_adx_filter:
-                adx_value=float(self.adx_values[i])
-                if not np.isfinite(adx_value):
-                    return False, "Direction-specific ADX filter indicator warm-up incomplete"
-                if direction == "LONG" and adx_value > self.config.directional_long_adx_maximum:
-                    return False, f"Long DI signal skipped: ADX {adx_value:.6g} above maximum {self.config.directional_long_adx_maximum:.6g}"
-                if direction == "SHORT" and adx_value < self.config.directional_short_adx_minimum:
-                    return False, f"Short DI signal skipped: ADX {adx_value:.6g} below minimum {self.config.directional_short_adx_minimum:.6g}"
-                limit = self.config.directional_long_adx_maximum if direction == "LONG" else self.config.directional_short_adx_minimum
-                comparison = "<= maximum" if direction == "LONG" else ">= minimum"
-                reasons.append(f"Direction-specific ADX passed: {direction} ADX {adx_value:.6g} {comparison} {limit:.6g}")
-            if self.config.enable_biased_short_adx_cap and minus > plus:
-                adx_value=float(self.adx_values[i])
-                if not np.isfinite(adx_value):
-                    return False, "Biased-short ADX cap indicator warm-up incomplete"
-                if adx_value >= self.config.biased_short_adx_maximum:
-                    return False, f"Biased short skipped: ADX {adx_value:.6g} at or above maximum {self.config.biased_short_adx_maximum:.6g}"
-                reasons.append(f"Biased-short ADX cap passed: ADX {adx_value:.6g} below {self.config.biased_short_adx_maximum:.6g}")
-            if self.config.enable_short_vwap_distance_filter and direction == "SHORT":
-                atr_value=float(self.atr_values[i]); vwap_value=float(self.session_vwap[i])
-                if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap_value):
-                    return False, "Short VWAP-distance filter indicator warm-up incomplete"
-                distance_atr=(vwap_value-float(self.close[i]))/atr_value
-                if distance_atr < self.config.short_vwap_minimum_distance_atr:
-                    return False, f"Short DI signal skipped: price is {distance_atr:.6g} ATR below UTC session VWAP, below minimum {self.config.short_vwap_minimum_distance_atr:.6g}"
-                reasons.append(f"Short VWAP-distance passed: price is {distance_atr:.6g} ATR below UTC session VWAP >= minimum {self.config.short_vwap_minimum_distance_atr:.6g}")
             regime_return=float(self.bull_regime_return_values[i])
             regime=self._regime_at(i)
-            if self.config.enable_bull_regime_short_filter:
-                if regime is None:
-                    reasons.append("Bull-regime filter not applied: market regime still warming up")
-                elif regime == "BULL" and minus > plus:
-                    return False, "Short DI signal skipped in bull regime"
-                else:
-                    reasons.append(f"Bull-regime filter passed: regime {regime}")
-            if self.config.enable_bear_regime_adx_filter:
-                if regime is None:
-                    reasons.append("Bear-regime ADX filter not applied: market regime still warming up")
-                elif regime == "BEAR":
-                    adx_value = float(self.adx_values[i])
-                    if not np.isfinite(adx_value):
-                        return False, "Bear-regime ADX filter indicator warm-up incomplete"
-                    if adx_value < self.config.bear_regime_adx_minimum:
-                        return False, f"DI signal skipped in bear regime: ADX {adx_value:.6g} below minimum {self.config.bear_regime_adx_minimum:.6g}"
-                    reasons.append(f"Bear-regime ADX passed: ADX {adx_value:.6g} >= minimum {self.config.bear_regime_adx_minimum:.6g}")
-                else:
-                    reasons.append(f"Bear-regime ADX filter not applied outside bear regime: regime {regime}")
         if self.config.enable_skip_monday_entries:
             execution_i = i if execution_i is None else execution_i
             entry_time = self._execution_time(execution_i)
@@ -910,7 +858,7 @@ class BacktestEngine:
         else:
             pair.entry_rsi=np.nan
             pair.directional_momentum_return=np.nan
-        pair.long_momentum_return=float(self.long_momentum_return_values[ind_i]) if np.isfinite(self.long_momentum_return_values[ind_i]) else np.nan
+        pair.long_momentum_return=pair.directional_momentum_return
         pair.market_regime=self._regime_at(ind_i)
         pair.market_regime_method=self.config.market_regime_method
         pair.bull_regime=pair.market_regime == "BULL"

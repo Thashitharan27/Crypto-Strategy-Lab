@@ -59,19 +59,6 @@ def test_market_ready_tabs_use_profile_only_strategy_workflow():
         window.close()
 
 
-def test_profile_workspace_round_trip_includes_regime_definition(tmp_path):
-    path=tmp_path/"profile.json"; app(); window=MainWindow()
-    try:
-        window.profile_editor.regime_lookback.setValue(60); window.profile_editor.bull_threshold.setValue(15); window.profile_editor.bear_threshold.setValue(-12)
-        window.profile_editor.profiles["bull_long"]=replace(window.profile_editor.profiles["bull_long"],enabled=True,reward_risk_ratio=2.5,adx_enabled=True,adx_minimum=20,adx_maximum=45)
-        save_config_json(path,window.values()); saved=json.loads(path.read_text())
-        assert saved["enable_strategy_profiles"] is True
-        assert "enable_directional_adx_filter" not in saved
-        window.apply_values(load_config_json(path)); values=window.values()
-        assert values["bull_regime_lookback_days"]==60
-        assert values["bull_regime_return_threshold"]==pytest.approx(.15)
-        assert values["strategy_profiles"]["bull_long"]["reward_risk_ratio"]==pytest.approx(2.5)
-    finally: window.close()
 
 
 def test_profile_trade_management_uses_one_switch_per_feature():

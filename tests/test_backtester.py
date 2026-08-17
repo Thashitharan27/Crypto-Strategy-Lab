@@ -235,97 +235,12 @@ def test_bull_long_r_step_staircase_banks_partial_at_activation():
     assert pos.final_exit_reason == "TP1_THEN_R_STEP_TRAILING_STOP"
 
 
-def test_biased_short_adx_cap_rejects_only_high_adx_shorts():
-    df = candles([(100, 100, 100, 100)] * 4)
-    engine = BacktestEngine(
-        df,
-        cfg(
-            enable_di_direction_sizing=True,
-            enable_biased_short_adx_cap=True,
-            biased_short_adx_maximum=50,
-        ),
-    )
-    engine.plus_di_values[:] = 10
-    engine.minus_di_values[:] = 45
-    engine.di_spread[:] = 35
-    engine.adx_values[:] = 50
-    passed, reason = engine._entry_filter_result(1)
-    assert not passed
-    assert "at or above maximum 50" in reason
-
-    engine.adx_values[:] = 49.999
-    assert engine._entry_filter_result(1)[0]
-
-    engine.plus_di_values[:] = 45
-    engine.minus_di_values[:] = 10
-    engine.di_spread[:] = 35
-    engine.adx_values[:] = 60
-    assert engine._entry_filter_result(1)[0]
 
 
-def test_short_vwap_distance_filter_rejects_only_shorts_below_threshold():
-    df = candles([(100, 100, 100, 100)] * 4)
-    engine = BacktestEngine(
-        df,
-        cfg(
-            enable_di_direction_sizing=True,
-            enable_short_vwap_distance_filter=True,
-            short_vwap_minimum_distance_atr=2,
-        ),
-    )
-    engine.plus_di_values[:] = 10
-    engine.minus_di_values[:] = 45
-    engine.di_spread[:] = 35
-    engine.atr_values[:] = 5
-    engine.session_vwap[:] = 109.99
-    passed, reason = engine._entry_filter_result(1)
-    assert not passed
-    assert "below minimum 2" in reason
-
-    engine.session_vwap[:] = 110
-    assert engine._entry_filter_result(1)[0]
-
-    engine.plus_di_values[:] = 45
-    engine.minus_di_values[:] = 10
-    engine.di_spread[:] = 35
-    engine.session_vwap[:] = 100
-    assert engine._entry_filter_result(1)[0]
 
 
-def test_long_momentum_filter_rejects_only_unconfirmed_longs():
-    df = candles([(100, 100, 100, 100)] * 4)
-    engine = BacktestEngine(
-        df,
-        cfg(
-            enable_di_direction_sizing=True,
-            enable_long_momentum_filter=True,
-            long_momentum_lookback_hours=24,
-            long_momentum_minimum_return=0.06,
-        ),
-    )
-    engine.plus_di_values[:] = 45
-    engine.minus_di_values[:] = 10
-    engine.di_spread[:] = 35
-    engine.long_momentum_return_values[:] = 0.0599
-    passed, reason = engine._entry_filter_result(1)
-    assert not passed
-    assert "below minimum 6.00%" in reason
-
-    engine.long_momentum_return_values[:] = 0.06
-    assert engine._entry_filter_result(1)[0]
-
-    engine.plus_di_values[:] = 10
-    engine.minus_di_values[:] = 45
-    engine.di_spread[:] = 35
-    engine.long_momentum_return_values[:] = -0.50
-    assert engine._entry_filter_result(1)[0]
 
 
-def test_long_momentum_return_uses_only_completed_24_hour_history():
-    rows = [(100, 100, 100, 100)] * 96 + [(106, 106, 106, 106)]
-    engine = BacktestEngine(candles(rows), cfg(long_momentum_lookback_hours=24))
-    assert np.isnan(engine.long_momentum_return_values[95])
-    assert engine.long_momentum_return_values[96] == pytest.approx(0.06)
 
 
 def test_profile_rsi_uses_only_completed_candles_and_has_warmup():

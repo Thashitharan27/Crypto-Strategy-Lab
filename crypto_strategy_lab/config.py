@@ -197,30 +197,17 @@ class BacktestConfig:
     bull_long_r_step_size_r: float = 1.0
     bull_long_r_step_maximum_r: float = 0.0
     bull_long_r_step_activation_close_pct: float = 0.0
-    enable_directional_adx_filter: bool = False
-    directional_long_adx_maximum: float = 60.0
-    directional_short_adx_minimum: float = 25.0
-    enable_long_momentum_filter: bool = False
-    long_momentum_lookback_hours: int = 24
-    long_momentum_minimum_return: float = 0.06
     enable_atr_checkpoint_tp_extension: bool = False
     atr_checkpoint_di_spread_minimum: float = 30.0
     atr_checkpoint_bb_width_minimum: float = 0.03
     atr_checkpoint_profit_lock_start: float = 3.0
     atr_checkpoint_profit_lock_distance: float = 1.0
-    enable_biased_short_adx_cap: bool = False
-    biased_short_adx_maximum: float = 50.0
-    enable_short_vwap_distance_filter: bool = False
-    short_vwap_minimum_distance_atr: float = 2.0
-    enable_bull_regime_short_filter: bool = False
     market_regime_method: str = "ASSET_RETURN"
     structural_regime_sma_days: int = 200
     structural_regime_slope_lookback_days: int = 30
     structural_regime_benchmark_csv: Optional[Path] = None
     bull_regime_lookback_days: int = 90
     bull_regime_return_threshold: float = 0.20
-    enable_bear_regime_adx_filter: bool = False
-    bear_regime_adx_minimum: float = 25.0
     random_entry_start_mode: RandomEntryStartMode = RandomEntryStartMode.NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE
     randomize_first_entry: bool = True
     max_random_wait_candles: int = 0
@@ -297,9 +284,6 @@ class BacktestConfig:
         if self.di_direction_long_minimum_spread < 0: raise ValueError("di_direction_long_minimum_spread must be non-negative")
         if self.di_direction_short_minimum_spread < 0: raise ValueError("di_direction_short_minimum_spread must be non-negative")
         if not 1 <= self.di_pressure_lookback <= 100: raise ValueError("di_pressure_lookback must be between 1 and 100")
-        if self.long_momentum_lookback_hours <= 0: raise ValueError("long_momentum_lookback_hours must be positive")
-        if self.long_momentum_minimum_return <= -1: raise ValueError("long_momentum_minimum_return must be greater than -100%")
-        if self.enable_long_momentum_filter and not self.enable_di_direction_sizing: raise ValueError("long momentum filter requires DI-direction sizing")
         if self.bull_long_r_step_activation_r <= 0: raise ValueError("bull_long_r_step_activation_r must be positive")
         if self.bull_long_r_step_distance_r <= 0: raise ValueError("bull_long_r_step_distance_r must be positive")
         if self.bull_long_r_step_size_r <= 0: raise ValueError("bull_long_r_step_size_r must be positive")
@@ -309,17 +293,10 @@ class BacktestConfig:
         if self.enable_bull_long_r_step_trailing and self.enable_partial_take_profit: raise ValueError("bull-long R-step trailing cannot be combined with partial take profit")
         if self.enable_bull_long_r_step_trailing and self.enable_atr_checkpoint_tp_extension: raise ValueError("bull-long R-step trailing cannot be combined with ATR checkpoint TP extension")
         if self.enable_bull_long_r_step_trailing and self.enable_trailing_profit: raise ValueError("bull-long R-step trailing cannot be combined with the independent trailing stop")
-        if self.directional_long_adx_maximum < 0: raise ValueError("directional_long_adx_maximum must be non-negative")
-        if self.directional_short_adx_minimum < 0: raise ValueError("directional_short_adx_minimum must be non-negative")
-        if self.enable_directional_adx_filter and not self.enable_di_direction_sizing: raise ValueError("direction-specific ADX filter requires DI-direction sizing")
         if self.atr_checkpoint_di_spread_minimum < 0: raise ValueError("atr_checkpoint_di_spread_minimum must be non-negative")
         if self.atr_checkpoint_bb_width_minimum < 0: raise ValueError("atr_checkpoint_bb_width_minimum must be non-negative")
         if self.atr_checkpoint_profit_lock_start < 1: raise ValueError("atr_checkpoint_profit_lock_start must be at least 1 ATR")
         if self.atr_checkpoint_profit_lock_distance <= 0: raise ValueError("atr_checkpoint_profit_lock_distance must be positive")
-        if self.biased_short_adx_maximum < 0: raise ValueError("biased_short_adx_maximum must be non-negative")
-        if self.enable_biased_short_adx_cap and not self.enable_di_direction_sizing: raise ValueError("biased-short ADX cap requires DI-direction sizing")
-        if self.short_vwap_minimum_distance_atr < 0: raise ValueError("short_vwap_minimum_distance_atr must be non-negative")
-        if self.enable_short_vwap_distance_filter and not self.enable_di_direction_sizing: raise ValueError("short VWAP-distance filter requires DI-direction sizing")
         if self.enable_atr_checkpoint_tp_extension and not self.enable_di_direction_sizing: raise ValueError("ATR checkpoint TP extension requires DI-direction sizing")
         if self.enable_atr_checkpoint_tp_extension and self.enable_partial_take_profit: raise ValueError("ATR checkpoint TP extension cannot be combined with partial take profit")
         if self.bull_regime_lookback_days <= 0: raise ValueError("bull_regime_lookback_days must be positive")
@@ -327,9 +304,6 @@ class BacktestConfig:
         if self.structural_regime_sma_days < 2: raise ValueError("structural_regime_sma_days must be at least 2")
         if self.structural_regime_slope_lookback_days < 1: raise ValueError("structural_regime_slope_lookback_days must be positive")
         if self.bull_regime_return_threshold <= -1: raise ValueError("bull_regime_return_threshold must be greater than -100%")
-        if self.enable_bull_regime_short_filter and not self.enable_di_direction_sizing: raise ValueError("bull-regime short filter requires DI-direction sizing")
-        if self.bear_regime_adx_minimum < 0: raise ValueError("bear_regime_adx_minimum must be non-negative")
-        if self.enable_bear_regime_adx_filter and not self.enable_di_direction_sizing: raise ValueError("bear-regime ADX filter requires DI-direction sizing")
         if self.enable_coin_flip_sizing and self.enable_di_direction_sizing: raise ValueError("coin-flip sizing and DI-direction sizing cannot both be enabled")
         if self.flip_filtered_di_direction and not (self.enable_di_direction_sizing or self.enable_strategy_profiles): raise ValueError("filtered direction flip requires DI-direction sizing or strategy profiles")
         if self.enable_coin_flip_sizing and self.trade_direction not in (TradeDirectionMode.BOTH, TradeDirectionMode.BOTH_INDEPENDENT): raise ValueError("coin-flip sizing requires both long and short positions")
