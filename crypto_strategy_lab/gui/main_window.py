@@ -15,6 +15,7 @@ from .worker import BacktestWorker
 from .portfolio_worker import PortfolioWorker
 from .profile_editor import StrategyProfilesWidget
 from .chatgpt_connection import ChatGPTIntegrationWidget
+from .github_manager import GitHubIntegrationWidget
 from crypto_strategy_lab.output_manager import planned_run_dir
 from crypto_strategy_lab.support_resistance_analysis import build_sr_event_context_summary
 from crypto_strategy_lab.report_workbooks import build_performance_breakdowns
@@ -47,9 +48,16 @@ class MainWindow(QMainWindow):
         self.tabs.setDocumentMode(True); self.tabs.setMovable(False)
         self.setStyleSheet("QGroupBox{font-weight:600;margin-top:10px;padding-top:10px} QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px} QPushButton{padding:6px 12px} QTabBar::tab{padding:8px 14px} QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{min-height:24px}")
         self._build_config(); self._build_profiles(); self._build_summary(); self._build_portfolio_tab(); self._build_log(); self.reset_defaults(); self._restore_settings()
+        self.github_tab=GitHubIntegrationWidget(self, self._git_work_active)
+        self.tabs.addTab(self.github_tab,"GitHub")
         self.chatgpt_tab=ChatGPTIntegrationWidget(self.settings, lambda: self.output_folder.text().strip() or "output", self)
         self.tabs.addTab(self.chatgpt_tab,"ChatGPT")
         QTimer.singleShot(0,self.chatgpt_tab.auto_start_connection)
+
+    def _git_work_active(self):
+        """Prevent source updates while calculation worker threads are running."""
+        return bool((self.thread and self.thread.isRunning()) or
+                    (self.portfolio_thread and self.portfolio_thread.isRunning()))
 
     def closeEvent(self,event):
         if not self.chatgpt_tab.manager.owns_running_processes:

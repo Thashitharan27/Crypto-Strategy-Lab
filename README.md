@@ -130,13 +130,30 @@ $env:QT_QPA_PLATFORM="offscreen"
 
 Market data, generated reports, virtual environments, and Python caches are intentionally excluded from version control.
 
+## GitHub Integration
+
+The desktop **GitHub** tab replaces the old pull and push command files. **Check
+Status** fetches remote metadata and reports the branch, changed files, and
+ahead/behind counts. **Pull Latest** uses a fast-forward-only pull. **Review
+Changes** displays working-tree and staged diffs, and **Commit & Push** requires
+the user to select each path and enter a commit message.
+
+The workflow is intentionally conservative: pulling requires a clean working
+tree, diverged branches and merge conflicts require manual resolution, and no
+force push, automatic stash, hard reset, or repository clean is performed.
+Ignored files cannot be added and common secret or credential filenames are
+blocked. Authentication is delegated to the user's existing Git configuration,
+SSH agent, or Git Credential Manager; the application does not store GitHub
+passwords or personal access tokens. Pull and commit/push are disabled while a
+backtest or portfolio calculation is running. After an update, restart Crypto
+Strategy Lab manually to load the downloaded source.
+
 ## Local MCP Server
 
-A local, read-only MCP server lets an MCP client inspect existing backtest reports. Install the dependencies and launch it on Windows:
+A local, read-only MCP server lets an MCP client inspect existing backtest reports. Install the dependencies with:
 
 ```powershell
 pip install -r requirements.txt
-& '.\Start MCP Server.bat'
 ```
 
 By default the server exposes only this project's `output` directory at
