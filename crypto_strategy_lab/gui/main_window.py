@@ -16,6 +16,7 @@ from .portfolio_worker import PortfolioWorker
 from .profile_editor import StrategyProfilesWidget
 from crypto_strategy_lab.output_manager import planned_run_dir
 from crypto_strategy_lab.support_resistance_analysis import build_sr_event_context_summary
+from crypto_strategy_lab.report_workbooks import build_performance_breakdowns
 from ..paths import DATA_DIR
 
 REPORT_TARGETS = {
@@ -719,18 +720,35 @@ class MainWindow(QMainWindow):
         thread=self.portfolio_thread; self.portfolio_thread=None; self.portfolio_worker=None; self.portfolio_run_btn.setEnabled(True)
         if thread is not None: thread.deleteLater()
     def _build_summary(self):
-        page=QWidget(); l=QVBoxLayout(page); self.summary_table=QTableWidget(0,2); self.summary_table.setHorizontalHeaderLabels(["Metric","Value"]); self.summary_table.horizontalHeader().setStretchLastSection(True); self.combo_table=QTableWidget(0,5); self.combo_table.setHorizontalHeaderLabels(["Exit Combination","Count","Percentage","Average Net R","Total Net R"]); self.combo_table.setSortingEnabled(True); self.comparison_heading=QLabel("Exit outcomes"); l.addWidget(QLabel("Performance overview")); l.addWidget(self.summary_table); l.addWidget(self.comparison_heading); l.addWidget(self.combo_table)
-        sr_summary_box=QGroupBox("Support / Resistance"); sr_summary_layout=QVBoxLayout(sr_summary_box)
-        self.sr_summary_panel_label=QLabel("No backtest run yet."); self.sr_summary_panel_label.setWordWrap(True)
-        sr_summary_layout.addWidget(self.sr_summary_panel_label); l.addWidget(sr_summary_box)
+        page=QScrollArea(); page.setWidgetResizable(True); page.setObjectName("summaryScrollArea")
+        content=QWidget(); l=QVBoxLayout(content); l.setAlignment(Qt.AlignTop)
+        overview=QGroupBox("Performance Overview"); overview_layout=QGridLayout(overview); self.kpi_labels={}
+        kpis=("Ending Equity","Total Return","Total Trades","Win Rate","Profit Factor","Maximum Drawdown","Average Net R","Total Net R","Total Fees","Signals Traded / Evaluated")
+        for index,label in enumerate(kpis):
+            card=QGroupBox(label); card_layout=QVBoxLayout(card); value=QLabel("—"); value.setAlignment(Qt.AlignCenter); value.setStyleSheet("font-size: 18px; font-weight: 600; padding: 4px;")
+            card_layout.addWidget(value); self.kpi_labels[label]=value; overview_layout.addWidget(card,index//5,index%5)
+        self.starting_equity_label=QLabel("Starting Equity: —"); overview_layout.addWidget(self.starting_equity_label,2,0,1,5)
+        l.addWidget(overview)
         reports_box=QGroupBox("Run Reports"); reports_layout=QGridLayout(reports_box)
         labels={"backtest":"Open Backtest Report","indicators":"Open Indicator Analysis","sr":"Open S/R Analysis","trades":"Open Trade List","charts":"Open Charts Folder","output":"Open Output Folder"}
         self.report_buttons={}
         for index,(name,label) in enumerate(labels.items()):
             button=QPushButton(label); button.setEnabled(False); button.clicked.connect(lambda _checked=False, key=name: self._open_report(key))
-            self.report_buttons[name]=button; reports_layout.addWidget(button,index//2,index%2)
+            self.report_buttons[name]=button; reports_layout.addWidget(button,index//3,index%3)
         l.addWidget(reports_box)
+        self.comparison_box=QGroupBox("Direction / Regime Performance"); comparison_layout=QVBoxLayout(self.comparison_box)
+        self.combo_table=QTableWidget(0,9); self.combo_table.setHorizontalHeaderLabels(["Market Regime","Direction","Trades","Wins","Losses","Win Rate","Average Net R","Total Net R","Net PnL"]); self.combo_table.setSortingEnabled(False); self.combo_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents); self.combo_table.horizontalHeader().setStretchLastSection(True); self.combo_table.verticalHeader().setVisible(False)
+        comparison_layout.addWidget(self.combo_table); l.addWidget(self.comparison_box)
+        sr_summary_box=QGroupBox("Support / Resistance"); sr_summary_layout=QVBoxLayout(sr_summary_box)
+        self.sr_summary_panel_label=QLabel("No backtest run yet."); self.sr_summary_panel_label.setWordWrap(True)
+        sr_summary_layout.addWidget(self.sr_summary_panel_label); l.addWidget(sr_summary_box)
+        page.setWidget(content); self.summary_scroll_area=page; self.summary_content=content
         self.tabs.addTab(page,"Summary")
+
+    def _size_summary_table(self):
+        height=self.combo_table.horizontalHeader().height()+self.combo_table.frameWidth()*2
+        height += sum(self.combo_table.rowHeight(row) for row in range(self.combo_table.rowCount()))
+        self.combo_table.setFixedHeight(max(80,height+2))
 
     def _refresh_report_buttons(self):
         states=report_button_states(Path(self.output_dir))
@@ -1105,7 +1123,7 @@ class MainWindow(QMainWindow):
         if self._pending_ui_results is None: return
         summary,trades,_,_=self._pending_ui_results
         try:
-            self.populate_summary(summary)
+            self.populate_summary(summary,trades)
         except Exception:
             self.append_log("Results display warning (summary):\n"+traceback.format_exc())
         try:
@@ -1140,14 +1158,15 @@ class MainWindow(QMainWindow):
             if self._run_failed: self.status.setText("Backtest failed; see the Log tab for details.")
         if thread is not None: thread.deleteLater()
     def _update_sr_summary_panel(self,trades):
+        mode=self.sr_filter_mode.currentText() if hasattr(self,"sr_filter_mode") else "Analysis Only"
+        mode_note="\nNo trades filtered; support/resistance was measured for analysis only." if mode == "Analysis Only" else ""
         if trades is None or trades.empty or ("long_sr_context" not in trades.columns and "short_sr_context" not in trades.columns):
-            self.sr_summary_panel_label.setText("Support/Resistance analysis was not enabled for this run.")
+            self.sr_summary_panel_label.setText(f"Mode: {mode}{mode_note}\n\nSupport/Resistance analysis was not enabled for this run.")
             return
-        mode=self.sr_filter_mode.currentText() if hasattr(self,"sr_filter_mode") else "ANALYSIS_ONLY"
         report=build_sr_event_context_summary(trades)
         candidates=report[report["trade_count"]>=3] if not report.empty else report
         if candidates.empty:
-            self.sr_summary_panel_label.setText(f"Mode: {mode}\nNot enough trades per S/R context yet for a reliable best/worst comparison (need at least 3 per context).")
+            self.sr_summary_panel_label.setText(f"Mode: {mode}{mode_note}\n\nNot enough trades per S/R context yet for a reliable best/weakest comparison (need at least 3 per context).")
             return
         ranked=candidates.dropna(subset=["win_rate"])
         best=ranked.sort_values("win_rate",ascending=False).iloc[0]
@@ -1158,29 +1177,45 @@ class MainWindow(QMainWindow):
             r_text=f"{r_value:+.2f}R" if r_value == r_value else "n/a"
             return f"{row['direction']} {context} — {format_percentage(row['win_rate'],1)} WR, {r_text}"
         self.sr_summary_panel_label.setText(
-            f"Mode: {mode}\n\nBest S/R Context:\n{describe(best)}\n\nWorst S/R Context:\n{describe(worst)}"
+            f"Mode: {mode}{mode_note}\n\nBest S/R Context: {describe(best)}\nWeakest S/R Context: {describe(worst)}"
         )
 
-    def populate_summary(self,s):
-        metrics=(("Starting equity",self.equity.value()),("Ending equity",s.get("ending_equity")),("Total return",s.get("total_return_percentage")),("Maximum drawdown",s.get("maximum_drawdown_percentage")),("Trades",s.get("total_trades",s.get("total_pairs"))),("Wins",s.get("wins")),("Losses",s.get("losses")),("Win rate",s.get("win_rate")),("Profit factor",s.get("profit_factor")),("Expectancy",s.get("expectancy")),("Average net R",s.get("average_net_r")),("Total net R",s.get("total_net_r")),("Total fees",s.get("total_fees")),("Signals evaluated",s.get("signals_evaluated")),("Signals traded",s.get("signals_traded")),("Blocked profile opportunities",s.get("blocked_profile_opportunities")))
-        metrics=[item for item in metrics if item[1] is not None]; self.summary_table.setRowCount(len(metrics))
-        for row,(label,value) in enumerate(metrics):
-            if label in ("Total return","Maximum drawdown","Win rate"): text=format_percentage(value,2)
-            elif label.endswith(" R"): text=f"{value:.4f}R"
-            else: text=str(value)
-            self.summary_table.setItem(row,0,QTableWidgetItem(label)); self.summary_table.setItem(row,1,QTableWidgetItem(text))
+    @staticmethod
+    def _money(value):
+        return "—" if value is None else f"{float(value):,.2f}"
+
+    def populate_summary(self,s,trades=None):
+        percentage=lambda value: "—" if value is None else format_percentage(value,2)
+        number=lambda value: "—" if value is None else f"{float(value):.2f}"
+        r_value=lambda value: "—" if value is None else f"{float(value):.2f}R"
+        values={
+            "Ending Equity":self._money(s.get("ending_equity")), "Total Return":percentage(s.get("total_return_percentage")),
+            "Total Trades":f"{int(s.get('total_trades',s.get('total_pairs',0)) or 0):,}", "Win Rate":percentage(s.get("win_rate")),
+            "Profit Factor":number(s.get("profit_factor")), "Maximum Drawdown":percentage(s.get("maximum_drawdown_percentage")),
+            "Average Net R":r_value(s.get("average_net_r")), "Total Net R":r_value(s.get("total_net_r")),
+            "Total Fees":self._money(s.get("total_fees")),
+            "Signals Traded / Evaluated":f"{int(s.get('signals_traded',0)):,} / {int(s.get('signals_evaluated',0)):,}" if s.get("signals_traded") is not None or s.get("signals_evaluated") is not None else "—",
+        }
+        for label,text in values.items(): self.kpi_labels[label].setText(text)
+        self.starting_equity_label.setText(f"Starting Equity: {self._money(self.equity.value())}")
         profiles=s.get("isolated_profile_comparison",[])
         if profiles:
-            self.comparison_heading.setText("Profile performance")
+            self.comparison_box.setTitle("Profile Performance")
+            self.combo_table.setColumnCount(5)
             self.combo_table.setHorizontalHeaderLabels(["Profile","Trades","Win Rate","Profit Factor","Net Profit"]); self.combo_table.setRowCount(len(profiles))
             for row,item in enumerate(profiles):
-                values=[item.get("profile","").replace("_"," ").title(),item.get("trades",0),format_percentage(item.get("win_rate",0),2),item.get("profit_factor",""),item.get("net_profit","")]
+                values=[item.get("profile","").replace("_"," ").title(),item.get("trades",0),format_percentage(item.get("win_rate",0),2),f"{float(item.get('profit_factor',0)):.2f}",self._money(item.get("net_profit"))]
                 for column,value in enumerate(values): self.combo_table.setItem(row,column,QTableWidgetItem(str(value)))
         else:
-            self.comparison_heading.setText("Exit outcomes")
-            self.combo_table.setHorizontalHeaderLabels(["Exit Combination","Count","Percentage","Average Net R","Total Net R"]); combos=s.get("exit_combinations",{}); self.combo_table.setRowCount(len(combos))
-            for row,(key,value) in enumerate(combos.items()):
-                for column,text in enumerate([key,value['count'],format_percentage(value['percentage'],2),f"{value['average_net_r']:.4f}R",f"{value['total_net_r']:.4f}R"]): self.combo_table.setItem(row,column,QTableWidgetItem(str(text)))
+            self.comparison_box.setTitle("Direction / Regime Performance")
+            self.combo_table.setColumnCount(9); self.combo_table.setHorizontalHeaderLabels(["Market Regime","Direction","Trades","Wins","Losses","Win Rate","Average Net R","Total Net R","Net PnL"])
+            _,breakdown=build_performance_breakdowns(trades if trades is not None else pd.DataFrame())
+            lookup={(str(item.market_regime).upper(),str(item.direction).upper()):item for item in breakdown.itertuples()}
+            rows=[(regime,direction) for regime in ("BULL","BEAR","SIDEWAYS") for direction in ("LONG","SHORT")]; self.combo_table.setRowCount(len(rows))
+            for row,(regime,direction) in enumerate(rows):
+                item=lookup.get((regime,direction)); raw=[regime.title(),direction.title(),getattr(item,"trades",0),getattr(item,"wins",0),getattr(item,"losses",0),format_percentage(getattr(item,"win_rate",0),2),f"{getattr(item,'average_r',0):.2f}R",f"{getattr(item,'total_r',0):.2f}R",self._money(getattr(item,"net_pnl",0))]
+                for column,text in enumerate(raw): self.combo_table.setItem(row,column,QTableWidgetItem(str(text)))
+        self.combo_table.resizeRowsToContents(); self._size_summary_table()
     def save_config(self):
         p,_=QFileDialog.getSaveFileName(self,"Save Configuration","backtest_config.json","JSON (*.json)");
         if p:
