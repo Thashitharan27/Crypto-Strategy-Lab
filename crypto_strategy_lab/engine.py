@@ -466,7 +466,6 @@ class BacktestEngine:
                 reasons.append(f"Short VWAP-distance passed: price is {distance_atr:.6g} ATR below UTC session VWAP >= minimum {self.config.short_vwap_minimum_distance_atr:.6g}")
             regime_return=float(self.bull_regime_return_values[i])
             regime=self._regime_at(i)
-                reasons.append(f"Regime-direction passed: {direction} allowed in {regime}")
             if self.config.enable_directional_di_spread_range:
                 minimum=getattr(self.config,f"directional_{direction.lower()}_di_spread_minimum"); maximum=getattr(self.config,f"directional_{direction.lower()}_di_spread_maximum")
                 if not minimum <= spread <= maximum: return False, f"{direction.title()} DI spread {spread:.6g} outside range {minimum:.6g} to {maximum:.6g}"
