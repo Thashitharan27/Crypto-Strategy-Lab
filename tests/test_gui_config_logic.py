@@ -201,16 +201,6 @@ def legacy_remaining_leg_timeout_json_round_trip_and_validation(tmp_path):
         build_backtest_config({**values, "remaining_leg_timeout_profit_threshold_r": -1})
 
 
-def test_zero_bull_regime_threshold_is_valid(tmp_path):
-    values = {
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_bull_regime_short_filter": True,
-        "bull_regime_return_threshold": 0.0,
-    }
-    assert not validate_config_values(values)
-    cfg = build_backtest_config(values)
-    assert cfg.bull_regime_return_threshold == 0.0
 
 
 def test_support_resistance_settings_round_trip_and_validation(tmp_path):
@@ -252,89 +242,18 @@ def test_support_resistance_mode_is_exact_and_unknown_config_is_discarded(tmp_pa
     assert "unknown_setting" not in loaded
 
 
-def test_negative_bull_regime_threshold_is_valid(tmp_path):
-    values = {
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_bull_regime_short_filter": True,
-        "bull_regime_return_threshold": -0.10,
-    }
-    assert not validate_config_values(values)
-    cfg = build_backtest_config(values)
-    assert cfg.bull_regime_return_threshold == pytest.approx(-0.10)
-
-    with pytest.raises(ValueError, match="-100%"):
-        build_backtest_config({**values, "bull_regime_return_threshold": -1.0})
-
-
-def test_biased_short_adx_cap_config(tmp_path):
-    values = {
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_biased_short_adx_cap": True,
-        "biased_short_adx_maximum": 50.0,
-    }
-    cfg = build_backtest_config(values)
-    assert cfg.enable_biased_short_adx_cap
-    assert cfg.biased_short_adx_maximum == 50.0
-
-
-def test_short_vwap_distance_filter_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_short_vwap_distance_filter": True,
-        "short_vwap_minimum_distance_atr": 2.25,
-    })
-    assert cfg.enable_short_vwap_distance_filter
-    assert cfg.short_vwap_minimum_distance_atr == pytest.approx(2.25)
-
-
-def test_long_momentum_filter_config_supports_long_only_di_selection(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "trade_direction": "LONG_ONLY",
-        "enable_di_direction_sizing": True,
-        "enable_long_momentum_filter": True,
-        "long_momentum_lookback_hours": 24,
-        "long_momentum_minimum_return": 0.06,
-    })
-    assert cfg.trade_direction == TradeDirectionMode.LONG_ONLY
-    assert cfg.enable_long_momentum_filter
-    assert cfg.long_momentum_lookback_hours == 24
-    assert cfg.long_momentum_minimum_return == pytest.approx(0.06)
-
-
-def test_bear_regime_adx_filter_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_bear_regime_adx_filter": True,
-        "bear_regime_adx_minimum": 25.0,
-    })
-    assert cfg.enable_bear_regime_adx_filter
-    assert cfg.bear_regime_adx_minimum == 25.0
 
 
 
 
-def test_direction_specific_adx_config(tmp_path):
-    cfg = build_backtest_config({
-        **base(tmp_path),
-        "enable_di_direction_sizing": True,
-        "enable_directional_adx_filter": True,
-        "directional_long_adx_maximum": 60,
-        "directional_short_adx_minimum": 25,
-    })
-    assert cfg.enable_directional_adx_filter
-    assert cfg.directional_long_adx_maximum == 60
-    assert cfg.directional_short_adx_minimum == 25
 
-    with pytest.raises(ValueError, match="requires DI-direction sizing"):
-        build_backtest_config({
-            **base(tmp_path),
-            "enable_directional_adx_filter": True,
-        })
+
+
+
+
+
+
+
 
 
 

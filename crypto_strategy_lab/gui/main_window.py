@@ -823,11 +823,6 @@ class MainWindow(QMainWindow):
         if hasattr(self,"vwap_confirmation_mode"):
             retest=self.entry_mode.currentData()=="VWAP_VOLUME_BREAKOUT" and self.vwap_confirmation_mode.currentText()=="RETEST"
             self.vwap_retest_window.setEnabled(retest); self.vwap_retest_tolerance.setEnabled(retest)
-        if hasattr(self,"enable_atr_checkpoint_tp_extension"):
-            checkpoint_enabled=self.enable_atr_checkpoint_tp_extension.isChecked() and self.enable_di_direction_sizing.isChecked()
-            self.enable_atr_checkpoint_tp_extension.setEnabled(self.enable_di_direction_sizing.isChecked())
-            for control in (self.atr_checkpoint_di_spread_min,self.atr_checkpoint_bb_width_min,self.atr_checkpoint_profit_lock_start,self.atr_checkpoint_profit_lock_distance):
-                control.setEnabled(checkpoint_enabled)
         if hasattr(self,"enable_trade_telemetry"):
             enabled=self.enable_trade_telemetry.isChecked(); self.telemetry_interval.setEnabled(enabled); self.save_full_telemetry.setEnabled(enabled); self.save_journey_summary.setEnabled(enabled); self.save_journey_charts.setEnabled(enabled)
         if hasattr(self,"enable_partial_sl"):
