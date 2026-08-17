@@ -212,7 +212,7 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
             else (
                 (
                     f"DI regime reward/risk enabled: bull at or above {config.bull_regime_return_threshold:.2%}, "
-                    f"bear at or below {config.bear_regime_return_threshold:.2%}; "
+                    f"bear at or below {config.di_regime_bear_return_threshold:.2%}; "
                     f"long bull/bear/sideways {config.di_long_bull_reward_risk_ratio}/"
                     f"{config.di_long_bear_reward_risk_ratio}/{config.di_long_sideways_reward_risk_ratio}; "
                     f"short bull/bear/sideways {config.di_short_bull_reward_risk_ratio}/"

@@ -175,7 +175,7 @@ class BacktestConfig:
     di_long_reward_risk_ratio: Optional[float] = None
     di_short_reward_risk_ratio: Optional[float] = None
     enable_di_regime_reward_risk: bool = False
-    bear_regime_return_threshold: float = -0.20
+    di_regime_bear_return_threshold: float = -0.20
     enable_support_resistance_analysis: bool = False
     sr_pivot_left: int = 5
     sr_pivot_right: int = 5
@@ -430,8 +430,8 @@ class BacktestConfig:
         if self.sideways_short_conditional_reward_risk_ratio <= 0: raise ValueError("sideways_short_conditional_reward_risk_ratio must be positive")
         if self.bear_short_conditional_di_spread_maximum < 0: raise ValueError("bear_short_conditional_di_spread_maximum must be non-negative")
         if self.bear_short_conditional_reward_risk_ratio <= 0: raise ValueError("bear_short_conditional_reward_risk_ratio must be positive")
-        if self.bear_regime_return_threshold <= -1: raise ValueError("bear_regime_return_threshold must be greater than -100%")
-        if self.enable_di_regime_reward_risk and self.bear_regime_return_threshold >= self.bull_regime_return_threshold: raise ValueError("DI bear threshold must be below bull threshold")
+        if self.di_regime_bear_return_threshold <= -1: raise ValueError("di_regime_bear_return_threshold must be greater than -100%")
+        if self.enable_di_regime_reward_risk and self.di_regime_bear_return_threshold >= self.bull_regime_return_threshold: raise ValueError("DI bear threshold must be below bull threshold")
         if self.enable_di_regime_reward_risk and not self.enable_di_direction_sizing: raise ValueError("regime-specific DI reward/risk requires DI-direction sizing")
         if self.enable_bull_long_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional bull-long reward/risk requires regime-specific DI reward/risk")
         if self.enable_bull_long_r_step_trailing and not self.enable_di_regime_reward_risk: raise ValueError("bull-long R-step trailing requires regime-specific DI reward/risk")

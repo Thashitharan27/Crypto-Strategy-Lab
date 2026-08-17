@@ -268,7 +268,7 @@ class BacktestEngine:
     def _market_regime_array(self):
         if self.config.market_regime_method == "ASSET_RETURN":
             return np.array([
-                None if not np.isfinite(value) else ("BULL" if value >= self.config.bull_regime_return_threshold else ("BEAR" if value <= self.config.bear_regime_return_threshold else "SIDEWAYS"))
+                None if not np.isfinite(value) else ("BULL" if value >= self.config.bull_regime_return_threshold else ("BEAR" if value <= self.config.di_regime_bear_return_threshold else "SIDEWAYS"))
                 for value in self.bull_regime_return_values
             ], dtype=object)
         benchmark_path = self.config.structural_regime_benchmark_csv
@@ -307,7 +307,7 @@ class BacktestEngine:
         if self.config.market_regime_method == "ASSET_RETURN":
             value=float(self.bull_regime_return_values[i])
             if not np.isfinite(value): return None
-            return "BULL" if value >= self.config.bull_regime_return_threshold else ("BEAR" if value <= self.config.bear_regime_return_threshold else "SIDEWAYS")
+            return "BULL" if value >= self.config.bull_regime_return_threshold else ("BEAR" if value <= self.config.di_regime_bear_return_threshold else "SIDEWAYS")
         value=self.market_regime_values[i]
         return None if value is None or pd.isna(value) else str(value)
     def _structural_sma_arrays(self, sma_days, slope_lookback_days):
