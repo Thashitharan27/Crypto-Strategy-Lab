@@ -15,11 +15,18 @@ def clean(path):
   if any(a<=s and e<=b for a,b in maximal): continue
   maximal=[(a,b) for a,b in maximal if not(s<=a and b<=e)]; maximal.append((s,e))
  remove={i for s,e in maximal for i in range(s,e+1)}
- path.write_text(''.join(line for i,line in enumerate(lines,1) if i not in remove),encoding='utf-8')
+ result=''.join(line for i,line in enumerate(lines,1) if i not in remove)
+ ast.parse(result); path.write_text(result,encoding='utf-8')
+
 clean(ROOT/'crypto_strategy_lab/config.py')
 p=ROOT/'crypto_strategy_lab/gui/config_logic.py'; clean(p); text=p.read_text(encoding='utf-8')
 text=''.join(line for line in text.splitlines(True) if not(old(line) and (line.strip().startswith(('"',"'")) or '=' in line.strip())))
 ast.parse(text); p.write_text(text,encoding='utf-8')
+# The primary R:R block is replaced by stage4_remove_legacy_di_rr.py first.
+# Remove remaining independent legacy conditionals/telemetry setup in engine and GUI.
+clean(ROOT/'crypto_strategy_lab/engine.py')
+clean(ROOT/'crypto_strategy_lab/gui/main_window.py')
+
 for rel in ('crypto_strategy_lab/config.py','crypto_strategy_lab/gui/config_logic.py','crypto_strategy_lab/engine.py','crypto_strategy_lab/gui/main_window.py'):
  content=(ROOT/rel).read_text(encoding='utf-8'); left=sorted(n for n in FIELDS if n in content)
  if left: raise SystemExit(f'{rel}: stale Stage 4 fields remain: {left}')
