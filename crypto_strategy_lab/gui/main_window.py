@@ -383,16 +383,7 @@ class MainWindow(QMainWindow):
         self.tp.setVisible(False); tp_label=strat.labelForField(self.tp)
         if tp_label: tp_label.setVisible(False)
         risk.setRowVisible(self.trade_direction,False)
-        scroll.setWidget(inner); outer.addWidget(scroll); self.backtest_setup_page=page; self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_direction_voting_tab(); self._build_support_resistance_tab(); self.update_dynamic()
-
-    def _build_direction_voting_tab(self):
-        page=QWidget(); layout=QVBoxLayout(page)
-        intro=QLabel("DI pressure is the validated default direction signal. +DI above -DI selects Long; -DI above +DI selects Short.")
-        intro.setWordWrap(True); layout.addWidget(intro)
-        self.direction_voting_box.setParent(page); layout.addWidget(self.direction_voting_box)
-        layout.addStretch(1)
-        self.tabs.addTab(page,"DI Direction & Pressure")
-        self.analysis_level.setCurrentText("Standard (Recommended)"); self._apply_analysis_preset(); self._set_analysis_advanced(False)
+        scroll.setWidget(inner); outer.addWidget(scroll); self.backtest_setup_page=page; self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_support_resistance_tab(); self.update_dynamic()
 
     def _build_support_resistance_tab(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); layout=QVBoxLayout(inner)
@@ -630,6 +621,8 @@ class MainWindow(QMainWindow):
         form.addWidget(checkpoint_box); form.addStretch(1)
         scroll.setWidget(inner); outer.addWidget(scroll); self.di_strategy_page=page
         self.config_controls += inner.findChildren(QWidget)
+        self.tabs.addTab(page,"DI Direction & Pressure")
+        self.analysis_level.setCurrentText("Standard (Recommended)"); self._apply_analysis_preset(); self._set_analysis_advanced(False)
     def _build_portfolio_tab(self):
         page=QWidget(); layout=QVBoxLayout(page); box=QGroupBox("Shared-Equity Portfolio"); form=QFormLayout(box)
         self.portfolio_assets=[]; asset_widget=QWidget(); self.portfolio_asset_layout=QVBoxLayout(asset_widget); self.portfolio_asset_layout.setContentsMargins(0,0,0,0); form.addRow("Assets",asset_widget)

@@ -237,9 +237,26 @@ def test_di_direction_pressure_tab_is_compact():
     app(); window=MainWindow()
     try:
         names=[window.tabs.tabText(i) for i in range(window.tabs.count())]
-        assert "DI Direction & Pressure" in names
+        page=window.tabs.widget(names.index("DI Direction & Pressure"))
+        assert page is window.di_strategy_page
+        assert page.isAncestorOf(window.enable_di_direction_selection)
+        assert page.isAncestorOf(window.enable_di_pressure_analysis)
+        assert page.isAncestorOf(window.di_pressure_lookback)
         assert window.di_pressure_lookback.minimum()==1
         assert window.di_pressure_lookback.maximum()==100
+        legacy_widgets=(
+            "direction_voting_box",
+            "direction_voting_form",
+            "enable_direction_voting",
+            "direction_vote_test_mode",
+            "direction_vote_use_di",
+            "direction_vote_use_structure",
+            "direction_vote_use_momentum",
+            "direction_vote_use_volume",
+            "direction_vote_use_htf",
+            "direction_vote_minimum",
+        )
+        assert not any(hasattr(window,name) for name in legacy_widgets)
     finally:
         window.close()
 
