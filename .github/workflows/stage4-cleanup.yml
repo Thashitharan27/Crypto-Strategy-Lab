@@ -12,7 +12,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: chatgpt/stage4-remove-legacy-di-rr
-      - run: python tools/stage4_remove_legacy_di_rr.py || true
       - run: python tools/stage4_fix_leftovers.py
       - run: python -m compileall -q crypto_strategy_lab tools
       - run: |
