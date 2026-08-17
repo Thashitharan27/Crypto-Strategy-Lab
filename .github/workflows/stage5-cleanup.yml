@@ -1,0 +1,22 @@
+name: Stage 5 legacy entry-filter cleanup
+on:
+  push:
+    branches: ["chatgpt/stage5-remove-oneoff-legacy-filters"]
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    if: github.event.head_commit.message != 'Apply Stage 5 legacy entry-filter cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/stage5-remove-oneoff-legacy-filters
+      - run: python tools/stage5_remove_legacy_entry_filters.py
+      - run: python -m compileall -q crypto_strategy_lab tests
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+Thashitharan27@users.noreply.github.com"
+          git add crypto_strategy_lab tests
+          git commit -m "Apply Stage 5 legacy entry-filter cleanup"
+          git push
