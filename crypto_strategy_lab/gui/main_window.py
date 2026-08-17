@@ -923,13 +923,17 @@ class MainWindow(QMainWindow):
             if voting_enabled and enabled_count and self.direction_vote_minimum.value()>enabled_count:
                 self.direction_vote_minimum.setValue(enabled_count)
             single_test=bool(self.direction_vote_test_mode.currentData())
-            self.direction_voting_form.setRowVisible(self.direction_vote_structure_lookback,voting_enabled and self.direction_vote_use_structure.isChecked())
-            self.direction_voting_form.setRowVisible(self.direction_vote_momentum_lookback,voting_enabled and self.direction_vote_use_momentum.isChecked())
-            self.direction_voting_form.setRowVisible(self.direction_vote_momentum_threshold,voting_enabled and self.direction_vote_use_momentum.isChecked())
-            self.direction_voting_form.setRowVisible(self.direction_vote_volume_lookback,voting_enabled and self.direction_vote_use_volume.isChecked())
-            self.direction_voting_form.setRowVisible(self.direction_vote_volume_threshold,voting_enabled and self.direction_vote_use_volume.isChecked())
-            self.direction_voting_form.setRowVisible(self.direction_vote_htf_sma,voting_enabled and self.direction_vote_use_htf.isChecked())
-            self.direction_voting_form.setRowVisible(self.direction_vote_minimum,voting_enabled and not single_test)
+            # These legacy controls are retained for config compatibility, but are
+            # no longer rows in direction_voting_form after the tab was simplified.
+            # Toggling the widgets directly avoids asking QFormLayout to operate on
+            # widgets that it does not own.
+            self.direction_vote_structure_lookback.setVisible(voting_enabled and self.direction_vote_use_structure.isChecked())
+            self.direction_vote_momentum_lookback.setVisible(voting_enabled and self.direction_vote_use_momentum.isChecked())
+            self.direction_vote_momentum_threshold.setVisible(voting_enabled and self.direction_vote_use_momentum.isChecked())
+            self.direction_vote_volume_lookback.setVisible(voting_enabled and self.direction_vote_use_volume.isChecked())
+            self.direction_vote_volume_threshold.setVisible(voting_enabled and self.direction_vote_use_volume.isChecked())
+            self.direction_vote_htf_sma.setVisible(voting_enabled and self.direction_vote_use_htf.isChecked())
+            self.direction_vote_minimum.setVisible(voting_enabled and not single_test)
             if not voting_enabled:
                 message="Direction voting is OFF. These signal settings will not affect entries until voting is enabled."
                 color="#8a5a00"
