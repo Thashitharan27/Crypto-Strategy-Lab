@@ -570,6 +570,85 @@ def test_gui_reset_restores_all_default_values_and_run_name():
         window.close()
 
 
+def test_new_run_confirmation_resets_defaults_refreshes_path_and_clears_results(monkeypatch, tmp_path):
+    from crypto_strategy_lab.gui.config_logic import default_gui_config
+
+    app(); window = MainWindow()
+    try:
+        old_run = tmp_path / "existing-run"
+        old_run.mkdir(); artifact = old_run / "trades.csv"; artifact.write_text("kept")
+        window.apply_values({"run_name": "old run", "atr_period": 7, "output_dir": str(tmp_path)})
+        old_plan = window.planned_output.text()
+        window.last_summary = {"win_rate": .75}
+        window.status.setText("Completed")
+        monkeypatch.setattr(window, "_confirm_new_run", lambda: True)
+
+        window.new_run()
+
+        defaults = default_gui_config(); values = window.values()
+        assert values["run_name"] == defaults["run_name"]
+        assert values["atr_period"] == defaults["atr_period"]
+        assert values["output_dir"] == defaults["output_dir"]
+        assert window.planned_output.text() != old_plan
+        assert window.status.text() == "Ready"
+        assert window.last_summary == {}
+        assert artifact.read_text() == "kept"
+    finally:
+        window.close()
+
+
+def test_new_run_cancel_preserves_configuration_and_integrations(monkeypatch):
+    app(); window = MainWindow()
+    try:
+        window.run_name.setText("do not reset")
+        chat_marker = window.chatgpt_tab.settings
+        github_marker = window.github_tab
+        monkeypatch.setattr(window, "_confirm_new_run", lambda: False)
+        window.new_run()
+        assert window.run_name.text() == "do not reset"
+        assert window.chatgpt_tab.settings is chat_marker
+        assert window.github_tab is github_marker
+    finally:
+        window.close()
+
+
+def test_new_run_is_guarded_while_a_job_is_active(monkeypatch):
+    class RunningThread:
+        def isRunning(self): return True
+
+    app(); window = MainWindow()
+    try:
+        window.run_name.setText("active")
+        window.thread = RunningThread(); window.new_run_btn.setEnabled(False)
+        monkeypatch.setattr(window, "_confirm_new_run", lambda: pytest.fail("confirmation must not open"))
+        window.new_run()
+        assert not window.new_run_btn.isEnabled()
+        assert window.run_name.text() == "active"
+        window.thread = None
+    finally:
+        window.close()
+
+
+def test_toolbar_save_and_load_use_existing_configuration_methods(monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QFileDialog
+
+    path = tmp_path / "toolbar-config.json"
+    app(); window = MainWindow()
+    try:
+        window.run_name.setText("saved by toolbar")
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(path), "JSON (*.json)"))
+        window.save_btn.click()
+        assert json.loads(path.read_text())["run_name"] == "saved by toolbar"
+
+        window.run_name.setText("changed")
+        monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args, **kwargs: (str(path), "JSON (*.json)"))
+        window.load_btn.click()
+        assert window.run_name.text() == "saved by toolbar"
+        assert window.planned_output.text()
+    finally:
+        window.close()
+
+
 def legacy_remaining_leg_timeout_gui_hours_save_load_round_trip(tmp_path):
     path = tmp_path / "timeout.json"
     app()
