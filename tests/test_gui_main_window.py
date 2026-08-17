@@ -50,7 +50,7 @@ def test_market_ready_tabs_use_profile_only_strategy_workflow():
     window = MainWindow()
     try:
         tab_names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
-        assert tab_names == ["Backtest Setup", "Direction Voting", "Support & Resistance", "Strategy Profiles", "Summary", "Portfolio"]
+        assert tab_names == ["Backtest Setup", "Direction Voting", "Support & Resistance", "Strategy Profiles", "Summary", "Portfolio", "Logs", "GitHub", "ChatGPT"]
         assert "Legacy Strategy" not in tab_names
         values=window.values()
         assert values["enable_strategy_profiles"] is True
