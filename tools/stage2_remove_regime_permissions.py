@@ -28,6 +28,10 @@ def edit(path: str, transform):
 def config(text: str) -> str:
     for name in LEGACY:
         text = re.sub(rf"^    {name}: bool = (?:False|True)\n", "", text, flags=re.M)
+    text = text.replace(
+        "if any((self.enable_regime_direction_filter, self.enable_directional_di_spread_range, self.enable_directional_adx_range, self.enable_directional_atr_pct_range, self.enable_directional_rsi_range, self.enable_directional_close_location_range, self.enable_directional_momentum_range)) and not self.enable_di_direction_sizing:",
+        "if any((self.enable_directional_di_spread_range, self.enable_directional_adx_range, self.enable_directional_atr_pct_range, self.enable_directional_rsi_range, self.enable_directional_close_location_range, self.enable_directional_momentum_range)) and not self.enable_di_direction_sizing:",
+    )
     return text
 
 
