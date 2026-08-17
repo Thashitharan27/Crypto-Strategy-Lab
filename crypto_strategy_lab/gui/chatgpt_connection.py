@@ -140,15 +140,32 @@ class ChatGPTConnectionManager(QObject):
         self._emit()
 
     def _child_finished(self, name):
+        if name == "MCP":
+            self._mcp_started = False
+        elif name == "Tunnel":
+            self._tunnel_started = False
         if not self._stopping and (self._starting or self.state == "Connected"):
             self._starting = False; self.state = "Error"; self._log("GUI", f"{name} process exited unexpectedly."); self._emit()
 
+    def _stop_owned_process(self, process, owned, name):
+        """Stop one owned child, escalating only if graceful exit times out."""
+        if not owned or process.state() == QProcess.NotRunning:
+            return
+        self._log("GUI", f"Stopping {name} process.")
+        process.terminate()
+        if process.waitForFinished(1500):
+            return
+        self._log("GUI", f"{name} did not stop gracefully; killing owned process.")
+        process.kill()
+        process.waitForFinished(1500)
+
     def stop(self):
         self._starting = False; self._stopping = True; self.state = "Stopping..."; self._emit()
-        for process, owned in ((self.tunnel, self._tunnel_started), (self.mcp, self._mcp_started)):
-            if owned and process.state() != QProcess.NotRunning:
-                process.terminate()
-                if not process.waitForFinished(1500): process.kill(); process.waitForFinished(1000)
+        # The tunnel depends on MCP, so stop it first. Ownership flags prevent
+        # an externally managed process (including one using our port) from
+        # ever being terminated here.
+        self._stop_owned_process(self.tunnel, self._tunnel_started, "Tunnel")
+        self._stop_owned_process(self.mcp, self._mcp_started, "MCP")
         self._tunnel_started = self._mcp_started = self._stopping = False
         self.state = "Disconnected"; self.monitor.stop(); self._log("GUI", "Connection stopped."); self._emit()
 
@@ -227,6 +244,9 @@ class ChatGPTIntegrationWidget(QWidget):
         self.manager.start(self.path.text(),self.tunnel_id.text(),key,self.port.value())
     def auto_start_connection(self):
         if self.auto_start.isChecked(): self.start()
+    def shutdown(self):
+        """Stop child processes owned by this integration widget."""
+        self.manager.stop()
     def _status(self,state,mcp,tunnel):
         color="#16833b" if state=="Connected" else ("#b42318" if state=="Error" else "#666")
         self.connection_status.setText(f"● {state}"); self.connection_status.setStyleSheet(f"color:{color};font-weight:600")
