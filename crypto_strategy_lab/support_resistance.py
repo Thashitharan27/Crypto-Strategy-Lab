@@ -100,6 +100,10 @@ class SRContext:
     support_last_test_index: Optional[int] = None
     resistance_last_test_index: Optional[int] = None
     confirmation_rating: str = "NEUTRAL"
+    support_zone_low: Optional[float] = None
+    support_zone_high: Optional[float] = None
+    resistance_zone_low: Optional[float] = None
+    resistance_zone_high: Optional[float] = None
 
 
 class SwingDetector:
@@ -586,6 +590,10 @@ class SupportResistanceDetector:
             bars_since_support_test=support_metrics["bars_since_test"], bars_since_resistance_test=resistance_metrics["bars_since_test"],
             support_last_test_index=support_metrics["last_test_index"], resistance_last_test_index=resistance_metrics["last_test_index"],
             confirmation_rating=confirmation_rating,
+            support_zone_low=nearest_support.zone_bottom if nearest_support else None,
+            support_zone_high=nearest_support.zone_top if nearest_support else None,
+            resistance_zone_low=nearest_resistance.zone_bottom if nearest_resistance else None,
+            resistance_zone_high=nearest_resistance.zone_top if nearest_resistance else None,
         )
         self._context_cache[cache_key] = context
         return context

@@ -15,6 +15,7 @@ from .worker import BacktestWorker
 from .portfolio_worker import PortfolioWorker
 from .profile_editor import StrategyProfilesWidget
 from crypto_strategy_lab.output_manager import planned_run_dir
+from crypto_strategy_lab.support_resistance_analysis import build_sr_event_context_summary
 from ..paths import DATA_DIR
 
 class PolicyComboBox(QComboBox):
@@ -155,7 +156,17 @@ class MainWindow(QMainWindow):
         self.enable_coin_flip_sizing=QCheckBox("Enable 3:1 Coin-Flip Sizing (1:1 SL/TP)"); self.coin_flip_seed=QLineEdit("42")
         random_group.addRow("",self.enable_coin_flip_sizing); random_group.addRow("Coin Flip Seed",self.coin_flip_seed)
         self.enable_di_direction_sizing=QCheckBox("Enable DI-Direction Selection"); self.flip_filtered_di_direction=QCheckBox("Flip direction after filters pass (Long ↔ Short)"); self.di_direction_long_min_spread=self._spin(30,0,1000,3); self.di_direction_short_min_spread=self._spin(30,0,1000,3); self.di_long_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_short_reward_risk_ratio=self._spin(1,0.01,100,3)
-        self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.enable_sr_hold_confirmation=QCheckBox("Enable"); self.sr_hold_confirmation_bars=QSpinBox(); self.sr_hold_confirmation_bars.setRange(1,100); self.sr_hold_confirmation_bars.setValue(3); self.sr_hold_confirmation_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_tolerance_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_basis=QComboBox(); self.sr_break_basis.addItems(["CLOSE","WICK"]); self.sr_filter_mode=QComboBox(); self.sr_filter_mode.addItems(["ANALYSIS_ONLY","BLOCK_BAD_LOCATION","REQUIRE_GOOD_LOCATION","REQUIRE_CONFIRMED_HOLD","BLOCK_BROKEN_STRUCTURE","CUSTOM_SR_STATE_FILTER"]); self.sr_long_state_requirement=QComboBox(); self.sr_short_state_requirement=QComboBox(); sr_state_options=["ANY","SUPPORT_HELD","SUPPORT_TESTING","SUPPORT_BROKEN","APPROACHING_SUPPORT","RESISTANCE_HELD","RESISTANCE_TESTING","RESISTANCE_BROKEN"]; self.sr_long_state_requirement.addItems(sr_state_options); self.sr_short_state_requirement.addItems(sr_state_options)
+        self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.enable_sr_hold_confirmation=QCheckBox("Enable"); self.sr_hold_confirmation_bars=QSpinBox(); self.sr_hold_confirmation_bars.setRange(1,100); self.sr_hold_confirmation_bars.setValue(3); self.sr_hold_confirmation_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_tolerance_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_basis=QComboBox(); self.sr_break_basis.addItems(["CLOSE","WICK"]); self.sr_filter_mode=PolicyComboBox()
+        for mode_label,mode_value in [("Analysis Only","ANALYSIS_ONLY"),("Filter Entries","TRADE_CONTEXT_FILTER"),("Confirmation","REQUIRE_CONFIRMED_HOLD"),("BLOCK_BAD_LOCATION","BLOCK_BAD_LOCATION"),("REQUIRE_GOOD_LOCATION","REQUIRE_GOOD_LOCATION"),("BLOCK_BROKEN_STRUCTURE","BLOCK_BROKEN_STRUCTURE"),("CUSTOM_SR_STATE_FILTER","CUSTOM_SR_STATE_FILTER")]:
+            self.sr_filter_mode.addItem(mode_label,mode_value)
+        self.sr_long_state_requirement=QComboBox(); self.sr_short_state_requirement=QComboBox(); sr_state_options=["ANY","SUPPORT_HELD","SUPPORT_TESTING","SUPPORT_BROKEN","APPROACHING_SUPPORT","RESISTANCE_HELD","RESISTANCE_TESTING","RESISTANCE_BROKEN"]; self.sr_long_state_requirement.addItems(sr_state_options); self.sr_short_state_requirement.addItems(sr_state_options)
+        self.long_sr_rule_support_bounce=QCheckBox("Support Bounce"); self.long_sr_rule_support_bounce.setChecked(True)
+        self.long_sr_rule_resistance_breakout=QCheckBox("Resistance Breakout"); self.long_sr_rule_resistance_breakout.setChecked(True)
+        self.long_sr_rule_near_support=QCheckBox("Near Support"); self.long_sr_rule_near_resistance=QCheckBox("Near Resistance")
+        self.short_sr_rule_resistance_rejection=QCheckBox("Resistance Rejection"); self.short_sr_rule_resistance_rejection.setChecked(True)
+        self.short_sr_rule_support_breakdown=QCheckBox("Support Breakdown"); self.short_sr_rule_support_breakdown.setChecked(True)
+        self.short_sr_rule_near_resistance=QCheckBox("Near Resistance"); self.short_sr_rule_near_support=QCheckBox("Near Support")
+        self.sr_trade_context_match_mode=PolicyComboBox(); self.sr_trade_context_match_mode.addItem("Any selected condition","ANY"); self.sr_trade_context_match_mode.addItem("All selected conditions","ALL")
         self.enable_direction_voting=QCheckBox("Enable direction voting for entries")
         self.direction_vote_test_mode=QComboBox()
         self.direction_vote_test_mode.addItem("Custom combination", "")
@@ -382,34 +393,188 @@ class MainWindow(QMainWindow):
         self.tp.setVisible(False); tp_label=strat.labelForField(self.tp)
         if tp_label: tp_label.setVisible(False)
         risk.setRowVisible(self.trade_direction,False)
-        scroll.setWidget(inner); outer.addWidget(scroll); self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_direction_voting_tab(); self.update_dynamic()
+        scroll.setWidget(inner); outer.addWidget(scroll); self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_direction_voting_tab(); self._build_support_resistance_tab(); self.update_dynamic()
 
     def _build_direction_voting_tab(self):
         page=QWidget(); layout=QVBoxLayout(page)
         intro=QLabel("DI pressure is the validated default direction signal. +DI above -DI selects Long; -DI above +DI selects Short.")
         intro.setWordWrap(True); layout.addWidget(intro)
         self.direction_voting_box.setParent(page); layout.addWidget(self.direction_voting_box)
-        sr_box=QGroupBox("Support / Resistance Analysis"); sr_form=QFormLayout(sr_box)
-        for lab,w in [
-            ("",self.enable_support_resistance_analysis),
-            ("Pivot Left",self.sr_pivot_left),
-            ("Pivot Right",self.sr_pivot_right),
-            ("Lookback Bars",self.sr_lookback_bars),
-            ("Zone Width (ATR)",self.sr_zone_width_atr),
-            ("Near Distance (ATR)",self.sr_near_distance_atr),
-            ("Hold Confirmation",self.enable_sr_hold_confirmation),
-            ("Confirmation Bars",self.sr_hold_confirmation_bars),
-            ("Confirmation Distance (ATR)",self.sr_hold_confirmation_atr),
-            ("Break Tolerance (ATR)",self.sr_break_tolerance_atr),
-            ("Break Basis",self.sr_break_basis),
-            ("Filter Mode",self.sr_filter_mode),
-            ("Long S/R Requirement",self.sr_long_state_requirement),
-            ("Short S/R Requirement",self.sr_short_state_requirement),
-        ]: sr_form.addRow(lab,w)
-        layout.addWidget(sr_box)
         layout.addStretch(1)
         self.tabs.addTab(page,"Direction Voting")
         self.analysis_level.setCurrentText("Standard (Recommended)"); self._apply_analysis_preset(); self._set_analysis_advanced(False)
+
+    def _build_support_resistance_tab(self):
+        page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); layout=QVBoxLayout(inner)
+        intro=QLabel("Support/Resistance analysis detects swing-based price structure and (optionally) uses it to filter or confirm entries. Analysis Only is the recommended default: it records structure and reports on it without changing which trades are taken.")
+        intro.setWordWrap(True); layout.addWidget(intro)
+
+        enable_box=QGroupBox("Enable / Mode"); enable_form=QFormLayout(enable_box)
+        self.enable_support_resistance_analysis.setToolTip("Turns on support/resistance detection. When off, no S/R data is calculated, recorded, or reported.")
+        self.sr_filter_mode.setToolTip(
+            "Analysis Only (recommended default): S/R data is recorded and reported, but never rejects or alters trades.\n"
+            "Filter Entries: allow/reject LONG and SHORT signals using the Trade Context rules below.\n"
+            "Confirmation: acts as a confirmation gate, requiring a held support/resistance test.\n"
+            "Other legacy modes filter using the overall location rating or specific structure states."
+        )
+        enable_form.addRow("",self.enable_support_resistance_analysis)
+        enable_form.addRow("Mode",self.sr_filter_mode)
+        layout.addWidget(enable_box)
+
+        trade_context_box=QGroupBox("Trade Context"); trade_context_layout=QVBoxLayout(trade_context_box)
+        trade_context_form=QFormLayout(); trade_context_layout.addLayout(trade_context_form)
+        self.sr_trade_context_note=QLabel(); self.sr_trade_context_note.setWordWrap(True)
+        self.sr_long_state_requirement.setToolTip("Legacy custom-state requirement for LONG entries (used by CUSTOM_SR_STATE_FILTER mode). Only applied when Mode is not ANALYSIS_ONLY.")
+        self.sr_short_state_requirement.setToolTip("Legacy custom-state requirement for SHORT entries (used by CUSTOM_SR_STATE_FILTER mode). Only applied when Mode is not ANALYSIS_ONLY.")
+        self.sr_trade_context_match_mode.setToolTip("How enabled rules below combine when Mode is Filter Entries: Any selected condition (at least one enabled rule must match) or All selected conditions (every enabled rule must match).")
+        trade_context_form.addRow("Rule Matching",self.sr_trade_context_match_mode)
+        long_short_row=QHBoxLayout()
+        long_rules_box=QGroupBox("LONG"); long_rules_form=QFormLayout(long_rules_box)
+        for w in (self.long_sr_rule_support_bounce,self.long_sr_rule_resistance_breakout,self.long_sr_rule_near_support,self.long_sr_rule_near_resistance):
+            long_rules_form.addRow("",w)
+        short_rules_box=QGroupBox("SHORT"); short_rules_form=QFormLayout(short_rules_box)
+        for w in (self.short_sr_rule_resistance_rejection,self.short_sr_rule_support_breakdown,self.short_sr_rule_near_resistance,self.short_sr_rule_near_support):
+            short_rules_form.addRow("",w)
+        long_short_row.addWidget(long_rules_box); long_short_row.addWidget(short_rules_box)
+        trade_context_layout.addLayout(long_short_row)
+        trade_context_layout.addWidget(self.sr_trade_context_note)
+        layout.addWidget(trade_context_box)
+
+        proximity_box=QGroupBox("Proximity"); proximity_form=QFormLayout(proximity_box)
+        self.sr_near_distance_atr.setToolTip("Maximum ATR-normalized distance between price and an S/R zone for the signal to be classified as near that zone.")
+        self.sr_zone_width_atr.setToolTip("Half-width/tolerance used when merging detected pivot levels into Support/Resistance zones.")
+        proximity_form.addRow("Near S/R Distance (ATR)",self.sr_near_distance_atr)
+        proximity_form.addRow("Zone Width (ATR)",self.sr_zone_width_atr)
+        layout.addWidget(proximity_box)
+
+        breakout_box=QGroupBox("Breakout Confirmation"); breakout_form=QFormLayout(breakout_box)
+        self.enable_sr_hold_confirmation.setText("Require breakout confirmation")
+        self.enable_sr_hold_confirmation.setToolTip("How long price must remain beyond/beside a level before a break or hold is confirmed.")
+        self.sr_hold_confirmation_bars.setToolTip("Number of bars price must hold beyond a level before confirmation.")
+        self.sr_hold_confirmation_atr.setToolTip("Minimum distance beyond a zone (in ATR) needed for confirmation.")
+        self.sr_break_tolerance_atr.setToolTip("Small tolerance (in ATR) around the S/R zone used when identifying breaks.")
+        self.sr_break_basis.setToolTip("Price basis used to evaluate breaks: CLOSE (candle close) or WICK (intrabar high/low).")
+        breakout_form.addRow("",self.enable_sr_hold_confirmation)
+        breakout_form.addRow("Confirmation Bars",self.sr_hold_confirmation_bars)
+        breakout_form.addRow("Confirmation Distance (ATR)",self.sr_hold_confirmation_atr)
+        breakout_form.addRow("Break Tolerance (ATR)",self.sr_break_tolerance_atr)
+        breakout_form.addRow("Break Basis",self.sr_break_basis)
+        layout.addWidget(breakout_box)
+
+        advanced_box=QGroupBox("Advanced Detection Settings"); advanced_box.setCheckable(True); advanced_box.setChecked(False)
+        advanced_form=QFormLayout(advanced_box)
+        self.sr_detection_preset=QComboBox(); self.sr_detection_preset.addItems(["Conservative","Balanced","Sensitive","Custom"]); self.sr_detection_preset.setCurrentText("Balanced")
+        self.sr_detection_preset.setToolTip("Conservative uses fewer, stronger levels. Balanced is the default. Sensitive detects more levels. Custom is selected automatically after any manual edit below.")
+        self.sr_pivot_left.setToolTip("Candles to the left of a candidate swing high/low used to confirm it as a pivot.")
+        self.sr_pivot_right.setToolTip("Candles to the right of a candidate swing high/low required before it is confirmed. A pivot is not available to the strategy until this many bars later, which prevents look-ahead bias.")
+        self.sr_lookback_bars.setToolTip("How much historical price structure (in bars) is considered when searching for levels.")
+        advanced_form.addRow("Detection Preset",self.sr_detection_preset)
+        advanced_form.addRow("Pivot Left",self.sr_pivot_left)
+        advanced_form.addRow("Pivot Right",self.sr_pivot_right)
+        advanced_form.addRow("Lookback Bars",self.sr_lookback_bars)
+        advanced_content=QWidget(); advanced_content.setLayout(advanced_form)
+        advanced_wrapper=QVBoxLayout(advanced_box); advanced_wrapper.addWidget(advanced_content)
+        advanced_box.toggled.connect(advanced_content.setVisible); advanced_content.setVisible(advanced_box.isChecked())
+        layout.addWidget(advanced_box)
+
+        summary_box=QGroupBox("Current S/R Rules"); summary_layout=QVBoxLayout(summary_box)
+        self.sr_summary_label=QLabel(); self.sr_summary_label.setWordWrap(True)
+        summary_layout.addWidget(self.sr_summary_label)
+        layout.addWidget(summary_box)
+        layout.addStretch(1)
+
+        self._sr_detection_presets={
+            "Conservative":{"pivot_left":8,"pivot_right":8,"lookback":300,"zone_width_atr":0.75,"break_tolerance_atr":0.35},
+            "Balanced":{"pivot_left":5,"pivot_right":5,"lookback":200,"zone_width_atr":0.5,"break_tolerance_atr":0.25},
+            "Sensitive":{"pivot_left":3,"pivot_right":3,"lookback":150,"zone_width_atr":0.35,"break_tolerance_atr":0.15},
+        }
+        self.sr_detection_preset.currentTextChanged.connect(self._apply_sr_detection_preset)
+        for control in (self.sr_pivot_left,self.sr_pivot_right,self.sr_lookback_bars,self.sr_zone_width_atr,self.sr_break_tolerance_atr):
+            control.valueChanged.connect(self._mark_sr_preset_custom)
+        for control in (self.enable_support_resistance_analysis,self.enable_sr_hold_confirmation):
+            control.toggled.connect(self.update_dynamic)
+        for control in (self.sr_filter_mode,self.sr_long_state_requirement,self.sr_short_state_requirement,self.sr_break_basis,self.sr_trade_context_match_mode):
+            control.currentTextChanged.connect(self.update_dynamic)
+        for control in (self.sr_near_distance_atr,self.sr_zone_width_atr,self.sr_hold_confirmation_bars,self.sr_hold_confirmation_atr,self.sr_break_tolerance_atr,self.sr_pivot_left,self.sr_pivot_right,self.sr_lookback_bars):
+            control.valueChanged.connect(self.update_dynamic)
+        for control in (self.long_sr_rule_support_bounce,self.long_sr_rule_resistance_breakout,self.long_sr_rule_near_support,self.long_sr_rule_near_resistance,self.short_sr_rule_resistance_rejection,self.short_sr_rule_support_breakdown,self.short_sr_rule_near_resistance,self.short_sr_rule_near_support):
+            control.toggled.connect(self.update_dynamic)
+
+        outer.addWidget(scroll); scroll.setWidget(inner)
+        self.tabs.addTab(page,"Support & Resistance")
+        self._update_sr_tab_state()
+
+    def _apply_sr_detection_preset(self,name):
+        preset=self._sr_detection_presets.get(name)
+        if not preset: return
+        self._applying_sr_preset=True
+        try:
+            self.sr_pivot_left.setValue(preset["pivot_left"]); self.sr_pivot_right.setValue(preset["pivot_right"]); self.sr_lookback_bars.setValue(preset["lookback"]); self.sr_zone_width_atr.setValue(preset["zone_width_atr"]); self.sr_break_tolerance_atr.setValue(preset["break_tolerance_atr"])
+        finally:
+            self._applying_sr_preset=False
+
+    def _mark_sr_preset_custom(self,*args):
+        if getattr(self,"_applying_sr_preset",False): return
+        if self.sr_detection_preset.currentText()!="Custom":
+            self.sr_detection_preset.blockSignals(True); self.sr_detection_preset.setCurrentText("Custom"); self.sr_detection_preset.blockSignals(False)
+
+    def _sync_sr_preset_from_values(self):
+        current={"pivot_left":self.sr_pivot_left.value(),"pivot_right":self.sr_pivot_right.value(),"lookback":self.sr_lookback_bars.value(),"zone_width_atr":round(self.sr_zone_width_atr.value(),3),"break_tolerance_atr":round(self.sr_break_tolerance_atr.value(),3)}
+        matched="Custom"
+        for name,preset in self._sr_detection_presets.items():
+            if preset=={**preset,**{k:current[k] for k in preset if k in current}} and current==preset:
+                matched=name; break
+        self._applying_sr_preset=True
+        try: self.sr_detection_preset.setCurrentText(matched)
+        finally: self._applying_sr_preset=False
+
+    def _update_sr_tab_state(self):
+        if not hasattr(self,"sr_summary_label"): return
+        sr_enabled=self.enable_support_resistance_analysis.isChecked()
+        mode=self.sr_filter_mode.currentText()
+        mode_label={"ANALYSIS_ONLY":"Analysis Only","TRADE_CONTEXT_FILTER":"Filter Entries","REQUIRE_CONFIRMED_HOLD":"Confirmation"}.get(mode,mode)
+        match_mode_label={"ANY":"Any selected condition","ALL":"All selected conditions"}.get(self.sr_trade_context_match_mode.currentText(),self.sr_trade_context_match_mode.currentText())
+        analysis_only=mode=="ANALYSIS_ONLY"
+        context_rule_mode=mode=="TRADE_CONTEXT_FILTER"
+        for box in (self.sr_long_state_requirement,self.sr_short_state_requirement):
+            box.setEnabled(sr_enabled and mode=="CUSTOM_SR_STATE_FILTER")
+        long_rule_controls=(self.long_sr_rule_support_bounce,self.long_sr_rule_resistance_breakout,self.long_sr_rule_near_support,self.long_sr_rule_near_resistance)
+        short_rule_controls=(self.short_sr_rule_resistance_rejection,self.short_sr_rule_support_breakdown,self.short_sr_rule_near_resistance,self.short_sr_rule_near_support)
+        for control in long_rule_controls+short_rule_controls:
+            control.setEnabled(sr_enabled)
+        self.sr_trade_context_match_mode.setEnabled(sr_enabled and context_rule_mode)
+        confirmation_enabled=sr_enabled and self.enable_sr_hold_confirmation.isChecked()
+        for control in (self.sr_hold_confirmation_bars,self.sr_hold_confirmation_atr):
+            control.setEnabled(confirmation_enabled)
+        self.enable_sr_hold_confirmation.setEnabled(sr_enabled)
+        for control in (self.sr_break_tolerance_atr,self.sr_break_basis,self.sr_near_distance_atr,self.sr_zone_width_atr,self.sr_filter_mode):
+            control.setEnabled(sr_enabled)
+        if not sr_enabled:
+            self.sr_trade_context_note.setText("Support/Resistance analysis is disabled.")
+        elif analysis_only:
+            self.sr_trade_context_note.setText("Mode is Analysis Only: these requirements are visible for preparation but do not filter or reject trades.")
+        elif context_rule_mode:
+            self.sr_trade_context_note.setText(f"Mode is Filter Entries: a signal is allowed when {match_mode_label.lower()} below is true.")
+        else:
+            self.sr_trade_context_note.setText(f"These requirements filter/confirm entries because Mode is {mode_label}, not Analysis Only.")
+        if not sr_enabled:
+            summary="Support/Resistance analysis is disabled."
+        else:
+            long_rules=[label for control,label in ((self.long_sr_rule_support_bounce,"Support bounce"),(self.long_sr_rule_resistance_breakout,"Resistance breakout"),(self.long_sr_rule_near_support,"Near support"),(self.long_sr_rule_near_resistance,"Near resistance")) if control.isChecked()]
+            short_rules=[label for control,label in ((self.short_sr_rule_resistance_rejection,"Resistance rejection"),(self.short_sr_rule_support_breakdown,"Support breakdown"),(self.short_sr_rule_near_resistance,"Near resistance"),(self.short_sr_rule_near_support,"Near support")) if control.isChecked()]
+            long_lines="\n- ".join(long_rules) if long_rules else "(none enabled)"
+            short_lines="\n- ".join(short_rules) if short_rules else "(none enabled)"
+            summary=(
+                f"LONG\n- {long_lines}\n\n"
+                f"SHORT\n- {short_lines}\n\n"
+                f"Mode: {mode_label}\n"
+                f"Rule Matching: {match_mode_label}\n"
+                f"Detection: {self.sr_detection_preset.currentText()}\n"
+                f"Near Distance: {self.sr_near_distance_atr.value():.2f} ATR\n"
+                f"Zone Width: {self.sr_zone_width_atr.value():.2f} ATR\n"
+                f"Breakout Confirmation: {'Enabled' if self.enable_sr_hold_confirmation.isChecked() else 'Disabled'}"
+            )
+        self.sr_summary_label.setText(summary)
     def _build_di_strategy_tab(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); form=QVBoxLayout(inner)
         intro=QLabel("DI-direction strategy settings live here. Shared data, risk, fees, execution, telemetry, and output settings remain on the Configuration tab.")
@@ -610,7 +775,11 @@ class MainWindow(QMainWindow):
         thread=self.portfolio_thread; self.portfolio_thread=None; self.portfolio_worker=None; self.portfolio_run_btn.setEnabled(True)
         if thread is not None: thread.deleteLater()
     def _build_summary(self):
-        page=QWidget(); l=QVBoxLayout(page); self.summary_table=QTableWidget(0,2); self.summary_table.setHorizontalHeaderLabels(["Metric","Value"]); self.summary_table.horizontalHeader().setStretchLastSection(True); self.combo_table=QTableWidget(0,5); self.combo_table.setHorizontalHeaderLabels(["Exit Combination","Count","Percentage","Average Net R","Total Net R"]); self.combo_table.setSortingEnabled(True); self.comparison_heading=QLabel("Exit outcomes"); l.addWidget(QLabel("Performance overview")); l.addWidget(self.summary_table); l.addWidget(self.comparison_heading); l.addWidget(self.combo_table); self.tabs.addTab(page,"Summary")
+        page=QWidget(); l=QVBoxLayout(page); self.summary_table=QTableWidget(0,2); self.summary_table.setHorizontalHeaderLabels(["Metric","Value"]); self.summary_table.horizontalHeader().setStretchLastSection(True); self.combo_table=QTableWidget(0,5); self.combo_table.setHorizontalHeaderLabels(["Exit Combination","Count","Percentage","Average Net R","Total Net R"]); self.combo_table.setSortingEnabled(True); self.comparison_heading=QLabel("Exit outcomes"); l.addWidget(QLabel("Performance overview")); l.addWidget(self.summary_table); l.addWidget(self.comparison_heading); l.addWidget(self.combo_table)
+        sr_summary_box=QGroupBox("Support / Resistance"); sr_summary_layout=QVBoxLayout(sr_summary_box)
+        self.sr_summary_panel_label=QLabel("No backtest run yet."); self.sr_summary_panel_label.setWordWrap(True)
+        sr_summary_layout.addWidget(self.sr_summary_panel_label); l.addWidget(sr_summary_box)
+        self.tabs.addTab(page,"Summary")
     def _build_log(self):
         # Keep an internal buffer for diagnostics and saved log files without
         # constructing a large interactive Log tab that the workflow does not use.
@@ -642,7 +811,7 @@ class MainWindow(QMainWindow):
         values.update({"vwap_breakout_lookback_hours":self.vwap_breakout_hours.value(),"vwap_volume_lookback":self.vwap_volume_lookback.value(),"vwap_volume_multiplier":self.vwap_volume_multiplier.value(),"vwap_slope_lookback":self.vwap_slope_lookback.value(),"vwap_atr_pct_minimum":self.vwap_atr_min.value(),"vwap_atr_pct_maximum":self.vwap_atr_max.value(),"vwap_confirmation_mode":self.vwap_confirmation_mode.currentText(),"vwap_retest_window_candles":self.vwap_retest_window.value(),"vwap_retest_tolerance_atr":self.vwap_retest_tolerance.value()})
         values.update({"enable_coin_flip_sizing":self.enable_coin_flip_sizing.isChecked(),"coin_flip_seed":self.coin_flip_seed.text().strip(),"coin_flip_large_multiplier":3.0,"coin_flip_small_multiplier":1.0})
         values.update({"enable_di_direction_sizing":self.enable_di_direction_sizing.isChecked(),"flip_filtered_di_direction":self.flip_filtered_di_direction.isChecked(),"di_direction_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_long_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_short_minimum_spread":self.di_direction_short_min_spread.value(),"di_execution_mode":self.di_execution_mode.currentText(),"di_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_long_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_short_reward_risk_ratio":self.di_short_reward_risk_ratio.value()})
-        values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"enable_sr_hold_confirmation":self.enable_sr_hold_confirmation.isChecked(),"sr_hold_confirmation_bars":self.sr_hold_confirmation_bars.value(),"sr_hold_confirmation_atr":self.sr_hold_confirmation_atr.value(),"sr_break_tolerance_atr":self.sr_break_tolerance_atr.value(),"sr_break_basis":self.sr_break_basis.currentText(),"sr_filter_mode":self.sr_filter_mode.currentText(),"sr_long_state_requirement":self.sr_long_state_requirement.currentText(),"sr_short_state_requirement":self.sr_short_state_requirement.currentText()})
+        values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"enable_sr_hold_confirmation":self.enable_sr_hold_confirmation.isChecked(),"sr_hold_confirmation_bars":self.sr_hold_confirmation_bars.value(),"sr_hold_confirmation_atr":self.sr_hold_confirmation_atr.value(),"sr_break_tolerance_atr":self.sr_break_tolerance_atr.value(),"sr_break_basis":self.sr_break_basis.currentText(),"sr_filter_mode":self.sr_filter_mode.currentText(),"sr_long_state_requirement":self.sr_long_state_requirement.currentText(),"sr_short_state_requirement":self.sr_short_state_requirement.currentText(),"sr_trade_context_match_mode":self.sr_trade_context_match_mode.currentText(),"long_sr_rule_support_bounce":self.long_sr_rule_support_bounce.isChecked(),"long_sr_rule_resistance_breakout":self.long_sr_rule_resistance_breakout.isChecked(),"long_sr_rule_near_support":self.long_sr_rule_near_support.isChecked(),"long_sr_rule_near_resistance":self.long_sr_rule_near_resistance.isChecked(),"short_sr_rule_resistance_rejection":self.short_sr_rule_resistance_rejection.isChecked(),"short_sr_rule_support_breakdown":self.short_sr_rule_support_breakdown.isChecked(),"short_sr_rule_near_resistance":self.short_sr_rule_near_resistance.isChecked(),"short_sr_rule_near_support":self.short_sr_rule_near_support.isChecked()})
         values.update({"enable_direction_voting":self.enable_direction_voting.isChecked(),"direction_vote_use_di":self.direction_vote_use_di.isChecked(),"direction_vote_use_structure":False,"direction_vote_structure_lookback":self.direction_vote_structure_lookback.value(),"direction_vote_use_momentum":False,"direction_vote_momentum_lookback_hours":self.direction_vote_momentum_lookback.value(),"direction_vote_momentum_threshold":self.direction_vote_momentum_threshold.value(),"direction_vote_use_volume_pressure":False,"direction_vote_volume_lookback":self.direction_vote_volume_lookback.value(),"direction_vote_volume_threshold":self.direction_vote_volume_threshold.value(),"direction_vote_use_higher_timeframe":False,"direction_vote_higher_timeframe_hours":self.direction_vote_htf_hours.value(),"direction_vote_higher_timeframe_sma_period":self.direction_vote_htf_sma.value(),"direction_vote_minimum_votes":1})
         values.update({"enable_di_regime_reward_risk":self.enable_di_regime_reward_risk.isChecked(),"di_regime_bear_return_threshold":parse_percentage(self.di_regime_bear_return_threshold.text()),"di_long_bull_reward_risk_ratio":self.di_long_bull_reward_risk_ratio.value(),"di_long_bear_reward_risk_ratio":self.di_long_bear_reward_risk_ratio.value(),"di_long_sideways_reward_risk_ratio":self.di_long_sideways_reward_risk_ratio.value(),"di_short_bull_reward_risk_ratio":self.di_short_bull_reward_risk_ratio.value(),"di_short_bear_reward_risk_ratio":self.di_short_bear_reward_risk_ratio.value(),"di_short_sideways_reward_risk_ratio":self.di_short_sideways_reward_risk_ratio.value()})
         values.update({"enable_bull_long_conditional_reward_risk":self.enable_bull_long_conditional_reward_risk.isChecked(),"bull_long_conditional_bb_width_minimum":parse_percentage(self.bull_long_conditional_bb_width_minimum.text()),"bull_long_conditional_adx_maximum":self.bull_long_conditional_adx_maximum.value(),"bull_long_conditional_reward_risk_ratio":self.bull_long_conditional_reward_risk_ratio.value()})
@@ -763,6 +932,7 @@ class MainWindow(QMainWindow):
     def update_dynamic(self):
         self.entry_interval.setEnabled(self.entry_mode.currentData()=="EVERY_N_CANDLES")
         self.max_pairs.setEnabled(self.entry_mode.currentData()=="EVERY_N_CANDLES")
+        self._update_sr_tab_state()
         if hasattr(self,"direction_voting_form"):
             voting_enabled=self.enable_direction_voting.isChecked()
             voter_controls=(self.direction_vote_use_di,self.direction_vote_use_structure,self.direction_vote_use_momentum,self.direction_vote_use_volume,self.direction_vote_use_htf)
@@ -973,11 +1143,15 @@ class MainWindow(QMainWindow):
             pass
     def _finish_summary_view(self):
         if self._pending_ui_results is None: return
-        summary,_,_,_=self._pending_ui_results
+        summary,trades,_,_=self._pending_ui_results
         try:
             self.populate_summary(summary)
         except Exception:
             self.append_log("Results display warning (summary):\n"+traceback.format_exc())
+        try:
+            self._update_sr_summary_panel(trades)
+        except Exception:
+            self.append_log("Results display warning (S/R summary):\n"+traceback.format_exc())
         QTimer.singleShot(0,self._finish_results_view)
     def _finish_results_view(self):
         if self._pending_ui_results is None: return
@@ -1005,6 +1179,28 @@ class MainWindow(QMainWindow):
             self.run_btn.setEnabled(True)
             if self._run_failed: self.status.setText("Backtest failed; see the Log tab for details.")
         if thread is not None: thread.deleteLater()
+    def _update_sr_summary_panel(self,trades):
+        if trades is None or trades.empty or ("long_sr_context" not in trades.columns and "short_sr_context" not in trades.columns):
+            self.sr_summary_panel_label.setText("Support/Resistance analysis was not enabled for this run.")
+            return
+        mode=self.sr_filter_mode.currentText() if hasattr(self,"sr_filter_mode") else "ANALYSIS_ONLY"
+        report=build_sr_event_context_summary(trades)
+        candidates=report[report["trade_count"]>=3] if not report.empty else report
+        if candidates.empty:
+            self.sr_summary_panel_label.setText(f"Mode: {mode}\nNot enough trades per S/R context yet for a reliable best/worst comparison (need at least 3 per context).")
+            return
+        ranked=candidates.dropna(subset=["win_rate"])
+        best=ranked.sort_values("win_rate",ascending=False).iloc[0]
+        worst=ranked.sort_values("win_rate",ascending=True).iloc[0]
+        def describe(row):
+            context=str(row["context"]).replace("_"," ").title()
+            r_value=row.get("avg_r")
+            r_text=f"{r_value:+.2f}R" if r_value == r_value else "n/a"
+            return f"{row['direction']} {context} — {format_percentage(row['win_rate'],1)} WR, {r_text}"
+        self.sr_summary_panel_label.setText(
+            f"Mode: {mode}\n\nBest S/R Context:\n{describe(best)}\n\nWorst S/R Context:\n{describe(worst)}"
+        )
+
     def populate_summary(self,s):
         metrics=(("Starting equity",self.equity.value()),("Ending equity",s.get("ending_equity")),("Total return",s.get("total_return_percentage")),("Maximum drawdown",s.get("maximum_drawdown_percentage")),("Trades",s.get("total_trades",s.get("total_pairs"))),("Wins",s.get("wins")),("Losses",s.get("losses")),("Win rate",s.get("win_rate")),("Profit factor",s.get("profit_factor")),("Expectancy",s.get("expectancy")),("Average net R",s.get("average_net_r")),("Total net R",s.get("total_net_r")),("Total fees",s.get("total_fees")),("Signals evaluated",s.get("signals_evaluated")),("Signals traded",s.get("signals_traded")),("Blocked profile opportunities",s.get("blocked_profile_opportunities")))
         metrics=[item for item in metrics if item[1] is not None]; self.summary_table.setRowCount(len(metrics))
@@ -1053,6 +1249,8 @@ class MainWindow(QMainWindow):
         self.enable_coin_flip_sizing.setChecked(bool(values.get("enable_coin_flip_sizing",False))); self.coin_flip_seed.setText(str(values.get("coin_flip_seed",42)))
         legacy_di_minimum=float(values.get("di_direction_minimum_spread",30.0)); legacy_di_ratio=float(values.get("di_reward_risk_ratio",1.0)); self.enable_di_direction_sizing.setChecked(bool(values.get("enable_di_direction_sizing",False))); self.flip_filtered_di_direction.setChecked(bool(values.get("flip_filtered_di_direction",False))); self.di_direction_long_min_spread.setValue(float(values.get("di_direction_long_minimum_spread",legacy_di_minimum))); self.di_direction_short_min_spread.setValue(float(values.get("di_direction_short_minimum_spread",legacy_di_minimum))); self.di_execution_mode.setCurrentText(str(values.get("di_execution_mode","BOTH_SIDES"))); self.di_long_reward_risk_ratio.setValue(float(values.get("di_long_reward_risk_ratio",legacy_di_ratio))); self.di_short_reward_risk_ratio.setValue(float(values.get("di_short_reward_risk_ratio",legacy_di_ratio)))
         self.enable_support_resistance_analysis.setChecked(bool(values.get("enable_support_resistance_analysis",False))); self.sr_pivot_left.setValue(int(values.get("sr_pivot_left",5))); self.sr_pivot_right.setValue(int(values.get("sr_pivot_right",5))); self.sr_lookback_bars.setValue(int(values.get("sr_lookback_bars",200))); self.sr_zone_width_atr.setValue(float(values.get("sr_zone_width_atr",0.5))); self.sr_near_distance_atr.setValue(float(values.get("sr_near_distance_atr",0.75))); self.enable_sr_hold_confirmation.setChecked(bool(values.get("enable_sr_hold_confirmation",False))); self.sr_hold_confirmation_bars.setValue(int(values.get("sr_hold_confirmation_bars",3))); self.sr_hold_confirmation_atr.setValue(float(values.get("sr_hold_confirmation_atr",0.25))); self.sr_break_tolerance_atr.setValue(float(values.get("sr_break_tolerance_atr",0.25))); self.sr_break_basis.setCurrentText(str(values.get("sr_break_basis","CLOSE"))); self.sr_filter_mode.setCurrentText(str(values.get("sr_filter_mode","ANALYSIS_ONLY"))); self.sr_long_state_requirement.setCurrentText(str(values.get("sr_long_state_requirement","ANY"))); self.sr_short_state_requirement.setCurrentText(str(values.get("sr_short_state_requirement","ANY")))
+        self.sr_trade_context_match_mode.setCurrentText(str(values.get("sr_trade_context_match_mode","ANY")).upper()); self.long_sr_rule_support_bounce.setChecked(bool(values.get("long_sr_rule_support_bounce",True))); self.long_sr_rule_resistance_breakout.setChecked(bool(values.get("long_sr_rule_resistance_breakout",True))); self.long_sr_rule_near_support.setChecked(bool(values.get("long_sr_rule_near_support",False))); self.long_sr_rule_near_resistance.setChecked(bool(values.get("long_sr_rule_near_resistance",False))); self.short_sr_rule_resistance_rejection.setChecked(bool(values.get("short_sr_rule_resistance_rejection",True))); self.short_sr_rule_support_breakdown.setChecked(bool(values.get("short_sr_rule_support_breakdown",True))); self.short_sr_rule_near_resistance.setChecked(bool(values.get("short_sr_rule_near_resistance",False))); self.short_sr_rule_near_support.setChecked(bool(values.get("short_sr_rule_near_support",False)))
+        if hasattr(self,"sr_detection_preset"): self._sync_sr_preset_from_values()
         self.enable_direction_voting.setChecked(bool(values.get("enable_direction_voting",True))); self.direction_vote_use_di.setChecked(bool(values.get("direction_vote_use_di",True))); self.direction_vote_use_structure.setChecked(False); self.direction_vote_structure_lookback.setValue(int(values.get("direction_vote_structure_lookback",20))); self.direction_vote_use_momentum.setChecked(False); self.direction_vote_momentum_lookback.setValue(int(values.get("direction_vote_momentum_lookback_hours",24))); self.direction_vote_momentum_threshold.setValue(float(values.get("direction_vote_momentum_threshold",0))); self.direction_vote_use_volume.setChecked(False); self.direction_vote_volume_lookback.setValue(int(values.get("direction_vote_volume_lookback",20))); self.direction_vote_volume_threshold.setValue(float(values.get("direction_vote_volume_threshold",.10))); self.direction_vote_use_htf.setChecked(False); self.direction_vote_htf_hours.setValue(int(values.get("direction_vote_higher_timeframe_hours",4))); self.direction_vote_htf_sma.setValue(int(values.get("direction_vote_higher_timeframe_sma_period",20))); self.direction_vote_minimum.setValue(1)
         self.enable_di_regime_reward_risk.setChecked(bool(values.get("enable_di_regime_reward_risk",False))); self.di_regime_bear_return_threshold.setText(format_percentage(float(values.get("di_regime_bear_return_threshold",-0.20)),2)); self.di_long_bull_reward_risk_ratio.setValue(float(values.get("di_long_bull_reward_risk_ratio",2.0))); self.di_long_bear_reward_risk_ratio.setValue(float(values.get("di_long_bear_reward_risk_ratio",1.0))); self.di_long_sideways_reward_risk_ratio.setValue(float(values.get("di_long_sideways_reward_risk_ratio",2.0))); self.di_short_bull_reward_risk_ratio.setValue(float(values.get("di_short_bull_reward_risk_ratio",1.0))); self.di_short_bear_reward_risk_ratio.setValue(float(values.get("di_short_bear_reward_risk_ratio",1.0))); self.di_short_sideways_reward_risk_ratio.setValue(float(values.get("di_short_sideways_reward_risk_ratio",2.0)))
         self.enable_bull_long_conditional_reward_risk.setChecked(bool(values.get("enable_bull_long_conditional_reward_risk",False))); self.bull_long_conditional_bb_width_minimum.setText(format_percentage(float(values.get("bull_long_conditional_bb_width_minimum",0.05)),2)); self.bull_long_conditional_adx_maximum.setValue(float(values.get("bull_long_conditional_adx_maximum",40.0))); self.bull_long_conditional_reward_risk_ratio.setValue(float(values.get("bull_long_conditional_reward_risk_ratio",1.0)))

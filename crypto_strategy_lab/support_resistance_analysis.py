@@ -8,7 +8,7 @@ from pathlib import Path
 
 def generate_sr_analysis_reports(trades: pd.DataFrame, run_dir: Path) -> dict[str, pd.DataFrame]:
     """Generate support/resistance analysis reports from trade data.
-    
+
     Args:
         trades: Trade results DataFrame from engine.results_frame()
         run_dir: Output directory for CSV files
@@ -27,18 +27,26 @@ def generate_sr_analysis_reports(trades: pd.DataFrame, run_dir: Path) -> dict[st
         reports["support_resistance_analysis.csv"] = sr_analysis
         sr_analysis.to_csv(run_dir / "support_resistance_analysis.csv", index=False)
     
-    # Report 2: Support/Resistance Regime Analysis
+    # Report 2: Support/Resistance Regime Analysis (also written as sr_regime_analysis.csv)
     if "market_regime" in trades.columns:
         sr_regime = _build_sr_regime_analysis(trades)
         if not sr_regime.empty:
             reports["support_resistance_regime_analysis.csv"] = sr_regime
             sr_regime.to_csv(run_dir / "support_resistance_regime_analysis.csv", index=False)
+            sr_regime.to_csv(run_dir / "sr_regime_analysis.csv", index=False)
     
-    # Report 3: Support/Resistance Distance Buckets
+    # Report 3: Support/Resistance Distance Buckets (also written as sr_distance_analysis.csv)
     sr_distance = _build_sr_distance_buckets(trades)
     if not sr_distance.empty:
         reports["support_resistance_distance_buckets.csv"] = sr_distance
         sr_distance.to_csv(run_dir / "support_resistance_distance_buckets.csv", index=False)
+        sr_distance.to_csv(run_dir / "sr_distance_analysis.csv", index=False)
+
+    # Report: S/R event-context analysis (NEAR_SUPPORT/SUPPORT_BOUNCE/etc, entry-time snapshot, may be multi-label)
+    sr_event_context = _build_sr_event_context_analysis(trades)
+    if not sr_event_context.empty:
+        reports["sr_event_context_analysis.csv"] = sr_event_context
+        sr_event_context.to_csv(run_dir / "sr_event_context_analysis.csv", index=False)
 
     for filename, builder in (
         ("support_resistance_hold_analysis.csv", _build_sr_hold_analysis),
@@ -131,6 +139,34 @@ def _build_sr_test_count_analysis(trades: pd.DataFrame) -> pd.DataFrame:
                 row.update({"market_regime": keys[regime_index] if regime_index is not None else None, "structure_type": structure, "test_bucket": keys[0], "state": keys[state_index] if state_index is not None else None})
                 rows.append(row)
     return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def build_sr_event_context_summary(trades: pd.DataFrame) -> pd.DataFrame:
+    """Public entry point for GUI/report consumers: same table written to sr_event_context_analysis.csv."""
+    return _build_sr_event_context_analysis(trades)
+
+
+def _build_sr_event_context_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    """S/R performance grouped by entry-time event context labels (NEAR_SUPPORT, SUPPORT_BOUNCE, RESISTANCE_REJECTION,
+    RESISTANCE_BREAKOUT, SUPPORT_BREAKDOWN, NO_NEARBY_SR). A trade may carry multiple labels."""
+    rows = []
+    for direction, prefix, side_values in (("LONG", "long_", {"LONG", "BOTH"}), ("SHORT", "short_", {"SHORT", "BOTH"})):
+        context_col = f"{prefix}sr_context"
+        if context_col not in trades.columns or "side" not in trades.columns:
+            continue
+        selected = trades[trades["side"].isin(side_values)].copy()
+        selected = selected[selected[context_col].notna()]
+        if selected.empty:
+            continue
+        selected["_sr_context_label"] = selected[context_col].str.split("|")
+        exploded = selected.explode("_sr_context_label")
+        for label, group in exploded.groupby("_sr_context_label", observed=True):
+            rows.append(_sr_stats_row(label, direction, group, prefix))
+    if not rows:
+        return pd.DataFrame()
+    result = pd.DataFrame(rows).rename(columns={"location": "context"})
+    cols = ["context", "direction"] + [c for c in result.columns if c not in ("context", "direction")]
+    return result[cols]
 
 
 def _build_sr_analysis(trades: pd.DataFrame) -> pd.DataFrame:

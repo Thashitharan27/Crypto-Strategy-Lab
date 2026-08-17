@@ -461,6 +461,15 @@ TRADE_R_COLUMN_METADATA = {
     "intrabar_partial_tp_ordering": "PESSIMISTIC uses STOP_FIRST; OPTIMISTIC uses TP1_THEN_TP2_THEN_STOP. Each leg is resolved independently.",
     "*_remaining_quantity": "Quantity still protected by reduce-only-equivalent exit logic after partial fills.",
     "*_tp1_* / *_tp2_* / *_stop_*": "Independent partial-fill quantities, times, prices, gross PnL, fees, and net PnL; unused fills are null.",
+    "*_sr_context": "Pipe-separated entry-time S/R event labels for the leg (NEAR_SUPPORT, NEAR_RESISTANCE, SUPPORT_BOUNCE, RESISTANCE_REJECTION, RESISTANCE_BREAKOUT, SUPPORT_BREAKDOWN, or NO_NEARBY_SR); derived from the stored entry-time S/R snapshot only, never recalculated after entry.",
+    "*_sr_support_bounce": "True when support was tested and held at entry time (SUPPORT_BOUNCE label present).",
+    "*_sr_resistance_rejection": "True when resistance was tested and held at entry time (RESISTANCE_REJECTION label present).",
+    "*_sr_resistance_breakout": "True when resistance structure was already broken at entry time (RESISTANCE_BREAKOUT label present).",
+    "*_sr_support_breakdown": "True when support structure was already broken at entry time (SUPPORT_BREAKDOWN label present).",
+    "*_sr_support_zone_low / *_sr_support_zone_high": "Bottom/top price bounds of the nearest confirmed support zone at entry time.",
+    "*_sr_resistance_zone_low / *_sr_resistance_zone_high": "Bottom/top price bounds of the nearest confirmed resistance zone at entry time.",
+    "*_sr_level_price": "Nearest S/R level price relevant to the leg's direction (support for LONG, resistance for SHORT).",
+    "*_sr_zone_low / *_sr_zone_high": "Zone bounds of *_sr_level_price: support zone for LONG legs, resistance zone for SHORT legs.",
 }
 
 

@@ -50,7 +50,7 @@ def test_market_ready_tabs_use_profile_only_strategy_workflow():
     window = MainWindow()
     try:
         tab_names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
-        assert tab_names == ["Backtest Setup", "Direction Voting", "Strategy Profiles", "Summary", "Portfolio"]
+        assert tab_names == ["Backtest Setup", "Direction Voting", "Support & Resistance", "Strategy Profiles", "Summary", "Portfolio"]
         assert "Legacy Strategy" not in tab_names
         values=window.values()
         assert values["enable_strategy_profiles"] is True
@@ -265,6 +265,43 @@ def test_direction_vote_required_count_is_clamped_to_enabled_signals():
         window.direction_vote_use_htf.setChecked(False)
         assert window.direction_vote_minimum.value()==1
         assert "DI pressure alone" in window.direction_vote_status.text()
+    finally:
+        window.close()
+
+
+def test_support_resistance_tab_exists_with_expected_sections():
+    app(); window=MainWindow()
+    try:
+        idx=[window.tabs.tabText(i) for i in range(window.tabs.count())].index("Support & Resistance")
+        assert idx >= 0
+        window.enable_support_resistance_analysis.setChecked(True)
+        window.sr_filter_mode.setCurrentText("TRADE_CONTEXT_FILTER")
+        window.update_dynamic()
+        assert "SUPPORT_BOUNCE" not in window.sr_summary_label.text()
+        assert "Support bounce" in window.sr_summary_label.text()
+        assert window.sr_trade_context_match_mode.isEnabled()
+    finally:
+        window.close()
+
+
+def test_sr_summary_panel_reports_best_and_worst_context():
+    import pandas as pd
+    app(); window=MainWindow()
+    try:
+        rows=[]
+        for i in range(10):
+            rows.append({
+                "side": "LONG",
+                "long_sr_context": "SUPPORT_BOUNCE" if i < 5 else "NO_NEARBY_SR",
+                "long_pair_net_r": 0.5 if i < 5 else -0.4,
+                "long_pair_net_pnl": 5.0 if i < 5 else -4.0,
+            })
+        trades=pd.DataFrame(rows)
+        window._update_sr_summary_panel(trades)
+        text=window.sr_summary_panel_label.text()
+        assert "Best S/R Context" in text
+        assert "Worst S/R Context" in text
+        assert "Support Bounce" in text
     finally:
         window.close()
 

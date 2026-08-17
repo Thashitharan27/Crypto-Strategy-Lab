@@ -201,6 +201,15 @@ class BacktestConfig:
     sr_filter_mode: str = "ANALYSIS_ONLY"
     sr_long_state_requirement: str = "ANY"
     sr_short_state_requirement: str = "ANY"
+    sr_trade_context_match_mode: str = "ANY"
+    long_sr_rule_support_bounce: bool = True
+    long_sr_rule_resistance_breakout: bool = True
+    long_sr_rule_near_support: bool = False
+    long_sr_rule_near_resistance: bool = False
+    short_sr_rule_resistance_rejection: bool = True
+    short_sr_rule_support_breakdown: bool = True
+    short_sr_rule_near_resistance: bool = False
+    short_sr_rule_near_support: bool = False
     di_long_bull_reward_risk_ratio: float = 2.0
     di_long_bear_reward_risk_ratio: float = 1.0
     di_long_sideways_reward_risk_ratio: float = 2.0

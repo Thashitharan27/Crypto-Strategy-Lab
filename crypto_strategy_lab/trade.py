@@ -46,6 +46,9 @@ class Position:
     sr_support_last_test_index: Optional[int] = None; sr_resistance_last_test_index: Optional[int] = None
     sr_support_last_test_time: Optional[object] = None; sr_resistance_last_test_time: Optional[object] = None
     sr_confirmation_rating: str = "NEUTRAL"
+    sr_support_zone_low: Optional[float] = None; sr_support_zone_high: Optional[float] = None
+    sr_resistance_zone_low: Optional[float] = None; sr_resistance_zone_high: Optional[float] = None
+    sr_level_price: Optional[float] = None; sr_zone_low: Optional[float] = None; sr_zone_high: Optional[float] = None
     @property
     def is_open(self) -> bool: return self.exit_time is None
 
