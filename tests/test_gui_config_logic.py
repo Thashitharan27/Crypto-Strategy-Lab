@@ -243,6 +243,21 @@ def test_support_resistance_settings_round_trip_and_validation(tmp_path):
     for key, value in rules.items(): assert getattr(cfg2, key) == value
 
 
+def test_support_resistance_mode_is_exact_and_unknown_config_is_discarded(tmp_path):
+    values = {
+        **base(tmp_path),
+        "enable_support_resistance_analysis": True,
+        "sr_filter_mode": "analysis only",
+    }
+    assert "Support/resistance filter mode is invalid." in validate_config_values(values)
+
+    path = tmp_path / "unknown-config.json"
+    path.write_text(json.dumps({**values, "unknown_setting": True}))
+    loaded = load_config_json(path)
+    assert loaded["sr_filter_mode"] == "analysis only"
+    assert "unknown_setting" not in loaded
+
+
 def test_negative_bull_regime_threshold_is_valid(tmp_path):
     values = {
         **base(tmp_path),

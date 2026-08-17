@@ -570,7 +570,7 @@ class BacktestEngine:
         if sr_context is None:
             return False, None
 
-        mode = str(self.config.sr_filter_mode).upper().replace("-", "_").replace(" ", "_")
+        mode = self.config.sr_filter_mode
         if mode == "ANALYSIS_ONLY":
             return False, None
         if mode != "APPLY_ENTRY_RULES":

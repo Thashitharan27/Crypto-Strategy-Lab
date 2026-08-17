@@ -167,7 +167,7 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         except (TypeError, ValueError): errors.append("Support/resistance ATR thresholds must be numeric.")
         if str(values.get("sr_break_basis", "CLOSE")).upper() not in {"CLOSE", "WICK"}: errors.append("Support/resistance break basis must be CLOSE or WICK.")
         allowed_sr_modes = {"ANALYSIS_ONLY", "APPLY_ENTRY_RULES"}
-        mode = str(values.get("sr_filter_mode", "ANALYSIS_ONLY")).upper().replace("-", "_").replace(" ", "_")
+        mode = values.get("sr_filter_mode", "ANALYSIS_ONLY")
         if mode not in allowed_sr_modes: errors.append("Support/resistance filter mode is invalid.")
         for key in ("sr_long_min_room_to_resistance_atr", "sr_short_min_room_to_support_atr"):
             try:
@@ -462,6 +462,8 @@ def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
     keep_regime={"di_regime_bear_return_threshold","bull_regime_lookback_days","bull_regime_return_threshold"}
     result={}
     for key,value in values.items():
+        if key not in DEFAULT_GUI_CONFIG:
+            continue
         if key in keep_regime or key not in _OBSOLETE_EXACT and not key.startswith(_OBSOLETE_PREFIXES): result[key]=value
     result["enable_strategy_profiles"]=True
     return result
@@ -469,7 +471,7 @@ def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
 
 def load_config_json(path: str | Path) -> dict[str, Any]:
     loaded = json.loads(Path(path).read_text())
-    loaded["sr_filter_mode"] = str(loaded.get("sr_filter_mode", "ANALYSIS_ONLY")).upper().replace("-", "_").replace(" ", "_")
+    loaded = {key: value for key, value in loaded.items() if key in DEFAULT_GUI_CONFIG}
     # Saved configs created before structural regimes existed retain their
     # original trailing-return semantics.
     loaded.setdefault("market_regime_method", "ASSET_RETURN")
