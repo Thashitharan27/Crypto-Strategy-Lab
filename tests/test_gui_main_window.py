@@ -275,11 +275,13 @@ def test_support_resistance_tab_exists_with_expected_sections():
         idx=[window.tabs.tabText(i) for i in range(window.tabs.count())].index("Support & Resistance")
         assert idx >= 0
         window.enable_support_resistance_analysis.setChecked(True)
-        window.sr_filter_mode.setCurrentText("TRADE_CONTEXT_FILTER")
+        window.sr_filter_mode.setCurrentIndex(window.sr_filter_mode.findData("APPLY_ENTRY_RULES"))
+        window.sr_long_avoid_near_resistance.setChecked(True)
+        window.sr_long_min_room_to_resistance_atr.setValue(1.5)
         window.update_dynamic()
-        assert "SUPPORT_BOUNCE" not in window.sr_summary_label.text()
-        assert "Support bounce" in window.sr_summary_label.text()
-        assert window.sr_trade_context_match_mode.isEnabled()
+        assert "Avoid near resistance" in window.sr_summary_label.text()
+        assert "Minimum room: 1.50 ATR" in window.sr_summary_label.text()
+        assert not hasattr(window, "sr_trade_context_match_mode")
     finally:
         window.close()
 

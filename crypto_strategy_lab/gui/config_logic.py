@@ -21,7 +21,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "enable_coin_flip_sizing": False, "coin_flip_seed": 42, "coin_flip_large_multiplier": 3.0, "coin_flip_small_multiplier": 1.0,
     "enable_di_direction_sizing": False, "flip_filtered_di_direction": False, "di_direction_minimum_spread": 30.0, "di_direction_long_minimum_spread": 30.0, "di_direction_short_minimum_spread": 30.0, "di_execution_mode": "BOTH_SIDES", "di_reward_risk_ratio": 1.0, "di_long_reward_risk_ratio": 1.0, "di_short_reward_risk_ratio": 1.0,
     "enable_direction_voting": False, "direction_vote_use_di": True, "direction_vote_use_structure": True, "direction_vote_structure_lookback": 20, "direction_vote_use_momentum": True, "direction_vote_momentum_lookback_hours": 24, "direction_vote_momentum_threshold": 0.0, "direction_vote_use_volume_pressure": True, "direction_vote_volume_lookback": 20, "direction_vote_volume_threshold": 0.10, "direction_vote_use_higher_timeframe": True, "direction_vote_higher_timeframe_hours": 4, "direction_vote_higher_timeframe_sma_period": 20, "direction_vote_minimum_votes": 2,
-    "enable_support_resistance_analysis": False, "sr_pivot_left": 5, "sr_pivot_right": 5, "sr_lookback_bars": 200, "sr_zone_width_atr": 0.5, "sr_near_distance_atr": 0.75, "enable_sr_hold_confirmation": False, "sr_hold_confirmation_bars": 3, "sr_hold_confirmation_atr": 0.25, "sr_break_tolerance_atr": 0.25, "sr_break_basis": "CLOSE", "sr_filter_mode": "ANALYSIS_ONLY", "sr_long_state_requirement": "ANY", "sr_short_state_requirement": "ANY", "sr_trade_context_match_mode": "ANY", "long_sr_rule_support_bounce": True, "long_sr_rule_resistance_breakout": True, "long_sr_rule_near_support": False, "long_sr_rule_near_resistance": False, "short_sr_rule_resistance_rejection": True, "short_sr_rule_support_breakdown": True, "short_sr_rule_near_resistance": False, "short_sr_rule_near_support": False,
+    "enable_support_resistance_analysis": False, "sr_pivot_left": 5, "sr_pivot_right": 5, "sr_lookback_bars": 200, "sr_zone_width_atr": 0.5, "sr_near_distance_atr": 0.75, "enable_sr_hold_confirmation": False, "sr_hold_confirmation_bars": 3, "sr_hold_confirmation_atr": 0.25, "sr_break_tolerance_atr": 0.25, "sr_break_basis": "CLOSE", "sr_filter_mode": "ANALYSIS_ONLY", "sr_long_avoid_near_resistance": False, "sr_long_require_near_support": False, "sr_long_block_broken_support": False, "sr_long_min_room_to_resistance_atr": 0.0, "sr_short_avoid_near_support": False, "sr_short_require_near_resistance": False, "sr_short_block_broken_resistance": False, "sr_short_min_room_to_support_atr": 0.0,
     "enable_di_regime_reward_risk": False, "di_regime_bear_return_threshold": -0.20,
     "di_long_bull_reward_risk_ratio": 2.0, "di_long_bear_reward_risk_ratio": 1.0, "di_long_sideways_reward_risk_ratio": 2.0,
     "di_short_bull_reward_risk_ratio": 1.0, "di_short_bear_reward_risk_ratio": 1.0, "di_short_sideways_reward_risk_ratio": 2.0,
@@ -166,14 +166,13 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
             if float(values.get("sr_break_tolerance_atr", -1)) < 0: errors.append("Support/resistance break-tolerance ATR must be non-negative.")
         except (TypeError, ValueError): errors.append("Support/resistance ATR thresholds must be numeric.")
         if str(values.get("sr_break_basis", "CLOSE")).upper() not in {"CLOSE", "WICK"}: errors.append("Support/resistance break basis must be CLOSE or WICK.")
-        allowed_sr_modes = {"ANALYSIS_ONLY", "BLOCK_BAD_LOCATION", "REQUIRE_GOOD_LOCATION", "REQUIRE_CONFIRMED_HOLD", "BLOCK_BROKEN_STRUCTURE", "CUSTOM_SR_STATE_FILTER", "TRADE_CONTEXT_FILTER"}
+        allowed_sr_modes = {"ANALYSIS_ONLY", "APPLY_ENTRY_RULES"}
         mode = str(values.get("sr_filter_mode", "ANALYSIS_ONLY")).upper().replace("-", "_").replace(" ", "_")
         if mode not in allowed_sr_modes: errors.append("Support/resistance filter mode is invalid.")
-        if str(values.get("sr_trade_context_match_mode", "ANY")).upper() not in {"ANY", "ALL"}: errors.append("Support/resistance trade-context match mode must be ANY or ALL.")
-        allowed_sr_states = {"ANY", "SUPPORT_HELD", "SUPPORT_TESTING", "SUPPORT_BROKEN", "APPROACHING_SUPPORT", "RESISTANCE_HELD", "RESISTANCE_TESTING", "RESISTANCE_BROKEN"}
-        for key, label in (("sr_long_state_requirement", "Long S/R requirement"), ("sr_short_state_requirement", "Short S/R requirement")):
-            requirement = str(values.get(key, "ANY")).upper().replace("-", "_").replace(" ", "_")
-            if requirement not in allowed_sr_states: errors.append(f"{label} is invalid.")
+        for key in ("sr_long_min_room_to_resistance_atr", "sr_short_min_room_to_support_atr"):
+            try:
+                if float(values.get(key, 0)) < 0: errors.append("Support/resistance minimum room must be non-negative.")
+            except (TypeError, ValueError): errors.append("Support/resistance minimum room must be numeric.")
     direction_voter_keys=("direction_vote_use_di","direction_vote_use_structure","direction_vote_use_momentum","direction_vote_use_volume_pressure","direction_vote_use_higher_timeframe")
     enabled_direction_voters=sum(bool(values.get(k)) for k in direction_voter_keys)
     if values.get("enable_direction_voting") and not enabled_direction_voters: errors.append("Direction voting requires at least one voter.")
@@ -427,69 +426,20 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
     )
     config = replace(
         config,
-        sr_long_state_requirement=str(merged["sr_long_state_requirement"]),
-        sr_short_state_requirement=str(merged["sr_short_state_requirement"]),
-    )
-    config = replace(
-        config,
-        sr_trade_context_match_mode=str(merged.get("sr_trade_context_match_mode", "ANY")).upper(),
-        long_sr_rule_support_bounce=bool(merged.get("long_sr_rule_support_bounce", True)),
-        long_sr_rule_resistance_breakout=bool(merged.get("long_sr_rule_resistance_breakout", True)),
-        long_sr_rule_near_support=bool(merged.get("long_sr_rule_near_support", False)),
-        long_sr_rule_near_resistance=bool(merged.get("long_sr_rule_near_resistance", False)),
-        short_sr_rule_resistance_rejection=bool(merged.get("short_sr_rule_resistance_rejection", True)),
-        short_sr_rule_support_breakdown=bool(merged.get("short_sr_rule_support_breakdown", True)),
-        short_sr_rule_near_resistance=bool(merged.get("short_sr_rule_near_resistance", False)),
-        short_sr_rule_near_support=bool(merged.get("short_sr_rule_near_support", False)),
+        sr_long_avoid_near_resistance=bool(merged["sr_long_avoid_near_resistance"]),
+        sr_long_require_near_support=bool(merged["sr_long_require_near_support"]),
+        sr_long_block_broken_support=bool(merged["sr_long_block_broken_support"]),
+        sr_long_min_room_to_resistance_atr=float(merged["sr_long_min_room_to_resistance_atr"]),
+        sr_short_avoid_near_support=bool(merged["sr_short_avoid_near_support"]),
+        sr_short_require_near_resistance=bool(merged["sr_short_require_near_resistance"]),
+        sr_short_block_broken_resistance=bool(merged["sr_short_block_broken_resistance"]),
+        sr_short_min_room_to_support_atr=float(merged["sr_short_min_room_to_support_atr"]),
     )
     return replace(config, enable_sr_hold_confirmation=bool(merged.get("enable_sr_hold_confirmation", False)), sr_hold_confirmation_bars=int(merged["sr_hold_confirmation_bars"]), sr_hold_confirmation_atr=float(merged["sr_hold_confirmation_atr"]), sr_break_tolerance_atr=float(merged["sr_break_tolerance_atr"]), sr_break_basis=str(merged["sr_break_basis"]).upper())
 
 
 def save_config_json(path: str | Path, values: dict[str, Any]) -> None:
     Path(path).write_text(json.dumps(canonical_config_values({**default_gui_config(), **values}), indent=2, default=str))
-
-
-# Legacy CUSTOM_SR_STATE_FILTER single-state requirement -> new Trade Context rule label.
-_LEGACY_SR_STATE_TO_CONTEXT_LABEL = {
-    "SUPPORT_HELD": "SUPPORT_BOUNCE",
-    "SUPPORT_TESTING": "NEAR_SUPPORT",
-    "SUPPORT_BROKEN": "SUPPORT_BREAKDOWN",
-    "APPROACHING_SUPPORT": "NEAR_SUPPORT",
-    "RESISTANCE_HELD": "RESISTANCE_REJECTION",
-    "RESISTANCE_TESTING": "NEAR_RESISTANCE",
-    "RESISTANCE_BROKEN": "RESISTANCE_BREAKOUT",
-}
-_LONG_CONTEXT_LABEL_TO_RULE_KEY = {
-    "SUPPORT_BOUNCE": "long_sr_rule_support_bounce",
-    "RESISTANCE_BREAKOUT": "long_sr_rule_resistance_breakout",
-    "NEAR_SUPPORT": "long_sr_rule_near_support",
-    "NEAR_RESISTANCE": "long_sr_rule_near_resistance",
-}
-_SHORT_CONTEXT_LABEL_TO_RULE_KEY = {
-    "RESISTANCE_REJECTION": "short_sr_rule_resistance_rejection",
-    "SUPPORT_BREAKDOWN": "short_sr_rule_support_breakdown",
-    "NEAR_RESISTANCE": "short_sr_rule_near_resistance",
-    "NEAR_SUPPORT": "short_sr_rule_near_support",
-}
-
-
-def _migrate_legacy_sr_requirements(loaded: dict[str, Any]) -> None:
-    """Map an old single-state sr_long/short_state_requirement onto the new Trade Context rule
-    checkboxes, only when the config predates those fields. Mutates `loaded` in place."""
-    for direction, requirement_key, label_map, rule_keys in (
-        ("long", "sr_long_state_requirement", _LONG_CONTEXT_LABEL_TO_RULE_KEY, _LONG_CONTEXT_LABEL_TO_RULE_KEY.values()),
-        ("short", "sr_short_state_requirement", _SHORT_CONTEXT_LABEL_TO_RULE_KEY, _SHORT_CONTEXT_LABEL_TO_RULE_KEY.values()),
-    ):
-        requirement = str(loaded.get(requirement_key, "ANY")).upper().replace("-", "_").replace(" ", "_")
-        already_migrated = any(key in loaded for key in rule_keys)
-        if already_migrated or requirement in ("ANY", ""):
-            continue
-        context_label = _LEGACY_SR_STATE_TO_CONTEXT_LABEL.get(requirement)
-        target_rule_key = label_map.get(context_label) if context_label else None
-        if target_rule_key is None:
-            continue
-        for rule_key in rule_keys:
-            loaded[rule_key] = (rule_key == target_rule_key)
 
 
 _OBSOLETE_EXACT = {
@@ -519,14 +469,7 @@ def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
 
 def load_config_json(path: str | Path) -> dict[str, Any]:
     loaded = json.loads(Path(path).read_text())
-    # Early GUI builds used shorter display-derived names.  Normalize those
-    # spellings while retaining all supported engine policy values.
-    legacy_sr_modes = {
-        "FILTER_ENTRIES": "TRADE_CONTEXT_FILTER",
-        "CONFIRMATION": "REQUIRE_CONFIRMED_HOLD",
-    }
-    raw_sr_mode = str(loaded.get("sr_filter_mode", "ANALYSIS_ONLY")).upper().replace("-", "_").replace(" ", "_")
-    loaded["sr_filter_mode"] = legacy_sr_modes.get(raw_sr_mode, raw_sr_mode)
+    loaded["sr_filter_mode"] = str(loaded.get("sr_filter_mode", "ANALYSIS_ONLY")).upper().replace("-", "_").replace(" ", "_")
     # Saved configs created before structural regimes existed retain their
     # original trailing-return semantics.
     loaded.setdefault("market_regime_method", "ASSET_RETURN")
@@ -539,5 +482,4 @@ def load_config_json(path: str | Path) -> dict[str, Any]:
     legacy_di_ratio = loaded.get("di_reward_risk_ratio", DEFAULT_GUI_CONFIG["di_reward_risk_ratio"])
     loaded.setdefault("di_long_reward_risk_ratio", legacy_di_ratio)
     loaded.setdefault("di_short_reward_risk_ratio", legacy_di_ratio)
-    _migrate_legacy_sr_requirements(loaded)
     return {**default_gui_config(), **loaded}
