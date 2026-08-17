@@ -318,8 +318,8 @@ def test_summary_is_scrollable_and_creates_report_buttons():
         assert isinstance(window.summary_scroll_area, qtwidgets.QScrollArea)
         assert window.summary_scroll_area.widgetResizable()
         assert [button.text() for button in window.report_buttons.values()] == [
-            "Open Backtest Report", "Open Indicator Analysis", "Open S/R Analysis",
-            "Open Trade List", "Open Charts Folder", "Open Output Folder",
+            "Open Output Folder", "Open Backtest Report", "Open Indicator Analysis",
+            "Open S/R Analysis", "Open Trade List", "Open Charts Folder",
         ]
         assert all(window.summary_content.isAncestorOf(button) for button in window.report_buttons.values())
     finally: window.close()
@@ -331,8 +331,56 @@ def test_report_button_availability_matches_files(tmp_path):
     assert states == {"backtest":True,"indicators":False,"sr":False,"trades":False,"charts":True,"output":True}
     app(); window=MainWindow()
     try:
-        window.output_dir=tmp_path; window._refresh_report_buttons()
+        window.completed_run_dir=tmp_path; window._refresh_report_buttons()
         assert {name:button.isEnabled() for name,button in window.report_buttons.items()} == states
+    finally: window.close()
+
+
+def test_setup_toolbar_contains_compact_run_controls_and_no_bottom_action_group():
+    app(); window=MainWindow()
+    try:
+        toolbar_widgets=[window.setup_toolbar.itemAt(i).widget() for i in range(window.setup_toolbar.count())]
+        assert toolbar_widgets[:3] == [window.new_run_btn,window.save_btn,window.load_btn]
+        assert toolbar_widgets[-2:] == [window.run_btn,window.cancel_btn]
+        assert window.backtest_setup_page.isAncestorOf(window.run_btn)
+        groups=window.backtest_setup_page.findChildren(qtwidgets.QGroupBox)
+        assert all(group.title() != "Run Backtest" for group in groups)
+        assert not window.cancel_btn.isEnabled()
+        assert window.summary_content.isAncestorOf(window.report_buttons["output"])
+    finally: window.close()
+
+
+def test_backtest_running_state_disables_unsafe_actions_and_restores_them():
+    app(); window=MainWindow()
+    try:
+        window._set_backtest_running(True)
+        assert not window.run_btn.isEnabled()
+        assert window.run_btn.text()=="Running..."
+        assert window.cancel_btn.isEnabled()
+        assert not window.new_run_btn.isEnabled()
+        assert not window.load_btn.isEnabled()
+        window._set_backtest_running(False)
+        assert window.run_btn.isEnabled()
+        assert window.run_btn.text()=="Run Backtest"
+        assert not window.cancel_btn.isEnabled()
+        assert window.new_run_btn.isEnabled() and window.load_btn.isEnabled()
+    finally: window.close()
+
+
+def test_completed_run_drives_output_folder_and_new_run_clears_it(monkeypatch,tmp_path):
+    app(); window=MainWindow()
+    try:
+        completed=tmp_path/"completed"; completed.mkdir()
+        opened=[]
+        monkeypatch.setattr("crypto_strategy_lab.gui.main_window.QDesktopServices.openUrl",lambda url: opened.append(url.toLocalFile()) or True)
+        window.on_finished({},pd.DataFrame(),pd.DataFrame(),str(completed))
+        window._open_report("output")
+        assert window.report_buttons["output"].isEnabled()
+        assert opened == [str(completed.resolve())]
+        monkeypatch.setattr(window,"_confirm_new_run",lambda:True)
+        window.new_run()
+        assert window.completed_run_dir is None
+        assert not window.report_buttons["output"].isEnabled()
     finally: window.close()
 
 

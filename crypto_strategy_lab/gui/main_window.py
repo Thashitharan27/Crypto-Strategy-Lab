@@ -1,6 +1,6 @@
 """Main PySide6 window for the backtester."""
 from __future__ import annotations
-import os, re, sys, time, traceback
+import re, time, traceback
 from dataclasses import replace
 from pathlib import Path
 
@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         super().__init__(); self.setWindowTitle("Crypto Strategy Lab"); self.resize(1280, 860)
         startup_status = startup_status or (lambda _message: None)
         self.market_data_folder=DATA_DIR
-        self.settings = QSettings("LongShortCrypto", "Backtester"); self.worker=None; self.thread=None; self.portfolio_worker=None; self.portfolio_thread=None; self.started=0; self.last_summary={}; self.output_dir=Path("output"); self._pending_ui_results=None; self._run_failed=False
+        self.settings = QSettings("LongShortCrypto", "Backtester"); self.worker=None; self.thread=None; self.portfolio_worker=None; self.portfolio_thread=None; self.started=0; self.last_summary={}; self.output_dir=Path("output"); self.completed_run_dir=None; self._pending_ui_results=None; self._run_failed=False
         self.tabs=QTabWidget(); self.setCentralWidget(self.tabs)
         self.tabs.setDocumentMode(True); self.tabs.setMovable(False)
         self.setStyleSheet("QGroupBox{font-weight:600;margin-top:10px;padding-top:10px} QGroupBox::title{subcontrol-origin:margin;left:10px;padding:0 4px} QPushButton{padding:6px 12px} QTabBar::tab{padding:8px 14px} QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox{min-height:24px}")
@@ -113,11 +113,14 @@ class MainWindow(QMainWindow):
         self.direction_vote_test_mode.blockSignals(False)
     def _build_config(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); form=QVBoxLayout(inner); self.config_controls=[]
-        toolbar=QHBoxLayout(); toolbar.setContentsMargins(0,0,0,4)
+        toolbar=QHBoxLayout(); toolbar.setContentsMargins(0,0,0,4); self.setup_toolbar=toolbar
         self.new_run_btn=QPushButton("New Run"); self.save_btn=QPushButton("Save Config"); self.load_btn=QPushButton("Load Config")
         for button in (self.new_run_btn,self.save_btn,self.load_btn): toolbar.addWidget(button)
-        toolbar.addStretch(1); outer.addLayout(toolbar)
+        toolbar.addStretch(1)
+        self.run_btn=QPushButton("Run Backtest"); self.cancel_btn=QPushButton("Cancel"); self.cancel_btn.setEnabled(False)
+        toolbar.addWidget(self.run_btn); toolbar.addWidget(self.cancel_btn); outer.addLayout(toolbar)
         self.new_run_btn.clicked.connect(self.new_run); self.save_btn.clicked.connect(self.save_config); self.load_btn.clicked.connect(self.load_config)
+        self.run_btn.clicked.connect(self.run_backtest); self.cancel_btn.clicked.connect(lambda: self.worker and self.worker.cancel())
         def group(title): g=QGroupBox(title); l=QFormLayout(g); form.addWidget(g); return l
         data=group("Data")
         self.market_symbol=QComboBox(); self.market_symbol.setEditable(True); self.market_symbol.addItems(["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT"]); self.market_symbol.setCurrentText("XRPUSDT"); data.addRow("Trading Pair",self.market_symbol)
@@ -418,20 +421,17 @@ class MainWindow(QMainWindow):
             control.toggled.connect(self._update_checkpoint_score_controls)
         be=group("Break-Even Calculator")
         self.be_label=QLabel(); self.be_label.setWordWrap(True); be.addRow(self.be_label)
-        controls=group("Backtest Controls")
-        self.run_btn=QPushButton("Run Backtest"); self.cancel_btn=QPushButton("Cancel"); self.cancel_btn.setEnabled(False); self.open_btn=QPushButton("Open Output Folder")
-        for w in [self.run_btn,self.cancel_btn,self.open_btn]: controls.addRow(w)
+        controls=group("Run Status")
         self.progress=QProgressBar(); self.status=QLabel("Ready"); self.elapsed=QLabel("Elapsed: 0s"); controls.addRow(self.progress); controls.addRow(self.status); controls.addRow(self.elapsed)
         for w in [self.run_name,self.output_folder]: w.textChanged.connect(self.update_planned_output)
-        self.run_btn.clicked.connect(self.run_backtest); self.cancel_btn.clicked.connect(lambda: self.worker and self.worker.cancel()); self.open_btn.clicked.connect(lambda: os.startfile(str(self.output_dir)) if sys.platform.startswith("win") else os.system(f'xdg-open "{self.output_dir}"'))
         for obsolete in (partial_sl,partial_tp,protective_stop,trailing,both_open,vwap_group,random_group,trend,compression,be_rule,remaining_timeout,be): obsolete.parentWidget().setVisible(False)
-        data.parentWidget().setTitle("Data & Output"); strat.parentWidget().setTitle("Entry Timing & Simulation"); sched.parentWidget().setTitle("Scheduled Entry"); fees.parentWidget().setTitle("Execution Costs"); telemetry.parentWidget().setTitle("Reports & Analysis"); lifecycle.parentWidget().setTitle("Advanced Indicator Analysis"); reports.parentWidget().setTitle("Report Files"); controls.parentWidget().setTitle("Run Backtest")
+        data.parentWidget().setTitle("Data & Output"); strat.parentWidget().setTitle("Entry Timing & Simulation"); sched.parentWidget().setTitle("Scheduled Entry"); fees.parentWidget().setTitle("Execution Costs"); telemetry.parentWidget().setTitle("Reports & Analysis"); lifecycle.parentWidget().setTitle("Advanced Indicator Analysis"); reports.parentWidget().setTitle("Report Files")
         self.sl.setVisible(False); sl_label=strat.labelForField(self.sl)
         if sl_label: sl_label.setVisible(False)
         self.tp.setVisible(False); tp_label=strat.labelForField(self.tp)
         if tp_label: tp_label.setVisible(False)
         risk.setRowVisible(self.trade_direction,False)
-        scroll.setWidget(inner); outer.addWidget(scroll); self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_direction_voting_tab(); self._build_support_resistance_tab(); self.update_dynamic()
+        scroll.setWidget(inner); outer.addWidget(scroll); self.backtest_setup_page=page; self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_direction_voting_tab(); self._build_support_resistance_tab(); self.update_dynamic()
 
     def _build_direction_voting_tab(self):
         page=QWidget(); layout=QVBoxLayout(page)
@@ -756,7 +756,7 @@ class MainWindow(QMainWindow):
         self.starting_equity_label=QLabel("Starting Equity: —"); overview_layout.addWidget(self.starting_equity_label,2,0,1,5)
         l.addWidget(overview)
         reports_box=QGroupBox("Run Reports"); reports_layout=QGridLayout(reports_box)
-        labels={"backtest":"Open Backtest Report","indicators":"Open Indicator Analysis","sr":"Open S/R Analysis","trades":"Open Trade List","charts":"Open Charts Folder","output":"Open Output Folder"}
+        labels={"output":"Open Output Folder","backtest":"Open Backtest Report","indicators":"Open Indicator Analysis","sr":"Open S/R Analysis","trades":"Open Trade List","charts":"Open Charts Folder"}
         self.report_buttons={}
         for index,(name,label) in enumerate(labels.items()):
             button=QPushButton(label); button.setEnabled(False); button.clicked.connect(lambda _checked=False, key=name: self._open_report(key))
@@ -777,11 +777,12 @@ class MainWindow(QMainWindow):
         self.combo_table.setFixedHeight(max(80,height+2))
 
     def _refresh_report_buttons(self):
-        states=report_button_states(Path(self.output_dir))
+        states=report_button_states(self.completed_run_dir) if self.completed_run_dir is not None else {name:False for name in REPORT_TARGETS}
         for name,button in self.report_buttons.items(): button.setEnabled(states[name])
 
     def _open_report(self,name):
-        target=(Path(self.output_dir)/REPORT_TARGETS[name]).resolve()
+        if self.completed_run_dir is None: return
+        target=(self.completed_run_dir/REPORT_TARGETS[name]).resolve()
         if target.exists(): QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
     def _build_log(self):
         # Keep an internal buffer for diagnostics and saved log files without
@@ -910,7 +911,8 @@ class MainWindow(QMainWindow):
 
     def _clear_displayed_results(self):
         """Clear in-memory result presentation, never persisted run artifacts."""
-        self.last_summary={}; self._pending_ui_results=None
+        self.last_summary={}; self._pending_ui_results=None; self.completed_run_dir=None
+        self._refresh_report_buttons()
         self.populate_summary({},pd.DataFrame())
         self.sr_summary_panel_label.setText("No backtest run yet.")
         self.progress.setValue(0); self.status.setText("Ready"); self.elapsed.setText("Elapsed: 0s")
@@ -1157,10 +1159,17 @@ class MainWindow(QMainWindow):
         try: vals=self.values(); cfg=build_backtest_config(vals); cfg=replace(cfg, save_feature_analysis_reports=self.save_feature_reports.isChecked(), save_indicator_analysis_reports=self.save_indicator_reports.isChecked(), create_standard_charts=self.create_standard_charts.isChecked()); Path(vals['output_dir']).mkdir(parents=True,exist_ok=True); cfg=replace(cfg, output_run_dir=planned_run_dir(cfg)); self.planned_output.setText(str(cfg.output_run_dir.resolve()))
         except Exception as e: QMessageBox.warning(self,"Validation Problems",str(e)); return
         if not self.validate_data(): return
-        self._run_failed=False; self._pending_ui_results=None; self.output_dir=cfg.output_run_dir; self.thread=QThread(); self.worker=BacktestWorker(cfg, self._validated_strategy_data); self.worker.moveToThread(self.thread); self.thread.started.connect(self.worker.run); self.thread.finished.connect(self._thread_finished); self.worker.status.connect(self.on_status); self.worker.log.connect(self.append_log); self.worker.finished.connect(self.on_finished); self.worker.failed.connect(self.on_failed); self.started=time.time(); self.cancel_btn.setEnabled(True); self.run_btn.setEnabled(False); self.new_run_btn.setEnabled(False); self.thread.start()
+        self._run_failed=False; self._pending_ui_results=None; self.output_dir=cfg.output_run_dir; self.thread=QThread(); self.worker=BacktestWorker(cfg, self._validated_strategy_data); self.worker.moveToThread(self.thread); self.thread.started.connect(self.worker.run); self.thread.finished.connect(self._thread_finished); self.worker.status.connect(self.on_status); self.worker.log.connect(self.append_log); self.worker.finished.connect(self.on_finished); self.worker.failed.connect(self.on_failed); self.started=time.time(); self._set_backtest_running(True); self.thread.start()
+    def _set_backtest_running(self,running):
+        """Keep setup actions consistent with the single-backtest worker state."""
+        self.run_btn.setEnabled(not running)
+        self.run_btn.setText("Running..." if running else "Run Backtest")
+        self.cancel_btn.setEnabled(running)
+        self.new_run_btn.setEnabled(not running and not bool(self.portfolio_thread and self.portfolio_thread.isRunning()))
+        self.load_btn.setEnabled(not running)
     def on_status(self,s,p): self.status.setText(s); self.progress.setValue(p); self.elapsed.setText(f"Elapsed: {int(time.time()-self.started)}s")
     def on_finished(self,summary,trades,equity,out):
-        self.last_summary=summary; self.output_dir=Path(out); self._pending_ui_results=(summary,trades,equity,out)
+        self.last_summary=summary; self.output_dir=Path(out); self.completed_run_dir=self.output_dir; self._pending_ui_results=(summary,trades,equity,out)
         self._refresh_report_buttons()
         self.cleanup_thread()
         # The backtest and all output files are complete at this point.  Do not
@@ -1209,8 +1218,7 @@ class MainWindow(QMainWindow):
     def _thread_finished(self):
         thread=self.thread
         self.thread=None; self.worker=None
-        self.new_run_btn.setEnabled(not bool(self.portfolio_thread and self.portfolio_thread.isRunning()))
-        self.cancel_btn.setEnabled(False)
+        self._set_backtest_running(False)
         if self._pending_ui_results is None:
             self.run_btn.setEnabled(True)
             if self._run_failed: self.status.setText("Backtest failed; see the Log tab for details.")
@@ -1279,6 +1287,7 @@ class MainWindow(QMainWindow):
         if p:
             values=self.values(); values.update({"save_feature_analysis_reports":self.save_feature_reports.isChecked(),"save_indicator_analysis_reports":self.save_indicator_reports.isChecked(),"create_standard_charts":self.create_standard_charts.isChecked()}); save_config_json(p,values)
     def load_config(self):
+        if self.thread and self.thread.isRunning(): return
         p,_=QFileDialog.getOpenFileName(self,"Load Configuration","","JSON (*.json)");
         if p: self.apply_values(load_config_json(p))
     def apply_values(self,d):
