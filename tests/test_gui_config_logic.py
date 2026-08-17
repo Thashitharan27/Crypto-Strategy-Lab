@@ -1,7 +1,22 @@
+import json
 from pathlib import Path
 import pytest
 from crypto_strategy_lab.config import RiskMode, TradeDirectionMode
 from crypto_strategy_lab.gui.config_logic import parse_percentage, build_backtest_config, save_config_json, load_config_json, validate_config_values
+
+
+@pytest.mark.parametrize("legacy, expected", [
+    ("FILTER_ENTRIES", "TRADE_CONTEXT_FILTER"),
+    ("CONFIRMATION", "REQUIRE_CONFIRMED_HOLD"),
+    ("BLOCK_BAD_LOCATION", "BLOCK_BAD_LOCATION"),
+    ("REQUIRE_GOOD_LOCATION", "REQUIRE_GOOD_LOCATION"),
+    ("BLOCK_BROKEN_STRUCTURE", "BLOCK_BROKEN_STRUCTURE"),
+    ("CUSTOM_SR_STATE_FILTER", "CUSTOM_SR_STATE_FILTER"),
+])
+def test_legacy_sr_modes_load(tmp_path, legacy, expected):
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps({"sr_filter_mode": legacy}))
+    assert load_config_json(path)["sr_filter_mode"] == expected
 
 
 def base(tmp_path):

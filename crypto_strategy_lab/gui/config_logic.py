@@ -519,6 +519,14 @@ def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
 
 def load_config_json(path: str | Path) -> dict[str, Any]:
     loaded = json.loads(Path(path).read_text())
+    # Early GUI builds used shorter display-derived names.  Normalize those
+    # spellings while retaining all supported engine policy values.
+    legacy_sr_modes = {
+        "FILTER_ENTRIES": "TRADE_CONTEXT_FILTER",
+        "CONFIRMATION": "REQUIRE_CONFIRMED_HOLD",
+    }
+    raw_sr_mode = str(loaded.get("sr_filter_mode", "ANALYSIS_ONLY")).upper().replace("-", "_").replace(" ", "_")
+    loaded["sr_filter_mode"] = legacy_sr_modes.get(raw_sr_mode, raw_sr_mode)
     # Saved configs created before structural regimes existed retain their
     # original trailing-return semantics.
     loaded.setdefault("market_regime_method", "ASSET_RETURN")
