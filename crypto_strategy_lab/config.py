@@ -300,7 +300,6 @@ class BacktestConfig:
         if self.long_momentum_lookback_hours <= 0: raise ValueError("long_momentum_lookback_hours must be positive")
         if self.long_momentum_minimum_return <= -1: raise ValueError("long_momentum_minimum_return must be greater than -100%")
         if self.enable_long_momentum_filter and not self.enable_di_direction_sizing: raise ValueError("long momentum filter requires DI-direction sizing")
-        if any(value <= 0 for value in regime_ratios): raise ValueError("DI regime reward/risk ratios must be positive")
         if self.bull_long_r_step_activation_r <= 0: raise ValueError("bull_long_r_step_activation_r must be positive")
         if self.bull_long_r_step_distance_r <= 0: raise ValueError("bull_long_r_step_distance_r must be positive")
         if self.bull_long_r_step_size_r <= 0: raise ValueError("bull_long_r_step_size_r must be positive")
