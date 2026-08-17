@@ -242,13 +242,6 @@ class BacktestConfig:
     enable_long_momentum_filter: bool = False
     long_momentum_lookback_hours: int = 24
     long_momentum_minimum_return: float = 0.06
-    enable_regime_direction_filter: bool = False
-    allow_bull_long: bool = True
-    allow_bull_short: bool = True
-    allow_bear_long: bool = True
-    allow_bear_short: bool = True
-    allow_sideways_long: bool = True
-    allow_sideways_short: bool = True
     enable_directional_di_spread_range: bool = False
     directional_long_di_spread_minimum: float = 0.0
     directional_long_di_spread_maximum: float = 1000.0
@@ -382,7 +375,7 @@ class BacktestConfig:
         if self.long_momentum_lookback_hours <= 0: raise ValueError("long_momentum_lookback_hours must be positive")
         if self.long_momentum_minimum_return <= -1: raise ValueError("long_momentum_minimum_return must be greater than -100%")
         if self.enable_long_momentum_filter and not self.enable_di_direction_sizing: raise ValueError("long momentum filter requires DI-direction sizing")
-        if any((self.enable_regime_direction_filter, self.enable_directional_di_spread_range, self.enable_directional_adx_range, self.enable_directional_atr_pct_range, self.enable_directional_rsi_range, self.enable_directional_close_location_range, self.enable_directional_momentum_range)) and not self.enable_di_direction_sizing: raise ValueError("directional entry filters require DI-direction sizing")
+        if any((self.enable_directional_di_spread_range, self.enable_directional_adx_range, self.enable_directional_atr_pct_range, self.enable_directional_rsi_range, self.enable_directional_close_location_range, self.enable_directional_momentum_range)) and not self.enable_di_direction_sizing: raise ValueError("directional entry filters require DI-direction sizing")
         for name, minimum, maximum in (
             ("long DI spread", self.directional_long_di_spread_minimum, self.directional_long_di_spread_maximum), ("short DI spread", self.directional_short_di_spread_minimum, self.directional_short_di_spread_maximum),
             ("long ADX", self.directional_long_adx_minimum, self.directional_long_adx_range_maximum), ("short ADX", self.directional_short_adx_range_minimum, self.directional_short_adx_maximum),
