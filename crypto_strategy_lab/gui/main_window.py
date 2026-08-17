@@ -60,16 +60,8 @@ class MainWindow(QMainWindow):
                     (self.portfolio_thread and self.portfolio_thread.isRunning()))
 
     def closeEvent(self,event):
-        if not self.chatgpt_tab.manager.owns_running_processes:
-            event.accept(); return
-        box=QMessageBox(QMessageBox.Question,"ChatGPT Connection",
-            "Stop the ChatGPT connection before exiting?\n\nFor safety, processes managed by this window cannot be left running.",
-            parent=self)
-        stop=box.addButton("Stop and Exit",QMessageBox.AcceptRole); box.addButton("Cancel",QMessageBox.RejectRole)
-        box.exec()
-        if box.clickedButton() is stop:
-            self.chatgpt_tab.manager.stop(); event.accept()
-        else: event.ignore()
+        self.chatgpt_tab.shutdown()
+        event.accept()
     def _build_profiles(self):
         self.profile_editor=StrategyProfilesWidget(); self.tabs.addTab(self.profile_editor,"Strategy Profiles")
         self.profile_editor.changed.connect(self.update_dynamic)
