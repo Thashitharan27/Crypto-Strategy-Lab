@@ -156,13 +156,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
                 if float(values.get(key, 0)) < 0: errors.append("Support/resistance minimum room must be non-negative.")
             except (TypeError, ValueError): errors.append("Support/resistance minimum room must be numeric.")
     if values.get("flip_filtered_di_direction") and not (values.get("enable_di_direction_sizing") or values.get("enable_strategy_profiles")): errors.append("Direction flip requires DI-direction selection.")
-    try:
-        if float(values.get("di_direction_minimum_spread", -1)) < 0: errors.append("DI direction minimum spread must be non-negative.")
-    except (TypeError, ValueError): errors.append("DI direction minimum spread must be numeric.")
-    for key, label in (("di_direction_long_minimum_spread", "Long DI direction minimum spread"), ("di_direction_short_minimum_spread", "Short DI direction minimum spread")):
-        try:
-            if float(values.get(key, -1)) < 0: errors.append(f"{label} must be non-negative.")
-        except (TypeError, ValueError): errors.append(f"{label} must be numeric.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_partial_take_profit"): errors.append("Bull-long staircase cannot be combined with Partial Take Profit.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_atr_checkpoint_tp_extension"): errors.append("Bull-long staircase cannot be combined with ATR checkpoint TP extension.")
     if values.get("enable_bull_long_r_step_trailing") and values.get("enable_trailing_profit"): errors.append("Bull-long staircase cannot be combined with the independent trailing stop.")
@@ -185,8 +178,6 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         if float(values.get("long_momentum_minimum_return", -1)) <= -1: errors.append("Long momentum minimum return must be greater than -100%.")
     except (TypeError, ValueError): errors.append("Long momentum settings must be numeric.")
     if values.get("enable_di_direction_sizing") and (values.get("enable_partial_take_profit") or values.get("enable_partial_stop_loss")): errors.append("DI-direction sizing cannot be combined with partial TP or partial SL.")
-    if values.get("di_execution_mode") not in [e.value for e in DIExecutionMode]: errors.append("Invalid DI execution mode.")
-    if values.get("di_execution_mode") == DIExecutionMode.PREFERRED_SIDE_ONLY.value and not values.get("enable_di_direction_sizing"): errors.append("Preferred-side-only execution requires DI-direction sizing.")
     if values.get("enable_bull_regime_short_filter") and not values.get("enable_di_direction_sizing"): errors.append("Bull-regime short filter requires DI-direction sizing.")
     if values.get("enable_bear_regime_adx_filter") and not values.get("enable_di_direction_sizing"): errors.append("Bear-regime ADX filter requires DI-direction sizing.")
     if values.get("enable_biased_short_adx_cap") and not values.get("enable_di_direction_sizing"): errors.append("Biased-short ADX cap requires DI-direction sizing.")
