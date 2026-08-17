@@ -162,7 +162,6 @@ class MainWindow(QMainWindow):
         for lab,w in [("",self.enable_random_entry),("Entry Timing Mode",self.entry_timing_mode),("Entry Probability",self.random_probability),("Random Seed",self.random_seed),("Random Entry Start Mode",self.random_start_mode),("",self.randomize_first),("Maximum Random Wait Candles",self.max_random_wait),("",self.enable_random_batch),("Random Seed Start",self.random_seed_start),("Random Seed Count",self.random_seed_count)]: random_group.addRow(lab,w)
         self.enable_coin_flip_sizing=QCheckBox("Enable 3:1 Coin-Flip Sizing (1:1 SL/TP)"); self.coin_flip_seed=QLineEdit("42")
         random_group.addRow("",self.enable_coin_flip_sizing); random_group.addRow("Coin Flip Seed",self.coin_flip_seed)
-        self.enable_di_direction_sizing=QCheckBox("Enable DI-Direction Selection"); self.flip_filtered_di_direction=QCheckBox("Flip direction after filters pass (Long ↔ Short)"); self.di_direction_long_min_spread=self._spin(30,0,1000,3); self.di_direction_short_min_spread=self._spin(30,0,1000,3); self.di_long_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_short_reward_risk_ratio=self._spin(1,0.01,100,3)
         self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.enable_sr_hold_confirmation=QCheckBox("Enable"); self.sr_hold_confirmation_bars=QSpinBox(); self.sr_hold_confirmation_bars.setRange(1,100); self.sr_hold_confirmation_bars.setValue(3); self.sr_hold_confirmation_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_tolerance_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_basis=QComboBox(); self.sr_break_basis.addItems(["CLOSE","WICK"]); self.sr_filter_mode=PolicyComboBox()
         self.sr_filter_mode.addItem("Analysis Only", "ANALYSIS_ONLY")
         self.sr_filter_mode.addItem("Apply Entry Rules", "APPLY_ENTRY_RULES")
@@ -178,44 +177,12 @@ class MainWindow(QMainWindow):
         self.enable_di_pressure_analysis=QCheckBox("Analyze DI expansion / contraction"); self.enable_di_pressure_analysis.setChecked(True)
         self.di_pressure_lookback=QSpinBox(); self.di_pressure_lookback.setRange(1,100); self.di_pressure_lookback.setValue(3)
         self.di_execution_mode=QComboBox(); self.di_execution_mode.addItems(["BOTH_SIDES","PREFERRED_SIDE_ONLY"])
-        self.enable_di_regime_reward_risk=QCheckBox("Enable Regime-Specific Reward/Risk")
-        self.di_regime_bear_return_threshold=self._line("-20%")
-        self.di_long_bull_reward_risk_ratio=self._spin(2,0.01,100,3); self.di_long_bear_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_long_sideways_reward_risk_ratio=self._spin(2,0.01,100,3)
-        self.di_short_bull_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_short_bear_reward_risk_ratio=self._spin(1,0.01,100,3); self.di_short_sideways_reward_risk_ratio=self._spin(2,0.01,100,3)
-        self.enable_bull_long_conditional_reward_risk=QCheckBox("Bull Long: Use Conditional Reward/Risk")
-        self.bull_long_conditional_bb_width_minimum=self._line("5%")
-        self.bull_long_conditional_adx_maximum=self._spin(40,0,1000,3)
-        self.bull_long_conditional_reward_risk_ratio=self._spin(1,0.01,100,3)
-        self.enable_bull_long_momentum_confirmation=QCheckBox("Bull Long: Require Shorter-Term Momentum Confirmation for Base Target")
-        self.bull_long_confirmation_lookback_days=QSpinBox(); self.bull_long_confirmation_lookback_days.setRange(1,3650); self.bull_long_confirmation_lookback_days.setValue(60)
-        self.bull_long_confirmation_return_threshold=self._line("20%")
-        self.bull_long_unconfirmed_reward_risk_ratio=self._spin(1,0.01,100,3)
-        self.enable_bull_long_momentum_target_extension=QCheckBox("Bull Long: Extend Target When Recent Momentum Is Strong")
-        self.bull_long_momentum_extension_lookback_days=QSpinBox(); self.bull_long_momentum_extension_lookback_days.setRange(1,3650); self.bull_long_momentum_extension_lookback_days.setValue(30)
-        self.bull_long_momentum_extension_return_threshold=self._line("10%")
-        self.enable_bull_long_momentum_extension_return_maximum=QCheckBox("Use Maximum Recent-Momentum Return")
-        self.bull_long_momentum_extension_return_maximum=self._line("40%")
-        self.bull_long_momentum_extended_reward_risk_ratio=self._spin(4,0.01,100,3)
-        self.enable_bull_long_structural_confirmation=QCheckBox("Bull Long: Require Long-Term Trend Confirmation")
-        self.bull_long_structural_sma_days=QSpinBox(); self.bull_long_structural_sma_days.setRange(1,3650); self.bull_long_structural_sma_days.setValue(200)
-        self.bull_long_structural_slope_lookback_days=QSpinBox(); self.bull_long_structural_slope_lookback_days.setRange(1,3650); self.bull_long_structural_slope_lookback_days.setValue(30)
-        self.bull_long_structural_unconfirmed_reward_risk_ratio=self._spin(1,0.01,100,3)
         self.enable_bull_long_r_step_trailing=QCheckBox("Bull Long: Enable R-Step Staircase")
         self.bull_long_r_step_activation_r=self._spin(2,0.01,100,2)
         self.bull_long_r_step_distance_r=self._spin(2,0.01,100,2)
         self.bull_long_r_step_size_r=self._spin(1,0.01,100,2)
         self.bull_long_r_step_maximum_r=self._spin(0,0,100,2)
         self.bull_long_r_step_activation_close_pct=self._spin(0,0,99.99,2)
-        self.enable_sideways_long_conditional_reward_risk=QCheckBox("Sideways Long: Use Conditional Reward/Risk")
-        self.sideways_long_conditional_adx_maximum=self._spin(35,0,1000,3)
-        self.sideways_long_conditional_reward_risk_ratio=self._spin(1,0.01,100,3)
-        self.enable_sideways_short_conditional_reward_risk=QCheckBox("Sideways Short: Use Conditional Reward/Risk")
-        self.sideways_short_conditional_di_spread_minimum=self._spin(35,0,1000,3)
-        self.sideways_short_conditional_di_spread_maximum=self._spin(40,0,1000,3)
-        self.sideways_short_conditional_reward_risk_ratio=self._spin(1,0.01,100,3)
-        self.enable_bear_short_conditional_reward_risk=QCheckBox("Bear Short: Use Conditional Reward/Risk")
-        self.bear_short_conditional_di_spread_maximum=self._spin(35,0,1000,3)
-        self.bear_short_conditional_reward_risk_ratio=self._spin(1,0.01,100,3)
         self.enable_directional_adx_filter=QCheckBox("Enable Direction-Specific ADX Filter"); self.directional_long_adx_maximum=self._spin(60,0,1000,3); self.directional_short_adx_minimum=self._spin(25,0,1000,3)
         self.enable_atr_checkpoint_tp_extension=QCheckBox("Extend biased TP at ATR checkpoints")
         self.atr_checkpoint_di_spread_min=self._spin(30,0,1000,3)
@@ -240,16 +207,7 @@ class MainWindow(QMainWindow):
         self.enable_coin_flip_sizing.toggled.connect(lambda checked: self.enable_di_direction_sizing.setChecked(False) if checked else None)
         self.enable_di_direction_sizing.toggled.connect(lambda checked: self.enable_coin_flip_sizing.setChecked(False) if checked else None)
         self.enable_di_direction_sizing.toggled.connect(self.update_dynamic)
-        self.enable_di_regime_reward_risk.toggled.connect(self.update_dynamic)
-        self.enable_bull_long_conditional_reward_risk.toggled.connect(self.update_dynamic)
-        self.enable_bull_long_momentum_target_extension.toggled.connect(self.update_dynamic)
-        self.enable_bull_long_momentum_extension_return_maximum.toggled.connect(self.update_dynamic)
-        self.enable_bull_long_structural_confirmation.toggled.connect(self.update_dynamic)
-        self.enable_bull_long_momentum_confirmation.toggled.connect(self.update_dynamic)
         self.enable_bull_long_r_step_trailing.toggled.connect(self.update_dynamic)
-        self.enable_sideways_long_conditional_reward_risk.toggled.connect(self.update_dynamic)
-        self.enable_sideways_short_conditional_reward_risk.toggled.connect(self.update_dynamic)
-        self.enable_bear_short_conditional_reward_risk.toggled.connect(self.update_dynamic)
         self.enable_directional_adx_filter.toggled.connect(self.update_dynamic)
         self.enable_biased_short_adx_cap.toggled.connect(self.update_dynamic)
         self.enable_short_vwap_distance_filter.toggled.connect(self.update_dynamic)
@@ -500,13 +458,6 @@ class MainWindow(QMainWindow):
         intro=QLabel("DI-direction strategy settings live here. Shared data, risk, fees, execution, telemetry, and output settings remain on the Configuration tab.")
         intro.setWordWrap(True); form.addWidget(intro)
         selection_box=QGroupBox("DI Direction Selection"); selection=QFormLayout(selection_box)
-        for lab,w in [
-            ("",self.enable_di_direction_sizing),
-            ("",self.flip_filtered_di_direction),
-            ("Execution Mode",self.di_execution_mode),
-            ("Long Reward/Risk Ratio",self.di_long_reward_risk_ratio),
-            ("Short Reward/Risk Ratio",self.di_short_reward_risk_ratio),
-        ]: selection.addRow(lab,w)
         form.addWidget(selection_box)
         direction_box=QGroupBox("Direction Selection"); direction_form=QFormLayout(direction_box)
         rule=QLabel("Current Rule\n+DI above -DI → LONG\n-DI above +DI → SHORT"); rule.setWordWrap(True)
@@ -520,52 +471,6 @@ class MainWindow(QMainWindow):
         regime_targets_help.setWordWrap(True)
         bull_long_conditional_help=QLabel("During bull regimes only: when BB width is at or above the minimum AND ADX is below the maximum, the conditional target replaces Long Bull Reward/Risk. Other bull longs keep the normal bull target.")
         bull_long_conditional_help.setWordWrap(True)
-        for lab,w in [
-            ("",self.enable_di_regime_reward_risk),
-            ("Bear Return Threshold",self.di_regime_bear_return_threshold),
-            ("Long Bull Reward/Risk",self.di_long_bull_reward_risk_ratio),
-            ("Long Bear Reward/Risk",self.di_long_bear_reward_risk_ratio),
-            ("Long Sideways Reward/Risk",self.di_long_sideways_reward_risk_ratio),
-            ("Short Bull Reward/Risk",self.di_short_bull_reward_risk_ratio),
-            ("Short Bear Reward/Risk",self.di_short_bear_reward_risk_ratio),
-            ("Short Sideways Reward/Risk",self.di_short_sideways_reward_risk_ratio),
-            ("",self.enable_bull_long_conditional_reward_risk),
-            ("Conditional BB Width Minimum",self.bull_long_conditional_bb_width_minimum),
-            ("Conditional ADX Maximum",self.bull_long_conditional_adx_maximum),
-            ("Conditional Bull Long Reward/Risk",self.bull_long_conditional_reward_risk_ratio),
-            ("",bull_long_conditional_help),
-            ("",self.enable_bull_long_momentum_confirmation),
-            ("Confirmation Lookback Days",self.bull_long_confirmation_lookback_days),
-            ("Confirmation Return Threshold",self.bull_long_confirmation_return_threshold),
-            ("Unconfirmed Bull Long Reward/Risk",self.bull_long_unconfirmed_reward_risk_ratio),
-            ("",self.enable_bull_long_momentum_target_extension),
-            ("Momentum Extension Lookback Days",self.bull_long_momentum_extension_lookback_days),
-            ("Momentum Extension Return Threshold",self.bull_long_momentum_extension_return_threshold),
-            ("",self.enable_bull_long_momentum_extension_return_maximum),
-            ("Momentum Extension Return Maximum",self.bull_long_momentum_extension_return_maximum),
-            ("Strong-Momentum Bull Long Reward/Risk",self.bull_long_momentum_extended_reward_risk_ratio),
-            ("",self.enable_bull_long_structural_confirmation),
-            ("Long-Term SMA Days",self.bull_long_structural_sma_days),
-            ("SMA Slope Comparison Days",self.bull_long_structural_slope_lookback_days),
-            ("Structurally Unconfirmed Bull Long Reward/Risk",self.bull_long_structural_unconfirmed_reward_risk_ratio),
-            ("",self.enable_bull_long_r_step_trailing),
-            ("Staircase Activation (R)",self.bull_long_r_step_activation_r),
-            ("Distance Behind Checkpoint (R)",self.bull_long_r_step_distance_r),
-            ("Checkpoint Step Size (R)",self.bull_long_r_step_size_r),
-            ("Maximum Target (R; 0 = none)",self.bull_long_r_step_maximum_r),
-            ("Close at Activation (%)",self.bull_long_r_step_activation_close_pct),
-            ("",self.enable_sideways_long_conditional_reward_risk),
-            ("Sideways Long ADX Maximum",self.sideways_long_conditional_adx_maximum),
-            ("Conditional Sideways Long Reward/Risk",self.sideways_long_conditional_reward_risk_ratio),
-            ("",self.enable_sideways_short_conditional_reward_risk),
-            ("Sideways Short DI Spread Minimum",self.sideways_short_conditional_di_spread_minimum),
-            ("Sideways Short DI Spread Maximum",self.sideways_short_conditional_di_spread_maximum),
-            ("Conditional Sideways Short Reward/Risk",self.sideways_short_conditional_reward_risk_ratio),
-            ("",self.enable_bear_short_conditional_reward_risk),
-            ("Bear Short DI Spread Maximum",self.bear_short_conditional_di_spread_maximum),
-            ("Conditional Bear Short Reward/Risk",self.bear_short_conditional_reward_risk_ratio),
-            ("",regime_targets_help),
-        ]: regime_targets.addRow(lab,w)
         form.addWidget(regime_targets_box)
         adx_box=QGroupBox("Direction-Specific ADX"); adx=QFormLayout(adx_box)
         for lab,w in [
@@ -742,16 +647,9 @@ class MainWindow(QMainWindow):
         values.update({"entry_mode":self.entry_mode.currentData(),"tie_policy":self.tie.currentData(),"trade_direction":"BOTH","enable_strategy_profiles":True,"enable_di_direction_sizing":True,"di_execution_mode":"PREFERRED_SIDE_ONLY"})
         values.update({"vwap_breakout_lookback_hours":self.vwap_breakout_hours.value(),"vwap_volume_lookback":self.vwap_volume_lookback.value(),"vwap_volume_multiplier":self.vwap_volume_multiplier.value(),"vwap_slope_lookback":self.vwap_slope_lookback.value(),"vwap_atr_pct_minimum":self.vwap_atr_min.value(),"vwap_atr_pct_maximum":self.vwap_atr_max.value(),"vwap_confirmation_mode":self.vwap_confirmation_mode.currentText(),"vwap_retest_window_candles":self.vwap_retest_window.value(),"vwap_retest_tolerance_atr":self.vwap_retest_tolerance.value()})
         values.update({"enable_coin_flip_sizing":self.enable_coin_flip_sizing.isChecked(),"coin_flip_seed":self.coin_flip_seed.text().strip(),"coin_flip_large_multiplier":3.0,"coin_flip_small_multiplier":1.0})
-        values.update({"enable_di_direction_sizing":self.enable_di_direction_sizing.isChecked(),"flip_filtered_di_direction":self.flip_filtered_di_direction.isChecked(),"di_direction_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_long_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_short_minimum_spread":self.di_direction_short_min_spread.value(),"di_execution_mode":self.di_execution_mode.currentText(),"di_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_long_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_short_reward_risk_ratio":self.di_short_reward_risk_ratio.value()})
         values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"enable_sr_hold_confirmation":self.enable_sr_hold_confirmation.isChecked(),"sr_hold_confirmation_bars":self.sr_hold_confirmation_bars.value(),"sr_hold_confirmation_atr":self.sr_hold_confirmation_atr.value(),"sr_break_tolerance_atr":self.sr_break_tolerance_atr.value(),"sr_break_basis":self.sr_break_basis.currentText(),"sr_filter_mode":self.sr_filter_mode.currentData(),"sr_long_avoid_near_resistance":self.sr_long_avoid_near_resistance.isChecked(),"sr_long_require_near_support":self.sr_long_require_near_support.isChecked(),"sr_long_block_broken_support":self.sr_long_block_broken_support.isChecked(),"sr_long_min_room_to_resistance_atr":self.sr_long_min_room_to_resistance_atr.value(),"sr_short_avoid_near_support":self.sr_short_avoid_near_support.isChecked(),"sr_short_require_near_resistance":self.sr_short_require_near_resistance.isChecked(),"sr_short_block_broken_resistance":self.sr_short_block_broken_resistance.isChecked(),"sr_short_min_room_to_support_atr":self.sr_short_min_room_to_support_atr.value()})
         values.update({"enable_di_direction_selection":self.enable_di_direction_selection.isChecked(),"enable_di_pressure_analysis":self.enable_di_pressure_analysis.isChecked(),"di_pressure_lookback":self.di_pressure_lookback.value()})
-        values.update({"enable_di_regime_reward_risk":self.enable_di_regime_reward_risk.isChecked(),"di_regime_bear_return_threshold":parse_percentage(self.di_regime_bear_return_threshold.text()),"di_long_bull_reward_risk_ratio":self.di_long_bull_reward_risk_ratio.value(),"di_long_bear_reward_risk_ratio":self.di_long_bear_reward_risk_ratio.value(),"di_long_sideways_reward_risk_ratio":self.di_long_sideways_reward_risk_ratio.value(),"di_short_bull_reward_risk_ratio":self.di_short_bull_reward_risk_ratio.value(),"di_short_bear_reward_risk_ratio":self.di_short_bear_reward_risk_ratio.value(),"di_short_sideways_reward_risk_ratio":self.di_short_sideways_reward_risk_ratio.value()})
-        values.update({"enable_bull_long_conditional_reward_risk":self.enable_bull_long_conditional_reward_risk.isChecked(),"bull_long_conditional_bb_width_minimum":parse_percentage(self.bull_long_conditional_bb_width_minimum.text()),"bull_long_conditional_adx_maximum":self.bull_long_conditional_adx_maximum.value(),"bull_long_conditional_reward_risk_ratio":self.bull_long_conditional_reward_risk_ratio.value()})
-        values.update({"enable_bull_long_momentum_confirmation":self.enable_bull_long_momentum_confirmation.isChecked(),"bull_long_confirmation_lookback_days":self.bull_long_confirmation_lookback_days.value(),"bull_long_confirmation_return_threshold":parse_percentage(self.bull_long_confirmation_return_threshold.text()),"bull_long_unconfirmed_reward_risk_ratio":self.bull_long_unconfirmed_reward_risk_ratio.value()})
-        values.update({"enable_bull_long_momentum_target_extension":self.enable_bull_long_momentum_target_extension.isChecked(),"bull_long_momentum_extension_lookback_days":self.bull_long_momentum_extension_lookback_days.value(),"bull_long_momentum_extension_return_threshold":parse_percentage(self.bull_long_momentum_extension_return_threshold.text()),"enable_bull_long_momentum_extension_return_maximum":self.enable_bull_long_momentum_extension_return_maximum.isChecked(),"bull_long_momentum_extension_return_maximum":parse_percentage(self.bull_long_momentum_extension_return_maximum.text()),"bull_long_momentum_extended_reward_risk_ratio":self.bull_long_momentum_extended_reward_risk_ratio.value()})
-        values.update({"enable_bull_long_structural_confirmation":self.enable_bull_long_structural_confirmation.isChecked(),"bull_long_structural_sma_days":self.bull_long_structural_sma_days.value(),"bull_long_structural_slope_lookback_days":self.bull_long_structural_slope_lookback_days.value(),"bull_long_structural_unconfirmed_reward_risk_ratio":self.bull_long_structural_unconfirmed_reward_risk_ratio.value()})
         values.update({"enable_bull_long_r_step_trailing":self.enable_bull_long_r_step_trailing.isChecked(),"bull_long_r_step_activation_r":self.bull_long_r_step_activation_r.value(),"bull_long_r_step_distance_r":self.bull_long_r_step_distance_r.value(),"bull_long_r_step_size_r":self.bull_long_r_step_size_r.value(),"bull_long_r_step_maximum_r":self.bull_long_r_step_maximum_r.value(),"bull_long_r_step_activation_close_pct":self.bull_long_r_step_activation_close_pct.value()})
-        values.update({"enable_sideways_long_conditional_reward_risk":self.enable_sideways_long_conditional_reward_risk.isChecked(),"sideways_long_conditional_adx_maximum":self.sideways_long_conditional_adx_maximum.value(),"sideways_long_conditional_reward_risk_ratio":self.sideways_long_conditional_reward_risk_ratio.value(),"enable_sideways_short_conditional_reward_risk":self.enable_sideways_short_conditional_reward_risk.isChecked(),"sideways_short_conditional_di_spread_minimum":self.sideways_short_conditional_di_spread_minimum.value(),"sideways_short_conditional_di_spread_maximum":self.sideways_short_conditional_di_spread_maximum.value(),"sideways_short_conditional_reward_risk_ratio":self.sideways_short_conditional_reward_risk_ratio.value(),"enable_bear_short_conditional_reward_risk":self.enable_bear_short_conditional_reward_risk.isChecked(),"bear_short_conditional_di_spread_maximum":self.bear_short_conditional_di_spread_maximum.value(),"bear_short_conditional_reward_risk_ratio":self.bear_short_conditional_reward_risk_ratio.value()})
         values.update({"enable_directional_adx_filter":self.enable_directional_adx_filter.isChecked(),"directional_long_adx_maximum":self.directional_long_adx_maximum.value(),"directional_short_adx_minimum":self.directional_short_adx_minimum.value()})
         values.update({"enable_biased_short_adx_cap":self.enable_biased_short_adx_cap.isChecked(),"biased_short_adx_maximum":self.biased_short_adx_maximum.value()})
         values.update({"enable_short_vwap_distance_filter":self.enable_short_vwap_distance_filter.isChecked(),"short_vwap_minimum_distance_atr":self.short_vwap_minimum_distance_atr.value()})
@@ -933,57 +831,6 @@ class MainWindow(QMainWindow):
             self.enable_atr_checkpoint_tp_extension.setEnabled(self.enable_di_direction_sizing.isChecked())
             for control in (self.atr_checkpoint_di_spread_min,self.atr_checkpoint_bb_width_min,self.atr_checkpoint_profit_lock_start,self.atr_checkpoint_profit_lock_distance):
                 control.setEnabled(checkpoint_enabled)
-        if hasattr(self,"enable_biased_short_adx_cap"):
-            di_enabled=self.enable_di_direction_sizing.isChecked()
-            self.di_long_reward_risk_ratio.setEnabled(di_enabled)
-            self.di_short_reward_risk_ratio.setEnabled(di_enabled)
-            self.enable_di_regime_reward_risk.setEnabled(di_enabled)
-            regime_rr_enabled=di_enabled and self.enable_di_regime_reward_risk.isChecked()
-            for control in (self.di_regime_bear_return_threshold,self.di_long_bull_reward_risk_ratio,self.di_long_bear_reward_risk_ratio,self.di_long_sideways_reward_risk_ratio,self.di_short_bull_reward_risk_ratio,self.di_short_bear_reward_risk_ratio,self.di_short_sideways_reward_risk_ratio):
-                control.setEnabled(regime_rr_enabled)
-            self.enable_bull_long_conditional_reward_risk.setEnabled(regime_rr_enabled)
-            conditional_bull_long_enabled=regime_rr_enabled and self.enable_bull_long_conditional_reward_risk.isChecked()
-            for control in (self.bull_long_conditional_bb_width_minimum,self.bull_long_conditional_adx_maximum,self.bull_long_conditional_reward_risk_ratio):
-                control.setEnabled(conditional_bull_long_enabled)
-            self.enable_bull_long_momentum_confirmation.setEnabled(regime_rr_enabled)
-            momentum_confirmation_enabled=regime_rr_enabled and self.enable_bull_long_momentum_confirmation.isChecked()
-            for control in (self.bull_long_confirmation_lookback_days,self.bull_long_confirmation_return_threshold,self.bull_long_unconfirmed_reward_risk_ratio):
-                control.setEnabled(momentum_confirmation_enabled)
-            self.enable_bull_long_momentum_target_extension.setEnabled(regime_rr_enabled)
-            momentum_extension_enabled=regime_rr_enabled and self.enable_bull_long_momentum_target_extension.isChecked()
-            for control in (self.bull_long_momentum_extension_lookback_days,self.bull_long_momentum_extension_return_threshold,self.enable_bull_long_momentum_extension_return_maximum,self.bull_long_momentum_extended_reward_risk_ratio):
-                control.setEnabled(momentum_extension_enabled)
-            self.bull_long_momentum_extension_return_maximum.setEnabled(momentum_extension_enabled and self.enable_bull_long_momentum_extension_return_maximum.isChecked())
-            self.enable_bull_long_structural_confirmation.setEnabled(regime_rr_enabled)
-            structural_confirmation_enabled=regime_rr_enabled and self.enable_bull_long_structural_confirmation.isChecked()
-            for control in (self.bull_long_structural_sma_days,self.bull_long_structural_slope_lookback_days,self.bull_long_structural_unconfirmed_reward_risk_ratio):
-                control.setEnabled(structural_confirmation_enabled)
-            self.enable_bull_long_r_step_trailing.setEnabled(regime_rr_enabled)
-            staircase_enabled=regime_rr_enabled and self.enable_bull_long_r_step_trailing.isChecked()
-            for control in (self.bull_long_r_step_activation_r,self.bull_long_r_step_distance_r,self.bull_long_r_step_size_r,self.bull_long_r_step_maximum_r,self.bull_long_r_step_activation_close_pct):
-                control.setEnabled(staircase_enabled)
-            for checkbox, controls in (
-                (self.enable_sideways_long_conditional_reward_risk,(self.sideways_long_conditional_adx_maximum,self.sideways_long_conditional_reward_risk_ratio)),
-                (self.enable_sideways_short_conditional_reward_risk,(self.sideways_short_conditional_di_spread_minimum,self.sideways_short_conditional_di_spread_maximum,self.sideways_short_conditional_reward_risk_ratio)),
-                (self.enable_bear_short_conditional_reward_risk,(self.bear_short_conditional_di_spread_maximum,self.bear_short_conditional_reward_risk_ratio)),
-            ):
-                checkbox.setEnabled(regime_rr_enabled)
-                for control in controls:
-                    control.setEnabled(regime_rr_enabled and checkbox.isChecked())
-            self.enable_directional_adx_filter.setEnabled(di_enabled)
-            directional_adx_enabled=di_enabled and self.enable_directional_adx_filter.isChecked()
-            self.directional_long_adx_maximum.setEnabled(directional_adx_enabled)
-            self.directional_short_adx_minimum.setEnabled(directional_adx_enabled)
-            self.enable_biased_short_adx_cap.setEnabled(di_enabled)
-            self.biased_short_adx_maximum.setEnabled(di_enabled and self.enable_biased_short_adx_cap.isChecked())
-            self.enable_short_vwap_distance_filter.setEnabled(di_enabled)
-            self.short_vwap_minimum_distance_atr.setEnabled(di_enabled and self.enable_short_vwap_distance_filter.isChecked())
-            self.enable_long_momentum_filter.setEnabled(di_enabled)
-            long_momentum_enabled=di_enabled and self.enable_long_momentum_filter.isChecked()
-            self.long_momentum_lookback_hours.setEnabled(long_momentum_enabled)
-            self.long_momentum_minimum_return.setEnabled(long_momentum_enabled)
-            self.enable_bear_regime_adx_filter.setEnabled(di_enabled)
-            self.bear_regime_adx_minimum.setEnabled(di_enabled and self.enable_bear_regime_adx_filter.isChecked())
         if hasattr(self,"enable_trade_telemetry"):
             enabled=self.enable_trade_telemetry.isChecked(); self.telemetry_interval.setEnabled(enabled); self.save_full_telemetry.setEnabled(enabled); self.save_journey_summary.setEnabled(enabled); self.save_journey_charts.setEnabled(enabled)
         if hasattr(self,"enable_partial_sl"):
@@ -1198,20 +1045,11 @@ class MainWindow(QMainWindow):
         self.vwap_breakout_hours.setValue(float(values.get("vwap_breakout_lookback_hours",4.0))); self.vwap_volume_lookback.setValue(int(values.get("vwap_volume_lookback",20))); self.vwap_volume_multiplier.setValue(float(values.get("vwap_volume_multiplier",1.5))); self.vwap_slope_lookback.setValue(int(values.get("vwap_slope_lookback",1))); self.vwap_atr_min.setValue(float(values.get("vwap_atr_pct_minimum",0))); self.vwap_atr_max.setValue(float(values.get("vwap_atr_pct_maximum",1))); self.vwap_confirmation_mode.setCurrentText(str(values.get("vwap_confirmation_mode","IMMEDIATE"))); self.vwap_retest_window.setValue(int(values.get("vwap_retest_window_candles",4))); self.vwap_retest_tolerance.setValue(float(values.get("vwap_retest_tolerance_atr",0.25)))
         self.enable_random_entry.setChecked(bool(values.get("enable_random_entry",False))); self.entry_timing_mode.setCurrentText(str(values.get("entry_timing_mode","CURRENT"))); self.random_probability.setValue(float(values.get("random_entry_probability",0.5))); self.random_seed.setText(str(values.get("random_seed",42))); self.random_start_mode.setCurrentText(str(values.get("random_entry_start_mode","NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE"))); self.randomize_first.setChecked(bool(values.get("randomize_first_entry",True))); self.max_random_wait.setValue(int(values.get("max_random_wait_candles",0))); self.enable_random_batch.setChecked(bool(values.get("enable_random_entry_batch",False))); self.random_seed_start.setValue(int(values.get("random_seed_start",1))); self.random_seed_count.setValue(int(values.get("random_seed_count",100)))
         self.enable_coin_flip_sizing.setChecked(bool(values.get("enable_coin_flip_sizing",False))); self.coin_flip_seed.setText(str(values.get("coin_flip_seed",42)))
-        legacy_di_minimum=float(values.get("di_direction_minimum_spread",30.0)); legacy_di_ratio=float(values.get("di_reward_risk_ratio",1.0)); self.enable_di_direction_sizing.setChecked(bool(values.get("enable_di_direction_sizing",False))); self.flip_filtered_di_direction.setChecked(bool(values.get("flip_filtered_di_direction",False))); self.di_direction_long_min_spread.setValue(float(values.get("di_direction_long_minimum_spread",legacy_di_minimum))); self.di_direction_short_min_spread.setValue(float(values.get("di_direction_short_minimum_spread",legacy_di_minimum))); self.di_execution_mode.setCurrentText(str(values.get("di_execution_mode","BOTH_SIDES"))); self.di_long_reward_risk_ratio.setValue(float(values.get("di_long_reward_risk_ratio",legacy_di_ratio))); self.di_short_reward_risk_ratio.setValue(float(values.get("di_short_reward_risk_ratio",legacy_di_ratio)))
         self.enable_support_resistance_analysis.setChecked(bool(values.get("enable_support_resistance_analysis",False))); self.sr_pivot_left.setValue(int(values.get("sr_pivot_left",5))); self.sr_pivot_right.setValue(int(values.get("sr_pivot_right",5))); self.sr_lookback_bars.setValue(int(values.get("sr_lookback_bars",200))); self.sr_zone_width_atr.setValue(float(values.get("sr_zone_width_atr",0.5))); self.sr_near_distance_atr.setValue(float(values.get("sr_near_distance_atr",0.75))); self.enable_sr_hold_confirmation.setChecked(bool(values.get("enable_sr_hold_confirmation",False))); self.sr_hold_confirmation_bars.setValue(int(values.get("sr_hold_confirmation_bars",3))); self.sr_hold_confirmation_atr.setValue(float(values.get("sr_hold_confirmation_atr",0.25))); self.sr_break_tolerance_atr.setValue(float(values.get("sr_break_tolerance_atr",0.25))); self.sr_break_basis.setCurrentText(str(values.get("sr_break_basis","CLOSE"))); self.sr_filter_mode.setCurrentIndex(max(0,self.sr_filter_mode.findData(str(values.get("sr_filter_mode","ANALYSIS_ONLY")))))
         self.sr_long_avoid_near_resistance.setChecked(bool(values.get("sr_long_avoid_near_resistance",False))); self.sr_long_require_near_support.setChecked(bool(values.get("sr_long_require_near_support",False))); self.sr_long_block_broken_support.setChecked(bool(values.get("sr_long_block_broken_support",False))); self.sr_long_min_room_to_resistance_atr.setValue(float(values.get("sr_long_min_room_to_resistance_atr",0.0))); self.sr_short_avoid_near_support.setChecked(bool(values.get("sr_short_avoid_near_support",False))); self.sr_short_require_near_resistance.setChecked(bool(values.get("sr_short_require_near_resistance",False))); self.sr_short_block_broken_resistance.setChecked(bool(values.get("sr_short_block_broken_resistance",False))); self.sr_short_min_room_to_support_atr.setValue(float(values.get("sr_short_min_room_to_support_atr",0.0)))
         if hasattr(self,"sr_detection_preset"): self._sync_sr_preset_from_values()
         self.enable_di_direction_selection.setChecked(bool(values.get("enable_di_direction_selection",True))); self.enable_di_pressure_analysis.setChecked(bool(values.get("enable_di_pressure_analysis",True))); self.di_pressure_lookback.setValue(int(values.get("di_pressure_lookback",3)))
-        self.enable_di_regime_reward_risk.setChecked(bool(values.get("enable_di_regime_reward_risk",False))); self.di_regime_bear_return_threshold.setText(format_percentage(float(values.get("di_regime_bear_return_threshold",-0.20)),2)); self.di_long_bull_reward_risk_ratio.setValue(float(values.get("di_long_bull_reward_risk_ratio",2.0))); self.di_long_bear_reward_risk_ratio.setValue(float(values.get("di_long_bear_reward_risk_ratio",1.0))); self.di_long_sideways_reward_risk_ratio.setValue(float(values.get("di_long_sideways_reward_risk_ratio",2.0))); self.di_short_bull_reward_risk_ratio.setValue(float(values.get("di_short_bull_reward_risk_ratio",1.0))); self.di_short_bear_reward_risk_ratio.setValue(float(values.get("di_short_bear_reward_risk_ratio",1.0))); self.di_short_sideways_reward_risk_ratio.setValue(float(values.get("di_short_sideways_reward_risk_ratio",2.0)))
-        self.enable_bull_long_conditional_reward_risk.setChecked(bool(values.get("enable_bull_long_conditional_reward_risk",False))); self.bull_long_conditional_bb_width_minimum.setText(format_percentage(float(values.get("bull_long_conditional_bb_width_minimum",0.05)),2)); self.bull_long_conditional_adx_maximum.setValue(float(values.get("bull_long_conditional_adx_maximum",40.0))); self.bull_long_conditional_reward_risk_ratio.setValue(float(values.get("bull_long_conditional_reward_risk_ratio",1.0)))
-        self.enable_bull_long_momentum_confirmation.setChecked(bool(values.get("enable_bull_long_momentum_confirmation",False))); self.bull_long_confirmation_lookback_days.setValue(int(values.get("bull_long_confirmation_lookback_days",60))); self.bull_long_confirmation_return_threshold.setText(format_percentage(float(values.get("bull_long_confirmation_return_threshold",0.20)),2)); self.bull_long_unconfirmed_reward_risk_ratio.setValue(float(values.get("bull_long_unconfirmed_reward_risk_ratio",1.0)))
-        self.enable_bull_long_momentum_target_extension.setChecked(bool(values.get("enable_bull_long_momentum_target_extension",False))); self.bull_long_momentum_extension_lookback_days.setValue(int(values.get("bull_long_momentum_extension_lookback_days",30))); self.bull_long_momentum_extension_return_threshold.setText(format_percentage(float(values.get("bull_long_momentum_extension_return_threshold",0.10)),2)); self.enable_bull_long_momentum_extension_return_maximum.setChecked(bool(values.get("enable_bull_long_momentum_extension_return_maximum",False))); self.bull_long_momentum_extension_return_maximum.setText(format_percentage(float(values.get("bull_long_momentum_extension_return_maximum",0.40)),2)); self.bull_long_momentum_extended_reward_risk_ratio.setValue(float(values.get("bull_long_momentum_extended_reward_risk_ratio",4.0)))
-        self.enable_bull_long_structural_confirmation.setChecked(bool(values.get("enable_bull_long_structural_confirmation",False))); self.bull_long_structural_sma_days.setValue(int(values.get("bull_long_structural_sma_days",200))); self.bull_long_structural_slope_lookback_days.setValue(int(values.get("bull_long_structural_slope_lookback_days",30))); self.bull_long_structural_unconfirmed_reward_risk_ratio.setValue(float(values.get("bull_long_structural_unconfirmed_reward_risk_ratio",1.0)))
         self.enable_bull_long_r_step_trailing.setChecked(bool(values.get("enable_bull_long_r_step_trailing",False))); self.bull_long_r_step_activation_r.setValue(float(values.get("bull_long_r_step_activation_r",2.0))); self.bull_long_r_step_distance_r.setValue(float(values.get("bull_long_r_step_distance_r",2.0))); self.bull_long_r_step_size_r.setValue(float(values.get("bull_long_r_step_size_r",1.0))); self.bull_long_r_step_maximum_r.setValue(float(values.get("bull_long_r_step_maximum_r",0.0))); self.bull_long_r_step_activation_close_pct.setValue(float(values.get("bull_long_r_step_activation_close_pct",0.0)))
-        self.enable_sideways_long_conditional_reward_risk.setChecked(bool(values.get("enable_sideways_long_conditional_reward_risk",False))); self.sideways_long_conditional_adx_maximum.setValue(float(values.get("sideways_long_conditional_adx_maximum",35.0))); self.sideways_long_conditional_reward_risk_ratio.setValue(float(values.get("sideways_long_conditional_reward_risk_ratio",1.0)))
-        self.enable_sideways_short_conditional_reward_risk.setChecked(bool(values.get("enable_sideways_short_conditional_reward_risk",False))); self.sideways_short_conditional_di_spread_minimum.setValue(float(values.get("sideways_short_conditional_di_spread_minimum",35.0))); self.sideways_short_conditional_di_spread_maximum.setValue(float(values.get("sideways_short_conditional_di_spread_maximum",40.0))); self.sideways_short_conditional_reward_risk_ratio.setValue(float(values.get("sideways_short_conditional_reward_risk_ratio",1.0)))
-        self.enable_bear_short_conditional_reward_risk.setChecked(bool(values.get("enable_bear_short_conditional_reward_risk",False))); self.bear_short_conditional_di_spread_maximum.setValue(float(values.get("bear_short_conditional_di_spread_maximum",35.0))); self.bear_short_conditional_reward_risk_ratio.setValue(float(values.get("bear_short_conditional_reward_risk_ratio",1.0)))
         self.enable_directional_adx_filter.setChecked(bool(values.get("enable_directional_adx_filter",False))); self.directional_long_adx_maximum.setValue(float(values.get("directional_long_adx_maximum",60.0))); self.directional_short_adx_minimum.setValue(float(values.get("directional_short_adx_minimum",25.0)))
         self.enable_biased_short_adx_cap.setChecked(bool(values.get("enable_biased_short_adx_cap",False))); self.biased_short_adx_maximum.setValue(float(values.get("biased_short_adx_maximum",50.0)))
         self.enable_short_vwap_distance_filter.setChecked(bool(values.get("enable_short_vwap_distance_filter",False))); self.short_vwap_minimum_distance_atr.setValue(float(values.get("short_vwap_minimum_distance_atr",2.0)))

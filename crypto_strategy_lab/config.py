@@ -171,11 +171,6 @@ class BacktestConfig:
     di_direction_long_minimum_spread: Optional[float] = None
     di_direction_short_minimum_spread: Optional[float] = None
     di_execution_mode: DIExecutionMode = DIExecutionMode.BOTH_SIDES
-    di_reward_risk_ratio: float = 1.0
-    di_long_reward_risk_ratio: Optional[float] = None
-    di_short_reward_risk_ratio: Optional[float] = None
-    enable_di_regime_reward_risk: bool = False
-    di_regime_bear_return_threshold: float = -0.20
     enable_support_resistance_analysis: bool = False
     sr_pivot_left: int = 5
     sr_pivot_right: int = 5
@@ -196,46 +191,12 @@ class BacktestConfig:
     sr_short_require_near_resistance: bool = False
     sr_short_block_broken_resistance: bool = False
     sr_short_min_room_to_support_atr: float = 0.0
-    di_long_bull_reward_risk_ratio: float = 2.0
-    di_long_bear_reward_risk_ratio: float = 1.0
-    di_long_sideways_reward_risk_ratio: float = 2.0
-    di_short_bull_reward_risk_ratio: float = 1.0
-    di_short_bear_reward_risk_ratio: float = 1.0
-    di_short_sideways_reward_risk_ratio: float = 2.0
-    enable_bull_long_conditional_reward_risk: bool = False
-    bull_long_conditional_bb_width_minimum: float = 0.05
-    bull_long_conditional_adx_maximum: float = 40.0
-    bull_long_conditional_reward_risk_ratio: float = 1.0
-    enable_bull_long_momentum_confirmation: bool = False
-    bull_long_confirmation_lookback_days: int = 60
-    bull_long_confirmation_return_threshold: float = 0.20
-    bull_long_unconfirmed_reward_risk_ratio: float = 1.0
-    enable_bull_long_momentum_target_extension: bool = False
-    bull_long_momentum_extension_lookback_days: int = 30
-    bull_long_momentum_extension_return_threshold: float = 0.10
-    enable_bull_long_momentum_extension_return_maximum: bool = False
-    bull_long_momentum_extension_return_maximum: float = 0.40
-    bull_long_momentum_extended_reward_risk_ratio: float = 4.0
-    enable_bull_long_structural_confirmation: bool = False
-    bull_long_structural_sma_days: int = 200
-    bull_long_structural_slope_lookback_days: int = 30
-    bull_long_structural_unconfirmed_reward_risk_ratio: float = 1.0
     enable_bull_long_r_step_trailing: bool = False
     bull_long_r_step_activation_r: float = 2.0
     bull_long_r_step_distance_r: float = 2.0
     bull_long_r_step_size_r: float = 1.0
     bull_long_r_step_maximum_r: float = 0.0
     bull_long_r_step_activation_close_pct: float = 0.0
-    enable_sideways_long_conditional_reward_risk: bool = False
-    sideways_long_conditional_adx_maximum: float = 35.0
-    sideways_long_conditional_reward_risk_ratio: float = 1.0
-    enable_sideways_short_conditional_reward_risk: bool = False
-    sideways_short_conditional_di_spread_minimum: float = 35.0
-    sideways_short_conditional_di_spread_maximum: float = 40.0
-    sideways_short_conditional_reward_risk_ratio: float = 1.0
-    enable_bear_short_conditional_reward_risk: bool = False
-    bear_short_conditional_di_spread_maximum: float = 35.0
-    bear_short_conditional_reward_risk_ratio: float = 1.0
     enable_directional_adx_filter: bool = False
     directional_long_adx_maximum: float = 60.0
     directional_short_adx_minimum: float = 25.0
@@ -300,10 +261,6 @@ class BacktestConfig:
             object.__setattr__(self, "di_direction_long_minimum_spread", self.di_direction_minimum_spread)
         if self.di_direction_short_minimum_spread is None:
             object.__setattr__(self, "di_direction_short_minimum_spread", self.di_direction_minimum_spread)
-        if self.di_long_reward_risk_ratio is None:
-            object.__setattr__(self, "di_long_reward_risk_ratio", self.di_reward_risk_ratio)
-        if self.di_short_reward_risk_ratio is None:
-            object.__setattr__(self, "di_short_reward_risk_ratio", self.di_reward_risk_ratio)
         if self.input_csv != Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv") and self.strategy_csv == Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv"):
             object.__setattr__(self, "strategy_csv", self.input_csv)
         if self.initial_equity <= 0: raise ValueError("initial_equity must be positive")
@@ -343,56 +300,16 @@ class BacktestConfig:
         if self.long_momentum_lookback_hours <= 0: raise ValueError("long_momentum_lookback_hours must be positive")
         if self.long_momentum_minimum_return <= -1: raise ValueError("long_momentum_minimum_return must be greater than -100%")
         if self.enable_long_momentum_filter and not self.enable_di_direction_sizing: raise ValueError("long momentum filter requires DI-direction sizing")
-        if self.di_reward_risk_ratio <= 0: raise ValueError("di_reward_risk_ratio must be positive")
-        if self.di_long_reward_risk_ratio <= 0: raise ValueError("di_long_reward_risk_ratio must be positive")
-        if self.di_short_reward_risk_ratio <= 0: raise ValueError("di_short_reward_risk_ratio must be positive")
-        regime_ratios = (
-            self.di_long_bull_reward_risk_ratio, self.di_long_bear_reward_risk_ratio,
-            self.di_long_sideways_reward_risk_ratio, self.di_short_bull_reward_risk_ratio,
-            self.di_short_bear_reward_risk_ratio, self.di_short_sideways_reward_risk_ratio,
-        )
         if any(value <= 0 for value in regime_ratios): raise ValueError("DI regime reward/risk ratios must be positive")
-        if self.bull_long_conditional_bb_width_minimum < 0: raise ValueError("bull_long_conditional_bb_width_minimum must be non-negative")
-        if self.bull_long_conditional_adx_maximum < 0: raise ValueError("bull_long_conditional_adx_maximum must be non-negative")
-        if self.bull_long_conditional_reward_risk_ratio <= 0: raise ValueError("bull_long_conditional_reward_risk_ratio must be positive")
         if self.bull_long_r_step_activation_r <= 0: raise ValueError("bull_long_r_step_activation_r must be positive")
         if self.bull_long_r_step_distance_r <= 0: raise ValueError("bull_long_r_step_distance_r must be positive")
         if self.bull_long_r_step_size_r <= 0: raise ValueError("bull_long_r_step_size_r must be positive")
         if self.bull_long_r_step_maximum_r < 0: raise ValueError("bull_long_r_step_maximum_r cannot be negative")
         if 0 < self.bull_long_r_step_maximum_r <= self.bull_long_r_step_activation_r: raise ValueError("bull_long_r_step_maximum_r must be zero or above the activation R")
         if not 0 <= self.bull_long_r_step_activation_close_pct < 100: raise ValueError("bull_long_r_step_activation_close_pct must be from 0 up to, but not including, 100")
-        if self.bull_long_confirmation_lookback_days <= 0: raise ValueError("bull_long_confirmation_lookback_days must be positive")
-        if self.bull_long_confirmation_return_threshold <= -1: raise ValueError("bull_long_confirmation_return_threshold must be greater than -100%")
-        if self.bull_long_momentum_extension_lookback_days <= 0: raise ValueError("bull_long_momentum_extension_lookback_days must be positive")
-        if self.bull_long_momentum_extension_return_threshold <= -1: raise ValueError("bull_long_momentum_extension_return_threshold must be greater than -100%")
-        if self.bull_long_momentum_extension_return_maximum <= -1: raise ValueError("bull_long_momentum_extension_return_maximum must be greater than -100%")
-        if self.enable_bull_long_momentum_extension_return_maximum and self.bull_long_momentum_extension_return_maximum <= self.bull_long_momentum_extension_return_threshold: raise ValueError("bull_long_momentum_extension_return_maximum must exceed the minimum threshold")
-        if self.bull_long_momentum_extended_reward_risk_ratio <= 0: raise ValueError("bull_long_momentum_extended_reward_risk_ratio must be positive")
-        if self.bull_long_structural_sma_days <= 0: raise ValueError("bull_long_structural_sma_days must be positive")
-        if self.bull_long_structural_slope_lookback_days <= 0: raise ValueError("bull_long_structural_slope_lookback_days must be positive")
-        if self.bull_long_structural_unconfirmed_reward_risk_ratio <= 0: raise ValueError("bull_long_structural_unconfirmed_reward_risk_ratio must be positive")
-        if self.bull_long_unconfirmed_reward_risk_ratio <= 0: raise ValueError("bull_long_unconfirmed_reward_risk_ratio must be positive")
-        if self.sideways_long_conditional_adx_maximum < 0: raise ValueError("sideways_long_conditional_adx_maximum must be non-negative")
-        if self.sideways_long_conditional_reward_risk_ratio <= 0: raise ValueError("sideways_long_conditional_reward_risk_ratio must be positive")
-        if self.sideways_short_conditional_di_spread_minimum < 0 or self.sideways_short_conditional_di_spread_maximum < 0: raise ValueError("sideways-short conditional DI spread thresholds must be non-negative")
-        if self.sideways_short_conditional_di_spread_minimum >= self.sideways_short_conditional_di_spread_maximum: raise ValueError("sideways-short conditional DI spread minimum must be below maximum")
-        if self.sideways_short_conditional_reward_risk_ratio <= 0: raise ValueError("sideways_short_conditional_reward_risk_ratio must be positive")
-        if self.bear_short_conditional_di_spread_maximum < 0: raise ValueError("bear_short_conditional_di_spread_maximum must be non-negative")
-        if self.bear_short_conditional_reward_risk_ratio <= 0: raise ValueError("bear_short_conditional_reward_risk_ratio must be positive")
-        if self.di_regime_bear_return_threshold <= -1: raise ValueError("di_regime_bear_return_threshold must be greater than -100%")
-        if self.enable_di_regime_reward_risk and self.di_regime_bear_return_threshold >= self.bull_regime_return_threshold: raise ValueError("DI bear threshold must be below bull threshold")
-        if self.enable_di_regime_reward_risk and not self.enable_di_direction_sizing: raise ValueError("regime-specific DI reward/risk requires DI-direction sizing")
-        if self.enable_bull_long_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional bull-long reward/risk requires regime-specific DI reward/risk")
-        if self.enable_bull_long_r_step_trailing and not self.enable_di_regime_reward_risk: raise ValueError("bull-long R-step trailing requires regime-specific DI reward/risk")
         if self.enable_bull_long_r_step_trailing and self.enable_partial_take_profit: raise ValueError("bull-long R-step trailing cannot be combined with partial take profit")
         if self.enable_bull_long_r_step_trailing and self.enable_atr_checkpoint_tp_extension: raise ValueError("bull-long R-step trailing cannot be combined with ATR checkpoint TP extension")
         if self.enable_bull_long_r_step_trailing and self.enable_trailing_profit: raise ValueError("bull-long R-step trailing cannot be combined with the independent trailing stop")
-        if self.enable_bull_long_momentum_confirmation and not self.enable_di_regime_reward_risk: raise ValueError("bull-long momentum confirmation requires regime-specific DI reward/risk")
-        if self.enable_bull_long_momentum_target_extension and not self.enable_di_regime_reward_risk: raise ValueError("bull-long momentum target extension requires regime-specific DI reward/risk")
-        if self.enable_bull_long_structural_confirmation and not self.enable_di_regime_reward_risk: raise ValueError("bull-long structural confirmation requires regime-specific DI reward/risk")
-        if self.enable_sideways_long_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional sideways-long reward/risk requires regime-specific DI reward/risk")
-        if self.enable_sideways_short_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional sideways-short reward/risk requires regime-specific DI reward/risk")
-        if self.enable_bear_short_conditional_reward_risk and not self.enable_di_regime_reward_risk: raise ValueError("conditional bear-short reward/risk requires regime-specific DI reward/risk")
         if self.directional_long_adx_maximum < 0: raise ValueError("directional_long_adx_maximum must be non-negative")
         if self.directional_short_adx_minimum < 0: raise ValueError("directional_short_adx_minimum must be non-negative")
         if self.enable_directional_adx_filter and not self.enable_di_direction_sizing: raise ValueError("direction-specific ADX filter requires DI-direction sizing")
