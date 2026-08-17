@@ -24,7 +24,7 @@ jobs:
       - name: Run focused tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q tests/test_stage6_profile_exit_management.py tests/test_strategy_profiles.py tests/test_gui_profile_editor.py
+        run: python -m pytest -q tests/test_stage6_profile_exit_management.py tests/test_strategy_profiles.py tests/test_gui_main_window.py
       - name: Commit migration
         run: |
           git config user.name "github-actions[bot]"
