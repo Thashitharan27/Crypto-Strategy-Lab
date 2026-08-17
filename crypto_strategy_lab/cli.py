@@ -18,7 +18,8 @@ from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_s
 from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, partial_take_profit_analysis
 from crypto_strategy_lab.lifecycle import export_lifecycle_reports
 from crypto_strategy_lab.support_resistance_analysis import generate_sr_analysis_reports
-from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_summary_txt, write_trade_column_metadata
+from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_trade_column_metadata
+from crypto_strategy_lab.report_workbooks import build_backtest_workbook, build_indicator_workbook, build_performance_breakdowns
 from crypto_strategy_lab.random_entry import decisions_frame, random_analysis, run_batch, comparison_row
 from crypto_strategy_lab.config import EntryTimingMode
 
@@ -199,15 +200,13 @@ def main() -> None:
             run_output_step("Building indicator lifecycle reports", lambda: export_lifecycle_reports(trades, telemetry, run_dir, phases=config.lifecycle_phases, checkpoints=config.lifecycle_early_checkpoints, minimum_sample=config.lifecycle_minimum_bucket_sample, charts=config.create_lifecycle_charts, flat_threshold_pct=config.lifecycle_flat_pattern_threshold_pct))
     run_output_step("Saving skipped_signals.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_signals", [])).to_csv(run_dir / "skipped_signals.csv", index=False))
     run_output_step("Saving skipped_daily_entries.csv", lambda: pd.DataFrame(trades.attrs.get("skipped_daily_entries", [])).to_csv(run_dir / "skipped_daily_entries.csv", index=False))
-    run_output_step("Saving telemetry summaries", lambda: adx_analysis(trades).to_csv(run_dir / "adx_analysis.csv", index=False))
-    run_output_step("Saving BB width analysis", lambda: bb_width_analysis(trades).to_csv(run_dir / "bb_width_analysis.csv", index=False))
-    run_output_step("Saving DI spread analysis", lambda: di_spread_analysis(trades).to_csv(run_dir / "di_spread_analysis.csv", index=False))
+    indicator_tables = {"ADX": adx_analysis(trades), "BB Width": bb_width_analysis(trades), "DI Spread": di_spread_analysis(trades)}
+    run_output_step("Saving indicator analysis workbook", lambda: build_indicator_workbook(indicator_tables, run_dir))
     run_output_step("Building support/resistance analysis", lambda: generate_sr_analysis_reports(trades, run_dir))
     run_output_step("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir))
     equity = equity_curve(trades, config.initial_equity)
     run_output_step("Saving equity_curve.csv", lambda: equity.to_csv(run_dir / "equity_curve.csv", index=False))
-    run_output_step("Saving monthly_results.csv", lambda: periodic_results(trades, "ME").to_csv(run_dir / "monthly_results.csv", index=False))
-    run_output_step("Saving yearly_results.csv", lambda: periodic_results(trades, "YE").to_csv(run_dir / "yearly_results.csv", index=False))
+    monthly, yearly = periodic_results(trades, "ME"), periodic_results(trades, "YE")
     chart_warnings = run_output_step("Saving charts", lambda: save_plots(trades, equity, run_dir / "charts")) or []
     if config.enable_trade_telemetry and config.save_trade_journey_charts:
         chart_warnings.extend(run_output_step("Saving journey charts", lambda: save_journey_charts(trades, telemetry, run_dir / "charts")) or [])
@@ -296,7 +295,8 @@ def main() -> None:
     if config.use_intrabar_data and summary.get("intrabar_exit_count") == 0:
         print("WARNING: use_intrabar_data=True but 1M_INTRABAR exit count is 0. Check intrabar path, overlap, and timestamp alignment.")
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
-    write_summary_txt(summary, run_dir)
+    market_regime, direction_regime = build_performance_breakdowns(trades)
+    run_output_step("Saving backtest report workbook", lambda: build_backtest_workbook(summary, config, run_dir, monthly, yearly, market_regime, direction_regime))
     write_run_info(config, summary, run_dir)
     (run_dir / "log.txt").write_text("Command-line backtest completed.\n")
     update_latest(output_root, run_dir)

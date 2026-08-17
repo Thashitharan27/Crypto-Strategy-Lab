@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 
 import pandas as pd
+from openpyxl import load_workbook
 
 from crypto_strategy_lab.config import BacktestConfig, EntryMode, RiskMode
 from crypto_strategy_lab.engine import BacktestEngine
@@ -88,24 +89,21 @@ def _synthetic_trades():
     return pd.DataFrame(rows)
 
 
-def test_generate_sr_analysis_reports_creates_expected_files(tmp_path):
+def test_generate_sr_analysis_reports_creates_consolidated_workbook(tmp_path):
     trades = _synthetic_trades()
     reports = generate_sr_analysis_reports(trades, tmp_path)
     assert reports
-    expected_files = [
-        "support_resistance_analysis.csv",
-        "sr_regime_analysis.csv",
-        "sr_distance_analysis.csv",
-        "sr_event_context_analysis.csv",
-    ]
-    for filename in expected_files:
-        assert (tmp_path / filename).exists(), f"missing {filename}"
+    workbook = tmp_path / "support_resistance_analysis.xlsx"
+    assert workbook.exists()
+    assert load_workbook(workbook, read_only=True).sheetnames == ["Overview", "Location", "Distance", "Regime", "Event Context", "Hold Analysis", "Rejection Strength", "Test Count"]
+    assert not (tmp_path / "sr_regime_analysis.csv").exists()
+    assert not (tmp_path / "sr_distance_analysis.csv").exists()
 
 
 def test_sr_event_context_report_has_expected_rows_and_columns(tmp_path):
     trades = _synthetic_trades()
     generate_sr_analysis_reports(trades, tmp_path)
-    report = pd.read_csv(tmp_path / "sr_event_context_analysis.csv")
+    report = pd.read_excel(tmp_path / "support_resistance_analysis.xlsx", sheet_name="Event Context")
     assert set(report["context"]) == {"SUPPORT_BOUNCE", "NO_NEARBY_SR"}
     for column in ("trade_count", "winners", "losers", "win_rate", "total_r", "avg_r", "total_pnl", "avg_pnl"):
         assert column in report.columns
