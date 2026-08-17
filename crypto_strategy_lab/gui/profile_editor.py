@@ -41,12 +41,20 @@ class StrategyProfilesWidget(QWidget):
         self._check("break_even_enabled","Break-even protection"); self._number("break_even_activation_r",1,.001,1000); self._number("break_even_offset_r",0,-1000,1000)
         self._check("trailing_enabled","Trailing stop"); self._number("trailing_activation_r",3,.001,1000); self._number("trailing_distance_r",1,.001,1000)
         self._check("timeout_enabled","Maximum holding time"); self._integer("timeout_minutes",480,1,1000000)
+        self._check("r_step_trailing_enabled","R-step staircase"); self._number("r_step_activation_r",2,.001,1000); self._number("r_step_distance_r",2,.001,1000); self._number("r_step_size_r",1,.001,1000); self._number("r_step_maximum_r",0,0,1000); self._number("r_step_activation_close_pct",0,0,99.99)
+        self._check("atr_checkpoint_tp_extension_enabled","ATR checkpoint TP extension"); self._number("atr_checkpoint_di_spread_minimum",30,0,1000); self._number("atr_checkpoint_bb_width_minimum",.03,0,1000); self._number("atr_checkpoint_profit_lock_start",3,.001,1000); self._number("atr_checkpoint_profit_lock_distance",1,.001,1000)
         for key,label in (("break_even_activation_r","Activate after profit reaches"),("break_even_offset_r","Profit locked at activation"),("trailing_activation_r","Activate after profit reaches"),("trailing_distance_r","Trailing distance"),("timeout_minutes","Maximum holding time")):
             self.form.labelForField(self.controls[key]).setText(label)
         for key in ("trailing_activation_r","trailing_distance_r","break_even_activation_r","break_even_offset_r"):
             self.controls[key].setDecimals(3); self.controls[key].setSuffix(" R")
         self.controls["timeout_minutes"].setSuffix(" min")
         self.controls["timeout_minutes"].setToolTip("480 minutes equals 8 hours.")
+        for key,label in (("r_step_activation_r","Staircase activation"),("r_step_distance_r","Stop distance behind checkpoint"),("r_step_size_r","Checkpoint step"),("r_step_maximum_r","Maximum target (0 = runner)"),("r_step_activation_close_pct","Close at activation"),("atr_checkpoint_di_spread_minimum","Checkpoint DI spread minimum"),("atr_checkpoint_bb_width_minimum","Checkpoint BB width minimum"),("atr_checkpoint_profit_lock_start","Profit lock starts at"),("atr_checkpoint_profit_lock_distance","Profit lock distance")):
+            self.form.labelForField(self.controls[key]).setText(label)
+        for key in ("r_step_activation_r","r_step_distance_r","r_step_size_r","r_step_maximum_r","atr_checkpoint_profit_lock_start","atr_checkpoint_profit_lock_distance"):
+            self.controls[key].setSuffix(" R")
+        self.controls["r_step_activation_close_pct"].setSuffix(" %")
+        self.controls["atr_checkpoint_bb_width_minimum"].setDecimals(6)
         self._section("Entry Rules")
         self._choice("flip_rule_match_mode",(("Any flip rule (OR)","ANY"),("All flip rules (AND)","ALL"))); self.form.labelForField(self.controls["flip_rule_match_mode"]).setText("Flip rules match")
         self._choice("reject_rule_match_mode",(("Any reject rule (OR)","ANY"),("All reject rules (AND)","ALL"))); self.form.labelForField(self.controls["reject_rule_match_mode"]).setText("Reject rules match")
@@ -61,7 +69,7 @@ class StrategyProfilesWidget(QWidget):
         copy_btn.clicked.connect(lambda:setattr(self,"clipboard",deepcopy(self.profiles[self.current]))); paste_btn.clicked.connect(self._paste); reset_btn.clicked.connect(self._reset); copy_rules_btn.clicked.connect(self._apply_rules_to_all); self.list.currentRowChanged.connect(self._select); self.mode.currentTextChanged.connect(self.changed); self.mode.currentIndexChanged.connect(self._update_mode_help)
         for widget in (self.regime_lookback,self.bull_threshold,self.bear_threshold,self.structural_sma_days,self.structural_slope_days,self.adx_period,self.bb_period,self.bb_stddevs): widget.valueChanged.connect(self.changed)
         self.regime_method.currentIndexChanged.connect(self._update_regime_controls); self.regime_method.currentIndexChanged.connect(self.changed)
-        for key in ("partial_stop_enabled","partial_profit_enabled","trailing_enabled","break_even_enabled","timeout_enabled"): self.controls[key].toggled.connect(self._update_management_controls)
+        for key in ("partial_stop_enabled","partial_profit_enabled","trailing_enabled","break_even_enabled","timeout_enabled","r_step_trailing_enabled","atr_checkpoint_tp_extension_enabled"): self.controls[key].toggled.connect(self._update_management_controls)
         self.add_rule_btn.clicked.connect(self._add_entry_rule); self.remove_rule_btn.clicked.connect(self._remove_entry_rule)
         self.controls["after_tp1_stop_mode"].currentTextChanged.connect(self._update_management_controls)
         self._update_mode_help(); self._update_regime_controls(); self._refresh_list(); self.list.setCurrentRow(0)

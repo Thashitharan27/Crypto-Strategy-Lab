@@ -67,6 +67,17 @@ class StrategyProfile:
     break_even_offset_r: float = 0.0
     timeout_enabled: bool = False
     timeout_minutes: int = 480
+    r_step_trailing_enabled: bool = False
+    r_step_activation_r: float = 2.0
+    r_step_distance_r: float = 2.0
+    r_step_size_r: float = 1.0
+    r_step_maximum_r: float = 0.0
+    r_step_activation_close_pct: float = 0.0
+    atr_checkpoint_tp_extension_enabled: bool = False
+    atr_checkpoint_di_spread_minimum: float = 30.0
+    atr_checkpoint_bb_width_minimum: float = 0.03
+    atr_checkpoint_profit_lock_start: float = 3.0
+    atr_checkpoint_profit_lock_distance: float = 1.0
 
     def validate(self, key: str = "profile") -> None:
         if self.reward_risk_ratio <= 0 or self.risk_multiplier <= 0:
@@ -102,6 +113,14 @@ class StrategyProfile:
         if not 0 <= self.close_location_minimum <= self.close_location_maximum <= 1: raise ValueError(f"{key}: close location must be within 0-100%")
         if self.rsi_period < 1 or self.momentum_lookback_hours < 1 or self.timeout_minutes < 1: raise ValueError(f"{key}: periods must be positive")
         if self.break_even_activation_r <= 0: raise ValueError(f"{key}: break-even activation must be positive")
+        if self.r_step_activation_r <= 0 or self.r_step_distance_r <= 0 or self.r_step_size_r <= 0: raise ValueError(f"{key}: R-step distances must be positive")
+        if self.r_step_maximum_r < 0: raise ValueError(f"{key}: R-step maximum cannot be negative")
+        if not 0 <= self.r_step_activation_close_pct < 100: raise ValueError(f"{key}: R-step activation close must be from 0% up to, but not including, 100%")
+        if self.atr_checkpoint_di_spread_minimum < 0 or self.atr_checkpoint_bb_width_minimum < 0: raise ValueError(f"{key}: checkpoint thresholds cannot be negative")
+        if self.atr_checkpoint_profit_lock_start <= 0 or self.atr_checkpoint_profit_lock_distance <= 0: raise ValueError(f"{key}: checkpoint profit-lock values must be positive")
+        if self.r_step_trailing_enabled and self.trailing_enabled: raise ValueError(f"{key}: choose either R-step staircase or trailing stop")
+        if self.r_step_trailing_enabled and self.partial_profit_enabled: raise ValueError(f"{key}: R-step staircase cannot be combined with partial take-profit")
+        if self.r_step_trailing_enabled and self.atr_checkpoint_tp_extension_enabled: raise ValueError(f"{key}: choose either R-step staircase or ATR checkpoint extension")
 
 
 def default_profiles() -> dict[str, StrategyProfile]:
