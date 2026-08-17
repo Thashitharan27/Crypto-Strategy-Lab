@@ -35,11 +35,16 @@ Short, and Abstain totals so every decision can be audited.
 
 ## Start the application
 
-On Windows, double-click:
+On Windows, double-click the normal no-console launcher:
 
 ```text
-Open Backtester.bat
+Crypto Strategy Lab.vbs
 ```
+
+It starts `.venv\Scripts\pythonw.exe` from the project directory, including when
+the directory path contains spaces. Startup errors are displayed in a GUI dialog.
+`Debug Launcher.bat` is available for troubleshooting only; it intentionally opens
+a console so Python diagnostics remain visible.
 
 Or launch it from a terminal:
 
@@ -79,7 +84,8 @@ The **Portfolio** tab accepts a dynamic list of assets. Each enabled asset uses 
 ## Project structure
 
 ```text
-Open Backtester.bat       Windows launcher
+Crypto Strategy Lab.vbs   Normal no-console Windows launcher
+Debug Launcher.bat        Console launcher for debugging only
 app.py                    Desktop application entry point
 cli.py                    Optional command-line backtest entry point
 crypto_strategy_lab/      Installable application package

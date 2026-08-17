@@ -1,10 +1,52 @@
-"""GUI entry point for the Long-Short Crypto Backtester."""
+"""GUI entry point for Crypto Strategy Lab."""
 import sys
-from PySide6.QtWidgets import QApplication
+import traceback
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from crypto_strategy_lab.gui.main_window import MainWindow
 
-if __name__ == "__main__":
+
+def _splash_pixmap() -> QPixmap:
+    pixmap = QPixmap(480, 220)
+    pixmap.fill(QColor("#172033"))
+    painter = QPainter(pixmap)
+    painter.setPen(QColor("#f5f7fb"))
+    painter.setFont(QFont("Segoe UI", 24, QFont.Weight.DemiBold))
+    painter.drawText(pixmap.rect().adjusted(30, 20, -30, -55), Qt.AlignCenter,
+                     "Crypto Strategy Lab")
+    painter.end()
+    return pixmap
+
+
+def main() -> int:
     app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec())
+    splash = QSplashScreen(_splash_pixmap(), Qt.WindowStaysOnTopHint)
+    splash.showMessage("Loading settings...", Qt.AlignBottom | Qt.AlignHCenter,
+                       QColor("#d8dfeb"))
+    splash.show()
+    app.processEvents()
+
+    def status(message: str) -> None:
+        splash.showMessage(message, Qt.AlignBottom | Qt.AlignHCenter, QColor("#d8dfeb"))
+        app.processEvents()
+
+    try:
+        window = MainWindow(startup_status=status)
+        status("Ready")
+        window.show()
+        splash.finish(window)
+        # Auto-connect only after the fully constructed main window is visible.
+        window.start_post_show_tasks()
+    except Exception as exc:
+        splash.close()
+        traceback.print_exc()
+        QMessageBox.critical(None, "Crypto Strategy Lab - Startup Error",
+                             f"Crypto Strategy Lab could not start.\n\n{exc}")
+        return 1
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
