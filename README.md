@@ -20,18 +20,16 @@ normal DI direction. Use **Add rule** or **Remove selected** to manage any
 number of rules. Legacy profile filters are migrated into this table when
 loaded.
 
-## Independent direction voting
+## DI Direction & Pressure
 
-The **DI Direction Selection** tab can replace DI-only direction choice with a
-majority vote. The five independently configurable voters are DI pressure,
-high/low market structure, momentum, volume-weighted candle pressure, and a
-completed higher-timeframe trend. Each voter returns Long, Short, or Abstain.
-The side with more votes is selected; tied votes and winners below the
-configured minimum vote count are skipped.
+DI direction selects Long when +DI is above -DI and Short when -DI is above
++DI. The optional pressure analysis records whether the selected directional DI
+is expanding, contracting, or mixed over a configurable lookback. This is
+record-only telemetry and never filters a trade.
 
-ADX, DI spread, ATR, and Bollinger width remain entry-quality filters rather
-than direction votes. Trade output records each individual vote plus the Long,
-Short, and Abstain totals so every decision can be audited.
+DI spread acceptance remains configured separately in **Strategy Profiles →
+Rules → DI Spread**. The indicator analysis workbook includes direction,
+regime, pressure-state, and DI-spread-change performance tables.
 
 ## Start the application
 

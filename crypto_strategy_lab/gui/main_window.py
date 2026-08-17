@@ -76,41 +76,6 @@ class MainWindow(QMainWindow):
         w=QLineEdit(text); return w
     def _spin(self, v, mn=-1e12, mx=1e12, dec=6):
         s=QDoubleSpinBox(); s.setRange(mn,mx); s.setDecimals(dec); s.setValue(v); return s
-    def _apply_single_voter_test(self):
-        selected=self.direction_vote_test_mode.currentData()
-        if not selected:
-            return
-        voters={
-            "di":self.direction_vote_use_di,
-            "structure":self.direction_vote_use_structure,
-            "momentum":self.direction_vote_use_momentum,
-            "volume":self.direction_vote_use_volume,
-            "higher_timeframe":self.direction_vote_use_htf,
-        }
-        self._applying_single_voter_test=True
-        try:
-            self.enable_direction_voting.setChecked(True)
-            for name,control in voters.items():
-                control.setChecked(name==selected)
-            self.direction_vote_minimum.setValue(1)
-        finally:
-            self._applying_single_voter_test=False
-        self.update_dynamic()
-    def _sync_single_voter_test_mode(self):
-        if getattr(self,"_applying_single_voter_test",False):
-            return
-        voters={
-            "di":self.direction_vote_use_di,
-            "structure":self.direction_vote_use_structure,
-            "momentum":self.direction_vote_use_momentum,
-            "volume":self.direction_vote_use_volume,
-            "higher_timeframe":self.direction_vote_use_htf,
-        }
-        enabled=[name for name,control in voters.items() if control.isChecked()]
-        selected=enabled[0] if self.enable_direction_voting.isChecked() and len(enabled)==1 and self.direction_vote_minimum.value()==1 else ""
-        self.direction_vote_test_mode.blockSignals(True)
-        self.direction_vote_test_mode.setCurrentIndex(self.direction_vote_test_mode.findData(selected))
-        self.direction_vote_test_mode.blockSignals(False)
     def _build_config(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); form=QVBoxLayout(inner); self.config_controls=[]
         toolbar=QHBoxLayout(); toolbar.setContentsMargins(0,0,0,4); self.setup_toolbar=toolbar
@@ -209,22 +174,9 @@ class MainWindow(QMainWindow):
         self.sr_short_require_near_resistance=QCheckBox("Require price near resistance")
         self.sr_short_block_broken_resistance=QCheckBox("Block if resistance structure is broken")
         self.sr_short_min_room_to_support_atr=self._spin(0.0,0.0,1000.0,2)
-        self.enable_direction_voting=QCheckBox("Enable direction voting for entries")
-        self.direction_vote_test_mode=QComboBox()
-        self.direction_vote_test_mode.addItem("Custom combination", "")
-        self.direction_vote_test_mode.addItem("DI pressure only", "di")
-        self.direction_vote_test_mode.setToolTip("DI pressure is the supported direction voter.")
-        self.direction_vote_use_di=QCheckBox("DI pressure (directional strength)"); self.direction_vote_use_di.setChecked(True)
-        self.direction_vote_use_structure=QCheckBox("Market structure (confirmed swing highs/lows)"); self.direction_vote_use_structure.setChecked(False); self.direction_vote_structure_lookback=QSpinBox(); self.direction_vote_structure_lookback.setRange(10,10000); self.direction_vote_structure_lookback.setValue(20); self.direction_vote_structure_lookback.setToolTip("Legacy configuration compatibility; no longer exposed in the GUI.")
-        self.direction_vote_use_momentum=QCheckBox("Momentum (trailing return)"); self.direction_vote_use_momentum.setChecked(False); self.direction_vote_momentum_lookback=QSpinBox(); self.direction_vote_momentum_lookback.setRange(1,10000); self.direction_vote_momentum_lookback.setValue(24); self.direction_vote_momentum_threshold=self._spin(0,0,1,6)
-        self.direction_vote_use_volume=QCheckBox("Candle / volume pressure (weighted buying vs selling)"); self.direction_vote_use_volume.setChecked(False); self.direction_vote_volume_lookback=QSpinBox(); self.direction_vote_volume_lookback.setRange(1,10000); self.direction_vote_volume_lookback.setValue(20); self.direction_vote_volume_threshold=self._spin(.10,0,1,3)
-        self.direction_vote_use_htf=QCheckBox("Higher-timeframe trend (completed HTF candles)"); self.direction_vote_use_htf.setChecked(False); self.direction_vote_htf_hours=QSpinBox(); self.direction_vote_htf_hours.setRange(1,168); self.direction_vote_htf_hours.setValue(4); self.direction_vote_htf_sma=QSpinBox(); self.direction_vote_htf_sma.setRange(2,1000); self.direction_vote_htf_sma.setValue(20); self.direction_vote_minimum=QSpinBox(); self.direction_vote_minimum.setRange(1,5); self.direction_vote_minimum.setValue(1)
-        self.direction_vote_test_mode.currentIndexChanged.connect(self._apply_single_voter_test)
-        for control in (self.enable_direction_voting,self.direction_vote_use_di,self.direction_vote_use_structure,self.direction_vote_use_momentum,self.direction_vote_use_volume,self.direction_vote_use_htf):
-            control.toggled.connect(self._sync_single_voter_test_mode)
-            control.toggled.connect(self.update_dynamic)
-        self.direction_vote_minimum.valueChanged.connect(self._sync_single_voter_test_mode)
-        self.direction_vote_minimum.valueChanged.connect(self.update_dynamic)
+        self.enable_di_direction_selection=QCheckBox("Enable DI direction selection"); self.enable_di_direction_selection.setChecked(True)
+        self.enable_di_pressure_analysis=QCheckBox("Analyze DI expansion / contraction"); self.enable_di_pressure_analysis.setChecked(True)
+        self.di_pressure_lookback=QSpinBox(); self.di_pressure_lookback.setRange(1,100); self.di_pressure_lookback.setValue(3)
         self.di_execution_mode=QComboBox(); self.di_execution_mode.addItems(["BOTH_SIDES","PREFERRED_SIDE_ONLY"])
         self.enable_di_regime_reward_risk=QCheckBox("Enable Regime-Specific Reward/Risk")
         self.di_regime_bear_return_threshold=self._line("-20%")
@@ -439,7 +391,7 @@ class MainWindow(QMainWindow):
         intro.setWordWrap(True); layout.addWidget(intro)
         self.direction_voting_box.setParent(page); layout.addWidget(self.direction_voting_box)
         layout.addStretch(1)
-        self.tabs.addTab(page,"Direction Voting")
+        self.tabs.addTab(page,"DI Direction & Pressure")
         self.analysis_level.setCurrentText("Standard (Recommended)"); self._apply_analysis_preset(); self._set_analysis_advanced(False)
 
     def _build_support_resistance_tab(self):
@@ -571,17 +523,17 @@ class MainWindow(QMainWindow):
             ("",self.enable_di_direction_sizing),
             ("",self.flip_filtered_di_direction),
             ("Execution Mode",self.di_execution_mode),
-            ("Long Minimum DI Spread",self.di_direction_long_min_spread),
-            ("Short Minimum DI Spread",self.di_direction_short_min_spread),
             ("Long Reward/Risk Ratio",self.di_long_reward_risk_ratio),
             ("Short Reward/Risk Ratio",self.di_short_reward_risk_ratio),
         ]: selection.addRow(lab,w)
         form.addWidget(selection_box)
-        voting_box=QGroupBox("Direction Selection"); self.direction_voting_box=voting_box; voting=QFormLayout(voting_box); self.direction_voting_form=voting
-        self.direction_vote_status=QLabel(); self.direction_vote_status.setWordWrap(True); self.direction_vote_status.setMinimumHeight(42)
-        voting_help=QLabel("Other experimental voters were removed from this screen because they did not add a dependable improvement. Legacy config fields remain readable for compatibility."); voting_help.setWordWrap(True)
-        for lab,w in [("",self.enable_direction_voting),("",self.direction_vote_status),("",self.direction_vote_use_di),("",voting_help)]: voting.addRow(lab,w)
-        form.addWidget(voting_box)
+        direction_box=QGroupBox("Direction Selection"); direction_form=QFormLayout(direction_box)
+        rule=QLabel("Current Rule\n+DI above -DI → LONG\n-DI above +DI → SHORT"); rule.setWordWrap(True)
+        direction_form.addRow("",self.enable_di_direction_selection); direction_form.addRow("",rule); form.addWidget(direction_box)
+        pressure_box=QGroupBox("DI Pressure Analysis"); pressure_form=QFormLayout(pressure_box)
+        mode=QLabel("Analysis Mode: RECORD ONLY\nDoes not filter or reject trades.")
+        help_text=QLabel("DI direction chooses LONG or SHORT from +DI versus -DI. DI Pressure Analysis measures whether directional pressure is strengthening or weakening before entry. It is analysis-only and does not filter trades. DI Spread entry filtering is configured separately under Strategy Profiles → Rules → DI Spread."); help_text.setWordWrap(True)
+        pressure_form.addRow("",self.enable_di_pressure_analysis); pressure_form.addRow("Lookback",self.di_pressure_lookback); pressure_form.addRow("",mode); pressure_form.addRow("",help_text); form.addWidget(pressure_box)
         regime_targets_box=QGroupBox("Regime-Specific Reward/Risk"); regime_targets=QFormLayout(regime_targets_box)
         regime_targets_help=QLabel("Bull uses the Bull Return Threshold below. Bear uses the separate bear threshold; returns between them are sideways. Warm-up trades use the base long/short ratios above.")
         regime_targets_help.setWordWrap(True)
@@ -816,7 +768,7 @@ class MainWindow(QMainWindow):
         values.update({"enable_coin_flip_sizing":self.enable_coin_flip_sizing.isChecked(),"coin_flip_seed":self.coin_flip_seed.text().strip(),"coin_flip_large_multiplier":3.0,"coin_flip_small_multiplier":1.0})
         values.update({"enable_di_direction_sizing":self.enable_di_direction_sizing.isChecked(),"flip_filtered_di_direction":self.flip_filtered_di_direction.isChecked(),"di_direction_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_long_minimum_spread":self.di_direction_long_min_spread.value(),"di_direction_short_minimum_spread":self.di_direction_short_min_spread.value(),"di_execution_mode":self.di_execution_mode.currentText(),"di_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_long_reward_risk_ratio":self.di_long_reward_risk_ratio.value(),"di_short_reward_risk_ratio":self.di_short_reward_risk_ratio.value()})
         values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"enable_sr_hold_confirmation":self.enable_sr_hold_confirmation.isChecked(),"sr_hold_confirmation_bars":self.sr_hold_confirmation_bars.value(),"sr_hold_confirmation_atr":self.sr_hold_confirmation_atr.value(),"sr_break_tolerance_atr":self.sr_break_tolerance_atr.value(),"sr_break_basis":self.sr_break_basis.currentText(),"sr_filter_mode":self.sr_filter_mode.currentData(),"sr_long_avoid_near_resistance":self.sr_long_avoid_near_resistance.isChecked(),"sr_long_require_near_support":self.sr_long_require_near_support.isChecked(),"sr_long_block_broken_support":self.sr_long_block_broken_support.isChecked(),"sr_long_min_room_to_resistance_atr":self.sr_long_min_room_to_resistance_atr.value(),"sr_short_avoid_near_support":self.sr_short_avoid_near_support.isChecked(),"sr_short_require_near_resistance":self.sr_short_require_near_resistance.isChecked(),"sr_short_block_broken_resistance":self.sr_short_block_broken_resistance.isChecked(),"sr_short_min_room_to_support_atr":self.sr_short_min_room_to_support_atr.value()})
-        values.update({"enable_direction_voting":self.enable_direction_voting.isChecked(),"direction_vote_use_di":self.direction_vote_use_di.isChecked(),"direction_vote_use_structure":False,"direction_vote_structure_lookback":self.direction_vote_structure_lookback.value(),"direction_vote_use_momentum":False,"direction_vote_momentum_lookback_hours":self.direction_vote_momentum_lookback.value(),"direction_vote_momentum_threshold":self.direction_vote_momentum_threshold.value(),"direction_vote_use_volume_pressure":False,"direction_vote_volume_lookback":self.direction_vote_volume_lookback.value(),"direction_vote_volume_threshold":self.direction_vote_volume_threshold.value(),"direction_vote_use_higher_timeframe":False,"direction_vote_higher_timeframe_hours":self.direction_vote_htf_hours.value(),"direction_vote_higher_timeframe_sma_period":self.direction_vote_htf_sma.value(),"direction_vote_minimum_votes":1})
+        values.update({"enable_di_direction_selection":self.enable_di_direction_selection.isChecked(),"enable_di_pressure_analysis":self.enable_di_pressure_analysis.isChecked(),"di_pressure_lookback":self.di_pressure_lookback.value()})
         values.update({"enable_di_regime_reward_risk":self.enable_di_regime_reward_risk.isChecked(),"di_regime_bear_return_threshold":parse_percentage(self.di_regime_bear_return_threshold.text()),"di_long_bull_reward_risk_ratio":self.di_long_bull_reward_risk_ratio.value(),"di_long_bear_reward_risk_ratio":self.di_long_bear_reward_risk_ratio.value(),"di_long_sideways_reward_risk_ratio":self.di_long_sideways_reward_risk_ratio.value(),"di_short_bull_reward_risk_ratio":self.di_short_bull_reward_risk_ratio.value(),"di_short_bear_reward_risk_ratio":self.di_short_bear_reward_risk_ratio.value(),"di_short_sideways_reward_risk_ratio":self.di_short_sideways_reward_risk_ratio.value()})
         values.update({"enable_bull_long_conditional_reward_risk":self.enable_bull_long_conditional_reward_risk.isChecked(),"bull_long_conditional_bb_width_minimum":parse_percentage(self.bull_long_conditional_bb_width_minimum.text()),"bull_long_conditional_adx_maximum":self.bull_long_conditional_adx_maximum.value(),"bull_long_conditional_reward_risk_ratio":self.bull_long_conditional_reward_risk_ratio.value()})
         values.update({"enable_bull_long_momentum_confirmation":self.enable_bull_long_momentum_confirmation.isChecked(),"bull_long_confirmation_lookback_days":self.bull_long_confirmation_lookback_days.value(),"bull_long_confirmation_return_threshold":parse_percentage(self.bull_long_confirmation_return_threshold.text()),"bull_long_unconfirmed_reward_risk_ratio":self.bull_long_unconfirmed_reward_risk_ratio.value()})
@@ -887,7 +839,7 @@ class MainWindow(QMainWindow):
 
     def reset_defaults(self):
         defaults=default_gui_config()
-        defaults.update({"enable_di_direction_sizing":True,"enable_direction_voting":True,"direction_vote_use_di":True})
+        defaults.update({"enable_di_direction_sizing":True,"enable_di_direction_selection":True,"enable_di_pressure_analysis":True,"di_pressure_lookback":3})
         self.apply_values(defaults)
 
     def new_run(self):
@@ -965,45 +917,6 @@ class MainWindow(QMainWindow):
         self.entry_interval.setEnabled(self.entry_mode.currentData()=="EVERY_N_CANDLES")
         self.max_pairs.setEnabled(self.entry_mode.currentData()=="EVERY_N_CANDLES")
         self._update_sr_tab_state()
-        if hasattr(self,"direction_voting_form"):
-            voting_enabled=self.enable_direction_voting.isChecked()
-            voter_controls=(self.direction_vote_use_di,self.direction_vote_use_structure,self.direction_vote_use_momentum,self.direction_vote_use_volume,self.direction_vote_use_htf)
-            for control in voter_controls: control.setEnabled(voting_enabled)
-            enabled_names=[label for control,label in (
-                (self.direction_vote_use_di,"DI pressure"),(self.direction_vote_use_structure,"market structure"),
-                (self.direction_vote_use_momentum,"momentum"),(self.direction_vote_use_volume,"candle/volume pressure"),
-                (self.direction_vote_use_htf,"higher-timeframe trend"),
-            ) if control.isChecked()]
-            enabled_count=len(enabled_names)
-            if voting_enabled and enabled_count and self.direction_vote_minimum.value()>enabled_count:
-                self.direction_vote_minimum.setValue(enabled_count)
-            single_test=bool(self.direction_vote_test_mode.currentData())
-            # These legacy controls are retained for config compatibility, but are
-            # no longer rows in direction_voting_form after the tab was simplified.
-            # Toggling the widgets directly avoids asking QFormLayout to operate on
-            # widgets that it does not own.
-            self.direction_vote_structure_lookback.setVisible(voting_enabled and self.direction_vote_use_structure.isChecked())
-            self.direction_vote_momentum_lookback.setVisible(voting_enabled and self.direction_vote_use_momentum.isChecked())
-            self.direction_vote_momentum_threshold.setVisible(voting_enabled and self.direction_vote_use_momentum.isChecked())
-            self.direction_vote_volume_lookback.setVisible(voting_enabled and self.direction_vote_use_volume.isChecked())
-            self.direction_vote_volume_threshold.setVisible(voting_enabled and self.direction_vote_use_volume.isChecked())
-            self.direction_vote_htf_sma.setVisible(voting_enabled and self.direction_vote_use_htf.isChecked())
-            self.direction_vote_minimum.setVisible(voting_enabled and not single_test)
-            if not voting_enabled:
-                message="Direction voting is OFF. These signal settings will not affect entries until voting is enabled."
-                color="#8a5a00"
-            elif not enabled_count:
-                message="Choose at least one direction signal before running the backtest."
-                color="#b42318"
-            elif single_test:
-                message=f"Active test: {enabled_names[0]} alone selects Long or Short. If it abstains, the signal is skipped."
-                color="#176b3a"
-            else:
-                votes=self.direction_vote_minimum.value()
-                message=f"Active combination: {', '.join(enabled_names)}. A direction needs {votes} matching vote{'s' if votes!=1 else ''}; ties and insufficient votes are skipped."
-                color="#176b3a"
-            self.direction_vote_status.setText(message)
-            self.direction_vote_status.setStyleSheet(f"background:#f5f7f8;border:1px solid #ccd3d8;border-left:4px solid {color};padding:8px")
         if hasattr(self,"strategy_timeframe"):
             strategy=self._timeframe_minutes(self.strategy_timeframe.currentText())
             intrabar=self._timeframe_minutes(self.intrabar_timeframe.currentText())
@@ -1313,7 +1226,7 @@ class MainWindow(QMainWindow):
         self.enable_support_resistance_analysis.setChecked(bool(values.get("enable_support_resistance_analysis",False))); self.sr_pivot_left.setValue(int(values.get("sr_pivot_left",5))); self.sr_pivot_right.setValue(int(values.get("sr_pivot_right",5))); self.sr_lookback_bars.setValue(int(values.get("sr_lookback_bars",200))); self.sr_zone_width_atr.setValue(float(values.get("sr_zone_width_atr",0.5))); self.sr_near_distance_atr.setValue(float(values.get("sr_near_distance_atr",0.75))); self.enable_sr_hold_confirmation.setChecked(bool(values.get("enable_sr_hold_confirmation",False))); self.sr_hold_confirmation_bars.setValue(int(values.get("sr_hold_confirmation_bars",3))); self.sr_hold_confirmation_atr.setValue(float(values.get("sr_hold_confirmation_atr",0.25))); self.sr_break_tolerance_atr.setValue(float(values.get("sr_break_tolerance_atr",0.25))); self.sr_break_basis.setCurrentText(str(values.get("sr_break_basis","CLOSE"))); self.sr_filter_mode.setCurrentIndex(max(0,self.sr_filter_mode.findData(str(values.get("sr_filter_mode","ANALYSIS_ONLY")))))
         self.sr_long_avoid_near_resistance.setChecked(bool(values.get("sr_long_avoid_near_resistance",False))); self.sr_long_require_near_support.setChecked(bool(values.get("sr_long_require_near_support",False))); self.sr_long_block_broken_support.setChecked(bool(values.get("sr_long_block_broken_support",False))); self.sr_long_min_room_to_resistance_atr.setValue(float(values.get("sr_long_min_room_to_resistance_atr",0.0))); self.sr_short_avoid_near_support.setChecked(bool(values.get("sr_short_avoid_near_support",False))); self.sr_short_require_near_resistance.setChecked(bool(values.get("sr_short_require_near_resistance",False))); self.sr_short_block_broken_resistance.setChecked(bool(values.get("sr_short_block_broken_resistance",False))); self.sr_short_min_room_to_support_atr.setValue(float(values.get("sr_short_min_room_to_support_atr",0.0)))
         if hasattr(self,"sr_detection_preset"): self._sync_sr_preset_from_values()
-        self.enable_direction_voting.setChecked(bool(values.get("enable_direction_voting",True))); self.direction_vote_use_di.setChecked(bool(values.get("direction_vote_use_di",True))); self.direction_vote_use_structure.setChecked(False); self.direction_vote_structure_lookback.setValue(int(values.get("direction_vote_structure_lookback",20))); self.direction_vote_use_momentum.setChecked(False); self.direction_vote_momentum_lookback.setValue(int(values.get("direction_vote_momentum_lookback_hours",24))); self.direction_vote_momentum_threshold.setValue(float(values.get("direction_vote_momentum_threshold",0))); self.direction_vote_use_volume.setChecked(False); self.direction_vote_volume_lookback.setValue(int(values.get("direction_vote_volume_lookback",20))); self.direction_vote_volume_threshold.setValue(float(values.get("direction_vote_volume_threshold",.10))); self.direction_vote_use_htf.setChecked(False); self.direction_vote_htf_hours.setValue(int(values.get("direction_vote_higher_timeframe_hours",4))); self.direction_vote_htf_sma.setValue(int(values.get("direction_vote_higher_timeframe_sma_period",20))); self.direction_vote_minimum.setValue(1)
+        self.enable_di_direction_selection.setChecked(bool(values.get("enable_di_direction_selection",True))); self.enable_di_pressure_analysis.setChecked(bool(values.get("enable_di_pressure_analysis",True))); self.di_pressure_lookback.setValue(int(values.get("di_pressure_lookback",3)))
         self.enable_di_regime_reward_risk.setChecked(bool(values.get("enable_di_regime_reward_risk",False))); self.di_regime_bear_return_threshold.setText(format_percentage(float(values.get("di_regime_bear_return_threshold",-0.20)),2)); self.di_long_bull_reward_risk_ratio.setValue(float(values.get("di_long_bull_reward_risk_ratio",2.0))); self.di_long_bear_reward_risk_ratio.setValue(float(values.get("di_long_bear_reward_risk_ratio",1.0))); self.di_long_sideways_reward_risk_ratio.setValue(float(values.get("di_long_sideways_reward_risk_ratio",2.0))); self.di_short_bull_reward_risk_ratio.setValue(float(values.get("di_short_bull_reward_risk_ratio",1.0))); self.di_short_bear_reward_risk_ratio.setValue(float(values.get("di_short_bear_reward_risk_ratio",1.0))); self.di_short_sideways_reward_risk_ratio.setValue(float(values.get("di_short_sideways_reward_risk_ratio",2.0)))
         self.enable_bull_long_conditional_reward_risk.setChecked(bool(values.get("enable_bull_long_conditional_reward_risk",False))); self.bull_long_conditional_bb_width_minimum.setText(format_percentage(float(values.get("bull_long_conditional_bb_width_minimum",0.05)),2)); self.bull_long_conditional_adx_maximum.setValue(float(values.get("bull_long_conditional_adx_maximum",40.0))); self.bull_long_conditional_reward_risk_ratio.setValue(float(values.get("bull_long_conditional_reward_risk_ratio",1.0)))
         self.enable_bull_long_momentum_confirmation.setChecked(bool(values.get("enable_bull_long_momentum_confirmation",False))); self.bull_long_confirmation_lookback_days.setValue(int(values.get("bull_long_confirmation_lookback_days",60))); self.bull_long_confirmation_return_threshold.setText(format_percentage(float(values.get("bull_long_confirmation_return_threshold",0.20)),2)); self.bull_long_unconfirmed_reward_risk_ratio.setValue(float(values.get("bull_long_unconfirmed_reward_risk_ratio",1.0)))

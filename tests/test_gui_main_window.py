@@ -50,7 +50,7 @@ def test_market_ready_tabs_use_profile_only_strategy_workflow():
     window = MainWindow()
     try:
         tab_names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
-        assert tab_names == ["Backtest Setup", "Direction Voting", "Support & Resistance", "Strategy Profiles", "Summary", "Portfolio", "Logs", "GitHub", "ChatGPT"]
+        assert tab_names == ["Backtest Setup", "DI Direction & Pressure", "Support & Resistance", "Strategy Profiles", "Summary", "Portfolio", "Logs", "GitHub", "ChatGPT"]
         assert "Legacy Strategy" not in tab_names
         values=window.values()
         assert values["enable_strategy_profiles"] is True
@@ -221,50 +221,25 @@ def test_gui_default_atr_period_matches_backtest_config():
         window.close()
 
 
-def test_direction_voting_defaults_to_runnable_di_only_config():
+def test_di_direction_pressure_defaults_are_analysis_only():
     app(); window=MainWindow()
     try:
         values=window.values()
-        assert values["enable_direction_voting"] is True
-        assert values["direction_vote_use_di"] is True
-        assert values["direction_vote_minimum_votes"]==1
-        assert values["direction_vote_use_structure"] is False
-        assert values["direction_vote_use_momentum"] is False
-        assert values["direction_vote_use_volume_pressure"] is False
-        assert values["direction_vote_use_higher_timeframe"] is False
-        assert window.direction_vote_test_mode.currentData()=="di"
+        assert values["enable_di_direction_selection"] is True
+        assert values["enable_di_pressure_analysis"] is True
+        assert values["di_pressure_lookback"] == 3
         assert validate_config_values(values, require_paths=False)==[]
     finally:
         window.close()
 
 
-def test_direction_voting_tab_only_shows_settings_that_affect_the_run():
+def test_di_direction_pressure_tab_is_compact():
     app(); window=MainWindow()
     try:
-        form=window.direction_voting_form
-        assert "DI pressure alone" in window.direction_vote_status.text()
-        assert form.isRowVisible(window.direction_vote_use_di)
-        assert not form.isRowVisible(window.direction_vote_use_structure)
-        assert not form.isRowVisible(window.direction_vote_use_momentum)
-        assert not form.isRowVisible(window.direction_vote_use_volume)
-        assert not form.isRowVisible(window.direction_vote_use_htf)
-        assert not form.isRowVisible(window.direction_vote_structure_lookback)
-        assert not form.isRowVisible(window.direction_vote_htf_dataset)
-    finally:
-        window.close()
-
-
-def test_direction_vote_required_count_is_clamped_to_enabled_signals():
-    app(); window=MainWindow()
-    try:
-        window.enable_direction_voting.setChecked(True)
-        window.direction_vote_minimum.setValue(5)
-        window.direction_vote_use_structure.setChecked(False)
-        window.direction_vote_use_momentum.setChecked(False)
-        window.direction_vote_use_volume.setChecked(False)
-        window.direction_vote_use_htf.setChecked(False)
-        assert window.direction_vote_minimum.value()==1
-        assert "DI pressure alone" in window.direction_vote_status.text()
+        names=[window.tabs.tabText(i) for i in range(window.tabs.count())]
+        assert "DI Direction & Pressure" in names
+        assert window.di_pressure_lookback.minimum()==1
+        assert window.di_pressure_lookback.maximum()==100
     finally:
         window.close()
 
