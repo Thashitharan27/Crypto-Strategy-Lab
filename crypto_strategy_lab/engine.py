@@ -8,6 +8,7 @@ from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.adx import adx
 from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, DailyEntryMissedPolicy
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
+from crypto_strategy_lab.mean_reversion import ema, distance_from_mean_atr, classify_state, classify_motion, classify_alignment, classify_strength
 from crypto_strategy_lab.strategy_profiles import profile_key
 from crypto_strategy_lab.support_resistance import SupportResistanceDetector
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Position, Side, TradePair
@@ -20,6 +21,9 @@ class BacktestEngine:
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
+        self.mean_reversion_mean=ema(self.close,config.mean_reversion_period)
+        self.mean_reversion_distance_atr=distance_from_mean_atr(self.close,self.mean_reversion_mean,self.atr_values)
+        self.mean_reversion_distance_atr_previous=lag(self.mean_reversion_distance_atr,1)
         self.profile_rsi_values={period:rsi(self.close,period) for period in {p.rsi_period for p in self.config.strategy_profiles.values()}}
         self.profile_momentum_values={hours:self._trailing_return_hours_array(hours) for hours in {p.momentum_lookback_hours for p in self.config.strategy_profiles.values()}}
         self.sr_detector = SupportResistanceDetector(
@@ -155,6 +159,36 @@ class BacktestEngine:
         oc=result["opposing_di_change"]=result["opposing_di"]-old_opposing
         result["di_spread_change"]=result["di_spread"]-abs(old_plus-old_minus)
         result["di_pressure_state"]="EXPANDING" if dc>0 and oc<0 else ("CONTRACTING" if dc<0 and oc>0 else "MIXED")
+        return result
+
+    def _mean_reversion_snapshot(self, i, di_direction, trade_direction=None):
+        """Return analysis-only entry-time mean-reversion telemetry."""
+        result={
+            "mean_reversion_enabled":bool(self.config.enable_mean_reversion_analysis),
+            "mean_reversion_period":int(self.config.mean_reversion_period),
+            "mean_price":np.nan,"mean_distance_atr":np.nan,"mean_distance_atr_previous":np.nan,
+            "mean_distance_change_atr":np.nan,"mean_reversion_state":"UNKNOWN",
+            "mean_reversion_motion":"UNKNOWN","mean_reversion_alignment":"UNKNOWN",
+            "mean_reversion_di_alignment":"UNKNOWN","mean_reversion_trade_alignment":"UNKNOWN",
+            "mean_reversion_strength":-1,"mean_reversion_strength_label":"UNKNOWN",
+        }
+        if not self.config.enable_mean_reversion_analysis:
+            return result
+        mean=float(self.mean_reversion_mean[i]); distance=float(self.mean_reversion_distance_atr[i]); previous=float(self.mean_reversion_distance_atr_previous[i])
+        result["mean_price"]=mean if np.isfinite(mean) else np.nan
+        result["mean_distance_atr"]=distance if np.isfinite(distance) else np.nan
+        result["mean_distance_atr_previous"]=previous if np.isfinite(previous) else np.nan
+        if np.isfinite(distance) and np.isfinite(previous): result["mean_distance_change_atr"]=distance-previous
+        result["mean_reversion_state"]=classify_state(distance)
+        result["mean_reversion_motion"]=classify_motion(distance,previous)
+        di_alignment=classify_alignment(distance,di_direction)
+        trade_alignment=classify_alignment(distance,trade_direction or di_direction)
+        strength,strength_label=classify_strength(distance)
+        result["mean_reversion_alignment"]=di_alignment
+        result["mean_reversion_di_alignment"]=di_alignment
+        result["mean_reversion_trade_alignment"]=trade_alignment
+        result["mean_reversion_strength"]=strength
+        result["mean_reversion_strength_label"]=strength_label
         return result
 
     def _first_valid_atr_timestamp(self):
@@ -427,7 +461,9 @@ class BacktestEngine:
 
     def _record_skipped_signal(self, i, reason):
         row={"strategy_candle_open_time": self.times[i], "strategy_entry_time": self._entry_time(i), "strategy_entry_price": float(self.close[i]), "adx": float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan, "plus_di": float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan, "minus_di": float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan, "di_spread": float(self.di_spread[i]) if np.isfinite(self.di_spread[i]) else np.nan, "market_regime_return": float(self.bull_regime_return_values[i]) if np.isfinite(self.bull_regime_return_values[i]) else np.nan, "bb_width": float(self.bb_width[i]) if np.isfinite(self.bb_width[i]) else np.nan, "entry_filter_passed": False, "entry_filter_reason": reason, "adx_filter_passed": False, "adx_filter_reason": reason}
-        row.update(self._di_pressure_snapshot(i, self._selected_direction(i)))
+        selected=self._selected_direction(i)
+        row.update(self._di_pressure_snapshot(i, selected))
+        row.update(self._mean_reversion_snapshot(i, selected, selected))
         self.skipped_signals.append(row)
     def _cap_qty(self, qty, entry_price, equity):
         capped=False; cap_qty=qty
@@ -638,6 +674,8 @@ class BacktestEngine:
         pair.long_size_multiplier = 1.0 if direction == "LONG" else 0.0
         pair.short_size_multiplier = 1.0 if direction == "SHORT" else 0.0
         for key, value in self._di_pressure_snapshot(ind_i, original_direction).items():
+            setattr(pair, key, value)
+        for key, value in self._mean_reversion_snapshot(ind_i, original_direction, direction).items():
             setattr(pair, key, value)
         pair.di_reward_risk_regime = regime
         pair.di_applied_long_reward_risk_ratio = active_profile.reward_risk_ratio if direction == "LONG" else np.nan
@@ -1412,6 +1450,19 @@ class BacktestEngine:
             "di_spread_change": getattr(p, "di_spread_change", np.nan),
             "di_pressure_state": getattr(p, "di_pressure_state", "UNKNOWN"),
             "di_pressure_lookback": getattr(p, "di_pressure_lookback", self.config.di_pressure_lookback),
+            "mean_reversion_enabled": getattr(p, "mean_reversion_enabled", self.config.enable_mean_reversion_analysis),
+            "mean_reversion_period": getattr(p, "mean_reversion_period", self.config.mean_reversion_period),
+            "mean_price": getattr(p, "mean_price", np.nan),
+            "mean_distance_atr": getattr(p, "mean_distance_atr", np.nan),
+            "mean_distance_atr_previous": getattr(p, "mean_distance_atr_previous", np.nan),
+            "mean_distance_change_atr": getattr(p, "mean_distance_change_atr", np.nan),
+            "mean_reversion_state": getattr(p, "mean_reversion_state", "UNKNOWN"),
+            "mean_reversion_motion": getattr(p, "mean_reversion_motion", "UNKNOWN"),
+            "mean_reversion_alignment": getattr(p, "mean_reversion_alignment", "UNKNOWN"),
+            "mean_reversion_di_alignment": getattr(p, "mean_reversion_di_alignment", "UNKNOWN"),
+            "mean_reversion_trade_alignment": getattr(p, "mean_reversion_trade_alignment", "UNKNOWN"),
+            "mean_reversion_strength": getattr(p, "mean_reversion_strength", -1),
+            "mean_reversion_strength_label": getattr(p, "mean_reversion_strength_label", "UNKNOWN"),
             "market_regime_method": getattr(p, "market_regime_method", self.config.market_regime_method),
             "market_regime": getattr(p, "market_regime", None),
             "bull_regime_lookback_days": self.config.bull_regime_lookback_days,

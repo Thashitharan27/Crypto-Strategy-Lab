@@ -64,6 +64,8 @@ class BacktestConfig:
     enable_di_direction_selection: bool = True
     enable_di_pressure_analysis: bool = True
     di_pressure_lookback: int = 3
+    enable_mean_reversion_analysis: bool = True
+    mean_reversion_period: int = 20
 
     enable_support_resistance_analysis: bool = False
     sr_pivot_left: int = 5
@@ -151,6 +153,8 @@ class BacktestConfig:
             raise ValueError("max portfolio leverage must be positive")
         if not 1 <= self.di_pressure_lookback <= 100:
             raise ValueError("di_pressure_lookback must be between 1 and 100")
+        if self.mean_reversion_period <= 0:
+            raise ValueError("mean_reversion_period must be positive")
         if self.market_regime_method not in ("ASSET_RETURN", "BTC_STRUCTURAL", "ASSET_STRUCTURAL"):
             raise ValueError("invalid market_regime_method")
         if self.structural_regime_sma_days < 2 or self.structural_regime_slope_lookback_days < 1:
