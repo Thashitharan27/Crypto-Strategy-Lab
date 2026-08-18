@@ -46,6 +46,9 @@ jobs:
             tests/test_partial_stop_loss.py \
             tests/test_partial_take_profit.py \
             tests/test_strategy_profiles.py \
+            tests/test_support_resistance.py \
+            tests/test_sr_reporting.py \
+            tests/test_stage15_hidden_random_vwap_gui_removed.py \
             tests/test_trailing_profit.py \
             tests/test_telemetry_enrichment.py \
             tools/stage19_audit_legacy_config.py
