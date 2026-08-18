@@ -505,53 +505,14 @@ class BacktestEngine:
                 return False,"Strategy profile classification indicator warm-up incomplete"
             return False,"Strategy profile direction unavailable"
         regime,direction,key,profile=context
-        if self.config.trade_direction == TradeDirectionMode.LONG_ONLY and direction != "LONG": return False,"Profile selected short, but trade direction is LONG_ONLY"
-        if self.config.trade_direction == TradeDirectionMode.SHORT_ONLY and direction != "SHORT": return False,"Profile selected long, but trade direction is SHORT_ONLY"
         if not profile.enabled: return False,f"Strategy profile {key} is disabled"
         if profile.entry_rules:
             rejected=self._strategy_profile_rule_group_match(i,direction,profile,"REJECT",profile.reject_rule_match_mode)
             if rejected: return False,f"Strategy profile {key} rejected by entry rules"
             flipped=self._strategy_profile_rule_group_match(i,direction,profile,"FLIP",profile.flip_rule_match_mode)
             action="will be flipped" if flipped else "will trade in its normal direction"
-            if self.config.enable_skip_monday_entries:
-                execution_i=i if execution_i is None else execution_i; entry_time=self._execution_time(execution_i)
-                if entry_time.tzinfo is None: entry_time=entry_time.tz_localize("UTC")
-                if entry_time.tz_convert(self.skip_monday_tz).weekday()==0: return False,f"Monday entry skipped in {self.config.skip_monday_timezone}"
             return True,f"Strategy profile {key} passed; flip rules {'matched' if flipped else 'did not match'}: entry {action}"
-        if profile.filter_action == "FLIP":
-            matched=self._strategy_profile_conditional_flip_match(i,direction,profile)
-            action="will be flipped" if matched else "will trade in its normal direction"
-            if self.config.enable_skip_monday_entries:
-                execution_i=i if execution_i is None else execution_i; entry_time=self._execution_time(execution_i)
-                if entry_time.tzinfo is None: entry_time=entry_time.tz_localize("UTC")
-                if entry_time.tz_convert(self.skip_monday_tz).weekday()==0: return False,f"Monday entry skipped in {self.config.skip_monday_timezone}"
-            return True,f"Strategy profile {key} passed; conditional flip filters {'matched' if matched else 'did not match'}: entry {action}"
-        values=(
-            (profile.di_spread_enabled,"DI spread",float(self.di_spread[i]),profile.di_spread_minimum,profile.di_spread_maximum),
-            (profile.adx_enabled,"ADX",float(self.adx_values[i]),profile.adx_minimum,profile.adx_maximum),
-            (profile.atr_pct_enabled,"ATR percentage",float(self.atr_pct_values[i]),profile.atr_pct_minimum,profile.atr_pct_maximum),
-            (profile.rsi_enabled,f"RSI({profile.rsi_period})",float(self.profile_rsi_values[profile.rsi_period][i]),profile.rsi_minimum,profile.rsi_maximum),
-            (profile.bb_width_enabled,"BB width",float(self.bb_width[i]),profile.bb_width_minimum,profile.bb_width_maximum),
-            (profile.close_location_enabled,"close location",float(self.close_location_values[i]),profile.close_location_minimum,profile.close_location_maximum),
-            (profile.momentum_enabled,f"{profile.momentum_lookback_hours}-hour return",float(self.profile_momentum_values[profile.momentum_lookback_hours][i]),profile.momentum_minimum,profile.momentum_maximum),
-        )
-        passed=[]
-        for enabled,label,value,minimum,maximum in values:
-            if not enabled: continue
-            if not np.isfinite(value): return False,f"{key} {label} indicator warm-up incomplete"
-            if not minimum <= value <= maximum: return False,f"{key} {label} {value:.6g} outside range {minimum:.6g} to {maximum:.6g}"
-            passed.append(label)
-        if profile.vwap_distance_enabled:
-            atr_value=float(self.atr_values[i]); vwap=float(self.session_vwap[i])
-            if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap): return False,f"{key} VWAP distance indicator warm-up incomplete"
-            distance=((float(self.close[i])-vwap) if direction=="LONG" else (vwap-float(self.close[i])))/atr_value
-            if not profile.vwap_distance_minimum <= distance <= profile.vwap_distance_maximum: return False,f"{key} directional VWAP distance {distance:.6g} ATR outside range {profile.vwap_distance_minimum:.6g} to {profile.vwap_distance_maximum:.6g}"
-            passed.append("VWAP distance")
-        if self.config.enable_skip_monday_entries:
-            execution_i=i if execution_i is None else execution_i; entry_time=self._execution_time(execution_i)
-            if entry_time.tzinfo is None: entry_time=entry_time.tz_localize("UTC")
-            if entry_time.tz_convert(self.skip_monday_tz).weekday()==0: return False,f"Monday entry skipped in {self.config.skip_monday_timezone}"
-        return True,f"Strategy profile {key} passed"+(f": {', '.join(passed)}" if passed else "")
+        return True,f"Strategy profile {key} passed"
 
     def _strategy_profile_flip_match(self, i, direction, profile):
         """True when every enabled profile filter matches the current signal."""
@@ -652,10 +613,7 @@ class BacktestEngine:
         original_di_direction = di_direction
         profile_context=self._profile_context(ind_i) if self.config.enable_strategy_profiles else None
         active_profile=profile_context[3] if profile_context else None; active_profile_key=profile_context[2] if profile_context else None
-        if active_profile and active_profile.entry_rules:
-            profile_filter_flip=self._strategy_profile_rule_group_match(ind_i,original_di_direction,active_profile,"FLIP",active_profile.flip_rule_match_mode)
-        else:
-            profile_filter_flip = bool(active_profile and active_profile.filter_action == "FLIP" and self._strategy_profile_conditional_flip_match(ind_i, original_di_direction, active_profile))
+        profile_filter_flip=bool(active_profile and active_profile.entry_rules and self._strategy_profile_rule_group_match(ind_i,original_di_direction,active_profile,"FLIP",active_profile.flip_rule_match_mode))
         profile_flip = bool(active_profile and (active_profile.flip_direction or profile_filter_flip))
         if (self.config.flip_filtered_di_direction or profile_flip) and di_direction is not None and signal_direction is None:
             di_direction = "SHORT" if di_direction == "LONG" else "LONG"

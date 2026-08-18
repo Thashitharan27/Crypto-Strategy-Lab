@@ -108,8 +108,8 @@ class MainWindow(QMainWindow):
         self.planned_output=QLabel("Output run folder: not calculated yet"); self.planned_output.setWordWrap(True); data.addRow("Next Run Folder", self.planned_output)
         self.dataset_info=QLabel("No CSV loaded."); data.addRow("Dataset Information", self.dataset_info); val=QPushButton("Validate Data"); val.clicked.connect(self.validate_data); data.addRow(val)
         strat=group("Core Strategy")
-        self.sl=self._spin(2,0); self.sl.setToolTip("Distance from entry to the protective stop, measured in the selected risk unit."); self.tp=self._spin(3,0); self.entry_mode=QComboBox(); self.entry_mode.addItem("Wait until current trade closes","WAIT_UNTIL_CLOSED"); self.entry_mode.addItem("Check every N candles","EVERY_N_CANDLES"); self.entry_interval=QSpinBox(); self.entry_interval.setRange(1,999999); self.max_pairs=QSpinBox(); self.max_pairs.setRange(1,999999); self.tie=QComboBox(); self.tie.addItem("Conservative (stop first)","PESSIMISTIC"); self.tie.addItem("Optimistic (target first)","OPTIMISTIC")
-        for lab,w in [("Stop Loss Multiple",self.sl),("Take Profit Multiple",self.tp),("Entry Mode",self.entry_mode),("Entry Interval",self.entry_interval),("Maximum Active Pairs",self.max_pairs),("Tie Policy",self.tie)]: strat.addRow(lab,w)
+        self.entry_mode=QComboBox(); self.entry_mode.addItem("Wait until current trade closes","WAIT_UNTIL_CLOSED"); self.entry_mode.addItem("Check every N candles","EVERY_N_CANDLES"); self.entry_interval=QSpinBox(); self.entry_interval.setRange(1,999999); self.max_pairs=QSpinBox(); self.max_pairs.setRange(1,999999); self.tie=QComboBox(); self.tie.addItem("Conservative (stop first)","PESSIMISTIC"); self.tie.addItem("Optimistic (target first)","OPTIMISTIC")
+        for lab,w in [("Entry Mode",self.entry_mode),("Entry Interval",self.entry_interval),("Maximum Active Pairs",self.max_pairs),("Tie Policy",self.tie)]: strat.addRow(lab,w)
         self.entry_mode.currentIndexChanged.connect(lambda:self.entry_interval.setEnabled(self.entry_mode.currentData()=="EVERY_N_CANDLES"))
         self.entry_mode.currentTextChanged.connect(self.update_dynamic)
         self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.enable_sr_hold_confirmation=QCheckBox("Enable"); self.sr_hold_confirmation_bars=QSpinBox(); self.sr_hold_confirmation_bars.setRange(1,100); self.sr_hold_confirmation_bars.setValue(3); self.sr_hold_confirmation_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_tolerance_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_basis=QComboBox(); self.sr_break_basis.addItems(["CLOSE","WICK"]); self.sr_filter_mode=PolicyComboBox()
@@ -126,8 +126,6 @@ class MainWindow(QMainWindow):
         self.enable_di_direction_selection=QCheckBox("Enable DI direction selection"); self.enable_di_direction_selection.setChecked(True)
         self.enable_di_pressure_analysis=QCheckBox("Analyze DI expansion / contraction"); self.enable_di_pressure_analysis.setChecked(True)
         self.di_pressure_lookback=QSpinBox(); self.di_pressure_lookback.setRange(1,100); self.di_pressure_lookback.setValue(3)
-        self.di_execution_mode=QComboBox(); self.di_execution_mode.addItems(["BOTH_SIDES","PREFERRED_SIDE_ONLY"])
-        self.di_execution_mode.currentTextChanged.connect(self.update_dynamic)
         sched=group("Entry Schedule")
         self.enable_daily_schedule=QCheckBox("Enable Daily Scheduled Entry")
         self.daily_entry_time=self._line("00:00")
@@ -138,9 +136,9 @@ class MainWindow(QMainWindow):
         for lab,w in [("",self.enable_daily_schedule),("Daily Entry Time",self.daily_entry_time),("Entry Timezone",self.daily_entry_timezone),("Missed Entry Policy",self.daily_entry_missed_policy),("Summary",self.next_entry_summary),("",help_text)]: sched.addRow(lab,w)
         self.enable_daily_schedule.toggled.connect(self.update_dynamic)
         risk=group("Account & Position Sizing"); self.account_form=risk
-        self.risk_mode=QComboBox(); self.risk_mode.addItems(["ATR","PERCENT","FIXED"]); self.trading_start=self._line(); self.trading_end=self._line(); self.max_lev_leg=self._line("3"); self.max_lev_combined=self._line("5"); self.missing_policy=PolicyComboBox(); self.missing_policy.addItem("Use strategy candle for affected interval","WARN_AND_USE_15M"); self.missing_policy.addItem("Stop the run","ERROR"); self.missing_policy.addItem("Continue with available intrabar candles","WARN_AND_CONTINUE"); self.trade_direction=QComboBox(); self.trade_direction.addItems(["BOTH","LONG_ONLY","SHORT_ONLY","BOTH_INDEPENDENT"]); self.zero_cost=QCheckBox("Run Zero-Cost Comparison"); self.atr_period=QSpinBox(); self.atr_period.setRange(1,99999); self.atr_mult=self._spin(1,0); self.percent_r=self._line("0.20%"); self.fixed_r=self._spin(100,0); self.equity=self._spin(1000,0,1e12,2); self.risk_leg=self._line("1%")
+        self.risk_mode=QComboBox(); self.risk_mode.addItems(["ATR","PERCENT","FIXED"]); self.trading_start=self._line(); self.trading_end=self._line(); self.max_lev_leg=self._line("3"); self.max_lev_combined=self._line("5"); self.missing_policy=PolicyComboBox(); self.missing_policy.addItem("Use strategy candle for affected interval","WARN_AND_USE_15M"); self.missing_policy.addItem("Stop the run","ERROR"); self.missing_policy.addItem("Continue with available intrabar candles","WARN_AND_CONTINUE"); self.zero_cost=QCheckBox("Run Zero-Cost Comparison"); self.atr_period=QSpinBox(); self.atr_period.setRange(1,99999); self.atr_mult=self._spin(1,0); self.percent_r=self._line("0.20%"); self.fixed_r=self._spin(100,0); self.equity=self._spin(1000,0,1e12,2); self.risk_leg=self._line("1%")
         self.risk_formula=QLabel(); self.risk_warn=QLabel(); self.risk_warn.setWordWrap(True)
-        for lab,w in [("Starting Equity",self.equity),("Base Account Risk Per Trade",self.risk_leg),("Risk Mode",self.risk_mode),("ATR Period",self.atr_period),("ATR Multiplier",self.atr_mult),("Price-Distance Percentage",self.percent_r),("Fixed Risk Distance",self.fixed_r),("Maximum Leverage Per Trade",self.max_lev_leg),("Maximum Portfolio Leverage",self.max_lev_combined),("Formula",self.risk_formula),("Planned Risk",self.risk_warn),("Trade Direction",self.trade_direction)]: risk.addRow(lab,w)
+        for lab,w in [("Starting Equity",self.equity),("Base Account Risk Per Trade",self.risk_leg),("Risk Mode",self.risk_mode),("ATR Period",self.atr_period),("ATR Multiplier",self.atr_mult),("Price-Distance Percentage",self.percent_r),("Fixed Risk Distance",self.fixed_r),("Maximum Leverage Per Trade",self.max_lev_leg),("Maximum Portfolio Leverage",self.max_lev_combined),("Formula",self.risk_formula),("Planned Risk",self.risk_warn)]: risk.addRow(lab,w)
         self.risk_mode.currentTextChanged.connect(self.update_dynamic); self.risk_leg.textChanged.connect(self.update_dynamic)
         period=group("Backtest Period"); self.period_form=period
         self.entire_dataset=QCheckBox("Use entire dataset"); self.entire_dataset.setChecked(True)
@@ -177,12 +175,7 @@ class MainWindow(QMainWindow):
         self.progress=QProgressBar(); self.status=QLabel("Ready"); self.elapsed=QLabel("Elapsed: 0s"); controls.addRow(self.progress); controls.addRow(self.status); controls.addRow(self.elapsed)
         for w in [self.run_name,self.output_folder]: w.textChanged.connect(self.update_planned_output)
         data.parentWidget().setTitle("Data & Output"); strat.parentWidget().setTitle("Entry Timing & Simulation"); sched.parentWidget().setTitle("Scheduled Entry"); fees.parentWidget().setTitle("Execution Costs"); telemetry.parentWidget().setTitle("Reports & Analysis"); lifecycle.parentWidget().setTitle("Advanced Indicator Analysis"); reports.parentWidget().setTitle("Report Files")
-        self.sl.setVisible(False); sl_label=strat.labelForField(self.sl)
-        if sl_label: sl_label.setVisible(False)
-        self.tp.setVisible(False); tp_label=strat.labelForField(self.tp)
-        if tp_label: tp_label.setVisible(False)
-        risk.setRowVisible(self.trade_direction,False)
-        scroll.setWidget(inner); outer.addWidget(scroll); self.backtest_setup_page=page; self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_support_resistance_tab(); self.update_dynamic()
+        scroll.setWidget(inner); outer.addWidget(scroll);        scroll.setWidget(inner); outer.addWidget(scroll); self.backtest_setup_page=page; self.tabs.addTab(page,"Backtest Setup"); self.config_controls=inner.findChildren(QWidget); self._build_di_strategy_tab(); self._build_support_resistance_tab(); self.update_dynamic()
 
     def _build_support_resistance_tab(self):
         page=QWidget(); outer=QVBoxLayout(page); scroll=QScrollArea(); scroll.setWidgetResizable(True); inner=QWidget(); layout=QVBoxLayout(inner)
@@ -446,37 +439,46 @@ class MainWindow(QMainWindow):
         self.update_planned_output()
 
     def _base_values(self):
-        return {"strategy_timeframe_minutes":self._timeframe_minutes(self.strategy_timeframe.currentText()),"intrabar_timeframe_minutes":self._timeframe_minutes(self.intrabar_timeframe.currentText()),"enable_indicator_lifecycle_analysis":self.enable_lifecycle.isChecked(),"lifecycle_phases":self.lifecycle_phases.value(),"lifecycle_early_checkpoints":[int(v.strip()) for v in self.lifecycle_checkpoints.text().split(",") if v.strip()],"lifecycle_minimum_bucket_sample":self.lifecycle_min_sample.value(),"create_lifecycle_charts":self.lifecycle_charts.isChecked(),"lifecycle_flat_pattern_threshold_pct":self.lifecycle_flat_threshold.value(),"enable_random_entry":False,"entry_timing_mode":"CURRENT","random_entry_probability":0.5,"random_seed":42,"random_entry_start_mode":"NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE","randomize_first_entry":True,"max_random_wait_candles":0,"enable_random_entry_batch":False,"random_seed_start":1,"random_seed_count":100,"run_name":self.run_name.text().strip(),"input_csv":self.input_csv.text(),"strategy_csv":self.input_csv.text(),"intrabar_csv":self.intrabar_csv.text(),"use_intrabar_data":self.use_intrabar.isChecked(),"trading_start_date":self.trading_start.text() or None,"trading_end_date":self.trading_end.text() or None,"max_effective_leverage_per_leg":self.max_lev_leg.text() or None,"max_combined_effective_leverage":self.max_lev_combined.text() or None,"intrabar_missing_policy":self.missing_policy.currentText(),"zero_cost_comparison":self.zero_cost.isChecked(),"trade_direction":self.trade_direction.currentText(),"enable_partial_take_profit":False,"enable_partial_stop_loss":False,"sl1_r":0.5,"sl1_close_pct":50.0,"sl2_r":8.0,"tp1_r":3.0,"tp1_close_pct":50.0,"tp2_r":12.0,"tp2_close_pct":50.0,"stop_loss_r":10.0,"after_tp1_stop_mode":"KEEP_ORIGINAL_SL","after_tp1_stop_offset_r":0.0,"tp2_exit_mode":"FIXED_TP2","enable_trailing_profit":False,"trail_activation_trigger":"PRICE_REACHES_R","trail_activation_r":3.0,"trail_distance_r":1.0,"trail_apply_to":"BOTH","trail_intrabar_mode":"PESSIMISTIC","output_dir":self.output_folder.text(),"sl_mult":self.sl.value(),"tp_mult":self.tp.value(),"entry_mode":self.entry_mode.currentText(),"entry_interval":self.entry_interval.value(),"enable_daily_entry_schedule":self.enable_daily_schedule.isChecked(),"daily_entry_time":self.daily_entry_time.text().strip(),"daily_entry_timezone":self.daily_entry_timezone.text().strip(),"daily_entry_missed_policy":self.daily_entry_missed_policy.currentText(),"enable_skip_monday_entries":False,"skip_monday_timezone":"UTC","max_active_pairs":self.max_pairs.value(),"tie_policy":self.tie.currentText(),"risk_mode":self.risk_mode.currentText(),"atr_period":self.atr_period.value(),"atr_multiplier":self.atr_mult.value(),"percent_r":parse_percentage(self.percent_r.text()),"fixed_r":self.fixed_r.value(),"initial_equity":self.equity.value(),"risk_per_leg":parse_percentage(self.risk_leg.text()),"maker_fee":parse_percentage(self.maker.text()),"taker_fee":parse_percentage(self.taker.text()),"use_maker_entry":self.maker_entry.isChecked(),"use_maker_exit":self.maker_exit.isChecked(),"slippage":parse_percentage(self.slippage.text()),"enable_both_open_timeout":False,"max_both_open_minutes":480,"both_open_timeout_unit":"Hours","enable_remaining_leg_timeout_after_first_sl":False,"remaining_leg_timeout_after_first_sl_minutes":240,"remaining_leg_timeout_after_first_sl_unit":"Hours","enable_remaining_leg_timeout_profit_extension":False,"remaining_leg_timeout_profit_threshold_r":10.0,"enable_adx_filter":False,"adx_period":self._shared_adx_period,"adx_filter_mode":"Disabled","adx_maximum":25.0,"adx_minimum":20.0,"enable_bb_width_filter":False,"bb_width_filter_mode":"Disabled","bb_width_maximum":0.03,"bb_width_minimum":0.012,"enable_di_spread_filter":False,"di_spread_filter_mode":"Disabled","di_spread_maximum":10.0,"di_spread_minimum":0.0,"enable_be_after_opposite_sl":False,"be_mode":"ENTRY_PRICE","be_offset_r":0.0,"be_same_candle_policy":"NEXT_CANDLE","enable_trade_telemetry":self.enable_trade_telemetry.isChecked(),"save_full_telemetry_csv":self.save_full_telemetry.isChecked(),"save_trade_journey_summary":self.save_journey_summary.isChecked(),"save_trade_journey_charts":self.save_journey_charts.isChecked(),"telemetry_interval_minutes":self.telemetry_interval.value()}
+        return {
+            "config_version": 2,
+            "strategy_timeframe_minutes": self._timeframe_minutes(self.strategy_timeframe.currentText()),
+            "intrabar_timeframe_minutes": self._timeframe_minutes(self.intrabar_timeframe.currentText()),
+            "enable_indicator_lifecycle_analysis": self.enable_lifecycle.isChecked(),
+            "lifecycle_phases": self.lifecycle_phases.value(),
+            "lifecycle_early_checkpoints": [int(v.strip()) for v in self.lifecycle_checkpoints.text().split(",") if v.strip()],
+            "lifecycle_minimum_bucket_sample": self.lifecycle_min_sample.value(),
+            "create_lifecycle_charts": self.lifecycle_charts.isChecked(),
+            "lifecycle_flat_pattern_threshold_pct": self.lifecycle_flat_threshold.value(),
+            "run_name": self.run_name.text().strip(),
+            "input_csv": self.input_csv.text(), "strategy_csv": self.input_csv.text(),
+            "intrabar_csv": self.intrabar_csv.text(), "use_intrabar_data": self.use_intrabar.isChecked(),
+            "trading_start_date": self.trading_start.text() or None, "trading_end_date": self.trading_end.text() or None,
+            "max_effective_leverage_per_leg": self.max_lev_leg.text() or None,
+            "max_combined_effective_leverage": self.max_lev_combined.text() or None,
+            "intrabar_missing_policy": self.missing_policy.currentText(), "zero_cost_comparison": self.zero_cost.isChecked(),
+            "output_dir": self.output_folder.text(), "entry_mode": self.entry_mode.currentData(), "entry_interval": self.entry_interval.value(),
+            "enable_daily_entry_schedule": self.enable_daily_schedule.isChecked(), "daily_entry_time": self.daily_entry_time.text().strip(),
+            "daily_entry_timezone": self.daily_entry_timezone.text().strip(), "daily_entry_missed_policy": self.daily_entry_missed_policy.currentText(),
+            "max_active_pairs": self.max_pairs.value(), "tie_policy": self.tie.currentData(),
+            "risk_mode": self.risk_mode.currentText(), "atr_period": self.atr_period.value(), "atr_multiplier": self.atr_mult.value(),
+            "percent_r": parse_percentage(self.percent_r.text()), "fixed_r": self.fixed_r.value(), "initial_equity": self.equity.value(),
+            "risk_per_leg": parse_percentage(self.risk_leg.text()), "maker_fee": parse_percentage(self.maker.text()),
+            "taker_fee": parse_percentage(self.taker.text()), "use_maker_entry": self.maker_entry.isChecked(),
+            "use_maker_exit": self.maker_exit.isChecked(), "slippage": parse_percentage(self.slippage.text()),
+            "adx_period": self._shared_adx_period,
+            "enable_trade_telemetry": self.enable_trade_telemetry.isChecked(), "save_full_telemetry_csv": self.save_full_telemetry.isChecked(),
+            "save_trade_journey_summary": self.save_journey_summary.isChecked(), "save_trade_journey_charts": self.save_journey_charts.isChecked(),
+            "telemetry_interval_minutes": self.telemetry_interval.value(),
+        }
     def values(self):
         values = self._base_values()
         values["market_symbol"]=self.market_symbol.currentText().strip().upper().replace("/","")
         if self.entire_dataset.isChecked():
             values["trading_start_date"]=None; values["trading_end_date"]=None
         values["analysis_level"]=self.analysis_level.currentText().split(" ",1)[0].upper()
-        values.update({"entry_mode":self.entry_mode.currentData(),"tie_policy":self.tie.currentData(),"trade_direction":"BOTH","enable_strategy_profiles":True,"enable_di_direction_sizing":True,"di_execution_mode":"PREFERRED_SIDE_ONLY"})
-        values.update({"vwap_breakout_lookback_hours":4.0,"vwap_volume_lookback":20,"vwap_volume_multiplier":1.5,"vwap_slope_lookback":1,"vwap_atr_pct_minimum":0.0,"vwap_atr_pct_maximum":1.0,"vwap_confirmation_mode":"IMMEDIATE","vwap_retest_window_candles":4,"vwap_retest_tolerance_atr":0.25})
-        values.update({"enable_coin_flip_sizing":False,"coin_flip_seed":42,"coin_flip_large_multiplier":3.0,"coin_flip_small_multiplier":1.0})
         values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"enable_sr_hold_confirmation":self.enable_sr_hold_confirmation.isChecked(),"sr_hold_confirmation_bars":self.sr_hold_confirmation_bars.value(),"sr_hold_confirmation_atr":self.sr_hold_confirmation_atr.value(),"sr_break_tolerance_atr":self.sr_break_tolerance_atr.value(),"sr_break_basis":self.sr_break_basis.currentText(),"sr_filter_mode":self.sr_filter_mode.currentData(),"sr_long_avoid_near_resistance":self.sr_long_avoid_near_resistance.isChecked(),"sr_long_require_near_support":self.sr_long_require_near_support.isChecked(),"sr_long_block_broken_support":self.sr_long_block_broken_support.isChecked(),"sr_long_min_room_to_resistance_atr":self.sr_long_min_room_to_resistance_atr.value(),"sr_short_avoid_near_support":self.sr_short_avoid_near_support.isChecked(),"sr_short_require_near_resistance":self.sr_short_require_near_resistance.isChecked(),"sr_short_block_broken_resistance":self.sr_short_block_broken_resistance.isChecked(),"sr_short_min_room_to_support_atr":self.sr_short_min_room_to_support_atr.value()})
         values.update({"enable_di_direction_selection":self.enable_di_direction_selection.isChecked(),"enable_di_pressure_analysis":self.enable_di_pressure_analysis.isChecked(),"di_pressure_lookback":self.di_pressure_lookback.value()})
-        values.update({
-            "enable_reentry_gate_after_remaining_leg_timeout":False,
-            "enable_remaining_leg_checkpoint_score_extension":False,
-            "checkpoint_score_use_profit":True,
-            "checkpoint_score_min_profit_r":0.85,
-            "checkpoint_score_use_atr_pct":True,
-            "checkpoint_score_max_atr_pct":0.08,
-            "checkpoint_score_use_directional_di":True,
-            "checkpoint_score_min_directional_di":2.3,
-            "checkpoint_score_use_bb_width_pct":True,
-            "checkpoint_score_max_bb_width_pct":0.349,
-            "checkpoint_score_min_conditions":3,
-            "enable_first_sl_survivor_partial_close":False,
-            "first_sl_survivor_partial_close_pct":25.0,
-            "enable_checkpoint_zero_score_confirmation":False,
-            "checkpoint_zero_score_confirmations_required":2,
-            "checkpoint_zero_score_recheck_minutes":120,
-            "checkpoint_zero_score_recheck_unit":"Hours",
-        })
+        values.update(self.profile_editor.values())
         values.update(self.profile_editor.values())
         return values
 
@@ -497,9 +499,7 @@ class MainWindow(QMainWindow):
         self.enable_lifecycle.parentWidget().setVisible(shown); self.save_feature_reports.parentWidget().setVisible(shown)
 
     def reset_defaults(self):
-        defaults=default_gui_config()
-        defaults.update({"enable_di_direction_sizing":True,"enable_di_direction_selection":True,"enable_di_pressure_analysis":True,"di_pressure_lookback":3})
-        self.apply_values(defaults)
+        self.apply_values(default_gui_config())
 
     def new_run(self):
         """Confirm and prepare a fresh configuration without touching persisted data."""
@@ -767,8 +767,6 @@ class MainWindow(QMainWindow):
         self.intrabar_csv.setText(str(values["intrabar_csv"]))
         self.use_intrabar.setChecked(bool(values["use_intrabar_data"]) and int(values["strategy_timeframe_minutes"]) > 1)
         self.output_folder.setText(str(values["output_dir"]))
-        self.sl.setValue(float(values["sl_mult"]))
-        self.tp.setValue(float(values["tp_mult"]))
         self.entry_mode.setCurrentIndex(max(0,self.entry_mode.findData(values["entry_mode"])))
         self.entry_interval.setValue(int(values["entry_interval"]))
         self.enable_support_resistance_analysis.setChecked(bool(values.get("enable_support_resistance_analysis",False))); self.sr_pivot_left.setValue(int(values.get("sr_pivot_left",5))); self.sr_pivot_right.setValue(int(values.get("sr_pivot_right",5))); self.sr_lookback_bars.setValue(int(values.get("sr_lookback_bars",200))); self.sr_zone_width_atr.setValue(float(values.get("sr_zone_width_atr",0.5))); self.sr_near_distance_atr.setValue(float(values.get("sr_near_distance_atr",0.75))); self.enable_sr_hold_confirmation.setChecked(bool(values.get("enable_sr_hold_confirmation",False))); self.sr_hold_confirmation_bars.setValue(int(values.get("sr_hold_confirmation_bars",3))); self.sr_hold_confirmation_atr.setValue(float(values.get("sr_hold_confirmation_atr",0.25))); self.sr_break_tolerance_atr.setValue(float(values.get("sr_break_tolerance_atr",0.25))); self.sr_break_basis.setCurrentText(str(values.get("sr_break_basis","CLOSE"))); self.sr_filter_mode.setCurrentIndex(max(0,self.sr_filter_mode.findData(str(values.get("sr_filter_mode","ANALYSIS_ONLY")))))
@@ -790,7 +788,7 @@ class MainWindow(QMainWindow):
         self.max_lev_leg.setText(str(values["max_effective_leverage_per_leg"] or ""))
         self.max_lev_combined.setText(str(values["max_combined_effective_leverage"] or ""))
         self.missing_policy.setCurrentText(values["intrabar_missing_policy"])
-        self.zero_cost.setChecked(bool(values["zero_cost_comparison"])); self.trade_direction.setCurrentText(str(values.get("trade_direction", "BOTH")))
+        self.zero_cost.setChecked(bool(values["zero_cost_comparison"]))
         self.percent_r.setText(format_percentage(float(values["percent_r"])))
         self.fixed_r.setValue(float(values["fixed_r"]))
         self.equity.setValue(float(values["initial_equity"]))
