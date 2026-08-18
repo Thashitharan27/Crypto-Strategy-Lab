@@ -1,0 +1,17 @@
+name: Stage 19 legacy config audit
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [opened, reopened, synchronize]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Audit retired config names
+        run: python tools/stage19_audit_legacy_config.py
