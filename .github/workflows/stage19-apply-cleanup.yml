@@ -27,6 +27,7 @@ jobs:
           python tools/stage19_result_schema.py
           python tools/stage19_final_production_cleanup.py
           python tools/stage19_remove_config_invariants.py
+          python tools/stage19_migrate_tests.py
       - name: Compile changed Python
         run: |
           python -m py_compile \
@@ -39,6 +40,14 @@ jobs:
             crypto_strategy_lab/gui/config_logic.py \
             crypto_strategy_lab/gui/main_window.py \
             crypto_strategy_lab/gui/worker.py \
+            tests/test_backtester.py \
+            tests/test_gui_config_logic.py \
+            tests/test_gui_main_window.py \
+            tests/test_partial_stop_loss.py \
+            tests/test_partial_take_profit.py \
+            tests/test_strategy_profiles.py \
+            tests/test_trailing_profit.py \
+            tests/test_telemetry_enrichment.py \
             tools/stage19_audit_legacy_config.py
       - name: Enforce hard-cleanup audit
         env:
@@ -52,6 +61,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crypto_strategy_lab tools/stage19_audit_legacy_config.py
-          git commit -m "Stage 19: delete retired config invariants"
+          git add crypto_strategy_lab tests tools/stage19_audit_legacy_config.py
+          git commit -m "Stage 19: migrate remaining current-contract tests"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
