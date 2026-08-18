@@ -3,7 +3,7 @@ name: Stage 19 apply cleanup
 on:
   pull_request:
     branches: [ main ]
-    types: [reopened]
+    types: [reopened, synchronize]
 
 permissions:
   contents: write
@@ -23,7 +23,17 @@ jobs:
       - name: Apply one-shot cleanup
         run: python tools/stage19_remove_strategy_csv.py
       - name: Compile changed Python
-        run: python -m py_compile crypto_strategy_lab/config.py crypto_strategy_lab/loader.py crypto_strategy_lab/gui/config_logic.py tools/stage19_audit_legacy_config.py
+        run: >-
+          python -m py_compile
+          crypto_strategy_lab/config.py
+          crypto_strategy_lab/loader.py
+          crypto_strategy_lab/engine.py
+          crypto_strategy_lab/cli.py
+          crypto_strategy_lab/output_manager.py
+          crypto_strategy_lab/report_workbooks.py
+          crypto_strategy_lab/gui/config_logic.py
+          crypto_strategy_lab/gui/main_window.py
+          tools/stage19_audit_legacy_config.py
       - name: Commit cleanup
         run: |
           if git diff --quiet; then
@@ -32,6 +42,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crypto_strategy_lab/config.py crypto_strategy_lab/loader.py crypto_strategy_lab/gui/config_logic.py tools/stage19_audit_legacy_config.py
+          git add crypto_strategy_lab tools/stage19_audit_legacy_config.py
           git commit -m "Stage 19: remove retired strategy_csv alias"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
