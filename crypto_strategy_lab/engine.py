@@ -678,8 +678,6 @@ class BacktestEngine:
         fields = {"bb_middle":self.bb_middle,"bb_upper":self.bb_upper,"bb_lower":self.bb_lower,"bb_width":self.bb_width,"bb_width_pct":self.bb_width_pct,"bb_width_1":self.bb_width_1,"bb_width_3":self.bb_width_3,"bb_width_5":self.bb_width_5,"bb_width_entry_5bar_change":self.bb_width_change,"bb_width_entry_5bar_change_pct":self.bb_width_change_pct,"di_spread":self.di_spread,"di_ratio":self.di_ratio,"di_spread_1":self.di_spread_1,"di_spread_3":self.di_spread_3,"di_spread_5":self.di_spread_5,"di_spread_entry_5bar_change":self.di_spread_change,"utc_session_vwap":self.session_vwap}
         for name, arr in fields.items():
             setattr(pair, name, float(arr[i]) if np.isfinite(arr[i]) else np.nan)
-        # Backward-compatible alias used by the compact result-row builder.
-        pair.bb_width_change = pair.bb_width_entry_5bar_change
         pair.short_vwap_distance_atr = ((pair.utc_session_vwap-float(self.close[i]))/float(self.atr_values[i])) if np.isfinite(pair.utc_session_vwap) and np.isfinite(self.atr_values[i]) and self.atr_values[i] > 0 else np.nan
     def _update_positions_to_strategy_index(self,i):
         for pair in self.active_pairs:
@@ -1233,57 +1231,176 @@ class BacktestEngine:
         return [(pos.side.value.lower(), [pos])]
 
     def _build_result_row(self, p, row_kind, positions):
-        primary=positions[0]
-        fees=sum(pos.fees for pos in positions); gross=sum(pos.gross_pnl for pos in positions); net=sum(pos.net_pnl for pos in positions); risk_base=sum(pos.risk_amount for pos in positions)
-        exit_t=max(pd.Timestamp(pos.exit_time) for pos in positions); hold=exit_t-pd.Timestamp(p.strategy_entry_time); comb=sum(pos.entry_notional for pos in positions)
-        partial_sl=bool(getattr(p,"applied_partial_sl_enabled",self.config.enable_partial_stop_loss)); partial_tp=bool(getattr(p,"applied_partial_tp_enabled",self.config.enable_partial_take_profit))
-        sl1_r=float(getattr(p,"applied_sl1_r",self.config.sl1_r)); sl1_pct=float(getattr(p,"applied_sl1_close_pct",self.config.sl1_close_pct)); sl2_r=float(getattr(p,"applied_sl2_r",self.config.sl2_r))
-        tp1_r=float(getattr(p,"applied_tp1_r",self.config.tp1_r)); tp1_pct=float(getattr(p,"applied_tp1_close_pct",self.config.tp1_close_pct)); tp2_r=float(getattr(p,"applied_tp2_r",self.config.tp2_r)); stop_mult=float(getattr(p,"applied_stop_loss_multiple",self.config.sl_mult))
-        selected_rr=getattr(p,"di_applied_long_reward_risk_ratio",None) if primary.side==Side.LONG else getattr(p,"di_applied_short_reward_risk_ratio",None)
-        selected_rr=float(selected_rr) if selected_rr is not None else (self.config.tp_mult/stop_mult if stop_mult else 1.0)
-        win_mult=(tp1_pct/100.0)*tp1_r+(1-tp1_pct/100.0)*tp2_r if partial_tp else stop_mult*selected_rr
-        loss_mult=(sl1_pct/100.0)*sl1_r+(1-sl1_pct/100.0)*sl2_r if partial_sl else stop_mult
-        expected_pair_mult=win_mult-loss_mult if len(positions)>1 else win_mult
-        exp=expected_pair_mult*sum(pos.risk*pos.quantity for pos in positions)/len(positions)
-        est=comb*((self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)+(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)); fee_pct=fees/exp*100 if exp>0 else np.nan
-        all_in_stop_risk=sum(self._estimated_stop_loss(pos) for pos in positions)/len(positions)/p.equity_before_trade
-        row={
-            "partial_tp_enabled":partial_tp,"tp1_r":tp1_r,"tp1_close_pct":tp1_pct,"tp2_r":tp2_r,"tp2_close_pct":self.config.tp2_close_pct,"stop_loss_r":stop_mult,
-            "partial_sl_enabled":partial_sl,"sl1_r":sl1_r,"sl1_close_pct":sl1_pct,"sl2_r":sl2_r,
-            "after_tp1_stop_mode":getattr(p,"applied_after_tp1_stop_mode",self.config.after_tp1_stop_mode.value),"after_tp1_stop_offset_r":getattr(p,"applied_after_tp1_stop_offset_r",self.config.after_tp1_stop_offset_r),"tp2_exit_mode":self.config.tp2_exit_mode.value,
-            "intrabar_partial_tp_ordering":"STOP_FIRST" if self.config.tie_policy==TiePolicy.PESSIMISTIC else "TP1_THEN_TP2_THEN_STOP",
-            "pair_id":p.pair_id,"trade_id":f"{p.pair_id}-{row_kind}" if row_kind!="pair" else p.pair_id,"trade_direction":self.config.trade_direction.value,"result_type":row_kind,"side":primary.side.value if len(positions)==1 else "BOTH",
-            "trailing_profit_enabled":any(pos.trailing_enabled for pos in positions),"trail_activation_r":self.config.trail_activation_r,"trail_distance_r":self.config.trail_distance_r,"trail_apply_to":self.config.trail_apply_to.value,"trail_intrabar_mode":self.config.trail_intrabar_mode.value,
-            "position_sizing_mode":self.config.position_sizing_mode.value,"configured_price_risk_percentage":self.config.risk_per_leg,"estimated_all_in_stop_risk_percentage":all_in_stop_risk,
-            "strategy_candle_open_time":p.strategy_candle_open_time,"strategy_entry_time":p.strategy_entry_time,"strategy_entry_price":p.strategy_entry_price,"entry_time":p.strategy_entry_time,"entry_price":primary.entry_price if len(positions)==1 else p.strategy_entry_price,
-            "strategy_timeframe_minutes":self.config.strategy_timeframe_minutes,"intrabar_timeframe_minutes":self.config.intrabar_timeframe_minutes,
-            "both_open_timeout_enabled":self.config.enable_both_open_timeout,"max_both_open_minutes":self.config.max_both_open_minutes,"both_open_timeout_triggered":p.both_open_timeout_triggered,"timeout_minutes":p.timeout_minutes,"timeout_exit_time":p.timeout_exit_time,
-            "remaining_leg_timeout_after_first_sl_enabled":self.config.enable_remaining_leg_timeout_after_first_sl,"remaining_leg_timeout_after_first_sl_minutes":self.config.remaining_leg_timeout_after_first_sl_minutes,"remaining_leg_timeout_after_first_sl_started":p.remaining_leg_timeout_after_first_sl_started,"first_sl_side":p.first_sl_side.value if p.first_sl_side else None,"first_sl_time":p.first_sl_time,"remaining_leg_timeout_deadline":p.remaining_leg_timeout_deadline,"remaining_leg_timeout_triggered":p.remaining_leg_timeout_triggered,"remaining_leg_timeout_exit_time":p.remaining_leg_timeout_exit_time,"remaining_leg_timeout_exit_side":p.remaining_leg_timeout_exit_side.value if p.remaining_leg_timeout_exit_side else None,
-            "pair_be_triggered":p.pair_be_triggered,"atr_period":self.config.atr_period,"atr_multiplier":self.config.atr_multiplier,"atr_at_entry":primary.atr_at_entry,
-            "adx":getattr(p,"adx",np.nan),"plus_di":getattr(p,"plus_di",np.nan),"minus_di":getattr(p,"minus_di",np.nan),"di_spread":getattr(p,"di_spread",np.nan),"di_ratio":getattr(p,"di_ratio",np.nan),"di_spread_1":getattr(p,"di_spread_1",np.nan),"di_spread_3":getattr(p,"di_spread_3",np.nan),"di_spread_5":getattr(p,"di_spread_5",np.nan),"di_spread_entry_5bar_change":getattr(p,"di_spread_entry_5bar_change",np.nan),
-            "bb_middle":getattr(p,"bb_middle",np.nan),"bb_upper":getattr(p,"bb_upper",np.nan),"bb_lower":getattr(p,"bb_lower",np.nan),"bb_width":getattr(p,"bb_width",np.nan),"bb_width_pct":getattr(p,"bb_width_pct",np.nan),"bb_width_1":getattr(p,"bb_width_1",np.nan),"bb_width_3":getattr(p,"bb_width_3",np.nan),"bb_width_5":getattr(p,"bb_width_5",np.nan),"bb_width_entry_5bar_change":getattr(p,"bb_width_change",np.nan),"bb_width_entry_5bar_change_pct":getattr(p,"bb_width_entry_5bar_change_pct",np.nan),
-            "indicator_warmup_complete":bool(np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))),"adx_available_at_entry":bool(np.isfinite(getattr(p,"adx",np.nan))),"bb_width_available_at_entry":bool(np.isfinite(getattr(p,"bb_width",np.nan))),"indicator_warmup_note":"Complete" if (np.isfinite(getattr(p,"adx",np.nan)) and np.isfinite(getattr(p,"bb_width",np.nan))) else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.",
-            "daily_schedule_enabled":getattr(p,"daily_schedule_enabled",False),"scheduled_entry_time":getattr(p,"scheduled_entry_time",None),"scheduled_entry_timezone":getattr(p,"scheduled_entry_timezone",None),"scheduled_entry_timestamp":getattr(p,"scheduled_entry_timestamp",None),"actual_entry_timestamp":getattr(p,"actual_entry_timestamp",p.strategy_entry_time),"entry_schedule_status":getattr(p,"entry_schedule_status",None),
-            "entry_filter_passed":getattr(p,"entry_filter_passed",True),"entry_filter_reason":getattr(p,"entry_filter_reason","Entry filters disabled"),"adx_filter_passed":getattr(p,"adx_filter_passed",True),"adx_filter_reason":getattr(p,"adx_filter_reason","ADX filter disabled"),
-            "r_distance":primary.risk,"equity_before_trade":p.equity_before_trade,"combined_entry_notional":comb,"combined_effective_leverage":comb/p.equity_before_trade,"leverage_capped":p.leverage_capped,
-            "pair_gross_pnl":gross,"pair_total_fees":fees,"pair_net_pnl":net,"pair_price_r":sum(pos.price_r for pos in positions),"pair_gross_account_r":gross/risk_base,"pair_fee_account_r":fees/risk_base,"pair_net_account_r":net/risk_base,"pair_gross_r":gross/risk_base,"pair_fee_r":fees/risk_base,"pair_net_r":net/risk_base,"pair_leg_gross_r_sum":sum(pos.gross_r for pos in positions),"pair_leg_net_r_sum":sum(pos.net_r for pos in positions),
-            "expected_gross_winning_pair_pnl":exp,"estimated_round_trip_fees":est,"fees_as_percentage_of_expected_winning_profit":fee_pct,"equity_after_trade":p.equity_after_trade,"exit_time":exit_t,"holding_minutes":hold.total_seconds()/60,"holding_hours":hold.total_seconds()/3600,"holding_bars":max(0,(exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),"holding_time":hold,
-            "ambiguous_intrabar":any(pos.ambiguous for pos in positions),"ambiguous_candle":any(pos.ambiguous for pos in positions),"missing_intrabar_data":any(pos.missing_intrabar_data for pos in positions),
-            "vwap_confirmation_mode":getattr(p,"vwap_confirmation_mode",None),"vwap_breakout_signal_time":getattr(p,"vwap_breakout_signal_time",None),"vwap_breakout_level":getattr(p,"vwap_breakout_level",None),"vwap_confirmation_time":getattr(p,"vwap_confirmation_time",None),"vwap_confirmation_bars":getattr(p,"vwap_confirmation_bars",None),
+        primary = positions[0]
+        profile_key_value = getattr(p, "strategy_profile_key", None)
+        profile = self.config.strategy_profiles.get(profile_key_value)
+        fees = sum(pos.fees for pos in positions)
+        gross = sum(pos.gross_pnl for pos in positions)
+        net = sum(pos.net_pnl for pos in positions)
+        risk_base = sum(pos.risk_amount for pos in positions)
+        exit_t = max(pd.Timestamp(pos.exit_time) for pos in positions)
+        hold = exit_t - pd.Timestamp(p.strategy_entry_time)
+        entry_notional = sum(pos.entry_notional for pos in positions)
+
+        partial_sl = bool(getattr(p, "applied_partial_sl_enabled", False))
+        partial_tp = bool(getattr(p, "applied_partial_tp_enabled", False))
+        sl1_r = float(getattr(p, "applied_sl1_r", 0.0))
+        sl1_pct = float(getattr(p, "applied_sl1_close_pct", 0.0))
+        sl2_r = float(getattr(p, "applied_sl2_r", 0.0))
+        tp1_r = float(getattr(p, "applied_tp1_r", 0.0))
+        tp1_pct = float(getattr(p, "applied_tp1_close_pct", 0.0))
+        tp2_r = float(getattr(p, "applied_tp2_r", 0.0))
+        stop_mult = float(getattr(p, "applied_stop_loss_multiple", 0.0))
+        applied_rr = float(profile.reward_risk_ratio) if profile is not None else np.nan
+
+        if partial_tp:
+            winning_price_r = stop_mult * ((tp1_pct/100.0) * tp1_r + (1-tp1_pct/100.0) * tp2_r)
+        else:
+            winning_price_r = stop_mult * applied_rr if np.isfinite(applied_rr) else np.nan
+        expected_profit = winning_price_r * primary.risk * primary.quantity if np.isfinite(winning_price_r) else np.nan
+        estimated_fees = entry_notional * (
+            (self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)
+            + (self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)
+        )
+        fee_pct = fees / expected_profit * 100 if expected_profit and expected_profit > 0 else np.nan
+        estimated_stop_risk = self._estimated_stop_loss(primary) / p.equity_before_trade
+        warmup_complete = bool(
+            np.isfinite(getattr(p, "adx", np.nan)) and np.isfinite(getattr(p, "bb_width", np.nan))
+        )
+
+        row = {
+            "pair_id": p.pair_id,
+            "trade_id": f"{p.pair_id}-{row_kind}",
+            "result_type": row_kind,
+            "side": primary.side.value,
+            "trade_direction": getattr(p, "trade_direction", primary.side.value),
+            "strategy_profile_key": profile_key_value,
+            "strategy_profile_run_mode": self.config.strategy_profile_run_mode,
+            "applied_reward_risk_ratio": applied_rr,
+            "stop_loss_multiple": stop_mult,
+            "partial_tp_enabled": partial_tp,
+            "tp1_r": tp1_r,
+            "tp1_close_pct": tp1_pct,
+            "tp2_r": tp2_r,
+            "tp2_close_pct": 100.0 - tp1_pct if partial_tp else 0.0,
+            "partial_sl_enabled": partial_sl,
+            "sl1_r": sl1_r,
+            "sl1_close_pct": sl1_pct,
+            "sl2_r": sl2_r,
+            "after_tp1_stop_mode": getattr(p, "applied_after_tp1_stop_mode", None),
+            "after_tp1_stop_offset_r": getattr(p, "applied_after_tp1_stop_offset_r", 0.0),
+            "intrabar_partial_tp_ordering": "STOP_FIRST" if self.config.tie_policy == TiePolicy.PESSIMISTIC else "TP1_THEN_TP2_THEN_STOP",
+            "trailing_profit_enabled": bool(primary.trailing_enabled),
+            "trail_activation_r": profile.trailing_activation_r if profile and profile.trailing_enabled else None,
+            "trail_distance_r": profile.trailing_distance_r if profile and profile.trailing_enabled else None,
+            "break_even_enabled": bool(primary.be_enabled),
+            "break_even_activation_r": profile.break_even_activation_r if profile and profile.break_even_enabled else None,
+            "break_even_offset_r": primary.be_offset_r if primary.be_enabled else None,
+            "profile_timeout_enabled": bool(getattr(p, "profile_timeout_enabled", False)),
+            "profile_timeout_minutes": getattr(p, "profile_timeout_minutes", None),
+            "profile_timeout_triggered": bool(getattr(p, "both_open_timeout_triggered", False)),
+            "profile_timeout_exit_time": getattr(p, "timeout_exit_time", None),
+            "configured_price_risk_percentage": self.config.risk_per_leg,
+            "estimated_all_in_stop_risk_percentage": estimated_stop_risk,
+            "strategy_candle_open_time": p.strategy_candle_open_time,
+            "strategy_entry_time": p.strategy_entry_time,
+            "strategy_entry_price": p.strategy_entry_price,
+            "entry_time": p.strategy_entry_time,
+            "entry_price": primary.entry_price,
+            "strategy_timeframe_minutes": self.config.strategy_timeframe_minutes,
+            "intrabar_timeframe_minutes": self.config.intrabar_timeframe_minutes,
+            "atr_period": self.config.atr_period,
+            "atr_multiplier": self.config.atr_multiplier,
+            "atr_at_entry": primary.atr_at_entry,
+            "adx": getattr(p, "adx", np.nan),
+            "plus_di": getattr(p, "plus_di", np.nan),
+            "minus_di": getattr(p, "minus_di", np.nan),
+            "di_spread": getattr(p, "di_spread", np.nan),
+            "di_ratio": getattr(p, "di_ratio", np.nan),
+            "di_spread_1": getattr(p, "di_spread_1", np.nan),
+            "di_spread_3": getattr(p, "di_spread_3", np.nan),
+            "di_spread_5": getattr(p, "di_spread_5", np.nan),
+            "di_spread_entry_5bar_change": getattr(p, "di_spread_entry_5bar_change", np.nan),
+            "bb_middle": getattr(p, "bb_middle", np.nan),
+            "bb_upper": getattr(p, "bb_upper", np.nan),
+            "bb_lower": getattr(p, "bb_lower", np.nan),
+            "bb_width": getattr(p, "bb_width", np.nan),
+            "bb_width_pct": getattr(p, "bb_width_pct", np.nan),
+            "bb_width_1": getattr(p, "bb_width_1", np.nan),
+            "bb_width_3": getattr(p, "bb_width_3", np.nan),
+            "bb_width_5": getattr(p, "bb_width_5", np.nan),
+            "bb_width_entry_5bar_change": getattr(p, "bb_width_entry_5bar_change", np.nan),
+            "bb_width_entry_5bar_change_pct": getattr(p, "bb_width_entry_5bar_change_pct", np.nan),
+            "indicator_warmup_complete": warmup_complete,
+            "adx_available_at_entry": bool(np.isfinite(getattr(p, "adx", np.nan))),
+            "bb_width_available_at_entry": bool(np.isfinite(getattr(p, "bb_width", np.nan))),
+            "indicator_warmup_note": "Complete" if warmup_complete else "Indicator warm-up incomplete at entry; missing indicator values are expected until enough historical candles are available.",
+            "daily_schedule_enabled": getattr(p, "daily_schedule_enabled", False),
+            "scheduled_entry_time": getattr(p, "scheduled_entry_time", None),
+            "scheduled_entry_timezone": getattr(p, "scheduled_entry_timezone", None),
+            "scheduled_entry_timestamp": getattr(p, "scheduled_entry_timestamp", None),
+            "actual_entry_timestamp": getattr(p, "actual_entry_timestamp", p.strategy_entry_time),
+            "entry_schedule_status": getattr(p, "entry_schedule_status", None),
+            "entry_filter_passed": getattr(p, "entry_filter_passed", True),
+            "entry_filter_reason": getattr(p, "entry_filter_reason", "Strategy profile passed"),
+            "r_distance": primary.risk,
+            "equity_before_trade": p.equity_before_trade,
+            "combined_entry_notional": entry_notional,
+            "combined_effective_leverage": entry_notional / p.equity_before_trade,
+            "leverage_capped": p.leverage_capped,
+            "pair_gross_pnl": gross,
+            "pair_total_fees": fees,
+            "pair_net_pnl": net,
+            "pair_price_r": sum(pos.price_r for pos in positions),
+            "pair_gross_account_r": gross / risk_base,
+            "pair_fee_account_r": fees / risk_base,
+            "pair_net_account_r": net / risk_base,
+            "pair_gross_r": gross / risk_base,
+            "pair_fee_r": fees / risk_base,
+            "pair_net_r": net / risk_base,
+            "pair_leg_gross_r_sum": sum(pos.gross_r for pos in positions),
+            "pair_leg_net_r_sum": sum(pos.net_r for pos in positions),
+            "expected_gross_winning_pair_pnl": expected_profit,
+            "estimated_round_trip_fees": estimated_fees,
+            "fees_as_percentage_of_expected_winning_profit": fee_pct,
+            "equity_after_trade": p.equity_after_trade,
+            "exit_time": exit_t,
+            "holding_minutes": hold.total_seconds()/60,
+            "holding_hours": hold.total_seconds()/3600,
+            "holding_bars": max(0, (exit_t-pd.Timestamp(p.strategy_entry_time))/self.entry_delta),
+            "holding_time": hold,
+            "ambiguous_intrabar": any(pos.ambiguous for pos in positions),
+            "ambiguous_candle": any(pos.ambiguous for pos in positions),
+            "missing_intrabar_data": any(pos.missing_intrabar_data for pos in positions),
+            "di_direction_selection_enabled": self.config.enable_di_direction_selection,
+            "di_sizing_direction": getattr(p, "di_sizing_direction", None),
+            "sizing_direction": getattr(p, "sizing_direction", None),
+            "directional_di": getattr(p, "directional_di", np.nan),
+            "opposing_di": getattr(p, "opposing_di", np.nan),
+            "plus_di_change": getattr(p, "plus_di_change", np.nan),
+            "minus_di_change": getattr(p, "minus_di_change", np.nan),
+            "directional_di_change": getattr(p, "directional_di_change", np.nan),
+            "opposing_di_change": getattr(p, "opposing_di_change", np.nan),
+            "di_spread_change": getattr(p, "di_spread_change", np.nan),
+            "di_pressure_state": getattr(p, "di_pressure_state", "UNKNOWN"),
+            "di_pressure_lookback": getattr(p, "di_pressure_lookback", self.config.di_pressure_lookback),
+            "market_regime_method": getattr(p, "market_regime_method", self.config.market_regime_method),
+            "market_regime": getattr(p, "market_regime", None),
+            "bull_regime_lookback_days": self.config.bull_regime_lookback_days,
+            "bull_regime_return_threshold": self.config.bull_regime_return_threshold,
+            "market_regime_return": getattr(p, "market_regime_return", np.nan),
+            "bull_regime": getattr(p, "bull_regime", False),
+            "entry_atr_pct": getattr(p, "entry_atr_pct", np.nan),
+            "entry_rsi": getattr(p, "entry_rsi", np.nan),
+            "entry_close_location": getattr(p, "entry_close_location", np.nan),
+            "directional_momentum_return_at_entry": getattr(p, "directional_momentum_return", np.nan),
         }
-        scheduled=getattr(p,"scheduled_entry_timestamp",None); actual=getattr(p,"actual_entry_timestamp",p.strategy_entry_time)
-        row["entry_delay_minutes"]=(pd.Timestamp(actual)-pd.Timestamp(scheduled)).total_seconds()/60 if scheduled is not None else 0
-        row.update({"remaining_leg_timeout_profit_extension_enabled":self.config.enable_remaining_leg_timeout_profit_extension,"remaining_leg_timeout_profit_threshold_r":self.config.remaining_leg_timeout_profit_threshold_r,"remaining_leg_timeout_checkpoint_count":p.remaining_leg_timeout_checkpoint_count,"remaining_leg_timeout_extension_count":p.remaining_leg_timeout_extension_count,"remaining_leg_timeout_last_checkpoint_time":p.remaining_leg_timeout_last_checkpoint_time,"remaining_leg_timeout_last_checkpoint_profit_r":p.remaining_leg_timeout_last_checkpoint_profit_r})
-        row.update({"remaining_leg_checkpoint_score_extension_enabled":self.config.enable_remaining_leg_checkpoint_score_extension,"checkpoint_score_last_atr_pct":p.checkpoint_score_last_atr_pct,"checkpoint_score_last_directional_di":p.checkpoint_score_last_directional_di,"checkpoint_score_last_bb_width_pct":p.checkpoint_score_last_bb_width_pct,"checkpoint_score_last_pass_count":p.checkpoint_score_last_pass_count,"checkpoint_score_last_condition_count":p.checkpoint_score_last_condition_count,"checkpoint_score_last_passed":p.checkpoint_score_last_passed})
-        row.update({"first_sl_survivor_partial_close_enabled":self.config.enable_first_sl_survivor_partial_close,"first_sl_survivor_partial_close_configured_pct":self.config.first_sl_survivor_partial_close_pct,"first_sl_survivor_partial_taken":p.first_sl_survivor_partial_taken,"first_sl_survivor_partial_side":p.first_sl_survivor_partial_side.value if p.first_sl_survivor_partial_side else None,"first_sl_survivor_partial_time":p.first_sl_survivor_partial_time,"first_sl_survivor_partial_pct":p.first_sl_survivor_partial_pct,"first_sl_survivor_partial_quantity":p.first_sl_survivor_partial_quantity,"first_sl_survivor_partial_exit_price":p.first_sl_survivor_partial_exit_price,"first_sl_survivor_partial_gross_pnl":p.first_sl_survivor_partial_gross_pnl,"first_sl_survivor_partial_fee":p.first_sl_survivor_partial_fee,"first_sl_survivor_partial_net_pnl":p.first_sl_survivor_partial_net_pnl,"checkpoint_zero_score_confirmation_enabled":self.config.enable_checkpoint_zero_score_confirmation,"checkpoint_zero_score_confirmations_required":self.config.checkpoint_zero_score_confirmations_required,"checkpoint_zero_score_recheck_minutes":self.config.checkpoint_zero_score_recheck_minutes,"checkpoint_zero_score_streak":p.checkpoint_zero_score_streak,"checkpoint_zero_score_max_streak":p.checkpoint_zero_score_max_streak,"checkpoint_zero_score_last_time":p.checkpoint_zero_score_last_time,"checkpoint_zero_score_confirmed_close":p.checkpoint_zero_score_confirmed_close})
-        row.update({"reentry_gate_after_remaining_leg_timeout_enabled":self.config.enable_reentry_gate_after_remaining_leg_timeout,"checkpoint_reentry_gate_started":p.checkpoint_reentry_gate_started,"checkpoint_reentry_gate_side":p.checkpoint_reentry_gate_side.value if p.checkpoint_reentry_gate_side else None,"checkpoint_reentry_gate_tp":p.checkpoint_reentry_gate_tp,"checkpoint_reentry_gate_sl":p.checkpoint_reentry_gate_sl,"checkpoint_reentry_gate_start_time":p.checkpoint_reentry_gate_start_time,"checkpoint_reentry_gate_release_time":p.checkpoint_reentry_gate_release_time,"checkpoint_reentry_gate_release_reason":p.checkpoint_reentry_gate_release_reason})
-        rd=getattr(p,"random_decision",None)
-        row.update({"random_entry_enabled":self.random_entry_active,"random_seed":self.config.random_seed if self.random_entry_active else None,"random_entry_probability":self.config.random_entry_probability if self.random_entry_active else None,"randomize_first_entry":self.config.randomize_first_entry,"max_random_wait_candles":self.config.max_random_wait_candles,"random_decision_id":rd.get("decision_id") if rd else None,"random_draw_that_opened_trade":rd.get("random_draw") if rd else None,"random_decision_timestamp":rd.get("candle_timestamp") if rd else None,"candles_waited_before_entry":rd.get("candles_waited_since_close") if rd else None,"minutes_waited_before_entry":rd.get("candles_waited_since_close",0)*self.config.strategy_timeframe_minutes if rd else None,"previous_pair_close_time":getattr(p,"previous_pair_close_time",None),"random_entry_forced":rd.get("forced_entry",False) if rd else False,"entry_timing_mode":self.config.entry_timing_mode.value if self.random_entry_active else EntryTimingMode.CURRENT.value})
-        row.update({"coin_flip_sizing_enabled":self.config.enable_coin_flip_sizing,"coin_flip_seed":self.config.coin_flip_seed if self.config.enable_coin_flip_sizing else None,"coin_flip_draw":getattr(p,"coin_flip_draw",None),"coin_flip_result":getattr(p,"coin_flip_result",None),"long_size_multiplier":getattr(p,"long_size_multiplier",1.0),"short_size_multiplier":getattr(p,"short_size_multiplier",1.0)})
-        row.update({"di_direction_sizing_enabled":self.config.enable_di_direction_sizing,"di_direction_minimum_spread":self.config.di_direction_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_long_minimum_spread":self.config.di_direction_long_minimum_spread if self.config.enable_di_direction_sizing else None,"di_direction_short_minimum_spread":self.config.di_direction_short_minimum_spread if self.config.enable_di_direction_sizing else None,"di_execution_mode":self.config.di_execution_mode.value if self.config.enable_di_direction_sizing else None,"di_sizing_direction":getattr(p,"di_sizing_direction",None),"sizing_direction":getattr(p,"sizing_direction",None),"di_direction_selection_enabled":self.config.enable_di_direction_selection,"directional_di":getattr(p,"directional_di",np.nan),"opposing_di":getattr(p,"opposing_di",np.nan),"plus_di_change":getattr(p,"plus_di_change",np.nan),"minus_di_change":getattr(p,"minus_di_change",np.nan),"directional_di_change":getattr(p,"directional_di_change",np.nan),"opposing_di_change":getattr(p,"opposing_di_change",np.nan),"di_spread_change":getattr(p,"di_spread_change",np.nan),"di_pressure_state":getattr(p,"di_pressure_state","UNKNOWN"),"di_pressure_lookback":getattr(p,"di_pressure_lookback",self.config.di_pressure_lookback),"di_reward_risk_regime":getattr(p,"di_reward_risk_regime",None),"di_applied_long_reward_risk_ratio":getattr(p,"di_applied_long_reward_risk_ratio",None),"di_applied_short_reward_risk_ratio":getattr(p,"di_applied_short_reward_risk_ratio",None)})
-        row.update({"strategy_profiles_enabled":self.config.enable_strategy_profiles,"strategy_profile_key":getattr(p,"strategy_profile_key",None),"strategy_profile_run_mode":self.config.strategy_profile_run_mode,"stop_loss_multiple":stop_mult,"market_regime_method":getattr(p,"market_regime_method",self.config.market_regime_method),"market_regime":getattr(p,"market_regime",None),"bull_regime_lookback_days":self.config.bull_regime_lookback_days,"bull_regime_return_threshold":self.config.bull_regime_return_threshold,"market_regime_return":getattr(p,"market_regime_return",np.nan),"bull_regime":getattr(p,"bull_regime",False),"entry_atr_pct":getattr(p,"entry_atr_pct",np.nan),"entry_rsi":getattr(p,"entry_rsi",np.nan),"entry_close_location":getattr(p,"entry_close_location",np.nan),"directional_momentum_return_at_entry":getattr(p,"directional_momentum_return",np.nan),"profile_timeout_enabled":getattr(p,"profile_timeout_enabled",False),"profile_timeout_minutes":getattr(p,"profile_timeout_minutes",None)})
-        if p.long is not None and (len(positions)>1 or primary.side==Side.LONG): row.update(self._pos_cols("long",p.long)); row.update(self._partial_sl_cols("long",p.long))
-        if p.short is not None and (len(positions)>1 or primary.side==Side.SHORT): row.update(self._pos_cols("short",p.short)); row.update(self._partial_sl_cols("short",p.short))
+        scheduled = getattr(p, "scheduled_entry_timestamp", None)
+        actual = getattr(p, "actual_entry_timestamp", p.strategy_entry_time)
+        row["entry_delay_minutes"] = (pd.Timestamp(actual)-pd.Timestamp(scheduled)).total_seconds()/60 if scheduled is not None else 0
+        prefix = primary.side.value.lower()
+        row.update(self._pos_cols(prefix, primary))
+        row.update(self._partial_sl_cols(prefix, primary))
         return row
 
     def results_frame(self):
@@ -1373,10 +1490,6 @@ class BacktestEngine:
             enabled = bool(pos and pos.trailing_enabled)
             active = bool(pos and pos.trailing_active)
             row.update({f"{prefix}_trailing_enabled":enabled, f"{prefix}_trailing_active":active, f"{prefix}_trailing_activation_price":pos.trailing_activation_price if enabled else np.nan, f"{prefix}_current_trailing_stop":pos.trailing_stop if active else np.nan, f"{prefix}_current_active_stop":pos.sl if pos and pos.is_open else np.nan, f"{prefix}_{'highest' if is_long else 'lowest'}_price_since_entry":pos.favourable_price if enabled else np.nan, f"{prefix}_distance_to_activation_r":((pos.trailing_activation_price-close) if is_long else (close-pos.trailing_activation_price))/pos.risk if enabled and pos.risk else np.nan, f"{prefix}_distance_to_trailing_stop_r":((close-pos.trailing_stop) if is_long else (pos.trailing_stop-close))/pos.risk if active and pos.risk else np.nan, f"{prefix}_unrealized_profit_r":((close-pos.entry_price) if is_long else (pos.entry_price-close))/pos.risk if pos and pos.is_open and pos.risk else np.nan, f"{prefix}_original_quantity":pos.original_quantity if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_remaining_quantity":pos.remaining_quantity if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_tp1_hit":bool(pos and pos.tp1_hit), f"{prefix}_tp2_hit":bool(pos and pos.tp2_hit), f"{prefix}_tp1_price":pos.tp1_price if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_tp2_price":pos.tp2_price if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_realized_pnl":pos.realized_pnl-pos.entry_fee if pos and pos.partial_tp_enabled else 0.0, f"{prefix}_total_current_pnl":(pos.realized_pnl-pos.entry_fee+self._unrealized(pos,close)+pos.fees if pos and pos.partial_tp_enabled else row.get(f"{prefix}_unrealized_pnl",0.0))})
-        if self.config.trade_direction == TradeDirectionMode.LONG_ONLY:
-            row={k:v for k,v in row.items() if not k.startswith("short_")}
-        elif self.config.trade_direction == TradeDirectionMode.SHORT_ONLY:
-            row={k:v for k,v in row.items() if not k.startswith("long_")}
         self.telemetry_rows.append(row)
 
     def _estimated_stop_loss(self,pos):
