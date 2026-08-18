@@ -5,7 +5,7 @@ import traceback
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
-from crypto_strategy_lab.gui.stage1_window import MainWindow
+from crypto_strategy_lab.gui.main_window import MainWindow
 
 
 def _splash_pixmap() -> QPixmap:

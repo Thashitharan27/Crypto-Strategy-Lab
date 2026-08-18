@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QApplication, QGroupBox
 
-from crypto_strategy_lab.gui.stage1_window import MainWindow
+from crypto_strategy_lab.gui.main_window import MainWindow
 
 
 def app():

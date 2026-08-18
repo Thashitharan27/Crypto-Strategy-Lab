@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QApplication
 
 from crypto_strategy_lab.config import BacktestConfig
 from crypto_strategy_lab.gui.config_logic import DEFAULT_GUI_CONFIG
-from crypto_strategy_lab.gui.stage1_window import MainWindow
+from crypto_strategy_lab.gui.main_window import MainWindow
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, default_profiles
 
 
