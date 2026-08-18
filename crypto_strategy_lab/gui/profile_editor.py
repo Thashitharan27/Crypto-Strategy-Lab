@@ -32,8 +32,9 @@ class StrategyProfilesWidget(QWidget):
         self._check("flip_direction","Flip entry direction (Long ↔ Short)")
         self.controls["flip_direction"].setToolTip("Apply this profile's filters to the original DI signal, then enter in the opposite direction.")
         self._number("risk_multiplier",1,.01,100)
-        self.form.labelForField(self.controls["risk_multiplier"]).setText("Position risk multiplier")
-        self.controls["risk_multiplier"].setToolTip("Scales the configured account risk for this profile. 1.0 uses the normal risk.")
+        self.form.labelForField(self.controls["risk_multiplier"]).setText("Profile Risk Multiplier")
+        self.controls["risk_multiplier"].setSuffix(" x")
+        self.controls["risk_multiplier"].setToolTip("Scales Base Risk Per Trade for this profile. 1.0x uses the base account risk; 0.5x uses half; 2.0x uses double.")
 
         self._section("Entry Rules")
         self._choice("flip_rule_match_mode",(("Any flip rule (OR)","ANY"),("All flip rules (AND)","ALL")))
@@ -66,12 +67,13 @@ class StrategyProfilesWidget(QWidget):
         self._subsection("Base Exit","The normal stop and fixed target used when optional exit methods are disabled.")
         self._number("stop_loss_multiple",2,.001,1000)
         self._number("reward_risk_ratio",1,.01,100)
-        self.form.labelForField(self.controls["stop_loss_multiple"]).setText("Initial stop distance")
-        self.form.labelForField(self.controls["reward_risk_ratio"]).setText("Reward / risk target")
+        self.form.labelForField(self.controls["stop_loss_multiple"]).setText("Stop Distance")
+        self.form.labelForField(self.controls["reward_risk_ratio"]).setText("Profit Target")
         self.controls["stop_loss_multiple"].setDecimals(3)
-        self.controls["stop_loss_multiple"].setSuffix(" R")
-        self.controls["stop_loss_multiple"].setToolTip("Distance from entry measured in the strategy's risk unit (R).")
-        self.controls["reward_risk_ratio"].setToolTip("Fixed final target as a multiple of the initial stop distance. Disabled while partial take-profit is active.")
+        self.controls["stop_loss_multiple"].setSuffix(" distance units")
+        self.controls["stop_loss_multiple"].setToolTip("Distance from entry measured in the Backtest Setup distance unit. With ATR basis, 2.0 means 2 × the configured ATR volatility unit.")
+        self.controls["reward_risk_ratio"].setSuffix(" x stop (R)")
+        self.controls["reward_risk_ratio"].setToolTip("Fixed final target as a multiple of the full initial stop distance. 1R equals the initial full stop distance. Disabled while partial take-profit is active.")
 
         self._subsection("Stop Loss","Optional staged loss handling.")
         self._check("partial_stop_enabled","Use partial stop-loss")
@@ -82,11 +84,11 @@ class StrategyProfilesWidget(QWidget):
             self.form.labelForField(self.controls[key]).setText(label)
         for key in ("sl1_r","sl2_r"):
             self.controls[key].setDecimals(3)
-            self.controls[key].setSuffix(" R")
+            self.controls[key].setSuffix(" distance units")
         self.controls["sl1_close_pct"].setDecimals(2)
         self.controls["sl1_close_pct"].setSuffix(" %")
 
-        self._subsection("Profit Taking","Choose staged profit-taking only when you need more than the fixed reward/risk target.")
+        self._subsection("Profit Taking","Profit targets use trade R, where 1R equals the full initial stop distance.")
         self._check("partial_profit_enabled","Use partial take-profit")
         self._number("tp1_r",1,.001,1000)
         self._number("tp1_close_pct",50,.01,99.99)
@@ -98,9 +100,9 @@ class StrategyProfilesWidget(QWidget):
             self.controls[key].setSuffix(" R")
         self.controls["tp1_close_pct"].setDecimals(2)
         self.controls["tp1_close_pct"].setSuffix(" %")
-        self.controls["tp1_close_pct"].setToolTip("The remaining position exits at the final profit target.")
+        self.controls["tp1_close_pct"].setToolTip("The remaining position exits at the final profit target. TP1 and TP2 are measured in trade R (1R = full initial stop distance).")
 
-        self._subsection("Protection","Optional rules that protect an open winner.")
+        self._subsection("Protection","Protection thresholds use trade R, where 1R equals the full initial stop distance.")
         self._check("break_even_enabled","Break-even protection")
         self._number("break_even_activation_r",1,.001,1000)
         self._number("break_even_offset_r",0,-1000,1000)
@@ -128,16 +130,18 @@ class StrategyProfilesWidget(QWidget):
         self._number("r_step_size_r",1,.001,1000)
         self._number("r_step_maximum_r",0,0,1000)
         self._number("r_step_activation_close_pct",0,0,99.99)
-        self._check("atr_checkpoint_tp_extension_enabled","ATR checkpoint TP extension")
-        self.controls["atr_checkpoint_tp_extension_enabled"].setToolTip("Extends profit management when the configured DI and Bollinger checkpoint conditions are met.")
+        self._check("atr_checkpoint_tp_extension_enabled","Distance-unit checkpoint TP extension")
+        self.controls["atr_checkpoint_tp_extension_enabled"].setToolTip("Advanced extension measured in the configured price-distance unit, not trade R. Extends profit management when DI and Bollinger checkpoint conditions are met.")
         self._number("atr_checkpoint_di_spread_minimum",30,0,1000)
         self._number("atr_checkpoint_bb_width_minimum",.03,0,1000)
         self._number("atr_checkpoint_profit_lock_start",3,.001,1000)
         self._number("atr_checkpoint_profit_lock_distance",1,.001,1000)
         for key,label in (("r_step_activation_r","Staircase activation"),("r_step_distance_r","Stop distance behind checkpoint"),("r_step_size_r","Checkpoint step"),("r_step_maximum_r","Maximum target (0 = runner)"),("r_step_activation_close_pct","Close at activation"),("atr_checkpoint_di_spread_minimum","Checkpoint DI spread minimum"),("atr_checkpoint_bb_width_minimum","Checkpoint BB width minimum"),("atr_checkpoint_profit_lock_start","Profit lock starts at"),("atr_checkpoint_profit_lock_distance","Profit lock distance")):
             self.form.labelForField(self.controls[key]).setText(label)
-        for key in ("r_step_activation_r","r_step_distance_r","r_step_size_r","r_step_maximum_r","atr_checkpoint_profit_lock_start","atr_checkpoint_profit_lock_distance"):
+        for key in ("r_step_activation_r","r_step_distance_r","r_step_size_r","r_step_maximum_r"):
             self.controls[key].setSuffix(" R")
+        for key in ("atr_checkpoint_profit_lock_start","atr_checkpoint_profit_lock_distance"):
+            self.controls[key].setSuffix(" distance units")
         self.controls["r_step_activation_close_pct"].setSuffix(" %")
         self.controls["atr_checkpoint_bb_width_minimum"].setDecimals(6)
 

@@ -125,9 +125,9 @@ def test_break_even_profit_offset_controls_remaining_stop_after_tp1():
     engine, position = open_long((100, 100), (120, 106), (106, 104), profile=profile)
     assert engine._scan_exit(position, 1)
     assert position.be_triggered
-    assert position.sl == pytest.approx(105)
+    assert position.sl == pytest.approx(110)
     assert engine._scan_exit(position, 2)
-    assert position.stop_exit_price == pytest.approx(105)
+    assert position.stop_exit_price == pytest.approx(110)
     assert position.final_exit_reason == "TP1_THEN_BE_R_OFFSET"
 
 

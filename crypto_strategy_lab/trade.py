@@ -11,7 +11,7 @@ class ExitSource(str, Enum): INTRABAR="1M_INTRABAR"; FALLBACK_15M="15M_FALLBACK"
 @dataclass
 class Position:
     side: Side; entry_time: object; entry_index: int; entry_price: float; risk: float; sl: float; tp: float; quantity: float; risk_amount: float; entry_notional: float; atr_at_entry: float
-    uncapped_quantity: float = 0.0; effective_leverage: float = 0.0; entry_fee: float = 0.0; exit_fee: float = 0.0
+    uncapped_quantity: float = 0.0; effective_leverage: float = 0.0; distance_unit: float = 0.0; entry_fee: float = 0.0; exit_fee: float = 0.0
     exit_time: Optional[object] = None; exit_index: Optional[int] = None; exit_price: Optional[float] = None; exit_reason: Optional[ExitReason] = None; exit_source: Optional[ExitSource] = None
     original_sl: float = 0.0; be_enabled: bool = False; be_triggered: bool = False; be_trigger_time: Optional[object] = None; be_triggered_by_side: Optional[Side] = None; be_mode: Optional[str] = None; be_offset_r: float = 0.0; be_stop_price: Optional[float] = None; be_exit_reason: Optional[ExitReason] = None; be_same_candle_ambiguous: bool = False; be_active_after: Optional[object] = None; gross_pnl: float = 0.0; fees: float = 0.0; gross_r: float = 0.0; net_pnl: float = 0.0; net_r: float = 0.0; price_r: float = 0.0; ambiguous: bool = False; missing_intrabar_data: bool = False; fallback_reason: Optional[str] = None
     trailing_enabled: bool = False; trailing_active: bool = False; trailing_activation_price: Optional[float] = None; trailing_activation_time: Optional[object] = None; favourable_price: Optional[float] = None; trailing_stop: Optional[float] = None; final_active_stop: Optional[float] = None; trailing_exit_price: Optional[float] = None; trailing_profit_r: Optional[float] = None

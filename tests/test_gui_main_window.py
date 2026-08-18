@@ -163,7 +163,7 @@ def test_analysis_presets_hide_advanced_controls_and_apply_expected_outputs():
 def test_setup_separates_sizing_period_intrabar_and_cost_controls():
     app(); window=MainWindow()
     try:
-        assert window.account_form.parentWidget().title()=="Account & Position Sizing"
+        assert window.account_form.parentWidget().title()=="Account Risk & Leverage"
         assert window.period_form.parentWidget().title()=="Backtest Period"
         assert window.intrabar_form.parentWidget().title()=="Intrabar Execution Rules"
         assert "Binance Market Data" in window.shared_data_note.text()
@@ -177,11 +177,12 @@ def test_setup_separates_sizing_period_intrabar_and_cost_controls():
         assert "one trade (entry + final exit): 0.14%" in window.cost.text()
         assert window.zero_cost.parentWidget() is window.cost.parentWidget()
         assert window.account_form.labelForField(window.max_lev_leg).text()=="Maximum Leverage Per Trade"
-        assert window.account_form.isRowVisible(window.atr_period)
-        assert not window.account_form.isRowVisible(window.percent_r)
+        assert window.distance_basis_form.parentWidget().title()=="Stop Distance Basis"
+        assert window.distance_basis_form.isRowVisible(window.atr_period)
+        assert not window.distance_basis_form.isRowVisible(window.percent_r)
         window.risk_mode.setCurrentText("PERCENT")
-        assert not window.account_form.isRowVisible(window.atr_period)
-        assert window.account_form.isRowVisible(window.percent_r)
+        assert not window.distance_basis_form.isRowVisible(window.atr_period)
+        assert window.distance_basis_form.isRowVisible(window.percent_r)
         assert not window.period_form.isRowVisible(window.trading_start)
         window.entire_dataset.setChecked(False)
         assert window.period_form.isRowVisible(window.trading_start)
@@ -769,4 +770,30 @@ def test_partial_profit_has_no_duplicate_post_tp1_stop_controls():
         assert "break_even_enabled" in controls
         assert "break_even_activation_r" in controls
         assert "break_even_offset_r" in controls
+    finally: window.close()
+
+
+def test_risk_ui_separates_account_risk_distance_units_and_trade_r():
+    app(); window=MainWindow()
+    try:
+        assert window.account_form.parentWidget().title()=="Account Risk & Leverage"
+        assert window.distance_basis_form.parentWidget().title()=="Stop Distance Basis"
+        assert window.account_form.labelForField(window.risk_leg).text()=="Base Risk Per Trade"
+        assert window.distance_basis_form.labelForField(window.risk_mode).text()=="Distance Basis"
+        assert window.risk_mode.itemText(0)=="ATR volatility"
+        assert window.risk_mode.currentText()=="ATR"
+        assert "1 volatility unit = ATR(14)" in window.risk_formula.text()
+        assert "1.00% account risk" in window.risk_warn.text()
+        assert "$10.00" in window.risk_warn.text()
+        editor=window.profile_editor; controls=editor.controls
+        assert editor.control_forms["risk_multiplier"].labelForField(controls["risk_multiplier"]).text()=="Profile Risk Multiplier"
+        assert controls["risk_multiplier"].suffix().strip()=="x"
+        assert editor.control_forms["stop_loss_multiple"].labelForField(controls["stop_loss_multiple"]).text()=="Stop Distance"
+        assert "distance units" in controls["stop_loss_multiple"].suffix()
+        assert editor.control_forms["reward_risk_ratio"].labelForField(controls["reward_risk_ratio"]).text()=="Profit Target"
+        assert "stop (R)" in controls["reward_risk_ratio"].suffix()
+        assert "distance units" in controls["sl1_r"].suffix()
+        assert controls["tp1_r"].suffix().strip()=="R"
+        assert controls["break_even_activation_r"].suffix().strip()=="R"
+        assert controls["atr_checkpoint_profit_lock_start"].suffix().strip()=="distance units"
     finally: window.close()
