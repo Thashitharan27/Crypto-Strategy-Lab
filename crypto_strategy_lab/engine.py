@@ -6,7 +6,7 @@ import numpy as np, pandas as pd
 from zoneinfo import ZoneInfo
 from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.adx import adx
-from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, DailyEntryMissedPolicy, AfterTP1StopMode
+from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, DailyEntryMissedPolicy
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
 from crypto_strategy_lab.strategy_profiles import profile_key
 from crypto_strategy_lab.support_resistance import SupportResistanceDetector
@@ -472,8 +472,6 @@ class BacktestEngine:
         tp1_r = active_profile.tp1_r
         tp1_close_pct = active_profile.tp1_close_pct
         tp2_r = active_profile.tp2_r
-        after_tp1_stop_mode = active_profile.after_tp1_stop_mode
-        after_tp1_stop_offset_r = active_profile.after_tp1_stop_offset_r
         r = float(self.risk[ind_i])
         stop_mult = sl2_r if partial_sl_enabled else active_profile.stop_loss_multiple
         stop = stop_mult * r
@@ -523,8 +521,6 @@ class BacktestEngine:
             if pos.r_step_maximum_r > 0:
                 pos.tp = pos.entry_price + side_sign * pos.r_step_maximum_r * pos.risk
 
-        pos.after_tp1_stop_mode = after_tp1_stop_mode
-        pos.after_tp1_stop_offset_r = after_tp1_stop_offset_r
         if partial_tp_enabled:
             pos.partial_tp_enabled = True
             pos.original_quantity = pos.quantity
@@ -635,8 +631,6 @@ class BacktestEngine:
         pair.applied_tp1_r = tp1_r
         pair.applied_tp1_close_pct = tp1_close_pct
         pair.applied_tp2_r = tp2_r
-        pair.applied_after_tp1_stop_mode = after_tp1_stop_mode
-        pair.applied_after_tp1_stop_offset_r = after_tp1_stop_offset_r
         pair.profile_timeout_enabled = bool(active_profile.timeout_enabled)
         pair.profile_timeout_minutes = int(active_profile.timeout_minutes) if pair.profile_timeout_enabled else None
         pair.di_sizing_direction = original_direction
@@ -793,35 +787,68 @@ class BacktestEngine:
         return not gaps.empty
     def _maybe_exit_ohlc(self,pos,i,source): return self._maybe_exit_bar(pos,i,self.high[i],self.low[i],self.times[i],source)
     def _maybe_exit_bar(self,pos,i,high,low,timestamp,source):
+        # Break-even is a Protection rule, independent of the selected profit
+        # taking method. A newly raised BE stop is deliberately not eligible
+        # until the next processed bar/intrabar candle, avoiding invented OHLC
+        # paths inside the candle that triggered it.
         if pos.r_step_trailing_enabled:
-            return self._maybe_r_step_trailing_exit(pos,i,float(high),float(low),timestamp,source)
+            changed=self._maybe_r_step_trailing_exit(pos,i,float(high),float(low),timestamp,source)
+            if pos.is_open: self._maybe_activate_break_even(pos,float(high),float(low),timestamp)
+            return changed
         if pos.partial_sl_enabled and pos.partial_tp_enabled:
-            return self._maybe_combined_partial_exit(pos,i,float(high),float(low),timestamp,source)
+            changed=self._maybe_combined_partial_exit(pos,i,float(high),float(low),timestamp,source)
+            if pos.is_open: self._maybe_activate_break_even(pos,float(high),float(low),timestamp)
+            return changed
         if pos.partial_sl_enabled:
-            return self._maybe_partial_sl_exit(pos,i,float(high),float(low),timestamp,source)
+            changed=self._maybe_partial_sl_exit(pos,i,float(high),float(low),timestamp,source)
+            if pos.is_open: self._maybe_activate_break_even(pos,float(high),float(low),timestamp)
+            return changed
         if pos.partial_tp_enabled:
-            return self._maybe_partial_exit(pos,i,float(high),float(low),timestamp,source)
+            changed=self._maybe_partial_exit(pos,i,float(high),float(low),timestamp,source)
+            if pos.is_open: self._maybe_activate_break_even(pos,float(high),float(low),timestamp)
+            return changed
         if pos.atr_checkpoint_extension_enabled:
             self._apply_atr_checkpoint_extensions(pos, float(high), float(low), timestamp)
         if pos.trailing_enabled:
-            # Whole-position trailing replaces the fixed TP. The favourable
-            # threshold activates/ratchets the trail; it is not itself an exit.
-            return self._maybe_trailing_exit(pos,i,float(high),float(low),timestamp,source)
+            changed=self._maybe_trailing_exit(pos,i,float(high),float(low),timestamp,source)
+            if pos.is_open: self._maybe_activate_break_even(pos,float(high),float(low),timestamp)
+            return changed
         hit_tp=high>=pos.tp if pos.side==Side.LONG else low<=pos.tp; hit_sl=low<=pos.sl if pos.side==Side.LONG else high>=pos.sl
         if not(hit_tp or hit_sl):
-            if pos.profile_break_even_activation_r is not None and not pos.be_triggered:
-                reached=high>=pos.entry_price+pos.profile_break_even_activation_r*pos.risk if pos.side==Side.LONG else low<=pos.entry_price-pos.profile_break_even_activation_r*pos.risk
-                if reached:
-                    new_sl=pos.entry_price+pos.be_offset_r*pos.risk if pos.side==Side.LONG else pos.entry_price-pos.be_offset_r*pos.risk
-                    improves=new_sl>pos.sl if pos.side==Side.LONG else new_sl<pos.sl
-                    if improves:
-                        pos.sl=new_sl; pos.be_triggered=True; pos.be_trigger_time=pd.Timestamp(timestamp); pos.be_stop_price=new_sl; pos.be_exit_reason=ExitReason.BE_R_OFFSET if pos.be_offset_r else ExitReason.BE
+            self._maybe_activate_break_even(pos,float(high),float(low),timestamp)
             return False
         if hit_tp and hit_sl: pos.ambiguous=True; use_tp=self.config.tie_policy==TiePolicy.OPTIMISTIC
         else: use_tp=hit_tp
         raw=pos.tp if use_tp else pos.sl; slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
         reason=ExitReason.TP if use_tp else (pos.be_exit_reason if pos.be_triggered else (ExitReason.ATR_CHECKPOINT_PROFIT_LOCK if pos.atr_checkpoint_profit_lock_r is not None else ExitReason.SL))
         self._close_position(pos,i,raw*slip,reason,source,timestamp); return True
+
+    def _maybe_activate_break_even(self,pos,high,low,timestamp):
+        activation=pos.profile_break_even_activation_r
+        if activation is None or pos.be_triggered or not pos.is_open:
+            return False
+        reached=(
+            high>=pos.entry_price+activation*pos.risk
+            if pos.side==Side.LONG
+            else low<=pos.entry_price-activation*pos.risk
+        )
+        if not reached:
+            return False
+        new_sl=(
+            pos.entry_price+pos.be_offset_r*pos.risk
+            if pos.side==Side.LONG
+            else pos.entry_price-pos.be_offset_r*pos.risk
+        )
+        improves=new_sl>pos.sl if pos.side==Side.LONG else new_sl<pos.sl
+        if not improves:
+            return False
+        pos.sl=new_sl
+        pos.final_active_stop=new_sl
+        pos.be_triggered=True
+        pos.be_trigger_time=pd.Timestamp(timestamp)
+        pos.be_stop_price=new_sl
+        pos.be_exit_reason=ExitReason.BE_R_OFFSET if pos.be_offset_r else ExitReason.BE
+        return True
 
     def _maybe_r_step_trailing_exit(self, pos, i, high, low, timestamp, source):
         """Trail a qualifying bull long in discrete R steps.
@@ -937,23 +964,34 @@ class BacktestEngine:
             pos.atr_checkpoint_next_r=checkpoint_r+1.0
 
     def _maybe_partial_sl_exit(self,pos,i,high,low,timestamp,source):
-        """Close SL1 percentage once, then leave the remainder for TP or SL2."""
+        """Close SL1 percentage once, then leave the remainder for TP or SL2.
+
+        If Break-even Protection was activated on an earlier processed bar, its
+        stop takes priority over the deeper SL ladder for the remaining size.
+        """
         if pos.trailing_enabled and pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
-        tp_hit=high>=pos.tp if pos.side==Side.LONG else low<=pos.tp
-        sl1_hit=(low<=pos.sl1_price if pos.side==Side.LONG else high>=pos.sl1_price) and not pos.sl1_hit
-        sl2_hit=low<=pos.sl2_price if pos.side==Side.LONG else high>=pos.sl2_price
-        sl1_execution=pos.sl1_price*(1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage)
-        if tp_hit and (not (sl1_hit or sl2_hit) or self.config.tie_policy==TiePolicy.OPTIMISTIC):
-            raw=pos.tp; price=raw*(1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage)
+        is_long=pos.side==Side.LONG
+        adverse=lambda price: low<=price if is_long else high>=price
+        tp_hit=high>=pos.tp if is_long else low<=pos.tp
+        protective_stop_hit=bool(pos.be_triggered and adverse(pos.sl))
+        sl1_hit=adverse(pos.sl1_price) and not pos.sl1_hit
+        sl2_hit=adverse(pos.sl2_price)
+        slip=1-self.config.slippage if is_long else 1+self.config.slippage
+        sl1_execution=pos.sl1_price*slip
+        if tp_hit and (not (protective_stop_hit or sl1_hit or sl2_hit) or self.config.tie_policy==TiePolicy.OPTIMISTIC):
+            raw=pos.tp; price=raw*slip
             self._partial_sl_fill(pos,pos.remaining_quantity,price,"tp",i,timestamp,source)
             self._finalize_partial_sl(pos,ExitReason.TP)
+            return True
+        if protective_stop_hit:
+            self._partial_sl_fill(pos,pos.remaining_quantity,pos.sl*slip,"stop",i,timestamp,source)
+            self._finalize_partial_sl(pos,pos.be_exit_reason or ExitReason.BE)
             return True
         if sl2_hit:
             if not pos.sl1_hit:
                 self._partial_sl_fill(pos,pos.sl1_quantity,sl1_execution,"sl1",i,timestamp,source)
-            price=pos.sl2_price*(1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage)
-            self._partial_sl_fill(pos,pos.remaining_quantity,price,"sl2",i,timestamp,source)
+            self._partial_sl_fill(pos,pos.remaining_quantity,pos.sl2_price*slip,"sl2",i,timestamp,source)
             self._finalize_partial_sl(pos,ExitReason.SL)
             return True
         if sl1_hit:
@@ -964,11 +1002,11 @@ class BacktestEngine:
         return False
 
     def _maybe_combined_partial_exit(self,pos,i,high,low,timestamp,source):
-        """Resolve the combined TP1/TP2 and SL1/SL2 ladders.
+        """Resolve TP1/TP2 and SL1/SL2 ladders.
 
-        Stage quantities are percentages of original size and are capped by the
-        quantity still open.  A TP1 stop move overrides pending SL stages;
-        KEEP_ORIGINAL_SL preserves the SL1-to-SL2 ladder.
+        Profit Taking never moves the stop. If Break-even Protection activated
+        on an earlier processed bar, that protective stop takes priority over
+        the deeper partial-stop ladder for the remaining size.
         """
         if pos.trailing_enabled and pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
@@ -977,16 +1015,16 @@ class BacktestEngine:
         favourable=lambda price: high>=price if is_long else low<=price
         tp1_hit=favourable(pos.tp1_price) and not pos.tp1_hit
         tp2_hit=favourable(pos.tp2_price) and pos.tp1_hit
-        moved_stop_hit=pos.partial_sl_overridden_after_tp1 and adverse(pos.sl)
-        sl1_hit=(not pos.partial_sl_overridden_after_tp1 and not pos.sl1_hit and adverse(pos.sl1_price))
-        sl2_hit=(not pos.partial_sl_overridden_after_tp1 and adverse(pos.sl2_price))
+        protective_stop_hit=bool(pos.be_triggered and adverse(pos.sl))
+        sl1_hit=not pos.sl1_hit and adverse(pos.sl1_price)
+        sl2_hit=adverse(pos.sl2_price)
         slip=1-self.config.slippage if is_long else 1+self.config.slippage
 
         def execute_losses():
             changed=False
-            if moved_stop_hit:
+            if protective_stop_hit:
                 self._partial_fill(pos,pos.remaining_quantity,pos.sl*slip,"stop",i,timestamp,source)
-                self._finalize_partial(pos,pos.be_exit_reason if pos.be_triggered else ExitReason.SL)
+                self._finalize_partial(pos,pos.be_exit_reason or ExitReason.BE)
                 return True
             if sl2_hit:
                 if not pos.sl1_hit:
@@ -1001,7 +1039,7 @@ class BacktestEngine:
                     self._finalize_partial(pos,ExitReason.SL)
             return changed
 
-        if self.config.tie_policy==TiePolicy.PESSIMISTIC and (moved_stop_hit or sl1_hit or sl2_hit):
+        if self.config.tie_policy==TiePolicy.PESSIMISTIC and (protective_stop_hit or sl1_hit or sl2_hit):
             return execute_losses()
 
         changed=False
@@ -1010,11 +1048,6 @@ class BacktestEngine:
             if not pos.is_open:
                 self._finalize_partial(pos,ExitReason.TP)
                 return True
-            self._after_tp1(pos)
-            if pos.after_tp1_stop_mode!=AfterTP1StopMode.KEEP_ORIGINAL_SL.value:
-                pos.partial_sl_overridden_after_tp1=True
-                moved_stop_hit=adverse(pos.sl)
-                sl1_hit=sl2_hit=False
             tp2_hit=favourable(pos.tp2_price)
         if pos.is_open and pos.tp1_hit and tp2_hit:
             self._partial_fill(pos,pos.remaining_quantity,pos.tp2_price,"tp2",i,timestamp,source)
@@ -1042,7 +1075,14 @@ class BacktestEngine:
 
     def _finalize_partial_sl(self,pos,reason):
         pos.exit_reason=reason
-        pos.final_exit_reason=("SL1_THEN_TP" if reason==ExitReason.TP and pos.sl1_hit else ("SL1_THEN_SL2" if reason==ExitReason.SL and pos.sl1_hit else reason.value))
+        if pos.sl1_hit and reason==ExitReason.TP:
+            pos.final_exit_reason="SL1_THEN_TP"
+        elif pos.sl1_hit and reason==ExitReason.SL:
+            pos.final_exit_reason="SL1_THEN_SL2"
+        elif pos.sl1_hit:
+            pos.final_exit_reason=f"SL1_THEN_{reason.value}"
+        else:
+            pos.final_exit_reason=reason.value
         pos.gross_pnl=(pos.sl1_gross_pnl or 0)+(pos.stop_gross_pnl or 0)
         pos.net_pnl=pos.gross_pnl-pos.fees; pos.gross_r=pos.gross_pnl/pos.risk_amount; pos.net_r=pos.net_pnl/pos.risk_amount
         pos.quantity=pos.original_quantity
@@ -1066,16 +1106,6 @@ class BacktestEngine:
             pos.remaining_quantity=0.0; pos.exit_time=pd.Timestamp(timestamp); pos.exit_index=i; pos.exit_price=price; pos.exit_source=source
         return True
 
-    def _after_tp1(self,pos):
-        if pos.after_tp1_stop_mode==AfterTP1StopMode.MOVE_TO_ENTRY.value: candidate=pos.entry_price
-        elif pos.after_tp1_stop_mode==AfterTP1StopMode.MOVE_TO_R_OFFSET.value:
-            candidate=pos.entry_price+pos.after_tp1_stop_offset_r*pos.risk if pos.side==Side.LONG else pos.entry_price-pos.after_tp1_stop_offset_r*pos.risk
-        else: candidate=pos.original_sl
-        pos.sl=max(pos.sl,candidate) if pos.side==Side.LONG else min(pos.sl,candidate)
-        pos.final_active_stop=pos.sl
-        if pos.partial_sl_enabled and pos.after_tp1_stop_mode!=AfterTP1StopMode.KEEP_ORIGINAL_SL.value:
-            pos.partial_sl_overridden_after_tp1=True
-
     def _maybe_partial_exit(self,pos,i,high,low,timestamp,source):
         """Resolve unknown OHLC paths consistently.
 
@@ -1093,7 +1123,7 @@ class BacktestEngine:
             return self._finish_partial_stop(pos,i,timestamp,source)
         changed=False
         if tp1_hit:
-            changed=self._partial_fill(pos,pos.tp1_quantity,pos.tp1_price,"tp1",i,timestamp,source); self._after_tp1(pos)
+            changed=self._partial_fill(pos,pos.tp1_quantity,pos.tp1_price,"tp1",i,timestamp,source)
         if pos.is_open and pos.tp1_hit and tp2_hit:
             self._partial_fill(pos,pos.remaining_quantity,pos.tp2_price,"tp2",i,timestamp,source); self._finalize_partial(pos,ExitReason.TP); return True
         if pos.is_open and stop_hit:
@@ -1116,6 +1146,7 @@ class BacktestEngine:
         if pos.tp2_hit: stages.append("TP2")
         elif reason==ExitReason.SL: stages.append("SL")
         elif reason==ExitReason.TP and not pos.tp1_hit: stages.append("TP")
+        elif reason in (ExitReason.BE,ExitReason.BE_R_OFFSET): stages.append(reason.value)
         elif reason==ExitReason.TRAILING_STOP: stages.append("TRAILING_STOP")
         elif reason==ExitReason.R_STEP_TRAILING_STOP: stages.append("R_STEP_TRAILING_STOP")
         pos.final_exit_reason="_THEN_".join(stages) or reason.value
@@ -1284,8 +1315,6 @@ class BacktestEngine:
             "sl1_r": sl1_r,
             "sl1_close_pct": sl1_pct,
             "sl2_r": sl2_r,
-            "after_tp1_stop_mode": getattr(p, "applied_after_tp1_stop_mode", None),
-            "after_tp1_stop_offset_r": getattr(p, "applied_after_tp1_stop_offset_r", 0.0),
             "intrabar_partial_tp_ordering": "STOP_FIRST" if self.config.tie_policy == TiePolicy.PESSIMISTIC else "TP1_THEN_TP2_THEN_STOP",
             "trailing_profit_enabled": bool(primary.trailing_enabled),
             "trail_activation_r": profile.trailing_activation_r if profile and profile.trailing_enabled else None,

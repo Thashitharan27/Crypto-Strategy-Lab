@@ -91,11 +91,9 @@ class StrategyProfilesWidget(QWidget):
         self._number("tp1_r",1,.001,1000)
         self._number("tp1_close_pct",50,.01,99.99)
         self._number("tp2_r",2,.001,1000)
-        self._choice("after_tp1_stop_mode",(("Keep original stop","KEEP_ORIGINAL_SL"),("Move stop to entry","MOVE_TO_ENTRY"),("Lock profit at R offset","MOVE_TO_R_OFFSET")))
-        self._number("after_tp1_stop_offset_r",0,0,1000)
-        for key,label in (("tp1_r","First profit target"),("tp1_close_pct","Position closed at first target"),("tp2_r","Final profit target"),("after_tp1_stop_mode","Remaining stop after first target"),("after_tp1_stop_offset_r","Profit locked after first target")):
+        for key,label in (("tp1_r","First profit target"),("tp1_close_pct","Position closed at first target"),("tp2_r","Final profit target")):
             self.form.labelForField(self.controls[key]).setText(label)
-        for key in ("tp1_r","tp2_r","after_tp1_stop_offset_r"):
+        for key in ("tp1_r","tp2_r"):
             self.controls[key].setDecimals(3)
             self.controls[key].setSuffix(" R")
         self.controls["tp1_close_pct"].setDecimals(2)
@@ -161,7 +159,6 @@ class StrategyProfilesWidget(QWidget):
         self.regime_method.currentIndexChanged.connect(self._update_regime_controls); self.regime_method.currentIndexChanged.connect(self.changed)
         for key in ("partial_stop_enabled","partial_profit_enabled","trailing_enabled","break_even_enabled","timeout_enabled","r_step_trailing_enabled","atr_checkpoint_tp_extension_enabled"): self.controls[key].toggled.connect(self._update_management_controls)
         self.add_rule_btn.clicked.connect(self._add_entry_rule); self.remove_rule_btn.clicked.connect(self._remove_entry_rule)
-        self.controls["after_tp1_stop_mode"].currentTextChanged.connect(self._update_management_controls)
         self._update_mode_help(); self._update_regime_controls(); self._refresh_list(); self.list.setCurrentRow(0)
     def _update_regime_controls(self,*_):
         structural=self.regime_method.currentData() in ("BTC_STRUCTURAL","ASSET_STRUCTURAL")
@@ -236,9 +233,8 @@ class StrategyProfilesWidget(QWidget):
             self._show_control(key,partial_stop)
 
         partial_profit=self.controls["partial_profit_enabled"].isChecked()
-        for key in ("tp1_r","tp1_close_pct","tp2_r","after_tp1_stop_mode"):
+        for key in ("tp1_r","tp1_close_pct","tp2_r"):
             self._show_control(key,partial_profit)
-        self._show_control("after_tp1_stop_offset_r",partial_profit and self.controls["after_tp1_stop_mode"].currentData()=="MOVE_TO_R_OFFSET")
         self.controls["reward_risk_ratio"].setEnabled(not partial_profit)
 
         break_even=self.controls["break_even_enabled"].isChecked()

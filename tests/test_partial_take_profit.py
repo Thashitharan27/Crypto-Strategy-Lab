@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from crypto_strategy_lab.config import AfterTP1StopMode, BacktestConfig, RiskMode, TiePolicy
+from crypto_strategy_lab.config import BacktestConfig, RiskMode, TiePolicy
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.strategy_profiles import StrategyProfile, default_profiles
 
@@ -30,7 +30,6 @@ def base_profile(**changes):
         tp1_r=1,
         tp1_close_pct=50,
         tp2_r=2,
-        after_tp1_stop_mode=AfterTP1StopMode.KEEP_ORIGINAL_SL.value,
     )
     values.update(changes)
     return StrategyProfile(**values)
@@ -66,6 +65,7 @@ def test_long_tp1_then_stop_closes_only_remainder():
     engine, position = open_long((100, 100), (120, 99), (105, 79))
     assert engine._scan_exit(position, 1)
     assert position.tp1_hit and position.is_open
+    assert position.sl == pytest.approx(80)
     assert engine._scan_exit(position, 2)
     assert not position.tp2_hit
     assert position.stop_exit_quantity == pytest.approx(position.original_quantity / 2)
@@ -73,12 +73,7 @@ def test_long_tp1_then_stop_closes_only_remainder():
 
 
 def test_long_tp1_then_tp2_and_fee_reconciliation():
-    engine, position = open_long(
-        (100, 100),
-        (140, 99),
-        fee=0.001,
-        tie_policy=TiePolicy.OPTIMISTIC,
-    )
+    engine, position = open_long((100, 100), (140, 99), fee=0.001, tie_policy=TiePolicy.OPTIMISTIC)
     assert engine._scan_exit(position, 1)
     assert position.tp1_hit and position.tp2_hit
     assert position.remaining_quantity == 0
@@ -105,36 +100,40 @@ def test_optimistic_same_candle_runs_tp1_then_tp2():
     assert position.stop_exit_time is None or pd.isna(position.stop_exit_time)
 
 
-@pytest.mark.parametrize(
-    "mode,offset,expected",
-    [
-        (AfterTP1StopMode.KEEP_ORIGINAL_SL, 0, 80),
-        (AfterTP1StopMode.MOVE_TO_ENTRY, 0, 100),
-        (AfterTP1StopMode.MOVE_TO_R_OFFSET, 1, 110),
-    ],
-)
-def test_after_tp1_stop_modes_are_profile_owned(mode, offset, expected):
-    profile = base_profile(after_tp1_stop_mode=mode.value, after_tp1_stop_offset_r=offset)
-    engine, position = open_long((100, 100), (120, 99), profile=profile)
+def test_partial_take_profit_does_not_move_stop_by_itself():
+    engine, position = open_long((100, 100), (120, 99))
     assert engine._scan_exit(position, 1)
     assert position.tp1_hit and position.is_open
-    assert position.sl == pytest.approx(expected)
+    assert position.sl == pytest.approx(80)
+    assert not position.be_triggered
+
+
+def test_break_even_protection_controls_remaining_stop_after_tp1():
+    profile = base_profile(break_even_enabled=True, break_even_activation_r=1, break_even_offset_r=0)
+    engine, position = open_long((100, 100), (120, 99), (100, 99), profile=profile)
+    assert engine._scan_exit(position, 1)
+    assert position.tp1_hit and position.is_open
+    assert position.be_triggered
+    assert position.sl == pytest.approx(100)
+    assert engine._scan_exit(position, 2)
+    assert position.stop_exit_price == pytest.approx(100)
+    assert position.final_exit_reason == "TP1_THEN_BE"
+
+
+def test_break_even_profit_offset_controls_remaining_stop_after_tp1():
+    profile = base_profile(break_even_enabled=True, break_even_activation_r=1, break_even_offset_r=0.5)
+    engine, position = open_long((100, 100), (120, 106), (106, 104), profile=profile)
+    assert engine._scan_exit(position, 1)
+    assert position.be_triggered
+    assert position.sl == pytest.approx(105)
+    assert engine._scan_exit(position, 2)
+    assert position.stop_exit_price == pytest.approx(105)
+    assert position.final_exit_reason == "TP1_THEN_BE_R_OFFSET"
 
 
 def test_combined_profile_ladders_allow_sl1_then_tp1_then_tp2():
-    profile = base_profile(
-        partial_stop_enabled=True,
-        sl1_r=0.5,
-        sl1_close_pct=25,
-        sl2_r=2,
-    )
-    engine, position = open_long(
-        (100, 100),
-        (100, 95),
-        (120, 100),
-        (140, 100),
-        profile=profile,
-    )
+    profile = base_profile(partial_stop_enabled=True, sl1_r=0.5, sl1_close_pct=25, sl2_r=2)
+    engine, position = open_long((100, 100), (100, 95), (120, 100), (140, 100), profile=profile)
     assert engine._scan_exit(position, 1)
     assert engine._scan_exit(position, 2)
     assert engine._scan_exit(position, 3)
@@ -143,17 +142,21 @@ def test_combined_profile_ladders_allow_sl1_then_tp1_then_tp2():
     assert position.remaining_quantity == 0
 
 
-def test_combined_move_to_entry_after_tp1_overrides_pending_sl_ladder():
+def test_combined_partial_profit_uses_break_even_as_the_only_stop_override():
     profile = base_profile(
         partial_stop_enabled=True,
         sl1_r=0.5,
         sl1_close_pct=25,
         sl2_r=2,
-        after_tp1_stop_mode=AfterTP1StopMode.MOVE_TO_ENTRY.value,
+        break_even_enabled=True,
+        break_even_activation_r=1,
+        break_even_offset_r=0,
     )
     engine, position = open_long((100, 100), (120, 100), (100, 99), profile=profile)
     assert engine._scan_exit(position, 1)
     assert position.tp1_hit and not position.sl1_hit
+    assert position.be_triggered and position.sl == pytest.approx(100)
     assert engine._scan_exit(position, 2)
+    assert not position.sl1_hit
     assert position.stop_exit_price == pytest.approx(100)
-    assert position.stop_exit_quantity == pytest.approx(position.original_quantity / 2)
+    assert position.final_exit_reason == "TP1_THEN_BE"
