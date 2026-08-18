@@ -52,3 +52,5 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "Stage 25: add analysis-only mean reversion telemetry"
           git push origin HEAD:chatgpt/stage25-mean-reversion-analysis
+
+# Retriggered after branch setup so the migration runs on the complete Stage 25 scaffold.
