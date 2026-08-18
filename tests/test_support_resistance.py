@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import time
-from crypto_strategy_lab.config import BacktestConfig
+from crypto_strategy_lab.config import BacktestConfig, RiskMode
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.support_resistance import (
     SwingDetector,
@@ -245,11 +245,9 @@ class TestSupportResistanceFiltering:
         assert long_engine._should_reject_for_sr(10, "SHORT", context) == (False, None)
         assert short_engine._should_reject_for_sr(10, "LONG", context) == (False, None)
 
-    def test_unrecognized_mode_does_not_apply_entry_rules(self):
-        engine = self._engine(sr_filter_mode="UNKNOWN", sr_long_avoid_near_resistance=True)
-        assert engine._should_reject_for_sr(
-            10, "LONG", self._context(near_resistance=True)
-        ) == (False, None)
+    def test_unrecognized_mode_is_rejected_by_current_config_contract(self):
+        with pytest.raises(ValueError, match="invalid sr_filter_mode"):
+            self._engine(sr_filter_mode="UNKNOWN", sr_long_avoid_near_resistance=True)
 
 
 def test_room_in_direction_uses_opposing_structure():
@@ -290,31 +288,47 @@ class TestAnalysisOnlyRegression:
             "volume": [1] * len(rows),
         })
 
+    @staticmethod
+    def _run_current_profile(data, enable_sr):
+        config = BacktestConfig(
+            risk_mode=RiskMode.FIXED,
+            fixed_r=2.0,
+            use_intrabar_data=False,
+            enable_trade_telemetry=False,
+            enable_support_resistance_analysis=enable_sr,
+            sr_filter_mode="ANALYSIS_ONLY",
+        )
+        engine = BacktestEngine(data, config)
+        engine.market_regime_values[:] = "SIDEWAYS"
+        engine.plus_di_values[:] = 50.0
+        engine.minus_di_values[:] = 10.0
+        engine.di_spread[:] = 40.0
+        return engine.run()
+
     def test_analysis_only_trades_match_sr_disabled_trades(self):
         data = self._wavy_candles()
-        disabled = BacktestEngine(data, BacktestConfig(enable_support_resistance_analysis=False)).run()
-        enabled = BacktestEngine(data, BacktestConfig(
-            enable_support_resistance_analysis=True, sr_filter_mode="ANALYSIS_ONLY",
-        )).run()
+        disabled = self._run_current_profile(data, False)
+        enabled = self._run_current_profile(data, True)
 
         assert len(disabled) == len(enabled)
         assert len(disabled) > 0
         shared_columns = [c for c in disabled.columns if c in enabled.columns and "_sr_" not in c]
-        pd.testing.assert_frame_equal(disabled[shared_columns].reset_index(drop=True), enabled[shared_columns].reset_index(drop=True))
-        assert enabled["long_sr_context"].notna().any() or enabled["short_sr_context"].notna().any()
-        assert disabled["long_sr_context"].isna().all() and disabled["short_sr_context"].isna().all()
+        pd.testing.assert_frame_equal(
+            disabled[shared_columns].reset_index(drop=True),
+            enabled[shared_columns].reset_index(drop=True),
+        )
+        assert enabled["long_sr_context"].notna().any()
+        assert disabled["long_sr_context"].isna().all()
 
-    def test_sr_zone_and_level_columns_present_when_enabled(self):
-        data = self._wavy_candles()
-        enabled = BacktestEngine(data, BacktestConfig(
-            enable_support_resistance_analysis=True, sr_filter_mode="ANALYSIS_ONLY",
-        )).run()
-        for column in (
-            "long_sr_zone_low", "long_sr_zone_high", "long_sr_level_price",
-            "short_sr_zone_low", "short_sr_zone_high", "short_sr_level_price",
-        ):
+    def test_sr_zone_and_level_columns_present_for_selected_side(self):
+        enabled = self._run_current_profile(self._wavy_candles(), True)
+        for column in ("long_sr_zone_low", "long_sr_zone_high", "long_sr_level_price"):
             assert column in enabled.columns
-        assert enabled["long_sr_zone_low"].notna().any() or enabled["short_sr_zone_low"].notna().any()
+        assert enabled["long_sr_zone_low"].notna().any()
+        assert "short_sr_zone_low" not in enabled.columns
+
+
+class TestSupportResistanceDetector:
 
 
 class TestSupportResistanceDetector:
