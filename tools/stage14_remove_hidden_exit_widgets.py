@@ -57,6 +57,24 @@ if old_mixed not in text:
     raise RuntimeError("Stage 14 could not find mixed trade-direction/trailing apply line")
 text = text.replace(old_mixed, new_mixed, 1)
 
+# Remove event wiring that existed only to coordinate the deleted global exit
+# widgets. The remaining-leg survivor rule no longer needs to be mutually
+# exclusive with a hidden global partial-TP switch; profiles own partial TP.
+exit_signal_lines = [
+    '        self.first_sl_survivor_partial.toggled.connect(lambda checked:self.enable_partial_tp.setChecked(False) if checked else None)\n',
+    '        self.enable_partial_tp.toggled.connect(lambda checked:self.first_sl_survivor_partial.setChecked(False) if checked else None)\n',
+    '        self.enable_partial_sl.toggled.connect(self.update_dynamic)\n',
+    '        self.enable_partial_tp.toggled.connect(self.update_dynamic)\n',
+    '        self.tp1_close_pct.valueChanged.connect(lambda value:self.tp2_close_pct.setValue(100.0-value))\n',
+    '        self.after_tp1_stop_mode.currentTextChanged.connect(self.update_dynamic)\n',
+    '        self.enable_trailing_profit.toggled.connect(self.update_dynamic)\n',
+    '        self.trail_activation_trigger.currentTextChanged.connect(self.update_dynamic)\n',
+]
+for line in exit_signal_lines:
+    if line not in text:
+        raise RuntimeError(f"Stage 14 could not find deleted-widget signal line: {line.strip()[:60]}")
+    text = text.replace(line, "", 1)
+
 # Remove dynamic logic that only operated the deleted hidden widgets.
 dynamic_pattern = re.compile(
     r'        if hasattr\(self,"enable_partial_sl"\):\n.*?'
@@ -75,9 +93,13 @@ removed_attrs = (
     "trail_distance_r", "trail_apply_to", "trail_intrabar_mode",
     "protective_stop_help", "trailing_help",
 )
+remaining = []
 for attr in removed_attrs:
-    if f"self.{attr}" in text:
-        raise RuntimeError(f"Stage 14 deleted-widget reference remains: self.{attr}")
+    for lineno, line in enumerate(text.splitlines(), 1):
+        if f"self.{attr}" in line:
+            remaining.append(f"line {lineno}: self.{attr}: {line.strip()}")
+if remaining:
+    raise RuntimeError("Stage 14 deleted-widget references remain:\n" + "\n".join(remaining))
 for title in ("Partial Stop Loss", "Partial Take Profit", "Post-TP1 Protective Stop", "Independent Trailing Stop"):
     if f'group("{title}")' in text:
         raise RuntimeError(f"Stage 14 hidden group remains: {title}")
