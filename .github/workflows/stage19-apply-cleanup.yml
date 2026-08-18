@@ -1,0 +1,37 @@
+name: Stage 19 apply cleanup
+
+on:
+  pull_request:
+    branches: [ main ]
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'chatgpt/stage19-remove-legacy-config-compat'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Apply one-shot cleanup
+        run: python tools/stage19_remove_strategy_csv.py
+      - name: Compile changed Python
+        run: python -m py_compile crypto_strategy_lab/config.py crypto_strategy_lab/loader.py crypto_strategy_lab/gui/config_logic.py tools/stage19_audit_legacy_config.py
+      - name: Commit cleanup
+        run: |
+          if git diff --quiet; then
+            echo "No cleanup changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crypto_strategy_lab/config.py crypto_strategy_lab/loader.py crypto_strategy_lab/gui/config_logic.py tools/stage19_audit_legacy_config.py
+          git commit -m "Stage 19: remove retired strategy_csv alias"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
