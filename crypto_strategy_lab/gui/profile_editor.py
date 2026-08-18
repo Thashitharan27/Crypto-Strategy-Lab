@@ -150,15 +150,15 @@ class StrategyProfilesWidget(QWidget):
         copy_btn=QPushButton("Copy Profile")
         paste_btn=QPushButton("Paste Profile")
         reset_btn=QPushButton("Reset Profile")
-        copy_rules_btn=QPushButton("Apply Rules to All")
+        copy_strategy_btn=QPushButton("Apply Strategy to All Profiles")
         buttons.addWidget(copy_btn)
         buttons.addWidget(paste_btn)
         buttons.addWidget(reset_btn)
-        buttons.addWidget(copy_rules_btn)
+        buttons.addWidget(copy_strategy_btn)
         self.form.addRow(buttons)
         self.editor_layout.addStretch()
         self.clipboard=None
-        copy_btn.clicked.connect(lambda:setattr(self,"clipboard",deepcopy(self.profiles[self.current]))); paste_btn.clicked.connect(self._paste); reset_btn.clicked.connect(self._reset); copy_rules_btn.clicked.connect(self._apply_rules_to_all); self.list.currentRowChanged.connect(self._select); self.mode.currentTextChanged.connect(self.changed); self.mode.currentIndexChanged.connect(self._update_mode_help)
+        copy_btn.clicked.connect(lambda:setattr(self,"clipboard",deepcopy(self.profiles[self.current]))); paste_btn.clicked.connect(self._paste); reset_btn.clicked.connect(self._reset); copy_strategy_btn.clicked.connect(self._apply_strategy_to_all); self.list.currentRowChanged.connect(self._select); self.mode.currentTextChanged.connect(self.changed); self.mode.currentIndexChanged.connect(self._update_mode_help)
         for widget in (self.regime_lookback,self.bull_threshold,self.structural_sma_days,self.structural_slope_days,self.adx_period,self.bb_period,self.bb_stddevs): widget.valueChanged.connect(self.changed)
         self.regime_method.currentIndexChanged.connect(self._update_regime_controls); self.regime_method.currentIndexChanged.connect(self.changed)
         for key in ("partial_stop_enabled","partial_profit_enabled","trailing_enabled","break_even_enabled","timeout_enabled","r_step_trailing_enabled","atr_checkpoint_tp_extension_enabled"): self.controls[key].toggled.connect(self._update_management_controls)
@@ -287,12 +287,20 @@ class StrategyProfilesWidget(QWidget):
     def _paste(self):
         if self.clipboard is not None:self.profiles[self.current]=deepcopy(self.clipboard);self._load();self._refresh_list();self.changed.emit()
     def _reset(self): self.profiles[self.current]=StrategyProfile();self._load();self._refresh_list();self.changed.emit()
-    def _apply_rules_to_all(self):
-        """Apply current profile's entry rules to all other profiles."""
-        current_rules=self.profiles[self.current].entry_rules
+    def _apply_strategy_to_all(self):
+        """Copy the current profile's complete baseline strategy to every profile.
+
+        Profile identity controls stay profile-specific: enabled and flip_direction
+        are preserved for each target profile. Every other StrategyProfile field is
+        copied from the current profile, so new strategy fields are included
+        automatically without maintaining a separate allow-list.
+        """
+        source=deepcopy(self.profiles[self.current])
         for key in PROFILE_KEYS:
-            if key!=self.current:
-                self.profiles[key]=replace(self.profiles[key], entry_rules=deepcopy(current_rules))
+            if key==self.current:
+                continue
+            target=self.profiles[key]
+            self.profiles[key]=replace(source, enabled=target.enabled, flip_direction=target.flip_direction)
         self._refresh_list();self.changed.emit()
     def values(self): return {"strategy_profile_run_mode":self.mode.currentData(),"market_regime_method":self.regime_method.currentData(),"structural_regime_sma_days":self.structural_sma_days.value(),"structural_regime_slope_lookback_days":self.structural_slope_days.value(),"bull_regime_lookback_days":self.regime_lookback.value(),"bull_regime_return_threshold":self.bull_threshold.value()/100.0,"adx_period":self.adx_period.value(),"bb_period":self.bb_period.value(),"bb_stddevs":self.bb_stddevs.value(),"strategy_profiles":profiles_to_dict(self.profiles)}
     def apply_values(self,values):
