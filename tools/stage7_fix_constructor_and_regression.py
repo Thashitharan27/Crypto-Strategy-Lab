@@ -7,26 +7,29 @@ ROOT = Path(__file__).resolve().parents[1]
 p = ROOT / "crypto_strategy_lab/gui/config_logic.py"
 s = p.read_text(encoding="utf-8")
 
-# Remove ATR checkpoint args wherever they still appear in BacktestConfig(...).
-s = re.sub(
-    r'\s*enable_atr_checkpoint_tp_extension=bool\(merged\["enable_atr_checkpoint_tp_extension"\]\),\s*'
-    r'atr_checkpoint_di_spread_minimum=float\(merged\["atr_checkpoint_di_spread_minimum"\]\),\s*'
-    r'atr_checkpoint_bb_width_minimum=float\(merged\["atr_checkpoint_bb_width_minimum"\]\),\s*'
-    r'atr_checkpoint_profit_lock_start=float\(merged\["atr_checkpoint_profit_lock_start"\]\),\s*'
-    r'atr_checkpoint_profit_lock_distance=float\(merged\["atr_checkpoint_profit_lock_distance"\]\),',
-    ' ', s,
+LEGACY_CONSTRUCTOR_KEYS = (
+    "enable_atr_checkpoint_tp_extension",
+    "atr_checkpoint_di_spread_minimum",
+    "atr_checkpoint_bb_width_minimum",
+    "atr_checkpoint_profit_lock_start",
+    "atr_checkpoint_profit_lock_distance",
+    "enable_bull_long_r_step_trailing",
+    "bull_long_r_step_activation_r",
+    "bull_long_r_step_distance_r",
+    "bull_long_r_step_size_r",
+    "bull_long_r_step_maximum_r",
+    "bull_long_r_step_activation_close_pct",
 )
 
-# Remove Bull-long R-step args wherever they still appear in BacktestConfig(...).
-s = re.sub(
-    r'\s*enable_bull_long_r_step_trailing=bool\(merged\["enable_bull_long_r_step_trailing"\]\),\s*'
-    r'bull_long_r_step_activation_r=float\(merged\["bull_long_r_step_activation_r"\]\),\s*'
-    r'bull_long_r_step_distance_r=float\(merged\["bull_long_r_step_distance_r"\]\),\s*'
-    r'bull_long_r_step_size_r=float\(merged\["bull_long_r_step_size_r"\]\),\s*'
-    r'bull_long_r_step_maximum_r=float\(merged\["bull_long_r_step_maximum_r"\]\),\s*'
-    r'bull_long_r_step_activation_close_pct=float\(merged\["bull_long_r_step_activation_close_pct"\]\),',
-    ' ', s,
-)
+# Constructor entries are ordinary keyword arguments ending in a comma. Remove
+# each argument independently so spacing/line wrapping cannot make the cleanup miss.
+for key in LEGACY_CONSTRUCTOR_KEYS:
+    s = re.sub(rf"\s*{re.escape(key)}\s*=\s*[^,\n]+,", "", s)
+
+# Fail fast if global constructor plumbing survived this repair.
+for key in LEGACY_CONSTRUCTOR_KEYS:
+    if re.search(rf"\b{re.escape(key)}\s*=", s):
+        raise RuntimeError(f"Stage 7 constructor cleanup missed {key}")
 
 p.write_text(s, encoding="utf-8")
 
