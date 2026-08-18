@@ -27,18 +27,12 @@ jobs:
           python tools/stage19_result_schema.py
           python tools/stage19_final_production_cleanup.py
       - name: Compile changed Python
-        run: >-
-          python -m py_compile
-          crypto_strategy_lab/config.py
-          crypto_strategy_lab/loader.py
-          crypto_strategy_lab/engine.py
-          crypto_strategy_lab/cli.py
-          crypto_strategy_lab/output_manager.py
-          crypto_strategy_lab/report_workbooks.py
-          crypto_strategy_lab/gui/config_logic.py
-          crypto_strategy_lab/gui/main_window.py
-          crypto_strategy_lab/gui/worker.py
-          tools/stage19_audit_legacy_config.py
+        run: |
+          if ! python -m py_compile crypto_strategy_lab/config.py crypto_strategy_lab/loader.py crypto_strategy_lab/engine.py crypto_strategy_lab/cli.py crypto_strategy_lab/output_manager.py crypto_strategy_lab/report_workbooks.py crypto_strategy_lab/gui/config_logic.py crypto_strategy_lab/gui/main_window.py crypto_strategy_lab/gui/worker.py tools/stage19_audit_legacy_config.py; then
+            echo "--- engine.py around migration failure ---"
+            nl -ba crypto_strategy_lab/engine.py | sed -n '975,1020p'
+            exit 1
+          fi
       - name: Commit cleanup
         run: |
           if git diff --quiet; then
