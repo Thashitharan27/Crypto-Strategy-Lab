@@ -3,6 +3,7 @@ import os
 import sys
 from dataclasses import replace
 
+import pandas as pd
 import pytest
 
 from crypto_strategy_lab.config import BacktestConfig
