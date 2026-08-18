@@ -3,8 +3,11 @@
 The experiment is intentionally isolated from the normal strategy/config contract.
 When enabled for a run, new entries are allowed until either wins lead losses by
 ``win_lead`` (default 1) or losses lead wins by ``loss_lead`` (default 5).
-Counters reset at the configured calendar-day boundary. Pair net PnL including
-fees decides W/L; exactly zero is neutral and does not change either counter.
+
+A trade belongs permanently to the configured research calendar day containing
+its ENTRY timestamp. Its eventual outcome updates that same day's ledger even if
+it exits after midnight. This avoids cross-midnight exits resetting or mutating
+another day's counters.
 """
 from __future__ import annotations
 
@@ -72,16 +75,18 @@ def _day_for(timestamp, timezone: str) -> date:
     return ts.tz_convert(ZoneInfo(timezone)).date()
 
 
-def _reset_day(engine, day: date) -> None:
-    engine._research_daily_day = day
-    engine._research_daily_wins = 0
-    engine._research_daily_losses = 0
-    engine._research_daily_stop_reason = None
+def _new_day_state() -> dict:
+    return {
+        "wins": 0,
+        "losses": 0,
+        "entries": 0,
+        "completed": 0,
+        "stop_reason": None,
+    }
 
 
-def _ensure_day(engine, day: date) -> None:
-    if getattr(engine, "_research_daily_day", None) != day:
-        _reset_day(engine, day)
+def _ledger_for(engine, day: date) -> dict:
+    return engine._research_daily_ledger.setdefault(day, _new_day_state())
 
 
 def _pair_net_pnl(pair) -> float:
@@ -111,10 +116,8 @@ def install_research_support() -> None:
     def patched_init(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
         self._research_daily_settings = replace(get_settings())
-        self._research_daily_day = None
-        self._research_daily_wins = 0
-        self._research_daily_losses = 0
-        self._research_daily_stop_reason = None
+        self._research_daily_ledger = {}
+        self._research_daily_pending_day = None
         self._research_daily_entries_blocked = 0
 
     def patched_collect(self, force=False):
@@ -125,53 +128,66 @@ def install_research_support() -> None:
             return result
 
         for pair in self.completed_pairs[before:]:
-            exit_time = _pair_exit_time(pair)
-            day = _day_for(exit_time, settings.timezone)
-            _ensure_day(self, day)
+            # The research day is fixed at ENTRY. Never derive bookkeeping day
+            # from exit_time, because trades can cross midnight.
+            day_text = getattr(pair, "research_daily_sequence_day", None)
+            if day_text:
+                day = date.fromisoformat(str(day_text))
+            else:
+                day = _day_for(pair.strategy_entry_time, settings.timezone)
+                pair.research_daily_sequence_day = str(day)
 
+            state = _ledger_for(self, day)
             pnl = _pair_net_pnl(pair)
             if pnl > 1e-12:
                 outcome = "W"
-                self._research_daily_wins += 1
+                state["wins"] += 1
             elif pnl < -1e-12:
                 outcome = "L"
-                self._research_daily_losses += 1
+                state["losses"] += 1
             else:
                 outcome = "N"
+            state["completed"] += 1
 
             reason = stop_reason(
-                self._research_daily_wins,
-                self._research_daily_losses,
+                state["wins"],
+                state["losses"],
                 settings.win_lead,
                 settings.loss_lead,
             )
-            self._research_daily_stop_reason = reason
+            state["stop_reason"] = reason
+
             pair.research_daily_sequence_outcome = outcome
-            pair.research_daily_sequence_exit_day = str(day)
-            pair.research_daily_sequence_wins_after = self._research_daily_wins
-            pair.research_daily_sequence_losses_after = self._research_daily_losses
+            pair.research_daily_sequence_exit_day = str(_day_for(_pair_exit_time(pair), settings.timezone))
+            pair.research_daily_sequence_wins_after = state["wins"]
+            pair.research_daily_sequence_losses_after = state["losses"]
             pair.research_daily_sequence_stop_reason_after = reason
         return result
 
     def patched_entry_decision(self, i, active_at_candle_start=False):
         decision = original_entry_decision(self, i, active_at_candle_start)
         settings = self._research_daily_settings
+        self._research_daily_pending_day = None
         if decision is None or not settings.enabled:
             return decision
 
         entry_time = decision.get("actual_entry_timestamp") or self._execution_time(i)
         day = _day_for(entry_time, settings.timezone)
-        _ensure_day(self, day)
+        state = _ledger_for(self, day)
         reason = stop_reason(
-            self._research_daily_wins,
-            self._research_daily_losses,
+            state["wins"],
+            state["losses"],
             settings.win_lead,
             settings.loss_lead,
         )
-        self._research_daily_stop_reason = reason
+        state["stop_reason"] = reason
         if reason is not None:
             self._research_daily_entries_blocked += 1
             return None
+
+        # Preserve the exact day used by the entry gate so _open_pair cannot be
+        # affected by any unrelated trade completion between these calls.
+        self._research_daily_pending_day = day
         return decision
 
     def patched_open_pair(self, *args, **kwargs):
@@ -180,15 +196,21 @@ def install_research_support() -> None:
         result = original_open_pair(self, *args, **kwargs)
         if settings.enabled and len(self.active_pairs) > before:
             pair = self.active_pairs[-1]
-            day = getattr(self, "_research_daily_day", None)
+            day = self._research_daily_pending_day
+            if day is None:
+                day = _day_for(pair.strategy_entry_time, settings.timezone)
+            state = _ledger_for(self, day)
+
             pair.research_daily_sequence_enabled = True
-            pair.research_daily_sequence_day = str(day) if day is not None else None
-            pair.research_daily_sequence_wins_before = self._research_daily_wins
-            pair.research_daily_sequence_losses_before = self._research_daily_losses
-            pair.research_daily_sequence_trade_number = self._research_daily_wins + self._research_daily_losses + 1
+            pair.research_daily_sequence_day = str(day)
+            pair.research_daily_sequence_wins_before = state["wins"]
+            pair.research_daily_sequence_losses_before = state["losses"]
+            state["entries"] += 1
+            pair.research_daily_sequence_trade_number = state["entries"]
             pair.research_daily_sequence_win_lead = settings.win_lead
             pair.research_daily_sequence_loss_lead = settings.loss_lead
             pair.research_daily_sequence_timezone = settings.timezone
+        self._research_daily_pending_day = None
         return result
 
     def patched_build_result_row(self, pair, row_kind, positions):
@@ -197,6 +219,7 @@ def install_research_support() -> None:
         row.update({
             "research_daily_sequence_enabled": bool(settings.enabled),
             "research_daily_sequence_day": getattr(pair, "research_daily_sequence_day", None),
+            "research_daily_sequence_exit_day": getattr(pair, "research_daily_sequence_exit_day", None),
             "research_daily_sequence_trade_number": getattr(pair, "research_daily_sequence_trade_number", None),
             "research_daily_sequence_wins_before": getattr(pair, "research_daily_sequence_wins_before", None),
             "research_daily_sequence_losses_before": getattr(pair, "research_daily_sequence_losses_before", None),
@@ -219,6 +242,7 @@ def install_research_support() -> None:
             "loss_lead": settings.loss_lead,
             "timezone": settings.timezone,
             "entries_blocked_after_daily_stop": int(getattr(self, "_research_daily_entries_blocked", 0)),
+            "research_days": len(getattr(self, "_research_daily_ledger", {})),
         }
         return frame
 
@@ -253,9 +277,10 @@ class ResearchTab(QWidget):
         self.timezone = QLineEdit("UTC")
         self.rule_summary = QLabel(); self.rule_summary.setWordWrap(True)
         note = QLabel(
-            "Outcome is based on the completed trade pair's net PnL after fees. "
-            "Positive = W, negative = L, exactly zero = neutral. Counters reset on each calendar day. "
-            "When a stop boundary is reached, later qualifying entries that day are ignored."
+            "Each trade belongs to the research calendar day containing its ENTRY timestamp. "
+            "Positive net PnL after fees = W, negative = L, exactly zero = neutral. "
+            "A trade that exits after midnight still updates its original entry day's counters. "
+            "When a stop boundary is reached, later qualifying entries for that research day are ignored."
         )
         note.setWordWrap(True)
 
@@ -289,7 +314,7 @@ class ResearchTab(QWidget):
         )
         self.rule_summary.setText(
             f"Keep taking normal qualifying trades until W >= L + {self.win_lead.value()} "
-            f"or L >= W + {self.loss_lead.value()}. Then stop entries until the next {timezone} day."
+            f"or L >= W + {self.loss_lead.value()}. Then stop entries for that {timezone} research day."
         )
 
 
