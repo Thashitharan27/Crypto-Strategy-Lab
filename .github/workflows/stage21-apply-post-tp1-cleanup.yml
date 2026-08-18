@@ -33,7 +33,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-qt
       - name: Apply Stage 21 cleanup
-        run: python tools/stage21_remove_post_tp1_stop.py
+        run: |
+          python tools/stage21_remove_post_tp1_stop.py
+          python tools/stage21_followup.py
       - name: Compile changed source and tests
         run: |
           python -m py_compile \
