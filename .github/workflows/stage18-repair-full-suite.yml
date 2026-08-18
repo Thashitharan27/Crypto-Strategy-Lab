@@ -21,8 +21,29 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+      - name: Install focused test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-qt
       - name: Apply Stage 18 targeted repair
         run: python tools/stage18_repair_full_suite.py
+      - name: Compile repaired source
+        run: python -m compileall -q crypto_strategy_lab tests
+      - name: Run focused engine regression tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m pytest -q \
+            tests/test_backtester.py \
+            tests/test_coin_flip_sizing.py \
+            tests/test_partial_stop_loss.py \
+            tests/test_partial_take_profit.py \
+            tests/test_random_entry.py \
+            tests/test_remaining_leg_timeout.py \
+            tests/test_support_resistance.py \
+            tests/test_trailing_profit.py
       - name: Commit repair when needed
         shell: bash
         run: |
@@ -32,6 +53,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/test_backtester.py tests/test_coin_flip_sizing.py tests/test_partial_stop_loss.py tests/test_partial_take_profit.py tests/test_random_entry.py tests/test_remaining_leg_timeout.py tests/test_support_resistance.py tests/test_trailing_profit.py
-          git commit -m "Stage 18: repair profile warm-up test regressions"
+          git add crypto_strategy_lab/engine.py tests/test_backtester.py tests/test_coin_flip_sizing.py tests/test_partial_stop_loss.py tests/test_partial_take_profit.py tests/test_random_entry.py tests/test_remaining_leg_timeout.py tests/test_support_resistance.py tests/test_trailing_profit.py
+          git commit -m "Stage 18: restore completed trade result rows"
           git push
