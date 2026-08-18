@@ -1,3 +1,5 @@
+"""Regression coverage for removing hidden pair-management GUI controls."""
+
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QGroupBox
