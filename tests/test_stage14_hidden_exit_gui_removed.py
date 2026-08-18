@@ -32,16 +32,11 @@ def test_hidden_global_exit_widgets_are_not_constructed():
         window.close()
 
 
-def test_global_exit_values_stay_inert_while_profiles_own_exit_management():
+def test_retired_global_exit_keys_are_absent_while_profiles_own_exit_management():
     app()
     window = MainWindow()
     try:
         values = default_gui_config()
-        values.update({
-            "enable_partial_stop_loss": True,
-            "enable_partial_take_profit": True,
-            "enable_trailing_profit": True,
-        })
         profile = values["strategy_profiles"]["bull_long"]
         profile.update({
             "partial_stop_enabled": True,
@@ -56,10 +51,11 @@ def test_global_exit_values_stay_inert_while_profiles_own_exit_management():
         })
         window.apply_values(values)
         current = window.values()
-
-        assert current["enable_partial_stop_loss"] is False
-        assert current["enable_partial_take_profit"] is False
-        assert current["enable_trailing_profit"] is False
+        for key in (
+            "enable_partial_stop_loss", "enable_partial_take_profit", "enable_trailing_profit",
+            "stop_loss_r", "trail_activation_trigger", "trail_apply_to", "trail_intrabar_mode",
+        ):
+            assert key not in current
         bull_long = current["strategy_profiles"]["bull_long"]
         assert bull_long["partial_stop_enabled"] is True
         assert bull_long["sl1_r"] == 0.75
