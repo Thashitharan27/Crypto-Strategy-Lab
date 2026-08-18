@@ -35,7 +35,7 @@ jobs:
             echo "Stage 25 production migration already applied."
             exit 0
           fi
-          python tools/stage25_mean_reversion_analysis.py
+          python tools/stage25_mean_reversion_analysis_v2.py
           python -m py_compile crypto_strategy_lab/config.py crypto_strategy_lab/gui/config_logic.py crypto_strategy_lab/gui/main_window.py crypto_strategy_lab/engine.py crypto_strategy_lab/statistics.py crypto_strategy_lab/cli.py crypto_strategy_lab/gui/worker.py crypto_strategy_lab/mean_reversion.py
           git config user.name "chatgpt-stage25"
           git config user.email "actions@users.noreply.github.com"
