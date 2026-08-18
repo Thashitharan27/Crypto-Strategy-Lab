@@ -21,8 +21,7 @@ class Position:
     r_step_trailing_enabled: bool = False; r_step_activation_r: float = 2.0; r_step_distance_r: float = 2.0; r_step_size_r: float = 1.0; r_step_maximum_r: float = 0.0; r_step_trailing_active: bool = False; r_step_next_checkpoint_r: float = 2.0; r_step_checkpoint_count: int = 0; r_step_last_checkpoint_r: Optional[float] = None; r_step_last_checkpoint_time: Optional[object] = None; r_step_locked_r: Optional[float] = None; r_step_initial_tp: Optional[float] = None
     r_step_activation_partial_taken: bool = False; r_step_activation_close_pct: float = 0.0; r_step_activation_quantity: float = 0.0; r_step_runner_quantity: float = 0.0
     partial_tp_enabled: bool = False; original_quantity: float = 0.0; remaining_quantity: float = 0.0; tp1_quantity: float = 0.0; tp2_quantity: float = 0.0
-    after_tp1_stop_mode: str = "KEEP_ORIGINAL_SL"; after_tp1_stop_offset_r: float = 0.0
-    partial_sl_enabled: bool = False; partial_sl_overridden_after_tp1: bool = False; sl1_price: Optional[float] = None; sl2_price: Optional[float] = None; sl1_quantity: float = 0.0; sl1_hit: bool = False
+    partial_sl_enabled: bool = False; sl1_price: Optional[float] = None; sl2_price: Optional[float] = None; sl1_quantity: float = 0.0; sl1_hit: bool = False
     sl1_exit_time: Optional[object] = None; sl1_exit_price: Optional[float] = None; sl1_gross_pnl: Optional[float] = None; sl1_fees: Optional[float] = None; sl1_net_pnl: Optional[float] = None
     tp1_price: Optional[float] = None; tp2_price: Optional[float] = None; tp1_hit: bool = False; tp2_hit: bool = False
     tp1_exit_time: Optional[object] = None; tp1_exit_price: Optional[float] = None; tp1_gross_pnl: Optional[float] = None; tp1_fees: Optional[float] = None; tp1_net_pnl: Optional[float] = None

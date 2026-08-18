@@ -179,7 +179,9 @@ def test_profile_owns_stop_and_partial_profit_exit_plan():
         tp1_r=1,
         tp1_close_pct=40,
         tp2_r=3,
-        after_tp1_stop_mode="MOVE_TO_ENTRY",
+        break_even_enabled=True,
+        break_even_activation_r=1,
+        break_even_offset_r=0,
     )
     engine = BacktestEngine(rising_candles(), profile_config(strategy_profiles=profiles))
     engine._open_pair(len(engine.data) - 1)
@@ -190,4 +192,11 @@ def test_profile_owns_stop_and_partial_profit_exit_plan():
     assert position.tp1_price - position.entry_price == pytest.approx(3)
     assert position.tp2_price - position.entry_price == pytest.approx(9)
     assert position.tp1_quantity / position.original_quantity == pytest.approx(0.40)
-    assert position.after_tp1_stop_mode == "MOVE_TO_ENTRY"
+    assert position.profile_break_even_activation_r == pytest.approx(1)
+
+
+def test_removed_post_tp1_stop_field_is_rejected():
+    raw = profiles_to_dict(default_profiles())
+    raw["bull_long"]["after_tp1_stop_mode"] = "MOVE_TO_ENTRY"
+    with pytest.raises(ValueError, match="unknown profile settings: after_tp1_stop_mode"):
+        normalize_profiles(raw)

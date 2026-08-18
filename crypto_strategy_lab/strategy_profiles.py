@@ -26,8 +26,6 @@ class StrategyProfile:
     tp1_r: float = 1.0
     tp1_close_pct: float = 50.0
     tp2_r: float = 2.0
-    after_tp1_stop_mode: str = "KEEP_ORIGINAL_SL"
-    after_tp1_stop_offset_r: float = 0.0
     rsi_period: int = 14
     momentum_lookback_hours: int = 24
     trailing_enabled: bool = False
@@ -61,10 +59,6 @@ class StrategyProfile:
             raise ValueError(f"{key}: TP2 must be greater than TP1")
         if not 0 < self.sl1_close_pct < 100 or not 0 < self.tp1_close_pct < 100:
             raise ValueError(f"{key}: partial close percentages must be between 0 and 100")
-        if self.after_tp1_stop_mode not in ("KEEP_ORIGINAL_SL", "MOVE_TO_ENTRY", "MOVE_TO_R_OFFSET"):
-            raise ValueError(f"{key}: invalid post-TP1 stop mode")
-        if self.after_tp1_stop_offset_r < 0:
-            raise ValueError(f"{key}: post-TP1 stop offset cannot be negative")
         if self.flip_rule_match_mode not in ("ANY", "ALL") or self.reject_rule_match_mode not in ("ANY", "ALL"):
             raise ValueError(f"{key}: rule match modes must be ANY or ALL")
         for number, rule in enumerate(self.entry_rules, 1):

@@ -20,8 +20,6 @@ class IntrabarMissingPolicy(str, Enum):
     ERROR = "ERROR"; WARN_AND_USE_15M = "WARN_AND_USE_15M"; WARN_AND_CONTINUE = "WARN_AND_CONTINUE"
 class DailyEntryMissedPolicy(str, Enum):
     SKIP_DAY = "SKIP_DAY"; NEXT_AVAILABLE_CANDLE = "NEXT_AVAILABLE_CANDLE"
-class AfterTP1StopMode(str, Enum):
-    KEEP_ORIGINAL_SL = "KEEP_ORIGINAL_SL"; MOVE_TO_ENTRY = "MOVE_TO_ENTRY"; MOVE_TO_R_OFFSET = "MOVE_TO_R_OFFSET"
 
 
 @dataclass(frozen=True)

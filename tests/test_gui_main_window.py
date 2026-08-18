@@ -488,7 +488,6 @@ def test_profile_partial_take_profit_uses_profile_ladder_controls():
         assert controls["tp1_r"].isEnabled()
         assert controls["tp1_close_pct"].isEnabled()
         assert controls["tp2_r"].isEnabled()
-        assert controls["after_tp1_stop_mode"].isEnabled()
     finally:
         window.close()
 
@@ -759,3 +758,15 @@ def legacy_remaining_leg_timeout_gui_hours_save_load_round_trip(tmp_path):
         assert score_values["checkpoint_zero_score_recheck_minutes"] == 120
     finally:
         window.close()
+
+
+def test_partial_profit_has_no_duplicate_post_tp1_stop_controls():
+    app(); window=MainWindow()
+    try:
+        controls=window.profile_editor.controls
+        assert "after_tp1_stop_mode" not in controls
+        assert "after_tp1_stop_offset_r" not in controls
+        assert "break_even_enabled" in controls
+        assert "break_even_activation_r" in controls
+        assert "break_even_offset_r" in controls
+    finally: window.close()
