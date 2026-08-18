@@ -109,10 +109,7 @@ class MainWindow(QMainWindow):
         self.dataset_info=QLabel("No CSV loaded."); data.addRow("Dataset Information", self.dataset_info); val=QPushButton("Validate Data"); val.clicked.connect(self.validate_data); data.addRow(val)
         strat=group("Core Strategy")
         self.sl=self._spin(2,0); self.sl.setToolTip("Distance from entry to the protective stop, measured in the selected risk unit."); self.tp=self._spin(3,0); self.entry_mode=QComboBox(); self.entry_mode.addItem("Wait until current trade closes","WAIT_UNTIL_CLOSED"); self.entry_mode.addItem("Check every N candles","EVERY_N_CANDLES"); self.entry_interval=QSpinBox(); self.entry_interval.setRange(1,999999); self.max_pairs=QSpinBox(); self.max_pairs.setRange(1,999999); self.tie=QComboBox(); self.tie.addItem("Conservative (stop first)","PESSIMISTIC"); self.tie.addItem("Optimistic (target first)","OPTIMISTIC")
-        self.both_timeout=QCheckBox("Enable Both-Open Timeout"); self.both_timeout_duration=QSpinBox(); self.both_timeout_duration.setRange(1,999999); self.both_timeout_unit=QComboBox(); self.both_timeout_unit.addItems(["Hours","Minutes"]); timeout_row=QHBoxLayout(); timeout_row.addWidget(self.both_timeout_duration); timeout_row.addWidget(self.both_timeout_unit); self.both_timeout_help=QLabel("If both long and short remain open beyond this time, both positions are\nclosed and a new pair may open at the next eligible 15-minute candle.\n\nThis rule does not apply after one leg has already closed."); self.both_timeout_help.setWordWrap(True)
         for lab,w in [("Stop Loss Multiple",self.sl),("Take Profit Multiple",self.tp),("Entry Mode",self.entry_mode),("Entry Interval",self.entry_interval),("Maximum Active Pairs",self.max_pairs),("Tie Policy",self.tie)]: strat.addRow(lab,w)
-        both_open=group("Both-Open Timeout")
-        for lab,w in [("",self.both_timeout),("Maximum Time Open",timeout_row),("",self.both_timeout_help)]: both_open.addRow(lab,w)
         self.entry_mode.currentIndexChanged.connect(lambda:self.entry_interval.setEnabled(self.entry_mode.currentData()=="EVERY_N_CANDLES"))
         self.entry_mode.currentTextChanged.connect(self.update_dynamic)
         self.enable_support_resistance_analysis=QCheckBox("Enable Support/Resistance Analysis"); self.sr_pivot_left=QSpinBox(); self.sr_pivot_left.setRange(1,1000); self.sr_pivot_left.setValue(5); self.sr_pivot_right=QSpinBox(); self.sr_pivot_right.setRange(1,1000); self.sr_pivot_right.setValue(5); self.sr_lookback_bars=QSpinBox(); self.sr_lookback_bars.setRange(10,10000); self.sr_lookback_bars.setValue(200); self.sr_zone_width_atr=self._spin(0.5,0.0,10.0,3); self.sr_near_distance_atr=self._spin(0.75,0.0,10.0,3); self.enable_sr_hold_confirmation=QCheckBox("Enable"); self.sr_hold_confirmation_bars=QSpinBox(); self.sr_hold_confirmation_bars.setRange(1,100); self.sr_hold_confirmation_bars.setValue(3); self.sr_hold_confirmation_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_tolerance_atr=self._spin(0.25,0.0,10.0,3); self.sr_break_basis=QComboBox(); self.sr_break_basis.addItems(["CLOSE","WICK"]); self.sr_filter_mode=PolicyComboBox()
@@ -140,7 +137,6 @@ class MainWindow(QMainWindow):
         help_text=QLabel("When enabled, the strategy attempts an entry once per day at the selected time.\n\nIf a trade is open at that time and SKIP_DAY is selected, no entry is opened later that day."); help_text.setWordWrap(True)
         for lab,w in [("",self.enable_daily_schedule),("Daily Entry Time",self.daily_entry_time),("Entry Timezone",self.daily_entry_timezone),("Missed Entry Policy",self.daily_entry_missed_policy),("Summary",self.next_entry_summary),("",help_text)]: sched.addRow(lab,w)
         self.enable_daily_schedule.toggled.connect(self.update_dynamic)
-        self.both_timeout.toggled.connect(self.both_timeout_duration.setEnabled); self.both_timeout.toggled.connect(self.both_timeout_unit.setEnabled)
         risk=group("Account & Position Sizing"); self.account_form=risk
         self.risk_mode=QComboBox(); self.risk_mode.addItems(["ATR","PERCENT","FIXED"]); self.trading_start=self._line(); self.trading_end=self._line(); self.max_lev_leg=self._line("3"); self.max_lev_combined=self._line("5"); self.missing_policy=PolicyComboBox(); self.missing_policy.addItem("Use strategy candle for affected interval","WARN_AND_USE_15M"); self.missing_policy.addItem("Stop the run","ERROR"); self.missing_policy.addItem("Continue with available intrabar candles","WARN_AND_CONTINUE"); self.trade_direction=QComboBox(); self.trade_direction.addItems(["BOTH","LONG_ONLY","SHORT_ONLY","BOTH_INDEPENDENT"]); self.zero_cost=QCheckBox("Run Zero-Cost Comparison"); self.atr_period=QSpinBox(); self.atr_period.setRange(1,99999); self.atr_mult=self._spin(1,0); self.percent_r=self._line("0.20%"); self.fixed_r=self._spin(100,0); self.equity=self._spin(1000,0,1e12,2); self.risk_leg=self._line("1%")
         self.risk_formula=QLabel(); self.risk_warn=QLabel(); self.risk_warn.setWordWrap(True)
@@ -177,51 +173,9 @@ class MainWindow(QMainWindow):
         for lab,w in [("Maker Fee",self.maker),("Taker Fee",self.taker),("",self.maker_entry),("",self.maker_exit),("Slippage",self.slippage),("Round-trip Cost",self.cost),("",self.zero_cost)]: fees.addRow(lab,w)
         for w in [self.maker,self.taker,self.slippage]: w.textChanged.connect(self.update_dynamic)
         self.maker_entry.toggled.connect(self.update_dynamic); self.maker_exit.toggled.connect(self.update_dynamic)
-        be_rule=group("Break-Even After Opposite SL")
-        self.be_after_sl=QCheckBox("Enable BE After Opposite SL"); self.be_mode=QComboBox(); self.be_mode.addItems(["ENTRY_PRICE","COST_ADJUSTED","R_OFFSET"]); self.be_offset=self._spin(0,0); self.be_same_candle=QComboBox(); self.be_same_candle.addItems(["NEXT_CANDLE","PESSIMISTIC"]); self.be_help=QLabel("When one leg hits SL, the still-open opposite leg keeps its TP but its SL\nmoves to break-even.\n\nEntry-price break-even does not recover fees or slippage."); self.be_help.setWordWrap(True)
-        for lab,w in [("",self.be_after_sl),("BE Mode",self.be_mode),("BE Offset in R",self.be_offset),("Same-Candle BE Policy",self.be_same_candle),("",self.be_help)]: be_rule.addRow(lab,w)
-        self.be_mode.currentTextChanged.connect(lambda t:self.be_offset.setEnabled(t=="R_OFFSET"))
-        remaining_timeout=group("Remaining Leg Timeout After First SL")
-        self.remaining_leg_timeout=QCheckBox("Enable Remaining-Leg Timeout After First SL")
-        self.remaining_leg_timeout_duration=QSpinBox(); self.remaining_leg_timeout_duration.setRange(1,999999)
-        self.remaining_leg_timeout_unit=QComboBox(); self.remaining_leg_timeout_unit.addItems(["Minutes","Hours"])
-        self.remaining_leg_timeout_profit_extension=QCheckBox("Extend When Remaining Leg Is Near TP")
-        self.remaining_leg_timeout_profit_threshold_r=self._spin(10.0,0.0,999999.0)
-        self.reentry_gate_after_timeout=QCheckBox("Wait for Virtual TP/SL Before Next Entry")
-        self.checkpoint_score_extension=QCheckBox("Extend Using Multi-Condition Score")
-        self.checkpoint_score_use_profit=QCheckBox("Profit at least (R)"); self.checkpoint_score_min_profit_r=self._spin(0.85,0.0,999999.0)
-        self.checkpoint_score_use_atr=QCheckBox("ATR at most (% of price)"); self.checkpoint_score_max_atr_pct=self._spin(0.08,0.0,100.0)
-        self.checkpoint_score_use_di=QCheckBox("Directional DI at least"); self.checkpoint_score_min_di=self._spin(2.3,-100.0,100.0)
-        self.checkpoint_score_use_bb=QCheckBox("Bollinger width at most (%)"); self.checkpoint_score_max_bb_pct=self._spin(0.349,0.0,100.0)
-        self.checkpoint_score_required=QSpinBox(); self.checkpoint_score_required.setRange(1,4); self.checkpoint_score_required.setValue(3)
-        self.first_sl_survivor_partial=QCheckBox("Take Partial Profit From Survivor at First SL"); self.first_sl_survivor_partial_pct=self._spin(25.0,0.01,99.99,2)
-        self.zero_score_confirmation=QCheckBox("Require Consecutive Zero-Score Confirmations"); self.zero_score_confirmations=QSpinBox(); self.zero_score_confirmations.setRange(2,20); self.zero_score_confirmations.setValue(2)
-        self.zero_score_recheck_duration=QSpinBox(); self.zero_score_recheck_duration.setRange(1,999999); self.zero_score_recheck_duration.setValue(2)
-        self.zero_score_recheck_unit=QComboBox(); self.zero_score_recheck_unit.addItems(["Minutes","Hours"])
-        zero_recheck_row=QHBoxLayout(); zero_recheck_row.addWidget(self.zero_score_recheck_duration); zero_recheck_row.addWidget(self.zero_score_recheck_unit)
-        remaining_timeout_row=QHBoxLayout(); remaining_timeout_row.addWidget(self.remaining_leg_timeout_duration); remaining_timeout_row.addWidget(self.remaining_leg_timeout_unit)
-        remaining_timeout_help=QLabel("The first-SL option realizes the selected percentage of the surviving leg at market and leaves the remainder on its original TP/SL. At each checkpoint, the score extends when enough conditions pass. Consecutive zero confirmation gives the first zero score a shorter recheck and closes only after the required zero-score streak. ATR and Bollinger values are percentages, so enter 0.08 for 0.08%. The virtual TP/SL gate prevents replacement entries until the saved boundary is touched."); remaining_timeout_help.setWordWrap(True)
-        for lab,w in [("",self.remaining_leg_timeout),("Check Every",remaining_timeout_row),("",self.first_sl_survivor_partial),("Partial Close (%)",self.first_sl_survivor_partial_pct),("",self.remaining_leg_timeout_profit_extension),("Keep Open At or Above (R)",self.remaining_leg_timeout_profit_threshold_r),("",self.checkpoint_score_extension),("",self.checkpoint_score_use_profit),("Minimum Profit (R)",self.checkpoint_score_min_profit_r),("",self.checkpoint_score_use_atr),("Maximum ATR (%)",self.checkpoint_score_max_atr_pct),("",self.checkpoint_score_use_di),("Minimum Directional DI",self.checkpoint_score_min_di),("",self.checkpoint_score_use_bb),("Maximum BB Width (%)",self.checkpoint_score_max_bb_pct),("Conditions Required",self.checkpoint_score_required),("",self.zero_score_confirmation),("Zero Scores Required",self.zero_score_confirmations),("Recheck Zero Score After",zero_recheck_row),("",self.reentry_gate_after_timeout),("",remaining_timeout_help)]: remaining_timeout.addRow(lab,w)
-        self.remaining_leg_timeout.toggled.connect(self.remaining_leg_timeout_duration.setEnabled)
-        self.remaining_leg_timeout.toggled.connect(self.remaining_leg_timeout_unit.setEnabled)
-        self.remaining_leg_timeout.toggled.connect(self.remaining_leg_timeout_profit_extension.setEnabled)
-        self.remaining_leg_timeout.toggled.connect(self.reentry_gate_after_timeout.setEnabled)
-        self.remaining_leg_timeout.toggled.connect(self._update_checkpoint_score_controls)
-        self.first_sl_survivor_partial.toggled.connect(lambda checked:self.first_sl_survivor_partial_pct.setEnabled(checked))
-        self.remaining_leg_timeout.toggled.connect(lambda _:self.remaining_leg_timeout_profit_threshold_r.setEnabled(self.remaining_leg_timeout.isChecked() and self.remaining_leg_timeout_profit_extension.isChecked()))
-        self.remaining_leg_timeout_profit_extension.toggled.connect(lambda _:self.remaining_leg_timeout_profit_threshold_r.setEnabled(self.remaining_leg_timeout.isChecked() and self.remaining_leg_timeout_profit_extension.isChecked()))
-        self.remaining_leg_timeout_profit_extension.toggled.connect(lambda checked:self.checkpoint_score_extension.setChecked(False) if checked else None)
-        self.checkpoint_score_extension.toggled.connect(lambda checked:self.remaining_leg_timeout_profit_extension.setChecked(False) if checked else None)
-        self.checkpoint_score_extension.toggled.connect(self._update_checkpoint_score_controls)
-        self.zero_score_confirmation.toggled.connect(self._update_checkpoint_score_controls)
-        for control in [self.checkpoint_score_use_profit,self.checkpoint_score_use_atr,self.checkpoint_score_use_di,self.checkpoint_score_use_bb]:
-            control.toggled.connect(self._update_checkpoint_score_controls)
-        be=group("Break-Even Calculator")
-        self.be_label=QLabel(); self.be_label.setWordWrap(True); be.addRow(self.be_label)
         controls=group("Run Status")
         self.progress=QProgressBar(); self.status=QLabel("Ready"); self.elapsed=QLabel("Elapsed: 0s"); controls.addRow(self.progress); controls.addRow(self.status); controls.addRow(self.elapsed)
         for w in [self.run_name,self.output_folder]: w.textChanged.connect(self.update_planned_output)
-        for obsolete in (both_open,be_rule,remaining_timeout,be): obsolete.parentWidget().setVisible(False)
         data.parentWidget().setTitle("Data & Output"); strat.parentWidget().setTitle("Entry Timing & Simulation"); sched.parentWidget().setTitle("Scheduled Entry"); fees.parentWidget().setTitle("Execution Costs"); telemetry.parentWidget().setTitle("Reports & Analysis"); lifecycle.parentWidget().setTitle("Advanced Indicator Analysis"); reports.parentWidget().setTitle("Report Files")
         self.sl.setVisible(False); sl_label=strat.labelForField(self.sl)
         if sl_label: sl_label.setVisible(False)
@@ -492,7 +446,7 @@ class MainWindow(QMainWindow):
         self.update_planned_output()
 
     def _base_values(self):
-        return {"strategy_timeframe_minutes":self._timeframe_minutes(self.strategy_timeframe.currentText()),"intrabar_timeframe_minutes":self._timeframe_minutes(self.intrabar_timeframe.currentText()),"enable_indicator_lifecycle_analysis":self.enable_lifecycle.isChecked(),"lifecycle_phases":self.lifecycle_phases.value(),"lifecycle_early_checkpoints":[int(v.strip()) for v in self.lifecycle_checkpoints.text().split(",") if v.strip()],"lifecycle_minimum_bucket_sample":self.lifecycle_min_sample.value(),"create_lifecycle_charts":self.lifecycle_charts.isChecked(),"lifecycle_flat_pattern_threshold_pct":self.lifecycle_flat_threshold.value(),"enable_random_entry":False,"entry_timing_mode":"CURRENT","random_entry_probability":0.5,"random_seed":42,"random_entry_start_mode":"NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE","randomize_first_entry":True,"max_random_wait_candles":0,"enable_random_entry_batch":False,"random_seed_start":1,"random_seed_count":100,"run_name":self.run_name.text().strip(),"input_csv":self.input_csv.text(),"strategy_csv":self.input_csv.text(),"intrabar_csv":self.intrabar_csv.text(),"use_intrabar_data":self.use_intrabar.isChecked(),"trading_start_date":self.trading_start.text() or None,"trading_end_date":self.trading_end.text() or None,"max_effective_leverage_per_leg":self.max_lev_leg.text() or None,"max_combined_effective_leverage":self.max_lev_combined.text() or None,"intrabar_missing_policy":self.missing_policy.currentText(),"zero_cost_comparison":self.zero_cost.isChecked(),"trade_direction":self.trade_direction.currentText(),"enable_partial_take_profit":False,"enable_partial_stop_loss":False,"sl1_r":0.5,"sl1_close_pct":50.0,"sl2_r":8.0,"tp1_r":3.0,"tp1_close_pct":50.0,"tp2_r":12.0,"tp2_close_pct":50.0,"stop_loss_r":10.0,"after_tp1_stop_mode":"KEEP_ORIGINAL_SL","after_tp1_stop_offset_r":0.0,"tp2_exit_mode":"FIXED_TP2","enable_trailing_profit":False,"trail_activation_trigger":"PRICE_REACHES_R","trail_activation_r":3.0,"trail_distance_r":1.0,"trail_apply_to":"BOTH","trail_intrabar_mode":"PESSIMISTIC","output_dir":self.output_folder.text(),"sl_mult":self.sl.value(),"tp_mult":self.tp.value(),"entry_mode":self.entry_mode.currentText(),"entry_interval":self.entry_interval.value(),"enable_daily_entry_schedule":self.enable_daily_schedule.isChecked(),"daily_entry_time":self.daily_entry_time.text().strip(),"daily_entry_timezone":self.daily_entry_timezone.text().strip(),"daily_entry_missed_policy":self.daily_entry_missed_policy.currentText(),"enable_skip_monday_entries":False,"skip_monday_timezone":"UTC","max_active_pairs":self.max_pairs.value(),"tie_policy":self.tie.currentText(),"risk_mode":self.risk_mode.currentText(),"atr_period":self.atr_period.value(),"atr_multiplier":self.atr_mult.value(),"percent_r":parse_percentage(self.percent_r.text()),"fixed_r":self.fixed_r.value(),"initial_equity":self.equity.value(),"risk_per_leg":parse_percentage(self.risk_leg.text()),"maker_fee":parse_percentage(self.maker.text()),"taker_fee":parse_percentage(self.taker.text()),"use_maker_entry":self.maker_entry.isChecked(),"use_maker_exit":self.maker_exit.isChecked(),"slippage":parse_percentage(self.slippage.text()),"enable_both_open_timeout":self.both_timeout.isChecked(),"max_both_open_minutes":self.both_timeout_duration.value()*(60 if self.both_timeout_unit.currentText()=="Hours" else 1),"both_open_timeout_unit":self.both_timeout_unit.currentText(),"enable_remaining_leg_timeout_after_first_sl":self.remaining_leg_timeout.isChecked(),"remaining_leg_timeout_after_first_sl_minutes":self.remaining_leg_timeout_duration.value()*(60 if self.remaining_leg_timeout_unit.currentText()=="Hours" else 1),"remaining_leg_timeout_after_first_sl_unit":self.remaining_leg_timeout_unit.currentText(),"enable_remaining_leg_timeout_profit_extension":self.remaining_leg_timeout_profit_extension.isChecked(),"remaining_leg_timeout_profit_threshold_r":self.remaining_leg_timeout_profit_threshold_r.value(),"enable_adx_filter":False,"adx_period":self._shared_adx_period,"adx_filter_mode":"Disabled","adx_maximum":25.0,"adx_minimum":20.0,"enable_bb_width_filter":False,"bb_width_filter_mode":"Disabled","bb_width_maximum":0.03,"bb_width_minimum":0.012,"enable_di_spread_filter":False,"di_spread_filter_mode":"Disabled","di_spread_maximum":10.0,"di_spread_minimum":0.0,"enable_be_after_opposite_sl":self.be_after_sl.isChecked(),"be_mode":self.be_mode.currentText(),"be_offset_r":self.be_offset.value(),"be_same_candle_policy":self.be_same_candle.currentText(),"enable_trade_telemetry":self.enable_trade_telemetry.isChecked(),"save_full_telemetry_csv":self.save_full_telemetry.isChecked(),"save_trade_journey_summary":self.save_journey_summary.isChecked(),"save_trade_journey_charts":self.save_journey_charts.isChecked(),"telemetry_interval_minutes":self.telemetry_interval.value()}
+        return {"strategy_timeframe_minutes":self._timeframe_minutes(self.strategy_timeframe.currentText()),"intrabar_timeframe_minutes":self._timeframe_minutes(self.intrabar_timeframe.currentText()),"enable_indicator_lifecycle_analysis":self.enable_lifecycle.isChecked(),"lifecycle_phases":self.lifecycle_phases.value(),"lifecycle_early_checkpoints":[int(v.strip()) for v in self.lifecycle_checkpoints.text().split(",") if v.strip()],"lifecycle_minimum_bucket_sample":self.lifecycle_min_sample.value(),"create_lifecycle_charts":self.lifecycle_charts.isChecked(),"lifecycle_flat_pattern_threshold_pct":self.lifecycle_flat_threshold.value(),"enable_random_entry":False,"entry_timing_mode":"CURRENT","random_entry_probability":0.5,"random_seed":42,"random_entry_start_mode":"NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE","randomize_first_entry":True,"max_random_wait_candles":0,"enable_random_entry_batch":False,"random_seed_start":1,"random_seed_count":100,"run_name":self.run_name.text().strip(),"input_csv":self.input_csv.text(),"strategy_csv":self.input_csv.text(),"intrabar_csv":self.intrabar_csv.text(),"use_intrabar_data":self.use_intrabar.isChecked(),"trading_start_date":self.trading_start.text() or None,"trading_end_date":self.trading_end.text() or None,"max_effective_leverage_per_leg":self.max_lev_leg.text() or None,"max_combined_effective_leverage":self.max_lev_combined.text() or None,"intrabar_missing_policy":self.missing_policy.currentText(),"zero_cost_comparison":self.zero_cost.isChecked(),"trade_direction":self.trade_direction.currentText(),"enable_partial_take_profit":False,"enable_partial_stop_loss":False,"sl1_r":0.5,"sl1_close_pct":50.0,"sl2_r":8.0,"tp1_r":3.0,"tp1_close_pct":50.0,"tp2_r":12.0,"tp2_close_pct":50.0,"stop_loss_r":10.0,"after_tp1_stop_mode":"KEEP_ORIGINAL_SL","after_tp1_stop_offset_r":0.0,"tp2_exit_mode":"FIXED_TP2","enable_trailing_profit":False,"trail_activation_trigger":"PRICE_REACHES_R","trail_activation_r":3.0,"trail_distance_r":1.0,"trail_apply_to":"BOTH","trail_intrabar_mode":"PESSIMISTIC","output_dir":self.output_folder.text(),"sl_mult":self.sl.value(),"tp_mult":self.tp.value(),"entry_mode":self.entry_mode.currentText(),"entry_interval":self.entry_interval.value(),"enable_daily_entry_schedule":self.enable_daily_schedule.isChecked(),"daily_entry_time":self.daily_entry_time.text().strip(),"daily_entry_timezone":self.daily_entry_timezone.text().strip(),"daily_entry_missed_policy":self.daily_entry_missed_policy.currentText(),"enable_skip_monday_entries":False,"skip_monday_timezone":"UTC","max_active_pairs":self.max_pairs.value(),"tie_policy":self.tie.currentText(),"risk_mode":self.risk_mode.currentText(),"atr_period":self.atr_period.value(),"atr_multiplier":self.atr_mult.value(),"percent_r":parse_percentage(self.percent_r.text()),"fixed_r":self.fixed_r.value(),"initial_equity":self.equity.value(),"risk_per_leg":parse_percentage(self.risk_leg.text()),"maker_fee":parse_percentage(self.maker.text()),"taker_fee":parse_percentage(self.taker.text()),"use_maker_entry":self.maker_entry.isChecked(),"use_maker_exit":self.maker_exit.isChecked(),"slippage":parse_percentage(self.slippage.text()),"enable_both_open_timeout":False,"max_both_open_minutes":480,"both_open_timeout_unit":"Hours","enable_remaining_leg_timeout_after_first_sl":False,"remaining_leg_timeout_after_first_sl_minutes":240,"remaining_leg_timeout_after_first_sl_unit":"Hours","enable_remaining_leg_timeout_profit_extension":False,"remaining_leg_timeout_profit_threshold_r":10.0,"enable_adx_filter":False,"adx_period":self._shared_adx_period,"adx_filter_mode":"Disabled","adx_maximum":25.0,"adx_minimum":20.0,"enable_bb_width_filter":False,"bb_width_filter_mode":"Disabled","bb_width_maximum":0.03,"bb_width_minimum":0.012,"enable_di_spread_filter":False,"di_spread_filter_mode":"Disabled","di_spread_maximum":10.0,"di_spread_minimum":0.0,"enable_be_after_opposite_sl":False,"be_mode":"ENTRY_PRICE","be_offset_r":0.0,"be_same_candle_policy":"NEXT_CANDLE","enable_trade_telemetry":self.enable_trade_telemetry.isChecked(),"save_full_telemetry_csv":self.save_full_telemetry.isChecked(),"save_trade_journey_summary":self.save_journey_summary.isChecked(),"save_trade_journey_charts":self.save_journey_charts.isChecked(),"telemetry_interval_minutes":self.telemetry_interval.value()}
     def values(self):
         values = self._base_values()
         values["market_symbol"]=self.market_symbol.currentText().strip().upper().replace("/","")
@@ -504,42 +458,27 @@ class MainWindow(QMainWindow):
         values.update({"enable_coin_flip_sizing":False,"coin_flip_seed":42,"coin_flip_large_multiplier":3.0,"coin_flip_small_multiplier":1.0})
         values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"enable_sr_hold_confirmation":self.enable_sr_hold_confirmation.isChecked(),"sr_hold_confirmation_bars":self.sr_hold_confirmation_bars.value(),"sr_hold_confirmation_atr":self.sr_hold_confirmation_atr.value(),"sr_break_tolerance_atr":self.sr_break_tolerance_atr.value(),"sr_break_basis":self.sr_break_basis.currentText(),"sr_filter_mode":self.sr_filter_mode.currentData(),"sr_long_avoid_near_resistance":self.sr_long_avoid_near_resistance.isChecked(),"sr_long_require_near_support":self.sr_long_require_near_support.isChecked(),"sr_long_block_broken_support":self.sr_long_block_broken_support.isChecked(),"sr_long_min_room_to_resistance_atr":self.sr_long_min_room_to_resistance_atr.value(),"sr_short_avoid_near_support":self.sr_short_avoid_near_support.isChecked(),"sr_short_require_near_resistance":self.sr_short_require_near_resistance.isChecked(),"sr_short_block_broken_resistance":self.sr_short_block_broken_resistance.isChecked(),"sr_short_min_room_to_support_atr":self.sr_short_min_room_to_support_atr.value()})
         values.update({"enable_di_direction_selection":self.enable_di_direction_selection.isChecked(),"enable_di_pressure_analysis":self.enable_di_pressure_analysis.isChecked(),"di_pressure_lookback":self.di_pressure_lookback.value()})
-        values["enable_reentry_gate_after_remaining_leg_timeout"] = self.reentry_gate_after_timeout.isChecked()
         values.update({
-            "enable_remaining_leg_checkpoint_score_extension":self.checkpoint_score_extension.isChecked(),
-            "checkpoint_score_use_profit":self.checkpoint_score_use_profit.isChecked(),
-            "checkpoint_score_min_profit_r":self.checkpoint_score_min_profit_r.value(),
-            "checkpoint_score_use_atr_pct":self.checkpoint_score_use_atr.isChecked(),
-            "checkpoint_score_max_atr_pct":self.checkpoint_score_max_atr_pct.value(),
-            "checkpoint_score_use_directional_di":self.checkpoint_score_use_di.isChecked(),
-            "checkpoint_score_min_directional_di":self.checkpoint_score_min_di.value(),
-            "checkpoint_score_use_bb_width_pct":self.checkpoint_score_use_bb.isChecked(),
-            "checkpoint_score_max_bb_width_pct":self.checkpoint_score_max_bb_pct.value(),
-            "checkpoint_score_min_conditions":self.checkpoint_score_required.value(),
-            "enable_first_sl_survivor_partial_close":self.first_sl_survivor_partial.isChecked(),
-            "first_sl_survivor_partial_close_pct":self.first_sl_survivor_partial_pct.value(),
-            "enable_checkpoint_zero_score_confirmation":self.zero_score_confirmation.isChecked(),
-            "checkpoint_zero_score_confirmations_required":self.zero_score_confirmations.value(),
-            "checkpoint_zero_score_recheck_minutes":self.zero_score_recheck_duration.value()*(60 if self.zero_score_recheck_unit.currentText()=="Hours" else 1),
-            "checkpoint_zero_score_recheck_unit":self.zero_score_recheck_unit.currentText(),
+            "enable_reentry_gate_after_remaining_leg_timeout":False,
+            "enable_remaining_leg_checkpoint_score_extension":False,
+            "checkpoint_score_use_profit":True,
+            "checkpoint_score_min_profit_r":0.85,
+            "checkpoint_score_use_atr_pct":True,
+            "checkpoint_score_max_atr_pct":0.08,
+            "checkpoint_score_use_directional_di":True,
+            "checkpoint_score_min_directional_di":2.3,
+            "checkpoint_score_use_bb_width_pct":True,
+            "checkpoint_score_max_bb_width_pct":0.349,
+            "checkpoint_score_min_conditions":3,
+            "enable_first_sl_survivor_partial_close":False,
+            "first_sl_survivor_partial_close_pct":25.0,
+            "enable_checkpoint_zero_score_confirmation":False,
+            "checkpoint_zero_score_confirmations_required":2,
+            "checkpoint_zero_score_recheck_minutes":120,
+            "checkpoint_zero_score_recheck_unit":"Hours",
         })
         values.update(self.profile_editor.values())
         return values
-
-    def _update_checkpoint_score_controls(self,*_):
-        enabled=self.remaining_leg_timeout.isChecked() and self.checkpoint_score_extension.isChecked()
-        self.checkpoint_score_extension.setEnabled(self.remaining_leg_timeout.isChecked())
-        for control in [self.checkpoint_score_use_profit,self.checkpoint_score_use_atr,self.checkpoint_score_use_di,self.checkpoint_score_use_bb,self.checkpoint_score_required]:
-            control.setEnabled(enabled)
-        self.checkpoint_score_min_profit_r.setEnabled(enabled and self.checkpoint_score_use_profit.isChecked())
-        self.checkpoint_score_max_atr_pct.setEnabled(enabled and self.checkpoint_score_use_atr.isChecked())
-        self.checkpoint_score_min_di.setEnabled(enabled and self.checkpoint_score_use_di.isChecked())
-        self.checkpoint_score_max_bb_pct.setEnabled(enabled and self.checkpoint_score_use_bb.isChecked())
-        self.zero_score_confirmation.setEnabled(enabled)
-        confirmation_enabled=enabled and self.zero_score_confirmation.isChecked()
-        self.zero_score_confirmations.setEnabled(confirmation_enabled)
-        self.zero_score_recheck_duration.setEnabled(confirmation_enabled)
-        self.zero_score_recheck_unit.setEnabled(confirmation_enabled)
 
     def _apply_analysis_preset(self,*_):
         level=self.analysis_level.currentText()
@@ -677,8 +616,6 @@ class MainWindow(QMainWindow):
             fees=entry_fee+exit_fee; slippage_cost=slip*2; cost=fees+slippage_cost
             self.cost.setText(f"Estimated cost for one trade (entry + final exit): {format_percentage(cost,4)} of notional — fees {format_percentage(fees,4)} + slippage {format_percentage(slippage_cost,4)}. Partial exits and changing exit value can alter the actual cost.")
         except Exception: self.cost.setText("Invalid execution-cost input")
-        try: be=theoretical_break_even(self.sl.value(),self.tp.value()); actual=self.last_summary.get('win_rate'); diff="n/a" if actual is None else format_percentage(actual-be,2); self.be_label.setText(f"Theoretical break-even before fees: {format_percentage(be,2)}\nActual backtest win rate: {format_percentage(actual,2) if actual is not None else 'n/a'}\nDifference from break-even: {diff}\nThe theoretical value assumes every winner is exactly one TP and one SL. Fees, slippage, end-of-data exits, and other outcomes increase the actual required win rate.")
-        except Exception: pass
     def run_backtest(self):
         try: vals=self.values(); cfg=build_backtest_config(vals); cfg=replace(cfg, save_feature_analysis_reports=self.save_feature_reports.isChecked(), save_indicator_analysis_reports=self.save_indicator_reports.isChecked(), create_standard_charts=self.create_standard_charts.isChecked()); Path(vals['output_dir']).mkdir(parents=True,exist_ok=True); cfg=replace(cfg, output_run_dir=planned_run_dir(cfg)); self.planned_output.setText(str(cfg.output_run_dir.resolve()))
         except Exception as e: QMessageBox.warning(self,"Validation Problems",str(e)); return
@@ -860,34 +797,10 @@ class MainWindow(QMainWindow):
         self.maker_exit.setChecked(bool(values["use_maker_exit"]))
         self.slippage.setText(format_percentage(float(values["slippage"])))
         self._shared_adx_period = int(values.get("adx_period", 14))
-        self.both_timeout.setChecked(bool(values.get("enable_both_open_timeout", False)))
-        mins=int(values.get("max_both_open_minutes", 480)); unit=values.get("both_open_timeout_unit") or ("Hours" if mins % 60 == 0 else "Minutes")
-        self.both_timeout_unit.setCurrentText(unit); self.both_timeout_duration.setValue(max(1, mins//60 if unit=="Hours" else mins))
-        self.both_timeout_duration.setEnabled(self.both_timeout.isChecked()); self.both_timeout_unit.setEnabled(self.both_timeout.isChecked())
-        self.remaining_leg_timeout.setChecked(bool(values.get("enable_remaining_leg_timeout_after_first_sl", False)))
-        remaining_mins=int(values.get("remaining_leg_timeout_after_first_sl_minutes", 240)); remaining_unit=values.get("remaining_leg_timeout_after_first_sl_unit") or ("Hours" if remaining_mins % 60 == 0 else "Minutes")
-        self.remaining_leg_timeout_unit.setCurrentText(remaining_unit); self.remaining_leg_timeout_duration.setValue(max(1, remaining_mins//60 if remaining_unit=="Hours" else remaining_mins))
-        self.remaining_leg_timeout_duration.setEnabled(self.remaining_leg_timeout.isChecked()); self.remaining_leg_timeout_unit.setEnabled(self.remaining_leg_timeout.isChecked())
-        self.remaining_leg_timeout_profit_extension.setChecked(bool(values.get("enable_remaining_leg_timeout_profit_extension", False)))
-        self.remaining_leg_timeout_profit_threshold_r.setValue(float(values.get("remaining_leg_timeout_profit_threshold_r", 10.0)))
-        self.reentry_gate_after_timeout.setChecked(bool(values.get("enable_reentry_gate_after_remaining_leg_timeout", False)))
-        self.checkpoint_score_use_profit.setChecked(bool(values.get("checkpoint_score_use_profit", True))); self.checkpoint_score_min_profit_r.setValue(float(values.get("checkpoint_score_min_profit_r", 0.85)))
-        self.checkpoint_score_use_atr.setChecked(bool(values.get("checkpoint_score_use_atr_pct", True))); self.checkpoint_score_max_atr_pct.setValue(float(values.get("checkpoint_score_max_atr_pct", 0.08)))
-        self.checkpoint_score_use_di.setChecked(bool(values.get("checkpoint_score_use_directional_di", True))); self.checkpoint_score_min_di.setValue(float(values.get("checkpoint_score_min_directional_di", 2.3)))
-        self.checkpoint_score_use_bb.setChecked(bool(values.get("checkpoint_score_use_bb_width_pct", True))); self.checkpoint_score_max_bb_pct.setValue(float(values.get("checkpoint_score_max_bb_width_pct", 0.349)))
-        self.checkpoint_score_required.setValue(int(values.get("checkpoint_score_min_conditions", 3))); self.checkpoint_score_extension.setChecked(bool(values.get("enable_remaining_leg_checkpoint_score_extension", False)))
-        self.first_sl_survivor_partial.setChecked(bool(values.get("enable_first_sl_survivor_partial_close", False))); self.first_sl_survivor_partial_pct.setValue(float(values.get("first_sl_survivor_partial_close_pct", 25.0))); self.first_sl_survivor_partial_pct.setEnabled(self.first_sl_survivor_partial.isChecked())
-        self.zero_score_confirmations.setValue(int(values.get("checkpoint_zero_score_confirmations_required", 2)))
-        zero_minutes=int(values.get("checkpoint_zero_score_recheck_minutes", 120)); zero_unit=values.get("checkpoint_zero_score_recheck_unit") or ("Hours" if zero_minutes % 60 == 0 else "Minutes")
-        self.zero_score_recheck_unit.setCurrentText(zero_unit); self.zero_score_recheck_duration.setValue(max(1,zero_minutes//60 if zero_unit=="Hours" else zero_minutes)); self.zero_score_confirmation.setChecked(bool(values.get("enable_checkpoint_zero_score_confirmation", False)))
-        self.remaining_leg_timeout_profit_extension.setEnabled(self.remaining_leg_timeout.isChecked()); self.remaining_leg_timeout_profit_threshold_r.setEnabled(self.remaining_leg_timeout.isChecked() and self.remaining_leg_timeout_profit_extension.isChecked()); self.reentry_gate_after_timeout.setEnabled(self.remaining_leg_timeout.isChecked())
-        self._update_checkpoint_score_controls()
         level=str(values.get("analysis_level","STANDARD")).upper(); self.analysis_level.setCurrentText({"FAST":"Fast","RESEARCH":"Research"}.get(level,"Standard (Recommended)"))
         self.enable_trade_telemetry.setChecked(bool(values.get("enable_trade_telemetry", False))); self.telemetry_interval.setValue(int(values.get("telemetry_interval_minutes", 15))); self.save_full_telemetry.setChecked(bool(values.get("save_full_telemetry_csv", False))); self.save_journey_summary.setChecked(bool(values.get("save_trade_journey_summary", False))); self.save_journey_charts.setChecked(bool(values.get("save_trade_journey_charts", False)))
         self.enable_lifecycle.setChecked(bool(values.get("enable_indicator_lifecycle_analysis",False))); self.lifecycle_phases.setValue(int(values.get("lifecycle_phases",4))); self.lifecycle_checkpoints.setText(",".join(str(v) for v in values.get("lifecycle_early_checkpoints",[15,30,60]))); self.lifecycle_min_sample.setValue(int(values.get("lifecycle_minimum_bucket_sample",20))); self.lifecycle_charts.setChecked(bool(values.get("create_lifecycle_charts",False))); self.lifecycle_flat_threshold.setValue(float(values.get("lifecycle_flat_pattern_threshold_pct",5.0)))
         self.save_feature_reports.setChecked(bool(values.get("save_feature_analysis_reports",False))); self.save_indicator_reports.setChecked(bool(values.get("save_indicator_analysis_reports",False))); self.create_standard_charts.setChecked(bool(values.get("create_standard_charts",False)))
-        self.be_after_sl.setChecked(bool(values.get("enable_be_after_opposite_sl", False)))
-        self.be_mode.setCurrentText(values.get("be_mode", "ENTRY_PRICE")); self.be_offset.setValue(float(values.get("be_offset_r", 0.0))); self.be_same_candle.setCurrentText(values.get("be_same_candle_policy", "NEXT_CANDLE")); self.be_offset.setEnabled(self.be_mode.currentText()=="R_OFFSET")
         self._applying_values=False; self.update_dynamic()
         self.update_planned_output()
     def append_log(self,t): self.log.append(str(t))
