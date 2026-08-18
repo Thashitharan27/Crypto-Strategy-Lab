@@ -430,12 +430,6 @@ class MainWindow(QMainWindow):
         mode=QLabel("Analysis Mode: RECORD ONLY\nDoes not filter or reject trades.")
         help_text=QLabel("DI direction chooses LONG or SHORT from +DI versus -DI. DI Pressure Analysis measures whether directional pressure is strengthening or weakening before entry. It is analysis-only and does not filter trades. DI Spread entry filtering is configured separately under Strategy Profiles → Rules → DI Spread."); help_text.setWordWrap(True)
         pressure_form.addRow("",self.enable_di_pressure_analysis); pressure_form.addRow("Lookback",self.di_pressure_lookback); pressure_form.addRow("",mode); pressure_form.addRow("",help_text); form.addWidget(pressure_box)
-        regime_targets_box=QGroupBox("Regime-Specific Reward/Risk"); regime_targets=QFormLayout(regime_targets_box)
-        regime_targets_help=QLabel("Bull uses the Bull Return Threshold below. Bear uses the separate bear threshold; returns between them are sideways. Warm-up trades use the base long/short ratios above.")
-        regime_targets_help.setWordWrap(True)
-        bull_long_conditional_help=QLabel("During bull regimes only: when BB width is at or above the minimum AND ADX is below the maximum, the conditional target replaces Long Bull Reward/Risk. Other bull longs keep the normal bull target.")
-        bull_long_conditional_help.setWordWrap(True)
-        form.addWidget(regime_targets_box)
         form.addStretch(1)
         scroll.setWidget(inner); outer.addWidget(scroll); self.di_strategy_page=page
         self.config_controls += inner.findChildren(QWidget)
@@ -579,8 +573,6 @@ class MainWindow(QMainWindow):
         values.update({"enable_coin_flip_sizing":self.enable_coin_flip_sizing.isChecked(),"coin_flip_seed":self.coin_flip_seed.text().strip(),"coin_flip_large_multiplier":3.0,"coin_flip_small_multiplier":1.0})
         values.update({"enable_support_resistance_analysis":self.enable_support_resistance_analysis.isChecked(),"sr_pivot_left":self.sr_pivot_left.value(),"sr_pivot_right":self.sr_pivot_right.value(),"sr_lookback_bars":self.sr_lookback_bars.value(),"sr_zone_width_atr":self.sr_zone_width_atr.value(),"sr_near_distance_atr":self.sr_near_distance_atr.value(),"enable_sr_hold_confirmation":self.enable_sr_hold_confirmation.isChecked(),"sr_hold_confirmation_bars":self.sr_hold_confirmation_bars.value(),"sr_hold_confirmation_atr":self.sr_hold_confirmation_atr.value(),"sr_break_tolerance_atr":self.sr_break_tolerance_atr.value(),"sr_break_basis":self.sr_break_basis.currentText(),"sr_filter_mode":self.sr_filter_mode.currentData(),"sr_long_avoid_near_resistance":self.sr_long_avoid_near_resistance.isChecked(),"sr_long_require_near_support":self.sr_long_require_near_support.isChecked(),"sr_long_block_broken_support":self.sr_long_block_broken_support.isChecked(),"sr_long_min_room_to_resistance_atr":self.sr_long_min_room_to_resistance_atr.value(),"sr_short_avoid_near_support":self.sr_short_avoid_near_support.isChecked(),"sr_short_require_near_resistance":self.sr_short_require_near_resistance.isChecked(),"sr_short_block_broken_resistance":self.sr_short_block_broken_resistance.isChecked(),"sr_short_min_room_to_support_atr":self.sr_short_min_room_to_support_atr.value()})
         values.update({"enable_di_direction_selection":self.enable_di_direction_selection.isChecked(),"enable_di_pressure_analysis":self.enable_di_pressure_analysis.isChecked(),"di_pressure_lookback":self.di_pressure_lookback.value()})
-        values.update({})
-        values.update({})
         values.update({"enable_partial_stop_loss":self.enable_partial_sl.isChecked(),"sl1_r":self.sl1_r.value(),"sl1_close_pct":self.sl1_close_pct.value(),"sl2_r":self.sl2_r.value()})
         values["enable_reentry_gate_after_remaining_leg_timeout"] = self.reentry_gate_after_timeout.isChecked()
         values.update({
