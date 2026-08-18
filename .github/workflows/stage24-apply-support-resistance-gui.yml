@@ -40,6 +40,8 @@ jobs:
           from pathlib import Path
           path=Path("crypto_strategy_lab/gui/main_window.py")
           text=path.read_text(encoding="utf-8")
+          text=text.replace('long_rules.append(f"Minimum room {self.sr_long_min_room_to_resistance_atr.value():.2f} ATR")','long_rules.append(f"Minimum room: {self.sr_long_min_room_to_resistance_atr.value():.2f} ATR")')
+          text=text.replace('short_rules.append(f"Minimum room {self.sr_short_min_room_to_support_atr.value():.2f} ATR")','short_rules.append(f"Minimum room: {self.sr_short_min_room_to_support_atr.value():.2f} ATR")')
           start=text.index('        self.sr_summary_label.setText(', text.index('    def _update_sr_tab_state(self):'))
           end=text.index('\n\n    def _build_di_strategy_tab(self):', start)
           replacement='''        self.sr_summary_label.setText(\n            f"Mode: {mode}\\n"\n            f"Detection: {preset}\\n"\n            f"Near level: ≤ {self.sr_near_distance_atr.value():.2f} ATR\\n\\n"\n            f"LONG filters: {long_text}\\n"\n            f"SHORT filters: {short_text}"\n        )'''
