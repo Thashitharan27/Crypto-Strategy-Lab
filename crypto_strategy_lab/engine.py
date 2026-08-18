@@ -514,45 +514,6 @@ class BacktestEngine:
             return True,f"Strategy profile {key} passed; flip rules {'matched' if flipped else 'did not match'}: entry {action}"
         return True,f"Strategy profile {key} passed"
 
-    def _strategy_profile_flip_match(self, i, direction, profile):
-        """True when every enabled profile filter matches the current signal."""
-        values=(
-            (profile.di_spread_enabled,float(self.di_spread[i]),profile.di_spread_minimum,profile.di_spread_maximum),
-            (profile.adx_enabled,float(self.adx_values[i]),profile.adx_minimum,profile.adx_maximum),
-            (profile.atr_pct_enabled,float(self.atr_pct_values[i]),profile.atr_pct_minimum,profile.atr_pct_maximum),
-            (profile.rsi_enabled,float(self.profile_rsi_values[profile.rsi_period][i]),profile.rsi_minimum,profile.rsi_maximum),
-            (profile.bb_width_enabled,float(self.bb_width[i]),profile.bb_width_minimum,profile.bb_width_maximum),
-            (profile.close_location_enabled,float(self.close_location_values[i]),profile.close_location_minimum,profile.close_location_maximum),
-            (profile.momentum_enabled,float(self.profile_momentum_values[profile.momentum_lookback_hours][i]),profile.momentum_minimum,profile.momentum_maximum),
-        )
-        enabled=False
-        for active,value,minimum,maximum in values:
-            if not active: continue
-            enabled=True
-            if not np.isfinite(value) or not minimum <= value <= maximum: return False
-        if profile.vwap_distance_enabled:
-            enabled=True; atr_value=float(self.atr_values[i]); vwap=float(self.session_vwap[i])
-            if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap): return False
-            distance=((float(self.close[i])-vwap) if direction=="LONG" else (vwap-float(self.close[i])))/atr_value
-            if not profile.vwap_distance_minimum <= distance <= profile.vwap_distance_maximum: return False
-        return enabled
-
-    def _strategy_profile_secondary_flip_match(self, i, direction, profile):
-        if not profile.secondary_flip_enabled: return False
-        indicator=profile.secondary_flip_indicator
-        if indicator=="DI_SPREAD": value=float(self.di_spread[i])
-        elif indicator=="ADX": value=float(self.adx_values[i])
-        elif indicator=="ATR_PCT": value=float(self.atr_pct_values[i])
-        elif indicator=="RSI": value=float(self.profile_rsi_values[profile.rsi_period][i])
-        elif indicator=="BB_WIDTH": value=float(self.bb_width[i])
-        elif indicator=="CLOSE_LOCATION": value=float(self.close_location_values[i])
-        elif indicator=="MOMENTUM": value=float(self.profile_momentum_values[profile.momentum_lookback_hours][i])
-        else:
-            atr_value=float(self.atr_values[i]); vwap=float(self.session_vwap[i])
-            if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap): return False
-            value=((float(self.close[i])-vwap) if direction=="LONG" else (vwap-float(self.close[i])))/atr_value
-        return np.isfinite(value) and profile.secondary_flip_minimum <= value <= profile.secondary_flip_maximum
-
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
         if indicator=="DI_SPREAD": return float(self.di_spread[i])
         if indicator=="ADX": return float(self.adx_values[i])
@@ -576,15 +537,6 @@ class BacktestEngine:
         if not rules: return False
         matches=[self._strategy_profile_entry_rule_matches(i,direction,profile,rule) for rule in rules]
         return all(matches) if mode=="ALL" else any(matches)
-
-    def _strategy_profile_additional_flip_match(self, i, direction, profile):
-        for rule in profile.additional_flip_rules:
-            value=self._strategy_profile_rule_value(i,direction,profile,rule["indicator"])
-            if np.isfinite(value) and float(rule["minimum"]) <= value <= float(rule["maximum"]): return True
-        return False
-
-    def _strategy_profile_conditional_flip_match(self, i, direction, profile):
-        return self._strategy_profile_flip_match(i,direction,profile) or self._strategy_profile_secondary_flip_match(i,direction,profile) or self._strategy_profile_additional_flip_match(i,direction,profile)
 
     def _adx_filter_result(self, i):
         result = self.entry_filters[0].evaluate(i)
