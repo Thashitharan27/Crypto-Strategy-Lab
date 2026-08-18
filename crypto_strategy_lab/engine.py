@@ -17,7 +17,7 @@ class BacktestEngine:
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.volume=self.data["volume"].to_numpy(float) if "volume" in self.data else np.ones(len(self.data),float); self.times=self.data.timestamp.to_numpy()
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array()
-        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_vwap_breakout=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
         self.profile_rsi_values={period:rsi(self.close,period) for period in {p.rsi_period for p in self.config.strategy_profiles.values()}}
@@ -35,9 +35,6 @@ class BacktestEngine:
             break_basis=config.sr_break_basis,
         ) if config.enable_support_resistance_analysis else None
         self._pending_sr_context = None
-        self.timeout_delta=pd.Timedelta(minutes=config.max_both_open_minutes)
-        self.remaining_leg_timeout_delta=pd.Timedelta(minutes=config.remaining_leg_timeout_after_first_sl_minutes)
-        self.checkpoint_zero_score_recheck_delta=pd.Timedelta(minutes=config.checkpoint_zero_score_recheck_minutes)
         self.last_timeout_exit_time=None
         self.trading_start=pd.Timestamp(config.trading_start_date, tz="UTC") if config.trading_start_date else None
         self.trading_end=pd.Timestamp(config.trading_end_date, tz="UTC") if config.trading_end_date else None
@@ -443,135 +440,127 @@ class BacktestEngine:
     def _active_positions(self, pair):
         return pair.positions()
 
-    def _open_pair(self,i, adx_filter_passed=True, adx_filter_reason="ADX filter disabled", schedule=None):
-        ind_i = schedule["indicator_index"] if schedule else i; signal_direction=(schedule or {}).get("signal_direction"); raw=(self.open[i] if (self.config.enable_daily_entry_schedule or self.random_entry_active or signal_direction) else self.close[i]); direction_sizing=self.config.enable_coin_flip_sizing or self.config.enable_di_direction_sizing or bool(signal_direction)
-        raw_di_direction = ("LONG" if self.plus_di_values[ind_i] > self.minus_di_values[ind_i] else "SHORT") if (self.config.enable_di_direction_sizing or self.config.enable_strategy_profiles) else None
-        di_direction = self._selected_direction(ind_i) if (self.config.enable_di_direction_sizing or self.config.enable_strategy_profiles) else None
-        original_di_direction = di_direction
-        profile_context=self._profile_context(ind_i) if self.config.enable_strategy_profiles else None
-        active_profile=profile_context[3] if profile_context else None; active_profile_key=profile_context[2] if profile_context else None
-        profile_filter_flip=bool(active_profile and active_profile.entry_rules and self._strategy_profile_rule_group_match(ind_i,original_di_direction,active_profile,"FLIP",active_profile.flip_rule_match_mode))
-        profile_flip = bool(active_profile and (active_profile.flip_direction or profile_filter_flip))
-        if (self.config.flip_filtered_di_direction or profile_flip) and di_direction is not None and signal_direction is None:
-            di_direction = "SHORT" if di_direction == "LONG" else "LONG"
-            adx_filter_reason = f"{adx_filter_reason}; direction flipped after filters passed: {original_di_direction} -> {di_direction}"
-        preferred_only = self.config.enable_strategy_profiles or (self.config.enable_di_direction_sizing and self.config.di_execution_mode == DIExecutionMode.PREFERRED_SIDE_ONLY) or bool(signal_direction)
-        if preferred_only:
-            long_entry = raw*(1+self.config.slippage) if di_direction == "LONG" else raw
-            short_entry = raw*(1-self.config.slippage) if di_direction == "SHORT" else raw
-        else:
-            long_entry=raw if direction_sizing else raw*(1+self.config.slippage); short_entry=raw if direction_sizing else raw*(1-self.config.slippage)
-        partial_sl_enabled=active_profile.partial_stop_enabled if active_profile else self.config.enable_partial_stop_loss
-        partial_tp_enabled=active_profile.partial_profit_enabled if active_profile else self.config.enable_partial_take_profit
-        sl1_r=active_profile.sl1_r if active_profile else self.config.sl1_r; sl1_close_pct=active_profile.sl1_close_pct if active_profile else self.config.sl1_close_pct
-        sl2_r=active_profile.sl2_r if active_profile else self.config.sl2_r; tp1_r=active_profile.tp1_r if active_profile else self.config.tp1_r
-        tp1_close_pct=active_profile.tp1_close_pct if active_profile else self.config.tp1_close_pct; tp2_r=active_profile.tp2_r if active_profile else self.config.tp2_r
-        base_stop_multiple=active_profile.stop_loss_multiple if active_profile else (self.config.stop_loss_r if partial_tp_enabled else self.config.sl_mult)
-        after_tp1_stop_mode=active_profile.after_tp1_stop_mode if active_profile else self.config.after_tp1_stop_mode.value; after_tp1_stop_offset_r=active_profile.after_tp1_stop_offset_r if active_profile else self.config.after_tp1_stop_offset_r
-        r=float(self.risk[ind_i]); stop_mult=sl2_r if partial_sl_enabled else base_stop_multiple; stop=stop_mult*r; risk_amt=self.current_equity*self.config.risk_per_leg*(active_profile.risk_multiplier if active_profile else 1.0)
-        entry_fee_rate=self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee; exit_fee_rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
-        long_stop_exit=(long_entry-stop)*(1-self.config.slippage); short_stop_exit=(short_entry+stop)*(1+self.config.slippage)
-        long_stop_loss_per_unit=(long_entry-long_stop_exit)+(long_entry*entry_fee_rate)+(long_stop_exit*exit_fee_rate)
-        short_stop_loss_per_unit=(short_stop_exit-short_entry)+(short_entry*entry_fee_rate)+(short_stop_exit*exit_fee_rate)
+    def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):
+        ind_i = schedule["indicator_index"] if schedule else i
+        raw = self.open[i] if self.config.enable_daily_entry_schedule else self.close[i]
+        profile_context = self._profile_context(ind_i)
+        if profile_context is None:
+            raise ValueError("Cannot open a trade without a current Strategy Profile context")
+        regime, original_direction, active_profile_key, active_profile = profile_context
+        direction = original_direction
+        profile_filter_flip = bool(
+            active_profile.entry_rules
+            and self._strategy_profile_rule_group_match(
+                ind_i, original_direction, active_profile, "FLIP", active_profile.flip_rule_match_mode
+            )
+        )
+        if active_profile.flip_direction or profile_filter_flip:
+            direction = "SHORT" if direction == "LONG" else "LONG"
+            entry_filter_reason = (
+                f"{entry_filter_reason}; direction flipped after profile rules: "
+                f"{original_direction} -> {direction}"
+            )
+
+        side = Side.LONG if direction == "LONG" else Side.SHORT
+        side_sign = 1 if side == Side.LONG else -1
+        entry = raw * (1 + self.config.slippage) if side == Side.LONG else raw * (1 - self.config.slippage)
+        partial_sl_enabled = active_profile.partial_stop_enabled
+        partial_tp_enabled = active_profile.partial_profit_enabled
+        sl1_r = active_profile.sl1_r
+        sl1_close_pct = active_profile.sl1_close_pct
+        sl2_r = active_profile.sl2_r
+        tp1_r = active_profile.tp1_r
+        tp1_close_pct = active_profile.tp1_close_pct
+        tp2_r = active_profile.tp2_r
+        after_tp1_stop_mode = active_profile.after_tp1_stop_mode
+        after_tp1_stop_offset_r = active_profile.after_tp1_stop_offset_r
+        r = float(self.risk[ind_i])
+        stop_mult = sl2_r if partial_sl_enabled else active_profile.stop_loss_multiple
+        stop = stop_mult * r
+        risk_amt = self.current_equity * self.config.risk_per_leg * active_profile.risk_multiplier
+        uncapped = risk_amt / stop
+        qty, capped = self._cap_qty(uncapped, entry, self.current_equity)
+        target_distance = stop * active_profile.reward_risk_ratio
+        sl = entry - side_sign * stop
+        tp = entry + side_sign * target_distance
+        entry_fee_rate = self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
+        entry_fee = entry * qty * entry_fee_rate
+        pos = Position(
+            side, self._execution_time(i), i, entry, r, sl, tp, qty, risk_amt, entry * qty,
+            float(self.atr_values[ind_i]), uncapped, qty * entry / self.current_equity,
+            entry_fee=entry_fee, fees=entry_fee, original_sl=sl,
+            be_enabled=active_profile.break_even_enabled,
+            be_mode="R_OFFSET" if active_profile.break_even_offset_r else "ENTRY_PRICE",
+            be_offset_r=active_profile.break_even_offset_r,
+        )
+
+        pos.atr_checkpoint_extension_enabled = bool(active_profile.atr_checkpoint_tp_extension_enabled)
+        if pos.atr_checkpoint_extension_enabled:
+            pos.atr_checkpoint_di_spread_minimum = active_profile.atr_checkpoint_di_spread_minimum
+            pos.atr_checkpoint_bb_width_minimum = active_profile.atr_checkpoint_bb_width_minimum
+            pos.atr_checkpoint_profit_lock_start = active_profile.atr_checkpoint_profit_lock_start
+            pos.atr_checkpoint_profit_lock_distance = active_profile.atr_checkpoint_profit_lock_distance
+            pos.atr_checkpoint_initial_tp = pos.tp
+            pos.atr_checkpoint_final_tp_r = target_distance / r
+
+        pos.r_step_trailing_enabled = bool(active_profile.r_step_trailing_enabled)
+        if pos.r_step_trailing_enabled:
+            pos.r_step_activation_r = active_profile.r_step_activation_r
+            pos.r_step_distance_r = active_profile.r_step_distance_r
+            pos.r_step_size_r = active_profile.r_step_size_r
+            pos.r_step_maximum_r = active_profile.r_step_maximum_r
+            pos.r_step_next_checkpoint_r = pos.r_step_activation_r
+            pos.r_step_initial_tp = pos.tp
+            pos.r_step_activation_close_pct = active_profile.r_step_activation_close_pct
+            if pos.r_step_activation_close_pct > 0:
+                pos.partial_tp_enabled = True
+                pos.original_quantity = pos.quantity
+                pos.remaining_quantity = pos.quantity
+                pos.tp1_quantity = pos.quantity * pos.r_step_activation_close_pct / 100.0
+                pos.tp1_price = pos.entry_price + side_sign * pos.r_step_activation_r * pos.risk
+                pos.r_step_activation_quantity = pos.tp1_quantity
+                pos.r_step_runner_quantity = pos.quantity - pos.tp1_quantity
+            if pos.r_step_maximum_r > 0:
+                pos.tp = pos.entry_price + side_sign * pos.r_step_maximum_r * pos.risk
+
+        pos.after_tp1_stop_mode = after_tp1_stop_mode
+        pos.after_tp1_stop_offset_r = after_tp1_stop_offset_r
+        if partial_tp_enabled:
+            pos.partial_tp_enabled = True
+            pos.original_quantity = pos.quantity
+            pos.remaining_quantity = pos.quantity
+            pos.tp1_quantity = pos.quantity * tp1_close_pct / 100.0
+            pos.tp2_quantity = pos.quantity - pos.tp1_quantity
+            pos.tp1_price = pos.entry_price + side_sign * tp1_r * stop
+            pos.tp2_price = pos.entry_price + side_sign * tp2_r * stop
+            pos.tp = pos.tp2_price
+            pos.final_active_stop = pos.sl
         if partial_sl_enabled:
-            first=sl1_close_pct/100.0; remainder=1-first
-            long_sl1_exit=(long_entry-sl1_r*r)*(1-self.config.slippage)
-            short_sl1_exit=(short_entry+sl1_r*r)*(1+self.config.slippage)
-            long_stop_loss_per_unit=(long_entry*entry_fee_rate)+first*((long_entry-long_sl1_exit)+long_sl1_exit*exit_fee_rate)+remainder*((long_entry-long_stop_exit)+long_stop_exit*exit_fee_rate)
-            short_stop_loss_per_unit=(short_entry*entry_fee_rate)+first*((short_sl1_exit-short_entry)+short_sl1_exit*exit_fee_rate)+remainder*((short_stop_exit-short_entry)+short_stop_exit*exit_fee_rate)
-        sizing_loss_per_unit=max(long_stop_loss_per_unit, short_stop_loss_per_unit) if self.config.position_sizing_mode==PositionSizingMode.ALL_IN_STOP_RISK else stop
-        uncapped=risk_amt/sizing_loss_per_unit
-        coin_draw = self.coin_flip_rng.random() if self.coin_flip_rng is not None else None
-        coin_result = "HEADS" if coin_draw is not None and coin_draw < 0.5 else ("TAILS" if coin_draw is not None else None)
-        large=self.config.coin_flip_large_multiplier; small=self.config.coin_flip_small_multiplier
-        sizing_direction = ("LONG" if coin_result == "HEADS" else "SHORT") if coin_result else (signal_direction or di_direction)
-        if preferred_only:
-            long_mult = 1.0 if sizing_direction == "LONG" else 0.0
-            short_mult = 1.0 if sizing_direction == "SHORT" else 0.0
-        else:
-            long_mult = (large if sizing_direction == "LONG" else small) if sizing_direction else 1.0
-            short_mult = (small if sizing_direction == "LONG" else large) if sizing_direction else 1.0
-        l_uncapped=uncapped*long_mult; s_uncapped=uncapped*short_mult
-        lqty,lc=self._cap_qty(l_uncapped,long_entry,self.current_equity); sqty,sc=self._cap_qty(s_uncapped,short_entry,self.current_equity); fee_rate=entry_fee_rate
-        # In coin-flip mode, TP distance equals stop distance. With zero slippage,
-        # each leg's TP is exactly the opposite leg's SL.
-        if self.config.enable_strategy_profiles:
-            applied_regime = profile_context[0] if active_profile is not None else "BASE"
-            long_reward_risk = short_reward_risk = 1.0
-            if active_profile is not None:
-                if sizing_direction == "LONG": long_reward_risk = active_profile.reward_risk_ratio
-                elif sizing_direction == "SHORT": short_reward_risk = active_profile.reward_risk_ratio
-            long_target_distance = stop * long_reward_risk
-            short_target_distance = stop * short_reward_risk
-        elif self.config.enable_di_direction_sizing:
-            applied_regime = "BASE"
-            long_reward_risk = short_reward_risk = 1.0
-            long_target_distance = short_target_distance = stop
-        elif self.config.enable_coin_flip_sizing:
-            applied_regime = "BASE"; bull_long_conditional_applied = bull_long_momentum_unconfirmed_applied = bull_long_momentum_target_extension_applied = bull_long_structural_unconfirmed_applied = sideways_long_conditional_applied = sideways_short_conditional_applied = bear_short_conditional_applied = False; long_reward_risk = short_reward_risk = 1.0
-            long_target_distance = short_target_distance = stop
-        else:
-            applied_regime = "BASE"; bull_long_conditional_applied = bull_long_momentum_unconfirmed_applied = bull_long_momentum_target_extension_applied = bull_long_structural_unconfirmed_applied = sideways_long_conditional_applied = sideways_short_conditional_applied = bear_short_conditional_applied = False; long_reward_risk = short_reward_risk = self.config.tp_mult / stop_mult
-            long_target_distance = short_target_distance = self.config.tp_mult*r
-        long=Position(Side.LONG,self._execution_time(i),i,long_entry,r,long_entry-stop,long_entry+long_target_distance,lqty,risk_amt*long_mult,long_entry*lqty,float(self.atr_values[ind_i]),l_uncapped,lqty*long_entry/self.current_equity, entry_fee=long_entry*lqty*fee_rate, fees=long_entry*lqty*fee_rate, original_sl=long_entry-stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
-        short=Position(Side.SHORT,self._execution_time(i),i,short_entry,r,short_entry+stop,short_entry-short_target_distance,sqty,risk_amt*short_mult,short_entry*sqty,float(self.atr_values[ind_i]),s_uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate, original_sl=short_entry+stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
-        for pos in (long, short):
-            profile_for_special_exit = active_profile if active_profile is not None and pos.side.value == sizing_direction else None
-            pos.atr_checkpoint_extension_enabled = bool(profile_for_special_exit and profile_for_special_exit.atr_checkpoint_tp_extension_enabled)
-            if pos.atr_checkpoint_extension_enabled:
-                pos.atr_checkpoint_di_spread_minimum = profile_for_special_exit.atr_checkpoint_di_spread_minimum if profile_for_special_exit else pos.atr_checkpoint_di_spread_minimum
-                pos.atr_checkpoint_bb_width_minimum = profile_for_special_exit.atr_checkpoint_bb_width_minimum if profile_for_special_exit else pos.atr_checkpoint_bb_width_minimum
-                pos.atr_checkpoint_profit_lock_start = profile_for_special_exit.atr_checkpoint_profit_lock_start if profile_for_special_exit else pos.atr_checkpoint_profit_lock_start
-                pos.atr_checkpoint_profit_lock_distance = profile_for_special_exit.atr_checkpoint_profit_lock_distance if profile_for_special_exit else pos.atr_checkpoint_profit_lock_distance
-                pos.atr_checkpoint_initial_tp = pos.tp
-                pos.atr_checkpoint_final_tp_r = (long_target_distance if pos.side == Side.LONG else short_target_distance) / r
-            pos.r_step_trailing_enabled = bool(profile_for_special_exit and profile_for_special_exit.r_step_trailing_enabled)
-            if pos.r_step_trailing_enabled:
-                pos.r_step_activation_r = profile_for_special_exit.r_step_activation_r if profile_for_special_exit else pos.r_step_activation_r
-                pos.r_step_distance_r = profile_for_special_exit.r_step_distance_r if profile_for_special_exit else pos.r_step_distance_r
-                pos.r_step_size_r = profile_for_special_exit.r_step_size_r if profile_for_special_exit else pos.r_step_size_r
-                pos.r_step_maximum_r = profile_for_special_exit.r_step_maximum_r if profile_for_special_exit else pos.r_step_maximum_r
-                pos.r_step_next_checkpoint_r = pos.r_step_activation_r
-                pos.r_step_initial_tp = pos.tp
-                pos.r_step_activation_close_pct = profile_for_special_exit.r_step_activation_close_pct
-                if pos.r_step_activation_close_pct > 0:
-                    pos.partial_tp_enabled = True
-                    pos.original_quantity = pos.quantity
-                    pos.remaining_quantity = pos.quantity
-                    pos.tp1_quantity = pos.quantity * pos.r_step_activation_close_pct / 100.0
-                    pos.tp1_price = pos.entry_price + (1 if pos.side == Side.LONG else -1) * pos.r_step_activation_r * pos.risk
-                    pos.r_step_activation_quantity = pos.tp1_quantity
-                    pos.r_step_runner_quantity = pos.quantity - pos.tp1_quantity
-                if pos.r_step_maximum_r > 0:
-                    pos.tp = pos.entry_price + (1 if pos.side == Side.LONG else -1) * pos.r_step_maximum_r * pos.risk
-            pos.after_tp1_stop_mode=after_tp1_stop_mode; pos.after_tp1_stop_offset_r=after_tp1_stop_offset_r
-            if partial_tp_enabled:
-                direction = 1 if pos.side == Side.LONG else -1
-                pos.partial_tp_enabled=True; pos.original_quantity=pos.quantity; pos.remaining_quantity=pos.quantity
-                pos.tp1_quantity=pos.quantity*tp1_close_pct/100.0
-                pos.tp2_quantity=pos.quantity-pos.tp1_quantity # any precision remainder belongs to TP2
-                target_unit=stop if active_profile else r
-                pos.tp1_price=pos.entry_price+direction*tp1_r*target_unit; pos.tp2_price=pos.entry_price+direction*tp2_r*target_unit
-                pos.tp=pos.tp2_price; pos.final_active_stop=pos.sl
-            if partial_sl_enabled:
-                direction = 1 if pos.side == Side.LONG else -1
-                pos.partial_sl_enabled=True; pos.original_quantity=pos.quantity; pos.remaining_quantity=pos.quantity
-                pos.sl1_quantity=pos.quantity*sl1_close_pct/100.0
-                pos.sl1_price=pos.entry_price-direction*sl1_r*r
-                pos.sl2_price=pos.entry_price-direction*sl2_r*r
-                pos.sl=pos.sl2_price; pos.original_sl=pos.sl2_price; pos.final_active_stop=pos.sl2_price
-            profile_for_position=active_profile if active_profile is not None and pos.side.value==sizing_direction else None
-            pos.be_enabled=bool(profile_for_position.break_even_enabled) if profile_for_position else self.config.enable_be_after_opposite_sl
-            pos.be_offset_r=profile_for_position.break_even_offset_r if profile_for_position else self.config.be_offset_r
-            pos.profile_break_even_activation_r=(profile_for_position.break_even_activation_r if profile_for_position and profile_for_position.break_even_enabled else None)
-            pos.trailing_enabled=bool(profile_for_position.trailing_enabled) if profile_for_position else (self.config.enable_trailing_profit and (self.config.trail_apply_to == TrailApplyTo.BOTH or self.config.trail_apply_to.value == f"{pos.side.value}_ONLY"))
-            if pos.trailing_enabled:
-                direction = 1 if pos.side == Side.LONG else -1
-                activation_r=profile_for_position.trailing_activation_r if profile_for_position else self.config.trail_activation_r
-                pos.trailing_distance_r=profile_for_position.trailing_distance_r if profile_for_position else self.config.trail_distance_r
-                pos.trailing_activation_price = (pos.entry_price + direction * pos.risk * activation_r if self.config.trail_activation_trigger == TrailActivationTrigger.PRICE_REACHES_R else None)
-                pos.favourable_price = pos.entry_price
-        
+            pos.partial_sl_enabled = True
+            pos.original_quantity = pos.quantity
+            pos.remaining_quantity = pos.quantity
+            pos.sl1_quantity = pos.quantity * sl1_close_pct / 100.0
+            pos.sl1_price = pos.entry_price - side_sign * sl1_r * r
+            pos.sl2_price = pos.entry_price - side_sign * sl2_r * r
+            pos.sl = pos.sl2_price
+            pos.original_sl = pos.sl2_price
+            pos.final_active_stop = pos.sl2_price
+
+        pos.be_enabled = bool(active_profile.break_even_enabled)
+        pos.be_offset_r = active_profile.break_even_offset_r
+        pos.profile_break_even_activation_r = (
+            active_profile.break_even_activation_r if active_profile.break_even_enabled else None
+        )
+        pos.trailing_enabled = bool(active_profile.trailing_enabled)
+        if pos.trailing_enabled:
+            pos.trailing_distance_r = active_profile.trailing_distance_r
+            pos.trailing_activation_price = pos.entry_price + side_sign * pos.risk * active_profile.trailing_activation_r
+            pos.favourable_price = pos.entry_price
+
+        long = pos if side == Side.LONG else None
+        short = pos if side == Side.SHORT else None
+
+        # Capture support/resistance data
         # Capture support/resistance data
         if self.config.enable_support_resistance_analysis:
             pending = self._pending_sr_context
@@ -625,47 +614,65 @@ class BacktestEngine:
                     pos.sr_zone_low = sr_context.resistance_zone_low
                     pos.sr_zone_high = sr_context.resistance_zone_high
         
-        if preferred_only:
-            if sizing_direction == "LONG":
-                short = None
-            else:
-                long = None
-        elif self.config.trade_direction == TradeDirectionMode.LONG_ONLY:
-            short = None
-        elif self.config.trade_direction == TradeDirectionMode.SHORT_ONLY:
-            long = None
-        pair=TradePair(self.next_pair_id,long,short,self.current_equity,pd.Timestamp(self.times[i]),self._execution_time(i),raw,(lc if long is not None else False) or (sc if short is not None else False)); pair.trade_direction=self.config.trade_direction.value; pair.daily_schedule_enabled=self.config.enable_daily_entry_schedule; pair.scheduled_entry_time=self.config.daily_entry_time; pair.scheduled_entry_timezone=self.config.daily_entry_timezone; pair.scheduled_entry_timestamp=(schedule or {}).get("scheduled_timestamp"); pair.actual_entry_timestamp=(schedule or {}).get("actual_entry_timestamp", self._execution_time(i)); pair.entry_schedule_status=(schedule or {}).get("entry_schedule_status");
-        pair.strategy_profile_key=active_profile_key
-        pair.applied_stop_loss_multiple=stop_mult; pair.applied_partial_sl_enabled=partial_sl_enabled; pair.applied_sl1_r=sl1_r; pair.applied_sl1_close_pct=sl1_close_pct; pair.applied_sl2_r=sl2_r
-        pair.applied_partial_tp_enabled=partial_tp_enabled; pair.applied_tp1_r=tp1_r; pair.applied_tp1_close_pct=tp1_close_pct; pair.applied_tp2_r=tp2_r; pair.applied_after_tp1_stop_mode=after_tp1_stop_mode; pair.applied_after_tp1_stop_offset_r=after_tp1_stop_offset_r
-        pair.profile_timeout_enabled=bool(active_profile and active_profile.timeout_enabled)
-        pair.profile_timeout_minutes=int(active_profile.timeout_minutes) if pair.profile_timeout_enabled else None
-        pair.vwap_confirmation_mode=self.config.vwap_confirmation_mode.value if self.config.entry_mode == EntryMode.VWAP_VOLUME_BREAKOUT else None; pair.vwap_breakout_signal_time=(schedule or {}).get("vwap_breakout_signal_time"); pair.vwap_breakout_level=(schedule or {}).get("vwap_breakout_level"); pair.vwap_confirmation_time=(schedule or {}).get("vwap_confirmation_time"); pair.vwap_confirmation_bars=(schedule or {}).get("vwap_confirmation_bars")
-        pair.coin_flip_result=coin_result; pair.coin_flip_draw=coin_draw; pair.di_sizing_direction=raw_di_direction; pair.sizing_direction=sizing_direction; pair.long_size_multiplier=long_mult; pair.short_size_multiplier=short_mult
-        pressure_direction=self._selected_direction(ind_i)
-        for key,value in self._di_pressure_snapshot(ind_i,pressure_direction).items(): setattr(pair,key,value)
-        pair.di_reward_risk_regime=applied_regime; pair.di_applied_long_reward_risk_ratio=long_reward_risk; pair.di_applied_short_reward_risk_ratio=short_reward_risk
-        pair.market_regime_return=float(self.bull_regime_return_values[ind_i]) if np.isfinite(self.bull_regime_return_values[ind_i]) else np.nan
-        pair.entry_atr_pct=float(self.atr_pct_values[ind_i]) if np.isfinite(self.atr_pct_values[ind_i]) else np.nan
-        pair.entry_close_location=float(self.close_location_values[ind_i]) if np.isfinite(self.close_location_values[ind_i]) else np.nan
-        if active_profile is not None:
-            profile_rsi=float(self.profile_rsi_values[active_profile.rsi_period][ind_i])
-            profile_momentum=float(self.profile_momentum_values[active_profile.momentum_lookback_hours][ind_i])
-            pair.entry_rsi=profile_rsi if np.isfinite(profile_rsi) else np.nan
-            pair.directional_momentum_return=profile_momentum if np.isfinite(profile_momentum) else np.nan
-        else:
-            pair.entry_rsi=np.nan
-            pair.directional_momentum_return=np.nan
-        pair.long_momentum_return=pair.directional_momentum_return
-        pair.market_regime=self._regime_at(ind_i)
-        pair.market_regime_method=self.config.market_regime_method
-        pair.bull_regime=pair.market_regime == "BULL"
-        rd=(schedule or {}).get("random_decision")
-        pair.random_decision=rd; pair.previous_pair_close_time=self.previous_pair_close_time
+        pair = TradePair(
+            self.next_pair_id, long, short, self.current_equity, pd.Timestamp(self.times[i]),
+            self._execution_time(i), raw, capped
+        )
+        pair.trade_direction = direction
+        pair.daily_schedule_enabled = self.config.enable_daily_entry_schedule
+        pair.scheduled_entry_time = self.config.daily_entry_time
+        pair.scheduled_entry_timezone = self.config.daily_entry_timezone
+        pair.scheduled_entry_timestamp = (schedule or {}).get("scheduled_timestamp")
+        pair.actual_entry_timestamp = (schedule or {}).get("actual_entry_timestamp", self._execution_time(i))
+        pair.entry_schedule_status = (schedule or {}).get("entry_schedule_status")
+        pair.strategy_profile_key = active_profile_key
+        pair.applied_stop_loss_multiple = stop_mult
+        pair.applied_partial_sl_enabled = partial_sl_enabled
+        pair.applied_sl1_r = sl1_r
+        pair.applied_sl1_close_pct = sl1_close_pct
+        pair.applied_sl2_r = sl2_r
+        pair.applied_partial_tp_enabled = partial_tp_enabled
+        pair.applied_tp1_r = tp1_r
+        pair.applied_tp1_close_pct = tp1_close_pct
+        pair.applied_tp2_r = tp2_r
+        pair.applied_after_tp1_stop_mode = after_tp1_stop_mode
+        pair.applied_after_tp1_stop_offset_r = after_tp1_stop_offset_r
+        pair.profile_timeout_enabled = bool(active_profile.timeout_enabled)
+        pair.profile_timeout_minutes = int(active_profile.timeout_minutes) if pair.profile_timeout_enabled else None
+        pair.di_sizing_direction = original_direction
+        pair.sizing_direction = direction
+        pair.long_size_multiplier = 1.0 if direction == "LONG" else 0.0
+        pair.short_size_multiplier = 1.0 if direction == "SHORT" else 0.0
+        for key, value in self._di_pressure_snapshot(ind_i, original_direction).items():
+            setattr(pair, key, value)
+        pair.di_reward_risk_regime = regime
+        pair.di_applied_long_reward_risk_ratio = active_profile.reward_risk_ratio if direction == "LONG" else np.nan
+        pair.di_applied_short_reward_risk_ratio = active_profile.reward_risk_ratio if direction == "SHORT" else np.nan
+        pair.market_regime_return = float(self.bull_regime_return_values[ind_i]) if np.isfinite(self.bull_regime_return_values[ind_i]) else np.nan
+        pair.entry_atr_pct = float(self.atr_pct_values[ind_i]) if np.isfinite(self.atr_pct_values[ind_i]) else np.nan
+        pair.entry_close_location = float(self.close_location_values[ind_i]) if np.isfinite(self.close_location_values[ind_i]) else np.nan
+        profile_rsi = float(self.profile_rsi_values[active_profile.rsi_period][ind_i])
+        profile_momentum = float(self.profile_momentum_values[active_profile.momentum_lookback_hours][ind_i])
+        pair.entry_rsi = profile_rsi if np.isfinite(profile_rsi) else np.nan
+        pair.directional_momentum_return = profile_momentum if np.isfinite(profile_momentum) else np.nan
+        pair.long_momentum_return = pair.directional_momentum_return
+        pair.market_regime = self._regime_at(ind_i)
+        pair.market_regime_method = self.config.market_regime_method
+        pair.bull_regime = pair.market_regime == "BULL"
         if self.config.enable_daily_entry_schedule:
-            if pair.entry_schedule_status == "ON_TIME": self.daily_entries_on_schedule += 1
-            elif pair.entry_schedule_status == "NEXT_AVAILABLE_CANDLE": self.daily_entries_next_available += 1
-        pair.adx=float(self.adx_values[ind_i]) if np.isfinite(self.adx_values[ind_i]) else np.nan; pair.plus_di=float(self.plus_di_values[ind_i]) if np.isfinite(self.plus_di_values[ind_i]) else np.nan; pair.minus_di=float(self.minus_di_values[ind_i]) if np.isfinite(self.minus_di_values[ind_i]) else np.nan; self._attach_market_state(pair,ind_i); pair.adx_filter_passed=adx_filter_passed; pair.entry_filter_passed=adx_filter_passed; pair.entry_filter_reason=adx_filter_reason; pair.adx_filter_reason=adx_filter_reason; self.active_pairs.append(pair); self._record_pair_telemetry(pair, i); self.next_pair_id+=1
+            if pair.entry_schedule_status == "ON_TIME":
+                self.daily_entries_on_schedule += 1
+            elif pair.entry_schedule_status == "NEXT_AVAILABLE_CANDLE":
+                self.daily_entries_next_available += 1
+        pair.adx = float(self.adx_values[ind_i]) if np.isfinite(self.adx_values[ind_i]) else np.nan
+        pair.plus_di = float(self.plus_di_values[ind_i]) if np.isfinite(self.plus_di_values[ind_i]) else np.nan
+        pair.minus_di = float(self.minus_di_values[ind_i]) if np.isfinite(self.minus_di_values[ind_i]) else np.nan
+        self._attach_market_state(pair, ind_i)
+        pair.entry_filter_passed = entry_filter_passed
+        pair.entry_filter_reason = entry_filter_reason
+        self.active_pairs.append(pair)
+        self._record_pair_telemetry(pair, i)
+        self.next_pair_id += 1
 
     def _attach_market_state(self, pair, i):
         fields = {"bb_middle":self.bb_middle,"bb_upper":self.bb_upper,"bb_lower":self.bb_lower,"bb_width":self.bb_width,"bb_width_pct":self.bb_width_pct,"bb_width_1":self.bb_width_1,"bb_width_3":self.bb_width_3,"bb_width_5":self.bb_width_5,"bb_width_entry_5bar_change":self.bb_width_change,"bb_width_entry_5bar_change_pct":self.bb_width_change_pct,"di_spread":self.di_spread,"di_ratio":self.di_ratio,"di_spread_1":self.di_spread_1,"di_spread_3":self.di_spread_3,"di_spread_5":self.di_spread_5,"di_spread_entry_5bar_change":self.di_spread_change,"utc_session_vwap":self.session_vwap}
@@ -682,9 +689,8 @@ class BacktestEngine:
     def _scan_pair_exit(self,pair,i):
         if not self.config.use_intrabar_data or self.intrabar_data is None:
             if self._maybe_timeout_pair_at(pair, i, pd.Timestamp(self.times[i]), float(self.open[i]), ExitSource.FALLBACK_15M): return
-            if self._maybe_timeout_remaining_leg(pair, i, pd.Timestamp(self.times[i]), float(self.open[i]), ExitSource.FALLBACK_15M): return
             for pos in pair.positions():
-                if pos.is_open: self._scan_exit(pos,i); self._after_position_scan(pair,pos,None,None,None,None)
+                if pos.is_open: self._scan_exit(pos,i)
             return
         # Only inspect the strategy interval currently being processed. Starting
         # every scan at pair entry replays old intrabars with today's ratcheted
@@ -692,7 +698,7 @@ class BacktestEngine:
         start=max(pd.Timestamp(pair.strategy_entry_time), pd.Timestamp(self.times[i])); end=pd.Timestamp(self.times[i])+self.entry_delta
         if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
             for pos in pair.positions():
-                if pos.is_open: self._fallback_exit(pos,i,"timestamp_alignment_failure"); self._after_position_scan(pair,pos,None,None,None,None)
+                if pos.is_open: self._fallback_exit(pos,i,"timestamp_alignment_failure")
             return
         sub=self.intrabar_data[(self.intrabar_data.timestamp>=start)&(self.intrabar_data.timestamp<end)]
         incomplete=sub.empty or (sub.timestamp.iloc[0] > start + pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)) or self._has_missing_intrabar(sub,start,end)
@@ -704,19 +710,16 @@ class BacktestEngine:
                 raise ValueError(f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade")
             if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M:
                 for pos in pair.positions():
-                    if pos.is_open: self._fallback_exit(pos,i,reason); self._after_position_scan(pair,pos,None,None,None,None)
+                    if pos.is_open: self._fallback_exit(pos,i,reason)
                 return
             if sub.empty: return
         for j,row in sub.iterrows():
             if self._maybe_timeout_pair_at(pair, j, pd.Timestamp(row.timestamp), float(row.open), ExitSource.INTRABAR):
                 break
-            if self._maybe_timeout_remaining_leg(pair, j, pd.Timestamp(row.timestamp), float(row.open), ExitSource.INTRABAR):
-                break
             before=tuple(pos.is_open for pos in pair.positions())
             for pos in pair.positions():
                 if pos.is_open and not (pos.be_active_after is not None and pd.Timestamp(row.timestamp) < pd.Timestamp(pos.be_active_after)):
                     self._maybe_exit_bar(pos,j,row.high,row.low,row.timestamp,ExitSource.INTRABAR)
-                    self._after_position_scan(pair,pos,j,row.high,row.low,row.timestamp)
             if not pair.is_open or before != tuple(pos.is_open for pos in pair.positions()):
                 pass
         if self.intrabar_data.timestamp.max() < end - pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes):
@@ -726,7 +729,7 @@ class BacktestEngine:
                 raise ValueError(f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade")
             if self.config.intrabar_missing_policy==IntrabarMissingPolicy.WARN_AND_USE_15M:
                 for pos in pair.positions():
-                    if pos.is_open: self._fallback_exit(pos,i,"end_of_intrabar_data"); self._after_position_scan(pair,pos,None,None,None,None)
+                    if pos.is_open: self._fallback_exit(pos,i,"end_of_intrabar_data")
 
     def _scan_exit(self,pos,i):
         # Trailing state is stateful; never apply its current stop to a candle
@@ -763,201 +766,24 @@ class BacktestEngine:
         return False
 
 
-    def _be_exit_reason(self):
-        return {BreakEvenMode.ENTRY_PRICE: ExitReason.BE, BreakEvenMode.COST_ADJUSTED: ExitReason.BE_COST_ADJUSTED, BreakEvenMode.R_OFFSET: ExitReason.BE_R_OFFSET}[self.config.be_mode]
-    def _be_stop(self,pos):
-        if self.config.be_mode==BreakEvenMode.ENTRY_PRICE:
-            return pos.entry_price
-        if self.config.be_mode==BreakEvenMode.R_OFFSET:
-            return pos.entry_price + self.config.be_offset_r*pos.risk if pos.side==Side.LONG else pos.entry_price - self.config.be_offset_r*pos.risk
-        rate=self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee
-        q=pos.quantity or 1.0
-        if pos.side==Side.LONG:
-            # exit_price solves (x-entry)*q - entry_fee - x*q*rate ~= 0 before configured exit slippage; raw stop is adjusted so executed exit is x.
-            target=(pos.entry_price*q + pos.entry_fee)/(q*(1-rate))
-            return target/(1-self.config.slippage)
-        target=(pos.entry_price*q - pos.entry_fee)/(q*(1+rate))
-        return target/(1+self.config.slippage)
-    def _maybe_apply_be(self,pair,closed_pos,bar_index,high,low,timestamp):
-        if not self.config.enable_be_after_opposite_sl or closed_pos.exit_reason != ExitReason.SL: return False
-        other=pair.short if closed_pos.side==Side.LONG else pair.long
-        if other is None or not other.is_open or other.be_triggered: return False
-        new_sl=self._be_stop(other)
-        improves = new_sl > other.sl if other.side==Side.LONG else new_sl < other.sl
-        if not improves: return False
-        other.sl=new_sl; other.be_triggered=True; other.be_trigger_time=timestamp if timestamp is not None else closed_pos.exit_time; other.be_triggered_by_side=closed_pos.side; other.be_mode=self.config.be_mode.value; other.be_offset_r=self.config.be_offset_r; other.be_stop_price=new_sl; other.be_exit_reason=self._be_exit_reason(); pair.pair_be_triggered=True
-        if timestamp is not None and self.config.be_same_candle_policy==BreakEvenSameCandlePolicy.NEXT_CANDLE:
-            other.be_active_after=pd.Timestamp(timestamp)+pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
-        elif timestamp is not None:
-            touched = low<=new_sl if other.side==Side.LONG else high>=new_sl
-            if touched:
-                other.be_same_candle_ambiguous=True
-                slip=1-self.config.slippage if other.side==Side.LONG else 1+self.config.slippage
-                self._close_position(other,bar_index,new_sl*slip,other.be_exit_reason,ExitSource.INTRABAR,timestamp)
-        return True
-    def _after_position_scan(self,pair,position,bar_index,high,low,timestamp):
-        """Run first-normal-SL reactions once, keeping BE and timeout independent."""
-        timeout_started=self._maybe_start_remaining_leg_timeout(pair, position)
-        if timeout_started or (position.exit_reason==ExitReason.SL and not pair.first_sl_survivor_partial_taken):
-            self._maybe_take_first_sl_survivor_partial(pair,position,bar_index,timestamp)
-        self._maybe_apply_be(pair,position,bar_index,high,low,timestamp)
-
-    def _maybe_start_remaining_leg_timeout(self,pair,closed_pos):
-        if (not self.config.enable_remaining_leg_timeout_after_first_sl
-                or pair.remaining_leg_timeout_after_first_sl_started
-                or closed_pos.exit_reason != ExitReason.SL):
+    def _maybe_timeout_pair_at(self, pair, i, timestamp, raw_open, source):
+        if not getattr(pair, "profile_timeout_enabled", False):
             return False
-        other=pair.short if closed_pos.side==Side.LONG else pair.long
-        if other is None or not other.is_open: return False
-        first_sl_time=pd.Timestamp(closed_pos.exit_time)
-        pair.remaining_leg_timeout_after_first_sl_started=True
-        pair.first_sl_side=closed_pos.side
-        pair.first_sl_time=first_sl_time
-        pair.remaining_leg_timeout_deadline=first_sl_time+self.remaining_leg_timeout_delta
-        return True
-
-    def _maybe_take_first_sl_survivor_partial(self,pair,closed_pos,bar_index,timestamp):
-        if (not self.config.enable_first_sl_survivor_partial_close
-                or pair.first_sl_survivor_partial_taken
-                or closed_pos.exit_reason != ExitReason.SL):
+        minutes = getattr(pair, "profile_timeout_minutes", None)
+        if minutes is None:
             return False
-        other=pair.short if closed_pos.side==Side.LONG else pair.long
-        if other is None or not other.is_open: return False
-        quantity=other.quantity*self.config.first_sl_survivor_partial_close_pct/100.0
-        if quantity <= 0 or quantity >= other.quantity: return False
-        closed_slip=1-self.config.slippage if closed_pos.side==Side.LONG else 1+self.config.slippage
-        raw=float(closed_pos.exit_price)/closed_slip
-        partial_slip=1-self.config.slippage if other.side==Side.LONG else 1+self.config.slippage
-        price=raw*partial_slip
-        gross=((price-other.entry_price) if other.side==Side.LONG else (other.entry_price-price))*quantity
-        fee=price*quantity*(self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)
-        net=gross-fee
-        other.first_sl_partial_original_quantity=other.quantity
-        other.first_sl_partial_quantity=quantity
-        other.first_sl_partial_gross_pnl=gross
-        other.first_sl_partial_fee=fee
-        other.first_sl_partial_net_pnl=net
-        other.quantity-=quantity
-        other.exit_fee+=fee
-        other.fees=other.entry_fee+other.exit_fee
-        pair.first_sl_survivor_partial_taken=True
-        if pair.first_sl_time is None:
-            pair.first_sl_time=pd.Timestamp(closed_pos.exit_time)
-            pair.first_sl_side=closed_pos.side
-        pair.first_sl_survivor_partial_side=other.side
-        pair.first_sl_survivor_partial_time=pd.Timestamp(timestamp if timestamp is not None else closed_pos.exit_time)
-        pair.first_sl_survivor_partial_pct=self.config.first_sl_survivor_partial_close_pct
-        pair.first_sl_survivor_partial_quantity=quantity
-        pair.first_sl_survivor_partial_exit_price=price
-        pair.first_sl_survivor_partial_gross_pnl=gross
-        pair.first_sl_survivor_partial_fee=fee
-        pair.first_sl_survivor_partial_net_pnl=net
-        return True
-
-    def _maybe_timeout_remaining_leg(self,pair,i,timestamp,raw_open,source):
-        deadline=pair.remaining_leg_timeout_deadline
-        if not pair.remaining_leg_timeout_after_first_sl_started or pair.remaining_leg_timeout_triggered or deadline is None:
+        timeout_at = pd.Timestamp(pair.strategy_entry_time) + pd.Timedelta(minutes=minutes)
+        timestamp = pd.Timestamp(timestamp)
+        if timestamp < timeout_at:
             return False
-        timestamp=pd.Timestamp(timestamp)
-        if timestamp < pd.Timestamp(deadline): return False
-        open_positions=[p for p in pair.positions() if p.is_open]
-        if len(open_positions) != 1: return False
-        pos=open_positions[0]
-        profit_r=((float(raw_open)-pos.entry_price) if pos.side==Side.LONG else (pos.entry_price-float(raw_open)))/pos.risk
-        pair.remaining_leg_timeout_checkpoint_count += 1
-        pair.remaining_leg_timeout_last_checkpoint_time=timestamp
-        pair.remaining_leg_timeout_last_checkpoint_profit_r=float(profit_r)
-        score_passed = self._remaining_leg_checkpoint_score(pair, pos, timestamp, raw_open, profit_r)
-        if self.config.enable_remaining_leg_checkpoint_score_extension and score_passed:
-            pair.checkpoint_zero_score_streak=0
-            pair.remaining_leg_timeout_extension_count += 1
-            pair.remaining_leg_timeout_deadline=pd.Timestamp(deadline)+self.remaining_leg_timeout_delta
-            return False
-        if (self.config.enable_checkpoint_zero_score_confirmation
-                and pair.checkpoint_score_last_pass_count == 0):
-            pair.checkpoint_zero_score_streak += 1
-            pair.checkpoint_zero_score_max_streak=max(pair.checkpoint_zero_score_max_streak,pair.checkpoint_zero_score_streak)
-            pair.checkpoint_zero_score_last_time=timestamp
-            if pair.checkpoint_zero_score_streak < self.config.checkpoint_zero_score_confirmations_required:
-                pair.remaining_leg_timeout_extension_count += 1
-                pair.remaining_leg_timeout_deadline=timestamp+self.checkpoint_zero_score_recheck_delta
-                return False
-            pair.checkpoint_zero_score_confirmed_close=True
-        if (self.config.enable_remaining_leg_timeout_profit_extension
-                and profit_r >= self.config.remaining_leg_timeout_profit_threshold_r):
-            pair.remaining_leg_timeout_extension_count += 1
-            pair.remaining_leg_timeout_deadline=pd.Timestamp(deadline)+self.remaining_leg_timeout_delta
-            return False
-        if source == ExitSource.FALLBACK_15M:
-            pos.missing_intrabar_data=True
-            pos.fallback_reason="remaining_leg_timeout_intrabar_unavailable"
-            self.fallback_reasons.append(pos.fallback_reason)
-        if self.config.enable_reentry_gate_after_remaining_leg_timeout:
-            pair.checkpoint_reentry_gate_started=True; pair.checkpoint_reentry_gate_side=pos.side; pair.checkpoint_reentry_gate_tp=pos.tp; pair.checkpoint_reentry_gate_sl=pos.sl; pair.checkpoint_reentry_gate_start_time=timestamp
-            self.reentry_gates.append({"pair":pair,"side":pos.side,"tp":float(pos.tp),"sl":float(pos.sl),"start_time":timestamp})
-        slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
-        self._close_position(pos,i,float(raw_open)*slip,ExitReason.REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL,source,timestamp)
-        pair.remaining_leg_timeout_triggered=True
-        pair.remaining_leg_timeout_exit_time=timestamp
-        pair.remaining_leg_timeout_exit_side=pos.side
-        return True
-    def _remaining_leg_checkpoint_score(self,pair,pos,timestamp,raw_open,profit_r):
-        if not self.config.enable_remaining_leg_checkpoint_score_extension:
-            return False
-        # Timeout checks may run on a 1-minute intrabar row whose index is much
-        # larger than the strategy arrays. Resolve the checkpoint timestamp to
-        # the current strategy candle, then use the previous completed candle's
-        # indicators to avoid both out-of-bounds access and look-ahead bias.
-        strategy_i=int(self.data.timestamp.searchsorted(pd.Timestamp(timestamp), side="right")-1)
-        strategy_i=max(0,min(strategy_i,len(self.data)-1))
-        indicator_i=max(0,strategy_i-1)
-        raw_open=float(raw_open)
-        atr_value=float(self.atr_values[indicator_i])
-        atr_pct=atr_value/raw_open*100 if np.isfinite(atr_value) and raw_open else np.nan
-        plus_di=float(self.plus_di_values[indicator_i]); minus_di=float(self.minus_di_values[indicator_i])
-        directional_di=(plus_di-minus_di) if pos.side==Side.LONG else (minus_di-plus_di)
-        bb_width_pct=float(self.bb_width_pct[indicator_i])
-        pair.checkpoint_score_last_atr_pct=float(atr_pct) if np.isfinite(atr_pct) else None
-        pair.checkpoint_score_last_directional_di=float(directional_di) if np.isfinite(directional_di) else None
-        pair.checkpoint_score_last_bb_width_pct=float(bb_width_pct) if np.isfinite(bb_width_pct) else None
-        checks=[]
-        if self.config.checkpoint_score_use_profit: checks.append(np.isfinite(profit_r) and profit_r >= self.config.checkpoint_score_min_profit_r)
-        if self.config.checkpoint_score_use_atr_pct: checks.append(np.isfinite(atr_pct) and atr_pct <= self.config.checkpoint_score_max_atr_pct)
-        if self.config.checkpoint_score_use_directional_di: checks.append(np.isfinite(directional_di) and directional_di >= self.config.checkpoint_score_min_directional_di)
-        if self.config.checkpoint_score_use_bb_width_pct: checks.append(np.isfinite(bb_width_pct) and bb_width_pct <= self.config.checkpoint_score_max_bb_width_pct)
-        pair.checkpoint_score_last_pass_count=sum(bool(value) for value in checks)
-        pair.checkpoint_score_last_condition_count=len(checks)
-        pair.checkpoint_score_last_passed=pair.checkpoint_score_last_pass_count >= self.config.checkpoint_score_min_conditions
-        return pair.checkpoint_score_last_passed
-    def _reentry_gate_blocks(self,i):
-        return bool(self.reentry_gates)
-    def _update_reentry_gates(self,i):
-        if not self.reentry_gates: return
-        high=float(self.high[i]); low=float(self.low[i]); timestamp=pd.Timestamp(self.times[i])
-        remaining=[]
-        for gate in self.reentry_gates:
-            side=gate["side"]; tp=gate["tp"]; sl=gate["sl"]
-            tp_hit=high>=tp if side==Side.LONG else low<=tp
-            sl_hit=low<=sl if side==Side.LONG else high>=sl
-            if not (tp_hit or sl_hit):
-                remaining.append(gate); continue
-            reason="TP_AND_SL" if tp_hit and sl_hit else ("TP" if tp_hit else "SL")
-            pair=gate["pair"]; pair.checkpoint_reentry_gate_release_time=timestamp; pair.checkpoint_reentry_gate_release_reason=reason
-            self.reentry_gate_release_index=i
-        self.reentry_gates=remaining
-    def _maybe_timeout_pair_at(self,pair,i,timestamp,raw_open,source):
-        profile_timeout=bool(getattr(pair,"profile_timeout_enabled",False))
-        both_timeout=bool(self.config.enable_both_open_timeout and pair.long is not None and pair.short is not None and pair.long.is_open and pair.short.is_open)
-        if not profile_timeout and not both_timeout: return False
-        minutes=getattr(pair,"profile_timeout_minutes",None) if profile_timeout else self.config.max_both_open_minutes
-        timeout_at=pd.Timestamp(pair.strategy_entry_time) + pd.Timedelta(minutes=minutes)
-        timestamp=pd.Timestamp(timestamp)
-        if timestamp < timeout_at: return False
         for pos in pair.positions():
             if pos.is_open:
-                slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
-                self._close_position(pos,i,float(raw_open)*slip,ExitReason.BOTH_OPEN_TIMEOUT,source,timestamp)
-        pair.both_open_timeout_triggered=True; pair.timeout_minutes=int(minutes); pair.timeout_exit_time=timestamp; self.last_timeout_exit_time=timestamp
+                slip = 1-self.config.slippage if pos.side == Side.LONG else 1+self.config.slippage
+                self._close_position(pos, i, float(raw_open)*slip, ExitReason.BOTH_OPEN_TIMEOUT, source, timestamp)
+        pair.both_open_timeout_triggered = True
+        pair.timeout_minutes = int(minutes)
+        pair.timeout_exit_time = timestamp
+        self.last_timeout_exit_time = timestamp
         return True
     def _fallback_exit(self,pos,i,reason):
         pos.fallback_reason=reason; self.fallback_reasons.append(reason)
@@ -1397,15 +1223,14 @@ class BacktestEngine:
         for p in self.active_pairs:
             if force or not p.is_open:
                 self.current_equity+=sum(pos.net_pnl for pos in p.positions()); p.equity_after_trade=self.current_equity; self.completed_pairs.append(p)
-                if not force:
-                    self.last_closed_pair_id=p.pair_id; self.previous_pair_close_time=max(pd.Timestamp(pos.exit_time) for pos in p.positions()); self.pair_closed_index=self.current_index; self.random_skips=0
             else: still.append(p)
         self.active_pairs=still
     def _result_rows_for_pair(self, p):
         positions = list(p.positions())
-        if self.config.trade_direction == TradeDirectionMode.BOTH_INDEPENDENT:
-            return [(pos.side.value.lower(), [pos]) for pos in positions]
-        return [("pair" if len(positions) > 1 else positions[0].side.value.lower(), positions)]
+        if not positions:
+            return []
+        pos = positions[0]
+        return [(pos.side.value.lower(), [pos])]
 
     def _build_result_row(self, p, row_kind, positions):
         primary=positions[0]
