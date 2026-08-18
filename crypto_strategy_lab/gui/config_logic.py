@@ -286,7 +286,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
 def save_config_json(path: str | Path, values: dict[str, Any]) -> None:
     Path(path).write_text(json.dumps(canonical_config_values({**default_gui_config(), **values}), indent=2, default=str))
 
-_OBSOLETE_EXACT = {
+_PROFILE_OWNED_LEGACY_EXACT = {
     "trade_direction","sl_mult","tp_mult","enable_partial_stop_loss","sl1_r","sl1_close_pct","sl2_r","enable_partial_take_profit","tp1_r","tp1_close_pct","tp2_r","tp2_close_pct","stop_loss_r","after_tp1_stop_mode","after_tp1_stop_offset_r","tp2_exit_mode","enable_trailing_profit","trail_activation_trigger","trail_activation_r","trail_distance_r","trail_apply_to","trail_intrabar_mode",
     "enable_both_open_timeout","max_both_open_minutes","both_open_timeout_unit","enable_be_after_opposite_sl","be_mode","be_offset_r","be_same_candle_policy",
     "enable_adx_filter","adx_filter_mode","adx_minimum","adx_maximum","enable_bb_width_filter","bb_width_filter_mode","bb_width_minimum","bb_width_maximum",
@@ -297,18 +297,22 @@ _OBSOLETE_EXACT = {
     "enable_remaining_leg_checkpoint_score_extension","enable_first_sl_survivor_partial_close","first_sl_survivor_partial_close_pct","enable_checkpoint_zero_score_confirmation","checkpoint_zero_score_confirmations_required","checkpoint_zero_score_recheck_minutes","checkpoint_zero_score_recheck_unit","enable_reentry_gate_after_remaining_leg_timeout",
     "vwap_breakout_lookback_hours","vwap_volume_lookback","vwap_volume_multiplier","vwap_slope_lookback","vwap_atr_pct_minimum","vwap_atr_pct_maximum","vwap_confirmation_mode","vwap_retest_window_candles","vwap_retest_tolerance_atr",
 }
-_OBSOLETE_PREFIXES = ("di_direction_","di_reward_","di_long_","di_short_","enable_di_regime_","enable_bull_long_","bull_long_","enable_sideways_","sideways_","enable_bear_short_","bear_short_","enable_directional_","directional_","enable_long_momentum_","long_momentum_","enable_regime_direction_","allow_bull_","allow_bear_","allow_sideways_","enable_biased_","biased_","enable_short_vwap_","short_vwap_","enable_bull_regime_short_","enable_bear_regime_adx_","bear_regime_adx_","checkpoint_score_")
+_PROFILE_OWNED_LEGACY_PREFIXES = ("di_direction_","di_reward_","di_long_","di_short_","enable_di_regime_","enable_bull_long_","bull_long_","enable_sideways_","sideways_","enable_bear_short_","bear_short_","enable_directional_","directional_","enable_long_momentum_","long_momentum_","enable_regime_direction_","allow_bull_","allow_bear_","allow_sideways_","enable_biased_","biased_","enable_short_vwap_","short_vwap_","enable_bull_regime_short_","enable_bear_regime_adx_","bear_regime_adx_","checkpoint_score_")
 
-_REGIME_CONFIG_KEYS = {"market_regime_method","structural_regime_sma_days","structural_regime_slope_lookback_days","structural_regime_benchmark_csv","bull_regime_lookback_days","bull_regime_return_threshold"}
+
+def _is_profile_owned_legacy_key(key: str) -> bool:
+    """Return True for hidden global settings superseded by Strategy Profiles."""
+    return key in _PROFILE_OWNED_LEGACY_EXACT or key.startswith(_PROFILE_OWNED_LEGACY_PREFIXES)
+
 
 def canonical_config_values(values: dict[str, Any]) -> dict[str, Any]:
-    """Return the compact, profile-only public configuration format."""
-    result={}
-    for key,value in values.items():
-        if key not in DEFAULT_GUI_CONFIG:
-            continue
-        if key in _REGIME_CONFIG_KEYS or (key not in _OBSOLETE_EXACT and not key.startswith(_OBSOLETE_PREFIXES)): result[key]=value
-    result["enable_strategy_profiles"]=True
+    """Return the saved-config contract: shared settings plus Strategy Profiles."""
+    result = {
+        key: value
+        for key, value in values.items()
+        if key in DEFAULT_GUI_CONFIG and not _is_profile_owned_legacy_key(key)
+    }
+    result["enable_strategy_profiles"] = True
     return result
 
 def load_config_json(path: str | Path) -> dict[str, Any]:

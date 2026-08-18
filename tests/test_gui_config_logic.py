@@ -65,24 +65,6 @@ def test_optional_report_settings_round_trip(tmp_path):
     assert cfg.create_standard_charts is False
 
 
-def legacy_entry_filter_options_round_trip(tmp_path):
-    path = tmp_path / "entry-filters.json"
-    values = {
-        **base(tmp_path),
-        "enable_bb_width_filter": True,
-        "bb_width_filter_mode": "Minimum Width",
-        "bb_width_minimum": 0.012,
-        "enable_skip_monday_entries": True,
-        "skip_monday_timezone": "UTC",
-    }
-    save_config_json(path, values)
-    loaded = load_config_json(path)
-    cfg = build_backtest_config(loaded)
-    assert cfg.enable_bb_width_filter is True
-    assert cfg.bb_width_minimum == pytest.approx(0.012)
-    assert cfg.enable_skip_monday_entries is True
-    assert cfg.skip_monday_timezone == "UTC"
-
 def test_gui_passes_selected_intrabar_csv_and_enabled_flag(tmp_path):
     strategy = tmp_path / "strategy.csv"
     intrabar = tmp_path / "intrabar.csv"
@@ -152,55 +134,6 @@ def test_intrabar_timeframe_must_be_lower_only_when_enabled(tmp_path):
 
     cfg = build_backtest_config({**values, "use_intrabar_data": False})
     assert cfg.use_intrabar_data is False
-
-
-def legacy_remaining_leg_timeout_json_round_trip_and_validation(tmp_path):
-    path = tmp_path / "remaining-timeout.json"
-    values = {**base(tmp_path), "enable_remaining_leg_timeout_after_first_sl": True,
-              "remaining_leg_timeout_after_first_sl_minutes": 120,
-              "remaining_leg_timeout_after_first_sl_unit": "Hours",
-              "enable_remaining_leg_timeout_profit_extension": True,
-              "remaining_leg_timeout_profit_threshold_r": 10,
-              "enable_reentry_gate_after_remaining_leg_timeout": True}
-    save_config_json(path, values)
-    loaded = load_config_json(path)
-    cfg = build_backtest_config(loaded)
-    assert cfg.enable_remaining_leg_timeout_after_first_sl is True
-    assert cfg.remaining_leg_timeout_after_first_sl_minutes == 120
-    assert cfg.enable_remaining_leg_timeout_profit_extension is True
-    assert cfg.remaining_leg_timeout_profit_threshold_r == 10
-    assert cfg.enable_reentry_gate_after_remaining_leg_timeout is True
-    assert loaded["remaining_leg_timeout_after_first_sl_unit"] == "Hours"
-
-    score_values = {
-        **values,
-        "enable_remaining_leg_timeout_profit_extension": False,
-        "enable_remaining_leg_checkpoint_score_extension": True,
-        "checkpoint_score_min_conditions": 3,
-    }
-    score_cfg = build_backtest_config(score_values)
-    assert score_cfg.enable_remaining_leg_checkpoint_score_extension
-    assert score_cfg.checkpoint_score_max_atr_pct == pytest.approx(0.08)
-
-    combined = build_backtest_config({
-        **score_values,
-        "enable_first_sl_survivor_partial_close": True,
-        "first_sl_survivor_partial_close_pct": 25,
-        "enable_checkpoint_zero_score_confirmation": True,
-        "checkpoint_zero_score_confirmations_required": 2,
-        "checkpoint_zero_score_recheck_minutes": 120,
-    })
-    assert combined.first_sl_survivor_partial_close_pct == 25
-    assert combined.checkpoint_zero_score_recheck_minutes == 120
-
-    with pytest.raises(ValueError, match="Remaining-Leg Timeout After First SL"):
-        build_backtest_config({**values, "remaining_leg_timeout_after_first_sl_minutes": -1})
-    with pytest.raises(ValueError, match="requires Remaining-Leg Timeout"):
-        build_backtest_config({**values, "enable_remaining_leg_timeout_after_first_sl": False})
-    with pytest.raises(ValueError, match="Threshold"):
-        build_backtest_config({**values, "remaining_leg_timeout_profit_threshold_r": -1})
-
-
 
 
 def test_support_resistance_settings_round_trip_and_validation(tmp_path):
