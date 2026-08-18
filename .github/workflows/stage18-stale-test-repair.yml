@@ -35,6 +35,13 @@ jobs:
         run: python tools/stage18_repair_stale_tests.py
       - name: Compile source
         run: python -m compileall -q crypto_strategy_lab mcp_server tools app.py
+      - name: Commit repaired tests and UI text
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_github_manager.py tests/test_gui_main_window.py crypto_strategy_lab/gui/main_window.py
+          git diff --cached --quiet || git commit -m "Repair stale full-suite regressions"
+          git push
       - name: Run focused regressions
         env:
           QT_QPA_PLATFORM: offscreen
@@ -49,10 +56,3 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: ${{ github.workspace }}
         run: python -m pytest -q
-      - name: Commit repaired tests and UI text
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/test_github_manager.py tests/test_gui_main_window.py crypto_strategy_lab/gui/main_window.py
-          git diff --cached --quiet || git commit -m "Repair stale full-suite regressions"
-          git push
