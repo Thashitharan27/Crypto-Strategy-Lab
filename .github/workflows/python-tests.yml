@@ -7,11 +7,42 @@ on:
     branches: [ main ]
     types: [opened, synchronize, reopened, ready_for_review]
 
+permissions:
+  contents: write
+
 concurrency:
   group: python-tests-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
+  stage25-migration:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'chatgpt/stage25-mean-reversion-analysis'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Stage 25 branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Apply migration once
+        run: |
+          if grep -q 'enable_mean_reversion_analysis: bool' crypto_strategy_lab/config.py; then
+            echo "Stage 25 production migration already applied."
+            exit 0
+          fi
+          python tools/stage25_mean_reversion_analysis.py
+          python -m py_compile crypto_strategy_lab/config.py crypto_strategy_lab/gui/config_logic.py crypto_strategy_lab/gui/main_window.py crypto_strategy_lab/engine.py crypto_strategy_lab/statistics.py crypto_strategy_lab/cli.py crypto_strategy_lab/gui/worker.py crypto_strategy_lab/mean_reversion.py
+          git config user.name "chatgpt-stage25"
+          git config user.email "actions@users.noreply.github.com"
+          git add crypto_strategy_lab
+          git commit -m "Stage 25: add analysis-only mean reversion telemetry"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
   strategy-profile-safety:
     runs-on: ubuntu-latest
     timeout-minutes: 30
