@@ -135,11 +135,16 @@ class MainWindow(QMainWindow):
         help_text=QLabel("When enabled, the strategy attempts an entry once per day at the selected time.\n\nIf a trade is open at that time and SKIP_DAY is selected, no entry is opened later that day."); help_text.setWordWrap(True)
         for lab,w in [("",self.enable_daily_schedule),("Daily Entry Time",self.daily_entry_time),("Entry Timezone",self.daily_entry_timezone),("Missed Entry Policy",self.daily_entry_missed_policy),("Summary",self.next_entry_summary),("",help_text)]: sched.addRow(lab,w)
         self.enable_daily_schedule.toggled.connect(self.update_dynamic)
-        risk=group("Account & Position Sizing"); self.account_form=risk
-        self.risk_mode=QComboBox(); self.risk_mode.addItems(["ATR","PERCENT","FIXED"]); self.trading_start=self._line(); self.trading_end=self._line(); self.max_lev_leg=self._line("3"); self.max_lev_combined=self._line("5"); self.missing_policy=PolicyComboBox(); self.missing_policy.addItem("Use strategy candle for affected interval","WARN_AND_USE_15M"); self.missing_policy.addItem("Stop the run","ERROR"); self.missing_policy.addItem("Continue with available intrabar candles","WARN_AND_CONTINUE"); self.zero_cost=QCheckBox("Run Zero-Cost Comparison"); self.atr_period=QSpinBox(); self.atr_period.setRange(1,99999); self.atr_mult=self._spin(1,0); self.percent_r=self._line("0.20%"); self.fixed_r=self._spin(100,0); self.equity=self._spin(1000,0,1e12,2); self.risk_leg=self._line("1%")
-        self.risk_formula=QLabel(); self.risk_warn=QLabel(); self.risk_warn.setWordWrap(True)
-        for lab,w in [("Starting Equity",self.equity),("Base Account Risk Per Trade",self.risk_leg),("Risk Mode",self.risk_mode),("ATR Period",self.atr_period),("ATR Multiplier",self.atr_mult),("Price-Distance Percentage",self.percent_r),("Fixed Risk Distance",self.fixed_r),("Maximum Leverage Per Trade",self.max_lev_leg),("Maximum Portfolio Leverage",self.max_lev_combined),("Formula",self.risk_formula),("Planned Risk",self.risk_warn)]: risk.addRow(lab,w)
-        self.risk_mode.currentTextChanged.connect(self.update_dynamic); self.risk_leg.textChanged.connect(self.update_dynamic)
+        risk=group("Account Risk & Leverage"); self.account_form=risk
+        self.risk_mode=PolicyComboBox(); self.risk_mode.addItem("ATR volatility","ATR"); self.risk_mode.addItem("Percent of price","PERCENT"); self.risk_mode.addItem("Fixed price distance","FIXED")
+        self.trading_start=self._line(); self.trading_end=self._line(); self.max_lev_leg=self._line("3"); self.max_lev_combined=self._line("5"); self.missing_policy=PolicyComboBox(); self.missing_policy.addItem("Use strategy candle for affected interval","WARN_AND_USE_15M"); self.missing_policy.addItem("Stop the run","ERROR"); self.missing_policy.addItem("Continue with available intrabar candles","WARN_AND_CONTINUE"); self.zero_cost=QCheckBox("Run Zero-Cost Comparison"); self.atr_period=QSpinBox(); self.atr_period.setRange(1,99999); self.atr_mult=self._spin(1,0); self.percent_r=self._line("0.20%"); self.fixed_r=self._spin(100,0); self.equity=self._spin(1000,0,1e12,2); self.risk_leg=self._line("1%")
+        self.risk_formula=QLabel(); self.risk_formula.setWordWrap(True); self.risk_warn=QLabel(); self.risk_warn.setWordWrap(True)
+        self.account_risk_help=QLabel("Account risk controls how many dollars are planned to be lost at the initial full stop. The selected Strategy Profile can scale this with its Profile Risk Multiplier."); self.account_risk_help.setWordWrap(True)
+        for lab,w in [("Starting Equity",self.equity),("Base Risk Per Trade",self.risk_leg),("Effective Account Risk",self.risk_warn),("Maximum Leverage Per Trade",self.max_lev_leg),("Maximum Portfolio Leverage",self.max_lev_combined),("",self.account_risk_help)]: risk.addRow(lab,w)
+        basis=group("Stop Distance Basis"); self.distance_basis_form=basis
+        self.distance_basis_help=QLabel("This defines one price-distance unit. Strategy Profile stop distances multiply this unit; it does not change the account-risk percentage by itself."); self.distance_basis_help.setWordWrap(True)
+        for lab,w in [("Distance Basis",self.risk_mode),("ATR Period",self.atr_period),("ATR Unit Multiplier",self.atr_mult),("Percentage Distance Unit",self.percent_r),("Fixed Distance Unit",self.fixed_r),("Distance Unit",self.risk_formula),("",self.distance_basis_help)]: basis.addRow(lab,w)
+        self.risk_mode.currentTextChanged.connect(self.update_dynamic); self.risk_leg.textChanged.connect(self.update_dynamic); self.equity.valueChanged.connect(self.update_dynamic); self.atr_period.valueChanged.connect(self.update_dynamic); self.atr_mult.valueChanged.connect(self.update_dynamic); self.percent_r.textChanged.connect(self.update_dynamic); self.fixed_r.valueChanged.connect(self.update_dynamic)
         period=group("Backtest Period"); self.period_form=period
         self.entire_dataset=QCheckBox("Use entire dataset"); self.entire_dataset.setChecked(True)
         self.trading_start.setPlaceholderText("YYYY-MM-DD (optional)"); self.trading_end.setPlaceholderText("YYYY-MM-DD (optional)")
@@ -590,10 +595,19 @@ class MainWindow(QMainWindow):
             "WARN_AND_CONTINUE":f"Available {self.intrabar_timeframe.currentText()} candles are evaluated and missing portions are skipped.",
         }.get(self.missing_policy.currentData(),"")
         self.data_help.setText(f"ATR, entry price, SL, and TP are calculated from {self.strategy_timeframe.currentText()} candles.\n" + (f"{self.intrabar_timeframe.currentText()} candles determine the exact exit sequence. {policy_help}\n" if self.use_intrabar.isChecked() else "Intrabar exit resolution is disabled.\n") + "Fees are charged on full notional, not margin; leverage changes required margin but does not reduce trading fees.")
-        m=getattr(self,'risk_mode',None) and self.risk_mode.currentText(); self.atr_period.setVisible(m=="ATR"); self.atr_mult.setVisible(m=="ATR"); self.percent_r.setVisible(m=="PERCENT"); self.fixed_r.setVisible(m=="FIXED"); self.risk_formula.setText({"ATR":"R = ATR × ATR Multiplier","PERCENT":"R = Entry Price × Percentage","FIXED":"R = Fixed Price Distance"}.get(m,""));
-        if hasattr(self,"account_form"):
-            self.account_form.setRowVisible(self.atr_period,m=="ATR"); self.account_form.setRowVisible(self.atr_mult,m=="ATR")
-            self.account_form.setRowVisible(self.percent_r,m=="PERCENT"); self.account_form.setRowVisible(self.fixed_r,m=="FIXED")
+        m=getattr(self,'risk_mode',None) and self.risk_mode.currentText(); self.atr_period.setVisible(m=="ATR"); self.atr_mult.setVisible(m=="ATR"); self.percent_r.setVisible(m=="PERCENT"); self.fixed_r.setVisible(m=="FIXED")
+        try:
+            distance_text={
+                "ATR":f"1 volatility unit = ATR({self.atr_period.value()}) × {self.atr_mult.value():g}",
+                "PERCENT":f"1 distance unit = Entry Price × {format_percentage(parse_percentage(self.percent_r.text()),2)}",
+                "FIXED":f"1 distance unit = {self.fixed_r.value():g} price units",
+            }.get(m,"")
+            self.risk_formula.setText(distance_text)
+        except Exception:
+            self.risk_formula.setText("Distance unit unavailable until the value is valid")
+        if hasattr(self,"distance_basis_form"):
+            self.distance_basis_form.setRowVisible(self.atr_period,m=="ATR"); self.distance_basis_form.setRowVisible(self.atr_mult,m=="ATR")
+            self.distance_basis_form.setRowVisible(self.percent_r,m=="PERCENT"); self.distance_basis_form.setRowVisible(self.fixed_r,m=="FIXED")
         if hasattr(self,"period_form"):
             custom_period=not self.entire_dataset.isChecked()
             self.period_form.setRowVisible(self.trading_start,custom_period); self.period_form.setRowVisible(self.trading_end,custom_period)
@@ -602,8 +616,8 @@ class MainWindow(QMainWindow):
             if hasattr(self,"profile_editor"):
                 profile_name=self.profile_editor.current.replace("_"," ").title()
                 multiplier=float(self.profile_editor.profiles[self.profile_editor.current].risk_multiplier)
-            planned=r*multiplier
-            self.risk_warn.setText(f"Base {format_percentage(r,2)} × {profile_name} {multiplier:g} = {format_percentage(planned,2)} per trade" + (" — warning: exceeds 5%." if planned>0.05 else ""))
+            planned=r*multiplier; planned_cash=self.equity.value()*planned
+            self.risk_warn.setText(f"Base {r*100:.2f}% × {profile_name} {multiplier:g}x = {planned*100:.2f}% account risk (${planned_cash:,.2f} at ${self.equity.value():,.2f} equity)" + (" — warning: exceeds 5%." if planned>0.05 else ""))
         except Exception: pass
         if hasattr(self,"enable_daily_schedule"):
             en=self.enable_daily_schedule.isChecked(); self.daily_entry_time.setEnabled(en); self.daily_entry_timezone.setEnabled(en); self.daily_entry_missed_policy.setEnabled(en); self.next_entry_summary.setText(f"Next eligible entry time: {self.daily_entry_time.text() or '00:00'} {self.daily_entry_timezone.text() or 'UTC'}" if en else "Daily schedule disabled; existing entry mode controls entries.")

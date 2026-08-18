@@ -65,7 +65,7 @@ def test_sl1_then_sl2_closes_current_profile_position_at_weighted_loss():
     assert position.sl1_hit and position.is_open
     assert engine._scan_exit(position, 2)
     assert position.final_exit_reason == "SL1_THEN_SL2"
-    assert weighted_price_r(position) == pytest.approx(-1.25)
+    assert weighted_price_r(position) == pytest.approx(-0.625)
 
 
 def test_sl1_then_profile_target_closes_remainder():
@@ -74,7 +74,7 @@ def test_sl1_then_profile_target_closes_remainder():
     assert position.sl1_hit and position.is_open
     assert engine._scan_exit(position, 2)
     assert position.final_exit_reason == "SL1_THEN_TP"
-    assert weighted_price_r(position) == pytest.approx(1.75)
+    assert weighted_price_r(position) == pytest.approx(0.875)
 
 
 def test_profile_partial_stop_requires_ordered_levels():

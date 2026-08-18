@@ -484,9 +484,9 @@ class BacktestEngine:
         entry_fee_rate = self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
         entry_fee = entry * qty * entry_fee_rate
         pos = Position(
-            side, self._execution_time(i), i, entry, r, sl, tp, qty, risk_amt, entry * qty,
+            side, self._execution_time(i), i, entry, stop, sl, tp, qty, risk_amt, entry * qty,
             float(self.atr_values[ind_i]), uncapped, qty * entry / self.current_equity,
-            entry_fee=entry_fee, fees=entry_fee, original_sl=sl,
+            distance_unit=r, entry_fee=entry_fee, fees=entry_fee, original_sl=sl,
             be_enabled=active_profile.break_even_enabled,
             be_mode="R_OFFSET" if active_profile.break_even_offset_r else "ENTRY_PRICE",
             be_offset_r=active_profile.break_even_offset_r,
@@ -924,7 +924,8 @@ class BacktestEngine:
     def _apply_atr_checkpoint_extensions(self, pos, high, low, timestamp):
         """Extend the biased leg one ATR at a time when DI and BB checks pass."""
         direction=1 if pos.side==Side.LONG else -1
-        favourable_r=((high-pos.entry_price) if pos.side==Side.LONG else (pos.entry_price-low))/pos.risk
+        unit=pos.distance_unit or pos.risk
+        favourable_r=((high-pos.entry_price) if pos.side==Side.LONG else (pos.entry_price-low))/unit
         while pos.is_open and favourable_r + 1e-12 >= pos.atr_checkpoint_next_r:
             checkpoint_r=float(pos.atr_checkpoint_next_r)
             indicator_i=self._checkpoint_indicator_index(timestamp)
@@ -951,11 +952,11 @@ class BacktestEngine:
                 break
             pos.atr_checkpoint_pass_count += 1
             new_tp_r=checkpoint_r+2.0
-            pos.tp=pos.entry_price+direction*new_tp_r*pos.risk
+            pos.tp=pos.entry_price+direction*new_tp_r*unit
             pos.atr_checkpoint_final_tp_r=new_tp_r
             if checkpoint_r >= pos.atr_checkpoint_profit_lock_start:
                 lock_r=checkpoint_r-pos.atr_checkpoint_profit_lock_distance
-                candidate=pos.entry_price+direction*lock_r*pos.risk
+                candidate=pos.entry_price+direction*lock_r*unit
                 improves=candidate>pos.sl if pos.side==Side.LONG else candidate<pos.sl
                 if improves:
                     pos.sl=candidate
@@ -1282,10 +1283,10 @@ class BacktestEngine:
         applied_rr = float(profile.reward_risk_ratio) if profile is not None else np.nan
 
         if partial_tp:
-            winning_price_r = stop_mult * ((tp1_pct/100.0) * tp1_r + (1-tp1_pct/100.0) * tp2_r)
+            winning_trade_r = (tp1_pct/100.0) * tp1_r + (1-tp1_pct/100.0) * tp2_r
         else:
-            winning_price_r = stop_mult * applied_rr if np.isfinite(applied_rr) else np.nan
-        expected_profit = winning_price_r * primary.risk * primary.quantity if np.isfinite(winning_price_r) else np.nan
+            winning_trade_r = applied_rr if np.isfinite(applied_rr) else np.nan
+        expected_profit = winning_trade_r * primary.risk * primary.quantity if np.isfinite(winning_trade_r) else np.nan
         estimated_fees = entry_notional * (
             (self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)
             + (self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)
@@ -1305,16 +1306,16 @@ class BacktestEngine:
             "strategy_profile_key": profile_key_value,
             "strategy_profile_run_mode": self.config.strategy_profile_run_mode,
             "applied_reward_risk_ratio": applied_rr,
-            "stop_loss_multiple": stop_mult,
+            "stop_distance_units": stop_mult,
             "partial_tp_enabled": partial_tp,
             "tp1_r": tp1_r,
             "tp1_close_pct": tp1_pct,
             "tp2_r": tp2_r,
             "tp2_close_pct": 100.0 - tp1_pct if partial_tp else 0.0,
             "partial_sl_enabled": partial_sl,
-            "sl1_r": sl1_r,
+            "sl1_distance_units": sl1_r,
             "sl1_close_pct": sl1_pct,
-            "sl2_r": sl2_r,
+            "sl2_distance_units": sl2_r,
             "intrabar_partial_tp_ordering": "STOP_FIRST" if self.config.tie_policy == TiePolicy.PESSIMISTIC else "TP1_THEN_TP2_THEN_STOP",
             "trailing_profit_enabled": bool(primary.trailing_enabled),
             "trail_activation_r": profile.trailing_activation_r if profile and profile.trailing_enabled else None,
@@ -1326,7 +1327,7 @@ class BacktestEngine:
             "profile_timeout_minutes": getattr(p, "profile_timeout_minutes", None),
             "profile_timeout_triggered": bool(getattr(p, "both_open_timeout_triggered", False)),
             "profile_timeout_exit_time": getattr(p, "timeout_exit_time", None),
-            "configured_price_risk_percentage": self.config.risk_per_leg,
+            "configured_account_risk_percentage": self.config.risk_per_leg,
             "estimated_all_in_stop_risk_percentage": estimated_stop_risk,
             "strategy_candle_open_time": p.strategy_candle_open_time,
             "strategy_entry_time": p.strategy_entry_time,
@@ -1369,7 +1370,8 @@ class BacktestEngine:
             "entry_schedule_status": getattr(p, "entry_schedule_status", None),
             "entry_filter_passed": getattr(p, "entry_filter_passed", True),
             "entry_filter_reason": getattr(p, "entry_filter_reason", "Strategy profile passed"),
-            "r_distance": primary.risk,
+            "distance_unit_price": primary.distance_unit,
+            "trade_r_price_distance": primary.risk,
             "equity_before_trade": p.equity_before_trade,
             "combined_entry_notional": entry_notional,
             "combined_effective_leverage": entry_notional / p.equity_before_trade,
@@ -1560,7 +1562,7 @@ class BacktestEngine:
 
     def _pos_cols(self,prefix,pos):
         est_stop_loss=self._estimated_stop_loss(pos)
-        cols={f"{prefix}_original_quantity":pos.original_quantity if pos.partial_tp_enabled else pos.quantity,f"{prefix}_remaining_quantity":pos.remaining_quantity if pos.partial_tp_enabled else 0.0,f"{prefix}_tp1_quantity":pos.tp1_quantity if pos.partial_tp_enabled else None,f"{prefix}_tp2_quantity":pos.tp2_quantity if pos.partial_tp_enabled else None,f"{prefix}_tp1_price":pos.tp1_price,f"{prefix}_tp2_price":pos.tp2_price,f"{prefix}_sl_price":pos.original_sl,f"{prefix}_tp1_hit":pos.tp1_hit,f"{prefix}_tp1_exit_time":pos.tp1_exit_time,f"{prefix}_tp1_exit_price":pos.tp1_exit_price,f"{prefix}_tp1_gross_pnl":pos.tp1_gross_pnl,f"{prefix}_tp1_fees":pos.tp1_fees,f"{prefix}_tp1_net_pnl":pos.tp1_net_pnl,f"{prefix}_tp2_hit":pos.tp2_hit,f"{prefix}_tp2_exit_time":pos.tp2_exit_time,f"{prefix}_tp2_exit_price":pos.tp2_exit_price,f"{prefix}_tp2_gross_pnl":pos.tp2_gross_pnl,f"{prefix}_tp2_fees":pos.tp2_fees,f"{prefix}_tp2_net_pnl":pos.tp2_net_pnl,f"{prefix}_stop_exit_time":pos.stop_exit_time,f"{prefix}_stop_exit_price":pos.stop_exit_price,f"{prefix}_stop_exit_quantity":pos.stop_exit_quantity,f"{prefix}_stop_gross_pnl":pos.stop_gross_pnl,f"{prefix}_stop_fees":pos.stop_fees,f"{prefix}_stop_net_pnl":pos.stop_net_pnl,f"{prefix}_total_gross_pnl":pos.gross_pnl,f"{prefix}_total_net_pnl":pos.net_pnl,f"{prefix}_final_exit_reason":pos.final_exit_reason or (pos.exit_reason.value if pos.exit_reason else None),f"{prefix}_existing_r":pos.risk,f"{prefix}_trailing_enabled":pos.trailing_enabled,f"{prefix}_trailing_activated":pos.trailing_active,f"{prefix}_trailing_activation_time":pos.trailing_activation_time,f"{prefix}_trailing_activation_price":pos.trailing_activation_price,f"{prefix}_{'highest' if pos.side==Side.LONG else 'lowest'}_favourable_price":pos.favourable_price if pos.trailing_active else None,f"{prefix}_final_trailing_stop":pos.trailing_stop,f"{prefix}_final_active_stop":pos.final_active_stop,f"{prefix}_trailing_exit_price":pos.trailing_exit_price,f"{prefix}_trailing_profit_r":pos.trailing_profit_r,f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_configured_price_risk_percentage":self.config.risk_per_leg,f"{prefix}_estimated_all_in_stop_risk_percentage":est_stop_loss/pos.risk_amount*self.config.risk_per_leg if pos.risk_amount else 0,f"{prefix}_original_sl":pos.original_sl,f"{prefix}_current_sl":pos.sl,f"{prefix}_sl":pos.sl,f"{prefix}_tp":(None if pos.r_step_trailing_enabled and pos.r_step_maximum_r==0 else pos.tp),f"{prefix}_be_enabled":pos.be_enabled,f"{prefix}_be_triggered":pos.be_triggered,f"{prefix}_be_trigger_time":pos.be_trigger_time,f"{prefix}_be_triggered_by_side":pos.be_triggered_by_side.value if pos.be_triggered_by_side else None,f"{prefix}_be_mode":pos.be_mode,f"{prefix}_be_offset_r":pos.be_offset_r,f"{prefix}_be_stop_price":pos.be_stop_price,f"{prefix}_be_exit_reason":pos.be_exit_reason.value if pos.be_exit_reason else None,f"{prefix}_be_same_candle_ambiguous":pos.be_same_candle_ambiguous,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
+        cols={f"{prefix}_original_quantity":pos.original_quantity if pos.partial_tp_enabled else pos.quantity,f"{prefix}_remaining_quantity":pos.remaining_quantity if pos.partial_tp_enabled else 0.0,f"{prefix}_tp1_quantity":pos.tp1_quantity if pos.partial_tp_enabled else None,f"{prefix}_tp2_quantity":pos.tp2_quantity if pos.partial_tp_enabled else None,f"{prefix}_tp1_price":pos.tp1_price,f"{prefix}_tp2_price":pos.tp2_price,f"{prefix}_sl_price":pos.original_sl,f"{prefix}_tp1_hit":pos.tp1_hit,f"{prefix}_tp1_exit_time":pos.tp1_exit_time,f"{prefix}_tp1_exit_price":pos.tp1_exit_price,f"{prefix}_tp1_gross_pnl":pos.tp1_gross_pnl,f"{prefix}_tp1_fees":pos.tp1_fees,f"{prefix}_tp1_net_pnl":pos.tp1_net_pnl,f"{prefix}_tp2_hit":pos.tp2_hit,f"{prefix}_tp2_exit_time":pos.tp2_exit_time,f"{prefix}_tp2_exit_price":pos.tp2_exit_price,f"{prefix}_tp2_gross_pnl":pos.tp2_gross_pnl,f"{prefix}_tp2_fees":pos.tp2_fees,f"{prefix}_tp2_net_pnl":pos.tp2_net_pnl,f"{prefix}_stop_exit_time":pos.stop_exit_time,f"{prefix}_stop_exit_price":pos.stop_exit_price,f"{prefix}_stop_exit_quantity":pos.stop_exit_quantity,f"{prefix}_stop_gross_pnl":pos.stop_gross_pnl,f"{prefix}_stop_fees":pos.stop_fees,f"{prefix}_stop_net_pnl":pos.stop_net_pnl,f"{prefix}_total_gross_pnl":pos.gross_pnl,f"{prefix}_total_net_pnl":pos.net_pnl,f"{prefix}_final_exit_reason":pos.final_exit_reason or (pos.exit_reason.value if pos.exit_reason else None),f"{prefix}_trade_r_price_distance":pos.risk,f"{prefix}_distance_unit_price":pos.distance_unit,f"{prefix}_trailing_enabled":pos.trailing_enabled,f"{prefix}_trailing_activated":pos.trailing_active,f"{prefix}_trailing_activation_time":pos.trailing_activation_time,f"{prefix}_trailing_activation_price":pos.trailing_activation_price,f"{prefix}_{'highest' if pos.side==Side.LONG else 'lowest'}_favourable_price":pos.favourable_price if pos.trailing_active else None,f"{prefix}_final_trailing_stop":pos.trailing_stop,f"{prefix}_final_active_stop":pos.final_active_stop,f"{prefix}_trailing_exit_price":pos.trailing_exit_price,f"{prefix}_trailing_profit_r":pos.trailing_profit_r,f"{prefix}_entry_price":pos.entry_price,f"{prefix}_quantity":pos.quantity,f"{prefix}_uncapped_quantity":pos.uncapped_quantity,f"{prefix}_entry_notional":pos.entry_notional,f"{prefix}_effective_leverage":pos.effective_leverage,f"{prefix}_risk_amount":pos.risk_amount,f"{prefix}_configured_account_risk_percentage":self.config.risk_per_leg,f"{prefix}_estimated_all_in_stop_risk_percentage":est_stop_loss/pos.risk_amount*self.config.risk_per_leg if pos.risk_amount else 0,f"{prefix}_original_sl":pos.original_sl,f"{prefix}_current_sl":pos.sl,f"{prefix}_sl":pos.sl,f"{prefix}_tp":(None if pos.r_step_trailing_enabled and pos.r_step_maximum_r==0 else pos.tp),f"{prefix}_be_enabled":pos.be_enabled,f"{prefix}_be_triggered":pos.be_triggered,f"{prefix}_be_trigger_time":pos.be_trigger_time,f"{prefix}_be_triggered_by_side":pos.be_triggered_by_side.value if pos.be_triggered_by_side else None,f"{prefix}_be_mode":pos.be_mode,f"{prefix}_be_offset_r":pos.be_offset_r,f"{prefix}_be_stop_price":pos.be_stop_price,f"{prefix}_be_exit_reason":pos.be_exit_reason.value if pos.be_exit_reason else None,f"{prefix}_be_same_candle_ambiguous":pos.be_same_candle_ambiguous,f"{prefix}_exit_time":pos.exit_time,f"{prefix}_exit_price":pos.exit_price,f"{prefix}_exit_reason":pos.exit_reason.value if pos.exit_reason else None,f"{prefix}_exit_source":pos.exit_source.value if pos.exit_source else None,f"{prefix}_fallback_reason":pos.fallback_reason,f"{prefix}_entry_fee":pos.entry_fee,f"{prefix}_exit_fee":pos.exit_fee,f"{prefix}_total_fees":pos.fees,f"{prefix}_fees":pos.fees,f"{prefix}_gross_pnl":pos.gross_pnl,f"{prefix}_net_pnl":pos.net_pnl,f"{prefix}_price_r":pos.price_r,f"{prefix}_account_r":pos.net_r,f"{prefix}_gross_r":pos.gross_r,f"{prefix}_net_r":pos.net_r}
         cols.update({f"{prefix}_atr_checkpoint_enabled":pos.atr_checkpoint_extension_enabled or pos.atr_checkpoint_count>0,f"{prefix}_atr_checkpoint_count":pos.atr_checkpoint_count,f"{prefix}_atr_checkpoint_pass_count":pos.atr_checkpoint_pass_count,f"{prefix}_atr_checkpoint_fail_count":pos.atr_checkpoint_fail_count,f"{prefix}_atr_checkpoint_last_time":pos.atr_checkpoint_last_time,f"{prefix}_atr_checkpoint_last_r":pos.atr_checkpoint_last_r,f"{prefix}_atr_checkpoint_last_di_spread":pos.atr_checkpoint_last_di_spread,f"{prefix}_atr_checkpoint_last_bb_width":pos.atr_checkpoint_last_bb_width,f"{prefix}_atr_checkpoint_last_passed":pos.atr_checkpoint_last_passed,f"{prefix}_atr_checkpoint_initial_tp":pos.atr_checkpoint_initial_tp,f"{prefix}_atr_checkpoint_final_tp_r":pos.atr_checkpoint_final_tp_r,f"{prefix}_atr_checkpoint_profit_lock_r":pos.atr_checkpoint_profit_lock_r})
         cols.update({f"{prefix}_r_step_trailing_enabled":pos.r_step_trailing_enabled,f"{prefix}_r_step_trailing_active":pos.r_step_trailing_active,f"{prefix}_r_step_checkpoint_count":pos.r_step_checkpoint_count,f"{prefix}_r_step_last_checkpoint_r":pos.r_step_last_checkpoint_r,f"{prefix}_r_step_last_checkpoint_time":pos.r_step_last_checkpoint_time,f"{prefix}_r_step_locked_r":pos.r_step_locked_r,f"{prefix}_r_step_initial_tp":pos.r_step_initial_tp,f"{prefix}_r_step_activation_partial_taken":pos.r_step_activation_partial_taken,f"{prefix}_r_step_activation_close_pct":pos.r_step_activation_close_pct,f"{prefix}_r_step_activation_quantity":pos.r_step_activation_quantity,f"{prefix}_r_step_runner_quantity":pos.r_step_runner_quantity})
         cols.update({f"{prefix}_sr_nearest_support":pos.sr_nearest_support,f"{prefix}_sr_nearest_resistance":pos.sr_nearest_resistance,f"{prefix}_sr_support_distance_atr":pos.sr_support_distance_atr,f"{prefix}_sr_resistance_distance_atr":pos.sr_resistance_distance_atr,f"{prefix}_sr_support_distance_price":pos.sr_support_distance_price,f"{prefix}_sr_resistance_distance_price":pos.sr_resistance_distance_price,f"{prefix}_sr_near_support":pos.sr_near_support,f"{prefix}_sr_near_resistance":pos.sr_near_resistance,f"{prefix}_sr_inside_support_zone":pos.sr_inside_support_zone,f"{prefix}_sr_inside_resistance_zone":pos.sr_inside_resistance_zone,f"{prefix}_sr_location":pos.sr_location,f"{prefix}_sr_trade_location_rating":pos.sr_trade_location_rating,f"{prefix}_sr_room_in_direction_atr":pos.sr_room_in_direction_atr})
