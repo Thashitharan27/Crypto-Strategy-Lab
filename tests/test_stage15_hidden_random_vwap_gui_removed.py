@@ -53,15 +53,15 @@ def test_retired_random_and_breakout_keys_are_absent_while_profile_vwap_rule_sur
             "vwap_confirmation_mode",
         ):
             assert key not in current
-        assert current["strategy_profiles"]["bull_short"]["entry_rules"] == [
+        assert tuple(current["strategy_profiles"]["bull_short"]["entry_rules"]) == (
             {
                 "action": "REJECT",
                 "indicator": "VWAP_DISTANCE",
                 "condition": "OUTSIDE",
                 "minimum": -0.5,
                 "maximum": 1.5,
-            }
-        ]
+            },
+        )
     finally:
         window.close()
 
