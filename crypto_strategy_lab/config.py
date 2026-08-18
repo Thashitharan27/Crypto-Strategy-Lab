@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import ClassVar, Optional
+from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from crypto_strategy_lab.strategy_profiles import StrategyProfile, default_profiles, normalize_profiles
@@ -13,57 +13,23 @@ from crypto_strategy_lab.strategy_profiles import StrategyProfile, default_profi
 class RiskMode(str, Enum):
     FIXED = "FIXED"; PERCENT = "PERCENT"; ATR = "ATR"
 class EntryMode(str, Enum):
-    WAIT_UNTIL_CLOSED = "WAIT_UNTIL_CLOSED"; EVERY_N_CANDLES = "EVERY_N_CANDLES"; CUSTOM = "CUSTOM"; VWAP_VOLUME_BREAKOUT = "VWAP_VOLUME_BREAKOUT"
-class VWAPConfirmationMode(str, Enum):
-    IMMEDIATE = "IMMEDIATE"; RETEST = "RETEST"
+    WAIT_UNTIL_CLOSED = "WAIT_UNTIL_CLOSED"; EVERY_N_CANDLES = "EVERY_N_CANDLES"
 class TiePolicy(str, Enum):
     PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"; INTRABAR = "INTRABAR"
 class IntrabarMissingPolicy(str, Enum):
     ERROR = "ERROR"; WARN_AND_USE_15M = "WARN_AND_USE_15M"; WARN_AND_CONTINUE = "WARN_AND_CONTINUE"
-class PositionSizingMode(str, Enum):
-    PRICE_RISK = "PRICE_RISK"; ALL_IN_STOP_RISK = "ALL_IN_STOP_RISK"
-class TimeoutExitPrice(str, Enum):
-    OPEN = "OPEN"
-class BreakEvenMode(str, Enum):
-    ENTRY_PRICE = "ENTRY_PRICE"; COST_ADJUSTED = "COST_ADJUSTED"; R_OFFSET = "R_OFFSET"
-class BreakEvenSameCandlePolicy(str, Enum):
-    NEXT_CANDLE = "NEXT_CANDLE"; PESSIMISTIC = "PESSIMISTIC"
-class AdxFilterMode(str, Enum):
-    DISABLED = "Disabled"; MAXIMUM = "ADX <= Maximum"; MINIMUM = "ADX >= Minimum"; RANGE = "Range"
-class BBWidthFilterMode(str, Enum):
-    DISABLED = "Disabled"; MAXIMUM = "Maximum Width"; MINIMUM = "Minimum Width"; RANGE = "Range"
-class DISpreadFilterMode(str, Enum):
-    DISABLED = "Disabled"; MAXIMUM = "Maximum Spread"; MINIMUM = "Minimum Spread"; RANGE = "Range"
-class TradeDirectionMode(str, Enum):
-    BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"; BOTH_INDEPENDENT = "BOTH_INDEPENDENT"
-class DIExecutionMode(str, Enum):
-    BOTH_SIDES = "BOTH_SIDES"; PREFERRED_SIDE_ONLY = "PREFERRED_SIDE_ONLY"
 class DailyEntryMissedPolicy(str, Enum):
     SKIP_DAY = "SKIP_DAY"; NEXT_AVAILABLE_CANDLE = "NEXT_AVAILABLE_CANDLE"
-class TrailApplyTo(str, Enum):
-    BOTH = "BOTH"; LONG_ONLY = "LONG_ONLY"; SHORT_ONLY = "SHORT_ONLY"
-class TrailIntrabarMode(str, Enum):
-    PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"
-class TrailActivationTrigger(str, Enum):
-    PRICE_REACHES_R = "PRICE_REACHES_R"; AFTER_TP1 = "AFTER_TP1"; AFTER_SL1 = "AFTER_SL1"; AFTER_TP1_OR_SL1 = "AFTER_TP1_OR_SL1"
 class AfterTP1StopMode(str, Enum):
     KEEP_ORIGINAL_SL = "KEEP_ORIGINAL_SL"; MOVE_TO_ENTRY = "MOVE_TO_ENTRY"; MOVE_TO_R_OFFSET = "MOVE_TO_R_OFFSET"
-class TP2ExitMode(str, Enum):
-    FIXED_TP2 = "FIXED_TP2"; TRAILING_AFTER_TP1 = "TRAILING_AFTER_TP1"
-class EntryTimingMode(str, Enum):
-    CURRENT = "CURRENT"; RANDOM_AFTER_PAIR_CLOSE = "RANDOM_AFTER_PAIR_CLOSE"
-class RandomEntryStartMode(str, Enum):
-    NEXT_CANDLE_AFTER_PAIR_CLOSE = "NEXT_CANDLE_AFTER_PAIR_CLOSE"; NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE = "NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE"
 
 
 @dataclass(frozen=True)
 class BacktestConfig:
     """Only settings belonging to the current GUI/Strategy Profile contract.
 
-    Retired global strategy switches are deliberately not dataclass fields, so
-    old JSON or direct constructor arguments cannot reactivate them. A small set
-    of fixed class invariants remains temporarily while dead engine branches are
-    removed; these values are not serialized or configurable.
+    Retired global strategy switches do not exist in this contract. Old JSON or
+    direct constructor arguments therefore cannot reactivate removed behavior.
     """
 
     input_csv: Path = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv")
@@ -158,108 +124,6 @@ class BacktestConfig:
     save_feature_analysis_reports: bool = True
     save_indicator_analysis_reports: bool = True
     create_standard_charts: bool = True
-
-    # Fixed current-engine invariants. These are intentionally NOT config fields.
-    enable_strategy_profiles: ClassVar[bool] = True
-    trade_direction: ClassVar[TradeDirectionMode] = TradeDirectionMode.BOTH
-    enable_di_direction_sizing: ClassVar[bool] = True
-    di_execution_mode: ClassVar[DIExecutionMode] = DIExecutionMode.PREFERRED_SIDE_ONLY
-    flip_filtered_di_direction: ClassVar[bool] = False
-    di_direction_minimum_spread: ClassVar[float] = 0.0
-    di_direction_long_minimum_spread: ClassVar[float] = 0.0
-    di_direction_short_minimum_spread: ClassVar[float] = 0.0
-    position_sizing_mode: ClassVar[PositionSizingMode] = PositionSizingMode.PRICE_RISK
-
-    sl_mult: ClassVar[float] = 2.0
-    tp_mult: ClassVar[float] = 3.0
-    enable_partial_take_profit: ClassVar[bool] = False
-    enable_partial_stop_loss: ClassVar[bool] = False
-    sl1_r: ClassVar[float] = 0.5
-    sl1_close_pct: ClassVar[float] = 50.0
-    sl2_r: ClassVar[float] = 2.0
-    tp1_r: ClassVar[float] = 1.0
-    tp1_close_pct: ClassVar[float] = 50.0
-    tp2_r: ClassVar[float] = 2.0
-    tp2_close_pct: ClassVar[float] = 50.0
-    stop_loss_r: ClassVar[float] = 2.0
-    after_tp1_stop_mode: ClassVar[AfterTP1StopMode] = AfterTP1StopMode.KEEP_ORIGINAL_SL
-    after_tp1_stop_offset_r: ClassVar[float] = 0.0
-    tp2_exit_mode: ClassVar[TP2ExitMode] = TP2ExitMode.FIXED_TP2
-    enable_trailing_profit: ClassVar[bool] = False
-    trail_activation_r: ClassVar[float] = 3.0
-    trail_activation_trigger: ClassVar[TrailActivationTrigger] = TrailActivationTrigger.PRICE_REACHES_R
-    trail_distance_r: ClassVar[float] = 1.0
-    trail_apply_to: ClassVar[TrailApplyTo] = TrailApplyTo.BOTH
-    trail_intrabar_mode: ClassVar[TrailIntrabarMode] = TrailIntrabarMode.PESSIMISTIC
-    enable_be_after_opposite_sl: ClassVar[bool] = False
-    be_mode: ClassVar[BreakEvenMode] = BreakEvenMode.ENTRY_PRICE
-    be_offset_r: ClassVar[float] = 0.0
-    be_same_candle_policy: ClassVar[BreakEvenSameCandlePolicy] = BreakEvenSameCandlePolicy.NEXT_CANDLE
-
-    enable_both_open_timeout: ClassVar[bool] = False
-    max_both_open_minutes: ClassVar[int] = 480
-    timeout_exit_price: ClassVar[TimeoutExitPrice] = TimeoutExitPrice.OPEN
-    comparison_timeout_minutes: ClassVar[tuple[int, ...]] = ()
-    enable_remaining_leg_timeout_after_first_sl: ClassVar[bool] = False
-    remaining_leg_timeout_after_first_sl_minutes: ClassVar[int] = 240
-    enable_remaining_leg_timeout_profit_extension: ClassVar[bool] = False
-    remaining_leg_timeout_profit_threshold_r: ClassVar[float] = 10.0
-    enable_remaining_leg_checkpoint_score_extension: ClassVar[bool] = False
-    checkpoint_score_use_profit: ClassVar[bool] = True
-    checkpoint_score_min_profit_r: ClassVar[float] = 0.85
-    checkpoint_score_use_atr_pct: ClassVar[bool] = True
-    checkpoint_score_max_atr_pct: ClassVar[float] = 0.08
-    checkpoint_score_use_directional_di: ClassVar[bool] = True
-    checkpoint_score_min_directional_di: ClassVar[float] = 2.3
-    checkpoint_score_use_bb_width_pct: ClassVar[bool] = True
-    checkpoint_score_max_bb_width_pct: ClassVar[float] = 0.349
-    checkpoint_score_min_conditions: ClassVar[int] = 3
-    enable_first_sl_survivor_partial_close: ClassVar[bool] = False
-    first_sl_survivor_partial_close_pct: ClassVar[float] = 25.0
-    enable_checkpoint_zero_score_confirmation: ClassVar[bool] = False
-    checkpoint_zero_score_confirmations_required: ClassVar[int] = 2
-    checkpoint_zero_score_recheck_minutes: ClassVar[int] = 120
-    enable_reentry_gate_after_remaining_leg_timeout: ClassVar[bool] = False
-
-    enable_adx_filter: ClassVar[bool] = False
-    adx_filter_mode: ClassVar[AdxFilterMode] = AdxFilterMode.DISABLED
-    adx_maximum: ClassVar[float] = 25.0
-    adx_minimum: ClassVar[float] = 20.0
-    enable_bb_width_filter: ClassVar[bool] = False
-    bb_width_filter_mode: ClassVar[BBWidthFilterMode] = BBWidthFilterMode.DISABLED
-    bb_width_maximum: ClassVar[float] = 0.03
-    bb_width_minimum: ClassVar[float] = 0.012
-    enable_di_spread_filter: ClassVar[bool] = False
-    di_spread_filter_mode: ClassVar[DISpreadFilterMode] = DISpreadFilterMode.DISABLED
-    di_spread_maximum: ClassVar[float] = 10.0
-    di_spread_minimum: ClassVar[float] = 0.0
-    enable_skip_monday_entries: ClassVar[bool] = False
-    skip_monday_timezone: ClassVar[str] = "UTC"
-
-    enable_random_entry: ClassVar[bool] = False
-    entry_timing_mode: ClassVar[EntryTimingMode] = EntryTimingMode.CURRENT
-    random_entry_probability: ClassVar[float] = 0.5
-    random_seed: ClassVar[int] = 42
-    random_entry_start_mode: ClassVar[RandomEntryStartMode] = RandomEntryStartMode.NEXT_FULL_CANDLE_AFTER_PAIR_CLOSE
-    randomize_first_entry: ClassVar[bool] = True
-    max_random_wait_candles: ClassVar[int] = 0
-    enable_random_entry_batch: ClassVar[bool] = False
-    random_seed_start: ClassVar[int] = 1
-    random_seed_count: ClassVar[int] = 100
-    enable_coin_flip_sizing: ClassVar[bool] = False
-    coin_flip_seed: ClassVar[int] = 42
-    coin_flip_large_multiplier: ClassVar[float] = 3.0
-    coin_flip_small_multiplier: ClassVar[float] = 1.0
-
-    vwap_breakout_lookback_hours: ClassVar[float] = 4.0
-    vwap_volume_lookback: ClassVar[int] = 20
-    vwap_volume_multiplier: ClassVar[float] = 1.5
-    vwap_slope_lookback: ClassVar[int] = 1
-    vwap_atr_pct_minimum: ClassVar[float] = 0.0
-    vwap_atr_pct_maximum: ClassVar[float] = 1.0
-    vwap_confirmation_mode: ClassVar[VWAPConfirmationMode] = VWAPConfirmationMode.IMMEDIATE
-    vwap_retest_window_candles: ClassVar[int] = 4
-    vwap_retest_tolerance_atr: ClassVar[float] = 0.25
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "strategy_profiles", normalize_profiles(self.strategy_profiles))
