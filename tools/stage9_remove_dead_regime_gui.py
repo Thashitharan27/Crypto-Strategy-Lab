@@ -1,5 +1,7 @@
 from pathlib import Path
 
+# This migration is intentionally narrow: it removes only dead GUI remnants left
+# after the earlier Strategy Profile reward/risk consolidation.
 ROOT = Path(__file__).resolve().parents[1]
 main = ROOT / "crypto_strategy_lab" / "gui" / "main_window.py"
 text = main.read_text(encoding="utf-8")
