@@ -58,6 +58,13 @@ s = replace_once(
     "market-ready tab expectation",
 )
 
+s = replace_once(
+    s,
+    'trades=pd.DataFrame({"market_regime":["BULL"],"long_pair_net_pnl":[10.0],"long_pair_net_r":[1.0]})',
+    'trades=pd.DataFrame({"market_regime":["BULL"],"pair_net_pnl":[10.0],"pair_net_r":[1.0],"long_pair_net_pnl":[10.0],"long_pair_net_r":[1.0]})',
+    "direction-regime summary fixture",
+)
+
 s = replace_test_function(
     s,
     "test_partial_stop_disables_ignored_core_stop_control",
