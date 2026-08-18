@@ -553,48 +553,51 @@ def legacy_entry_filter_controls_save_and_load(tmp_path):
         window.close()
 
 
-def test_gui_reset_restores_all_default_values_and_run_name():
+def test_gui_reset_restores_all_current_default_values_and_profiles():
     from crypto_strategy_lab.gui.config_logic import default_gui_config, format_percentage
 
     app()
     window = MainWindow()
     defaults = default_gui_config()
     try:
-        window.apply_values({
+        changed = {
             "run_name": "custom",
             "atr_period": 7,
             "atr_multiplier": 2.5,
-            "sl_mult": 9,
-            "tp_mult": 10,
             "initial_equity": 555,
             "risk_per_leg": 0.123,
             "maker_fee": 0.1,
             "taker_fee": 0.2,
             "slippage": 0.3,
-            "strategy_timeframe_minutes": 99,
-            "intrabar_timeframe_minutes": 3,
+            "strategy_timeframe_minutes": 60,
+            "intrabar_timeframe_minutes": 5,
             "use_intrabar_data": False,
-        })
+        }
+        changed["strategy_profiles"] = defaults["strategy_profiles"]
+        changed["strategy_profiles"]["bull_long"]["reward_risk_ratio"] = 4.0
+        window.apply_values(changed)
         assert window.values()["run_name"] == "custom"
+        assert window.values()["strategy_profiles"]["bull_long"]["reward_risk_ratio"] == 4.0
 
         window.reset_defaults()
         values = window.values()
 
-        for key in [
-            "run_name", "input_csv", "strategy_csv", "intrabar_csv", "use_intrabar_data",
-            "output_dir", "sl_mult", "tp_mult", "entry_mode", "entry_interval",
-            "max_active_pairs", "tie_policy", "risk_mode", "atr_period", "atr_multiplier",
-            "trading_start_date", "trading_end_date", "max_effective_leverage_per_leg",
-            "max_combined_effective_leverage", "intrabar_missing_policy", "zero_cost_comparison",
-            "percent_r", "fixed_r", "initial_equity", "risk_per_leg", "maker_fee",
-            "taker_fee", "use_maker_entry", "use_maker_exit", "slippage",
-        ]:
+        for key in (
+            "run_name", "input_csv", "intrabar_csv", "use_intrabar_data", "output_dir",
+            "entry_mode", "entry_interval", "max_active_pairs", "tie_policy", "risk_mode",
+            "atr_period", "atr_multiplier", "trading_start_date", "trading_end_date",
+            "max_effective_leverage_per_leg", "max_combined_effective_leverage",
+            "intrabar_missing_policy", "zero_cost_comparison", "percent_r", "fixed_r",
+            "initial_equity", "risk_per_leg", "maker_fee", "taker_fee", "use_maker_entry",
+            "use_maker_exit", "slippage", "strategy_profiles",
+        ):
             assert values[key] == defaults[key]
 
+        assert "strategy_csv" not in values
+        assert "sl_mult" not in values
+        assert "tp_mult" not in values
         assert window.atr_period.value() == 14
         assert window.atr_mult.value() == 1.0
-        assert window.sl.value() == 2.0
-        assert window.tp.value() == 3.0
         assert window.equity.value() == 1000
         assert window.risk_leg.text() == format_percentage(0.01)
         assert window.maker.text() == format_percentage(0.0002)
