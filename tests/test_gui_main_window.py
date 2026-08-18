@@ -54,8 +54,11 @@ def test_market_ready_tabs_use_profile_only_strategy_workflow():
         assert tab_names == ["Backtest Setup", "DI Direction & Pressure", "Support & Resistance", "Strategy Profiles", "Summary", "Portfolio", "GitHub", "ChatGPT"]
         assert "Legacy Strategy" not in tab_names
         values=window.values()
-        assert values["enable_strategy_profiles"] is True
-        assert values["di_execution_mode"] == "PREFERRED_SIDE_ONLY"
+        assert "enable_strategy_profiles" not in values
+        assert "di_execution_mode" not in values
+        assert set(values["strategy_profiles"]) == {
+            "bull_long", "bull_short", "bear_long", "bear_short", "sideways_long", "sideways_short"
+        }
     finally:
         window.close()
 
