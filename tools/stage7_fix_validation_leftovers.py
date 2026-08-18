@@ -29,12 +29,19 @@ lines = p.read_text(encoding="utf-8").splitlines(True)
 cleaned = []
 for line in lines:
     stripped = line.strip()
+
     if "Bull-long staircase" in line:
         continue
     if "ATR checkpoint" in line and ("errors.append" in line or "values.get" in line):
         continue
     if any(key in line for key in LEGACY_KEYS) and ("errors.append" in line or stripped.startswith("if ")):
         continue
+
+    # The old staircase validation calculated helper values on separate lines.
+    # Once the global controls are removed those helpers are stale too.
+    if stripped.startswith("staircase_max=") or stripped.startswith("staircase_close="):
+        continue
+
     cleaned.append(line)
 p.write_text("".join(cleaned), encoding="utf-8")
 
