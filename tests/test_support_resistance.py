@@ -267,7 +267,7 @@ def test_room_in_direction_uses_opposing_structure():
     ) == pytest.approx(2.0)
 
 class TestAnalysisOnlyRegression:
-    """Enabling S/R analysis in ANALYSIS_ONLY mode must not change which trades are taken."""
+    """ANALYSIS_ONLY must enrich current trades without changing execution."""
 
     @staticmethod
     def _wavy_candles(n=80):
@@ -283,27 +283,12 @@ class TestAnalysisOnlyRegression:
         start = pd.Timestamp("2024-01-01", tz="UTC")
         return pd.DataFrame({
             "timestamp": [start + pd.Timedelta(minutes=15 * i) for i in range(len(rows))],
-            "open": [r[0] for r in rows], "high": [r[1] for r in rows],
-            "low": [r[2] for r in rows], "close": [r[3] for r in rows],
+            "open": [r[0] for r in rows],
+            "high": [r[1] for r in rows],
+            "low": [r[2] for r in rows],
+            "close": [r[3] for r in rows],
             "volume": [1] * len(rows),
         })
-
-    @staticmethod
-    def _run_current_profile(data, enable_sr):
-        config = BacktestConfig(
-            risk_mode=RiskMode.FIXED,
-            fixed_r=2.0,
-            use_intrabar_data=False,
-            enable_trade_telemetry=False,
-            enable_support_resistance_analysis=enable_sr,
-            sr_filter_mode="ANALYSIS_ONLY",
-        )
-        engine = BacktestEngine(data, config)
-        engine.market_regime_values[:] = "SIDEWAYS"
-        engine.plus_di_values[:] = 50.0
-        engine.minus_di_values[:] = 10.0
-        engine.di_spread[:] = 40.0
-        return engine.run()
 
     @staticmethod
     def _run_current_profile(data, enable_sr):
@@ -326,7 +311,6 @@ class TestAnalysisOnlyRegression:
         data = self._wavy_candles()
         disabled = self._run_current_profile(data, False)
         enabled = self._run_current_profile(data, True)
-
         assert len(disabled) == len(enabled)
         assert len(disabled) > 0
         shared_columns = [c for c in disabled.columns if c in enabled.columns and "_sr_" not in c]
@@ -343,12 +327,6 @@ class TestAnalysisOnlyRegression:
             assert column in enabled.columns
         assert enabled["long_sr_zone_low"].notna().any()
         assert "short_sr_zone_low" not in enabled.columns
-
-
-class TestSupportResistanceDetector:
-
-
-class TestSupportResistanceDetector:
 
 
 class TestSupportResistanceDetector:
