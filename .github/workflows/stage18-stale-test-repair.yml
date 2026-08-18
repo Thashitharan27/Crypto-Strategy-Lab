@@ -3,6 +3,8 @@ name: Stage 18 stale test repair
 on:
   push:
     branches: [chatgpt/stage18-repair-stale-full-suite-tests]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
