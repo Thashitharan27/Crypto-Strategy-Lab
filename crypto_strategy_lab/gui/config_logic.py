@@ -58,6 +58,8 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "enable_di_direction_selection": True,
     "enable_di_pressure_analysis": True,
     "di_pressure_lookback": 3,
+    "enable_mean_reversion_analysis": True,
+    "mean_reversion_period": 20,
     "enable_support_resistance_analysis": False,
     "sr_pivot_left": 5,
     "sr_pivot_right": 5,
@@ -214,6 +216,11 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
             errors.append("DI pressure lookback must be between 1 and 100.")
     except (TypeError, ValueError):
         errors.append("DI pressure lookback must be a whole number.")
+    try:
+        if int(values["mean_reversion_period"]) <= 0:
+            errors.append("Mean reversion period must be greater than zero.")
+    except (TypeError, ValueError):
+        errors.append("Mean reversion period must be a whole number.")
     return errors
 
 
@@ -233,6 +240,8 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         enable_di_direction_selection=bool(merged["enable_di_direction_selection"]),
         enable_di_pressure_analysis=bool(merged["enable_di_pressure_analysis"]),
         di_pressure_lookback=int(merged["di_pressure_lookback"]),
+        enable_mean_reversion_analysis=bool(merged["enable_mean_reversion_analysis"]),
+        mean_reversion_period=int(merged["mean_reversion_period"]),
         enable_support_resistance_analysis=bool(merged["enable_support_resistance_analysis"]),
         sr_pivot_left=int(merged["sr_pivot_left"]), sr_pivot_right=int(merged["sr_pivot_right"]),
         sr_lookback_bars=int(merged["sr_lookback_bars"]), sr_zone_width_atr=float(merged["sr_zone_width_atr"]),

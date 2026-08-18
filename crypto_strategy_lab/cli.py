@@ -40,6 +40,7 @@ from crypto_strategy_lab.statistics import (
     bb_width_analysis,
     di_pressure_analysis,
     di_spread_analysis,
+    mean_reversion_analysis,
     equity_curve,
     summarize,
 )
@@ -193,8 +194,10 @@ def main() -> None:
         "BB Width": bb_width_analysis(trades),
         "DI Spread": di_spread_analysis(trades),
         "DI Pressure": di_pressure_analysis(trades),
+        "Mean Reversion": mean_reversion_analysis(trades),
     }
     run_output_step("Saving indicator analysis workbook", lambda: build_indicator_workbook(indicator_tables, run_dir))
+    run_output_step("Saving DI mean reversion analysis", lambda: mean_reversion_analysis(trades).to_csv(run_dir / "di_mean_reversion_analysis.csv", index=False))
     run_output_step("Building support/resistance analysis", lambda: generate_sr_analysis_reports(trades, run_dir))
     run_output_step("Saving trade column metadata", lambda: write_trade_column_metadata(run_dir))
 

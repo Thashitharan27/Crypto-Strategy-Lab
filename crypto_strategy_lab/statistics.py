@@ -285,3 +285,33 @@ def di_pressure_analysis(trades: pd.DataFrame) -> pd.DataFrame:
     rows+=grouped("Regime + Direction + Pressure",["Market Regime","Direction","DI Pressure State"])
     rows+=grouped("DI Spread Change",["DI Spread Change Bucket"])
     return pd.DataFrame(rows).reindex(columns=columns)
+
+
+def mean_reversion_analysis(trades: pd.DataFrame) -> pd.DataFrame:
+    """Cross-tab mean-reversion behavior across the complete DI-pressure range."""
+    columns=["Section","DI Pressure Bucket","Direction","Market Regime","DI Pressure State","Mean Reversion Alignment","Mean Reversion Motion","Mean Reversion State","Mean Reversion Strength","Trades","Wins","Losses","Win Rate","Average Net PnL","Net PnL","Average Net R","Total Net R"]
+    required={"di_spread","mean_reversion_alignment","mean_reversion_motion"}
+    if trades.empty or not required.issubset(trades.columns): return pd.DataFrame(columns=columns)
+    frame=trades.copy(); di=pd.to_numeric(frame["di_spread"],errors="coerce")
+    edges=[0,5,10,15,20,25,30,35,40,45,50,np.inf]; labels=["0-5","5-10","10-15","15-20","20-25","25-30","30-35","35-40","40-45","45-50","50+"]
+    frame["DI Pressure Bucket"]=pd.cut(di,edges,right=False,labels=labels)
+    frame["Direction"]=frame.get("di_sizing_direction",frame.get("sizing_direction",pd.Series("UNKNOWN",index=frame.index))).fillna("UNKNOWN").astype(str).str.upper()
+    frame["Market Regime"]=frame.get("market_regime",pd.Series("UNKNOWN",index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
+    frame["DI Pressure State"]=frame.get("di_pressure_state",pd.Series("UNKNOWN",index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
+    frame["Mean Reversion Alignment"]=frame["mean_reversion_alignment"].fillna("UNKNOWN").astype(str).str.upper()
+    frame["Mean Reversion Motion"]=frame["mean_reversion_motion"].fillna("UNKNOWN").astype(str).str.upper()
+    frame["Mean Reversion State"]=frame.get("mean_reversion_state",pd.Series("UNKNOWN",index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
+    frame["Mean Reversion Strength"]=frame.get("mean_reversion_strength_label",pd.Series("UNKNOWN",index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
+    frame["_pnl"]=pd.to_numeric(frame.get("pair_net_pnl"),errors="coerce"); frame["_r"]=pd.to_numeric(frame.get("pair_net_r"),errors="coerce")
+    def grouped(section, groups):
+        rows=[]
+        for keys,g in frame.groupby(groups,dropna=False,observed=True):
+            keys=keys if isinstance(keys,tuple) else (keys,); pnl=g["_pnl"]; rr=g["_r"]
+            rows.append({"Section":section,**dict(zip(groups,keys)),"Trades":int(len(g)),"Wins":int((pnl>0).sum()),"Losses":int((pnl<0).sum()),"Win Rate":float((pnl>0).mean()),"Average Net PnL":float(pnl.mean()),"Net PnL":float(pnl.sum()),"Average Net R":float(rr.mean()),"Total Net R":float(rr.sum())})
+        return rows
+    rows=grouped("DI Bucket + Reversion",["DI Pressure Bucket","Mean Reversion Alignment","Mean Reversion Motion"])
+    rows+=grouped("Direction + DI Bucket + Reversion",["Direction","DI Pressure Bucket","Mean Reversion Alignment","Mean Reversion Motion"])
+    rows+=grouped("DI State + DI Bucket + Reversion",["DI Pressure State","DI Pressure Bucket","Mean Reversion Alignment","Mean Reversion Motion"])
+    rows+=grouped("Regime + DI Bucket + Reversion",["Market Regime","DI Pressure Bucket","Mean Reversion Alignment","Mean Reversion Motion"])
+    rows+=grouped("Mean Reversion State",["Mean Reversion State","Mean Reversion Strength"])
+    return pd.DataFrame(rows).reindex(columns=columns)
