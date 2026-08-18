@@ -25,6 +25,7 @@ jobs:
           python tools/stage19_remove_strategy_csv.py
           python tools/stage19_engine_profile_only.py
           python tools/stage19_result_schema.py
+          python tools/stage19_final_production_cleanup.py
       - name: Compile changed Python
         run: >-
           python -m py_compile
@@ -47,5 +48,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add crypto_strategy_lab tools/stage19_audit_legacy_config.py
-          git commit -m "Stage 19: remove legacy result-schema plumbing"
+          git commit -m "Stage 19: remove final retired engine accesses"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
