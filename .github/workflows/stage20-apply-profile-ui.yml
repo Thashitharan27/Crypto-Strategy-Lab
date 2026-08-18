@@ -33,7 +33,18 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-qt
       - name: Apply Stage 20 UI migration
-        run: python tools/stage20_profile_exit_ui.py
+        run: |
+          python tools/stage20_profile_exit_ui.py
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('tests/test_gui_main_window.py')
+          text=path.read_text(encoding='utf-8')
+          name='def test_analysis_presets_hide_advanced_controls_and_apply_expected_outputs():\n'
+          duplicate=name+'\n\n'+name
+          if duplicate in text:
+              text=text.replace(duplicate,name,1)
+          path.write_text(text,encoding='utf-8')
+          PY
       - name: Compile changed Python
         run: python -m py_compile crypto_strategy_lab/gui/profile_editor.py tests/test_gui_main_window.py
       - name: Run focused GUI tests
