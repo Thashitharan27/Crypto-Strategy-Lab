@@ -35,8 +35,8 @@ jobs:
           tests/test_stage10_stage1_gui_shim_removed.py
           tests/test_di_tab_stage1.py
           tests/test_stage2_regime_permissions_removed.py
-          tests/test_gui_main_window.py
           tests/test_strategy_profiles.py
+          tests/test_gui_config_logic.py
       - name: Commit cleanup
         run: |
           git config user.name "github-actions[bot]"
