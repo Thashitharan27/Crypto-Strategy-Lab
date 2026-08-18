@@ -21,6 +21,7 @@ jobs:
         run: |
           python tools/stage7_remove_global_special_exit_legacy.py
           python tools/stage7_fix_validation_leftovers.py
+          python tools/stage7_fix_constructor_and_regression.py
       - name: Compile
         run: python -m compileall -q crypto_strategy_lab tests
       - name: Run focused safety tests
