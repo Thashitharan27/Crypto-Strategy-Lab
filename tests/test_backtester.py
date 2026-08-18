@@ -10,6 +10,7 @@ from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.loader import load_ohlcv_csv
 from crypto_strategy_lab.statistics import equity_curve, summarize
 from crypto_strategy_lab.trade import Position, Side
+from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, StrategyProfile
 
 
 def candles(rows):
@@ -22,11 +23,49 @@ def candles(rows):
     })
 
 
+def profile_set(**changes):
+    profile = StrategyProfile(enabled=True, **changes)
+    return {key: profile for key in PROFILE_KEYS}
+
+
+def _profile_value(value):
+    return getattr(value, "value", value)
+
+
+def _profiles_for_legacy_config(values):
+    sl = float(values.get("sl_mult", 2.0))
+    tp = float(values.get("tp_mult", 3.0))
+    partial_profit = bool(values.get("enable_partial_take_profit", False))
+    partial_stop = bool(values.get("enable_partial_stop_loss", False))
+    stop_multiple = float(values.get("stop_loss_r", sl)) if partial_profit else sl
+    profile = StrategyProfile(
+        enabled=True,
+        stop_loss_multiple=stop_multiple,
+        reward_risk_ratio=tp / sl if sl else 1.0,
+        partial_stop_enabled=partial_stop,
+        sl1_r=float(values.get("sl1_r", 0.5)),
+        sl1_close_pct=float(values.get("sl1_close_pct", 50.0)),
+        sl2_r=float(values.get("sl2_r", 8.0)),
+        partial_profit_enabled=partial_profit,
+        tp1_r=float(values.get("tp1_r", 3.0)),
+        tp1_close_pct=float(values.get("tp1_close_pct", 50.0)),
+        tp2_r=float(values.get("tp2_r", 12.0)),
+        after_tp1_stop_mode=_profile_value(values.get("after_tp1_stop_mode", "KEEP_ORIGINAL_SL")),
+        after_tp1_stop_offset_r=float(values.get("after_tp1_stop_offset_r", 0.0)),
+        trailing_enabled=bool(values.get("enable_trailing_profit", False)),
+        trailing_activation_r=float(values.get("trail_activation_r", 3.0)),
+        trailing_distance_r=float(values.get("trail_distance_r", 1.0)),
+    )
+    return {key: profile for key in PROFILE_KEYS}
+
+
 def cfg(**kw):
     base = dict(risk_mode=RiskMode.FIXED, fixed_r=10, initial_equity=1000, risk_per_leg=0.01,
                 sl_mult=1, tp_mult=1, taker_fee=0, maker_fee=0, slippage=0,
                 entry_mode=EntryMode.WAIT_UNTIL_CLOSED)
     base.update(kw)
+    base["enable_strategy_profiles"] = True
+    base.setdefault("strategy_profiles", _profiles_for_legacy_config(base))
     return BacktestConfig(**base)
 
 
@@ -125,9 +164,11 @@ def test_atr_checkpoint_extends_biased_tp_and_locks_profit():
         df,
         cfg(
             enable_di_direction_sizing=True,
-            enable_atr_checkpoint_tp_extension=True,
-            atr_checkpoint_di_spread_minimum=30,
-            atr_checkpoint_bb_width_minimum=0.03,
+            strategy_profiles=profile_set(
+                atr_checkpoint_tp_extension_enabled=True,
+                atr_checkpoint_di_spread_minimum=30,
+                atr_checkpoint_bb_width_minimum=0.03,
+            ),
         ),
     )
     engine.plus_di_values[:] = 50
@@ -142,8 +183,8 @@ def test_atr_checkpoint_extends_biased_tp_and_locks_profit():
     engine._apply_atr_checkpoint_extensions(pos, 130, 100, df.timestamp.iloc[2])
 
     assert pos.atr_checkpoint_pass_count == 3
-    assert pos.tp == pytest.approx(150)  # +3 ATR checkpoint extends TP to +5 ATR
-    assert pos.sl == pytest.approx(120)  # profit floor trails one ATR behind
+    assert pos.tp == pytest.approx(150)
+    assert pos.sl == pytest.approx(120)
     assert pos.atr_checkpoint_profit_lock_r == pytest.approx(2)
 
 
@@ -151,7 +192,10 @@ def test_atr_checkpoint_failure_leaves_original_exit_levels():
     df = candles([(100, 100, 100, 100)] * 4)
     engine = BacktestEngine(
         df,
-        cfg(enable_di_direction_sizing=True, enable_atr_checkpoint_tp_extension=True),
+        cfg(
+            enable_di_direction_sizing=True,
+            strategy_profiles=profile_set(atr_checkpoint_tp_extension_enabled=True),
+        ),
     )
     engine.plus_di_values[:] = 35
     engine.minus_di_values[:] = 10
@@ -173,12 +217,13 @@ def test_bull_long_r_step_staircase_advances_stop_and_ignores_fixed_tp():
         df,
         cfg(
             enable_di_direction_sizing=True,
-            enable_di_regime_reward_risk=True,
-            enable_bull_long_r_step_trailing=True,
-            bull_long_r_step_activation_r=2,
-            bull_long_r_step_distance_r=2,
-            bull_long_r_step_size_r=1,
-            bull_long_r_step_maximum_r=0,
+            strategy_profiles=profile_set(
+                r_step_trailing_enabled=True,
+                r_step_activation_r=2,
+                r_step_distance_r=2,
+                r_step_size_r=1,
+                r_step_maximum_r=0,
+            ),
         ),
     )
     pos = Position(Side.LONG, df.timestamp.iloc[0], 0, 100, 10, 90, 120, 1, 10, 100, 10)
@@ -206,9 +251,10 @@ def test_bull_long_r_step_staircase_banks_partial_at_activation():
         df,
         cfg(
             enable_di_direction_sizing=True,
-            enable_di_regime_reward_risk=True,
-            enable_bull_long_r_step_trailing=True,
-            bull_long_r_step_activation_close_pct=80,
+            strategy_profiles=profile_set(
+                r_step_trailing_enabled=True,
+                r_step_activation_close_pct=80,
+            ),
         ),
     )
     pos = Position(Side.LONG, df.timestamp.iloc[0], 0, 100, 10, 90, 120, 1, 10, 100, 10)
@@ -233,14 +279,6 @@ def test_bull_long_r_step_staircase_banks_partial_at_activation():
     assert pos.exit_reason.value == "R_STEP_TRAILING_STOP"
     assert pos.gross_r == pytest.approx(1.6)
     assert pos.final_exit_reason == "TP1_THEN_R_STEP_TRAILING_STOP"
-
-
-
-
-
-
-
-
 
 
 def test_profile_rsi_uses_only_completed_candles_and_has_warmup():

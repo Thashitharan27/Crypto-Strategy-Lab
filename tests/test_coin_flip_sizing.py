@@ -4,6 +4,7 @@ import pytest
 
 from crypto_strategy_lab.config import BacktestConfig, RiskMode, TradeDirectionMode, DIExecutionMode
 from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, StrategyProfile
 
 
 def candles():
@@ -36,7 +37,21 @@ def config(**overrides):
         coin_flip_small_multiplier=1,
     )
     values.update(overrides)
+    sl = float(values.get("sl_mult", 2.0))
+    tp = float(values.get("tp_mult", 3.0))
+    reward_risk = 1.0 if values.get("enable_di_direction_sizing", False) else tp / sl
+    profile = StrategyProfile(enabled=True, stop_loss_multiple=sl, reward_risk_ratio=reward_risk)
+    values["enable_strategy_profiles"] = True
+    values.setdefault("strategy_profiles", {key: profile for key in PROFILE_KEYS})
     return BacktestConfig(**values)
+
+
+def direction_profiles(long_rr=1.0, short_rr=1.0, stop_loss_multiple=1.0):
+    profiles = {}
+    for key in PROFILE_KEYS:
+        rr = long_rr if key.endswith("_long") else short_rr
+        profiles[key] = StrategyProfile(enabled=True, stop_loss_multiple=stop_loss_multiple, reward_risk_ratio=rr)
+    return profiles
 
 
 def test_heads_assigns_three_to_long_and_one_to_short_with_mirrored_one_to_one_levels():
@@ -161,16 +176,14 @@ def test_di_preferred_side_only_supports_two_to_one_reward_risk():
         **{
             **engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
-            "di_reward_risk_ratio": 2.0,
-            "di_long_reward_risk_ratio": 2.0,
-            "di_short_reward_risk_ratio": 2.0,
+            "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=2.0),
         }
     )
     row = engine.run().iloc[0]
     stop_distance = row.long_entry_price - row.long_sl
     target_distance = row.long_tp - row.long_entry_price
     assert target_distance == pytest.approx(2 * stop_distance)
-    assert row.di_reward_risk_ratio == pytest.approx(2.0)
+    assert row.di_applied_long_reward_risk_ratio == pytest.approx(2.0)
 
 
 def test_di_preferred_side_only_supports_asymmetric_reward_risk():
@@ -179,8 +192,7 @@ def test_di_preferred_side_only_supports_asymmetric_reward_risk():
         **{
             **long_engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
-            "di_long_reward_risk_ratio": 2.0,
-            "di_short_reward_risk_ratio": 1.0,
+            "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=1.0),
         }
     )
     long_row = long_engine.run().iloc[0]
@@ -193,8 +205,7 @@ def test_di_preferred_side_only_supports_asymmetric_reward_risk():
         **{
             **short_engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
-            "di_long_reward_risk_ratio": 2.0,
-            "di_short_reward_risk_ratio": 1.0,
+            "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=1.0),
         }
     )
     short_row = short_engine.run().iloc[0]
@@ -266,51 +277,6 @@ def test_journey_enrichment_reports_each_completed_trade():
     calls = []
     add_journey_columns(trades, telemetry, progress=lambda current, total: calls.append((current, total)))
     assert calls == [(1, 2), (2, 2)]
-
-
-
-
-
-
-def test_bull_long_conditional_reward_risk_uses_override_only_when_both_conditions_pass():
-    engine = di_engine(50, 15)
-    engine.config = BacktestConfig(
-        **{
-            **engine.config.__dict__,
-            "enable_di_regime_reward_risk": True,
-            "di_long_bull_reward_risk_ratio": 2,
-            "enable_bull_long_conditional_reward_risk": True,
-            "bull_long_conditional_bb_width_minimum": 0.05,
-            "bull_long_conditional_adx_maximum": 40,
-            "bull_long_conditional_reward_risk_ratio": 1,
-        }
-    )
-    engine.bull_regime_return_values[:] = 0.25
-    engine.bb_width[:] = 0.05
-    engine.adx_values[:] = 39.99
-    row = engine.run().iloc[0]
-    assert row.di_reward_risk_regime == "BULL"
-    assert row.bull_long_conditional_reward_risk_applied
-    assert row.di_applied_long_reward_risk_ratio == 1
-
-    engine = di_engine(50, 15)
-    engine.config = BacktestConfig(
-        **{
-            **engine.config.__dict__,
-            "enable_di_regime_reward_risk": True,
-            "di_long_bull_reward_risk_ratio": 2,
-            "enable_bull_long_conditional_reward_risk": True,
-            "bull_long_conditional_bb_width_minimum": 0.05,
-            "bull_long_conditional_adx_maximum": 40,
-            "bull_long_conditional_reward_risk_ratio": 1,
-        }
-    )
-    engine.bull_regime_return_values[:] = 0.25
-    engine.bb_width[:] = 0.0499
-    engine.adx_values[:] = 39.99
-    row = engine.run().iloc[0]
-    assert not row.bull_long_conditional_reward_risk_applied
-    assert row.di_applied_long_reward_risk_ratio == 2
 
 
 

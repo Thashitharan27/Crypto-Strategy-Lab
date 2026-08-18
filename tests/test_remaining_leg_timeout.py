@@ -4,6 +4,7 @@ import pytest
 from crypto_strategy_lab.config import BacktestConfig, EntryMode, RiskMode
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.statistics import summarize
+from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, StrategyProfile
 
 
 def strategy(rows):
@@ -32,6 +33,11 @@ def config(**overrides):
                   enable_remaining_leg_timeout_after_first_sl=True,
                   remaining_leg_timeout_after_first_sl_minutes=5)
     values.update(overrides)
+    sl = float(values.get("sl_mult", 1.0))
+    tp = float(values.get("tp_mult", 5.0))
+    profile = StrategyProfile(enabled=True, stop_loss_multiple=sl, reward_risk_ratio=tp / sl)
+    values["enable_strategy_profiles"] = True
+    values.setdefault("strategy_profiles", {key: profile for key in PROFILE_KEYS})
     return BacktestConfig(**values)
 
 

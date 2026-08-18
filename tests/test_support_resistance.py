@@ -6,6 +6,7 @@ import pytest
 import time
 from crypto_strategy_lab.config import BacktestConfig
 from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.strategy_profiles import default_profiles
 from crypto_strategy_lab.support_resistance import (
     SwingDetector,
     SRZoneMerger,
@@ -292,8 +293,9 @@ class TestAnalysisOnlyRegression:
 
     def test_analysis_only_trades_match_sr_disabled_trades(self):
         data = self._wavy_candles()
-        disabled = BacktestEngine(data, BacktestConfig(enable_support_resistance_analysis=False)).run()
+        disabled = BacktestEngine(data, BacktestConfig(enable_strategy_profiles=True, strategy_profiles=default_profiles(), enable_support_resistance_analysis=False)).run()
         enabled = BacktestEngine(data, BacktestConfig(
+            enable_strategy_profiles=True, strategy_profiles=default_profiles(),
             enable_support_resistance_analysis=True, sr_filter_mode="ANALYSIS_ONLY",
         )).run()
 
