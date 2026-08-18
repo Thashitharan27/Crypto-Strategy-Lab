@@ -1,4 +1,4 @@
-"""Regression coverage for removing hidden pair-management GUI controls."""
+"""Regression coverage for the hard removal of old pair-management controls."""
 
 from pathlib import Path
 
@@ -35,24 +35,11 @@ def test_hidden_pair_management_widgets_are_not_constructed():
         window.close()
 
 
-def test_retired_pair_globals_stay_inert_while_profile_timeout_and_be_survive():
+def test_retired_pair_globals_are_absent_while_profile_timeout_and_be_survive():
     app()
     window = MainWindow()
     try:
         values = default_gui_config()
-        values.update({
-            "enable_both_open_timeout": True,
-            "max_both_open_minutes": 60,
-            "enable_be_after_opposite_sl": True,
-            "be_mode": "R_OFFSET",
-            "be_offset_r": 0.5,
-            "enable_remaining_leg_timeout_after_first_sl": True,
-            "enable_remaining_leg_timeout_profit_extension": True,
-            "enable_remaining_leg_checkpoint_score_extension": True,
-            "enable_first_sl_survivor_partial_close": True,
-            "enable_checkpoint_zero_score_confirmation": True,
-            "enable_reentry_gate_after_remaining_leg_timeout": True,
-        })
         profile = values["strategy_profiles"]["bull_long"]
         profile.update({
             "timeout_enabled": True,
@@ -63,17 +50,13 @@ def test_retired_pair_globals_stay_inert_while_profile_timeout_and_be_survive():
         })
         window.apply_values(values)
         current = window.values()
-
-        assert current["enable_both_open_timeout"] is False
-        assert current["max_both_open_minutes"] == 480
-        assert current["enable_be_after_opposite_sl"] is False
-        assert current["be_mode"] == "ENTRY_PRICE"
-        assert current["enable_remaining_leg_timeout_after_first_sl"] is False
-        assert current["enable_remaining_leg_timeout_profit_extension"] is False
-        assert current["enable_remaining_leg_checkpoint_score_extension"] is False
-        assert current["enable_first_sl_survivor_partial_close"] is False
-        assert current["enable_checkpoint_zero_score_confirmation"] is False
-        assert current["enable_reentry_gate_after_remaining_leg_timeout"] is False
+        for key in (
+            "enable_both_open_timeout", "max_both_open_minutes", "enable_be_after_opposite_sl", "be_mode",
+            "enable_remaining_leg_timeout_after_first_sl", "enable_remaining_leg_timeout_profit_extension",
+            "enable_remaining_leg_checkpoint_score_extension", "enable_first_sl_survivor_partial_close",
+            "enable_checkpoint_zero_score_confirmation", "enable_reentry_gate_after_remaining_leg_timeout",
+        ):
+            assert key not in current
         bull_long = current["strategy_profiles"]["bull_long"]
         assert bull_long["timeout_enabled"] is True
         assert bull_long["timeout_minutes"] == 180
