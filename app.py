@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from crypto_strategy_lab.gui.main_window import MainWindow
+from crypto_strategy_lab.research_daily_sequence import attach_research_tab, install_research_support
 
 
 def _splash_pixmap() -> QPixmap:
@@ -33,7 +34,9 @@ def main() -> int:
         app.processEvents()
 
     try:
+        install_research_support()
         window = MainWindow(startup_status=status)
+        attach_research_tab(window)
         status("Ready")
         window.show()
         splash.finish(window)
