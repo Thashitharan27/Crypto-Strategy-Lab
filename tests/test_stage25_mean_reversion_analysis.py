@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from crypto_strategy_lab.config import BacktestConfig
+from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.gui.config_logic import build_backtest_config, default_gui_config
 from crypto_strategy_lab.mean_reversion import (
     DI_PRESSURE_BUCKETS,
@@ -71,6 +73,28 @@ def test_config_exposes_mean_reversion_as_analysis_settings():
     cfg=build_backtest_config(values,require_paths=False)
     assert cfg.enable_mean_reversion_analysis is True
     assert cfg.mean_reversion_period == 20
+
+
+def test_mean_reversion_toggle_changes_telemetry_not_di_direction():
+    n=30
+    candles=pd.DataFrame({
+        "timestamp":pd.date_range("2024-01-01",periods=n,freq="15min",tz="UTC"),
+        "open":np.arange(n,dtype=float)+100,
+        "high":np.arange(n,dtype=float)+102,
+        "low":np.arange(n,dtype=float)+99,
+        "close":np.arange(n,dtype=float)+101,
+        "volume":1.0,
+    })
+    enabled=BacktestEngine(candles,BacktestConfig(adx_period=2,mean_reversion_period=5,enable_mean_reversion_analysis=True))
+    disabled=BacktestEngine(candles,BacktestConfig(adx_period=2,mean_reversion_period=5,enable_mean_reversion_analysis=False))
+    for engine in (enabled,disabled):
+        engine.plus_di_values[:]=30
+        engine.minus_di_values[:]=10
+        engine.di_spread[:]=20
+    i=n-1
+    assert enabled._selected_direction(i)==disabled._selected_direction(i)=="LONG"
+    assert enabled._mean_reversion_snapshot(i,"LONG")["mean_reversion_state"] != "UNKNOWN"
+    assert disabled._mean_reversion_snapshot(i,"LONG")["mean_reversion_state"] == "UNKNOWN"
 
 
 def test_di_tab_exposes_record_only_mean_reversion_controls():
