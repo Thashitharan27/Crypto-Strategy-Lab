@@ -19,7 +19,7 @@ def test_base_main_window_owns_single_di_direction_group():
 
 def test_safety_tests_no_longer_import_stage1_window():
     root = Path(__file__).resolve().parents[1]
-    for rel in ("tests/test_di_tab_stage1.py", "tests/test_stage2_regime_permissions_removed.py"):
-        text = (root / rel).read_text(encoding="utf-8")
-        assert "gui.main_window import MainWindow" in text
-        assert "stage1_window" not in text
+    assert not (root / "tests" / "test_di_tab_stage1.py").exists()
+    text = (root / "tests" / "test_stage2_regime_permissions_removed.py").read_text(encoding="utf-8")
+    assert "gui.main_window import MainWindow" in text
+    assert "stage1_window" not in text
