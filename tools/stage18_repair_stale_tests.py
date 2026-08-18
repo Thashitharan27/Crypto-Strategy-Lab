@@ -131,8 +131,8 @@ p = ROOT / "crypto_strategy_lab" / "gui" / "main_window.py"
 s = p.read_text(encoding="utf-8")
 s = replace_once(
     s,
-    '        mode = self.sr_filter_mode.currentText()\n        mode_line = f"Mode: {mode}"',
-    '        mode_raw = self.sr_filter_mode.currentText()\n        mode = {\n            "ANALYSIS_ONLY": "Analysis Only",\n            "APPLY_ENTRY_RULES": "Apply Entry Rules",\n        }.get(mode_raw, mode_raw)\n        mode_line = f"Mode: {mode}"',
+    '        mode=self.sr_filter_mode.currentText() if hasattr(self,"sr_filter_mode") else "Analysis Only"\n        mode_note="\\nNo trades filtered; support/resistance was measured for analysis only." if mode == "Analysis Only" else ""',
+    '        mode_raw=self.sr_filter_mode.currentText() if hasattr(self,"sr_filter_mode") else "ANALYSIS_ONLY"\n        mode={\n            "ANALYSIS_ONLY":"Analysis Only",\n            "APPLY_ENTRY_RULES":"Apply Entry Rules",\n        }.get(mode_raw,mode_raw)\n        mode_note="\\nNo trades filtered; support/resistance was measured for analysis only." if mode == "Analysis Only" else ""',
     "friendly S/R summary mode",
 )
 p.write_text(s, encoding="utf-8")
