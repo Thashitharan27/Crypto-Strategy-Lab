@@ -106,16 +106,42 @@ def test_profile_editor_supports_unified_action_rules():
     finally: window.close()
 
 
-def test_profile_feature_details_follow_switches_and_rules_table_is_visible():
+def test_profile_editor_orders_entry_rules_before_exit_strategy():
     app(); window=MainWindow()
     try:
-        controls=window.profile_editor.controls
-        form=window.profile_editor.control_forms["trailing_enabled"]
-        assert form is window.profile_editor.control_forms["partial_profit_enabled"]
-        assert form.parentWidget().title()=="Exit & Trade Management"
-        assert form.getWidgetPosition(controls["trailing_activation_r"])[0] == form.getWidgetPosition(controls["trailing_enabled"])[0] + 1
-        assert window.profile_editor.entry_rules_table.columnCount()==5
-        assert window.profile_editor.add_rule_btn.text()=="+ Add rule"
+        editor=window.profile_editor
+        layout=editor.editor_layout
+        assert layout.indexOf(editor.sections["Profile Settings"]) < layout.indexOf(editor.sections["Entry Rules"])
+        assert layout.indexOf(editor.sections["Entry Rules"]) < layout.indexOf(editor.sections["Exit Strategy"])
+        assert layout.indexOf(editor.sections["Exit Strategy"]) < layout.indexOf(editor.sections["Profile Actions"])
+        assert editor.control_forms["risk_multiplier"].parentWidget().title()=="Profile Settings"
+        assert editor.control_forms["reward_risk_ratio"].parentWidget().title()=="Exit Strategy"
+    finally: window.close()
+
+
+def test_profile_exit_strategy_hides_inactive_advanced_details_and_prevents_invalid_r_step_combinations():
+    app(); window=MainWindow()
+    try:
+        editor=window.profile_editor; controls=editor.controls
+        form=editor.control_forms["trailing_enabled"]
+        assert form.parentWidget().title()=="Exit Strategy"
+        assert not form.isRowVisible(controls["r_step_activation_r"])
+        assert not form.isRowVisible(controls["atr_checkpoint_di_spread_minimum"])
+        assert editor.entry_rules_table.columnCount()==5
+        assert editor.add_rule_btn.text()=="+ Add rule"
+
+        controls["r_step_trailing_enabled"].setChecked(True)
+        assert form.isRowVisible(controls["r_step_activation_r"])
+        assert not controls["partial_profit_enabled"].isEnabled()
+        assert not controls["trailing_enabled"].isEnabled()
+        assert not controls["atr_checkpoint_tp_extension_enabled"].isEnabled()
+
+        controls["r_step_trailing_enabled"].setChecked(False)
+        controls["atr_checkpoint_tp_extension_enabled"].setChecked(True)
+        assert form.isRowVisible(controls["atr_checkpoint_di_spread_minimum"])
+        assert not controls["r_step_trailing_enabled"].isEnabled()
+        controls["atr_checkpoint_tp_extension_enabled"].setChecked(False)
+        assert controls["r_step_trailing_enabled"].isEnabled()
     finally: window.close()
 
 
