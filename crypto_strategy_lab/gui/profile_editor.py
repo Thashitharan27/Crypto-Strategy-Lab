@@ -25,47 +25,137 @@ class StrategyProfilesWidget(QWidget):
         definition.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Maximum); root.addWidget(definition)
         self.mode_help=QLabel(); self.mode_help.setWordWrap(True); self.mode_help.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Maximum); root.addWidget(self.mode_help)
         split=QSplitter(); split.setMinimumHeight(450); self.list=QListWidget(); self.list.setMinimumWidth(280); split.addWidget(self.list); editor=QScrollArea(); editor.setWidgetResizable(True); body=QWidget(); self.editor_layout=QVBoxLayout(body); editor.setWidget(body); split.addWidget(editor); split.setStretchFactor(1,1); root.addWidget(split,1)
-        self.controls={}; self.control_forms={}; self._section("Profile Settings"); self._check("enabled","Profile enabled"); self._check("flip_direction","Flip entry direction (Long ↔ Short)"); self.controls["flip_direction"].setToolTip("Apply this profile's filters to the original DI signal, then enter in the opposite direction."); self._number("reward_risk_ratio",1,.01,100); self._number("risk_multiplier",1,.01,100)
-        self._section("Exit & Trade Management"); self._number("stop_loss_multiple",2,.001,1000)
-        self._check("partial_stop_enabled","Partial stop-loss"); self._number("sl1_r",.5,.001,1000); self._number("sl1_close_pct",50,.01,99.99); self._number("sl2_r",2,.001,1000)
-        self._check("partial_profit_enabled","Partial take-profit"); self._number("tp1_r",1,.001,1000); self._number("tp1_close_pct",50,.01,99.99); self._number("tp2_r",2,.001,1000)
-        self._choice("after_tp1_stop_mode",(("Keep original stop","KEEP_ORIGINAL_SL"),("Move stop to entry","MOVE_TO_ENTRY"),("Lock profit at R offset","MOVE_TO_R_OFFSET"))); self._number("after_tp1_stop_offset_r",0,0,1000)
-        for key,label in (("stop_loss_multiple","Initial stop distance"),("sl1_r","First stop distance"),("sl1_close_pct","Position closed at first stop"),("sl2_r","Final stop distance"),("tp1_r","First profit target"),("tp1_close_pct","Position closed at first target"),("tp2_r","Final profit target"),("after_tp1_stop_mode","Remaining stop after first target"),("after_tp1_stop_offset_r","Profit locked after first target")):
-            self.form.labelForField(self.controls[key]).setText(label)
-        for key in ("stop_loss_multiple","sl1_r","sl2_r","tp1_r","tp2_r","after_tp1_stop_offset_r"):
-            self.controls[key].setDecimals(3); self.controls[key].setSuffix(" R")
-        for key in ("sl1_close_pct","tp1_close_pct"):
-            self.controls[key].setDecimals(2); self.controls[key].setSuffix(" %")
+        self.controls={}; self.control_forms={}; self.sections={}
+
+        self._section("Profile Settings")
+        self._check("enabled","Profile enabled")
+        self._check("flip_direction","Flip entry direction (Long ↔ Short)")
+        self.controls["flip_direction"].setToolTip("Apply this profile's filters to the original DI signal, then enter in the opposite direction.")
+        self._number("risk_multiplier",1,.01,100)
+        self.form.labelForField(self.controls["risk_multiplier"]).setText("Position risk multiplier")
+        self.controls["risk_multiplier"].setToolTip("Scales the configured account risk for this profile. 1.0 uses the normal risk.")
+
+        self._section("Entry Rules")
+        self._choice("flip_rule_match_mode",(("Any flip rule (OR)","ANY"),("All flip rules (AND)","ALL")))
+        self.form.labelForField(self.controls["flip_rule_match_mode"]).setText("Flip rules match")
+        self._choice("reject_rule_match_mode",(("Any reject rule (OR)","ANY"),("All reject rules (AND)","ALL")))
+        self.form.labelForField(self.controls["reject_rule_match_mode"]).setText("Reject rules match")
+        self._integer("rsi_period",14,1,1000)
+        self.form.labelForField(self.controls["rsi_period"]).setText("RSI period")
+        self._integer("momentum_lookback_hours",24,1,87600)
+        self.form.labelForField(self.controls["momentum_lookback_hours"]).setText("Return lookback")
+        self.controls["momentum_lookback_hours"].setSuffix(" hours")
+        self.entry_rules_table=QTableWidget(0,5)
+        self.entry_rules_table.setHorizontalHeaderLabels(["Action","Indicator","Condition","Minimum","Maximum"])
+        self.entry_rules_table.horizontalHeader().setStretchLastSection(True)
+        self.entry_rules_table.setMaximumHeight(240)
+        self.entry_rules_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        rule_buttons=QHBoxLayout()
+        self.add_rule_btn=QPushButton("+ Add rule")
+        self.remove_rule_btn=QPushButton("Remove selected")
+        rule_buttons.addWidget(self.add_rule_btn)
+        rule_buttons.addWidget(self.remove_rule_btn)
+        rule_buttons.addStretch()
+        self.form.addRow("Rules",self.entry_rules_table)
+        self.form.addRow("",rule_buttons)
+        filter_note=QLabel("Rules are evaluated in this order: Reject, then Flip, then Normal. Choose Inside or Outside for each range. Any means OR; All means AND. Percentage values use decimals: 0.025 means 2.5%.")
+        filter_note.setWordWrap(True)
+        self.form.addRow(filter_note)
+
+        self._section("Exit Strategy")
+        self._subsection("Base Exit","The normal stop and fixed target used when optional exit methods are disabled.")
+        self._number("stop_loss_multiple",2,.001,1000)
+        self._number("reward_risk_ratio",1,.01,100)
+        self.form.labelForField(self.controls["stop_loss_multiple"]).setText("Initial stop distance")
+        self.form.labelForField(self.controls["reward_risk_ratio"]).setText("Reward / risk target")
+        self.controls["stop_loss_multiple"].setDecimals(3)
+        self.controls["stop_loss_multiple"].setSuffix(" R")
         self.controls["stop_loss_multiple"].setToolTip("Distance from entry measured in the strategy's risk unit (R).")
+        self.controls["reward_risk_ratio"].setToolTip("Fixed final target as a multiple of the initial stop distance. Disabled while partial take-profit is active.")
+
+        self._subsection("Stop Loss","Optional staged loss handling.")
+        self._check("partial_stop_enabled","Use partial stop-loss")
+        self._number("sl1_r",.5,.001,1000)
+        self._number("sl1_close_pct",50,.01,99.99)
+        self._number("sl2_r",2,.001,1000)
+        for key,label in (("sl1_r","First stop distance"),("sl1_close_pct","Position closed at first stop"),("sl2_r","Final stop distance")):
+            self.form.labelForField(self.controls[key]).setText(label)
+        for key in ("sl1_r","sl2_r"):
+            self.controls[key].setDecimals(3)
+            self.controls[key].setSuffix(" R")
+        self.controls["sl1_close_pct"].setDecimals(2)
+        self.controls["sl1_close_pct"].setSuffix(" %")
+
+        self._subsection("Profit Taking","Choose staged profit-taking only when you need more than the fixed reward/risk target.")
+        self._check("partial_profit_enabled","Use partial take-profit")
+        self._number("tp1_r",1,.001,1000)
+        self._number("tp1_close_pct",50,.01,99.99)
+        self._number("tp2_r",2,.001,1000)
+        self._choice("after_tp1_stop_mode",(("Keep original stop","KEEP_ORIGINAL_SL"),("Move stop to entry","MOVE_TO_ENTRY"),("Lock profit at R offset","MOVE_TO_R_OFFSET")))
+        self._number("after_tp1_stop_offset_r",0,0,1000)
+        for key,label in (("tp1_r","First profit target"),("tp1_close_pct","Position closed at first target"),("tp2_r","Final profit target"),("after_tp1_stop_mode","Remaining stop after first target"),("after_tp1_stop_offset_r","Profit locked after first target")):
+            self.form.labelForField(self.controls[key]).setText(label)
+        for key in ("tp1_r","tp2_r","after_tp1_stop_offset_r"):
+            self.controls[key].setDecimals(3)
+            self.controls[key].setSuffix(" R")
+        self.controls["tp1_close_pct"].setDecimals(2)
+        self.controls["tp1_close_pct"].setSuffix(" %")
         self.controls["tp1_close_pct"].setToolTip("The remaining position exits at the final profit target.")
-        self._check("break_even_enabled","Break-even protection"); self._number("break_even_activation_r",1,.001,1000); self._number("break_even_offset_r",0,-1000,1000)
-        self._check("trailing_enabled","Trailing stop"); self._number("trailing_activation_r",3,.001,1000); self._number("trailing_distance_r",1,.001,1000)
-        self._check("timeout_enabled","Maximum holding time"); self._integer("timeout_minutes",480,1,1000000)
-        self._check("r_step_trailing_enabled","R-step staircase"); self._number("r_step_activation_r",2,.001,1000); self._number("r_step_distance_r",2,.001,1000); self._number("r_step_size_r",1,.001,1000); self._number("r_step_maximum_r",0,0,1000); self._number("r_step_activation_close_pct",0,0,99.99)
-        self._check("atr_checkpoint_tp_extension_enabled","ATR checkpoint TP extension"); self._number("atr_checkpoint_di_spread_minimum",30,0,1000); self._number("atr_checkpoint_bb_width_minimum",.03,0,1000); self._number("atr_checkpoint_profit_lock_start",3,.001,1000); self._number("atr_checkpoint_profit_lock_distance",1,.001,1000)
-        for key,label in (("break_even_activation_r","Activate after profit reaches"),("break_even_offset_r","Profit locked at activation"),("trailing_activation_r","Activate after profit reaches"),("trailing_distance_r","Trailing distance"),("timeout_minutes","Maximum holding time")):
+
+        self._subsection("Protection","Optional rules that protect an open winner.")
+        self._check("break_even_enabled","Break-even protection")
+        self._number("break_even_activation_r",1,.001,1000)
+        self._number("break_even_offset_r",0,-1000,1000)
+        self._check("trailing_enabled","Trailing stop")
+        self._number("trailing_activation_r",3,.001,1000)
+        self._number("trailing_distance_r",1,.001,1000)
+        for key,label in (("break_even_activation_r","Break-even activates at"),("break_even_offset_r","Break-even profit lock"),("trailing_activation_r","Trailing activates at"),("trailing_distance_r","Trailing distance")):
             self.form.labelForField(self.controls[key]).setText(label)
         for key in ("trailing_activation_r","trailing_distance_r","break_even_activation_r","break_even_offset_r"):
-            self.controls[key].setDecimals(3); self.controls[key].setSuffix(" R")
+            self.controls[key].setDecimals(3)
+            self.controls[key].setSuffix(" R")
+
+        self._subsection("Time Exit","Optional maximum duration for a trade.")
+        self._check("timeout_enabled","Use maximum holding time")
+        self._integer("timeout_minutes",480,1,1000000)
+        self.form.labelForField(self.controls["timeout_minutes"]).setText("Maximum holding time")
         self.controls["timeout_minutes"].setSuffix(" min")
         self.controls["timeout_minutes"].setToolTip("480 minutes equals 8 hours.")
+
+        self._subsection("Advanced Profit Management","Advanced alternatives/extensions. Details stay hidden until the feature is enabled.")
+        self._check("r_step_trailing_enabled","R-step staircase / runner")
+        self.controls["r_step_trailing_enabled"].setToolTip("Cannot be combined with partial take-profit, trailing stop, or ATR checkpoint extension.")
+        self._number("r_step_activation_r",2,.001,1000)
+        self._number("r_step_distance_r",2,.001,1000)
+        self._number("r_step_size_r",1,.001,1000)
+        self._number("r_step_maximum_r",0,0,1000)
+        self._number("r_step_activation_close_pct",0,0,99.99)
+        self._check("atr_checkpoint_tp_extension_enabled","ATR checkpoint TP extension")
+        self.controls["atr_checkpoint_tp_extension_enabled"].setToolTip("Extends profit management when the configured DI and Bollinger checkpoint conditions are met.")
+        self._number("atr_checkpoint_di_spread_minimum",30,0,1000)
+        self._number("atr_checkpoint_bb_width_minimum",.03,0,1000)
+        self._number("atr_checkpoint_profit_lock_start",3,.001,1000)
+        self._number("atr_checkpoint_profit_lock_distance",1,.001,1000)
         for key,label in (("r_step_activation_r","Staircase activation"),("r_step_distance_r","Stop distance behind checkpoint"),("r_step_size_r","Checkpoint step"),("r_step_maximum_r","Maximum target (0 = runner)"),("r_step_activation_close_pct","Close at activation"),("atr_checkpoint_di_spread_minimum","Checkpoint DI spread minimum"),("atr_checkpoint_bb_width_minimum","Checkpoint BB width minimum"),("atr_checkpoint_profit_lock_start","Profit lock starts at"),("atr_checkpoint_profit_lock_distance","Profit lock distance")):
             self.form.labelForField(self.controls[key]).setText(label)
         for key in ("r_step_activation_r","r_step_distance_r","r_step_size_r","r_step_maximum_r","atr_checkpoint_profit_lock_start","atr_checkpoint_profit_lock_distance"):
             self.controls[key].setSuffix(" R")
         self.controls["r_step_activation_close_pct"].setSuffix(" %")
         self.controls["atr_checkpoint_bb_width_minimum"].setDecimals(6)
-        self._section("Entry Rules")
-        self._choice("flip_rule_match_mode",(("Any flip rule (OR)","ANY"),("All flip rules (AND)","ALL"))); self.form.labelForField(self.controls["flip_rule_match_mode"]).setText("Flip rules match")
-        self._choice("reject_rule_match_mode",(("Any reject rule (OR)","ANY"),("All reject rules (AND)","ALL"))); self.form.labelForField(self.controls["reject_rule_match_mode"]).setText("Reject rules match")
-        self._integer("rsi_period",14,1,1000); self.form.labelForField(self.controls["rsi_period"]).setText("RSI period")
-        self._integer("momentum_lookback_hours",24,1,87600); self.form.labelForField(self.controls["momentum_lookback_hours"]).setText("Return lookback"); self.controls["momentum_lookback_hours"].setSuffix(" hours")
-        self.entry_rules_table=QTableWidget(0,5); self.entry_rules_table.setHorizontalHeaderLabels(["Action","Indicator","Condition","Minimum","Maximum"]); self.entry_rules_table.horizontalHeader().setStretchLastSection(True); self.entry_rules_table.setMaximumHeight(240); self.entry_rules_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        rule_buttons=QHBoxLayout(); self.add_rule_btn=QPushButton("+ Add rule"); self.remove_rule_btn=QPushButton("Remove selected"); rule_buttons.addWidget(self.add_rule_btn); rule_buttons.addWidget(self.remove_rule_btn); rule_buttons.addStretch()
-        self.form.addRow("Rules",self.entry_rules_table); self.form.addRow("",rule_buttons)
-        filter_note=QLabel("Rules are evaluated in this order: Reject, then Flip, then Normal. Choose Inside or Outside for each range. Any means OR; All means AND. Percentage values use decimals: 0.025 means 2.5%."); filter_note.setWordWrap(True); self.form.addRow(filter_note)
+
         self._section("Profile Actions")
-        buttons=QHBoxLayout(); copy_btn=QPushButton("Copy Profile"); paste_btn=QPushButton("Paste Profile"); reset_btn=QPushButton("Reset Profile"); copy_rules_btn=QPushButton("Apply Rules to All"); buttons.addWidget(copy_btn); buttons.addWidget(paste_btn); buttons.addWidget(reset_btn); buttons.addWidget(copy_rules_btn); self.form.addRow(buttons); self.editor_layout.addStretch(); self.clipboard=None
+        buttons=QHBoxLayout()
+        copy_btn=QPushButton("Copy Profile")
+        paste_btn=QPushButton("Paste Profile")
+        reset_btn=QPushButton("Reset Profile")
+        copy_rules_btn=QPushButton("Apply Rules to All")
+        buttons.addWidget(copy_btn)
+        buttons.addWidget(paste_btn)
+        buttons.addWidget(reset_btn)
+        buttons.addWidget(copy_rules_btn)
+        self.form.addRow(buttons)
+        self.editor_layout.addStretch()
+        self.clipboard=None
         copy_btn.clicked.connect(lambda:setattr(self,"clipboard",deepcopy(self.profiles[self.current]))); paste_btn.clicked.connect(self._paste); reset_btn.clicked.connect(self._reset); copy_rules_btn.clicked.connect(self._apply_rules_to_all); self.list.currentRowChanged.connect(self._select); self.mode.currentTextChanged.connect(self.changed); self.mode.currentIndexChanged.connect(self._update_mode_help)
         for widget in (self.regime_lookback,self.bull_threshold,self.structural_sma_days,self.structural_slope_days,self.adx_period,self.bb_period,self.bb_stddevs): widget.valueChanged.connect(self.changed)
         self.regime_method.currentIndexChanged.connect(self._update_regime_controls); self.regime_method.currentIndexChanged.connect(self.changed)
@@ -85,7 +175,15 @@ class StrategyProfilesWidget(QWidget):
         }
         self.mode_help.setText(text.get(self.mode.currentData(),""))
     def _section(self,title):
-        box=QGroupBox(title); self.form=QFormLayout(box); self.editor_layout.addWidget(box)
+        box=QGroupBox(title); self.form=QFormLayout(box); self.editor_layout.addWidget(box); self.sections[title]=box; return box
+    def _subsection(self,title,help_text=""):
+        label=QLabel(title); font=label.font(); font.setBold(True); label.setFont(font)
+        if help_text:
+            label.setToolTip(help_text)
+        self.form.addRow(label)
+        if help_text:
+            note=QLabel(help_text); note.setWordWrap(True); note.setStyleSheet("color: palette(mid);")
+            self.form.addRow(note)
     def _check(self,key,label): w=QCheckBox(label); self.controls[key]=w; self.control_forms[key]=self.form; self.form.addRow(w); w.toggled.connect(self._store)
     def _number(self,key,value,lo,hi): w=QDoubleSpinBox(); w.setRange(lo,hi); w.setDecimals(3); w.setValue(value); self.controls[key]=w; self.control_forms[key]=self.form; self.form.addRow(key.replace('_',' ').title(),w); w.valueChanged.connect(self._store)
     def _integer(self,key,value,lo,hi): w=QSpinBox(); w.setRange(lo,hi); w.setValue(value); self.controls[key]=w; self.control_forms[key]=self.form; self.form.addRow(key.replace('_',' ').title(),w); w.valueChanged.connect(self._store)
@@ -133,14 +231,41 @@ class StrategyProfilesWidget(QWidget):
         self.entry_rules_table.setRowCount(0)
         for rule in rules: self._add_entry_rule(rule=rule)
     def _update_management_controls(self,*_):
-        for key in ("sl1_r","sl1_close_pct","sl2_r"): self._show_control(key,self.controls["partial_stop_enabled"].isChecked())
+        partial_stop=self.controls["partial_stop_enabled"].isChecked()
+        for key in ("sl1_r","sl1_close_pct","sl2_r"):
+            self._show_control(key,partial_stop)
+
         partial_profit=self.controls["partial_profit_enabled"].isChecked()
-        for key in ("tp1_r","tp1_close_pct","tp2_r","after_tp1_stop_mode"): self._show_control(key,partial_profit)
+        for key in ("tp1_r","tp1_close_pct","tp2_r","after_tp1_stop_mode"):
+            self._show_control(key,partial_profit)
         self._show_control("after_tp1_stop_offset_r",partial_profit and self.controls["after_tp1_stop_mode"].currentData()=="MOVE_TO_R_OFFSET")
         self.controls["reward_risk_ratio"].setEnabled(not partial_profit)
-        for key in ("trailing_activation_r","trailing_distance_r"): self._show_control(key,self.controls["trailing_enabled"].isChecked())
-        for key in ("break_even_activation_r","break_even_offset_r"): self._show_control(key,self.controls["break_even_enabled"].isChecked())
-        self._show_control("timeout_minutes",self.controls["timeout_enabled"].isChecked())
+
+        break_even=self.controls["break_even_enabled"].isChecked()
+        for key in ("break_even_activation_r","break_even_offset_r"):
+            self._show_control(key,break_even)
+
+        trailing=self.controls["trailing_enabled"].isChecked()
+        for key in ("trailing_activation_r","trailing_distance_r"):
+            self._show_control(key,trailing)
+
+        timeout=self.controls["timeout_enabled"].isChecked()
+        self._show_control("timeout_minutes",timeout)
+
+        r_step=self.controls["r_step_trailing_enabled"].isChecked()
+        for key in ("r_step_activation_r","r_step_distance_r","r_step_size_r","r_step_maximum_r","r_step_activation_close_pct"):
+            self._show_control(key,r_step)
+
+        atr_extension=self.controls["atr_checkpoint_tp_extension_enabled"].isChecked()
+        for key in ("atr_checkpoint_di_spread_minimum","atr_checkpoint_bb_width_minimum","atr_checkpoint_profit_lock_start","atr_checkpoint_profit_lock_distance"):
+            self._show_control(key,atr_extension)
+
+        # Match StrategyProfile.validate(): R-step is mutually exclusive with
+        # partial take-profit, trailing stop, and ATR checkpoint extension.
+        r_step_conflict=partial_profit or trailing or atr_extension
+        self.controls["r_step_trailing_enabled"].setEnabled(r_step or not r_step_conflict)
+        for key in ("partial_profit_enabled","trailing_enabled","atr_checkpoint_tp_extension_enabled"):
+            self.controls[key].setEnabled(not r_step)
     def _show_control(self,key,visible):
         control=self.controls[key]; control.setEnabled(visible); self.control_forms[key].setRowVisible(control,visible)
     def _load(self):
