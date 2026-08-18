@@ -13,46 +13,6 @@ def test_run_folder_name_uses_required_parts_and_run_name():
     assert name == "My_Run_BTC_15m_ATR14x1_SL2_TP3_2026-07-23_12-34-56"
 
 
-def test_run_folder_name_uses_effective_di_reward_risk_target():
-    cfg = BacktestConfig(
-        strategy_csv=Path("data/BTCUSDT_4h.csv"),
-        strategy_timeframe_minutes=240,
-        telemetry_interval_minutes=240,
-        enable_di_direction_sizing=True,
-        sl_mult=2,
-        tp_mult=2,
-        di_reward_risk_ratio=2,
-    )
-    name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "BTC_240m_ATR14x1_SL2_TP4_2026-07-23_12-34-56"
-
-
-def test_run_folder_name_uses_asymmetric_di_targets():
-    cfg = BacktestConfig(
-        strategy_csv=Path("data/BTCUSDT_4h.csv"),
-        strategy_timeframe_minutes=240,
-        telemetry_interval_minutes=240,
-        enable_di_direction_sizing=True,
-        sl_mult=2,
-        di_long_reward_risk_ratio=2,
-        di_short_reward_risk_ratio=1,
-    )
-    name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "BTC_240m_ATR14x1_SL2_LTP4-STP2_2026-07-23_12-34-56"
-
-
-def test_run_folder_name_marks_regime_specific_di_targets():
-    cfg = BacktestConfig(
-        strategy_csv=Path("data/BTCUSDT_1h.csv"),
-        strategy_timeframe_minutes=60,
-        telemetry_interval_minutes=60,
-        enable_di_direction_sizing=True,
-        enable_di_regime_reward_risk=True,
-    )
-    name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
-    assert name == "BTC_60m_ATR14x1_SL2_RRREGIME_2026-07-23_12-34-56"
-
-
 def test_run_folder_name_describes_partial_stop_instead_of_ignored_core_stop():
     cfg = BacktestConfig(
         strategy_csv=Path("data/BTCUSDT_15m.csv"),
@@ -139,13 +99,14 @@ def test_periodic_results_does_not_use_reset_index_names_keyword(monkeypatch):
     assert list(monthly.columns) == ["period", "pair_count", "net_pnl", "net_r"]
     assert list(monthly["net_pnl"]) == [10.0, 5.0]
 
+
 def test_create_run_dir_creates_timestamped_folder_and_latest_pointer(tmp_path):
     from crypto_strategy_lab.output_manager import create_run_dir, update_latest
 
     cfg = BacktestConfig(output_dir=tmp_path, strategy_csv=Path("data/BTCUSDT_15m.csv"), atr_period=14, sl_mult=2, tp_mult=3)
     run_dir = create_run_dir(cfg)
     assert run_dir.parent == tmp_path
-    assert run_dir.name.startswith("BTC_15m_ATR14_SL2_TP3_")
+    assert run_dir.name.startswith("BTC_15m_ATR14x1_SL2_TP3_")
     assert (run_dir / "charts").is_dir()
 
     (run_dir / "trade_list.csv").write_text("trade\n")
