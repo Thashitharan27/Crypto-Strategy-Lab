@@ -191,17 +191,6 @@ class BacktestConfig:
     sr_short_require_near_resistance: bool = False
     sr_short_block_broken_resistance: bool = False
     sr_short_min_room_to_support_atr: float = 0.0
-    enable_bull_long_r_step_trailing: bool = False
-    bull_long_r_step_activation_r: float = 2.0
-    bull_long_r_step_distance_r: float = 2.0
-    bull_long_r_step_size_r: float = 1.0
-    bull_long_r_step_maximum_r: float = 0.0
-    bull_long_r_step_activation_close_pct: float = 0.0
-    enable_atr_checkpoint_tp_extension: bool = False
-    atr_checkpoint_di_spread_minimum: float = 30.0
-    atr_checkpoint_bb_width_minimum: float = 0.03
-    atr_checkpoint_profit_lock_start: float = 3.0
-    atr_checkpoint_profit_lock_distance: float = 1.0
     market_regime_method: str = "ASSET_RETURN"
     structural_regime_sma_days: int = 200
     structural_regime_slope_lookback_days: int = 30
@@ -284,21 +273,6 @@ class BacktestConfig:
         if self.di_direction_long_minimum_spread < 0: raise ValueError("di_direction_long_minimum_spread must be non-negative")
         if self.di_direction_short_minimum_spread < 0: raise ValueError("di_direction_short_minimum_spread must be non-negative")
         if not 1 <= self.di_pressure_lookback <= 100: raise ValueError("di_pressure_lookback must be between 1 and 100")
-        if self.bull_long_r_step_activation_r <= 0: raise ValueError("bull_long_r_step_activation_r must be positive")
-        if self.bull_long_r_step_distance_r <= 0: raise ValueError("bull_long_r_step_distance_r must be positive")
-        if self.bull_long_r_step_size_r <= 0: raise ValueError("bull_long_r_step_size_r must be positive")
-        if self.bull_long_r_step_maximum_r < 0: raise ValueError("bull_long_r_step_maximum_r cannot be negative")
-        if 0 < self.bull_long_r_step_maximum_r <= self.bull_long_r_step_activation_r: raise ValueError("bull_long_r_step_maximum_r must be zero or above the activation R")
-        if not 0 <= self.bull_long_r_step_activation_close_pct < 100: raise ValueError("bull_long_r_step_activation_close_pct must be from 0 up to, but not including, 100")
-        if self.enable_bull_long_r_step_trailing and self.enable_partial_take_profit: raise ValueError("bull-long R-step trailing cannot be combined with partial take profit")
-        if self.enable_bull_long_r_step_trailing and self.enable_atr_checkpoint_tp_extension: raise ValueError("bull-long R-step trailing cannot be combined with ATR checkpoint TP extension")
-        if self.enable_bull_long_r_step_trailing and self.enable_trailing_profit: raise ValueError("bull-long R-step trailing cannot be combined with the independent trailing stop")
-        if self.atr_checkpoint_di_spread_minimum < 0: raise ValueError("atr_checkpoint_di_spread_minimum must be non-negative")
-        if self.atr_checkpoint_bb_width_minimum < 0: raise ValueError("atr_checkpoint_bb_width_minimum must be non-negative")
-        if self.atr_checkpoint_profit_lock_start < 1: raise ValueError("atr_checkpoint_profit_lock_start must be at least 1 ATR")
-        if self.atr_checkpoint_profit_lock_distance <= 0: raise ValueError("atr_checkpoint_profit_lock_distance must be positive")
-        if self.enable_atr_checkpoint_tp_extension and not self.enable_di_direction_sizing: raise ValueError("ATR checkpoint TP extension requires DI-direction sizing")
-        if self.enable_atr_checkpoint_tp_extension and self.enable_partial_take_profit: raise ValueError("ATR checkpoint TP extension cannot be combined with partial take profit")
         if self.bull_regime_lookback_days <= 0: raise ValueError("bull_regime_lookback_days must be positive")
         if self.market_regime_method not in ("ASSET_RETURN", "BTC_STRUCTURAL", "ASSET_STRUCTURAL"): raise ValueError("market_regime_method must be ASSET_RETURN, BTC_STRUCTURAL, or ASSET_STRUCTURAL")
         if self.structural_regime_sma_days < 2: raise ValueError("structural_regime_sma_days must be at least 2")

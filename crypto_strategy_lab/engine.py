@@ -720,10 +720,7 @@ class BacktestEngine:
         short=Position(Side.SHORT,self._execution_time(i),i,short_entry,r,short_entry+stop,short_entry-short_target_distance,sqty,risk_amt*short_mult,short_entry*sqty,float(self.atr_values[ind_i]),s_uncapped,sqty*short_entry/self.current_equity, entry_fee=short_entry*sqty*fee_rate, fees=short_entry*sqty*fee_rate, original_sl=short_entry+stop, be_enabled=self.config.enable_be_after_opposite_sl, be_mode=self.config.be_mode.value, be_offset_r=self.config.be_offset_r)
         for pos in (long, short):
             profile_for_special_exit = active_profile if active_profile is not None and pos.side.value == sizing_direction else None
-            pos.atr_checkpoint_extension_enabled = bool(
-                profile_for_special_exit.atr_checkpoint_tp_extension_enabled
-                if profile_for_special_exit else (self.config.enable_atr_checkpoint_tp_extension and sizing_direction == pos.side.value)
-            )
+            pos.atr_checkpoint_extension_enabled = bool(profile_for_special_exit and profile_for_special_exit.atr_checkpoint_tp_extension_enabled)
             if pos.atr_checkpoint_extension_enabled:
                 pos.atr_checkpoint_di_spread_minimum = profile_for_special_exit.atr_checkpoint_di_spread_minimum if profile_for_special_exit else pos.atr_checkpoint_di_spread_minimum
                 pos.atr_checkpoint_bb_width_minimum = profile_for_special_exit.atr_checkpoint_bb_width_minimum if profile_for_special_exit else pos.atr_checkpoint_bb_width_minimum
@@ -731,10 +728,7 @@ class BacktestEngine:
                 pos.atr_checkpoint_profit_lock_distance = profile_for_special_exit.atr_checkpoint_profit_lock_distance if profile_for_special_exit else pos.atr_checkpoint_profit_lock_distance
                 pos.atr_checkpoint_initial_tp = pos.tp
                 pos.atr_checkpoint_final_tp_r = (long_target_distance if pos.side == Side.LONG else short_target_distance) / r
-            pos.r_step_trailing_enabled = bool(
-                profile_for_special_exit.r_step_trailing_enabled
-                if profile_for_special_exit else (self.config.enable_bull_long_r_step_trailing and pos.side == Side.LONG and applied_regime == "BULL")
-            )
+            pos.r_step_trailing_enabled = bool(profile_for_special_exit and profile_for_special_exit.r_step_trailing_enabled)
             if pos.r_step_trailing_enabled:
                 pos.r_step_activation_r = profile_for_special_exit.r_step_activation_r if profile_for_special_exit else pos.r_step_activation_r
                 pos.r_step_distance_r = profile_for_special_exit.r_step_distance_r if profile_for_special_exit else pos.r_step_distance_r
@@ -742,7 +736,7 @@ class BacktestEngine:
                 pos.r_step_maximum_r = profile_for_special_exit.r_step_maximum_r if profile_for_special_exit else pos.r_step_maximum_r
                 pos.r_step_next_checkpoint_r = pos.r_step_activation_r
                 pos.r_step_initial_tp = pos.tp
-                pos.r_step_activation_close_pct = profile_for_special_exit.r_step_activation_close_pct if profile_for_special_exit else self.config.bull_long_r_step_activation_close_pct
+                pos.r_step_activation_close_pct = profile_for_special_exit.r_step_activation_close_pct
                 if pos.r_step_activation_close_pct > 0:
                     pos.partial_tp_enabled = True
                     pos.original_quantity = pos.quantity

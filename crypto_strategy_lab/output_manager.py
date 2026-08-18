@@ -227,18 +227,6 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
             if config.enable_trailing_profit
             else "Trailing stop: disabled"
         ),
-        (
-            f"Bull-long R-step staircase: enabled; activate at {config.bull_long_r_step_activation_r}R; "
-            f"distance {config.bull_long_r_step_distance_r}R; step {config.bull_long_r_step_size_r}R; "
-            f"close {config.bull_long_r_step_activation_close_pct}% at activation; "
-            + (
-                f"maximum target {config.bull_long_r_step_maximum_r}R"
-                if config.bull_long_r_step_maximum_r > 0
-                else "no fixed target"
-            )
-            if config.enable_bull_long_r_step_trailing
-            else "Bull-long R-step staircase: disabled"
-        ),
         f"Partial intrabar ordering: {'STOP_FIRST' if config.tie_policy.value == 'PESSIMISTIC' else 'TP1_THEN_TP2_THEN_STOP'}",
         f"Initial equity: {config.initial_equity}",
         f"Total pairs: {summary.get('total_pairs')}",
