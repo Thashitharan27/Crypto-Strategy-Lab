@@ -357,7 +357,7 @@ class MainWindow(QMainWindow):
                 if not symbol:raise ValueError("Every enabled asset needs a trading pair.")
                 if symbol in seen:raise ValueError(f"{symbol} is included more than once.")
                 if not Path(path).is_file():raise ValueError(f"Select a valid saved configuration for {symbol}.")
-                values=load_config_json(path); configured=str(values.get("market_symbol") or self._pair_from_path(values.get("strategy_csv") or values.get("input_csv") or "") or "").upper()
+                values=load_config_json(path); configured=str(values.get("market_symbol") or self._pair_from_path(values.get("input_csv") or "") or "").upper()
                 if configured and configured != symbol:raise ValueError(f"{symbol} row uses a {configured} configuration. Select the matching configuration.")
                 seen.add(symbol); components.append((symbol,path))
             if len(components)<2:raise ValueError("Enable at least two assets and select their saved configurations.")
@@ -450,7 +450,7 @@ class MainWindow(QMainWindow):
             "create_lifecycle_charts": self.lifecycle_charts.isChecked(),
             "lifecycle_flat_pattern_threshold_pct": self.lifecycle_flat_threshold.value(),
             "run_name": self.run_name.text().strip(),
-            "input_csv": self.input_csv.text(), "strategy_csv": self.input_csv.text(),
+            "input_csv": self.input_csv.text(),
             "intrabar_csv": self.intrabar_csv.text(), "use_intrabar_data": self.use_intrabar.isChecked(),
             "trading_start_date": self.trading_start.text() or None, "trading_end_date": self.trading_end.text() or None,
             "max_effective_leverage_per_leg": self.max_lev_leg.text() or None,

@@ -39,8 +39,7 @@ def enum_value(enum_cls):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dual long/short Binance OHLCV backtester")
-    parser.add_argument("--input", type=Path, help="Backward-compatible strategy CSV path")
-    parser.add_argument("--strategy-input", type=Path, dest="strategy_csv")
+    parser.add_argument("--input", type=Path, help="Strategy CSV path")
     parser.add_argument("--intrabar-input", type=Path, dest="intrabar_csv")
     parser.add_argument("--use-intrabar", action="store_true", default=None, dest="use_intrabar_data")
     parser.add_argument("--strategy-timeframe", type=int, dest="strategy_timeframe_minutes")

@@ -114,7 +114,7 @@ def _target_label(config: BacktestConfig) -> str:
 
 
 def infer_symbol(config: BacktestConfig) -> str:
-    stem = Path(config.strategy_csv or config.input_csv).stem.upper()
+    stem = Path(config.input_csv).stem.upper()
     match = re.match(r"([A-Z]+?)(?:USDT|USD|BTC|ETH)?(?:_|-|$)", stem)
     return match.group(1) if match else "BACKTEST"
 
@@ -212,7 +212,7 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
         "========================",
         f"Output folder: {run_dir.resolve()}",
         f"Run name: {config.run_name or '(none)'}",
-        f"Strategy CSV: {config.strategy_csv}",
+        f"Strategy CSV: {config.input_csv}",
         f"Intrabar CSV: {config.intrabar_csv if config.use_intrabar_data else '(disabled)'}",
         f"Symbol: {infer_symbol(config)}",
         f"Strategy timeframe: {config.strategy_timeframe_minutes}m",

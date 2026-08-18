@@ -270,7 +270,7 @@ class BacktestEngine:
             return np.array([None if not np.isfinite(v) else ("BULL" if v >= threshold else ("BEAR" if v <= -threshold else "SIDEWAYS")) for v in self.bull_regime_return_values], dtype=object)
         benchmark_path = self.config.structural_regime_benchmark_csv
         if benchmark_path is None:
-            strategy_path = Path(self.config.strategy_csv)
+            strategy_path = Path(self.config.input_csv)
             benchmark_path = strategy_path if self.config.market_regime_method == "ASSET_STRUCTURAL" else strategy_path.with_name("BTCUSDT_1h.csv")
         benchmark_path = Path(benchmark_path)
         if not benchmark_path.is_file():

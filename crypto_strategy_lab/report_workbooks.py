@@ -92,7 +92,7 @@ def build_performance_breakdowns(trades: pd.DataFrame) -> tuple[pd.DataFrame, pd
 def _dashboard_metrics(summary: Mapping[str, Any], config: Any, run_dir: Path) -> list[tuple[str, Any]]:
     candidates = [
         ("Run Name", getattr(config, "run_name", None) or run_dir.name),
-        ("Symbol", getattr(config, "strategy_csv", None) and Path(config.strategy_csv).stem),
+        ("Symbol", getattr(config, "input_csv", None) and Path(config.input_csv).stem),
         ("Strategy Timeframe", getattr(config, "strategy_timeframe_minutes", None)),
         ("Intrabar Timeframe", getattr(config, "intrabar_timeframe_minutes", None) if getattr(config, "use_intrabar_data", False) else None),
         ("Trading Start", summary.get("trading_start")), ("Trading End", summary.get("trading_end")),
