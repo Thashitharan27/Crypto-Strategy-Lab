@@ -1,0 +1,30 @@
+name: Stage 16 GUI cleanup check
+on:
+  push:
+    branches: [chatgpt/stage16-remove-hidden-pair-management-widgets]
+  pull_request:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/stage16-remove-hidden-pair-management-widgets
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pytest
+      - name: Apply cleanup
+        run: python tools/stage16_remove_hidden_pair_management_widgets.py
+      - name: Compile
+        run: python -m compileall -q crypto_strategy_lab tests app.py
+      - name: Run focused tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q tests/test_stage16_hidden_pair_management_gui_removed.py tests/test_stage15_hidden_random_vwap_gui_removed.py tests/test_stage14_hidden_exit_gui_removed.py tests/test_remaining_leg_timeout.py tests/test_stage6_profile_exit_management.py tests/test_strategy_profiles.py tests/test_gui_config_logic.py tests/test_worker_profile_modes.py
