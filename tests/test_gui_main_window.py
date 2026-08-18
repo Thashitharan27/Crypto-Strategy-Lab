@@ -367,7 +367,7 @@ def test_completed_run_drives_output_folder_and_new_run_clears_it(monkeypatch,tm
 def test_normal_summary_uses_six_direction_regime_rows():
     app(); window=MainWindow()
     try:
-        trades=pd.DataFrame({"market_regime":["BULL"],"long_pair_net_pnl":[10.0],"long_pair_net_r":[1.0]})
+        trades=pd.DataFrame({"market_regime":["BULL"],"pair_net_pnl":[10.0],"pair_net_r":[1.0],"long_pair_net_pnl":[10.0],"long_pair_net_r":[1.0]})
         window.populate_summary({"total_trades":1},trades)
         assert window.comparison_box.title()=="Direction / Regime Performance"
         assert window.combo_table.rowCount()==6
