@@ -14,7 +14,7 @@ def test_hidden_global_entry_filter_widgets_are_not_constructed():
     window = MainWindow()
     try:
         removed = (
-            "enable_adx", "adx_period", "adx_mode", "adx_max", "adx_min",
+            "enable_adx", "adx_mode", "adx_max", "adx_min",
             "enable_bb_width", "bb_width_mode", "bb_width_min", "bb_width_max",
             "skip_monday_entries", "skip_monday_timezone",
             "enable_di_spread", "di_spread_mode", "di_spread_min", "di_spread_max",
@@ -28,26 +28,19 @@ def test_hidden_global_entry_filter_widgets_are_not_constructed():
         window.close()
 
 
-def test_runtime_keeps_legacy_global_filters_inert_but_preserves_shared_adx_period():
+def test_retired_global_entry_filter_keys_do_not_exist_in_gui_values():
     app()
     window = MainWindow()
     try:
-        window.apply_values({
-            "adx_period": 21,
-            "enable_adx_filter": True,
-            "adx_filter_mode": "ADX >= Minimum",
-            "adx_minimum": 33.0,
-            "enable_bb_width_filter": True,
-            "enable_skip_monday_entries": True,
-            "enable_di_spread_filter": True,
-        })
         values = window.values()
-        assert values["adx_period"] == 21
-        assert values["enable_adx_filter"] is False
-        assert values["adx_filter_mode"] == "Disabled"
-        assert values["enable_bb_width_filter"] is False
-        assert values["enable_skip_monday_entries"] is False
-        assert values["enable_di_spread_filter"] is False
+        for key in (
+            "enable_adx_filter", "adx_filter_mode", "adx_minimum", "adx_maximum",
+            "enable_bb_width_filter", "bb_width_filter_mode", "bb_width_minimum", "bb_width_maximum",
+            "enable_skip_monday_entries", "skip_monday_timezone",
+            "enable_di_spread_filter", "di_spread_filter_mode", "di_spread_minimum", "di_spread_maximum",
+        ):
+            assert key not in values
+        assert "adx_period" in values
     finally:
         window.close()
 
