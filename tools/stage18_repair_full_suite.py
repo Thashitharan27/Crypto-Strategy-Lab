@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 
 
+# This helper is temporary and will be removed before Stage 18 is marked ready.
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -18,7 +19,7 @@ def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
 
 def main() -> None:
     # These Stage 18 edits only enabled Strategy Profiles globally in tests
-    # that exercise legacy-compatible engine behavior.  Restore the historical
+    # that exercise legacy-compatible engine behavior. Restore the historical
     # tests instead of weakening profile classification warm-up safeguards.
     restore = [
         "tests/test_partial_stop_loss.py",
@@ -44,7 +45,7 @@ def main() -> None:
     )
 
     # Coin-flip / DI sizing tests should use the legacy-compatible execution
-    # path by default.  Only the tests that explicitly verify profile R:R
+    # path by default. Only the tests that explicitly verify profile R:R
     # enable profiles, and their tiny synthetic data gets a deterministic
     # SIDEWAYS classification context rather than bypassing production warm-up.
     replace_exact(
