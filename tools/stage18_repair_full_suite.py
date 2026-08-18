@@ -12,9 +12,12 @@ def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
     target = ROOT / path
     text = target.read_text(encoding="utf-8")
     actual = text.count(old)
-    if actual != expected:
-        raise RuntimeError(f"{path}: expected {expected} matches, found {actual}")
-    target.write_text(text.replace(old, new), encoding="utf-8")
+    if actual == expected:
+        target.write_text(text.replace(old, new), encoding="utf-8")
+        return
+    if actual == 0 and text.count(new) == expected:
+        return
+    raise RuntimeError(f"{path}: expected {expected} old or new matches, found old={actual}, new={text.count(new)}")
 
 
 def main() -> None:
