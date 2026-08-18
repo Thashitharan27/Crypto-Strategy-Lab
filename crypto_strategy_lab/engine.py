@@ -6,7 +6,7 @@ import numpy as np, pandas as pd
 from zoneinfo import ZoneInfo
 from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.adx import adx
-from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode, DIExecutionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, TrailActivationTrigger, AfterTP1StopMode, TP2ExitMode, EntryTimingMode, RandomEntryStartMode, VWAPConfirmationMode
+from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, DailyEntryMissedPolicy, AfterTP1StopMode
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
 from crypto_strategy_lab.strategy_profiles import profile_key
 from crypto_strategy_lab.support_resistance import SupportResistanceDetector
@@ -936,30 +936,9 @@ class BacktestEngine:
                     pos.atr_checkpoint_profit_lock_r=lock_r
             pos.atr_checkpoint_next_r=checkpoint_r+1.0
 
-    def _trail_event_matches(self,event):
-        trigger=self.config.trail_activation_trigger
-        return (
-            (event=="TP1" and trigger in (TrailActivationTrigger.AFTER_TP1,TrailActivationTrigger.AFTER_TP1_OR_SL1))
-            or (event=="SL1" and trigger in (TrailActivationTrigger.AFTER_SL1,TrailActivationTrigger.AFTER_TP1_OR_SL1))
-        )
-
-    def _activate_trailing_from_event(self,pos,event,timestamp,price):
-        if not pos.trailing_enabled or pos.trailing_active or not self._trail_event_matches(event):
-            return False
-        pos.trailing_active=True
-        pos.trailing_activation_time=pd.Timestamp(timestamp)
-        pos.favourable_price=price
-        is_long=pos.side==Side.LONG
-        distance_r=pos.trailing_distance_r if pos.trailing_distance_r is not None else self.config.trail_distance_r
-        candidate=price-pos.risk*distance_r if is_long else price+pos.risk*distance_r
-        pos.trailing_stop=candidate
-        pos.sl=max(pos.sl,candidate) if is_long else min(pos.sl,candidate)
-        pos.final_active_stop=pos.sl
-        return True
-
     def _maybe_partial_sl_exit(self,pos,i,high,low,timestamp,source):
         """Close SL1 percentage once, then leave the remainder for TP or SL2."""
-        if pos.trailing_enabled and pos.trailing_active and self.config.trail_intrabar_mode==TrailIntrabarMode.PESSIMISTIC:
+        if pos.trailing_enabled and pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
         tp_hit=high>=pos.tp if pos.side==Side.LONG else low<=pos.tp
         sl1_hit=(low<=pos.sl1_price if pos.side==Side.LONG else high>=pos.sl1_price) and not pos.sl1_hit
@@ -979,9 +958,8 @@ class BacktestEngine:
             return True
         if sl1_hit:
             self._partial_sl_fill(pos,pos.sl1_quantity,sl1_execution,"sl1",i,timestamp,source)
-            self._activate_trailing_from_event(pos,"SL1",timestamp,pos.sl1_price)
             return True
-        if pos.trailing_enabled and (self.config.trail_intrabar_mode==TrailIntrabarMode.OPTIMISTIC or not pos.trailing_active):
+        if pos.trailing_enabled and not pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
         return False
 
@@ -992,7 +970,7 @@ class BacktestEngine:
         quantity still open.  A TP1 stop move overrides pending SL stages;
         KEEP_ORIGINAL_SL preserves the SL1-to-SL2 ladder.
         """
-        if pos.trailing_enabled and pos.trailing_active and self.config.trail_intrabar_mode==TrailIntrabarMode.PESSIMISTIC:
+        if pos.trailing_enabled and pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
         is_long=pos.side==Side.LONG
         adverse=lambda price: low<=price if is_long else high>=price
@@ -1019,7 +997,6 @@ class BacktestEngine:
                 return True
             if sl1_hit:
                 changed=self._partial_sl_fill(pos,pos.sl1_quantity,pos.sl1_price*slip,"sl1",i,timestamp,source) or changed
-                self._activate_trailing_from_event(pos,"SL1",timestamp,pos.sl1_price)
                 if not pos.is_open:
                     self._finalize_partial(pos,ExitReason.SL)
             return changed
@@ -1034,7 +1011,6 @@ class BacktestEngine:
                 self._finalize_partial(pos,ExitReason.TP)
                 return True
             self._after_tp1(pos)
-            self._activate_trailing_from_event(pos,"TP1",timestamp,pos.tp1_price)
             if pos.after_tp1_stop_mode!=AfterTP1StopMode.KEEP_ORIGINAL_SL.value:
                 pos.partial_sl_overridden_after_tp1=True
                 moved_stop_hit=adverse(pos.sl)
@@ -1046,7 +1022,7 @@ class BacktestEngine:
             return True
         if pos.is_open:
             changed=execute_losses() or changed
-        if pos.is_open and pos.trailing_enabled and (self.config.trail_intrabar_mode==TrailIntrabarMode.OPTIMISTIC or not pos.trailing_active):
+        if pos.is_open and pos.trailing_enabled and not pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
         return changed
 
@@ -1107,7 +1083,7 @@ class BacktestEngine:
         OPTIMISTIC orders TP1, then fixed TP2 (or trailing update), before the
         stop. Targets are monotonic, so TP2 is never processed before TP1.
         """
-        trailing_prechecked=pos.trailing_enabled and pos.trailing_active and self.config.trail_intrabar_mode==TrailIntrabarMode.PESSIMISTIC
+        trailing_prechecked=pos.trailing_enabled and pos.trailing_active
         if trailing_prechecked:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
         stop_hit=False if trailing_prechecked else (low<=pos.sl if pos.side==Side.LONG else high>=pos.sl)
@@ -1118,12 +1094,11 @@ class BacktestEngine:
         changed=False
         if tp1_hit:
             changed=self._partial_fill(pos,pos.tp1_quantity,pos.tp1_price,"tp1",i,timestamp,source); self._after_tp1(pos)
-            self._activate_trailing_from_event(pos,"TP1",timestamp,pos.tp1_price)
         if pos.is_open and pos.tp1_hit and tp2_hit:
             self._partial_fill(pos,pos.remaining_quantity,pos.tp2_price,"tp2",i,timestamp,source); self._finalize_partial(pos,ExitReason.TP); return True
         if pos.is_open and stop_hit:
             return self._finish_partial_stop(pos,i,timestamp,source)
-        if pos.is_open and pos.trailing_enabled and (self.config.trail_intrabar_mode==TrailIntrabarMode.OPTIMISTIC or not pos.trailing_active):
+        if pos.is_open and pos.trailing_enabled and not pos.trailing_active:
             if self._maybe_trailing_exit(pos,i,high,low,timestamp,source): return True
         return changed
 
@@ -1149,39 +1124,61 @@ class BacktestEngine:
         pos.quantity=pos.original_quantity
         move=(pos.exit_price-pos.entry_price) if pos.side==Side.LONG else (pos.entry_price-pos.exit_price); pos.price_r=move/pos.risk
     def _maybe_trailing_exit(self, pos, i, high, low, timestamp, source):
-        """Resolve OHLC ambiguity without inventing an unknowable intrabar path.
+        """Apply current Strategy Profile trailing with pessimistic OHLC ordering.
 
-        PESSIMISTIC tests the stop that existed at bar open before allowing a
-        favourable extreme to ratchet it. On the activation bar it gives an
-        simultaneously touched original stop priority and defers the new trail.
-        OPTIMISTIC assumes favourable extreme first, then tests the updated trail.
+        The stop that existed at bar open has priority. Only after that check can
+        the favourable extreme activate or ratchet the trail. A newly raised stop
+        becomes eligible on the next processed bar, avoiding invented intrabar paths.
         """
         is_long = pos.side == Side.LONG
-        old_stop = max(pos.sl,pos.be_stop_price or -np.inf,pos.trailing_stop or -np.inf) if is_long else min(pos.sl,pos.be_stop_price or np.inf,pos.trailing_stop or np.inf)
+        old_stop = (
+            max(pos.sl, pos.be_stop_price or -np.inf, pos.trailing_stop or -np.inf)
+            if is_long else
+            min(pos.sl, pos.be_stop_price or np.inf, pos.trailing_stop or np.inf)
+        )
         stop_hit = low <= old_stop if is_long else high >= old_stop
+        if stop_hit:
+            reason = (
+                ExitReason.TRAILING_STOP
+                if pos.trailing_active and pos.trailing_stop is not None and abs(old_stop-pos.trailing_stop) < 1e-9
+                else (
+                    pos.be_exit_reason
+                    if pos.be_triggered and pos.be_stop_price is not None and abs(old_stop-pos.be_stop_price) < 1e-9
+                    else ExitReason.SL
+                )
+            )
+            return self._close_at_stop(pos, i, old_stop, reason, source, timestamp)
+
         activation_hit = (
             (high >= pos.trailing_activation_price if is_long else low <= pos.trailing_activation_price)
             if pos.trailing_activation_price is not None else False
         )
-        if stop_hit and (not pos.trailing_active or self.config.trail_intrabar_mode == TrailIntrabarMode.PESSIMISTIC):
-            reason = ExitReason.TRAILING_STOP if pos.trailing_active and pos.trailing_stop is not None and abs(old_stop-pos.trailing_stop)<1e-9 else (pos.be_exit_reason if pos.be_triggered and pos.be_stop_price is not None and abs(old_stop-pos.be_stop_price)<1e-9 else ExitReason.SL)
-            return self._close_at_stop(pos,i,old_stop,reason,source,timestamp)
-        just_activated = False
         if not pos.trailing_active and activation_hit:
-            pos.trailing_active=True; pos.trailing_activation_time=timestamp; just_activated=True
+            pos.trailing_active = True
+            pos.trailing_activation_time = pd.Timestamp(timestamp)
         if pos.trailing_active:
             extreme = high if is_long else low
             pos.favourable_price = max(pos.favourable_price, extreme) if is_long else min(pos.favourable_price, extreme)
-            distance_r=pos.trailing_distance_r if pos.trailing_distance_r is not None else self.config.trail_distance_r
-            candidate = pos.favourable_price - pos.risk*distance_r if is_long else pos.favourable_price + pos.risk*distance_r
-            pos.trailing_stop = max(pos.trailing_stop or -np.inf,candidate) if is_long else min(pos.trailing_stop or np.inf,candidate)
-            active = max(pos.sl,pos.be_stop_price or -np.inf,pos.trailing_stop) if is_long else min(pos.sl,pos.be_stop_price or np.inf,pos.trailing_stop)
-            pos.sl=active; pos.final_active_stop=active
-            hit = low <= active if is_long else high >= active
-            if hit and self.config.trail_intrabar_mode == TrailIntrabarMode.OPTIMISTIC:
-                reason = ExitReason.TRAILING_STOP if abs(active-pos.trailing_stop)<1e-9 else pos.be_exit_reason
-                return self._close_at_stop(pos,i,active,reason,source,timestamp)
+            distance_r = float(pos.trailing_distance_r)
+            candidate = (
+                pos.favourable_price - pos.risk*distance_r
+                if is_long else
+                pos.favourable_price + pos.risk*distance_r
+            )
+            pos.trailing_stop = (
+                max(pos.trailing_stop or -np.inf, candidate)
+                if is_long else
+                min(pos.trailing_stop or np.inf, candidate)
+            )
+            active_stop = (
+                max(pos.sl, pos.be_stop_price or -np.inf, pos.trailing_stop)
+                if is_long else
+                min(pos.sl, pos.be_stop_price or np.inf, pos.trailing_stop)
+            )
+            pos.sl = active_stop
+            pos.final_active_stop = active_stop
         return False
+
     def _close_at_stop(self,pos,i,raw,reason,source,timestamp):
         slip=1-self.config.slippage if pos.side==Side.LONG else 1+self.config.slippage
         self._close_position(pos,i,raw*slip,reason,source,timestamp)
@@ -1409,11 +1406,6 @@ class BacktestEngine:
             for row_kind,positions in self._result_rows_for_pair(p):
                 rows.append(self._build_result_row(p,row_kind,positions))
         frame=pd.DataFrame(rows)
-        if not frame.empty and self.config.trade_direction == TradeDirectionMode.BOTH_INDEPENDENT:
-            exit_cols=[c for c in ("long_exit_time","short_exit_time") if c in frame]
-            exit_times=frame[exit_cols].max(axis=1) if exit_cols else frame["entry_time"]
-            frame=frame.assign(_result_exit_time=pd.to_datetime(exit_times)).sort_values(["_result_exit_time","trade_id"]).drop(columns=["_result_exit_time"]).reset_index(drop=True)
-            frame["equity_after_trade"] = self.config.initial_equity + frame["pair_net_pnl"].cumsum()
         if not frame.empty:
             entry = pd.to_datetime(frame["entry_time"], utc=True)
             frame["exit_time_before_entry"] = pd.to_datetime(frame["exit_time"], utc=True) < entry
@@ -1436,12 +1428,11 @@ class BacktestEngine:
         frame.attrs["skipped_signals"] = self.skipped_signals
         frame.attrs["skipped_daily_entries"] = self.skipped_daily_entries
         frame.attrs["daily_schedule_stats"] = {"scheduled_entry_opportunities": self.daily_entry_opportunities, "trades_opened_on_schedule": self.daily_entries_on_schedule, "scheduled_entries_opened_next_available": self.daily_entries_next_available}
-        frame.attrs["random_entry_decisions"] = list(self.random_entry_decisions)
         return frame
 
     def telemetry_frame(self):
-        from crypto_strategy_lab.telemetry import telemetry_columns_for_direction
-        return pd.DataFrame(self.telemetry_rows, columns=telemetry_columns_for_direction(self.config.trade_direction))
+        from crypto_strategy_lab.telemetry import TELEMETRY_COLUMNS
+        return pd.DataFrame(self.telemetry_rows, columns=TELEMETRY_COLUMNS)
 
     def _num(self, arr, i):
         value = arr[i]
@@ -1485,7 +1476,7 @@ class BacktestEngine:
                 tp_d = pos.tp - close if is_long else close - pos.tp
             return (float(sl_d), float(tp_d), float(sl_d / pos.risk) if pos.risk else np.nan, float(tp_d / pos.risk) if pos.risk else np.nan)
         lsl, ltp, lslr, ltpr = distances(pair.long, True) if pair.long is not None else (np.nan, np.nan, np.nan, np.nan); ssl, stp, sslr, stpr = distances(pair.short, False) if pair.short is not None else (np.nan, np.nan, np.nan, np.nan)
-        row={"pair_id":pair.pair_id,"long_leg_id":f"{pair.pair_id}_LONG","short_leg_id":f"{pair.pair_id}_SHORT","timestamp":ts,"elapsed_minutes":elapsed,"elapsed_strategy_bars":int(elapsed / self.config.strategy_timeframe_minutes),"close":close,"high":high,"low":low,"atr":self._num(self.atr_values,i),"adx":self._num(self.adx_values,i),"plus_di":self._num(self.plus_di_values,i),"minus_di":self._num(self.minus_di_values,i),"di_spread":self._num(self.di_spread,i),"di_ratio":self._num(self.di_ratio,i),"bb_middle":self._num(self.bb_middle,i),"bb_upper":self._num(self.bb_upper,i),"bb_lower":self._num(self.bb_lower,i),"bb_width":self._num(self.bb_width,i),"bb_width_pct":self._num(self.bb_width_pct,i),"long_is_open":long_open,"short_is_open":short_open,"long_unrealized_pnl":long_pnl,"short_unrealized_pnl":short_pnl,"pair_unrealized_pnl":long_pnl+short_pnl,"long_distance_to_sl":lsl,"long_distance_to_tp":ltp,"short_distance_to_sl":ssl,"short_distance_to_tp":stp,"long_distance_to_sl_r":lslr,"long_distance_to_tp_r":ltpr,"short_distance_to_sl_r":sslr,"short_distance_to_tp_r":stpr,"long_current_sl":pair.long.sl if pair.long is not None and pair.long.is_open else np.nan,"short_current_sl":pair.short.sl if pair.short is not None and pair.short.is_open else np.nan,"long_tp":(np.nan if pair.long is not None and pair.long.r_step_trailing_enabled and pos.r_step_maximum_r==0 else (pair.long.tp if pair.long is not None else np.nan)),"short_tp":pair.short.tp if pair.short is not None else np.nan}
+        row={"pair_id":pair.pair_id,"long_leg_id":f"{pair.pair_id}_LONG","short_leg_id":f"{pair.pair_id}_SHORT","timestamp":ts,"elapsed_minutes":elapsed,"elapsed_strategy_bars":int(elapsed / self.config.strategy_timeframe_minutes),"close":close,"high":high,"low":low,"atr":self._num(self.atr_values,i),"adx":self._num(self.adx_values,i),"plus_di":self._num(self.plus_di_values,i),"minus_di":self._num(self.minus_di_values,i),"di_spread":self._num(self.di_spread,i),"di_ratio":self._num(self.di_ratio,i),"bb_middle":self._num(self.bb_middle,i),"bb_upper":self._num(self.bb_upper,i),"bb_lower":self._num(self.bb_lower,i),"bb_width":self._num(self.bb_width,i),"bb_width_pct":self._num(self.bb_width_pct,i),"long_is_open":long_open,"short_is_open":short_open,"long_unrealized_pnl":long_pnl,"short_unrealized_pnl":short_pnl,"pair_unrealized_pnl":long_pnl+short_pnl,"long_distance_to_sl":lsl,"long_distance_to_tp":ltp,"short_distance_to_sl":ssl,"short_distance_to_tp":stp,"long_distance_to_sl_r":lslr,"long_distance_to_tp_r":ltpr,"short_distance_to_sl_r":sslr,"short_distance_to_tp_r":stpr,"long_current_sl":pair.long.sl if pair.long is not None and pair.long.is_open else np.nan,"short_current_sl":pair.short.sl if pair.short is not None and pair.short.is_open else np.nan,"long_tp":(np.nan if pair.long is not None and pair.long.r_step_trailing_enabled and pair.long.r_step_maximum_r==0 else (pair.long.tp if pair.long is not None else np.nan)),"short_tp":pair.short.tp if pair.short is not None else np.nan}
         for prefix, pos, is_long in (("long", pair.long, True), ("short", pair.short, False)):
             enabled = bool(pos and pos.trailing_enabled)
             active = bool(pos and pos.trailing_active)
