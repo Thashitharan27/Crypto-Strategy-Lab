@@ -1,4 +1,4 @@
-from crypto_strategy_lab.research_coin_flip import coin_flip_direction
+from crypto_strategy_lab.research_coin_flip import coin_flip_applies_to_trade_number, coin_flip_direction
 
 
 def test_coin_flip_is_reproducible_for_same_seed_and_index():
@@ -18,3 +18,10 @@ def test_coin_flip_is_reasonably_balanced_over_large_sample():
     directions = [coin_flip_direction(i, 42) for i in range(2000)]
     long_count = directions.count("LONG")
     assert 850 <= long_count <= 1150
+
+
+def test_first_trade_is_normal_and_second_onward_use_coin_flip():
+    assert coin_flip_applies_to_trade_number(1) is False
+    assert coin_flip_applies_to_trade_number(2) is True
+    assert coin_flip_applies_to_trade_number(3) is True
+    assert coin_flip_applies_to_trade_number(20) is True
