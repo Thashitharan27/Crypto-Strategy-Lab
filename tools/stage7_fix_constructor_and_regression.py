@@ -3,7 +3,8 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# 1. Remove stale global special-exit constructor arguments from GUI config conversion.
+# 1. Remove stale global special-exit constructor arguments and retired GUI-key
+# compatibility references from GUI config conversion.
 p = ROOT / "crypto_strategy_lab/gui/config_logic.py"
 s = p.read_text(encoding="utf-8")
 
@@ -25,6 +26,16 @@ LEGACY_CONSTRUCTOR_KEYS = (
 # each argument independently so spacing/line wrapping cannot make the cleanup miss.
 for key in LEGACY_CONSTRUCTOR_KEYS:
     s = re.sub(rf"\s*{re.escape(key)}\s*=\s*[^,\n]+,", "", s)
+
+# Stage 7 intentionally drops backward compatibility for these retired global
+# names. Remove them from the obsolete-key compatibility set as well; otherwise
+# the names still survive in GUI plumbing even though they can no longer be used.
+obsolete_match = re.search(r"_OBSOLETE_EXACT\s*=\s*\{(?P<body>.*?)\n\}", s, flags=re.S)
+if obsolete_match:
+    body = obsolete_match.group("body")
+    for key in LEGACY_CONSTRUCTOR_KEYS:
+        body = re.sub(rf'\s*"{re.escape(key)}"\s*,?', "", body)
+    s = s[:obsolete_match.start("body")] + body + s[obsolete_match.end("body"):]
 
 # Fail fast if global constructor plumbing survived this repair.
 for key in LEGACY_CONSTRUCTOR_KEYS:
