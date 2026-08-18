@@ -17,5 +17,6 @@ replace_once(
 
 # Stage 22 intentionally changes these from base-distance normalization to full-stop trade R.
 replace_once("tests/test_partial_take_profit.py", "assert position.sl == pytest.approx(105)", "assert position.sl == pytest.approx(110)")
+replace_once("tests/test_partial_take_profit.py", "assert position.stop_exit_price == pytest.approx(105)", "assert position.stop_exit_price == pytest.approx(110)")
 replace_once("tests/test_partial_stop_loss.py", "assert weighted_price_r(position) == pytest.approx(-1.25)", "assert weighted_price_r(position) == pytest.approx(-0.625)")
 replace_once("tests/test_partial_stop_loss.py", "assert weighted_price_r(position) == pytest.approx(1.75)", "assert weighted_price_r(position) == pytest.approx(0.875)")
