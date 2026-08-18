@@ -1,0 +1,37 @@
+name: Stage 18 targeted full-suite repair
+
+on:
+  push:
+    branches:
+      - chatgpt/stage18-repair-stale-full-suite-tests
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch with main history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Apply Stage 18 targeted repair
+        run: python tools/stage18_repair_full_suite.py
+      - name: Commit repair when needed
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No Stage 18 repair changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_backtester.py tests/test_coin_flip_sizing.py tests/test_partial_stop_loss.py tests/test_partial_take_profit.py tests/test_random_entry.py tests/test_remaining_leg_timeout.py tests/test_support_resistance.py tests/test_trailing_profit.py
+          git commit -m "Stage 18: repair profile warm-up test regressions"
+          git push
