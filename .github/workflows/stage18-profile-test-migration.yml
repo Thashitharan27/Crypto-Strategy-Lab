@@ -33,6 +33,19 @@ jobs:
           pip install pytest pytest-qt
       - name: Apply Strategy Profile test migration
         run: python tools/stage18_profile_test_migration.py
+      - name: Repair duplicate S/R profile kwargs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("tests/test_support_resistance.py")
+          s = p.read_text(encoding="utf-8")
+          line = "            enable_strategy_profiles=True, strategy_profiles=default_profiles(),\n"
+          duplicate = line + line
+          if duplicate not in s:
+              raise SystemExit("expected duplicate S/R profile kwargs were not generated")
+          s = s.replace(duplicate, line)
+          p.write_text(s, encoding="utf-8")
+          PY
       - name: Compile source and tests
         run: python -m compileall -q crypto_strategy_lab mcp_server tools tests app.py
       - name: Commit migrated tests
