@@ -17,8 +17,7 @@ action (Flip or Reject), indicator, Inside/Outside condition, and range. Flip
 and Reject groups each have an Any (OR) / All (AND) selector. Reject rules are
 evaluated first, followed by Flip rules; signals matching neither trade in the
 normal DI direction. Use **Add rule** or **Remove selected** to manage any
-number of rules. Legacy profile filters are migrated into this table when
-loaded.
+number of rules.
 
 ## DI Direction & Pressure
 
@@ -82,10 +81,9 @@ The **Portfolio** tab accepts a dynamic list of assets. Each enabled asset uses 
 ## Project structure
 
 ```text
-Crypto Strategy Lab.vbs   Normal no-console Windows launcher
-Debug Launcher.bat        Console launcher for debugging only
-app.py                    Desktop application entry point
-cli.py                    Optional command-line backtest entry point
+.github/                  GitHub Actions workflows
+.vscode/                  Repository-local editor settings
+config/                   Current saved strategy configurations
 crypto_strategy_lab/      Installable application package
   gui/                    Interface, profile editor, and background workers
   config.py               Backtest configuration model
@@ -94,14 +92,18 @@ crypto_strategy_lab/      Installable application package
   strategy_profiles.py    Six market-regime strategy profiles
   loader.py               OHLCV loading and validation
   output_manager.py       Reports and run-folder management
-Config/                   Saved user strategy configurations
-data/                     Local market data (ignored by Git)
-output/                    Generated backtest results (ignored by Git)
-tools/                     Offline import and migration utilities
-tests/                     Automated regression suite
+docs/                     Implementation and design documentation
+mcp_server/               Read-only report MCP server
+tests/                    Automated regression suite
+tools/                    Offline import and maintenance utilities
+Crypto Strategy Lab.vbs   Normal no-console Windows launcher
+Debug Launcher.bat        Console launcher for debugging only
+app.py                    Desktop application entry point
+cli.py                    Optional command-line backtest entry point
+requirements.txt          Python dependencies
 ```
 
-Older user-generated artifacts were preserved under `output/legacy_artifacts/`. New application results also use `output/`.
+Local market data is stored outside the repository workflow and generated backtest results use `output/`, which is ignored by Git.
 
 ## Supported CSV format
 
