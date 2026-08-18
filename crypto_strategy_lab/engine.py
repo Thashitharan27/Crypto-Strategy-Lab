@@ -1,16 +1,13 @@
 """Event-driven dual long/short backtesting engine with 15m strategy and optional 1m exits."""
 from __future__ import annotations
 from collections.abc import Callable
-from random import Random
 from pathlib import Path
 import numpy as np, pandas as pd
 from zoneinfo import ZoneInfo
 from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.adx import adx
 from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, PositionSizingMode, RiskMode, TiePolicy, BreakEvenMode, BreakEvenSameCandlePolicy, TradeDirectionMode, DIExecutionMode, DailyEntryMissedPolicy, TrailApplyTo, TrailIntrabarMode, TrailActivationTrigger, AfterTP1StopMode, TP2ExitMode, EntryTimingMode, RandomEntryStartMode, VWAPConfirmationMode
-from crypto_strategy_lab.entry_filters import ADXFilter, BBWidthFilter, DISpreadFilter
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
-from crypto_strategy_lab.strategy import custom_entry_signal
 from crypto_strategy_lab.strategy_profiles import profile_key
 from crypto_strategy_lab.support_resistance import SupportResistanceDetector
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Position, Side, TradePair
@@ -19,7 +16,7 @@ class BacktestEngine:
     def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.volume=self.data["volume"].to_numpy(float) if "volume" in self.data else np.ones(len(self.data),float); self.times=self.data.timestamp.to_numpy()
-        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array(); self.entry_filters=[ADXFilter(self.config,self.adx_values),BBWidthFilter(self.config,self.bb_width),DISpreadFilter(self.config,self.di_spread)]
+        self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array()
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_vwap_breakout=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
@@ -47,14 +44,8 @@ class BacktestEngine:
         self.first_valid_atr_timestamp=self._first_valid_atr_timestamp()
         self.warmup_candle_count=int((self.data.timestamp < self.trading_start).sum()) if self.trading_start is not None else 0
         self.daily_entry_tz=ZoneInfo(config.daily_entry_timezone)
-        self.skip_monday_tz=ZoneInfo(config.skip_monday_timezone)
         hh, mm = [int(part) for part in str(config.daily_entry_time).split(":", 1)]
         self.daily_entry_minutes = hh * 60 + mm
-        self.random_entry_active = bool(config.enable_random_entry and config.entry_timing_mode == EntryTimingMode.RANDOM_AFTER_PAIR_CLOSE)
-        self.random_rng = Random(config.random_seed) if self.random_entry_active else None
-        # A separate stream keeps sizing flips independent from random-entry draws.
-        self.coin_flip_rng = Random(config.coin_flip_seed) if config.enable_coin_flip_sizing else None
-        self.random_entry_decisions=[]; self.random_skips=0; self.last_closed_pair_id=None; self.previous_pair_close_time=None; self.pair_closed_index=None; self.reentry_gates=[]; self.reentry_gate_release_index=None
 
     def _market_structure_snapshot(self, i):
         """Confirmed 2-left/2-right swing structure known at candle ``i``.
@@ -181,50 +172,11 @@ class BacktestEngine:
         cumulative_weighted=pd.Series(weighted).groupby(sessions).cumsum().to_numpy(float)
         cumulative_volume=pd.Series(self.volume).groupby(sessions).cumsum().to_numpy(float)
         return np.divide(cumulative_weighted,cumulative_volume,out=np.full(len(self.data),np.nan),where=cumulative_volume>0)
-    def _vwap_breakout_signal(self, i):
-        bars=max(1,int(np.ceil(self.config.vwap_breakout_lookback_hours*60/self.config.strategy_timeframe_minutes)))
-        volume_bars=self.config.vwap_volume_lookback
-        slope=self.config.vwap_slope_lookback
-        warmup=max(bars,volume_bars,slope)
-        if i < warmup or not np.isfinite(self.atr_values[i]) or not np.isfinite(self.session_vwap[i]) or not np.isfinite(self.session_vwap[i-slope]): return None
-        prior_high=float(np.max(self.high[i-bars:i])); prior_low=float(np.min(self.low[i-bars:i])); average_volume=float(np.mean(self.volume[i-volume_bars:i]))
-        if average_volume <= 0 or self.volume[i] < average_volume*self.config.vwap_volume_multiplier: return None
-        atr_pct=float(self.atr_values[i]/self.close[i]) if self.close[i] else np.nan
-        if not np.isfinite(atr_pct) or not self.config.vwap_atr_pct_minimum <= atr_pct <= self.config.vwap_atr_pct_maximum: return None
-        if self.close[i] > prior_high and self.close[i] > self.session_vwap[i] and self.session_vwap[i] > self.session_vwap[i-slope]: return {"direction":"LONG","level":prior_high,"signal_index":i}
-        if self.close[i] < prior_low and self.close[i] < self.session_vwap[i] and self.session_vwap[i] < self.session_vwap[i-slope]: return {"direction":"SHORT","level":prior_low,"signal_index":i}
-        return None
-    def _vwap_breakout_direction(self, i):
-        signal=self._vwap_breakout_signal(i)
-        return signal["direction"] if signal else None
-    def _vwap_retest_decision(self, execution_i):
-        candidate_i=execution_i-1
-        pending=self.pending_vwap_breakout
-        if pending is not None and candidate_i > pending["signal_index"]:
-            elapsed=candidate_i-pending["signal_index"]
-            if elapsed > self.config.vwap_retest_window_candles:
-                self.pending_vwap_breakout=None
-            else:
-                level=pending["level"]; direction=pending["direction"]
-                if (direction == "LONG" and self.close[candidate_i] <= level) or (direction == "SHORT" and self.close[candidate_i] >= level):
-                    self.pending_vwap_breakout=None
-                else:
-                    tolerance=self.config.vwap_retest_tolerance_atr*self.atr_values[candidate_i]
-                    touched=(self.low[candidate_i] <= level+tolerance) if direction == "LONG" else (self.high[candidate_i] >= level-tolerance)
-                    if touched:
-                        self.pending_vwap_breakout=None
-                        return {"execution_index":execution_i,"indicator_index":candidate_i,"scheduled_timestamp":None,"actual_entry_timestamp":pd.Timestamp(self.times[execution_i]),"entry_schedule_status":None,"signal_direction":direction,"vwap_breakout_signal_time":pd.Timestamp(self.times[pending["signal_index"]]),"vwap_breakout_level":level,"vwap_confirmation_time":pd.Timestamp(self.times[candidate_i]),"vwap_confirmation_bars":elapsed}
-        if self.pending_vwap_breakout is None:
-            signal=self._vwap_breakout_signal(candidate_i)
-            if signal is not None:
-                self.pending_vwap_breakout=signal
-        return None
     def run(self)->pd.DataFrame:
         total=len(self.data)
         self._emit_progress(0,total)
         for i in range(total):
             self.current_index=i
-            self._update_reentry_gates(i)
             active_at_candle_start = bool(self.active_pairs)
             self._update_positions_to_strategy_index(i); self._record_active_telemetry(i); self._collect_closed_pairs()
             decision = self._entry_decision(i, active_at_candle_start)
@@ -315,7 +267,7 @@ class BacktestEngine:
         prior_sma[valid]=sma[prior[valid]]
         return sma,prior_sma
     def _entry_time(self,i): return pd.Timestamp(self.times[i]) + self.entry_delta
-    def _execution_time(self,i): return pd.Timestamp(self.times[i]) if (self.config.enable_daily_entry_schedule or self.random_entry_active) else self._entry_time(i)
+    def _execution_time(self,i): return pd.Timestamp(self.times[i]) if self.config.enable_daily_entry_schedule else self._entry_time(i)
     def _price_index(self,i): return i
     def _indicator_index_for_execution(self,i): return i - 1 if self.config.enable_daily_entry_schedule else i
     def _in_trading_window(self,i):
@@ -349,103 +301,41 @@ class BacktestEngine:
             self._record_skipped_daily_entry(scheduled_ts, "INDICATOR_WARMUP") ; return None
         if not self._in_trading_window(i):
             self._record_skipped_daily_entry(scheduled_ts, "OUTSIDE_TRADING_DATE_RANGE") ; return None
-        if active_at_candle_start or len(self.active_pairs) >= self.config.max_active_pairs or self._reentry_gate_blocks(i):
-            self._record_skipped_daily_entry(scheduled_ts, "REENTRY_GATE" if self._reentry_gate_blocks(i) else "ACTIVE_TRADE")
+        if active_at_candle_start or len(self.active_pairs) >= self.config.max_active_pairs:
+            self._record_skipped_daily_entry(scheduled_ts, "ACTIVE_TRADE")
             if self.config.daily_entry_missed_policy == DailyEntryMissedPolicy.NEXT_AVAILABLE_CANDLE:
                 self.pending_daily_entry={"scheduled_timestamp": scheduled_ts}
             return None
         return {"execution_index": i, "indicator_index": i-1, "scheduled_timestamp": scheduled_ts, "actual_entry_timestamp": scheduled_ts, "entry_schedule_status": "ON_TIME"}
 
     def _base_entry_allowed(self, i):
-        return i > 0 and not self._reentry_gate_blocks(i) and np.isfinite(self.risk[i-1]) and self.risk[i-1] > 0 and len(self.active_pairs) < self.config.max_active_pairs and self._in_trading_window(i)
+        return i > 0 and np.isfinite(self.risk[i-1]) and self.risk[i-1] > 0 and len(self.active_pairs) < self.config.max_active_pairs and self._in_trading_window(i)
 
     def _entry_decision(self, i, active_at_candle_start=False):
-        if self.random_entry_active:
-            return self._random_entry_decision(i, active_at_candle_start)
         if self.config.enable_daily_entry_schedule:
             return self._daily_entry_decision(i, active_at_candle_start)
-        if self.config.entry_mode == EntryMode.VWAP_VOLUME_BREAKOUT:
-            if i <= 0 or not self._base_entry_allowed(i): return None
-            if self.config.vwap_confirmation_mode == VWAPConfirmationMode.RETEST:
-                return self._vwap_retest_decision(i)
-            signal=self._vwap_breakout_signal(i-1)
-            if signal is None: return None
-            return {"execution_index":i,"indicator_index":i-1,"scheduled_timestamp":None,"actual_entry_timestamp":pd.Timestamp(self.times[i]),"entry_schedule_status":None,"signal_direction":signal["direction"],"vwap_breakout_signal_time":pd.Timestamp(self.times[i-1]),"vwap_breakout_level":signal["level"],"vwap_confirmation_time":None,"vwap_confirmation_bars":0}
         return {"execution_index": i, "indicator_index": i, "scheduled_timestamp": None, "actual_entry_timestamp": self._entry_time(i), "entry_schedule_status": None} if self._should_enter(i) else None
-    def _random_entry_decision(self, i, active_at_candle_start=False):
-        """Flip at an eligible candle open using indicators completed at i-1."""
-        if active_at_candle_start or self.active_pairs or i <= 0 or not self._base_entry_allowed(i): return None
-        # Entry filters are part of eligibility, so rejected/warm-up candles do
-        # not perturb the dedicated random stream.
-        if not self._entry_filter_result(i-1, i)[0]: return None
-        if self.next_pair_id == 1 and not self.config.randomize_first_entry:
-            return {"execution_index":i,"indicator_index":i-1,"actual_entry_timestamp":pd.Timestamp(self.times[i]),"entry_schedule_status":None,"random_bypass":True}
-        if self.pair_closed_index is not None and i <= self.pair_closed_index: return None
-        forced = self.config.max_random_wait_candles > 0 and self.random_skips >= self.config.max_random_wait_candles
-        draw = self.random_rng.random()
-        opens = forced or draw < self.config.random_entry_probability
-        row={"decision_id":len(self.random_entry_decisions)+1,"candle_timestamp":pd.Timestamp(self.times[i]),"candle_open_time":pd.Timestamp(self.times[i]),"candle_close_time":pd.Timestamp(self.times[i])+self.entry_delta,"pair_id_previously_closed":self.last_closed_pair_id,"previous_pair_close_time":self.previous_pair_close_time,"candles_waited_since_close":self.random_skips+1,"random_seed":self.config.random_seed,"random_draw":draw,"entry_probability":self.config.random_entry_probability,"decision":"FORCED_OPEN" if forced else ("OPEN" if opens else "SKIP"),"forced_entry":forced,"entry_created":opens,"new_pair_id":self.next_pair_id if opens else None,"entry_timestamp":pd.Timestamp(self.times[i]) if opens else None,"entry_price":float(self.open[i]) if opens else None,"equity_before_entry":self.current_equity,"entry_timing_mode":self.config.entry_timing_mode.value}
-        self.random_entry_decisions.append(row)
-        if not opens: self.random_skips += 1; return None
-        self.random_skips=0
-        return {"execution_index":i,"indicator_index":i-1,"scheduled_timestamp":None,"actual_entry_timestamp":pd.Timestamp(self.times[i]),"entry_schedule_status":None,"random_decision":row}
     def _should_enter(self,i):
-        if self._reentry_gate_blocks(i) or not np.isfinite(self.risk[i]) or self.risk[i]<=0 or len(self.active_pairs)>=self.config.max_active_pairs or not self._in_trading_window(i): return False
-        if self.last_timeout_exit_time is not None and self._entry_time(i) <= self.last_timeout_exit_time: return False
-        if self.config.entry_mode==EntryMode.WAIT_UNTIL_CLOSED: return not self.active_pairs
-        if self.config.entry_mode==EntryMode.EVERY_N_CANDLES: return i % self.config.entry_interval==0
-        if self.config.entry_mode==EntryMode.CUSTOM: return custom_entry_signal(i,{"open":self.open,"high":self.high,"low":self.low,"close":self.close},len(self.active_pairs))
+        if not np.isfinite(self.risk[i]) or self.risk[i] <= 0 or len(self.active_pairs) >= self.config.max_active_pairs or not self._in_trading_window(i):
+            return False
+        if self.last_timeout_exit_time is not None and self._entry_time(i) <= self.last_timeout_exit_time:
+            return False
+        if self.config.entry_mode == EntryMode.WAIT_UNTIL_CLOSED:
+            return not self.active_pairs
+        if self.config.entry_mode == EntryMode.EVERY_N_CANDLES:
+            return i % self.config.entry_interval == 0
         return False
     def _entry_filter_result(self, i, execution_i=None):
         self._pending_sr_context = None
-        reasons=[]
-        if self.config.enable_strategy_profiles:
-            profile_result = self._strategy_profile_filter_result(i, execution_i)
-            if not profile_result[0]:
-                return profile_result
-            if self.config.enable_support_resistance_analysis:
-                direction = self._selected_direction(i)
-                sr_reject, sr_reason = self._should_reject_for_sr(i, direction, None)
-                if sr_reject:
-                    return False, sr_reason
-            return True, profile_result[1]
-        if self.config.enable_di_direction_sizing:
-            plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i]); spread=float(self.di_spread[i])
-            if not np.isfinite(plus) or not np.isfinite(minus) or not np.isfinite(spread):
-                return False, "DI-direction sizing indicator warm-up incomplete"
-            direction = self._selected_direction(i)
-            if direction is None:
-                return False, "DI direction unavailable"
-            if self.config.trade_direction == TradeDirectionMode.LONG_ONLY and direction != "LONG":
-                return False, "DI selected short, but trade direction is LONG_ONLY"
-            if self.config.trade_direction == TradeDirectionMode.SHORT_ONLY and direction != "SHORT":
-                return False, "DI selected long, but trade direction is SHORT_ONLY"
-            minimum = self.config.di_direction_long_minimum_spread if direction == "LONG" else self.config.di_direction_short_minimum_spread
-            if spread < minimum:
-                return False, f"DI spread {spread:.6g} below direction-sizing minimum {minimum:.6g} for {direction.lower()}"
-            reasons.append(f"DI direction sizing passed: {direction} stronger, spread {spread:.6g} >= minimum {minimum:.6g}")
-            regime_return=float(self.bull_regime_return_values[i])
-            regime=self._regime_at(i)
-        if self.config.enable_skip_monday_entries:
-            execution_i = i if execution_i is None else execution_i
-            entry_time = self._execution_time(execution_i)
-            if entry_time.tzinfo is None:
-                entry_time = entry_time.tz_localize("UTC")
-            local_entry_time = entry_time.tz_convert(self.skip_monday_tz)
-            if local_entry_time.weekday() == 0:
-                return False, f"Monday entry skipped in {self.config.skip_monday_timezone}"
-            reasons.append(f"Entry weekday {local_entry_time.day_name()} allowed in {self.config.skip_monday_timezone}")
-        for flt in self.entry_filters:
-            result=flt.evaluate(i)
-            reasons.append(result.reason)
-            if not result.passed:
-                return False, "; ".join(reasons)
+        profile_result = self._strategy_profile_filter_result(i, execution_i)
+        if not profile_result[0]:
+            return profile_result
         if self.config.enable_support_resistance_analysis:
             direction = self._selected_direction(i)
             sr_reject, sr_reason = self._should_reject_for_sr(i, direction, None)
             if sr_reject:
                 return False, sr_reason
-        return True, "; ".join(reasons)
+        return True, profile_result[1]
 
     def _should_reject_for_sr(self, i, direction, sr_context=None):
         """Apply independent, trader-facing S/R entry constraints."""
@@ -538,9 +428,6 @@ class BacktestEngine:
         matches=[self._strategy_profile_entry_rule_matches(i,direction,profile,rule) for rule in rules]
         return all(matches) if mode=="ALL" else any(matches)
 
-    def _adx_filter_result(self, i):
-        result = self.entry_filters[0].evaluate(i)
-        return result.passed, result.reason
     def _record_skipped_signal(self, i, reason):
         row={"strategy_candle_open_time": self.times[i], "strategy_entry_time": self._entry_time(i), "strategy_entry_price": float(self.close[i]), "adx": float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan, "plus_di": float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan, "minus_di": float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan, "di_spread": float(self.di_spread[i]) if np.isfinite(self.di_spread[i]) else np.nan, "market_regime_return": float(self.bull_regime_return_values[i]) if np.isfinite(self.bull_regime_return_values[i]) else np.nan, "bb_width": float(self.bb_width[i]) if np.isfinite(self.bb_width[i]) else np.nan, "entry_filter_passed": False, "entry_filter_reason": reason, "adx_filter_passed": False, "adx_filter_reason": reason}
         row.update(self._di_pressure_snapshot(i, self._selected_direction(i)))
@@ -552,9 +439,7 @@ class BacktestEngine:
         capped=cap_qty < qty - 1e-12
         return cap_qty,capped
     def _entry_leg_count(self):
-        if self.config.enable_di_direction_sizing and self.config.di_execution_mode == DIExecutionMode.PREFERRED_SIDE_ONLY:
-            return 1
-        return 2 if self.config.trade_direction in (TradeDirectionMode.BOTH, TradeDirectionMode.BOTH_INDEPENDENT) else 1
+        return 1
     def _active_positions(self, pair):
         return pair.positions()
 
