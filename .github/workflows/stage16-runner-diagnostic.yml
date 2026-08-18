@@ -1,0 +1,11 @@
+name: Stage 16 runner diagnostic
+on:
+  push:
+    branches: [chatgpt/stage16-remove-hidden-pair-management-widgets]
+  workflow_dispatch:
+jobs:
+  ubuntu-runner-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm hosted runner can start
+        run: echo runner-ok
