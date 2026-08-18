@@ -61,7 +61,7 @@ def test_sr_summary_explains_mode_detection_proximity_and_directional_filters():
         assert "Mode: Filter Entries" in summary
         assert "Detection: Balanced (Recommended)" in summary
         assert "Near level: ≤ 0.75 ATR" in summary
-        assert "LONG filters: Require near support, Minimum room 1.50 ATR" in summary
+        assert "LONG filters: Require near support, Minimum room: 1.50 ATR" in summary
         assert "SHORT filters: Avoid near support" in summary
     finally: window.close()
 
