@@ -4,8 +4,11 @@ on:
     branches: [chatgpt/stage16-remove-hidden-pair-management-widgets]
   pull_request:
     branches: [main]
+permissions:
+  contents: write
 jobs:
   check:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,3 +31,10 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -q tests/test_stage16_hidden_pair_management_gui_removed.py tests/test_stage15_hidden_random_vwap_gui_removed.py tests/test_stage14_hidden_exit_gui_removed.py tests/test_stage6_profile_exit_management.py tests/test_strategy_profiles.py tests/test_gui_config_logic.py tests/test_worker_profile_modes.py
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crypto_strategy_lab/gui/main_window.py tests/test_stage16_hidden_pair_management_gui_removed.py
+          git diff --cached --quiet || git commit -m "Apply Stage 16 hidden pair-management GUI cleanup"
+          git push origin HEAD:chatgpt/stage16-remove-hidden-pair-management-widgets
