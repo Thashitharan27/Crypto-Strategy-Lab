@@ -1,8 +1,12 @@
-"""Temporary Stage 19 audit: locate retired configuration names in production source."""
+"""Temporary Stage 19 audit for retired configuration names."""
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 import re
+
+from crypto_strategy_lab.config import BacktestConfig
+from crypto_strategy_lab.gui.config_logic import DEFAULT_GUI_CONFIG
 
 LEGACY = {
     "trade_direction", "sl_mult", "tp_mult",
@@ -10,8 +14,7 @@ LEGACY = {
     "enable_partial_take_profit", "tp1_r", "tp1_close_pct", "tp2_r", "tp2_close_pct",
     "stop_loss_r", "after_tp1_stop_mode", "after_tp1_stop_offset_r", "tp2_exit_mode",
     "enable_trailing_profit", "trail_activation_trigger", "trail_activation_r", "trail_distance_r",
-    "trail_apply_to", "trail_intrabar_mode",
-    "enable_both_open_timeout", "max_both_open_minutes", "timeout_exit_price", "comparison_timeout_minutes",
+    "trail_apply_to", "trail_intrabar_mode", "enable_both_open_timeout", "max_both_open_minutes",
     "enable_be_after_opposite_sl", "be_mode", "be_offset_r", "be_same_candle_policy",
     "enable_adx_filter", "adx_filter_mode", "adx_minimum", "adx_maximum",
     "enable_bb_width_filter", "bb_width_filter_mode", "bb_width_minimum", "bb_width_maximum",
@@ -33,9 +36,20 @@ LEGACY = {
     "checkpoint_zero_score_recheck_minutes", "enable_reentry_gate_after_remaining_leg_timeout",
     "vwap_breakout_lookback_hours", "vwap_volume_lookback", "vwap_volume_multiplier", "vwap_slope_lookback",
     "vwap_atr_pct_minimum", "vwap_atr_pct_maximum", "vwap_confirmation_mode",
-    "vwap_retest_window_candles", "vwap_retest_tolerance_atr",
-    "position_sizing_mode", "enable_strategy_profiles",
+    "vwap_retest_window_candles", "vwap_retest_tolerance_atr", "position_sizing_mode",
+    "enable_strategy_profiles",
 }
+
+# These are the important configuration boundaries. Old names may still appear
+# temporarily inside dead engine code while Stage 19 deletes those branches, but
+# they must never be accepted or serialized as current configuration.
+field_names = {field.name for field in fields(BacktestConfig)}
+retired_fields = sorted(field_names & LEGACY)
+if retired_fields:
+    raise SystemExit(f"Retired BacktestConfig fields remain: {', '.join(retired_fields)}")
+retired_gui = sorted(set(DEFAULT_GUI_CONFIG) & LEGACY)
+if retired_gui:
+    raise SystemExit(f"Retired GUI defaults remain: {', '.join(retired_gui)}")
 
 ROOT = Path(__file__).resolve().parents[1]
 for path in sorted((ROOT / "crypto_strategy_lab").rglob("*.py")):
@@ -49,3 +63,5 @@ for path in sorted((ROOT / "crypto_strategy_lab").rglob("*.py")):
         print(f"\n## {path.relative_to(ROOT)}")
         for number, names, line in hits:
             print(f"{number}: {', '.join(names)} :: {line[:220]}")
+
+print("\nCurrent config boundary is free of retired fields.")
