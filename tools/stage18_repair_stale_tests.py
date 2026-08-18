@@ -19,7 +19,7 @@ def replace_test_function(text: str, name: str, replacement: str) -> str:
     pattern = rf"(?ms)^def {re.escape(name)}\(.*?(?=^def |\Z)"
     matches = list(re.finditer(pattern, text))
     if not matches:
-        if f"def {name}(" in replacement and replacement.strip() in text:
+        if replacement.rstrip() in text:
             return text
         raise SystemExit(f"Stage 18 test function not found: {name}")
     if len(matches) != 1:
@@ -44,8 +44,12 @@ p.write_text(s, encoding="utf-8")
 # Bring the main-window regressions in line with the Strategy-Profile-only GUI.
 p = ROOT / "tests" / "test_gui_main_window.py"
 s = p.read_text(encoding="utf-8")
-if "import pandas as pd\n" not in s:
-    s = replace_once(s, "import pytest\n", "import pandas as pd\nimport pytest\n", "module pandas import")
+s = replace_once(
+    s,
+    "from dataclasses import replace\n\nimport pytest\n",
+    "from dataclasses import replace\n\nimport pandas as pd\nimport pytest\n",
+    "module pandas import",
+)
 
 s = replace_once(
     s,
