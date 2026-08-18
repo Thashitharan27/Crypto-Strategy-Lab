@@ -17,6 +17,6 @@ def test_dead_regime_reward_risk_gui_remnants_are_gone():
 def test_di_tab_still_exposes_active_direction_and_pressure_controls():
     root = Path(__file__).resolve().parents[1]
     text = (root / "crypto_strategy_lab" / "gui" / "main_window.py").read_text(encoding="utf-8")
-    assert 'QGroupBox("Direction Selection")' in text
+    assert 'QGroupBox("DI Direction Selection")' in text
     assert 'QGroupBox("DI Pressure Analysis")' in text
     assert 'self.profile_editor.values()' in text
