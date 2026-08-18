@@ -67,7 +67,6 @@ class BacktestConfig:
     """
 
     input_csv: Path = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv")
-    strategy_csv: Path = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv")
     intrabar_csv: Optional[Path] = Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_1m.csv")
     output_dir: Path = Path("output")
     timestamp_unit: Optional[str] = "ms"
@@ -266,8 +265,6 @@ class BacktestConfig:
         object.__setattr__(self, "strategy_profiles", normalize_profiles(self.strategy_profiles))
         if self.strategy_profile_run_mode not in ("ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"):
             raise ValueError("invalid strategy_profile_run_mode")
-        if self.input_csv != Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv") and self.strategy_csv == Path(r"C:\CryptoBots\Binance Market Data\futures\usdm\BTCUSDT_15m.csv"):
-            object.__setattr__(self, "strategy_csv", self.input_csv)
         if self.initial_equity <= 0:
             raise ValueError("initial_equity must be positive")
         if self.strategy_timeframe_minutes <= 0 or self.intrabar_timeframe_minutes <= 0:

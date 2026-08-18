@@ -24,7 +24,6 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "strategy_profile_run_mode": "COMBINED_SHARED_CAPITAL",
     "strategy_profiles": profiles_to_dict(default_profiles()),
     "input_csv": "C:/CryptoBots/Binance Market Data/futures/usdm/BTCUSDT_15m.csv",
-    "strategy_csv": "C:/CryptoBots/Binance Market Data/futures/usdm/BTCUSDT_15m.csv",
     "intrabar_csv": "C:/CryptoBots/Binance Market Data/futures/usdm/BTCUSDT_1m.csv",
     "output_dir": "output",
     "run_name": "",
@@ -153,7 +152,7 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         return [str(exc)]
     errors: list[str] = []
     if require_paths:
-        strategy_path = values.get("strategy_csv") or values.get("input_csv")
+        strategy_path = values.get("input_csv")
         if not Path(strategy_path or "").is_file():
             errors.append("Strategy CSV must exist.")
         intrabar_path = values.get("intrabar_csv")
@@ -225,7 +224,6 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         raise ValueError("\n".join(errors))
     return BacktestConfig(
         input_csv=Path(merged["input_csv"]),
-        strategy_csv=Path(merged.get("strategy_csv") or merged["input_csv"]),
         intrabar_csv=Path(merged["intrabar_csv"]) if merged.get("intrabar_csv") else None,
         output_dir=Path(merged["output_dir"]),
         strategy_profile_run_mode=str(merged["strategy_profile_run_mode"]),

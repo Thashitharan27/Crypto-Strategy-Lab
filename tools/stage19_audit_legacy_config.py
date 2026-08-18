@@ -9,6 +9,7 @@ from crypto_strategy_lab.config import BacktestConfig
 from crypto_strategy_lab.gui.config_logic import DEFAULT_GUI_CONFIG
 
 LEGACY = {
+    "strategy_csv",
     "trade_direction", "sl_mult", "tp_mult",
     "enable_partial_stop_loss", "sl1_r", "sl1_close_pct", "sl2_r",
     "enable_partial_take_profit", "tp1_r", "tp1_close_pct", "tp2_r", "tp2_close_pct",
