@@ -2,6 +2,8 @@ name: Stage 12 config serialization
 on:
   push:
     branches: [chatgpt/stage12-config-serialization-contract]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
