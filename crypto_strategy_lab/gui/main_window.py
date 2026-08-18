@@ -685,7 +685,11 @@ class MainWindow(QMainWindow):
             if self._run_failed: self.status.setText("Backtest failed; see the Log tab for details.")
         if thread is not None: thread.deleteLater()
     def _update_sr_summary_panel(self,trades):
-        mode=self.sr_filter_mode.currentText() if hasattr(self,"sr_filter_mode") else "Analysis Only"
+        mode_raw=self.sr_filter_mode.currentText() if hasattr(self,"sr_filter_mode") else "ANALYSIS_ONLY"
+        mode={
+            "ANALYSIS_ONLY":"Analysis Only",
+            "APPLY_ENTRY_RULES":"Apply Entry Rules",
+        }.get(mode_raw,mode_raw)
         mode_note="\nNo trades filtered; support/resistance was measured for analysis only." if mode == "Analysis Only" else ""
         if trades is None or trades.empty or ("long_sr_context" not in trades.columns and "short_sr_context" not in trades.columns):
             self.sr_summary_panel_label.setText(f"Mode: {mode}{mode_note}\n\nSupport/Resistance analysis was not enabled for this run.")

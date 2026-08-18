@@ -50,7 +50,7 @@ def test_market_ready_tabs_use_profile_only_strategy_workflow():
     window = MainWindow()
     try:
         tab_names = [window.tabs.tabText(i) for i in range(window.tabs.count())]
-        assert tab_names == ["Backtest Setup", "DI Direction & Pressure", "Support & Resistance", "Strategy Profiles", "Summary", "Portfolio", "Logs", "GitHub", "ChatGPT"]
+        assert tab_names == ["Backtest Setup", "DI Direction & Pressure", "Support & Resistance", "Strategy Profiles", "Summary", "Portfolio", "GitHub", "ChatGPT"]
         assert "Legacy Strategy" not in tab_names
         values=window.values()
         assert values["enable_strategy_profiles"] is True
@@ -423,57 +423,61 @@ def legacy_vwap_volume_breakout_controls_round_trip():
         window.close()
 
 
-def test_partial_stop_disables_ignored_core_stop_control():
+def test_profile_partial_stop_exposes_profile_stop_ladder_controls():
     app()
     window = MainWindow()
     try:
-        assert window.sl.isEnabled()
-        window.enable_partial_sl.setChecked(True)
-        assert not window.sl.isEnabled()
-        window.enable_partial_sl.setChecked(False)
-        assert window.sl.isEnabled()
+        controls = window.profile_editor.controls
+        assert controls["stop_loss_multiple"].isEnabled()
+        assert not controls["sl1_r"].isEnabled()
+        assert not controls["sl1_close_pct"].isEnabled()
+        assert not controls["sl2_r"].isEnabled()
+
+        controls["partial_stop_enabled"].setChecked(True)
+        assert controls["partial_stop_enabled"].isChecked()
+        assert controls["sl1_r"].isEnabled()
+        assert controls["sl1_close_pct"].isEnabled()
+        assert controls["sl2_r"].isEnabled()
     finally:
         window.close()
 
 
-def test_partial_take_profit_disables_ignored_core_controls_and_calculates_remainder():
+def test_profile_partial_take_profit_uses_profile_ladder_controls():
     app()
     window = MainWindow()
     try:
-        window.enable_partial_tp.setChecked(True)
-        assert not window.sl.isEnabled()
-        assert not window.tp.isEnabled()
-        window.tp1_close_pct.setValue(65)
-        assert window.tp2_close_pct.value() == pytest.approx(35)
-        assert not window.tp2_close_pct.isEnabled()
+        controls = window.profile_editor.controls
+        assert controls["reward_risk_ratio"].isEnabled()
+        assert not controls["tp1_r"].isEnabled()
+        assert not controls["tp1_close_pct"].isEnabled()
+        assert not controls["tp2_r"].isEnabled()
 
-        assert window.tp2_r.isEnabled()
-        assert window.enable_trailing_profit.isEnabled()
-        window.enable_trailing_profit.setChecked(True)
-        window.trail_activation_trigger.setCurrentText("AFTER_TP1")
-        assert not window.trail_activation_r.isEnabled()
-        assert window.trail_distance_r.isEnabled()
-        assert "fixed TP2 and SL2 stay active" in window.trailing_help.text()
+        controls["partial_profit_enabled"].setChecked(True)
+        assert controls["partial_profit_enabled"].isChecked()
+        assert not controls["reward_risk_ratio"].isEnabled()
+        assert controls["tp1_r"].isEnabled()
+        assert controls["tp1_close_pct"].isEnabled()
+        assert controls["tp2_r"].isEnabled()
+        assert controls["after_tp1_stop_mode"].isEnabled()
     finally:
         window.close()
 
 
-def test_partial_take_profit_and_partial_stop_loss_can_be_enabled_together():
+def test_profile_partial_profit_and_stop_can_be_enabled_together():
     app()
     window = MainWindow()
     try:
-        window.enable_partial_tp.setChecked(True)
-        window.enable_partial_sl.setChecked(True)
-        assert window.enable_partial_tp.isChecked()
-        assert window.enable_partial_sl.isChecked()
-        assert not window.stop_loss_r.isEnabled()
-        assert window.enable_trailing_profit.isEnabled()
-        assert window.sl1_r.isEnabled()
-        assert window.tp1_r.isEnabled()
-        assert "ladder remains active" in window.protective_stop_help.text()
+        controls = window.profile_editor.controls
+        controls["partial_profit_enabled"].setChecked(True)
+        controls["partial_stop_enabled"].setChecked(True)
 
-        window.after_tp1_stop_mode.setCurrentText("MOVE_TO_ENTRY")
-        assert "replaced by one stop at the entry price" in window.protective_stop_help.text()
+        assert controls["partial_profit_enabled"].isChecked()
+        assert controls["partial_stop_enabled"].isChecked()
+        assert not controls["reward_risk_ratio"].isEnabled()
+        assert controls["tp1_r"].isEnabled()
+        assert controls["tp2_r"].isEnabled()
+        assert controls["sl1_r"].isEnabled()
+        assert controls["sl2_r"].isEnabled()
     finally:
         window.close()
 

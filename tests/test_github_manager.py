@@ -33,7 +33,7 @@ def test_repository_branch_clean_modified_and_untracked(repo):
 
 
 def test_missing_repository_and_git_unavailable(tmp_path, repo):
-    with pytest.raises(GitError, match="not a Git repository"): GitManager(tmp_path).validate()
+    with pytest.raises(GitError, match="not a Git repository"): GitManager(tmp_path / "not-a-repo").validate()
     with pytest.raises(GitError, match="not installed"): GitManager(repo, "definitely-no-such-git").validate()
 
 
