@@ -573,7 +573,7 @@ def test_gui_reset_restores_all_current_default_values_and_profiles():
             "intrabar_timeframe_minutes": 5,
             "use_intrabar_data": False,
         }
-        changed["strategy_profiles"] = defaults["strategy_profiles"]
+        changed["strategy_profiles"] = default_gui_config()["strategy_profiles"]
         changed["strategy_profiles"]["bull_long"]["reward_risk_ratio"] = 4.0
         window.apply_values(changed)
         assert window.values()["run_name"] == "custom"
