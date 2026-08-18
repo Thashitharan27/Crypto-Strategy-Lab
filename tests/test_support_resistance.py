@@ -305,6 +305,23 @@ class TestAnalysisOnlyRegression:
         engine.di_spread[:] = 40.0
         return engine.run()
 
+    @staticmethod
+    def _run_current_profile(data, enable_sr):
+        config = BacktestConfig(
+            risk_mode=RiskMode.FIXED,
+            fixed_r=2.0,
+            use_intrabar_data=False,
+            enable_trade_telemetry=False,
+            enable_support_resistance_analysis=enable_sr,
+            sr_filter_mode="ANALYSIS_ONLY",
+        )
+        engine = BacktestEngine(data, config)
+        engine.market_regime_values[:] = "SIDEWAYS"
+        engine.plus_di_values[:] = 50.0
+        engine.minus_di_values[:] = 10.0
+        engine.di_spread[:] = 40.0
+        return engine.run()
+
     def test_analysis_only_trades_match_sr_disabled_trades(self):
         data = self._wavy_candles()
         disabled = self._run_current_profile(data, False)
@@ -326,6 +343,9 @@ class TestAnalysisOnlyRegression:
             assert column in enabled.columns
         assert enabled["long_sr_zone_low"].notna().any()
         assert "short_sr_zone_low" not in enabled.columns
+
+
+class TestSupportResistanceDetector:
 
 
 class TestSupportResistanceDetector:
