@@ -39,7 +39,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-qt
       - name: Apply Stage 18 repair
-        run: python tools/stage18_repair_full_suite.py
+        run: |
+          python tools/stage18_repair_full_suite.py
+          python tools/stage18_repair_followup.py
       - name: Compile repaired source
         run: python -m compileall -q crypto_strategy_lab tests
       - name: Run focused engine regression tests
