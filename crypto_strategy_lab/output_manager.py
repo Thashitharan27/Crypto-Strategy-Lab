@@ -70,47 +70,13 @@ def _profile_exit_labels(config: BacktestConfig) -> tuple[str, str]:
     return stop, target
 
 
-def _profile_mode_label(config: BacktestConfig) -> str | None:
-    if not config.enable_strategy_profiles:
-        return None
+def _profile_mode_label(config: BacktestConfig) -> str:
     labels = {
         "ISOLATED_PROFILES": "PROFILES-ISOLATED",
         "COMBINED_SHARED_CAPITAL": "PROFILES-COMBINED",
         "BOTH": "PROFILES-BOTH",
     }
     return labels.get(config.strategy_profile_run_mode, f"PROFILES-{_safe_part(config.strategy_profile_run_mode)}")
-
-
-def _stop_label(config: BacktestConfig) -> str:
-    if config.enable_partial_stop_loss:
-        closed = _format_number(config.sl1_close_pct)
-        return (
-            f"PSL{_format_number(config.sl1_r)}x{closed}"
-            f"-SL{_format_number(config.sl2_r)}"
-        )
-    if config.enable_partial_take_profit:
-        return f"SL{_format_number(config.stop_loss_r)}"
-    return f"SL{_format_number(config.sl_mult)}"
-
-
-def _target_label(config: BacktestConfig) -> str:
-    if config.enable_partial_take_profit:
-        closed = _format_number(config.tp1_close_pct)
-        return (
-            f"PTP{_format_number(config.tp1_r)}x{closed}"
-            f"-TP{_format_number(config.tp2_r)}"
-        )
-    if config.enable_di_direction_sizing and config.enable_di_regime_reward_risk:
-        return "RRREGIME"
-    if config.enable_di_direction_sizing:
-        long_target = config.sl_mult * config.di_long_reward_risk_ratio
-        short_target = config.sl_mult * config.di_short_reward_risk_ratio
-        if long_target != short_target:
-            return f"LTP{_format_number(long_target)}-STP{_format_number(short_target)}"
-        target_multiple = long_target
-    else:
-        target_multiple = config.tp_mult
-    return f"TP{_format_number(target_multiple)}"
 
 
 def infer_symbol(config: BacktestConfig) -> str:
@@ -121,19 +87,13 @@ def infer_symbol(config: BacktestConfig) -> str:
 
 def run_folder_name(config: BacktestConfig, timestamp: datetime | None = None) -> str:
     stamp = (timestamp or datetime.now()).strftime("%Y-%m-%d_%H-%M-%S")
-    stop, target = (
-        _profile_exit_labels(config)
-        if config.enable_strategy_profiles
-        else (_stop_label(config), _target_label(config))
-    )
+    stop, target = _profile_exit_labels(config)
     parts = [
         infer_symbol(config),
         f"{config.strategy_timeframe_minutes}m",
         _risk_label(config),
     ]
-    profile_mode = _profile_mode_label(config)
-    if profile_mode:
-        parts.append(profile_mode)
+    parts.append(_profile_mode_label(config))
     parts.extend([
         stop,
         target,
@@ -183,30 +143,10 @@ def write_config(config: BacktestConfig, run_dir: Path) -> None:
 
 
 def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Path) -> None:
-    if config.enable_partial_stop_loss:
-        stop_description = (
-            f"Partial stop: {config.sl1_close_pct}% at {config.sl1_r}R; "
-            f"remainder at {config.sl2_r}R (Core SL ignored)"
-        )
-    elif config.enable_partial_take_profit:
-        stop_description = f"Partial TP stop: {config.stop_loss_r}R (Core SL ignored)"
-    else:
-        stop_description = f"Stop loss multiple: {config.sl_mult}R"
-
-    if config.enable_strategy_profiles:
-        enabled_profiles = [key for key, profile in config.strategy_profiles.items() if profile.enabled]
-        target_description = (
-            "Strategy Profiles: " + (", ".join(enabled_profiles) if enabled_profiles else "none enabled")
-            + f"; run mode {config.strategy_profile_run_mode}"
-        )
-    elif config.enable_partial_take_profit:
-        target_description = (
-            f"Partial take profit: {config.tp1_close_pct}% at {config.tp1_r}R; "
-            f"remainder at {config.tp2_r}R (Core TP ignored)"
-        )
-    else:
-        target_description = f"Take profit multiple: {config.tp_mult}R"
-
+    enabled_profiles = {key: profile for key, profile in config.strategy_profiles.items() if profile.enabled}
+    trailing_profiles = [key for key, profile in enabled_profiles.items() if profile.trailing_enabled or profile.r_step_trailing_enabled]
+    break_even_profiles = [key for key, profile in enabled_profiles.items() if profile.break_even_enabled]
+    timeout_profiles = [key for key, profile in enabled_profiles.items() if profile.timeout_enabled]
     lines = [
         "Backtest Run Information",
         "========================",
@@ -218,15 +158,11 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
         f"Strategy timeframe: {config.strategy_timeframe_minutes}m",
         f"Risk mode: {config.risk_mode.value}",
         f"ATR period/multiplier: {config.atr_period} / {config.atr_multiplier}",
-        stop_description,
-        target_description,
-        (
-            f"Trailing stop: enabled; trigger {config.trail_activation_trigger.value}; "
-            f"activation {config.trail_activation_r}R; distance {config.trail_distance_r}R; "
-            f"apply to {config.trail_apply_to.value}; fixed final targets remain active"
-            if config.enable_trailing_profit
-            else "Trailing stop: disabled"
-        ),
+        "Strategy Profiles: " + (", ".join(enabled_profiles) if enabled_profiles else "none enabled"),
+        f"Strategy Profile run mode: {config.strategy_profile_run_mode}",
+        "Trailing profiles: " + (", ".join(trailing_profiles) if trailing_profiles else "none"),
+        "Break-even profiles: " + (", ".join(break_even_profiles) if break_even_profiles else "none"),
+        "Timeout profiles: " + (", ".join(timeout_profiles) if timeout_profiles else "none"),
         f"Partial intrabar ordering: {'STOP_FIRST' if config.tie_policy.value == 'PESSIMISTIC' else 'TP1_THEN_TP2_THEN_STOP'}",
         f"Initial equity: {config.initial_equity}",
         f"Total pairs: {summary.get('total_pairs')}",
