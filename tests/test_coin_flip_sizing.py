@@ -172,6 +172,7 @@ def test_di_preferred_side_only_supports_two_to_one_reward_risk():
             **engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
             "enable_strategy_profiles": True,
+            "enable_strategy_profiles": True,
             "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=2.0),
         }
     )
@@ -189,6 +190,7 @@ def test_di_preferred_side_only_supports_asymmetric_reward_risk():
             **long_engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
             "enable_strategy_profiles": True,
+            "enable_strategy_profiles": True,
             "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=1.0),
         }
     )
@@ -202,6 +204,7 @@ def test_di_preferred_side_only_supports_asymmetric_reward_risk():
         **{
             **short_engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
+            "enable_strategy_profiles": True,
             "enable_strategy_profiles": True,
             "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=1.0),
         }
