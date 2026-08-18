@@ -26,13 +26,24 @@ jobs:
           python tools/stage19_engine_profile_only.py
           python tools/stage19_result_schema.py
           python tools/stage19_final_production_cleanup.py
+          python tools/stage19_remove_config_invariants.py
       - name: Compile changed Python
         run: |
-          if ! python -m py_compile crypto_strategy_lab/config.py crypto_strategy_lab/loader.py crypto_strategy_lab/engine.py crypto_strategy_lab/cli.py crypto_strategy_lab/output_manager.py crypto_strategy_lab/report_workbooks.py crypto_strategy_lab/gui/config_logic.py crypto_strategy_lab/gui/main_window.py crypto_strategy_lab/gui/worker.py tools/stage19_audit_legacy_config.py; then
-            echo "--- engine.py around migration failure ---"
-            nl -ba crypto_strategy_lab/engine.py | sed -n '975,1020p'
-            exit 1
-          fi
+          python -m py_compile \
+            crypto_strategy_lab/config.py \
+            crypto_strategy_lab/loader.py \
+            crypto_strategy_lab/engine.py \
+            crypto_strategy_lab/cli.py \
+            crypto_strategy_lab/output_manager.py \
+            crypto_strategy_lab/report_workbooks.py \
+            crypto_strategy_lab/gui/config_logic.py \
+            crypto_strategy_lab/gui/main_window.py \
+            crypto_strategy_lab/gui/worker.py \
+            tools/stage19_audit_legacy_config.py
+      - name: Enforce hard-cleanup audit
+        env:
+          PYTHONPATH: .
+        run: python tools/stage19_audit_legacy_config.py
       - name: Commit cleanup
         run: |
           if git diff --quiet; then
@@ -42,5 +53,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add crypto_strategy_lab tools/stage19_audit_legacy_config.py
-          git commit -m "Stage 19: remove final retired engine accesses"
+          git commit -m "Stage 19: delete retired config invariants"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
