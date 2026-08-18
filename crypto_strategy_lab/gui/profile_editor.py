@@ -1,6 +1,7 @@
 """Six-profile overview with one reusable strategy-profile editor."""
 from __future__ import annotations
 from copy import deepcopy
+from dataclasses import replace
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import *
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, StrategyProfile, default_profiles, profiles_to_dict, normalize_profiles
@@ -13,14 +14,13 @@ class StrategyProfilesWidget(QWidget):
         super().__init__(); self.profiles=default_profiles(); self.current="bull_long"; self._loading=False
         root=QVBoxLayout(self); top=QHBoxLayout(); self.mode=QComboBox(); self.mode.addItem("Combined shared account","COMBINED_SHARED_CAPITAL"); self.mode.addItem("Each profile separately","ISOLATED_PROFILES"); self.mode.addItem("Combined + separate comparison","BOTH"); top.addWidget(QLabel("Test mode")); top.addWidget(self.mode); top.addStretch(); root.addLayout(top)
         definition=QGroupBox("Market Regime Definition"); definition_form=QFormLayout(definition)
-        self.regime_method=QComboBox(); self.regime_method.addItem("BTC structural trend (market-wide)","BTC_STRUCTURAL"); self.regime_method.addItem("Selected asset structural trend","ASSET_STRUCTURAL"); self.regime_method.addItem("Asset trailing return (legacy)","ASSET_RETURN")
+        self.regime_method=QComboBox(); self.regime_method.addItem("BTC structural trend (market-wide)","BTC_STRUCTURAL"); self.regime_method.addItem("Selected asset structural trend","ASSET_STRUCTURAL"); self.regime_method.addItem("Asset trailing return","ASSET_RETURN")
         self.structural_sma_days=QSpinBox(); self.structural_sma_days.setRange(2,3650); self.structural_sma_days.setSuffix(" days"); self.structural_sma_days.setValue(200)
         self.structural_slope_days=QSpinBox(); self.structural_slope_days.setRange(1,3650); self.structural_slope_days.setSuffix(" days"); self.structural_slope_days.setValue(30)
         self.regime_lookback=QSpinBox(); self.regime_lookback.setRange(1,3650); self.regime_lookback.setSuffix(" days")
         self.bull_threshold=QDoubleSpinBox(); self.bull_threshold.setRange(-99.99,10000); self.bull_threshold.setSuffix(" %"); self.bull_threshold.setDecimals(2)
-        self.bear_threshold=QDoubleSpinBox(); self.bear_threshold.setRange(-99.99,10000); self.bear_threshold.setSuffix(" %"); self.bear_threshold.setDecimals(2)
         self.adx_period=QSpinBox(); self.adx_period.setRange(1,1000); self.bb_period=QSpinBox(); self.bb_period.setRange(2,1000); self.bb_stddevs=QDoubleSpinBox(); self.bb_stddevs.setRange(.01,20); self.bb_stddevs.setDecimals(2)
-        for label,widget in (("Regime method",self.regime_method),("Trend average",self.structural_sma_days),("Average slope",self.structural_slope_days),("Return lookback",self.regime_lookback),("Bull starts at",self.bull_threshold),("Bear starts at or below",self.bear_threshold),("ADX period",self.adx_period),("Bollinger period",self.bb_period),("Bollinger deviations",self.bb_stddevs)): definition_form.addRow(label,widget)
+        for label,widget in (("Regime method",self.regime_method),("Trend average",self.structural_sma_days),("Average slope",self.structural_slope_days),("Return lookback",self.regime_lookback),("Bull/Bear threshold magnitude",self.bull_threshold),("ADX period",self.adx_period),("Bollinger period",self.bb_period),("Bollinger deviations",self.bb_stddevs)): definition_form.addRow(label,widget)
         self.definition_form=definition_form
         definition.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Maximum); root.addWidget(definition)
         self.mode_help=QLabel(); self.mode_help.setWordWrap(True); self.mode_help.setSizePolicy(QSizePolicy.Preferred,QSizePolicy.Maximum); root.addWidget(self.mode_help)
@@ -67,7 +67,7 @@ class StrategyProfilesWidget(QWidget):
         self._section("Profile Actions")
         buttons=QHBoxLayout(); copy_btn=QPushButton("Copy Profile"); paste_btn=QPushButton("Paste Profile"); reset_btn=QPushButton("Reset Profile"); copy_rules_btn=QPushButton("Apply Rules to All"); buttons.addWidget(copy_btn); buttons.addWidget(paste_btn); buttons.addWidget(reset_btn); buttons.addWidget(copy_rules_btn); self.form.addRow(buttons); self.editor_layout.addStretch(); self.clipboard=None
         copy_btn.clicked.connect(lambda:setattr(self,"clipboard",deepcopy(self.profiles[self.current]))); paste_btn.clicked.connect(self._paste); reset_btn.clicked.connect(self._reset); copy_rules_btn.clicked.connect(self._apply_rules_to_all); self.list.currentRowChanged.connect(self._select); self.mode.currentTextChanged.connect(self.changed); self.mode.currentIndexChanged.connect(self._update_mode_help)
-        for widget in (self.regime_lookback,self.bull_threshold,self.bear_threshold,self.structural_sma_days,self.structural_slope_days,self.adx_period,self.bb_period,self.bb_stddevs): widget.valueChanged.connect(self.changed)
+        for widget in (self.regime_lookback,self.bull_threshold,self.structural_sma_days,self.structural_slope_days,self.adx_period,self.bb_period,self.bb_stddevs): widget.valueChanged.connect(self.changed)
         self.regime_method.currentIndexChanged.connect(self._update_regime_controls); self.regime_method.currentIndexChanged.connect(self.changed)
         for key in ("partial_stop_enabled","partial_profit_enabled","trailing_enabled","break_even_enabled","timeout_enabled","r_step_trailing_enabled","atr_checkpoint_tp_extension_enabled"): self.controls[key].toggled.connect(self._update_management_controls)
         self.add_rule_btn.clicked.connect(self._add_entry_rule); self.remove_rule_btn.clicked.connect(self._remove_entry_rule)
@@ -76,7 +76,7 @@ class StrategyProfilesWidget(QWidget):
     def _update_regime_controls(self,*_):
         structural=self.regime_method.currentData() in ("BTC_STRUCTURAL","ASSET_STRUCTURAL")
         for widget in (self.structural_sma_days,self.structural_slope_days): self.definition_form.setRowVisible(widget,structural)
-        for widget in (self.regime_lookback,self.bull_threshold,self.bear_threshold): self.definition_form.setRowVisible(widget,not structural)
+        for widget in (self.regime_lookback,self.bull_threshold): self.definition_form.setRowVisible(widget,not structural)
     def _update_mode_help(self,*_):
         text={
             "COMBINED_SHARED_CAPITAL":"Runs all enabled profiles together once using one shared account. Open trades can block opportunities from other profiles.",
@@ -167,8 +167,8 @@ class StrategyProfilesWidget(QWidget):
         current_rules=self.profiles[self.current].entry_rules
         for key in PROFILE_KEYS:
             if key!=self.current:
-                self.profiles[key].entry_rules=deepcopy(current_rules)
+                self.profiles[key]=replace(self.profiles[key], entry_rules=deepcopy(current_rules))
         self._refresh_list();self.changed.emit()
-    def values(self): return {"enable_strategy_profiles":True,"enable_di_direction_sizing":True,"di_execution_mode":"PREFERRED_SIDE_ONLY","strategy_profile_run_mode":self.mode.currentData(),"market_regime_method":self.regime_method.currentData(),"structural_regime_sma_days":self.structural_sma_days.value(),"structural_regime_slope_lookback_days":self.structural_slope_days.value(),"bull_regime_lookback_days":self.regime_lookback.value(),"bull_regime_return_threshold":self.bull_threshold.value()/100.0,"di_regime_bear_return_threshold":self.bear_threshold.value()/100.0,"adx_period":self.adx_period.value(),"bb_period":self.bb_period.value(),"bb_stddevs":self.bb_stddevs.value(),"strategy_profiles":profiles_to_dict(self.profiles)}
+    def values(self): return {"strategy_profile_run_mode":self.mode.currentData(),"market_regime_method":self.regime_method.currentData(),"structural_regime_sma_days":self.structural_sma_days.value(),"structural_regime_slope_lookback_days":self.structural_slope_days.value(),"bull_regime_lookback_days":self.regime_lookback.value(),"bull_regime_return_threshold":self.bull_threshold.value()/100.0,"adx_period":self.adx_period.value(),"bb_period":self.bb_period.value(),"bb_stddevs":self.bb_stddevs.value(),"strategy_profiles":profiles_to_dict(self.profiles)}
     def apply_values(self,values):
-        self.profiles=normalize_profiles(values.get("strategy_profiles",{})); index=self.mode.findData(str(values.get("strategy_profile_run_mode","COMBINED_SHARED_CAPITAL"))); self.mode.setCurrentIndex(max(0,index)); method=self.regime_method.findData(str(values.get("market_regime_method","ASSET_RETURN"))); self.regime_method.setCurrentIndex(max(0,method)); self.structural_sma_days.setValue(int(values.get("structural_regime_sma_days",200))); self.structural_slope_days.setValue(int(values.get("structural_regime_slope_lookback_days",30))); self.regime_lookback.setValue(int(values.get("bull_regime_lookback_days",90))); self.bull_threshold.setValue(float(values.get("bull_regime_return_threshold",.20))*100); self.bear_threshold.setValue(float(values.get("di_regime_bear_return_threshold",-.20))*100); self.adx_period.setValue(int(values.get("adx_period",14))); self.bb_period.setValue(int(values.get("bb_period",20))); self.bb_stddevs.setValue(float(values.get("bb_stddevs",2))); self._update_regime_controls(); self._load(); self._refresh_list()
+        self.profiles=normalize_profiles(values.get("strategy_profiles",{})); index=self.mode.findData(str(values.get("strategy_profile_run_mode","COMBINED_SHARED_CAPITAL"))); self.mode.setCurrentIndex(max(0,index)); method=self.regime_method.findData(str(values.get("market_regime_method","ASSET_RETURN"))); self.regime_method.setCurrentIndex(max(0,method)); self.structural_sma_days.setValue(int(values.get("structural_regime_sma_days",200))); self.structural_slope_days.setValue(int(values.get("structural_regime_slope_lookback_days",30))); self.regime_lookback.setValue(int(values.get("bull_regime_lookback_days",90))); self.bull_threshold.setValue(float(values.get("bull_regime_return_threshold",.20))*100); self.adx_period.setValue(int(values.get("adx_period",14))); self.bb_period.setValue(int(values.get("bb_period",20))); self.bb_stddevs.setValue(float(values.get("bb_stddevs",2))); self._update_regime_controls(); self._load(); self._refresh_list()

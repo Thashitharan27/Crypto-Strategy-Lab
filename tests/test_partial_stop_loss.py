@@ -1,114 +1,105 @@
 import pandas as pd
 import pytest
 
-from crypto_strategy_lab.config import BacktestConfig, RiskMode, TiePolicy, TrailActivationTrigger, TradeDirectionMode
+from crypto_strategy_lab.config import BacktestConfig, RiskMode, TiePolicy
 from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.strategy_profiles import StrategyProfile, default_profiles
 
 
 def candles(*bars):
-    return pd.DataFrame([
-        {
-            "timestamp": pd.Timestamp("2024-01-01", tz="UTC") + pd.Timedelta(minutes=15 * i),
-            "open": 100,
-            "close": 100,
-            "high": high,
-            "low": low,
-            "volume": 1,
-        }
-        for i, (high, low) in enumerate(bars)
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "timestamp": pd.Timestamp("2024-01-01", tz="UTC") + pd.Timedelta(minutes=15 * i),
+                "open": 100,
+                "close": 100,
+                "high": high,
+                "low": low,
+                "volume": 1,
+            }
+            for i, (high, low) in enumerate(bars)
+        ]
+    )
 
 
-def run(*bars):
-    cfg = BacktestConfig(
-        risk_mode=RiskMode.FIXED,
-        fixed_r=1,
-        atr_period=1,
-        use_intrabar_data=False,
-        enable_trade_telemetry=False,
-        enable_partial_stop_loss=True,
+def open_long(*bars, profile=None, tie_policy=TiePolicy.PESSIMISTIC):
+    profiles = default_profiles()
+    profiles["sideways_long"] = profile or StrategyProfile(
+        enabled=True,
+        partial_stop_enabled=True,
         sl1_r=0.5,
         sl1_close_pct=50,
-        sl2_r=8,
-        tp_mult=8,
-        maker_fee=0,
-        taker_fee=0,
-        slippage=0,
-        tie_policy=TiePolicy.PESSIMISTIC,
+        sl2_r=2,
+        reward_risk_ratio=2,
     )
-    engine = BacktestEngine(candles(*bars), cfg)
-    engine.run()
-    return engine.completed_pairs[0]
-
-
-def weighted_price_r(position):
-    return position.gross_pnl / (position.risk * position.original_quantity)
-
-
-def test_both_sl1_then_sl2_and_tp_net_minus_half_r():
-    pair = run((100, 100), (100.5, 99.5), (100, 92))
-    assert pair.long.sl1_hit and pair.short.sl1_hit
-    assert pair.long.final_exit_reason == "SL1_THEN_SL2"
-    assert pair.short.final_exit_reason == "SL1_THEN_TP"
-    assert weighted_price_r(pair.long) + weighted_price_r(pair.short) == pytest.approx(-0.5)
-
-
-def test_one_sl1_sl2_and_other_full_tp_net_three_point_seven_five_r():
-    pair = run((100, 100), (100, 99.5), (100, 92))
-    assert pair.long.sl1_hit and not pair.short.sl1_hit
-    assert weighted_price_r(pair.long) + weighted_price_r(pair.short) == pytest.approx(3.75)
-
-
-def test_partial_stop_loss_requires_ordered_levels():
-    with pytest.raises(ValueError, match="SL2_R"):
-        BacktestConfig(enable_partial_stop_loss=True, sl1_r=8, sl2_r=8)
-
-
-def test_partial_stop_reporting_uses_weighted_stop_not_ignored_core_stop():
-    cfg = BacktestConfig(
-        risk_mode=RiskMode.FIXED,
-        fixed_r=1,
-        atr_period=1,
-        use_intrabar_data=False,
-        enable_trade_telemetry=False,
-        enable_partial_stop_loss=True,
-        sl_mult=10,
-        sl1_r=2,
-        sl1_close_pct=75,
-        sl2_r=10,
-        tp_mult=10,
-        maker_fee=0,
-        taker_fee=0,
-        slippage=0,
-    )
-    results = BacktestEngine(candles((100, 100), (110, 100)), cfg).run()
-    assert results.iloc[0]["expected_gross_winning_pair_pnl"] > 0
-    assert results.iloc[0]["fees_as_percentage_of_expected_winning_profit"] == 0
-
-
-def test_trailing_can_activate_after_sl1_and_keeps_sl2_as_final_boundary():
     cfg = BacktestConfig(
         risk_mode=RiskMode.FIXED,
         fixed_r=10,
         atr_period=1,
         use_intrabar_data=False,
         enable_trade_telemetry=False,
-        trade_direction=TradeDirectionMode.LONG_ONLY,
-        enable_partial_stop_loss=True,
-        sl1_r=.5,
-        sl1_close_pct=50,
-        sl2_r=2,
-        tp_mult=3,
-        enable_trailing_profit=True,
-        trail_activation_trigger=TrailActivationTrigger.AFTER_SL1,
-        trail_distance_r=.5,
+        strategy_profiles=profiles,
         maker_fee=0,
         taker_fee=0,
         slippage=0,
+        tie_policy=tie_policy,
     )
-    engine = BacktestEngine(candles((100, 100), (100, 94), (96, 89)), cfg)
-    row = engine.run().iloc[0]
-    assert row.long_sl1_hit
-    assert row.long_trailing_activated
-    assert row.long_exit_reason == "TRAILING_STOP"
-    assert row.long_exit_price > row.long_sl2_price
+    engine = BacktestEngine(candles(*bars), cfg)
+    engine.market_regime_values[:] = "SIDEWAYS"
+    engine.plus_di_values[:] = 50
+    engine.minus_di_values[:] = 10
+    engine.di_spread[:] = 40
+    engine._open_pair(0)
+    pair = engine.active_pairs[0]
+    assert pair.long is not None and pair.short is None
+    return engine, pair.long
+
+
+def weighted_price_r(position):
+    return position.gross_pnl / (position.risk * position.original_quantity)
+
+
+def test_sl1_then_sl2_closes_current_profile_position_at_weighted_loss():
+    engine, position = open_long((100, 100), (100, 95), (100, 80))
+    assert engine._scan_exit(position, 1)
+    assert position.sl1_hit and position.is_open
+    assert engine._scan_exit(position, 2)
+    assert position.final_exit_reason == "SL1_THEN_SL2"
+    assert weighted_price_r(position) == pytest.approx(-1.25)
+
+
+def test_sl1_then_profile_target_closes_remainder():
+    engine, position = open_long((100, 100), (100, 95), (140, 100))
+    assert engine._scan_exit(position, 1)
+    assert position.sl1_hit and position.is_open
+    assert engine._scan_exit(position, 2)
+    assert position.final_exit_reason == "SL1_THEN_TP"
+    assert weighted_price_r(position) == pytest.approx(1.75)
+
+
+def test_profile_partial_stop_requires_ordered_levels():
+    profile = StrategyProfile(partial_stop_enabled=True, sl1_r=2, sl2_r=2)
+    with pytest.raises(ValueError, match="SL2 must be greater than SL1"):
+        profile.validate("sideways_long")
+
+
+def test_profile_partial_stop_plan_owns_stop_levels_and_quantities():
+    engine, position = open_long((100, 100), (100, 100))
+    assert position.partial_sl_enabled
+    assert position.sl1_price == pytest.approx(95)
+    assert position.sl2_price == pytest.approx(80)
+    assert position.sl == pytest.approx(80)
+    assert position.sl1_quantity == pytest.approx(position.original_quantity * 0.5)
+
+
+def test_pessimistic_same_bar_target_and_sl2_resolves_to_losses_first():
+    engine, position = open_long((100, 100), (140, 80), tie_policy=TiePolicy.PESSIMISTIC)
+    assert engine._scan_exit(position, 1)
+    assert position.final_exit_reason == "SL1_THEN_SL2"
+
+
+def test_optimistic_same_bar_target_and_sl2_resolves_to_target_first():
+    engine, position = open_long((100, 100), (140, 80), tie_policy=TiePolicy.OPTIMISTIC)
+    assert engine._scan_exit(position, 1)
+    assert position.final_exit_reason == "TP"
+    assert not position.sl1_hit

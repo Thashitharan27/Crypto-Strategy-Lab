@@ -17,9 +17,7 @@ from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey
 from crypto_strategy_lab.lifecycle import export_lifecycle_reports
 from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_trade_column_metadata
 from crypto_strategy_lab.report_workbooks import build_backtest_workbook, build_indicator_workbook, build_performance_breakdowns
-from crypto_strategy_lab.random_entry import decisions_frame, random_analysis, run_batch, comparison_row
 from crypto_strategy_lab.support_resistance_analysis import generate_sr_analysis_reports
-from crypto_strategy_lab.config import EntryTimingMode
 from dataclasses import replace
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS
 
@@ -161,7 +159,7 @@ class BacktestWorker(QObject):
             self._check(); self._emit_stage("ATR calculation", 10, 0, len(data))
             self._log(f"Running {self.config.risk_mode.value}, ATR({self.config.atr_period}), multiplier {self.config.atr_multiplier}")
             self._log(f"Intrabar config: use_intrabar_data={self.config.use_intrabar_data}, intrabar_csv={self.config.intrabar_csv}, intrabar_timeframe={self.config.intrabar_timeframe_minutes}m")
-            if self.config.enable_strategy_profiles and self.config.strategy_profile_run_mode=="ISOLATED_PROFILES":
+            if self.config.strategy_profile_run_mode=="ISOLATED_PROFILES":
                 self._run_isolated_only(data,intrabar)
                 return
             # Minute data contains many more candles. Less frequent GUI-only
@@ -192,7 +190,7 @@ class BacktestWorker(QObject):
             # although calculations and reports do not use that export-only payload.
             equity = equity_curve(trades, self.config.initial_equity)
             summary = summarize(trades, self.config.initial_equity)
-            summary.update({"trade_direction": self.config.trade_direction.value, "use_intrabar_data": self.config.use_intrabar_data, "intrabar_csv": str(self.config.intrabar_csv) if self.config.intrabar_csv else None, "strategy_timeframe": self.config.strategy_timeframe_minutes, "intrabar_timeframe": self.config.intrabar_timeframe_minutes, "atr_period": self.config.atr_period, "atr_multiplier": self.config.atr_multiplier})
+            summary.update({"strategy_profile_run_mode": self.config.strategy_profile_run_mode, "use_intrabar_data": self.config.use_intrabar_data, "intrabar_csv": str(self.config.intrabar_csv) if self.config.intrabar_csv else None, "strategy_timeframe": self.config.strategy_timeframe_minutes, "intrabar_timeframe": self.config.intrabar_timeframe_minutes, "atr_period": self.config.atr_period, "atr_multiplier": self.config.atr_multiplier})
             if self.config.use_intrabar_data and summary.get("intrabar_exit_count") == 0:
                 self._log("WARNING: use_intrabar_data=True but 1M_INTRABAR exit count is 0. Check intrabar path, overlap, and timestamp alignment.")
             self._check(); self._output_progress("preparing trade list", 95)
@@ -219,7 +217,7 @@ class BacktestWorker(QObject):
                     output_timings.append((label, elapsed))
                     self._log(f"Output report timing: {label}: {elapsed:.3f}s")
 
-            if self.config.enable_strategy_profiles and self.config.strategy_profile_run_mode == "BOTH":
+            if self.config.strategy_profile_run_mode == "BOTH":
                 self._output_progress("Running six isolated strategy profiles", 95)
                 isolated_dir=run_dir/"isolated_profiles"; isolated_dir.mkdir(parents=True,exist_ok=True)
                 comparison=[]; isolated_frames=[]
@@ -245,14 +243,6 @@ class BacktestWorker(QObject):
                 summary["blocked_profile_opportunities"]=len(blocked)
 
             run_output_step("writing trade_list.csv", lambda: trades.to_csv(run_dir / "trade_list.csv", index=False), 96)
-            if engine.random_entry_active:
-                run_output_step("writing random_entry_decisions.csv",lambda:decisions_frame(engine.random_entry_decisions).to_csv(run_dir/"random_entry_decisions.csv",index=False))
-                run_output_step("writing random_entry_analysis.csv",lambda:random_analysis(trades,engine.random_entry_decisions,self.config).to_csv(run_dir/"random_entry_analysis.csv",index=False))
-                baseline_cfg=replace(self.config,enable_random_entry=False,entry_timing_mode=EntryTimingMode.CURRENT,enable_random_entry_batch=False)
-                baseline=BacktestEngine(data,baseline_cfg,intrabar).run()
-                run_output_step("writing random_vs_baseline_comparison.csv",lambda:pd.DataFrame([comparison_row("CURRENT",None,baseline,self.config.initial_equity),comparison_row("RANDOM_AFTER_PAIR_CLOSE",self.config.random_seed,trades,self.config.initial_equity)]).to_csv(run_dir/"random_vs_baseline_comparison.csv",index=False))
-                if self.config.enable_random_entry_batch:
-                    batch,batch_stats=run_batch(data,intrabar,self.config); run_output_step("writing random_entry_batch_summary.csv",lambda:batch.to_csv(run_dir/"random_entry_batch_summary.csv",index=False)); run_output_step("writing random_entry_batch_statistics.csv",lambda:batch_stats.to_csv(run_dir/"random_entry_batch_statistics.csv",index=False))
             if self.config.save_feature_analysis_reports:
                 run_output_step("writing trailing_profit_analysis.csv", lambda: trailing_profit_analysis(trades).to_csv(run_dir / "trailing_profit_analysis.csv", index=False))
                 run_output_step("writing partial_take_profit_analysis.csv", lambda: partial_take_profit_analysis(trades).to_csv(run_dir / "partial_take_profit_analysis.csv", index=False))

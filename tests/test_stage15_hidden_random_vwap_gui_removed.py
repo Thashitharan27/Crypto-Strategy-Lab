@@ -30,40 +30,38 @@ def test_hidden_random_vwap_widgets_are_not_constructed():
         window.close()
 
 
-def test_retired_random_and_breakout_globals_stay_inert_while_profile_vwap_rule_survives():
+def test_retired_random_and_breakout_keys_are_absent_while_profile_vwap_rule_survives():
     app()
     window = MainWindow()
     try:
         values = default_gui_config()
-        values.update({
-            "enable_random_entry": True,
-            "entry_timing_mode": "RANDOM_AFTER_PAIR_CLOSE",
-            "random_entry_probability": 0.9,
-            "enable_random_entry_batch": True,
-            "enable_coin_flip_sizing": True,
-            "vwap_breakout_lookback_hours": 24.0,
-            "vwap_confirmation_mode": "RETEST",
-        })
         profile = values["strategy_profiles"]["bull_short"]
-        profile.update({
-            "vwap_distance_enabled": True,
-            "vwap_distance_minimum": -0.5,
-            "vwap_distance_maximum": 1.5,
-        })
+        profile["entry_rules"] = [
+            {
+                "action": "REJECT",
+                "indicator": "VWAP_DISTANCE",
+                "condition": "OUTSIDE",
+                "minimum": -0.5,
+                "maximum": 1.5,
+            }
+        ]
         window.apply_values(values)
         current = window.values()
-
-        assert current["enable_random_entry"] is False
-        assert current["entry_timing_mode"] == "CURRENT"
-        assert current["random_entry_probability"] == 0.5
-        assert current["enable_random_entry_batch"] is False
-        assert current["enable_coin_flip_sizing"] is False
-        assert current["vwap_breakout_lookback_hours"] == 4.0
-        assert current["vwap_confirmation_mode"] == "IMMEDIATE"
-        bull_short = current["strategy_profiles"]["bull_short"]
-        assert bull_short["vwap_distance_enabled"] is True
-        assert bull_short["vwap_distance_minimum"] == -0.5
-        assert bull_short["vwap_distance_maximum"] == 1.5
+        for key in (
+            "enable_random_entry", "entry_timing_mode", "random_entry_probability",
+            "enable_random_entry_batch", "enable_coin_flip_sizing", "vwap_breakout_lookback_hours",
+            "vwap_confirmation_mode",
+        ):
+            assert key not in current
+        assert tuple(current["strategy_profiles"]["bull_short"]["entry_rules"]) == (
+            {
+                "action": "REJECT",
+                "indicator": "VWAP_DISTANCE",
+                "condition": "OUTSIDE",
+                "minimum": -0.5,
+                "maximum": 1.5,
+            },
+        )
     finally:
         window.close()
 

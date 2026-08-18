@@ -52,7 +52,7 @@ def load_ohlcv_csv(path: str, timestamp_unit: str | None = "ms", expected_timefr
 
 def load_backtest_data(config, strategy_data: pd.DataFrame | None = None):
     """Load input data, reusing an already validated strategy frame when supplied."""
-    strat = strategy_data if strategy_data is not None else load_ohlcv_csv(str(config.strategy_csv), config.timestamp_unit, config.strategy_timeframe_minutes, "Strategy data", True)
+    strat = strategy_data if strategy_data is not None else load_ohlcv_csv(str(config.input_csv), config.timestamp_unit, config.strategy_timeframe_minutes, "Strategy data", True)
     if getattr(config, "data_start_date", None):
         data_start = pd.Timestamp(config.data_start_date, tz="UTC")
         strat = strat.loc[strat.timestamp >= data_start].reset_index(drop=True)

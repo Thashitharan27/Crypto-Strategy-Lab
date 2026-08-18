@@ -10,9 +10,16 @@ from crypto_strategy_lab.support_resistance_analysis import generate_sr_analysis
 
 
 def cfg(**kw):
-    base = dict(risk_mode=RiskMode.FIXED, fixed_r=10, initial_equity=1000, risk_per_leg=0.01,
-                sl_mult=1, tp_mult=1, taker_fee=0, maker_fee=0, slippage=0,
-                entry_mode=EntryMode.WAIT_UNTIL_CLOSED)
+    base = dict(
+        risk_mode=RiskMode.FIXED,
+        fixed_r=10,
+        initial_equity=1000,
+        risk_per_leg=0.01,
+        taker_fee=0,
+        maker_fee=0,
+        slippage=0,
+        entry_mode=EntryMode.WAIT_UNTIL_CLOSED,
+    )
     base.update(kw)
     return BacktestConfig(**base)
 
