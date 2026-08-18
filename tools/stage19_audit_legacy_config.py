@@ -41,9 +41,6 @@ LEGACY = {
     "enable_strategy_profiles",
 }
 
-# These are the important configuration boundaries. Old names may still appear
-# temporarily inside dead engine code while Stage 19 deletes those branches, but
-# they must never be accepted or serialized as current configuration.
 field_names = {field.name for field in fields(BacktestConfig)}
 retired_fields = sorted(field_names & LEGACY)
 if retired_fields:
@@ -53,16 +50,26 @@ if retired_gui:
     raise SystemExit(f"Retired GUI defaults remain: {', '.join(retired_gui)}")
 
 ROOT = Path(__file__).resolve().parents[1]
+access_hits: list[str] = []
+classvar_hits: list[str] = []
 for path in sorted((ROOT / "crypto_strategy_lab").rglob("*.py")):
     text = path.read_text(encoding="utf-8")
-    hits = []
     for number, line in enumerate(text.splitlines(), 1):
-        names = sorted(name for name in LEGACY if re.search(rf"\b{re.escape(name)}\b", line))
-        if names:
-            hits.append((number, names, line.strip()))
-    if hits:
-        print(f"\n## {path.relative_to(ROOT)}")
-        for number, names, line in hits:
-            print(f"{number}: {', '.join(names)} :: {line[:220]}")
+        for name in sorted(LEGACY):
+            if re.search(rf"\b(?:self\.)?config\.{re.escape(name)}\b", line):
+                access_hits.append(f"{path.relative_to(ROOT)}:{number}: {name}: {line.strip()[:220]}")
+            if path.name == "config.py" and re.search(rf"^\s+{re.escape(name)}\s*:\s*ClassVar\b", line):
+                classvar_hits.append(f"{path.relative_to(ROOT)}:{number}: {name}")
 
-print("\nCurrent config boundary is free of retired fields.")
+if access_hits:
+    print("Retired production config accesses remain:")
+    print("\n".join(access_hits))
+if classvar_hits:
+    print("Retired BacktestConfig ClassVars remain:")
+    print("\n".join(classvar_hits))
+if access_hits or classvar_hits:
+    raise SystemExit(
+        f"Stage 19 incomplete: {len(access_hits)} retired config accesses and {len(classvar_hits)} retired ClassVars remain"
+    )
+
+print("Current production code is free of retired configuration fields, accesses, and ClassVars.")
