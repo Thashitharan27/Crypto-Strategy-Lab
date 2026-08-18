@@ -34,8 +34,10 @@ replace_between(
     "    def _maybe_partial_sl_exit(self,pos,i,high,low,timestamp,source):\n",
     "",
 )
-replace_if_present('            self._activate_trailing_from_event(pos,"SL1",timestamp,pos.sl1_price)\n', "")
+# Remove the more deeply indented occurrence first so the shorter whitespace
+# prefix cannot leave indentation debris behind.
 replace_if_present('                self._activate_trailing_from_event(pos,"SL1",timestamp,pos.sl1_price)\n', "")
+replace_if_present('            self._activate_trailing_from_event(pos,"SL1",timestamp,pos.sl1_price)\n', "")
 replace_if_present('            self._activate_trailing_from_event(pos,"TP1",timestamp,pos.tp1_price)\n', "")
 
 # The only retained intrabar policy is the existing pessimistic policy: an
