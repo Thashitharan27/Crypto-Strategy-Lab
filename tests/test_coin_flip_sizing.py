@@ -37,12 +37,6 @@ def config(**overrides):
         coin_flip_small_multiplier=1,
     )
     values.update(overrides)
-    sl = float(values.get("sl_mult", 2.0))
-    tp = float(values.get("tp_mult", 3.0))
-    reward_risk = 1.0 if values.get("enable_di_direction_sizing", False) else tp / sl
-    profile = StrategyProfile(enabled=True, stop_loss_multiple=sl, reward_risk_ratio=reward_risk)
-    values["enable_strategy_profiles"] = True
-    values.setdefault("strategy_profiles", {key: profile for key in PROFILE_KEYS})
     return BacktestConfig(**values)
 
 
@@ -103,6 +97,7 @@ def di_engine(plus, minus, minimum=30):
     engine.plus_di_values[:] = plus
     engine.minus_di_values[:] = minus
     engine.di_spread[:] = abs(plus - minus)
+    engine.market_regime_values[:] = "SIDEWAYS"
     return engine
 
 
@@ -176,6 +171,7 @@ def test_di_preferred_side_only_supports_two_to_one_reward_risk():
         **{
             **engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
+            "enable_strategy_profiles": True,
             "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=2.0),
         }
     )
@@ -192,6 +188,7 @@ def test_di_preferred_side_only_supports_asymmetric_reward_risk():
         **{
             **long_engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
+            "enable_strategy_profiles": True,
             "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=1.0),
         }
     )
@@ -205,6 +202,7 @@ def test_di_preferred_side_only_supports_asymmetric_reward_risk():
         **{
             **short_engine.config.__dict__,
             "di_execution_mode": DIExecutionMode.PREFERRED_SIDE_ONLY,
+            "enable_strategy_profiles": True,
             "strategy_profiles": direction_profiles(long_rr=2.0, short_rr=1.0),
         }
     )

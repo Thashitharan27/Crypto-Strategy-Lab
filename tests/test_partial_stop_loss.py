@@ -3,7 +3,6 @@ import pytest
 
 from crypto_strategy_lab.config import BacktestConfig, RiskMode, TiePolicy, TrailActivationTrigger, TradeDirectionMode
 from crypto_strategy_lab.engine import BacktestEngine
-from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, StrategyProfile
 
 
 def candles(*bars):
@@ -18,21 +17,6 @@ def candles(*bars):
         }
         for i, (high, low) in enumerate(bars)
     ])
-
-
-def partial_stop_profiles(*, sl1_r, sl1_close_pct, sl2_r, target_r, trailing=False, trailing_distance_r=1.0):
-    profile = StrategyProfile(
-        enabled=True,
-        stop_loss_multiple=1.0,
-        reward_risk_ratio=float(target_r),
-        partial_stop_enabled=True,
-        sl1_r=float(sl1_r),
-        sl1_close_pct=float(sl1_close_pct),
-        sl2_r=float(sl2_r),
-        trailing_enabled=trailing,
-        trailing_distance_r=float(trailing_distance_r),
-    )
-    return {key: profile for key in PROFILE_KEYS}
 
 
 def run(*bars):
@@ -51,8 +35,6 @@ def run(*bars):
         taker_fee=0,
         slippage=0,
         tie_policy=TiePolicy.PESSIMISTIC,
-        enable_strategy_profiles=True,
-        strategy_profiles=partial_stop_profiles(sl1_r=.5, sl1_close_pct=50, sl2_r=8, target_r=8),
     )
     engine = BacktestEngine(candles(*bars), cfg)
     engine.run()
@@ -98,8 +80,6 @@ def test_partial_stop_reporting_uses_weighted_stop_not_ignored_core_stop():
         maker_fee=0,
         taker_fee=0,
         slippage=0,
-        enable_strategy_profiles=True,
-        strategy_profiles=partial_stop_profiles(sl1_r=2, sl1_close_pct=75, sl2_r=10, target_r=10),
     )
     results = BacktestEngine(candles((100, 100), (110, 100)), cfg).run()
     assert results.iloc[0]["expected_gross_winning_pair_pnl"] > 0
@@ -125,8 +105,6 @@ def test_trailing_can_activate_after_sl1_and_keeps_sl2_as_final_boundary():
         maker_fee=0,
         taker_fee=0,
         slippage=0,
-        enable_strategy_profiles=True,
-        strategy_profiles=partial_stop_profiles(sl1_r=.5, sl1_close_pct=50, sl2_r=2, target_r=3, trailing=True, trailing_distance_r=.5),
     )
     engine = BacktestEngine(candles((100, 100), (100, 94), (96, 89)), cfg)
     row = engine.run().iloc[0]

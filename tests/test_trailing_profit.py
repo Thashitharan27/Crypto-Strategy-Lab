@@ -3,7 +3,6 @@ import pytest
 from crypto_strategy_lab.config import BacktestConfig, RiskMode, TrailApplyTo, TrailIntrabarMode
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Position, Side, TradePair
-from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, StrategyProfile
 
 
 def engine(mode="PESSIMISTIC", enabled=True):
@@ -43,32 +42,15 @@ def test_fixed_tp_unchanged_when_trailing_disabled():
     assert p.exit_reason==ExitReason.TP
 
 
-def test_profiles_enable_trailing_independently_by_direction_and_reuse_stored_r():
-    e=engine()
-    profiles={}
-    for key in PROFILE_KEYS:
-        profiles[key]=StrategyProfile(
-            enabled=True,
-            stop_loss_multiple=2,
-            reward_risk_ratio=1.5,
-            trailing_enabled=key.endswith("_long"),
-            trailing_activation_r=3,
-            trailing_distance_r=1,
-        )
-    e.config=BacktestConfig(
-        use_intrabar_data=False,
-        enable_trade_telemetry=False,
-        risk_mode=RiskMode.FIXED,
-        fixed_r=2,
-        enable_strategy_profiles=True,
-        strategy_profiles=profiles,
-    )
-    e._open_pair(0)
-    pair=e.active_pairs[0]
+def test_apply_to_is_independent_and_reuses_stored_r():
+    e=engine(); e.config=BacktestConfig(use_intrabar_data=False,enable_trade_telemetry=False,risk_mode=RiskMode.FIXED,fixed_r=2,enable_trailing_profit=True,trail_apply_to=TrailApplyTo.LONG_ONLY)
+    e._open_pair(0); pair=e.active_pairs[0]
     assert pair.long.trailing_enabled and not pair.short.trailing_enabled
     assert pair.long.trailing_activation_price == pair.long.entry_price + pair.long.risk*3
 
 
+@pytest.mark.parametrize("side", [Side.LONG, Side.SHORT])
+@pytest.mark.parametrize("activation_offset,exit_offset", [(5, 10), (45, 75), (3 * 24 * 60, 4 * 24 * 60)])
 def test_trailing_exit_reports_trigger_time_for_same_candle_later_candles_and_days(side, activation_offset, exit_offset):
     e=engine("PESSIMISTIC"); p=position(side)
     activation=p.entry_time + pd.Timedelta(minutes=activation_offset)

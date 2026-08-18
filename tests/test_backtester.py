@@ -64,8 +64,8 @@ def cfg(**kw):
                 sl_mult=1, tp_mult=1, taker_fee=0, maker_fee=0, slippage=0,
                 entry_mode=EntryMode.WAIT_UNTIL_CLOSED)
     base.update(kw)
-    base["enable_strategy_profiles"] = True
-    base.setdefault("strategy_profiles", _profiles_for_legacy_config(base))
+    if "strategy_profiles" in kw:
+        base.setdefault("enable_strategy_profiles", True)
     return BacktestConfig(**base)
 
 

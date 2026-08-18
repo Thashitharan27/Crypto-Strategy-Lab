@@ -3,51 +3,17 @@ import pytest
 
 from crypto_strategy_lab.config import AfterTP1StopMode, BacktestConfig, RiskMode, TrailActivationTrigger, TiePolicy, TradeDirectionMode
 from crypto_strategy_lab.engine import BacktestEngine
-from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, StrategyProfile
 
 
 def candles(*bars):
     return pd.DataFrame([{"timestamp":pd.Timestamp("2024-01-01",tz="UTC")+pd.Timedelta(minutes=15*i),"open":100,"close":100,"high":h,"low":l,"volume":1} for i,(h,l) in enumerate(bars)])
 
 
-def _profile_value(value):
-    return getattr(value, "value", value)
-
-
-def _profiles_for(values):
-    partial_profit = bool(values.get("enable_partial_take_profit", False))
-    partial_stop = bool(values.get("enable_partial_stop_loss", False))
-    sl = float(values.get("sl_mult", 2.0))
-    tp = float(values.get("tp_mult", 3.0))
-    profile = StrategyProfile(
-        enabled=True,
-        stop_loss_multiple=float(values.get("stop_loss_r", sl)) if partial_profit else sl,
-        reward_risk_ratio=tp / sl,
-        partial_profit_enabled=partial_profit,
-        tp1_r=float(values.get("tp1_r", 1.0)),
-        tp1_close_pct=float(values.get("tp1_close_pct", 50.0)),
-        tp2_r=float(values.get("tp2_r", 2.0)),
-        after_tp1_stop_mode=_profile_value(values.get("after_tp1_stop_mode", "KEEP_ORIGINAL_SL")),
-        after_tp1_stop_offset_r=float(values.get("after_tp1_stop_offset_r", 0.0)),
-        partial_stop_enabled=partial_stop,
-        sl1_r=float(values.get("sl1_r", 0.5)),
-        sl1_close_pct=float(values.get("sl1_close_pct", 50.0)),
-        sl2_r=float(values.get("sl2_r", 2.0)),
-        trailing_enabled=bool(values.get("enable_trailing_profit", False)),
-        trailing_activation_r=float(values.get("trail_activation_r", 3.0)),
-        trailing_distance_r=float(values.get("trail_distance_r", 1.0)),
-    )
-    return {key: profile for key in PROFILE_KEYS}
-
-
 def config(**kw):
     base=dict(risk_mode=RiskMode.FIXED,fixed_r=10,atr_period=1,use_intrabar_data=False,enable_trade_telemetry=False,
               enable_partial_take_profit=True,tp1_r=1,tp2_r=2,stop_loss_r=2,tp1_close_pct=50,tp2_close_pct=50,
               maker_fee=0,taker_fee=0,slippage=0,trade_direction=TradeDirectionMode.LONG_ONLY)
-    base.update(kw)
-    base["enable_strategy_profiles"] = True
-    base.setdefault("strategy_profiles", _profiles_for(base))
-    return BacktestConfig(**base)
+    return BacktestConfig(**{**base,**kw})
 
 
 def run(bars, **kw):
@@ -105,11 +71,10 @@ def test_trailing_after_tp1_coexists_with_fixed_tp2():
     assert row.long_remaining_quantity == 0
 
 
-def test_disabled_mode_is_identical_to_non_partial_profile_configuration():
+def test_disabled_mode_is_identical_to_legacy_configuration():
     data=candles((100,100),(111,89))
     common=dict(risk_mode=RiskMode.FIXED,fixed_r=10,atr_period=1,use_intrabar_data=False,enable_trade_telemetry=False,
-                sl_mult=1,tp_mult=1,maker_fee=0,taker_fee=0,slippage=0,enable_strategy_profiles=True,
-                strategy_profiles={key:StrategyProfile(enabled=True,stop_loss_multiple=1,reward_risk_ratio=1) for key in PROFILE_KEYS})
+                sl_mult=1,tp_mult=1,maker_fee=0,taker_fee=0,slippage=0)
     baseline=BacktestEngine(data,BacktestConfig(**common)).run()
     disabled=BacktestEngine(data,BacktestConfig(**common,enable_partial_take_profit=False)).run()
     pd.testing.assert_frame_equal(baseline,disabled)
