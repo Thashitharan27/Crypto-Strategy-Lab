@@ -1,8 +1,8 @@
 name: Stage 18 profile test migration
 
 on:
-  push:
-    branches: [chatgpt/stage18-repair-stale-full-suite-tests]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
