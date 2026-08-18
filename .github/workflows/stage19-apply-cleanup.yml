@@ -28,6 +28,7 @@ jobs:
           python tools/stage19_final_production_cleanup.py
           python tools/stage19_remove_config_invariants.py
           python tools/stage19_migrate_tests.py
+          python tools/stage19_fix_reset_test.py
       - name: Compile changed Python
         run: |
           python -m py_compile \
