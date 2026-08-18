@@ -14,4 +14,6 @@ jobs:
         with:
           python-version: "3.10"
       - name: Audit retired config names
+        env:
+          PYTHONPATH: .
         run: python tools/stage19_audit_legacy_config.py
