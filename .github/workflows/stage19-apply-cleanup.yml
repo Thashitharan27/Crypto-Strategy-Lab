@@ -21,7 +21,9 @@ jobs:
         with:
           python-version: "3.10"
       - name: Apply one-shot cleanup
-        run: python tools/stage19_remove_strategy_csv.py
+        run: |
+          python tools/stage19_remove_strategy_csv.py
+          python tools/stage19_engine_profile_only.py
       - name: Compile changed Python
         run: >-
           python -m py_compile
@@ -33,6 +35,7 @@ jobs:
           crypto_strategy_lab/report_workbooks.py
           crypto_strategy_lab/gui/config_logic.py
           crypto_strategy_lab/gui/main_window.py
+          crypto_strategy_lab/gui/worker.py
           tools/stage19_audit_legacy_config.py
       - name: Commit cleanup
         run: |
@@ -43,5 +46,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add crypto_strategy_lab tools/stage19_audit_legacy_config.py
-          git commit -m "Stage 19: remove retired strategy_csv alias"
+          git commit -m "Stage 19: make engine profile-only"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
