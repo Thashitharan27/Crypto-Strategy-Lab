@@ -17,7 +17,7 @@ from crypto_strategy_lab.gui.config_logic import (
 def base(tmp_path):
     csv = tmp_path / "x.csv"
     csv.write_text("timestamp,open,high,low,close,volume\n2024-01-01,1,1,1,1,1\n")
-    return {"input_csv": str(csv), "output_dir": str(tmp_path / "out")}
+    return {"input_csv": str(csv), "output_dir": str(tmp_path / "out"), "use_intrabar_data": False}
 
 
 def test_percent_conversions():
@@ -147,7 +147,7 @@ def test_configurable_timeframes_are_passed_to_backtest_config(tmp_path):
 
 
 def test_intrabar_timeframe_must_be_lower_only_when_enabled(tmp_path):
-    values = {**base(tmp_path), "strategy_timeframe_minutes": 5, "intrabar_timeframe_minutes": 5}
+    values = {**base(tmp_path), "strategy_timeframe_minutes": 5, "intrabar_timeframe_minutes": 5, "use_intrabar_data": True}
     with pytest.raises(ValueError, match="Intrabar timeframe must be smaller"):
         build_backtest_config(values)
 
