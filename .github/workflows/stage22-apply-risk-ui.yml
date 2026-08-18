@@ -33,7 +33,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-qt
       - name: Apply Stage 22 migration
-        run: python tools/stage22_risk_ui_semantics.py
+        run: |
+          python tools/stage22_risk_ui_semantics.py
+          python tools/stage22_followup.py
       - name: Compile changed code and tests
         run: |
           python -m py_compile \
@@ -43,7 +45,9 @@ jobs:
             crypto_strategy_lab/engine.py \
             crypto_strategy_lab/output_manager.py \
             tests/test_gui_main_window.py \
-            tests/test_stage22_risk_semantics.py
+            tests/test_stage22_risk_semantics.py \
+            tests/test_partial_take_profit.py \
+            tests/test_partial_stop_loss.py
       - name: Run focused Stage 22 tests
         env:
           QT_QPA_PLATFORM: offscreen
