@@ -8,18 +8,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from crypto_strategy_lab.research_engine import ResearchBacktestEngine
+from crypto_strategy_lab.enhanced_engine import EnhancedBacktestEngine
 from crypto_strategy_lab.trade import Side
 
 
-class SRDynamicTPBacktestEngine(ResearchBacktestEngine):
-    """Cap a trade's final TP at the next opposing S/R level minus an R buffer.
-
-    ResearchBacktestEngine is intentionally the parent so the removable dual-entry
-    research hook remains active when this later GUI layer replaces the worker
-    engine with SRDynamicTPBacktestEngine. With research disabled, behaviour is
-    identical to the enhanced production engine.
-    """
+class SRDynamicTPBacktestEngine(EnhancedBacktestEngine):
+    """Cap a trade's final TP at the next opposing S/R level minus an R buffer."""
 
     def _effective_trade_direction(self, i: int) -> str | None:
         context = self._profile_context(i)

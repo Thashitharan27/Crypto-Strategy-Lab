@@ -18,32 +18,6 @@ HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 
 
-def _excel_safe_value(value: Any) -> Any:
-    """Return an Excel-compatible scalar while preserving the displayed UTC time."""
-    if isinstance(value, pd.Timestamp) and value.tzinfo is not None:
-        return value.tz_convert("UTC").tz_localize(None)
-    return value
-
-
-def _excel_safe_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
-    """Strip timezone metadata from datetime cells before handing data to openpyxl.
-
-    Excel has no timezone-aware datetime type.  We keep the same UTC wall-clock
-    value and remove only the timezone metadata. This is an export-only copy and
-    never changes the calculations or source DataFrame.
-    """
-    if frame is None:
-        return pd.DataFrame()
-    result = frame.copy()
-    for column in result.columns:
-        series = result[column]
-        if isinstance(series.dtype, pd.DatetimeTZDtype):
-            result[column] = series.dt.tz_convert("UTC").dt.tz_localize(None)
-        elif series.dtype == object:
-            result[column] = series.map(_excel_safe_value)
-    return result
-
-
 def _format_table_sheet(sheet) -> None:
     sheet.freeze_panes = "A2"
     if sheet.max_row and sheet.max_column:
@@ -72,7 +46,7 @@ def _write_tables(path: Path, tables: Mapping[str, pd.DataFrame]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         for sheet_name, frame in tables.items():
-            _excel_safe_frame(frame).to_excel(writer, sheet_name=sheet_name, index=False)
+            (frame if frame is not None else pd.DataFrame()).to_excel(writer, sheet_name=sheet_name, index=False)
         for sheet in writer.book.worksheets:
             _format_table_sheet(sheet)
     return path
@@ -141,10 +115,9 @@ def build_backtest_workbook(summary: Mapping[str, Any], config: Any, run_dir: Pa
               "Market Regime": market_regime if market_regime is not None else pd.DataFrame(),
               "Direction - Regime": direction_regime if direction_regime is not None else pd.DataFrame()}
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        dashboard_frame = pd.DataFrame(_dashboard_metrics(summary, config, run_dir), columns=["Metric", "Value"])
-        _excel_safe_frame(dashboard_frame).to_excel(writer, "Dashboard", index=False)
+        pd.DataFrame(_dashboard_metrics(summary, config, run_dir), columns=["Metric", "Value"]).to_excel(writer, "Dashboard", index=False)
         for name, frame in tables.items():
-            _excel_safe_frame(frame).to_excel(writer, name, index=False)
+            frame.to_excel(writer, name, index=False)
         for sheet in writer.book.worksheets:
             _format_table_sheet(sheet)
         dashboard = writer.book["Dashboard"]
