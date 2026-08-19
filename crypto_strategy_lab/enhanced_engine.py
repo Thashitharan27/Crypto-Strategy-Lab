@@ -56,6 +56,15 @@ class EnhancedBacktestEngine(BacktestEngine):
             overbought,
         )
 
+    @staticmethod
+    def _confirmed_alignment(reentry_direction: str, trade_direction: str | None) -> str:
+        """Return the deliberately simple confirmed-MR research classification."""
+        if reentry_direction not in ("LONG", "SHORT"):
+            return "NO_SIGNAL"
+        if trade_direction not in ("LONG", "SHORT"):
+            return "UNKNOWN"
+        return "AGREE" if trade_direction == reentry_direction else "DISAGREE"
+
     def _mean_reversion_snapshot(self, i, di_direction, trade_direction=None):
         result = super()._mean_reversion_snapshot(i, di_direction, trade_direction)
         config = self.config
@@ -85,6 +94,11 @@ class EnhancedBacktestEngine(BacktestEngine):
                 "mean_reversion_distance_alignment": result.get("mean_reversion_alignment", "UNKNOWN"),
                 "mean_reversion_signal_di_alignment": "UNKNOWN",
                 "mean_reversion_signal_trade_alignment": "UNKNOWN",
+                # Simple aliases for the primary confirmed-reentry validation.
+                "bb_reentry": "NONE",
+                "mr_signal": "NO_SIGNAL",
+                "mr_signal_direction": "NONE",
+                "mr_trade_alignment": "NO_SIGNAL",
             }
         )
         if not config.enable_mean_reversion_analysis:
@@ -117,6 +131,11 @@ class EnhancedBacktestEngine(BacktestEngine):
         signal_dir = signal_direction(signal)
         di_alignment = signal_alignment(signal, di_direction)
         trade_alignment = signal_alignment(signal, trade_direction or di_direction)
+        reentry_direction = "LONG" if long_reentry else ("SHORT" if short_reentry else "NONE")
+        confirmed_signal = "CONFIRMED" if reentry_direction != "NONE" else "NO_SIGNAL"
+        confirmed_trade_alignment = self._confirmed_alignment(
+            reentry_direction, trade_direction or di_direction
+        )
 
         result.update(
             {
@@ -130,12 +149,16 @@ class EnhancedBacktestEngine(BacktestEngine):
                 "mean_reversion_rsi_state": classify_rsi_state(rsi_value, oversold, overbought),
                 "mean_reversion_long_reentry": long_reentry,
                 "mean_reversion_short_reentry": short_reentry,
-                "mean_reversion_reentry_confirmation": "LONG" if long_reentry else ("SHORT" if short_reentry else "NONE"),
+                "mean_reversion_reentry_confirmation": reentry_direction,
                 "mean_reversion_signal": signal,
                 "mean_reversion_signal_direction": signal_dir,
                 "mean_reversion_setup_strength": "STRONG" if signal.startswith("STRONG_") else ("POTENTIAL" if signal.startswith("POTENTIAL_") else ("NEUTRAL" if signal == "NEUTRAL" else "UNKNOWN")),
                 "mean_reversion_signal_di_alignment": di_alignment,
                 "mean_reversion_signal_trade_alignment": trade_alignment,
+                "bb_reentry": reentry_direction,
+                "mr_signal": confirmed_signal,
+                "mr_signal_direction": reentry_direction,
+                "mr_trade_alignment": confirmed_trade_alignment,
                 # Make the primary alignment field describe the new model while
                 # retaining the old distance-only alignment separately above.
                 "mean_reversion_alignment": di_alignment,
