@@ -32,7 +32,11 @@ def test_sr_higher_timeframe_config_is_optional_and_validated():
     assert cfg.sr_timeframe_minutes == 60
 
     invalid = dict(values)
-    invalid.update({"strategy_timeframe_minutes": 240, "sr_timeframe_minutes": 60})
+    invalid.update({
+        "strategy_timeframe_minutes": 240,
+        "sr_timeframe_minutes": 60,
+        "telemetry_interval_minutes": 240,
+    })
     with pytest.raises(ValueError, match="cannot be lower"):
         build_enhanced_backtest_config(invalid, require_paths=False)
 
@@ -59,6 +63,7 @@ def test_engine_exposes_only_completed_htf_candle_at_entry():
             "adx_period": 2,
             "sr_pivot_left": 1,
             "sr_pivot_right": 1,
+            "market_regime_method": "ASSET_RETURN",
         }
     )
     cfg = build_enhanced_backtest_config(values, require_paths=False)
@@ -81,6 +86,7 @@ def test_same_timeframe_keeps_legacy_sr_path():
             "sr_timeframe_minutes": 0,
             "atr_period": 2,
             "adx_period": 2,
+            "market_regime_method": "ASSET_RETURN",
         }
     )
     engine = EnhancedBacktestEngine(_candles(16), build_enhanced_backtest_config(values, require_paths=False))
