@@ -52,7 +52,7 @@ class MainWindow(EnhancedMainWindow):
         preset_form = QFormLayout(self.market_preset_box)
         self.market_preset = QComboBox()
         self.market_preset.addItem("Crypto / existing settings", "CRYPTO")
-        self.market_preset.addItem("Crypto Swing (4H + Daily structure)", "CRYPTO_SWING")
+        self.market_preset.addItem("Crypto Swing (4H baseline)", "CRYPTO_SWING")
         self.market_preset.addItem("Sri Lanka Stocks (CSE daily)", "CSE_DAILY")
         self.market_preset_status = QLabel(
             "Crypto / existing settings: no automatic changes are applied."
@@ -84,22 +84,23 @@ class MainWindow(EnhancedMainWindow):
             return
 
         if mode == "CRYPTO_SWING":
-            # Research-first slower swing baseline: 4H entries, Daily confirmed
-            # structure, and the asset's own structural regime. Existing Strategy
-            # Profile exits remain untouched so the slower horizon can be compared
-            # without silently changing stop/target semantics.
+            # Research-first slower swing baseline: 4H entries and the asset's
+            # own structural regime. Existing Strategy Profile exits remain
+            # untouched so the slower horizon can be compared without silently
+            # changing stop/target semantics.
             self.strategy_timeframe.setCurrentText("4h")
             self.use_intrabar.setChecked(False)
             self.enable_daily_schedule.setChecked(False)
             self._set_asset_structural_regime()
 
-            # S/R is useful as Daily context for a 4H entry. Keep it analysis-only
-            # by default; users can deliberately activate entry rules later.
+            # Keep S/R on the 4H strategy timeframe for the baseline. The optional
+            # resampled Daily S/R path is deliberately not forced by this preset;
+            # it can be tested separately after its timestamp handling is hardened.
             self.enable_support_resistance_analysis.setChecked(True)
             if hasattr(self, "sr_analyze_only"):
                 self.sr_analyze_only.setChecked(True)
             if hasattr(self, "sr_timeframe"):
-                idx = self.sr_timeframe.findData(1440)
+                idx = self.sr_timeframe.findData(0)
                 if idx >= 0:
                     self.sr_timeframe.setCurrentIndex(idx)
 
@@ -122,10 +123,10 @@ class MainWindow(EnhancedMainWindow):
             )
             self.market_preset_status.setText(
                 "Crypto Swing preset active: 4H entries, intrabar exits OFF, scheduled entry OFF, "
-                "Market Regime = Selected asset structural trend, and Daily S/R structure is enabled "
-                "in analysis-only mode. DI expansion/contraction admits all states and MR remains analysis "
-                "telemetry. Existing Strategy Profile stop/TP/trailing settings are intentionally preserved. "
-                "This gives a clean slower-horizon baseline before we optimize exits or filters."
+                "Market Regime = Selected asset structural trend, and S/R uses the same 4H strategy "
+                "timeframe in analysis-only mode. DI expansion/contraction admits all states and MR remains "
+                "analysis telemetry. Existing Strategy Profile stop/TP/trailing settings are intentionally "
+                "preserved. Daily S/R remains available for separate testing but is not forced by this preset."
             )
             self.update_dynamic()
             self.update_planned_output()
