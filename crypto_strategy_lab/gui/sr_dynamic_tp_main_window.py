@@ -1,0 +1,155 @@
+"""GUI layer for optional support/resistance-capped take-profit targets."""
+from __future__ import annotations
+
+from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox, QLabel
+
+import crypto_strategy_lab.gui.worker as worker_module
+import crypto_strategy_lab.portfolio as portfolio_module
+from crypto_strategy_lab.sr_dynamic_tp_engine import SRDynamicTPBacktestEngine
+from crypto_strategy_lab.gui.enhanced_config import SR_DYNAMIC_TP_DEFAULTS
+from crypto_strategy_lab.gui.enhanced_main_window import MainWindow as EnhancedMainWindow
+
+
+# The normal app already routes through EnhancedMainWindow. Replace only the
+# calculation engine so all existing DI/MR/HTF-SR behaviour is preserved.
+worker_module.BacktestEngine = SRDynamicTPBacktestEngine
+portfolio_module.BacktestEngine = SRDynamicTPBacktestEngine
+
+
+class MainWindow(EnhancedMainWindow):
+    """Enhanced main window with a configurable S/R-aware final target."""
+
+    def _build_support_resistance_tab(self):
+        super()._build_support_resistance_tab()
+
+        self.sr_take_profit_box = QGroupBox("Take Profit from S/R Room")
+        tp_form = QFormLayout(self.sr_take_profit_box)
+
+        self.sr_take_profit_mode = QComboBox()
+        self.sr_take_profit_mode.addItem("Fixed R (baseline)", "FIXED_R")
+        self.sr_take_profit_mode.addItem("Cap TP at next S/R level", "SR_CAPPED_R")
+
+        self.sr_take_profit_maximum_r = QDoubleSpinBox()
+        self.sr_take_profit_maximum_r.setRange(0.1, 100.0)
+        self.sr_take_profit_maximum_r.setDecimals(2)
+        self.sr_take_profit_maximum_r.setSingleStep(0.1)
+        self.sr_take_profit_maximum_r.setSuffix(" R")
+
+        self.sr_take_profit_minimum_r = QDoubleSpinBox()
+        self.sr_take_profit_minimum_r.setRange(0.1, 100.0)
+        self.sr_take_profit_minimum_r.setDecimals(2)
+        self.sr_take_profit_minimum_r.setSingleStep(0.1)
+        self.sr_take_profit_minimum_r.setSuffix(" R")
+
+        self.sr_take_profit_buffer_r = QDoubleSpinBox()
+        self.sr_take_profit_buffer_r.setRange(0.0, 10.0)
+        self.sr_take_profit_buffer_r.setDecimals(2)
+        self.sr_take_profit_buffer_r.setSingleStep(0.05)
+        self.sr_take_profit_buffer_r.setSuffix(" R")
+
+        self.sr_take_profit_no_level_policy = QComboBox()
+        self.sr_take_profit_no_level_policy.addItem("Use normal fixed TP", "USE_FIXED_TP")
+        self.sr_take_profit_no_level_policy.addItem("Reject trade", "REJECT_TRADE")
+
+        self.sr_take_profit_status = QLabel()
+        self.sr_take_profit_status.setWordWrap(True)
+        help_text = QLabel(
+            "When S/R-capped mode is active, the engine measures the next resistance for LONG or next support "
+            "for SHORT in initial-stop R units. The final target is min(normal strategy TP, Maximum TP, "
+            "available S/R room − buffer). If that result is below Minimum TP, the entry is rejected. "
+            "Fixed R remains the default baseline."
+        )
+        help_text.setWordWrap(True)
+
+        tp_form.addRow("Take Profit Mode", self.sr_take_profit_mode)
+        tp_form.addRow("Maximum TP", self.sr_take_profit_maximum_r)
+        tp_form.addRow("Minimum Acceptable TP", self.sr_take_profit_minimum_r)
+        tp_form.addRow("S/R Target Buffer", self.sr_take_profit_buffer_r)
+        tp_form.addRow("If No Opposing S/R", self.sr_take_profit_no_level_policy)
+        tp_form.addRow("", self.sr_take_profit_status)
+        tp_form.addRow("", help_text)
+
+        parent_layout = self.sr_detection_box.parentWidget().layout()
+        anchor = getattr(self, "sr_entry_rules_box", self.sr_detection_box)
+        index = parent_layout.indexOf(anchor)
+        parent_layout.insertWidget(index + 1 if index >= 0 else parent_layout.count(), self.sr_take_profit_box)
+
+        self.sr_take_profit_mode.currentIndexChanged.connect(self.update_dynamic)
+        self.sr_take_profit_maximum_r.valueChanged.connect(self.update_dynamic)
+        self.sr_take_profit_minimum_r.valueChanged.connect(self.update_dynamic)
+        self.sr_take_profit_buffer_r.valueChanged.connect(self.update_dynamic)
+        self.sr_take_profit_no_level_policy.currentIndexChanged.connect(self.update_dynamic)
+        self.enable_support_resistance_analysis.toggled.connect(self.update_dynamic)
+
+    def values(self):
+        values = super().values()
+        values.update(
+            {
+                "sr_take_profit_mode": str(self.sr_take_profit_mode.currentData() or "FIXED_R"),
+                "sr_take_profit_maximum_r": self.sr_take_profit_maximum_r.value(),
+                "sr_take_profit_minimum_r": self.sr_take_profit_minimum_r.value(),
+                "sr_take_profit_buffer_r": self.sr_take_profit_buffer_r.value(),
+                "sr_take_profit_no_level_policy": str(
+                    self.sr_take_profit_no_level_policy.currentData() or "USE_FIXED_TP"
+                ),
+            }
+        )
+        return values
+
+    def apply_values(self, values):
+        merged = {**SR_DYNAMIC_TP_DEFAULTS, **values}
+        super().apply_values(merged)
+
+        mode_index = self.sr_take_profit_mode.findData(str(merged["sr_take_profit_mode"]).upper())
+        self.sr_take_profit_mode.setCurrentIndex(mode_index if mode_index >= 0 else 0)
+        self.sr_take_profit_maximum_r.setValue(float(merged["sr_take_profit_maximum_r"]))
+        self.sr_take_profit_minimum_r.setValue(float(merged["sr_take_profit_minimum_r"]))
+        self.sr_take_profit_buffer_r.setValue(float(merged["sr_take_profit_buffer_r"]))
+        policy_index = self.sr_take_profit_no_level_policy.findData(
+            str(merged["sr_take_profit_no_level_policy"]).upper()
+        )
+        self.sr_take_profit_no_level_policy.setCurrentIndex(policy_index if policy_index >= 0 else 0)
+        self.update_dynamic()
+
+    def update_dynamic(self):
+        super().update_dynamic()
+        if not hasattr(self, "sr_take_profit_mode"):
+            return
+
+        sr_enabled = self.enable_support_resistance_analysis.isChecked()
+        mode = str(self.sr_take_profit_mode.currentData() or "FIXED_R")
+        if not sr_enabled and mode == "SR_CAPPED_R":
+            self.sr_take_profit_mode.blockSignals(True)
+            self.sr_take_profit_mode.setCurrentIndex(self.sr_take_profit_mode.findData("FIXED_R"))
+            self.sr_take_profit_mode.blockSignals(False)
+            mode = "FIXED_R"
+
+        self.sr_take_profit_mode.setEnabled(sr_enabled)
+        active = sr_enabled and mode == "SR_CAPPED_R"
+        for control in (
+            self.sr_take_profit_maximum_r,
+            self.sr_take_profit_minimum_r,
+            self.sr_take_profit_buffer_r,
+            self.sr_take_profit_no_level_policy,
+        ):
+            control.setEnabled(active)
+
+        maximum_r = self.sr_take_profit_maximum_r.value()
+        minimum_r = self.sr_take_profit_minimum_r.value()
+        if not sr_enabled:
+            text = "S/R TP: DISABLED — fixed Strategy Profile TP is used."
+        elif mode == "FIXED_R":
+            text = "S/R TP Mode: FIXED R BASELINE — S/R does not change the target."
+        elif minimum_r > maximum_r:
+            text = "S/R TP Mode: INVALID — Minimum Acceptable TP cannot exceed Maximum TP."
+        else:
+            no_level = (
+                "use the normal fixed TP"
+                if self.sr_take_profit_no_level_policy.currentData() == "USE_FIXED_TP"
+                else "reject the trade"
+            )
+            text = (
+                f"S/R TP Mode: ACTIVE — target up to {maximum_r:.2f}R, reject below {minimum_r:.2f}R, "
+                f"leave {self.sr_take_profit_buffer_r.value():.2f}R before the level; if no level, {no_level}."
+            )
+        self.sr_take_profit_status.setText(text)
