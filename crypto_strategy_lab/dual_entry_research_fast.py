@@ -1,7 +1,7 @@
 """Fast implementation of the optional dual LONG + SHORT research simulation.
 
 Keeps the research model isolated from normal trading while avoiding repeated
-full-DataFrame filtering for every observation.  Exit discovery uses binary
+full-DataFrame filtering for every observation. Exit discovery uses binary
 search to jump to the entry bar and vectorized chunks to locate TP/SL events.
 """
 from __future__ import annotations
@@ -19,6 +19,18 @@ from crypto_strategy_lab.dual_entry_research import (
     _sr_fields,
     _utc,
 )
+
+
+def _research_progress(engine, processed: int, total: int) -> None:
+    """Best-effort research progress without assuming the engine has a log method."""
+    callback = getattr(engine, "progress_callback", None)
+    if callable(callback):
+        try:
+            # Reuse the standard callback contract so the GUI stays responsive.
+            callback(processed, max(total, 1), len(getattr(engine, "completed_pairs", ())), total)
+        except Exception:
+            # Research progress must never fail the backtest.
+            pass
 
 
 def _resolved_exit(reason: str, price: float, time_ns, bars: int, ambiguous: bool,
@@ -62,8 +74,7 @@ def _scan_pair(entry: float, unit: float, tp_r: float, sl_r: float,
         if long_exit is None:
             tp_hits = h >= long_tp
             sl_hits = l <= long_sl
-            hits = tp_hits | sl_hits
-            found = np.flatnonzero(hits)
+            found = np.flatnonzero(tp_hits | sl_hits)
             if found.size:
                 rel = int(found[0]); absolute = cursor + rel
                 both = bool(tp_hits[rel] and sl_hits[rel])
@@ -75,8 +86,7 @@ def _scan_pair(entry: float, unit: float, tp_r: float, sl_r: float,
         if short_exit is None:
             tp_hits = l <= short_tp
             sl_hits = h >= short_sl
-            hits = tp_hits | sl_hits
-            found = np.flatnonzero(hits)
+            found = np.flatnonzero(tp_hits | sl_hits)
             if found.size:
                 rel = int(found[0]); absolute = cursor + rel
                 both = bool(tp_hits[rel] and sl_hits[rel])
@@ -110,7 +120,6 @@ def run_dual_entry_research(engine) -> tuple[pd.DataFrame, pd.DataFrame, dict[st
     strategy_ns = strategy_times.astype("int64").to_numpy()
     rows: list[dict[str, Any]] = []
     total = len(engine.completed_pairs)
-    engine.log(f"Dual-entry research: scanning {total:,} accepted entries with indexed intrabar lookup")
 
     for observation_id, pair in enumerate(engine.completed_pairs, 1):
         candle_time = _utc(pair.strategy_candle_open_time)
@@ -182,7 +191,7 @@ def run_dual_entry_research(engine) -> tuple[pd.DataFrame, pd.DataFrame, dict[st
         for key, value in engine._mean_reversion_snapshot(i, selected, "SHORT").items(): row[f"short_{key}"] = value
         row.update(_sr_fields(engine, i, "LONG")); row.update(_sr_fields(engine, i, "SHORT")); rows.append(row)
         if observation_id % 500 == 0 or observation_id == total:
-            engine.log(f"Dual-entry research: {observation_id:,}/{total:,} observations scanned")
+            _research_progress(engine, observation_id, total)
 
     observations = pd.DataFrame(rows)
     if observations.empty:
