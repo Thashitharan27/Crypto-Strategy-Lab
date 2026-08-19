@@ -1,4 +1,4 @@
-"""Extended configuration for research-only analytics layered on the core contract."""
+"""Extended configuration for research analytics and optional entry filters."""
 from __future__ import annotations
 
 import json
@@ -14,6 +14,12 @@ from crypto_strategy_lab.gui.config_logic import (
     default_gui_config,
 )
 
+
+DI_PRESSURE_FILTER_DEFAULTS: dict[str, Any] = {
+    "di_pressure_allow_expanding": True,
+    "di_pressure_allow_contracting": True,
+    "di_pressure_allow_mixed": True,
+}
 
 MEAN_REVERSION_V2_DEFAULTS: dict[str, Any] = {
     "mean_reversion_mean_type": "SMA",
@@ -31,13 +37,20 @@ SR_HTF_DEFAULTS: dict[str, Any] = {
     "sr_timeframe_minutes": 0,
 }
 
-ENHANCED_DEFAULTS: dict[str, Any] = {**MEAN_REVERSION_V2_DEFAULTS, **SR_HTF_DEFAULTS}
+ENHANCED_DEFAULTS: dict[str, Any] = {
+    **DI_PRESSURE_FILTER_DEFAULTS,
+    **MEAN_REVERSION_V2_DEFAULTS,
+    **SR_HTF_DEFAULTS,
+}
 
 
 @dataclass(frozen=True)
 class EnhancedBacktestConfig(BacktestConfig):
-    """BacktestConfig plus record-only MR-v2 and higher-timeframe S/R settings."""
+    """BacktestConfig plus DI-pressure filtering, MR-v2, and higher-timeframe S/R settings."""
 
+    di_pressure_allow_expanding: bool = True
+    di_pressure_allow_contracting: bool = True
+    di_pressure_allow_mixed: bool = True
     mean_reversion_mean_type: str = "SMA"
     mean_reversion_bb_stddevs: float = 2.0
     mean_reversion_rsi_period: int = 14
@@ -50,6 +63,15 @@ class EnhancedBacktestConfig(BacktestConfig):
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if not any(
+            (
+                self.di_pressure_allow_expanding,
+                self.di_pressure_allow_contracting,
+                self.di_pressure_allow_mixed,
+            )
+        ):
+            raise ValueError("At least one DI pressure state must be allowed")
+
         mean_type = str(self.mean_reversion_mean_type).upper()
         object.__setattr__(self, "mean_reversion_mean_type", mean_type)
         if mean_type not in ("SMA", "EMA"):
