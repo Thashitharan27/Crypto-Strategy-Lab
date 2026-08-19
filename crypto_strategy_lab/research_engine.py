@@ -1,7 +1,8 @@
 """Optional research hooks layered over the enhanced production engine."""
 from __future__ import annotations
 
-from crypto_strategy_lab.dual_entry_research import run_dual_entry_research, store_pending
+from crypto_strategy_lab.dual_entry_research import store_pending
+from crypto_strategy_lab.dual_entry_research_fast import run_dual_entry_research
 from crypto_strategy_lab.enhanced_engine import EnhancedBacktestEngine
 
 
