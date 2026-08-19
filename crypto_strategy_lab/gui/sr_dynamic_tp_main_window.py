@@ -43,21 +43,22 @@ class MainWindow(EnhancedMainWindow):
     def _build_config(self):
         super()._build_config()
 
-        # Daily candles are useful for exchange-traded assets while preserving
-        # every existing crypto timeframe and default.
+        # Daily candles are useful for exchange-traded assets and higher-timeframe
+        # swing research while preserving every existing crypto timeframe/default.
         if self.strategy_timeframe.findText("1d") < 0:
             self.strategy_timeframe.addItem("1d")
 
-        self.market_preset_box = QGroupBox("Market Preset")
+        self.market_preset_box = QGroupBox("Market / Strategy Preset")
         preset_form = QFormLayout(self.market_preset_box)
         self.market_preset = QComboBox()
         self.market_preset.addItem("Crypto / existing settings", "CRYPTO")
+        self.market_preset.addItem("Crypto Swing (4H + Daily structure)", "CRYPTO_SWING")
         self.market_preset.addItem("Sri Lanka Stocks (CSE daily)", "CSE_DAILY")
         self.market_preset_status = QLabel(
             "Crypto / existing settings: no automatic changes are applied."
         )
         self.market_preset_status.setWordWrap(True)
-        preset_form.addRow("Market", self.market_preset)
+        preset_form.addRow("Preset", self.market_preset)
         preset_form.addRow("", self.market_preset_status)
 
         # Backtest Setup contains the toolbar followed by the main scroll area.
@@ -65,14 +66,69 @@ class MainWindow(EnhancedMainWindow):
         self.backtest_setup_page.layout().insertWidget(1, self.market_preset_box)
         self.market_preset.currentIndexChanged.connect(self._apply_market_preset)
 
+    def _set_asset_structural_regime(self):
+        if not hasattr(self, "profile_editor"):
+            return
+        idx = self.profile_editor.regime_method.findData("ASSET_STRUCTURAL")
+        if idx >= 0:
+            self.profile_editor.regime_method.setCurrentIndex(idx)
+
     def _apply_market_preset(self, *_):
         if not hasattr(self, "market_preset"):
             return
         mode = str(self.market_preset.currentData() or "CRYPTO")
-        if mode != "CSE_DAILY":
+        if mode == "CRYPTO":
             self.market_preset_status.setText(
                 "Crypto / existing settings: no automatic changes are applied."
             )
+            return
+
+        if mode == "CRYPTO_SWING":
+            # Research-first slower swing baseline: 4H entries, Daily confirmed
+            # structure, and the asset's own structural regime. Existing Strategy
+            # Profile exits remain untouched so the slower horizon can be compared
+            # without silently changing stop/target semantics.
+            self.strategy_timeframe.setCurrentText("4h")
+            self.use_intrabar.setChecked(False)
+            self.enable_daily_schedule.setChecked(False)
+            self._set_asset_structural_regime()
+
+            # S/R is useful as Daily context for a 4H entry. Keep it analysis-only
+            # by default; users can deliberately activate entry rules later.
+            self.enable_support_resistance_analysis.setChecked(True)
+            if hasattr(self, "sr_analyze_only"):
+                self.sr_analyze_only.setChecked(True)
+            if hasattr(self, "sr_timeframe"):
+                idx = self.sr_timeframe.findData(1440)
+                if idx >= 0:
+                    self.sr_timeframe.setCurrentIndex(idx)
+
+            # DI/MR remain descriptive on the first swing baseline. Ensure all DI
+            # pressure states are admitted so an older filtered config cannot turn
+            # the preset into an accidental optimization.
+            self.enable_di_pressure_analysis.setChecked(True)
+            for name in (
+                "di_pressure_allow_expanding",
+                "di_pressure_allow_contracting",
+                "di_pressure_allow_mixed",
+            ):
+                control = getattr(self, name, None)
+                if control is not None:
+                    control.setChecked(True)
+            self.enable_mean_reversion_analysis.setChecked(True)
+
+            self.input_csv.setPlaceholderText(
+                "Select 4H crypto OHLCV CSV for swing research"
+            )
+            self.market_preset_status.setText(
+                "Crypto Swing preset active: 4H entries, intrabar exits OFF, scheduled entry OFF, "
+                "Market Regime = Selected asset structural trend, and Daily S/R structure is enabled "
+                "in analysis-only mode. DI expansion/contraction admits all states and MR remains analysis "
+                "telemetry. Existing Strategy Profile stop/TP/trailing settings are intentionally preserved. "
+                "This gives a clean slower-horizon baseline before we optimize exits or filters."
+            )
+            self.update_dynamic()
+            self.update_planned_output()
             return
 
         # CSE research starts from daily OHLCV and the selected asset's own
@@ -83,11 +139,7 @@ class MainWindow(EnhancedMainWindow):
         self.strategy_timeframe.setCurrentText("1d")
         self.use_intrabar.setChecked(False)
         self.enable_daily_schedule.setChecked(False)
-
-        if hasattr(self, "profile_editor"):
-            idx = self.profile_editor.regime_method.findData("ASSET_STRUCTURAL")
-            if idx >= 0:
-                self.profile_editor.regime_method.setCurrentIndex(idx)
+        self._set_asset_structural_regime()
 
         self.input_csv.setPlaceholderText(
             "Browse CSE daily OHLCV CSV: Date, Open, High, Low, Close, Volume"
