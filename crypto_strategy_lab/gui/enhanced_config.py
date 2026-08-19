@@ -1,9 +1,4 @@
-"""Extended mean-reversion configuration for the BB + RSI research model.
-
-This module deliberately layers the new research settings on top of the existing
-BacktestConfig contract so older saved configs and the existing engine remain
-backwards-compatible while the GUI can opt into the richer telemetry model.
-"""
+"""Extended configuration for research-only analytics layered on the core contract."""
 from __future__ import annotations
 
 import json
@@ -31,10 +26,17 @@ MEAN_REVERSION_V2_DEFAULTS: dict[str, Any] = {
     "mean_reversion_track_motion": True,
 }
 
+SR_HTF_DEFAULTS: dict[str, Any] = {
+    # 0 means use the strategy timeframe exactly as before.
+    "sr_timeframe_minutes": 0,
+}
+
+ENHANCED_DEFAULTS: dict[str, Any] = {**MEAN_REVERSION_V2_DEFAULTS, **SR_HTF_DEFAULTS}
+
 
 @dataclass(frozen=True)
 class EnhancedBacktestConfig(BacktestConfig):
-    """BacktestConfig plus record-only Bollinger/RSI mean-reversion settings."""
+    """BacktestConfig plus record-only MR-v2 and higher-timeframe S/R settings."""
 
     mean_reversion_mean_type: str = "SMA"
     mean_reversion_bb_stddevs: float = 2.0
@@ -44,6 +46,7 @@ class EnhancedBacktestConfig(BacktestConfig):
     mean_reversion_require_reentry: bool = True
     mean_reversion_track_atr_distance: bool = True
     mean_reversion_track_motion: bool = True
+    sr_timeframe_minutes: int = 0
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -60,23 +63,33 @@ class EnhancedBacktestConfig(BacktestConfig):
         if not 0 <= oversold < overbought <= 100:
             raise ValueError("RSI thresholds must satisfy 0 <= oversold < overbought <= 100")
 
+        sr_tf = int(self.sr_timeframe_minutes)
+        object.__setattr__(self, "sr_timeframe_minutes", sr_tf)
+        if sr_tf < 0:
+            raise ValueError("sr_timeframe_minutes cannot be negative")
+        if sr_tf:
+            if sr_tf < self.strategy_timeframe_minutes:
+                raise ValueError("S/R timeframe cannot be lower than the strategy timeframe")
+            if sr_tf % self.strategy_timeframe_minutes != 0:
+                raise ValueError("S/R timeframe must be an integer multiple of the strategy timeframe")
+
 
 def enhanced_default_gui_config() -> dict[str, Any]:
-    return {**default_gui_config(), **MEAN_REVERSION_V2_DEFAULTS}
+    return {**default_gui_config(), **ENHANCED_DEFAULTS}
 
 
 def _split_values(values: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    allowed = set(DEFAULT_GUI_CONFIG) | set(MEAN_REVERSION_V2_DEFAULTS)
+    allowed = set(DEFAULT_GUI_CONFIG) | set(ENHANCED_DEFAULTS)
     unknown = sorted(set(values) - allowed)
     if unknown:
         raise ValueError(f"Unknown/retired configuration settings: {', '.join(unknown)}")
     base = {key: value for key, value in values.items() if key in DEFAULT_GUI_CONFIG}
-    extras = {**MEAN_REVERSION_V2_DEFAULTS, **{key: values[key] for key in MEAN_REVERSION_V2_DEFAULTS if key in values}}
+    extras = {**ENHANCED_DEFAULTS, **{key: values[key] for key in ENHANCED_DEFAULTS if key in values}}
     return base, extras
 
 
 def build_enhanced_backtest_config(values: dict[str, Any], require_paths: bool = True) -> EnhancedBacktestConfig:
-    """Build the normal config, then preserve it exactly while adding MR-v2 fields."""
+    """Build the normal config, then preserve it exactly while adding enhanced fields."""
     base_values, extras = _split_values({**enhanced_default_gui_config(), **values})
     base = build_backtest_config(base_values, require_paths=require_paths)
     base_kwargs = {field.name: getattr(base, field.name) for field in fields(BacktestConfig)}
@@ -95,7 +108,6 @@ def load_enhanced_config_json(path: str | Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValueError("Configuration JSON must contain an object.")
     base_values, extras = _split_values({**enhanced_default_gui_config(), **loaded})
-    # Let the existing canonical contract validate/normalize the base portion.
     from crypto_strategy_lab.gui.config_logic import _merged_current
 
     merged = _merged_current(base_values)
