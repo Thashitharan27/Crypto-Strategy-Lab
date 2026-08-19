@@ -17,7 +17,90 @@ portfolio_module.BacktestEngine = SRDynamicTPBacktestEngine
 
 
 class MainWindow(EnhancedMainWindow):
-    """Enhanced main window with a configurable S/R-aware final target."""
+    """Enhanced main window with S/R-aware TP and optional market presets."""
+
+    @staticmethod
+    def _timeframe_minutes(label):
+        """Support minute, hour, and daily strategy data."""
+        text = str(label).strip().lower()
+        if text.endswith("d"):
+            return int(text[:-1]) * 1440
+        if text.endswith("h"):
+            return int(text[:-1]) * 60
+        if text.endswith("m"):
+            return int(text[:-1])
+        raise ValueError(f"Unsupported timeframe: {label}")
+
+    @staticmethod
+    def _timeframe_label(minutes):
+        minutes = int(minutes)
+        if minutes >= 1440 and minutes % 1440 == 0:
+            return f"{minutes // 1440}d"
+        if minutes >= 60 and minutes % 60 == 0:
+            return f"{minutes // 60}h"
+        return f"{minutes}m"
+
+    def _build_config(self):
+        super()._build_config()
+
+        # Daily candles are useful for exchange-traded assets while preserving
+        # every existing crypto timeframe and default.
+        if self.strategy_timeframe.findText("1d") < 0:
+            self.strategy_timeframe.addItem("1d")
+
+        self.market_preset_box = QGroupBox("Market Preset")
+        preset_form = QFormLayout(self.market_preset_box)
+        self.market_preset = QComboBox()
+        self.market_preset.addItem("Crypto / existing settings", "CRYPTO")
+        self.market_preset.addItem("Sri Lanka Stocks (CSE daily)", "CSE_DAILY")
+        self.market_preset_status = QLabel(
+            "Crypto / existing settings: no automatic changes are applied."
+        )
+        self.market_preset_status.setWordWrap(True)
+        preset_form.addRow("Market", self.market_preset)
+        preset_form.addRow("", self.market_preset_status)
+
+        # Backtest Setup contains the toolbar followed by the main scroll area.
+        # Put the small preset box between them so it stays visible and removable.
+        self.backtest_setup_page.layout().insertWidget(1, self.market_preset_box)
+        self.market_preset.currentIndexChanged.connect(self._apply_market_preset)
+
+    def _apply_market_preset(self, *_):
+        if not hasattr(self, "market_preset"):
+            return
+        mode = str(self.market_preset.currentData() or "CRYPTO")
+        if mode != "CSE_DAILY":
+            self.market_preset_status.setText(
+                "Crypto / existing settings: no automatic changes are applied."
+            )
+            return
+
+        # CSE research starts from daily OHLCV and the selected asset's own
+        # structural regime. These are existing engine features, not a new
+        # stock-specific calculation path.
+        if self.strategy_timeframe.findText("1d") < 0:
+            self.strategy_timeframe.addItem("1d")
+        self.strategy_timeframe.setCurrentText("1d")
+        self.use_intrabar.setChecked(False)
+        self.enable_daily_schedule.setChecked(False)
+
+        if hasattr(self, "profile_editor"):
+            idx = self.profile_editor.regime_method.findData("ASSET_STRUCTURAL")
+            if idx >= 0:
+                self.profile_editor.regime_method.setCurrentIndex(idx)
+
+        self.input_csv.setPlaceholderText(
+            "Browse CSE daily OHLCV CSV: Date, Open, High, Low, Close, Volume"
+        )
+        self.market_preset_status.setText(
+            "CSE daily preset active: Strategy Timeframe = 1d, intrabar exits = OFF, "
+            "scheduled entry = OFF, and Market Regime = Selected asset structural trend. "
+            "ATR, DI, MR, S/R and Strategy Profiles use the same engine as crypto. Review "
+            "fees/slippage for your stock assumptions. SHORT profiles remain research-only "
+            "unless the instrument/venue actually permits short selling."
+        )
+        self.update_dynamic()
+        self.update_planned_output()
 
     def _build_support_resistance_tab(self):
         super()._build_support_resistance_tab()
