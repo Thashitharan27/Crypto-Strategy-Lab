@@ -37,16 +37,25 @@ SR_HTF_DEFAULTS: dict[str, Any] = {
     "sr_timeframe_minutes": 0,
 }
 
+SR_DYNAMIC_TP_DEFAULTS: dict[str, Any] = {
+    "sr_take_profit_mode": "FIXED_R",
+    "sr_take_profit_maximum_r": 3.0,
+    "sr_take_profit_minimum_r": 1.5,
+    "sr_take_profit_buffer_r": 0.20,
+    "sr_take_profit_no_level_policy": "USE_FIXED_TP",
+}
+
 ENHANCED_DEFAULTS: dict[str, Any] = {
     **DI_PRESSURE_FILTER_DEFAULTS,
     **MEAN_REVERSION_V2_DEFAULTS,
     **SR_HTF_DEFAULTS,
+    **SR_DYNAMIC_TP_DEFAULTS,
 }
 
 
 @dataclass(frozen=True)
 class EnhancedBacktestConfig(BacktestConfig):
-    """BacktestConfig plus DI-pressure filtering, MR-v2, and higher-timeframe S/R settings."""
+    """BacktestConfig plus DI-pressure, MR-v2, and advanced S/R settings."""
 
     di_pressure_allow_expanding: bool = True
     di_pressure_allow_contracting: bool = True
@@ -60,6 +69,11 @@ class EnhancedBacktestConfig(BacktestConfig):
     mean_reversion_track_atr_distance: bool = True
     mean_reversion_track_motion: bool = True
     sr_timeframe_minutes: int = 0
+    sr_take_profit_mode: str = "FIXED_R"
+    sr_take_profit_maximum_r: float = 3.0
+    sr_take_profit_minimum_r: float = 1.5
+    sr_take_profit_buffer_r: float = 0.20
+    sr_take_profit_no_level_policy: str = "USE_FIXED_TP"
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -94,6 +108,27 @@ class EnhancedBacktestConfig(BacktestConfig):
                 raise ValueError("S/R timeframe cannot be lower than the strategy timeframe")
             if sr_tf % self.strategy_timeframe_minutes != 0:
                 raise ValueError("S/R timeframe must be an integer multiple of the strategy timeframe")
+
+        tp_mode = str(self.sr_take_profit_mode).upper()
+        no_level_policy = str(self.sr_take_profit_no_level_policy).upper()
+        object.__setattr__(self, "sr_take_profit_mode", tp_mode)
+        object.__setattr__(self, "sr_take_profit_no_level_policy", no_level_policy)
+        if tp_mode not in ("FIXED_R", "SR_CAPPED_R"):
+            raise ValueError("sr_take_profit_mode must be FIXED_R or SR_CAPPED_R")
+        if no_level_policy not in ("USE_FIXED_TP", "REJECT_TRADE"):
+            raise ValueError("sr_take_profit_no_level_policy must be USE_FIXED_TP or REJECT_TRADE")
+        if self.sr_take_profit_maximum_r <= 0 or self.sr_take_profit_minimum_r <= 0:
+            raise ValueError("S/R take-profit R values must be positive")
+        if self.sr_take_profit_minimum_r > self.sr_take_profit_maximum_r:
+            raise ValueError("S/R minimum TP cannot exceed maximum TP")
+        if self.sr_take_profit_buffer_r < 0:
+            raise ValueError("S/R take-profit buffer cannot be negative")
+        if tp_mode == "SR_CAPPED_R" and not self.enable_support_resistance_analysis:
+            raise ValueError("S/R analysis must be enabled when S/R-capped take profit is selected")
+        if tp_mode == "SR_CAPPED_R":
+            enabled_profiles = [p for p in self.strategy_profiles.values() if p.enabled]
+            if any(getattr(p, "partial_profit_enabled", False) for p in enabled_profiles):
+                raise ValueError("S/R-capped take profit is not compatible with partial take-profit profiles")
 
 
 def enhanced_default_gui_config() -> dict[str, Any]:
