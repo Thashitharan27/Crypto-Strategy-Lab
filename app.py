@@ -6,8 +6,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from crypto_strategy_lab.gui.main_window import MainWindow
-from crypto_strategy_lab.research_daily_sequence import attach_research_tab, install_research_support
-from crypto_strategy_lab.research_coin_flip import attach_coin_flip_controls, install_coin_flip_support
 
 
 def _splash_pixmap() -> QPixmap:
@@ -35,11 +33,7 @@ def main() -> int:
         app.processEvents()
 
     try:
-        install_research_support()
-        install_coin_flip_support()
         window = MainWindow(startup_status=status)
-        research_tab = attach_research_tab(window)
-        attach_coin_flip_controls(research_tab)
         status("Ready")
         window.show()
         splash.finish(window)
