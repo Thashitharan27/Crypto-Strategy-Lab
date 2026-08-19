@@ -1,4 +1,4 @@
-"""GUI layer for the configurable Bollinger + RSI mean-reversion research model."""
+"""GUI layer for enhanced mean-reversion and higher-timeframe S/R research."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -21,6 +21,7 @@ from crypto_strategy_lab.enhanced_engine import EnhancedBacktestEngine
 from crypto_strategy_lab.enhanced_statistics import mean_reversion_analysis_v2
 from crypto_strategy_lab.gui.enhanced_config import (
     MEAN_REVERSION_V2_DEFAULTS,
+    SR_HTF_DEFAULTS,
     build_enhanced_backtest_config,
     enhanced_default_gui_config,
     load_enhanced_config_json,
@@ -29,8 +30,6 @@ from crypto_strategy_lab.gui.enhanced_config import (
 from crypto_strategy_lab.gui.main_window import MainWindow as BaseMainWindow
 
 
-# Route the existing GUI/worker/portfolio pipeline through the enhanced contract
-# without duplicating the mature simulation and output code.
 base_main_window_module.build_backtest_config = build_enhanced_backtest_config
 base_main_window_module.default_gui_config = enhanced_default_gui_config
 base_main_window_module.save_config_json = save_enhanced_config_json
@@ -43,7 +42,32 @@ portfolio_module.load_config_json = load_enhanced_config_json
 
 
 class MainWindow(BaseMainWindow):
-    """Crypto Strategy Lab main window with mean-reversion research v2 controls."""
+    """Crypto Strategy Lab main window with enhanced research controls."""
+
+    def _build_support_resistance_tab(self):
+        """Build the mature S/R tab, then add a structure-timeframe selector."""
+        super()._build_support_resistance_tab()
+        self.sr_timeframe = QComboBox()
+        self.sr_timeframe.addItem("Same as Strategy", 0)
+        self.sr_timeframe.addItem("1h", 60)
+        self.sr_timeframe.addItem("4h", 240)
+        self.sr_timeframe.addItem("1d", 1440)
+        self.sr_timeframe.setToolTip(
+            "Choose the candle timeframe used to build support/resistance structure. "
+            "Higher timeframes are resampled from the strategy data and only fully completed candles are used."
+        )
+        timeframe_widget = QWidget()
+        timeframe_form = QFormLayout(timeframe_widget)
+        timeframe_form.setContentsMargins(0, 0, 0, 0)
+        timeframe_form.addRow("Structure Timeframe", self.sr_timeframe)
+        timeframe_help = QLabel(
+            "Higher-timeframe S/R uses only completed structure candles. The current strategy entry price is then "
+            "measured against those confirmed levels, avoiding future-candle leakage."
+        )
+        timeframe_help.setWordWrap(True)
+        timeframe_form.addRow("", timeframe_help)
+        self.sr_detection_box.layout().insertWidget(0, timeframe_widget)
+        self.sr_timeframe.currentIndexChanged.connect(self.update_dynamic)
 
     def _build_di_strategy_tab(self):
         page = QWidget()
@@ -185,12 +209,13 @@ class MainWindow(BaseMainWindow):
                 "mean_reversion_require_reentry": self.mean_reversion_require_reentry.isChecked(),
                 "mean_reversion_track_atr_distance": self.mean_reversion_track_atr_distance.isChecked(),
                 "mean_reversion_track_motion": self.mean_reversion_track_motion.isChecked(),
+                "sr_timeframe_minutes": int(self.sr_timeframe.currentData() or 0),
             }
         )
         return values
 
     def apply_values(self, values):
-        merged = {**MEAN_REVERSION_V2_DEFAULTS, **values}
+        merged = {**MEAN_REVERSION_V2_DEFAULTS, **SR_HTF_DEFAULTS, **values}
         super().apply_values(merged)
         self.mean_reversion_mean_type.setCurrentText(str(merged["mean_reversion_mean_type"]).upper())
         self.mean_reversion_bb_stddevs.setValue(float(merged["mean_reversion_bb_stddevs"]))
@@ -200,11 +225,36 @@ class MainWindow(BaseMainWindow):
         self.mean_reversion_require_reentry.setChecked(bool(merged["mean_reversion_require_reentry"]))
         self.mean_reversion_track_atr_distance.setChecked(bool(merged["mean_reversion_track_atr_distance"]))
         self.mean_reversion_track_motion.setChecked(bool(merged["mean_reversion_track_motion"]))
+        sr_tf = int(merged.get("sr_timeframe_minutes", 0) or 0)
+        idx = self.sr_timeframe.findData(sr_tf)
+        self.sr_timeframe.setCurrentIndex(idx if idx >= 0 else 0)
         self.update_dynamic()
         self.update_planned_output()
 
+    def _sync_sr_timeframe_options(self):
+        if not hasattr(self, "sr_timeframe"):
+            return
+        strategy = self._timeframe_minutes(self.strategy_timeframe.currentText())
+        for index in range(self.sr_timeframe.count()):
+            minutes = int(self.sr_timeframe.itemData(index) or 0)
+            valid = minutes == 0 or (minutes >= strategy and minutes % strategy == 0)
+            item = self.sr_timeframe.model().item(index)
+            if item is not None:
+                item.setEnabled(valid)
+        current = int(self.sr_timeframe.currentData() or 0)
+        if current and (current < strategy or current % strategy):
+            self.sr_timeframe.setCurrentIndex(self.sr_timeframe.findData(0))
+
     def update_dynamic(self):
         super().update_dynamic()
+        self._sync_sr_timeframe_options()
+        if hasattr(self, "sr_timeframe"):
+            self.sr_timeframe.setEnabled(self.enable_support_resistance_analysis.isChecked())
+            if hasattr(self, "sr_summary_label"):
+                text = self.sr_summary_label.text()
+                selected = self.sr_timeframe.currentText()
+                if "Structure timeframe:" not in text:
+                    self.sr_summary_label.setText(f"Structure timeframe: {selected}\n{text}")
         if not hasattr(self, "mean_reversion_controls"):
             return
         enabled = self.enable_mean_reversion_analysis.isChecked()
