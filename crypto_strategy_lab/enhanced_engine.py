@@ -1,4 +1,4 @@
-"""Backtest engine extensions for MR telemetry and higher-timeframe S/R."""
+"""Backtest engine extensions for DI-pressure filters, MR telemetry, and higher-timeframe S/R."""
 from __future__ import annotations
 
 import numpy as np
@@ -23,7 +23,7 @@ from crypto_strategy_lab.mean_reversion_v2 import (
 
 
 class EnhancedBacktestEngine(BacktestEngine):
-    """Preserve trading rules while adding record-only research calculations."""
+    """Add optional DI-pressure filtering plus enhanced research calculations."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -90,6 +90,36 @@ class EnhancedBacktestEngine(BacktestEngine):
                 break_tolerance_atr=config.sr_break_tolerance_atr,
                 break_basis=config.sr_break_basis,
             )
+
+    def _di_pressure_filter_result(self, i):
+        """Return whether the classified DI-pressure state is allowed to enter."""
+        if not self.config.enable_di_pressure_analysis:
+            return True, None
+
+        allowed = {
+            "EXPANDING": bool(getattr(self.config, "di_pressure_allow_expanding", True)),
+            "CONTRACTING": bool(getattr(self.config, "di_pressure_allow_contracting", True)),
+            "MIXED": bool(getattr(self.config, "di_pressure_allow_mixed", True)),
+        }
+        # All three selected preserves the historical record-only behaviour exactly,
+        # including warm-up rows that can still classify as UNKNOWN.
+        if all(allowed.values()):
+            return True, None
+
+        direction = self._selected_direction(i)
+        state = str(self._di_pressure_snapshot(i, direction).get("di_pressure_state", "UNKNOWN")).upper()
+        if allowed.get(state, False):
+            return True, None
+        return False, f"DI_PRESSURE_{state}_FILTERED"
+
+    def _entry_filter_result(self, i, execution_i=None):
+        passed, reason = super()._entry_filter_result(i, execution_i)
+        if not passed:
+            return passed, reason
+        pressure_passed, pressure_reason = self._di_pressure_filter_result(i)
+        if not pressure_passed:
+            return False, pressure_reason
+        return True, reason
 
     def _latest_completed_sr_index(self, strategy_index: int) -> int:
         if not self.sr_uses_higher_timeframe or not len(self.sr_htf_end_times):
