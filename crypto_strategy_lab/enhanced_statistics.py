@@ -14,11 +14,20 @@ EXTRA_COLUMNS = [
     "RSI State",
     "BB Re-entry",
     "Mean Type",
+    "Confirmed MR",
+    "Confirmed Direction",
+    "Confirmed Alignment",
 ]
 
 
 def mean_reversion_analysis_v2(trades: pd.DataFrame) -> pd.DataFrame:
-    """Return legacy MR tables plus BB/RSI/re-entry research cross-tabs."""
+    """Return legacy MR tables plus BB/RSI/re-entry research cross-tabs.
+
+    The primary validation section deliberately collapses the classical MR idea
+    into only three trade-alignment groups for DI 0-30: AGREE, DISAGREE, and
+    NO_SIGNAL. Potential outside-band setups remain available in the detailed
+    telemetry but are not treated as confirmed mean reversion.
+    """
     legacy = legacy_mean_reversion_analysis(trades)
     columns = list(legacy.columns) + [column for column in EXTRA_COLUMNS if column not in legacy.columns]
     legacy = legacy.reindex(columns=columns)
@@ -46,14 +55,17 @@ def mean_reversion_analysis_v2(trades: pd.DataFrame) -> pd.DataFrame:
     frame["MR Signal Direction"] = frame.get("mean_reversion_signal_direction", pd.Series("NONE", index=frame.index)).fillna("NONE").astype(str).str.upper()
     frame["BB Location"] = frame.get("mean_reversion_bb_location", pd.Series("UNKNOWN", index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
     frame["RSI State"] = frame.get("mean_reversion_rsi_state", pd.Series("UNKNOWN", index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
-    frame["BB Re-entry"] = frame.get("mean_reversion_reentry_confirmation", pd.Series("NONE", index=frame.index)).fillna("NONE").astype(str).str.upper()
+    frame["BB Re-entry"] = frame.get("bb_reentry", frame.get("mean_reversion_reentry_confirmation", pd.Series("NONE", index=frame.index))).fillna("NONE").astype(str).str.upper()
     frame["Mean Type"] = frame.get("mean_reversion_mean_type", pd.Series("UNKNOWN", index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
+    frame["Confirmed MR"] = frame.get("mr_signal", pd.Series("NO_SIGNAL", index=frame.index)).fillna("NO_SIGNAL").astype(str).str.upper()
+    frame["Confirmed Direction"] = frame.get("mr_signal_direction", pd.Series("NONE", index=frame.index)).fillna("NONE").astype(str).str.upper()
+    frame["Confirmed Alignment"] = frame.get("mr_trade_alignment", pd.Series("NO_SIGNAL", index=frame.index)).fillna("NO_SIGNAL").astype(str).str.upper()
     frame["_pnl"] = pd.to_numeric(frame.get("pair_net_pnl"), errors="coerce")
     frame["_r"] = pd.to_numeric(frame.get("pair_net_r"), errors="coerce")
 
-    def grouped(section: str, groups: list[str]) -> list[dict]:
+    def grouped(source: pd.DataFrame, section: str, groups: list[str]) -> list[dict]:
         rows: list[dict] = []
-        for keys, group in frame.groupby(groups, dropna=False, observed=True):
+        for keys, group in source.groupby(groups, dropna=False, observed=True):
             keys = keys if isinstance(keys, tuple) else (keys,)
             pnl = group["_pnl"]
             rr = group["_r"]
@@ -74,13 +86,23 @@ def mean_reversion_analysis_v2(trades: pd.DataFrame) -> pd.DataFrame:
         return rows
 
     rows: list[dict] = []
-    rows += grouped("MR V2 Signal", ["MR Signal"])
-    rows += grouped("DI Bucket + MR V2 Signal", ["DI Pressure Bucket", "MR Signal"])
-    rows += grouped("Direction + DI Bucket + MR V2 Signal", ["Direction", "DI Pressure Bucket", "MR Signal"])
-    rows += grouped("DI State + DI Bucket + MR V2 Signal", ["DI Pressure State", "DI Pressure Bucket", "MR Signal"])
-    rows += grouped("Regime + DI Bucket + MR V2 Signal", ["Market Regime", "DI Pressure Bucket", "MR Signal"])
-    rows += grouped("BB Location + RSI State", ["BB Location", "RSI State"])
-    rows += grouped("BB Re-entry", ["BB Re-entry", "MR Signal"])
+
+    # Primary hypothesis test: one broad confirmed-MR rule across the entire
+    # low-to-moderate DI range, with potential/unconfirmed setups counted as NO_SIGNAL.
+    primary = frame.loc[di.ge(0) & di.lt(30)].copy()
+    if not primary.empty:
+        rows += grouped(primary, "DI 0-30 Confirmed MR Alignment", ["Confirmed Alignment"])
+        rows += grouped(primary, "DI 0-30 Confirmed MR Direction", ["Confirmed Direction", "Confirmed Alignment"])
+        rows += grouped(primary, "DI 0-30 Confirmed MR + DI State", ["DI Pressure State", "Confirmed Alignment"])
+
+    # Detailed research views remain available after the broad test is established.
+    rows += grouped(frame, "MR V2 Signal", ["MR Signal"])
+    rows += grouped(frame, "DI Bucket + MR V2 Signal", ["DI Pressure Bucket", "MR Signal"])
+    rows += grouped(frame, "Direction + DI Bucket + MR V2 Signal", ["Direction", "DI Pressure Bucket", "MR Signal"])
+    rows += grouped(frame, "DI State + DI Bucket + MR V2 Signal", ["DI Pressure State", "DI Pressure Bucket", "MR Signal"])
+    rows += grouped(frame, "Regime + DI Bucket + MR V2 Signal", ["Market Regime", "DI Pressure Bucket", "MR Signal"])
+    rows += grouped(frame, "BB Location + RSI State", ["BB Location", "RSI State"])
+    rows += grouped(frame, "BB Re-entry", ["BB Re-entry", "MR Signal"])
 
     enhanced = pd.DataFrame(rows).reindex(columns=columns)
     return pd.concat([legacy, enhanced], ignore_index=True)
