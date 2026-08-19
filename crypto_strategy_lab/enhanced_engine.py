@@ -1,9 +1,12 @@
-"""Backtest engine extension for Bollinger + RSI mean-reversion telemetry."""
+"""Backtest engine extensions for MR telemetry and higher-timeframe S/R."""
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
+from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.higher_timeframe_sr import HigherTimeframeSRDetector, resample_ohlc_for_sr
 from crypto_strategy_lab.indicators import lag, rsi
 from crypto_strategy_lab.mean_reversion import distance_from_mean_atr
 from crypto_strategy_lab.mean_reversion_v2 import (
@@ -20,7 +23,7 @@ from crypto_strategy_lab.mean_reversion_v2 import (
 
 
 class EnhancedBacktestEngine(BacktestEngine):
-    """Preserve the trading engine and add record-only MR-v2 calculations."""
+    """Preserve trading rules while adding record-only research calculations."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -52,6 +55,75 @@ class EnhancedBacktestEngine(BacktestEngine):
             oversold,
             overbought,
         )
+
+        # Optional S/R timeframe. 0 keeps legacy same-timeframe behavior.
+        configured_sr_tf = int(getattr(config, "sr_timeframe_minutes", 0) or 0)
+        self.sr_timeframe_minutes = configured_sr_tf or int(config.strategy_timeframe_minutes)
+        self.sr_uses_higher_timeframe = bool(
+            config.enable_support_resistance_analysis
+            and self.sr_timeframe_minutes > int(config.strategy_timeframe_minutes)
+        )
+        self.sr_htf_frame = None
+        self.sr_htf_end_times = np.array([], dtype="datetime64[ns]")
+        if self.sr_uses_higher_timeframe:
+            htf = resample_ohlc_for_sr(
+                self.data,
+                int(config.strategy_timeframe_minutes),
+                self.sr_timeframe_minutes,
+            )
+            self.sr_htf_frame = htf
+            self.sr_htf_open = htf["open"].to_numpy(float)
+            self.sr_htf_high = htf["high"].to_numpy(float)
+            self.sr_htf_low = htf["low"].to_numpy(float)
+            self.sr_htf_close = htf["close"].to_numpy(float)
+            self.sr_htf_atr = atr(self.sr_htf_high, self.sr_htf_low, self.sr_htf_close, config.atr_period)
+            self.sr_htf_end_times = pd.to_datetime(htf["end_time"], utc=True).to_numpy(dtype="datetime64[ns]")
+            self.sr_detector = HigherTimeframeSRDetector(
+                pivot_left=config.sr_pivot_left,
+                pivot_right=config.sr_pivot_right,
+                lookback_bars=config.sr_lookback_bars,
+                zone_width_atr=config.sr_zone_width_atr,
+                near_distance_atr=config.sr_near_distance_atr,
+                enable_hold_confirmation=config.enable_sr_hold_confirmation,
+                hold_confirmation_bars=config.sr_hold_confirmation_bars,
+                hold_confirmation_atr=config.sr_hold_confirmation_atr,
+                break_tolerance_atr=config.sr_break_tolerance_atr,
+                break_basis=config.sr_break_basis,
+            )
+
+    def _latest_completed_sr_index(self, strategy_index: int) -> int:
+        if not self.sr_uses_higher_timeframe or not len(self.sr_htf_end_times):
+            return -1
+        entry_time = pd.Timestamp(self._entry_time(strategy_index))
+        if entry_time.tzinfo is None:
+            entry_time = entry_time.tz_localize("UTC")
+        else:
+            entry_time = entry_time.tz_convert("UTC")
+        needle = np.datetime64(entry_time.tz_localize(None).to_datetime64(), "ns")
+        return int(np.searchsorted(self.sr_htf_end_times, needle, side="right") - 1)
+
+    def _analyze_support_resistance(self, i, direction):
+        if not self.sr_uses_higher_timeframe:
+            return super()._analyze_support_resistance(i, direction)
+        if self.sr_detector is None:
+            return None
+        htf_i = self._latest_completed_sr_index(i)
+        if htf_i < 0:
+            return self.sr_detector._default_context()
+        try:
+            return self.sr_detector.analyze_external_price(
+                htf_i,
+                self.sr_htf_open,
+                self.sr_htf_high,
+                self.sr_htf_low,
+                self.sr_htf_close,
+                self.sr_htf_atr,
+                direction,
+                float(self.close[i]),
+            )
+        except Exception as exc:
+            self.log(f"Higher-timeframe S/R analysis failed at strategy index {i}: {exc}")
+            return None
 
     @staticmethod
     def _confirmed_alignment(reentry_direction: str, trade_direction: str | None) -> str:
@@ -113,24 +185,15 @@ class EnhancedBacktestEngine(BacktestEngine):
         require_reentry = bool(getattr(config, "mean_reversion_require_reentry", True))
 
         signal = classify_signal(
-            close,
-            lower,
-            upper,
-            rsi_value,
-            oversold,
-            overbought,
-            long_reentry,
-            short_reentry,
-            require_reentry,
+            close, lower, upper, rsi_value, oversold, overbought,
+            long_reentry, short_reentry, require_reentry,
         )
         signal_dir = signal_direction(signal)
         di_alignment = signal_alignment(signal, di_direction)
         trade_alignment = signal_alignment(signal, trade_direction or di_direction)
         reentry_direction = "LONG" if long_reentry else ("SHORT" if short_reentry else "NONE")
         confirmed_signal = "CONFIRMED" if reentry_direction != "NONE" else "NO_SIGNAL"
-        confirmed_trade_alignment = self._confirmed_alignment(
-            reentry_direction, trade_direction or di_direction
-        )
+        confirmed_trade_alignment = self._confirmed_alignment(reentry_direction, trade_direction or di_direction)
 
         result.update(
             {
@@ -177,52 +240,45 @@ class EnhancedBacktestEngine(BacktestEngine):
             result["mean_reversion_motion"] = "UNKNOWN"
         return result
 
+    @staticmethod
+    def _timeframe_label(minutes: int) -> str:
+        if minutes == 1440:
+            return "1d"
+        if minutes >= 60 and minutes % 60 == 0:
+            return f"{minutes // 60}h"
+        return f"{minutes}m"
+
     def _build_result_row(self, p, row_kind, positions):
-        """Include all enhanced MR telemetry and simple confirmed aliases in trade_list.csv."""
+        """Include enhanced MR and S/R source telemetry in trade_list.csv."""
         row = super()._build_result_row(p, row_kind, positions)
         fields = (
-            "mean_reversion_mean_type",
-            "mean_reversion_bb_stddevs",
-            "mean_reversion_rsi_period",
-            "mean_reversion_rsi_oversold",
-            "mean_reversion_rsi_overbought",
-            "mean_reversion_require_reentry",
-            "mean_reversion_bb_upper",
-            "mean_reversion_bb_lower",
-            "mean_reversion_bb_sigma",
-            "mean_reversion_bb_zscore",
-            "mean_reversion_bb_location",
-            "mean_reversion_rsi",
-            "mean_reversion_rsi_state",
-            "mean_reversion_long_reentry",
-            "mean_reversion_short_reentry",
-            "mean_reversion_reentry_confirmation",
-            "mean_reversion_signal",
-            "mean_reversion_signal_direction",
-            "mean_reversion_setup_strength",
-            "mean_reversion_distance_alignment",
-            "mean_reversion_signal_di_alignment",
-            "mean_reversion_signal_trade_alignment",
-            "bb_reentry",
-            "mr_signal",
-            "mr_signal_direction",
-            "mr_trade_alignment",
+            "mean_reversion_mean_type", "mean_reversion_bb_stddevs", "mean_reversion_rsi_period",
+            "mean_reversion_rsi_oversold", "mean_reversion_rsi_overbought", "mean_reversion_require_reentry",
+            "mean_reversion_bb_upper", "mean_reversion_bb_lower", "mean_reversion_bb_sigma",
+            "mean_reversion_bb_zscore", "mean_reversion_bb_location", "mean_reversion_rsi",
+            "mean_reversion_rsi_state", "mean_reversion_long_reentry", "mean_reversion_short_reentry",
+            "mean_reversion_reentry_confirmation", "mean_reversion_signal", "mean_reversion_signal_direction",
+            "mean_reversion_setup_strength", "mean_reversion_distance_alignment", "mean_reversion_signal_di_alignment",
+            "mean_reversion_signal_trade_alignment", "bb_reentry", "mr_signal", "mr_signal_direction", "mr_trade_alignment",
         )
         defaults = {
-            "mean_reversion_bb_location": "UNKNOWN",
-            "mean_reversion_rsi_state": "UNKNOWN",
-            "mean_reversion_reentry_confirmation": "NONE",
-            "mean_reversion_signal": "UNKNOWN",
-            "mean_reversion_signal_direction": "NONE",
-            "mean_reversion_setup_strength": "UNKNOWN",
-            "mean_reversion_distance_alignment": "UNKNOWN",
-            "mean_reversion_signal_di_alignment": "UNKNOWN",
-            "mean_reversion_signal_trade_alignment": "UNKNOWN",
-            "bb_reentry": "NONE",
-            "mr_signal": "NO_SIGNAL",
-            "mr_signal_direction": "NONE",
-            "mr_trade_alignment": "NO_SIGNAL",
+            "mean_reversion_bb_location": "UNKNOWN", "mean_reversion_rsi_state": "UNKNOWN",
+            "mean_reversion_reentry_confirmation": "NONE", "mean_reversion_signal": "UNKNOWN",
+            "mean_reversion_signal_direction": "NONE", "mean_reversion_setup_strength": "UNKNOWN",
+            "mean_reversion_distance_alignment": "UNKNOWN", "mean_reversion_signal_di_alignment": "UNKNOWN",
+            "mean_reversion_signal_trade_alignment": "UNKNOWN", "bb_reentry": "NONE",
+            "mr_signal": "NO_SIGNAL", "mr_signal_direction": "NONE", "mr_trade_alignment": "NO_SIGNAL",
         }
         for field in fields:
             row[field] = getattr(p, field, defaults.get(field, np.nan))
+
+        row["sr_timeframe_minutes"] = int(self.sr_timeframe_minutes)
+        row["sr_timeframe"] = self._timeframe_label(int(self.sr_timeframe_minutes))
+        row["sr_timeframe_source"] = "HIGHER_TIMEFRAME_RESAMPLED" if self.sr_uses_higher_timeframe else "STRATEGY_TIMEFRAME"
+        if self.sr_uses_higher_timeframe:
+            strategy_i = int(np.searchsorted(self.times, np.datetime64(pd.Timestamp(p.strategy_candle_open_time).to_datetime64()), side="right") - 1)
+            htf_i = self._latest_completed_sr_index(max(0, strategy_i))
+            row["sr_last_completed_candle_time"] = pd.Timestamp(self.sr_htf_end_times[htf_i], tz="UTC") if htf_i >= 0 else pd.NaT
+        else:
+            row["sr_last_completed_candle_time"] = pd.Timestamp(p.strategy_entry_time)
         return row
