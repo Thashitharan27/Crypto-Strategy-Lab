@@ -1,4 +1,4 @@
-"""GUI layer for enhanced mean-reversion and higher-timeframe S/R research."""
+"""GUI layer for enhanced DI-pressure, mean-reversion, and higher-timeframe S/R research."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -20,6 +20,7 @@ import crypto_strategy_lab.portfolio as portfolio_module
 from crypto_strategy_lab.enhanced_engine import EnhancedBacktestEngine
 from crypto_strategy_lab.enhanced_statistics import mean_reversion_analysis_v2
 from crypto_strategy_lab.gui.enhanced_config import (
+    DI_PRESSURE_FILTER_DEFAULTS,
     MEAN_REVERSION_V2_DEFAULTS,
     SR_HTF_DEFAULTS,
     build_enhanced_backtest_config,
@@ -78,8 +79,8 @@ class MainWindow(BaseMainWindow):
         form = QVBoxLayout(inner)
 
         intro = QLabel(
-            "DI-direction strategy settings live here. Mean Reversion Analysis is record-only: "
-            "it adds context to each entry but never filters, flips, resizes, or rejects a trade."
+            "DI-direction strategy settings live here. DI Pressure can now be used either as record-only telemetry "
+            "or as an entry filter. Mean Reversion Analysis remains record-only."
         )
         intro.setWordWrap(True)
         form.addWidget(intro)
@@ -94,18 +95,38 @@ class MainWindow(BaseMainWindow):
 
         pressure_box = QGroupBox("DI Pressure Analysis")
         pressure_form = QFormLayout(pressure_box)
-        pressure_mode = QLabel("Analysis Mode: RECORD ONLY\nDoes not filter or reject trades.")
+        self.di_pressure_allow_expanding = QCheckBox("Allow Expanding")
+        self.di_pressure_allow_contracting = QCheckBox("Allow Contracting")
+        self.di_pressure_allow_mixed = QCheckBox("Allow Mixed")
+        self.di_pressure_allow_expanding.setChecked(True)
+        self.di_pressure_allow_contracting.setChecked(True)
+        self.di_pressure_allow_mixed.setChecked(True)
+        self.di_pressure_mode_label = QLabel()
+        self.di_pressure_mode_label.setWordWrap(True)
         pressure_help = QLabel(
-            "DI direction chooses LONG or SHORT from +DI versus -DI. DI Pressure Analysis measures "
-            "whether directional pressure is strengthening or weakening before entry. DI Spread entry "
-            "filtering remains under Strategy Profiles → Rules → DI Spread."
+            "DI direction chooses LONG or SHORT from +DI versus -DI. DI Pressure Analysis measures whether "
+            "directional pressure is strengthening or weakening before entry. Leave all three states selected for "
+            "the historical RECORD ONLY behaviour. Deselect one or more states to reject entries in those states. "
+            "DI Spread entry filtering remains under Strategy Profiles → Rules → DI Spread."
         )
         pressure_help.setWordWrap(True)
         pressure_form.addRow("", self.enable_di_pressure_analysis)
         pressure_form.addRow("Lookback", self.di_pressure_lookback)
-        pressure_form.addRow("", pressure_mode)
+        pressure_form.addRow("Entry Pressure Filter", self.di_pressure_allow_expanding)
+        pressure_form.addRow("", self.di_pressure_allow_contracting)
+        pressure_form.addRow("", self.di_pressure_allow_mixed)
+        pressure_form.addRow("", self.di_pressure_mode_label)
         pressure_form.addRow("", pressure_help)
         form.addWidget(pressure_box)
+
+        self.di_pressure_filter_controls = [
+            self.di_pressure_allow_expanding,
+            self.di_pressure_allow_contracting,
+            self.di_pressure_allow_mixed,
+        ]
+        for control in self.di_pressure_filter_controls:
+            control.toggled.connect(self.update_dynamic)
+        self.enable_di_pressure_analysis.toggled.connect(self.update_dynamic)
 
         mean_box = QGroupBox("Mean Reversion Analysis")
         mean_form = QFormLayout(mean_box)
@@ -201,6 +222,9 @@ class MainWindow(BaseMainWindow):
         values = super().values()
         values.update(
             {
+                "di_pressure_allow_expanding": self.di_pressure_allow_expanding.isChecked(),
+                "di_pressure_allow_contracting": self.di_pressure_allow_contracting.isChecked(),
+                "di_pressure_allow_mixed": self.di_pressure_allow_mixed.isChecked(),
                 "mean_reversion_mean_type": self.mean_reversion_mean_type.currentText(),
                 "mean_reversion_bb_stddevs": self.mean_reversion_bb_stddevs.value(),
                 "mean_reversion_rsi_period": self.mean_reversion_rsi_period.value(),
@@ -215,8 +239,16 @@ class MainWindow(BaseMainWindow):
         return values
 
     def apply_values(self, values):
-        merged = {**MEAN_REVERSION_V2_DEFAULTS, **SR_HTF_DEFAULTS, **values}
+        merged = {
+            **DI_PRESSURE_FILTER_DEFAULTS,
+            **MEAN_REVERSION_V2_DEFAULTS,
+            **SR_HTF_DEFAULTS,
+            **values,
+        }
         super().apply_values(merged)
+        self.di_pressure_allow_expanding.setChecked(bool(merged["di_pressure_allow_expanding"]))
+        self.di_pressure_allow_contracting.setChecked(bool(merged["di_pressure_allow_contracting"]))
+        self.di_pressure_allow_mixed.setChecked(bool(merged["di_pressure_allow_mixed"]))
         self.mean_reversion_mean_type.setCurrentText(str(merged["mean_reversion_mean_type"]).upper())
         self.mean_reversion_bb_stddevs.setValue(float(merged["mean_reversion_bb_stddevs"]))
         self.mean_reversion_rsi_period.setValue(int(merged["mean_reversion_rsi_period"]))
@@ -255,6 +287,30 @@ class MainWindow(BaseMainWindow):
                 selected = self.sr_timeframe.currentText()
                 if "Structure timeframe:" not in text:
                     self.sr_summary_label.setText(f"Structure timeframe: {selected}\n{text}")
+
+        if hasattr(self, "di_pressure_filter_controls"):
+            pressure_enabled = self.enable_di_pressure_analysis.isChecked()
+            for control in self.di_pressure_filter_controls:
+                control.setEnabled(pressure_enabled)
+            allowed = [
+                label
+                for control, label in (
+                    (self.di_pressure_allow_expanding, "Expanding"),
+                    (self.di_pressure_allow_contracting, "Contracting"),
+                    (self.di_pressure_allow_mixed, "Mixed"),
+                )
+                if control.isChecked()
+            ]
+            if not pressure_enabled:
+                status = "Analysis: DISABLED\nDI pressure does not filter entries."
+            elif len(allowed) == 3:
+                status = "Analysis Mode: RECORD ONLY\nAll pressure states are allowed; no trades are rejected by DI Pressure."
+            elif allowed:
+                status = f"Filter Mode: ACTIVE\nAllowed entry states: {', '.join(allowed)}"
+            else:
+                status = "Filter Mode: INVALID\nSelect at least one pressure state before running."
+            self.di_pressure_mode_label.setText(status)
+
         if not hasattr(self, "mean_reversion_controls"):
             return
         enabled = self.enable_mean_reversion_analysis.isChecked()
