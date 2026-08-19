@@ -63,14 +63,14 @@ class EnhancedBacktestConfig(BacktestConfig):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        if not any(
+        if self.enable_di_pressure_analysis and not any(
             (
                 self.di_pressure_allow_expanding,
                 self.di_pressure_allow_contracting,
                 self.di_pressure_allow_mixed,
             )
         ):
-            raise ValueError("At least one DI pressure state must be allowed")
+            raise ValueError("At least one DI pressure state must be allowed when DI pressure analysis is enabled")
 
         mean_type = str(self.mean_reversion_mean_type).upper()
         object.__setattr__(self, "mean_reversion_mean_type", mean_type)
