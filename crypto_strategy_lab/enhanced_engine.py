@@ -32,14 +32,11 @@ class EnhancedBacktestEngine(BacktestEngine):
         oversold = float(getattr(config, "mean_reversion_rsi_oversold", 30.0))
         overbought = float(getattr(config, "mean_reversion_rsi_overbought", 70.0))
 
-        # Override the legacy EMA arrays with the selected causal mean while
-        # preserving their attribute names for all existing downstream code.
         self.mean_reversion_mean = moving_mean(self.close, period, mean_type)
         self.mean_reversion_distance_atr = distance_from_mean_atr(
             self.close, self.mean_reversion_mean, self.atr_values
         )
         self.mean_reversion_distance_atr_previous = lag(self.mean_reversion_distance_atr, 1)
-
         self.mean_reversion_sigma, self.mean_reversion_bb_upper, self.mean_reversion_bb_lower = bollinger_envelope(
             self.close, self.mean_reversion_mean, period, stddevs
         )
@@ -58,7 +55,6 @@ class EnhancedBacktestEngine(BacktestEngine):
 
     @staticmethod
     def _confirmed_alignment(reentry_direction: str, trade_direction: str | None) -> str:
-        """Return the deliberately simple confirmed-MR research classification."""
         if reentry_direction not in ("LONG", "SHORT"):
             return "NO_SIGNAL"
         if trade_direction not in ("LONG", "SHORT"):
@@ -94,7 +90,6 @@ class EnhancedBacktestEngine(BacktestEngine):
                 "mean_reversion_distance_alignment": result.get("mean_reversion_alignment", "UNKNOWN"),
                 "mean_reversion_signal_di_alignment": "UNKNOWN",
                 "mean_reversion_signal_trade_alignment": "UNKNOWN",
-                # Simple aliases for the primary confirmed-reentry validation.
                 "bb_reentry": "NONE",
                 "mr_signal": "NO_SIGNAL",
                 "mr_signal_direction": "NONE",
@@ -159,8 +154,6 @@ class EnhancedBacktestEngine(BacktestEngine):
                 "mr_signal": confirmed_signal,
                 "mr_signal_direction": reentry_direction,
                 "mr_trade_alignment": confirmed_trade_alignment,
-                # Make the primary alignment field describe the new model while
-                # retaining the old distance-only alignment separately above.
                 "mean_reversion_alignment": di_alignment,
                 "mean_reversion_di_alignment": di_alignment,
                 "mean_reversion_trade_alignment": trade_alignment,
@@ -183,3 +176,53 @@ class EnhancedBacktestEngine(BacktestEngine):
             result["mean_distance_change_atr"] = np.nan
             result["mean_reversion_motion"] = "UNKNOWN"
         return result
+
+    def _build_result_row(self, p, row_kind, positions):
+        """Include all enhanced MR telemetry and simple confirmed aliases in trade_list.csv."""
+        row = super()._build_result_row(p, row_kind, positions)
+        fields = (
+            "mean_reversion_mean_type",
+            "mean_reversion_bb_stddevs",
+            "mean_reversion_rsi_period",
+            "mean_reversion_rsi_oversold",
+            "mean_reversion_rsi_overbought",
+            "mean_reversion_require_reentry",
+            "mean_reversion_bb_upper",
+            "mean_reversion_bb_lower",
+            "mean_reversion_bb_sigma",
+            "mean_reversion_bb_zscore",
+            "mean_reversion_bb_location",
+            "mean_reversion_rsi",
+            "mean_reversion_rsi_state",
+            "mean_reversion_long_reentry",
+            "mean_reversion_short_reentry",
+            "mean_reversion_reentry_confirmation",
+            "mean_reversion_signal",
+            "mean_reversion_signal_direction",
+            "mean_reversion_setup_strength",
+            "mean_reversion_distance_alignment",
+            "mean_reversion_signal_di_alignment",
+            "mean_reversion_signal_trade_alignment",
+            "bb_reentry",
+            "mr_signal",
+            "mr_signal_direction",
+            "mr_trade_alignment",
+        )
+        defaults = {
+            "mean_reversion_bb_location": "UNKNOWN",
+            "mean_reversion_rsi_state": "UNKNOWN",
+            "mean_reversion_reentry_confirmation": "NONE",
+            "mean_reversion_signal": "UNKNOWN",
+            "mean_reversion_signal_direction": "NONE",
+            "mean_reversion_setup_strength": "UNKNOWN",
+            "mean_reversion_distance_alignment": "UNKNOWN",
+            "mean_reversion_signal_di_alignment": "UNKNOWN",
+            "mean_reversion_signal_trade_alignment": "UNKNOWN",
+            "bb_reentry": "NONE",
+            "mr_signal": "NO_SIGNAL",
+            "mr_signal_direction": "NONE",
+            "mr_trade_alignment": "NO_SIGNAL",
+        }
+        for field in fields:
+            row[field] = getattr(p, field, defaults.get(field, np.nan))
+        return row
