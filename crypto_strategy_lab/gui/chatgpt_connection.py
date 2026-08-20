@@ -24,7 +24,7 @@ CREATE_NO_WINDOW = 0x08000000
 def configure_hidden_process(process: QProcess) -> None:
     """Best-effort suppression of a Windows console for a Qt child process.
 
-    Some PySide6 builds do not expose Qt's process-argument modifier.  Console
+    Some PySide6 builds do not expose Qt's process-argument modifier. Console
     suppression is optional in that case: the child must remain launchable and
     its Qt-managed output pipes must remain intact.
     """
@@ -76,6 +76,7 @@ def tunnel_environment(api_key: str, tunnel_id: str, endpoint: str) -> QProcessE
 class ChatGPTConnectionManager(QObject):
     """Own exactly the child processes started by this GUI."""
     state_changed = Signal(str, str, str)
+    diagnostic_changed = Signal(str)
     log_added = Signal(str)
     error = Signal(str)
 
@@ -88,9 +89,14 @@ class ChatGPTConnectionManager(QObject):
         self.tunnel.setProcessChannelMode(QProcess.MergedChannels)
         self.mcp.readyReadStandardOutput.connect(lambda: self._read(self.mcp, "MCP"))
         self.tunnel.readyReadStandardOutput.connect(lambda: self._read(self.tunnel, "TUNNEL"))
-        self.mcp.finished.connect(lambda *_: self._child_finished("MCP"))
-        self.tunnel.finished.connect(lambda *_: self._child_finished("Tunnel"))
+        self.mcp.started.connect(lambda: self._process_started("MCP", self.mcp))
+        self.tunnel.started.connect(lambda: self._process_started("TUNNEL", self.tunnel))
+        self.mcp.errorOccurred.connect(lambda err: self._process_error("MCP", self.mcp, err))
+        self.tunnel.errorOccurred.connect(lambda err: self._process_error("Tunnel", self.tunnel, err))
+        self.mcp.finished.connect(lambda code, status: self._child_finished("MCP", code, status))
+        self.tunnel.finished.connect(lambda code, status: self._child_finished("Tunnel", code, status))
         self.logs = deque(maxlen=2000); self.state = "Disconnected"
+        self.last_diagnostic = ""
         self.port = 8765; self._starting = False; self._stopping = False
         self._tunnel_ready = False
         self._mcp_started = False; self._tunnel_started = False; self._deadline = 0
@@ -106,12 +112,34 @@ class ChatGPTConnectionManager(QObject):
         for line in redact_secrets(str(message)).splitlines():
             entry = f"[{source}] {line}"; self.logs.append(entry); self.log_added.emit(entry)
 
+    def _set_diagnostic(self, message):
+        message = redact_secrets(str(message)).strip()
+        self.last_diagnostic = message
+        self.diagnostic_changed.emit(message)
+        if message:
+            self._log("ERROR", message)
+
     def _read(self, process, source):
         output = bytes(process.readAllStandardOutput()).decode(errors="replace")
         if source == "TUNNEL" and any(marker in output.lower() for marker in
                                       ("tunnel-client started", "tunnel client started", "tunnel connected")):
             self._tunnel_ready = True
         self._log(source, output)
+
+    def _process_started(self, name, process):
+        self._log(name, f"Process started (PID {process.processId()}).")
+
+    def _process_error(self, name, process, error):
+        detail = process.errorString() or str(error)
+        self._log(name.upper(), f"QProcess error {error}: {detail}")
+        if self._stopping:
+            return
+        self._starting = False
+        self.state = "Error"
+        message = f"{name} process error: {detail}"
+        self._set_diagnostic(message)
+        self.error.emit(message + "\n\nOpen Logs for the tunnel-client output and exit details.")
+        self._emit()
 
     def _reachable(self):
         try:
@@ -130,15 +158,17 @@ class ChatGPTConnectionManager(QObject):
         self.port = port
         if self._reachable():
             self.state = "Error"; self._log("GUI", f"MCP port {port} is already in use.")
+            self._set_diagnostic(f"MCP port {port} is already in use.")
             self.error.emit(f"MCP port {port} is already in use. The existing process was not changed."); self._emit(); return False
         self._path, self._tunnel_id, self._api_key = path, tunnel_id, api_key
         self._tunnel_ready = False
+        self.last_diagnostic = ""; self.diagnostic_changed.emit("")
         self._starting = True; self.state = "Starting MCP..."; self._deadline = 40
         env = QProcessEnvironment.systemEnvironment()
         env.insert("CRYPTO_STRATEGY_LAB_MCP_PORT", str(port))
         env.insert("CRYPTO_STRATEGY_LAB_OUTPUT_DIR", str(Path(self.output_dir()).resolve()))
         self.mcp.setProcessEnvironment(env); self._mcp_started = True
-        self._log("GUI", "Starting local MCP server.")
+        self._log("GUI", f"Starting local MCP server on 127.0.0.1:{port}.")
         self.mcp.start(sys.executable, ["-m", "mcp_server.server"]); self.monitor.start(); self._emit(); return True
 
     def _poll(self):
@@ -149,25 +179,41 @@ class ChatGPTConnectionManager(QObject):
                 self.state = "Starting Tunnel..."; self._deadline = 60; self._tunnel_started = True
                 endpoint = f"http://127.0.0.1:{self.port}/mcp"
                 self.tunnel.setProcessEnvironment(tunnel_environment(self._api_key, self._tunnel_id, endpoint))
-                self._log("GUI", "MCP is ready; starting secure tunnel.")
+                self._log("GUI", f"MCP is ready; starting secure tunnel for {endpoint}.")
                 self.tunnel.start(self._path, TUNNEL_ARGUMENTS)
             elif self.state == "Starting Tunnel..." and self.tunnel.state() == QProcess.Running and self._tunnel_ready:
                 self._starting = False; self.state = "Connected"; self._log("GUI", "ChatGPT connection is running.")
             elif self._deadline <= 0:
-                self._starting = False; self.state = "Error"; self._log("GUI", "Connection startup timed out.")
-                self.error.emit("ChatGPT connection startup timed out. Open Logs for details.")
-                self.stop()
+                self._starting = False; self.state = "Error"
+                message = "Connection startup timed out. The MCP or tunnel did not become ready in time."
+                self._set_diagnostic(message)
+                self.error.emit(message + "\n\nOpen Logs for details.")
+                self._emit()
         elif self.state == "Connected" and (not self._reachable() or self.tunnel.state() != QProcess.Running):
-            self.state = "Error"; self._log("GUI", "Connection health check failed.")
+            self.state = "Error"
+            message = "Connection health check failed: the MCP endpoint or secure tunnel stopped responding."
+            self._set_diagnostic(message)
         self._emit()
 
-    def _child_finished(self, name):
+    @staticmethod
+    def _exit_status_name(exit_status):
+        return "NormalExit" if exit_status == QProcess.NormalExit else "CrashExit"
+
+    def _child_finished(self, name, exit_code=0, exit_status=QProcess.NormalExit):
+        process = self.mcp if name == "MCP" else self.tunnel
+        self._read(process, name.upper())
+        status_name = self._exit_status_name(exit_status)
+        self._log("GUI", f"{name} process exited with code {exit_code} ({status_name}).")
         if name == "MCP":
             self._mcp_started = False
         elif name == "Tunnel":
             self._tunnel_started = False
         if not self._stopping and (self._starting or self.state == "Connected"):
-            self._starting = False; self.state = "Error"; self._log("GUI", f"{name} process exited unexpectedly."); self._emit()
+            self._starting = False; self.state = "Error"
+            message = f"{name} process exited with code {exit_code} ({status_name})."
+            self._set_diagnostic(message)
+            self.error.emit(message + "\n\nOpen Logs for the tunnel-client output immediately before the exit.")
+            self._emit()
 
     def _stop_owned_process(self, process, owned, name):
         """Stop one owned child, escalating only if graceful exit times out."""
@@ -198,14 +244,16 @@ class ChatGPTIntegrationWidget(QWidget):
         self.manager = ChatGPTConnectionManager(output_dir, self)
         self._build(); self._load()
         self.manager.state_changed.connect(self._status)
+        self.manager.diagnostic_changed.connect(self._diagnostic)
         self.manager.error.connect(lambda text: QMessageBox.warning(self, "ChatGPT Connection", text))
 
     def _build(self):
         outer = QVBoxLayout(self); title = QLabel("ChatGPT Integration"); title.setStyleSheet("font-size:20px;font-weight:600")
         outer.addWidget(title)
         connection = QGroupBox("Connection"); form = QFormLayout(connection)
-        self.connection_status=QLabel("● Disconnected"); self.mcp_status=QLabel("● Stopped"); self.tunnel_status=QLabel("● Stopped"); self.endpoint=QLabel()
-        form.addRow("Connection Status",self.connection_status); form.addRow("Local MCP Server",self.mcp_status); form.addRow("Secure Tunnel",self.tunnel_status); form.addRow("MCP Endpoint",self.endpoint)
+        self.connection_status=QLabel("● Disconnected"); self.mcp_status=QLabel("● Stopped"); self.tunnel_status=QLabel("● Stopped"); self.endpoint=QLabel(); self.last_error=QLabel("—")
+        self.last_error.setWordWrap(True)
+        form.addRow("Connection Status",self.connection_status); form.addRow("Local MCP Server",self.mcp_status); form.addRow("Secure Tunnel",self.tunnel_status); form.addRow("MCP Endpoint",self.endpoint); form.addRow("Last Connection Error",self.last_error)
         buttons=QHBoxLayout(); self.start_button=QPushButton("Start ChatGPT Connection"); self.stop_button=QPushButton("Stop Connection"); self.stop_button.setEnabled(False); buttons.addWidget(self.start_button); buttons.addWidget(self.stop_button); form.addRow(buttons)
         self.auto_start=QCheckBox("Start automatically with Crypto Strategy Lab"); form.addRow(self.auto_start); outer.addWidget(connection)
         config=QGroupBox("Configuration"); cf=QFormLayout(config)
@@ -269,11 +317,13 @@ class ChatGPTIntegrationWidget(QWidget):
     def shutdown(self):
         """Stop child processes owned by this integration widget."""
         self.manager.stop()
+    def _diagnostic(self,text):
+        self.last_error.setText(text or "—")
     def _status(self,state,mcp,tunnel):
         color="#16833b" if state=="Connected" else ("#b42318" if state=="Error" else "#666")
         self.connection_status.setText(f"● {state}"); self.connection_status.setStyleSheet(f"color:{color};font-weight:600")
         self.mcp_status.setText(f"● {mcp}"); self.tunnel_status.setText(f"● {tunnel}")
-        active=state in ("Starting MCP...","Starting Tunnel...","Connected","Stopping...")
+        active=state in ("Starting MCP...","Starting Tunnel...","Connected","Stopping...") or self.manager.owns_running_processes
         self.start_button.setEnabled(not active); self.start_button.setText("Connection Active" if state=="Connected" else "Start ChatGPT Connection"); self.stop_button.setEnabled(active and state!="Stopping...")
     def open_logs(self):
         dialog=QDialog(self); dialog.setWindowTitle("ChatGPT Connection Logs"); dialog.resize(800,450); layout=QVBoxLayout(dialog); edit=QPlainTextEdit(); edit.setReadOnly(True); edit.setMaximumBlockCount(2000); edit.setPlainText("\n".join(self.manager.logs)); layout.addWidget(edit); self.manager.log_added.connect(edit.appendPlainText); dialog.setAttribute(Qt.WA_DeleteOnClose); dialog.show(); self._log_dialog=dialog
