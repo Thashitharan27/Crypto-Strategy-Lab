@@ -4,22 +4,44 @@
 
 ## Scope
 
-This first stage deliberately does **not** alter entries, stops, targets, sizing, or Strategy Profile selection.
+This research layer deliberately does **not** alter entries, direction selection, stops, targets, sizing, Strategy Profile selection, or execution.
 
-It answers two questions:
+It answers three questions:
 
 1. Given the current broad market state, what state historically came next?
 2. How did actual backtest trades perform when grouped by **DI bucket × DI movement × volatility state**?
+3. How did LONG and SHORT trades perform when the last fully completed 20-day regime was BULL, BEAR, or SIDEWAYS?
 
 ## Broad market state
 
-The default state model mirrors the simple three-state approach:
+The default state model is:
 
 - `BULL`: trailing 20-day close return >= +5%
 - `SIDEWAYS`: trailing 20-day close return between -5% and +5%
 - `BEAR`: trailing 20-day close return <= -5%
+- `UNKNOWN`: the 20-day lookback is not available yet
 
-The output is a transition matrix with both probability and sample count. Rows whose current-state sample count is below the configured minimum are marked rather than silently trusted.
+The output transition matrix includes probability and sample count. Rows whose current-state sample count is below the configured minimum are marked rather than silently trusted.
+
+## Causal trade-state rule
+
+Every trade uses only the **last fully completed daily state before the trade entry**.
+
+A state dated `D` is considered available at `D + 1 day, 00:00 UTC`. A trade on day `D + 1` therefore cannot use the still-forming state for `D + 1`.
+
+The per-trade expected-next regime is also causal. Its transition probabilities are built only from regime transitions that were already observable by the completed state date used for that trade. Future transitions from the backtest sample are not allowed to leak into the trade row.
+
+## Trade alignment
+
+Alignment between the completed regime and the actual final trade direction is classified as:
+
+- `BULL + LONG` = `AGREE`
+- `BULL + SHORT` = `COUNTER`
+- `BEAR + SHORT` = `AGREE`
+- `BEAR + LONG` = `COUNTER`
+- `SIDEWAYS + LONG/SHORT` = `NEUTRAL`
+
+The same mapping is used for `research_regime_transition_agreement`, but against the causal expected-next regime instead of the current completed regime.
 
 ## Volatility state
 
@@ -61,7 +83,7 @@ Daily close, trailing return, broad regime, rolling volatility, and volatility s
 
 `state_transition_research/regime_transition_matrix.csv`
 
-Broad BULL/SIDEWAYS/BEAR transition probabilities and counts.
+Broad BULL/SIDEWAYS/BEAR transition probabilities and counts for the complete research sample.
 
 `state_transition_research/volatility_transition_matrix.csv`
 
@@ -75,6 +97,28 @@ Only the broad transition probabilities applicable to the most recent regime sta
 
 Trade count, wins, win rate, net R, average R, and minimum-sample flag for every observed DI bucket × DI movement × volatility state combination.
 
+`state_transition_research/regime_direction_trade_performance.csv`
+
+Six fixed rows: BULL/Bear/SIDEWAYS × LONG/SHORT. Each row contains trades, wins, losses, win rate, Net R, Avg R, and minimum-sample status. The regime assigned to each trade is the last fully completed daily regime before entry.
+
+`state_transition_research/regime_alignment_trade_performance.csv`
+
+AGREE, COUNTER, and NEUTRAL outcome summary with trades, wins, losses, win rate, Net R, Avg R, and minimum-sample status.
+
+## `trade_list.csv` research telemetry
+
+State-transition research runs overwrite the normal `trade_list.csv` export with the same trade rows plus these reporting-only fields:
+
+- `research_regime_state`
+- `research_regime_date`
+- `research_regime_return_20d`
+- `research_regime_trade_alignment`
+- `research_regime_expected_next_state`
+- `research_regime_expected_next_probability`
+- `research_regime_transition_agreement`
+
+The expected-next state and probability are calculated from transition history available at that time, not from future sample data.
+
 ## Example integration
 
 ```python
@@ -87,6 +131,4 @@ generate_state_transition_reports(data, trades, run_dir)
 
 ## Research rules
 
-Do not use the raw in-sample transition probabilities as a live entry filter. The next stage should evaluate them through walk-forward windows and verify that any proposed probability threshold improves out-of-sample expectancy with sufficient sample size.
-
-A future Stage 2 can add the GUI controls and automatic worker export after the research report contract is validated.
+These fields and reports are telemetry only. They must not be read by the entry engine or used to alter entry selection, trade direction, position sizing, TP, SL, or any other trading behavior unless a separate future strategy change is explicitly designed and walk-forward validated.
