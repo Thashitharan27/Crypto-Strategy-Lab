@@ -121,6 +121,34 @@ def test_clean_shutdown_allows_next_start_without_false_port_conflict(qapp,tmp_p
 
     replacement_mcp.start.assert_called_once()
 
+def test_tunnel_process_error_is_exposed_without_stopping_owned_mcp(qapp,tmp_path):
+    manager=ChatGPTConnectionManager(lambda:str(tmp_path))
+    manager._starting=True; manager._mcp_started=True; manager._tunnel_started=True
+    process=Mock(); process.errorString.return_value='another tunnel instance is already active'
+
+    with patch.object(manager,'_emit') as emit:
+        manager._process_error('Tunnel',process,QProcess.FailedToStart)
+
+    assert manager.state=='Error'
+    assert manager._starting is False
+    assert manager._mcp_started is True
+    assert 'another tunnel instance is already active' in manager.last_diagnostic
+    assert any('another tunnel instance is already active' in line for line in manager.logs)
+    emit.assert_called_once_with()
+
+def test_unexpected_tunnel_exit_records_exit_code_and_status(qapp,tmp_path):
+    manager=ChatGPTConnectionManager(lambda:str(tmp_path))
+    manager._starting=True; manager._mcp_started=True; manager._tunnel_started=True
+
+    with patch.object(manager,'_read'), patch.object(manager,'_emit'):
+        manager._child_finished('Tunnel',17,QProcess.CrashExit)
+
+    assert manager.state=='Error'
+    assert manager._tunnel_started is False
+    assert manager._mcp_started is True
+    assert 'code 17 (CrashExit)' in manager.last_diagnostic
+    assert any('code 17 (CrashExit)' in line for line in manager.logs)
+
 def test_api_key_is_not_a_settings_key(tmp_path):
     settings=QSettings(str(tmp_path/'settings.ini'),QSettings.IniFormat)
     for key,value in {'tunnel_client_path':'client.exe','tunnel_id':'tunnel_x','mcp_port':8765,'auto_start_chatgpt_connection':True}.items(): settings.setValue(key,value)
