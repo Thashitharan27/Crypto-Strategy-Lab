@@ -5,7 +5,14 @@ import traceback
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
-from crypto_strategy_lab.gui.sr_dynamic_tp_main_window import MainWindow
+from crypto_strategy_lab.gui import main_window as main_window_module
+from crypto_strategy_lab.gui.state_transition_worker import StateTransitionBacktestWorker
+
+# Keep the large existing MainWindow implementation untouched. Swap only the
+# worker class it instantiates so successful GUI backtests automatically write
+# research-only Markov/state-transition reports.
+main_window_module.BacktestWorker = StateTransitionBacktestWorker
+MainWindow = main_window_module.MainWindow
 
 
 def _splash_pixmap() -> QPixmap:
