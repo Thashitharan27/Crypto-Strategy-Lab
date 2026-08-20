@@ -1,4 +1,5 @@
 """GUI entry point for Crypto Strategy Lab."""
+import os
 import sys
 import traceback
 
@@ -21,6 +22,11 @@ def _splash_pixmap() -> QPixmap:
 
 
 def main() -> int:
+    # tunnel-client's health/admin listener defaults to 127.0.0.1:8080.
+    # Use an OS-assigned loopback port so Crypto Strategy Lab can run beside
+    # another tunnel-client instance without colliding on port 8080.
+    os.environ["HEALTH_LISTEN_ADDR"] = "127.0.0.1:0"
+
     app = QApplication(sys.argv)
     splash = QSplashScreen(_splash_pixmap(), Qt.WindowStaysOnTopHint)
     splash.showMessage("Loading settings...", Qt.AlignBottom | Qt.AlignHCenter,
