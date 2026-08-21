@@ -72,6 +72,7 @@ jobs:
           crypto_strategy_lab/features
           crypto_strategy_lab/data_lake_config.py
           crypto_strategy_lab/data_lake_engine.py
+          crypto_strategy_lab/data_lake_production_engine.py
           tools/data_lake_validate.py
           tools/data_lake_backtest_parity.py
           tools/data_lake_run.py
@@ -91,6 +92,7 @@ jobs:
           tests/test_feature_registry.py
           tests/test_core_directional_features.py
           tests/test_market_context_features.py
+          tests/test_support_resistance_features.py
           tests/test_feature_cache.py
           tests/test_binance_compact_adapters.py
           tests/test_data_lake_legacy_bridge.py
