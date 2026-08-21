@@ -99,8 +99,18 @@ class MarketDataStore:
             if column in frame.columns:
                 frame[column] = pd.to_datetime(frame[column], utc=True)
         sort_column = "event_time" if "event_time" in frame.columns else "period_start"
-        frame = frame.sort_values(sort_column, kind="stable")
-        subset = [column for column in ("symbol", "interval", sort_column) if column in frame.columns]
+
+        if "agg_trade_id" in frame.columns:
+            sort_columns = [sort_column, "agg_trade_id"]
+            subset = [column for column in ("symbol", "agg_trade_id") if column in frame.columns]
+        elif "trade_id" in frame.columns:
+            sort_columns = [sort_column, "trade_id"]
+            subset = [column for column in ("symbol", "trade_id") if column in frame.columns]
+        else:
+            sort_columns = [sort_column]
+            subset = [column for column in ("symbol", "interval", sort_column) if column in frame.columns]
+
+        frame = frame.sort_values(sort_columns, kind="stable")
         return frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
 
     def load_klines(self, request: DataRequest, interval: str | None = None) -> pd.DataFrame:
