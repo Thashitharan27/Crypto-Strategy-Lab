@@ -7,6 +7,11 @@ from .context import (
     MARKET_CONTEXT_FEATURE_VERSION,
     MarketContextFeatureProvider,
 )
+from .futures_positioning import (
+    FUTURES_POSITIONING_FEATURE_NAME,
+    FUTURES_POSITIONING_FEATURE_VERSION,
+    FuturesPositioningFeatureProvider,
+)
 from .registry import FeatureRegistry
 from .support_resistance import (
     SUPPORT_RESISTANCE_FEATURE_NAME,
@@ -39,4 +44,7 @@ __all__ = [
     "PreparedSupportResistanceContextReader",
     "SR_CONTEXT_FIELDS",
     "SupportResistanceFeatureProvider",
+    "FUTURES_POSITIONING_FEATURE_NAME",
+    "FUTURES_POSITIONING_FEATURE_VERSION",
+    "FuturesPositioningFeatureProvider",
 ]
