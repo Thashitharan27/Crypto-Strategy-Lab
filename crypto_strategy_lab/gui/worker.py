@@ -13,7 +13,7 @@ from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.loader import load_backtest_data
 from crypto_strategy_lab.plots import save_plots
 from crypto_strategy_lab.statistics import adx_analysis, bb_width_analysis, di_spread_analysis, di_pressure_analysis, mean_reversion_analysis, equity_curve, summarize
-from crypto_strategy_lab.telemetry import add_journey_columns, double_sl_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, trailing_profit_analysis, partial_take_profit_analysis
+from crypto_strategy_lab.telemetry import add_journey_columns, stop_loss_journey_analysis, save_journey_charts, trade_journey_analysis, winner_loser_journey_analysis, trailing_profit_analysis, partial_take_profit_analysis
 from crypto_strategy_lab.lifecycle import export_lifecycle_reports
 from crypto_strategy_lab.output_manager import create_run_dir, periodic_results, update_latest, write_config, write_run_info, write_trade_column_metadata
 from crypto_strategy_lab.report_workbooks import build_backtest_workbook, build_indicator_workbook, build_performance_breakdowns
@@ -253,7 +253,7 @@ class BacktestWorker(QObject):
                 if self.config.save_trade_journey_summary:
                     run_output_step("writing trade_journey_analysis.csv", lambda: trade_journey_analysis(trades).to_csv(run_dir / "trade_journey_analysis.csv", index=False))
                     run_output_step("writing winner_loser_journey_analysis.csv", lambda: winner_loser_journey_analysis(trades).to_csv(run_dir / "winner_loser_journey_analysis.csv", index=False))
-                    run_output_step("writing double_sl_journey_analysis.csv", lambda: double_sl_journey_analysis(trades, telemetry).to_csv(run_dir / "double_sl_journey_analysis.csv", index=False))
+                    run_output_step("writing stop_loss_journey_analysis.csv", lambda: stop_loss_journey_analysis(trades, telemetry).to_csv(run_dir / "stop_loss_journey_analysis.csv", index=False))
                 if self.config.enable_indicator_lifecycle_analysis:
                     def lifecycle_progress(label, current, total):
                         detail = f"{label} trade {current:,} of {total:,}" if total else label
