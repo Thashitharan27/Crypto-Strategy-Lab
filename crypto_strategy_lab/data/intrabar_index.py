@@ -7,8 +7,9 @@ The mature engine asks for intrabar rows with the idiom::
 On a multi-year 1m DataFrame that boolean expression scans every row for every
 strategy candle. ``SearchsortedIntrabarFrame`` preserves that public expression,
 but turns the paired timestamp predicates into positional ``searchsorted`` bounds.
-The resulting slice is a normal pandas DataFrame, so all downstream gap/exit
-logic remains untouched.
+The resulting slice is a DataFrame-compatible intrabar window whose ``iterrows``
+uses pandas' much lighter tuple iterator. The stateful simulator therefore keeps
+its existing row-by-row exit order without allocating a Series for every 1m bar.
 """
 from __future__ import annotations
 
@@ -95,10 +96,29 @@ class _TimestampAccessor:
         return getattr(self._series, name)
 
 
+class _IntrabarWindowFrame(pd.DataFrame):
+    """Internal engine window with Series-free row iteration.
+
+    ``BacktestEngine`` only reads row attributes (timestamp/open/high/low) from
+    these range slices. ``itertuples`` preserves those values and exact index
+    ordering while avoiding the much heavier Series construction performed by
+    pandas ``DataFrame.iterrows``.
+    """
+
+    @property
+    def _constructor(self):
+        # Keep ordinary pandas behavior for any secondary DataFrame operation.
+        return pd.DataFrame
+
+    def iterrows(self):
+        rows = pd.DataFrame.itertuples(self, index=False, name="IntrabarRow")
+        return zip(self.index, rows)
+
+
 class SearchsortedIntrabarFrame(pd.DataFrame):
     """DataFrame whose timestamp range masks use a pre-built DatetimeIndex."""
 
-    _metadata = ["_intrabar_timestamp_index", "intrabar_index_mode"]
+    _metadata = ["_intrabar_timestamp_index", "intrabar_index_mode", "intrabar_iteration_mode"]
 
     @property
     def _constructor(self):
@@ -120,6 +140,10 @@ class SearchsortedIntrabarFrame(pd.DataFrame):
             mask &= (series <= bounds.upper).to_numpy() if bounds.upper_inclusive else (series < bounds.upper).to_numpy()
         return mask
 
+    @staticmethod
+    def _engine_window(frame) -> _IntrabarWindowFrame:
+        return _IntrabarWindowFrame(frame, copy=False)
+
     def __getitem__(self, key):
         if isinstance(key, _TimestampRange) and key.owner_id == id(self):
             index = getattr(self, "_intrabar_timestamp_index", None)
@@ -130,12 +154,9 @@ class SearchsortedIntrabarFrame(pd.DataFrame):
                     left = int(index.searchsorted(key.lower, side="left" if key.lower_inclusive else "right"))
                 if key.upper is not None:
                     right = int(index.searchsorted(key.upper, side="right" if key.upper_inclusive else "left"))
-                # Return an ordinary DataFrame so all mature gap/exit code sees
-                # exactly the same object shape it saw before this optimization.
-                return pd.DataFrame(self.iloc[left:right], copy=False)
-            return pd.DataFrame(
-                pd.DataFrame.__getitem__(self, self._boolean_mask_for_range(key)),
-                copy=False,
+                return self._engine_window(self.iloc[left:right])
+            return self._engine_window(
+                pd.DataFrame.__getitem__(self, self._boolean_mask_for_range(key))
             )
         return pd.DataFrame.__getitem__(self, key)
 
@@ -156,4 +177,5 @@ def as_searchsorted_intrabar(frame: pd.DataFrame | None) -> pd.DataFrame | None:
         if not timestamps.hasnans and timestamps.is_monotonic_increasing
         else "boolean_fallback"
     )
+    wrapped.intrabar_iteration_mode = "itertuples"
     return wrapped
