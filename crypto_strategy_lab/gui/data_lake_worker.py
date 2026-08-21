@@ -123,6 +123,15 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 )
             elif self.config.enable_support_resistance_analysis:
                 self._log("S/R: higher-timeframe mature engine path (prepared HTF provider pending)")
+            if bundle.research_features:
+                labels = [
+                    f"{name}@{frame.attrs.get('feature_version')} "
+                    f"(cache={'hit' if frame.attrs.get('feature_cache_hit') else 'miss'})"
+                    for name, frame in sorted(bundle.research_features.items())
+                ]
+                self._log("Futures research: " + ", ".join(labels))
+            else:
+                self._log("Futures research: no local metrics/funding coverage for this request")
             if bundle.structural_benchmark is not None:
                 self._log(
                     f"Structural benchmark: {bundle.structural_benchmark_symbol} "
@@ -139,6 +148,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         technical_features = bundle.technical_features
         context_features = bundle.context_features
         sr_features = bundle.support_resistance_features
+        research_features = bundle.research_features
 
         def prepared_loader(_config, _strategy_data=None):
             return bundle.strategy, bundle.intrabar
@@ -149,6 +159,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 kwargs["technical_features"] = technical_features
                 kwargs["context_features"] = context_features
                 kwargs["support_resistance_features"] = sr_features
+                kwargs["research_features"] = research_features
                 super().__init__(*args, **kwargs)
 
         worker_module.load_backtest_data = prepared_loader
@@ -197,6 +208,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "context_feature_version": context.attrs.get("feature_version"),
                     "support_resistance_feature_name": sr.attrs.get("feature_name") if sr is not None else None,
                     "support_resistance_feature_version": sr.attrs.get("feature_version") if sr is not None else None,
+                    "research_feature_names": sorted(bundle.research_features),
                 }
             )
             (run_dir / "summary.json").write_text(
@@ -235,6 +247,10 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "core_directional": directional_manifest,
                     "market_context": context_manifest,
                     "support_resistance": self._feature_manifest(sr),
+                    "research": {
+                        name: self._feature_manifest(frame)
+                        for name, frame in sorted(bundle.research_features.items())
+                    },
                 },
                 "production_engine": "DataLakeProductionBacktestEngine",
                 "structural_benchmark_symbol": bundle.structural_benchmark_symbol,
