@@ -180,7 +180,7 @@ class MainWindow(StateTransitionMainWindow):
             symbol=symbol,
             interval=normalize_binance_interval(interval),
         )
-        if coverage.archive_count <= 0 or coverage.start is None or coverage.end is None:
+        if coverage.archive_count <= 0 or coverage.first_period is None or coverage.last_period is None:
             raise ValueError(f"No Binance Data Lake kline coverage for {symbol} {interval}")
         return coverage
 
@@ -212,14 +212,14 @@ class MainWindow(StateTransitionMainWindow):
                 else None
             )
             strategy_coverage = self._coverage(store, symbol, strategy_interval)
-            trade_coverage_start = _utc_timestamp(strategy_coverage.start)
-            trade_coverage_end = _utc_timestamp(strategy_coverage.end)
+            trade_coverage_start = _utc_timestamp(strategy_coverage.first_period)
+            trade_coverage_end = _utc_timestamp(strategy_coverage.last_period)
 
             intrabar_coverage = None
             if intrabar_interval:
                 intrabar_coverage = self._coverage(store, symbol, intrabar_interval)
-                trade_coverage_start = max(trade_coverage_start, _utc_timestamp(intrabar_coverage.start))
-                trade_coverage_end = min(trade_coverage_end, _utc_timestamp(intrabar_coverage.end))
+                trade_coverage_start = max(trade_coverage_start, _utc_timestamp(intrabar_coverage.first_period))
+                trade_coverage_end = min(trade_coverage_end, _utc_timestamp(intrabar_coverage.last_period))
                 if trade_coverage_start >= trade_coverage_end:
                     raise ValueError(
                         f"{symbol} {strategy_interval} and {intrabar_interval} coverage do not overlap"
@@ -248,7 +248,7 @@ class MainWindow(StateTransitionMainWindow):
                 )
 
             request_start = max(
-                _utc_timestamp(strategy_coverage.start),
+                _utc_timestamp(strategy_coverage.first_period),
                 trade_start - strategy_warmup_period(normalized_config),
             )
             request_end = trade_end
@@ -268,11 +268,11 @@ class MainWindow(StateTransitionMainWindow):
 
             lines = [
                 f"Pair: {symbol}",
-                f"Strategy coverage ({strategy_interval}): {strategy_coverage.start} to {strategy_coverage.end}",
+                f"Strategy coverage ({strategy_interval}): {strategy_coverage.first_period} to {strategy_coverage.last_period}",
             ]
             if intrabar_coverage is not None:
                 lines.append(
-                    f"Intrabar coverage ({intrabar_interval}): {intrabar_coverage.start} to {intrabar_coverage.end}"
+                    f"Intrabar coverage ({intrabar_interval}): {intrabar_coverage.first_period} to {intrabar_coverage.last_period}"
                 )
             lines.extend(
                 [
