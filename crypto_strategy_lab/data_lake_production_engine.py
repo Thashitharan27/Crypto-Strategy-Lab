@@ -12,12 +12,14 @@ import numpy as np
 import pandas as pd
 
 import crypto_strategy_lab.enhanced_engine as enhanced_engine_module
+from crypto_strategy_lab.config import IntrabarMissingPolicy
 from crypto_strategy_lab.data_lake_engine import DataLakeBacktestEngine
 from crypto_strategy_lab.features.support_resistance import (
     PreparedSupportResistanceContextReader,
     SR_CONTEXT_FIELDS,
 )
 from crypto_strategy_lab.sr_dynamic_tp_engine import SRDynamicTPBacktestEngine
+from crypto_strategy_lab.trade import ExitSource
 
 
 _REQUIRED_SR_COLUMNS = {
@@ -235,6 +237,96 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         return SRDynamicTPBacktestEngine._mean_reversion_snapshot(
             self, i, di_direction, trade_direction
         )
+
+    def _scan_pair_exit(self, pair, i):
+        """Use array-backed intrabar windows while preserving mature exit ordering."""
+        if not self.config.use_intrabar_data or self.intrabar_data is None:
+            return super()._scan_pair_exit(pair, i)
+        fast_window = getattr(self.intrabar_data, "fast_window", None)
+        if not callable(fast_window):
+            return super()._scan_pair_exit(pair, i)
+
+        start = max(pd.Timestamp(pair.strategy_entry_time), pd.Timestamp(self.times[i]))
+        end = pd.Timestamp(self.times[i]) + self.entry_delta
+        expected = pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
+        if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
+            for pos in pair.positions():
+                if pos.exit_time is None:
+                    self._fallback_exit(pos, i, "timestamp_alignment_failure")
+            return
+
+        window = fast_window(start, end)
+        if window is None:
+            return super()._scan_pair_exit(pair, i)
+
+        gaps = window.gap_pairs(expected)
+        if gaps:
+            for previous, current in gaps:
+                self.missing_intrabar_intervals.append((previous, current))
+                print(f"WARNING: Missing intrabar data {previous} to {current}")
+
+        incomplete = (
+            window.empty
+            or window.first_timestamp > start + expected
+            or bool(gaps)
+        )
+        positions = pair.positions()
+        if incomplete:
+            reason = "no_overlapping_intrabar_rows" if window.empty else "intrabar_gap"
+            for pos in positions:
+                if pos.exit_time is None:
+                    pos.missing_intrabar_data = True
+            if self.config.intrabar_missing_policy == IntrabarMissingPolicy.ERROR:
+                raise ValueError(
+                    f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade"
+                )
+            if self.config.intrabar_missing_policy == IntrabarMissingPolicy.WARN_AND_USE_15M:
+                for pos in positions:
+                    if pos.exit_time is None:
+                        self._fallback_exit(pos, i, reason)
+                return
+            if window.empty:
+                return
+
+        # ``positions`` is stable for the lifetime of a TradePair scan; the
+        # Position objects mutate in place as exits occur. The previous code
+        # rebuilt this same tuple multiple times per minute and also built
+        # before/after is_open tuples whose branch body was a no-op.
+        for j, timestamp, raw_open, high, low in window.rows():
+            if self._maybe_timeout_pair_at(
+                pair,
+                j,
+                timestamp,
+                raw_open,
+                ExitSource.INTRABAR,
+            ):
+                break
+            for pos in positions:
+                if pos.exit_time is not None:
+                    continue
+                if pos.be_active_after is not None and timestamp < pd.Timestamp(pos.be_active_after):
+                    continue
+                self._maybe_exit_bar(
+                    pos,
+                    j,
+                    high,
+                    low,
+                    timestamp,
+                    ExitSource.INTRABAR,
+                )
+
+        if self.intrabar_data.timestamp.max() < end - expected:
+            for pos in positions:
+                if pos.exit_time is None:
+                    pos.missing_intrabar_data = True
+            if self.config.intrabar_missing_policy == IntrabarMissingPolicy.ERROR:
+                raise ValueError(
+                    f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade"
+                )
+            if self.config.intrabar_missing_policy == IntrabarMissingPolicy.WARN_AND_USE_15M:
+                for pos in positions:
+                    if pos.exit_time is None:
+                        self._fallback_exit(pos, i, "end_of_intrabar_data")
 
     def _configure_support_resistance_feature(
         self,
