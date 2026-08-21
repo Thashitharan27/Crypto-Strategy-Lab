@@ -19,7 +19,7 @@ from crypto_strategy_lab.features.support_resistance import (
     SR_CONTEXT_FIELDS,
 )
 from crypto_strategy_lab.sr_dynamic_tp_engine import SRDynamicTPBacktestEngine
-from crypto_strategy_lab.trade import ExitSource
+from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
 
 
 _REQUIRED_SR_COLUMNS = {
@@ -238,21 +238,45 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             self, i, di_direction, trade_direction
         )
 
+    def _update_positions_to_strategy_index(self, i):
+        """Advance each active directional trade without rebuilding a pair tuple."""
+        for pair in self.active_pairs:
+            position = pair.position
+            if i > position.entry_index:
+                self._scan_position_exit(pair, position, i)
+
     def _scan_pair_exit(self, pair, i):
-        """Use array-backed intrabar windows while preserving mature exit ordering."""
+        """Compatibility entry point for callers that still name a trade as a pair."""
+        return self._scan_position_exit(pair, pair.position, i)
+
+    def _scan_position_exit(self, pair, position, i):
+        """Use the single supported Position on the array-backed Data Lake path."""
         if not self.config.use_intrabar_data or self.intrabar_data is None:
-            return super()._scan_pair_exit(pair, i)
+            if self._maybe_timeout_position_at(
+                pair,
+                position,
+                i,
+                pd.Timestamp(self.times[i]),
+                float(self.open[i]),
+                ExitSource.FALLBACK_15M,
+            ):
+                return
+            if position.is_open:
+                self._scan_exit(position, i)
+            return
+
         fast_window = getattr(self.intrabar_data, "fast_window", None)
         if not callable(fast_window):
+            # Compatibility fallback for callers that supplied a plain DataFrame
+            # instead of the Data Lake searchsorted wrapper.
             return super()._scan_pair_exit(pair, i)
 
         start = max(pd.Timestamp(pair.strategy_entry_time), pd.Timestamp(self.times[i]))
         end = pd.Timestamp(self.times[i]) + self.entry_delta
         expected = pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
         if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
-            for pos in pair.positions():
-                if pos.exit_time is None:
-                    self._fallback_exit(pos, i, "timestamp_alignment_failure")
+            if position.is_open:
+                self._fallback_exit(position, i, "timestamp_alignment_failure")
             return
 
         window = fast_window(start, end)
@@ -270,63 +294,81 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             or window.first_timestamp > start + expected
             or bool(gaps)
         )
-        positions = pair.positions()
         if incomplete:
             reason = "no_overlapping_intrabar_rows" if window.empty else "intrabar_gap"
-            for pos in positions:
-                if pos.exit_time is None:
-                    pos.missing_intrabar_data = True
+            if position.is_open:
+                position.missing_intrabar_data = True
             if self.config.intrabar_missing_policy == IntrabarMissingPolicy.ERROR:
                 raise ValueError(
                     f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade"
                 )
             if self.config.intrabar_missing_policy == IntrabarMissingPolicy.WARN_AND_USE_15M:
-                for pos in positions:
-                    if pos.exit_time is None:
-                        self._fallback_exit(pos, i, reason)
+                if position.is_open:
+                    self._fallback_exit(position, i, reason)
                 return
             if window.empty:
                 return
 
-        # ``positions`` is stable for the lifetime of a TradePair scan; the
-        # Position objects mutate in place as exits occur. The previous code
-        # rebuilt this same tuple multiple times per minute and also built
-        # before/after is_open tuples whose branch body was a no-op.
         for j, timestamp, raw_open, high, low in window.rows():
-            if self._maybe_timeout_pair_at(
+            if self._maybe_timeout_position_at(
                 pair,
+                position,
                 j,
                 timestamp,
                 raw_open,
                 ExitSource.INTRABAR,
             ):
                 break
-            for pos in positions:
-                if pos.exit_time is not None:
-                    continue
-                if pos.be_active_after is not None and timestamp < pd.Timestamp(pos.be_active_after):
-                    continue
-                self._maybe_exit_bar(
-                    pos,
-                    j,
-                    high,
-                    low,
-                    timestamp,
-                    ExitSource.INTRABAR,
-                )
+            if not position.is_open:
+                break
+            if position.be_active_after is not None and timestamp < pd.Timestamp(position.be_active_after):
+                continue
+            self._maybe_exit_bar(
+                position,
+                j,
+                high,
+                low,
+                timestamp,
+                ExitSource.INTRABAR,
+            )
 
         if self.intrabar_data.timestamp.max() < end - expected:
-            for pos in positions:
-                if pos.exit_time is None:
-                    pos.missing_intrabar_data = True
+            if position.is_open:
+                position.missing_intrabar_data = True
             if self.config.intrabar_missing_policy == IntrabarMissingPolicy.ERROR:
                 raise ValueError(
                     f"Missing {self.config.intrabar_timeframe_minutes}-minute intrabar candles during open trade"
                 )
             if self.config.intrabar_missing_policy == IntrabarMissingPolicy.WARN_AND_USE_15M:
-                for pos in positions:
-                    if pos.exit_time is None:
-                        self._fallback_exit(pos, i, "end_of_intrabar_data")
+                if position.is_open:
+                    self._fallback_exit(position, i, "end_of_intrabar_data")
+
+    def _maybe_timeout_position_at(self, pair, position, i, timestamp, raw_open, source):
+        """Apply Strategy Profile timeout to the one supported directional position."""
+        if not getattr(pair, "profile_timeout_enabled", False):
+            return False
+        minutes = getattr(pair, "profile_timeout_minutes", None)
+        if minutes is None:
+            return False
+        timeout_at = pd.Timestamp(pair.strategy_entry_time) + pd.Timedelta(minutes=minutes)
+        timestamp = pd.Timestamp(timestamp)
+        if timestamp < timeout_at:
+            return False
+        if position.is_open:
+            slip = 1-self.config.slippage if position.side == Side.LONG else 1+self.config.slippage
+            self._close_position(
+                position,
+                i,
+                float(raw_open)*slip,
+                ExitReason.BOTH_OPEN_TIMEOUT,
+                source,
+                timestamp,
+            )
+        pair.profile_timeout_triggered = True
+        pair.timeout_minutes = int(minutes)
+        pair.timeout_exit_time = timestamp
+        self.last_timeout_exit_time = timestamp
+        return True
 
     def _configure_support_resistance_feature(
         self,
