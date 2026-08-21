@@ -34,6 +34,8 @@ jobs:
           pip install pytest
       - name: Compile source
         run: python -m compileall -q crypto_strategy_lab mcp_server tools app.py
+      - name: Smoke direct parity-tool launch
+        run: python tools/data_lake_backtest_parity.py --help
       - name: Run strategy-profile safety tests
         env:
           QT_QPA_PLATFORM: offscreen
@@ -64,6 +66,8 @@ jobs:
           pip install numpy pandas duckdb pytest
       - name: Compile data layer and migration tools
         run: python -m compileall -q crypto_strategy_lab/data crypto_strategy_lab/features tools/data_lake_validate.py tools/data_lake_backtest_parity.py
+      - name: Smoke direct validator launch
+        run: python tools/data_lake_validate.py --help
       - name: Run Data Lake v2 safety tests
         env:
           PYTHONPATH: ${{ github.workspace }}
