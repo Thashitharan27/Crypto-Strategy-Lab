@@ -106,6 +106,7 @@ def main() -> int:
         technical_features=bundle.technical_features,
         context_features=bundle.context_features,
         support_resistance_features=bundle.support_resistance_features,
+        research_features=bundle.research_features,
     )
     trades = engine.run()
 
@@ -145,6 +146,10 @@ def main() -> int:
             "core_directional": directional_manifest,
             "market_context": context_manifest,
             "support_resistance": _feature_manifest(bundle.support_resistance_features),
+            "research": {
+                name: _feature_manifest(frame)
+                for name, frame in sorted(bundle.research_features.items())
+            },
         },
         "structural_benchmark_symbol": bundle.structural_benchmark_symbol,
         "structural_benchmark_interval": bundle.structural_benchmark_interval,
