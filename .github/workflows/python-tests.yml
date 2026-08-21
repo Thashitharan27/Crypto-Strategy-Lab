@@ -79,6 +79,7 @@ jobs:
           tools/data_lake_run.py
           tools/data_lake_benchmark.py
           tools/data_lake_profile.py
+          tools/data_lake_preparation_profile.py
           tools/rewrite_config_current.py
       - name: Smoke direct Data Lake tools
         run: |
@@ -86,6 +87,7 @@ jobs:
           python tools/data_lake_run.py --help
           python tools/data_lake_benchmark.py --help
           python tools/data_lake_profile.py --help
+          python tools/data_lake_preparation_profile.py --help
           python tools/rewrite_config_current.py --help
       - name: Run Data Lake v2 safety tests
         env:
@@ -116,6 +118,7 @@ jobs:
           tests/test_single_position_data_lake_exits.py
           tests/test_data_lake_benchmark.py
           tests/test_data_lake_profile.py
+          tests/test_data_lake_preparation_profile.py
           tests/test_data_lake_config.py
           tests/test_rewrite_config_current.py
 
