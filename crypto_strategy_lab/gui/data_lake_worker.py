@@ -81,6 +81,11 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             bb_period=self.config.bb_period,
             bb_stddevs=self.config.bb_stddevs,
             mean_reversion_period=self.config.mean_reversion_period,
+            mean_reversion_mean_type=getattr(self.config, "mean_reversion_mean_type", "SMA"),
+            mean_reversion_bb_stddevs=getattr(self.config, "mean_reversion_bb_stddevs", 2.0),
+            mean_reversion_rsi_period=getattr(self.config, "mean_reversion_rsi_period", 14),
+            mean_reversion_rsi_oversold=getattr(self.config, "mean_reversion_rsi_oversold", 30.0),
+            mean_reversion_rsi_overbought=getattr(self.config, "mean_reversion_rsi_overbought", 70.0),
             enable_support_resistance_analysis=self.config.enable_support_resistance_analysis,
             sr_timeframe_minutes=int(getattr(self.config, "sr_timeframe_minutes", 0) or 0),
             sr_pivot_left=self.config.sr_pivot_left,
@@ -230,6 +235,11 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 bb_period=context.attrs.get("bb_period"),
                 bb_stddevs=context.attrs.get("bb_stddevs"),
                 mean_reversion_period=context.attrs.get("mean_reversion_period"),
+                mean_reversion_mean_type=context.attrs.get("mean_reversion_mean_type"),
+                mean_reversion_bb_stddevs=context.attrs.get("mean_reversion_bb_stddevs"),
+                mean_reversion_rsi_period=context.attrs.get("mean_reversion_rsi_period"),
+                mean_reversion_rsi_oversold=context.attrs.get("mean_reversion_rsi_oversold"),
+                mean_reversion_rsi_overbought=context.attrs.get("mean_reversion_rsi_overbought"),
             )
             manifest = {
                 "data_source": "binance_data_lake_v2",
@@ -253,7 +263,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 "intrabar_rows": len(bundle.intrabar) if bundle.intrabar is not None else 0,
                 "features": {
                     "core_directional": directional_manifest,
-                    "market_context": context_manifest,
+                    "production_market_context": context_manifest,
                     "support_resistance": self._feature_manifest(sr),
                     "research": {
                         name: self._feature_manifest(frame)
