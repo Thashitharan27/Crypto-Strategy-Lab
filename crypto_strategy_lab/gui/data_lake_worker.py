@@ -1,11 +1,9 @@
-"""GUI worker adapter for Data Lake v2 market data.
+"""GUI worker adapter for Data Lake v2 market data and prepared features.
 
-The reporting/output pipeline in :mod:`crypto_strategy_lab.gui.worker` is still
-valuable and intentionally remains unchanged during the data migration.  This
-adapter prepares all market data through ``MarketDataStore`` and binds the
-forward ``DataLakeBacktestEngine`` for the duration of one worker run.
-
-No CSV market-data filename is resolved by this module.
+The reporting/output pipeline in :mod:`crypto_strategy_lab.gui.worker` remains
+valuable during migration. This adapter prepares market data and causal features
+through the Data Lake, then binds the forward ``DataLakeBacktestEngine`` for one
+worker run. No CSV market-data filename is resolved by this module.
 """
 from __future__ import annotations
 
@@ -49,14 +47,14 @@ class DataLakeGuiRunSpec:
 
 
 class DataLakeGuiBacktestWorker(BacktestWorker):
-    """Existing GUI/report worker with all market data supplied by Data Lake v2."""
+    """Existing GUI/report worker with Data Lake market data and feature inputs."""
 
     def __init__(self, config, run_spec: DataLakeGuiRunSpec):
         super().__init__(config, strategy_data=None)
         self.run_spec = run_spec
         self.data_bundle: BacktestDataBundle | None = None
-        # This connection is installed before MainWindow connects its completion
-        # handler, so research/manifest files normally exist when the GUI refreshes.
+        # Installed before MainWindow attaches its completion handler, so the
+        # manifest/research files normally exist when the GUI refreshes.
         self.finished.connect(self._write_data_lake_metadata_and_research)
 
     def _prepare_bundle(self) -> BacktestDataBundle:
@@ -82,6 +80,9 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             structural_regime_slope_lookback_days=self.config.structural_regime_slope_lookback_days,
             refresh_catalog=self.run_spec.refresh_catalog,
             intrabar_start=self.run_spec.intrabar_start,
+            atr_period=self.config.atr_period,
+            adx_period=self.config.adx_period,
+            di_pressure_lookback=self.config.di_pressure_lookback,
         )
 
     @Slot()
@@ -98,6 +99,13 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 f"intrabar={bundle.request.intrabar_interval or 'disabled'} "
                 f"({len(bundle.intrabar) if bundle.intrabar is not None else 0:,} rows)"
             )
+            self._log(
+                "Prepared technical features: "
+                f"{bundle.technical_features.attrs.get('feature_name', 'core_directional')}@"
+                f"{bundle.technical_features.attrs.get('feature_version', 'unknown')} | "
+                f"ATR({self.config.atr_period}) ADX/DI({self.config.adx_period}) "
+                f"DI pressure lookback={self.config.di_pressure_lookback}"
+            )
             if bundle.structural_benchmark is not None:
                 self._log(
                     f"Structural benchmark: {bundle.structural_benchmark_symbol} "
@@ -110,10 +118,11 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
 
         # BacktestWorker still calls module-level loader/engine hooks. Binding
         # these only for this worker execution lets us reuse its reporting logic
-        # without adding any legacy filename behavior to the Data Lake contract.
+        # while the large legacy worker is progressively decomposed.
         original_loader = worker_module.load_backtest_data
         original_engine = worker_module.BacktestEngine
         benchmark = bundle.structural_benchmark
+        technical_features = bundle.technical_features
 
         def prepared_loader(_config, _strategy_data=None):
             return bundle.strategy, bundle.intrabar
@@ -121,6 +130,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         class BoundDataLakeEngine(DataLakeBacktestEngine):
             def __init__(self, *args, **kwargs):
                 kwargs["structural_benchmark"] = benchmark
+                kwargs["technical_features"] = technical_features
                 super().__init__(*args, **kwargs)
 
         worker_module.load_backtest_data = prepared_loader
@@ -138,6 +148,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         run_dir = Path(run_dir)
         bundle = self.data_bundle
         request = bundle.request
+        features = bundle.technical_features
         try:
             summary.update(
                 {
@@ -147,6 +158,8 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "intrabar_interval": request.intrabar_interval,
                     "data_request_start": request.start.isoformat(),
                     "data_request_end": request.end.isoformat(),
+                    "technical_feature_name": features.attrs.get("feature_name"),
+                    "technical_feature_version": features.attrs.get("feature_version"),
                 }
             )
             (run_dir / "summary.json").write_text(
@@ -170,6 +183,15 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 },
                 "strategy_rows": len(bundle.strategy),
                 "intrabar_rows": len(bundle.intrabar) if bundle.intrabar is not None else 0,
+                "technical_features": {
+                    "name": features.attrs.get("feature_name"),
+                    "version": features.attrs.get("feature_version"),
+                    "rows": len(features),
+                    "atr_period": features.attrs.get("atr_period"),
+                    "adx_period": features.attrs.get("adx_period"),
+                    "di_pressure_lookback": features.attrs.get("di_pressure_lookback"),
+                    "effective_warmup_bars": features.attrs.get("effective_warmup_bars"),
+                },
                 "structural_benchmark_symbol": bundle.structural_benchmark_symbol,
                 "structural_benchmark_interval": bundle.structural_benchmark_interval,
                 "benchmark_rows": (
@@ -185,6 +207,6 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             generate_state_transition_reports(bundle.strategy, trades, run_dir)
             self._log("Data Lake manifest and state-transition research reports saved")
         except Exception as exc:
-            # The core backtest has already completed.  Ancillary metadata must
+            # The core backtest has already completed. Ancillary metadata must
             # never turn a valid run into a failed run.
             self._log(f"WARNING: Data Lake post-run metadata/research failed: {exc}")
