@@ -6,7 +6,7 @@ The existing BacktestEngine and strategy configuration are intentionally reused.
 
 Example:
     python tools/data_lake_backtest_parity.py \
-      --config "config/my_run.json" \
+      --config "output/my_run/config.json" \
       --raw-root "C:\\CryptoBots\\Binance Market Data" \
       --symbol BTCUSDT
 """
@@ -37,19 +37,50 @@ from crypto_strategy_lab.data.legacy_bridge import (
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.gui.config_logic import build_backtest_config, load_config_json
 from crypto_strategy_lab.loader import load_backtest_data
+from crypto_strategy_lab.output_manager import load_config_snapshot
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Compare the current CSV backtest with Data Lake v2 using the same engine/config"
     )
-    parser.add_argument("--config", required=True, type=Path, help="Existing GUI configuration JSON")
+    parser.add_argument(
+        "--config",
+        required=True,
+        type=Path,
+        help="Current GUI config JSON or a saved output/<run>/config.json snapshot",
+    )
     parser.add_argument("--raw-root", required=True, type=Path)
     parser.add_argument("--cache-root", type=Path, default=Path("cache"))
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--tolerance", type=float, default=1e-10)
     parser.add_argument("--output", type=Path, default=Path("data_lake_backtest_parity.json"))
     return parser
+
+
+def _load_parity_config(path: Path):
+    """Load either the current GUI schema or an older saved run snapshot."""
+
+    try:
+        config = build_backtest_config(load_config_json(path), require_paths=True)
+        print(f"Config source: current GUI config ({path})")
+        return config, ()
+    except ValueError as gui_error:
+        try:
+            config, ignored = load_config_snapshot(path, require_paths=True)
+        except Exception as snapshot_error:
+            raise ValueError(
+                "Could not load config as either a current GUI config or a saved run snapshot.\n"
+                f"GUI config error: {gui_error}\n"
+                f"Saved run snapshot error: {snapshot_error}"
+            ) from snapshot_error
+        print(f"Config source: saved run snapshot ({path})")
+        if ignored:
+            print(
+                "Ignored retired snapshot fields that no longer exist in the current engine: "
+                + ", ".join(ignored)
+            )
+        return config, ignored
 
 
 def _window_intrabar(frame: pd.DataFrame | None, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame | None:
@@ -61,7 +92,7 @@ def _window_intrabar(frame: pd.DataFrame | None, start: pd.Timestamp, end: pd.Ti
 
 def main() -> int:
     args = build_parser().parse_args()
-    config = build_backtest_config(load_config_json(args.config), require_paths=True)
+    config, ignored_config_fields = _load_parity_config(args.config)
 
     # Legacy path is the known-good reference for this migration gate.
     legacy_strategy, legacy_intrabar = load_backtest_data(config)
@@ -105,6 +136,8 @@ def main() -> int:
         intrabar_parity = None
 
     report: dict[str, object] = {
+        "config_path": str(args.config),
+        "ignored_retired_config_fields": list(ignored_config_fields),
         "cataloged_archives": archives,
         "symbol": request.symbol,
         "start": request.start.isoformat(),
