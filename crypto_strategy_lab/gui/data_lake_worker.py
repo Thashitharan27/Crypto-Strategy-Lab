@@ -15,7 +15,7 @@ from PySide6.QtCore import Slot
 
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
-from crypto_strategy_lab.data_lake_engine import DataLakeBacktestEngine
+from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.state_transition_research import generate_state_transition_reports
 from crypto_strategy_lab.gui import worker as worker_module
 from crypto_strategy_lab.gui.worker import BacktestWorker
@@ -80,6 +80,18 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             bb_period=self.config.bb_period,
             bb_stddevs=self.config.bb_stddevs,
             mean_reversion_period=self.config.mean_reversion_period,
+            enable_support_resistance_analysis=self.config.enable_support_resistance_analysis,
+            sr_timeframe_minutes=int(getattr(self.config, "sr_timeframe_minutes", 0) or 0),
+            sr_pivot_left=self.config.sr_pivot_left,
+            sr_pivot_right=self.config.sr_pivot_right,
+            sr_lookback_bars=self.config.sr_lookback_bars,
+            sr_zone_width_atr=self.config.sr_zone_width_atr,
+            sr_near_distance_atr=self.config.sr_near_distance_atr,
+            enable_sr_hold_confirmation=self.config.enable_sr_hold_confirmation,
+            sr_hold_confirmation_bars=self.config.sr_hold_confirmation_bars,
+            sr_hold_confirmation_atr=self.config.sr_hold_confirmation_atr,
+            sr_break_tolerance_atr=self.config.sr_break_tolerance_atr,
+            sr_break_basis=self.config.sr_break_basis,
         )
 
     @Slot()
@@ -90,6 +102,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             bundle = self.data_bundle
             directional = bundle.technical_features
             context = bundle.context_features
+            sr = bundle.support_resistance_features
             self._log(
                 f"Data Lake source: {self.run_spec.symbol} | "
                 f"strategy={bundle.request.strategy_interval} ({len(bundle.strategy):,} rows) | "
@@ -103,6 +116,13 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 f"{context.attrs.get('feature_name')}@{context.attrs.get('feature_version')} "
                 f"(cache={'hit' if context.attrs.get('feature_cache_hit') else 'miss'})"
             )
+            if sr is not None:
+                self._log(
+                    f"Prepared S/R: {sr.attrs.get('feature_name')}@{sr.attrs.get('feature_version')} "
+                    f"(cache={'hit' if sr.attrs.get('feature_cache_hit') else 'miss'})"
+                )
+            elif self.config.enable_support_resistance_analysis:
+                self._log("S/R: higher-timeframe mature engine path (prepared HTF provider pending)")
             if bundle.structural_benchmark is not None:
                 self._log(
                     f"Structural benchmark: {bundle.structural_benchmark_symbol} "
@@ -118,15 +138,17 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         benchmark = bundle.structural_benchmark
         technical_features = bundle.technical_features
         context_features = bundle.context_features
+        sr_features = bundle.support_resistance_features
 
         def prepared_loader(_config, _strategy_data=None):
             return bundle.strategy, bundle.intrabar
 
-        class BoundDataLakeEngine(DataLakeBacktestEngine):
+        class BoundDataLakeEngine(DataLakeProductionBacktestEngine):
             def __init__(self, *args, **kwargs):
                 kwargs["structural_benchmark"] = benchmark
                 kwargs["technical_features"] = technical_features
                 kwargs["context_features"] = context_features
+                kwargs["support_resistance_features"] = sr_features
                 super().__init__(*args, **kwargs)
 
         worker_module.load_backtest_data = prepared_loader
@@ -139,6 +161,8 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
 
     @staticmethod
     def _feature_manifest(frame):
+        if frame is None:
+            return None
         return {
             "name": frame.attrs.get("feature_name"),
             "version": frame.attrs.get("feature_version"),
@@ -157,6 +181,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         request = bundle.request
         directional = bundle.technical_features
         context = bundle.context_features
+        sr = bundle.support_resistance_features
         try:
             summary.update(
                 {
@@ -170,6 +195,8 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "technical_feature_version": directional.attrs.get("feature_version"),
                     "context_feature_name": context.attrs.get("feature_name"),
                     "context_feature_version": context.attrs.get("feature_version"),
+                    "support_resistance_feature_name": sr.attrs.get("feature_name") if sr is not None else None,
+                    "support_resistance_feature_version": sr.attrs.get("feature_version") if sr is not None else None,
                 }
             )
             (run_dir / "summary.json").write_text(
@@ -207,7 +234,9 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 "features": {
                     "core_directional": directional_manifest,
                     "market_context": context_manifest,
+                    "support_resistance": self._feature_manifest(sr),
                 },
+                "production_engine": "DataLakeProductionBacktestEngine",
                 "structural_benchmark_symbol": bundle.structural_benchmark_symbol,
                 "structural_benchmark_interval": bundle.structural_benchmark_interval,
                 "benchmark_rows": (
