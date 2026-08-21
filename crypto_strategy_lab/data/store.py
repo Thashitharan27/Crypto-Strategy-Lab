@@ -71,14 +71,33 @@ class MarketDataStore:
         temporary.replace(target)
         return target
 
+    @staticmethod
+    def _projection(columns: tuple[str, ...] | None) -> tuple[str, ...] | None:
+        if columns is None:
+            return None
+        selected = tuple(dict.fromkeys(str(column) for column in columns))
+        if not selected:
+            raise ValueError("Projected dataset loads require at least one column")
+        if "period_start" not in selected:
+            raise ValueError("Projected dataset loads must include period_start")
+        return selected
+
     def load_dataset(
         self,
         request: DataRequest,
         dataset: DatasetKind,
         *,
         interval: str | None = None,
+        columns: tuple[str, ...] | None = None,
     ) -> pd.DataFrame:
-        """Load one canonical dataset for `[request.start, request.end)`."""
+        """Load one canonical dataset for ``[request.start, request.end)``.
+
+        ``columns`` is an optional internal fast path for consumers that need a
+        small canonical projection. Projected reads let DuckDB apply Parquet
+        column pruning and the request time predicate before materializing a
+        pandas DataFrame. The default full-dataset path is intentionally kept
+        unchanged for feature/research callers during the migration.
+        """
 
         records = self.catalog.records_for(self.raw_root, request, dataset, interval)
         if not records:
@@ -87,14 +106,36 @@ class MarketDataStore:
                 f"interval={interval!r} from {request.start.isoformat()} to {request.end.isoformat()}"
             )
         parquet_paths = [self._ensure_canonical(record) for record in records]
+        selected = self._projection(columns)
         with duckdb.connect() as con:
-            frame = con.read_parquet([str(path) for path in parquet_paths]).df()
+            relation = con.read_parquet([str(path) for path in parquet_paths])
+            if selected is not None:
+                available = set(relation.columns)
+                missing = [column for column in selected if column not in available]
+                if missing:
+                    raise KeyError(f"Canonical dataset is missing projected columns: {missing}")
+                start = request.start.isoformat().replace("'", "''")
+                end = request.end.isoformat().replace("'", "''")
+                relation = relation.filter(
+                    f"period_start >= TIMESTAMPTZ '{start}' AND "
+                    f"period_start < TIMESTAMPTZ '{end}'"
+                )
+                projection = ", ".join(
+                    f'"{column.replace(chr(34), chr(34) * 2)}"' for column in selected
+                )
+                relation = relation.project(projection)
+            frame = relation.df()
         if frame.empty:
             return frame
         starts = pd.to_datetime(frame["period_start"], utc=True)
-        mask = (starts >= request.start) & (starts < request.end)
-        frame = frame.loc[mask].copy()
-        frame["period_start"] = starts.loc[mask]
+        if selected is None:
+            mask = (starts >= request.start) & (starts < request.end)
+            frame = frame.loc[mask].copy()
+            frame["period_start"] = starts.loc[mask]
+        else:
+            # The projected path was already filtered in DuckDB; normalize the
+            # materialized timestamp without allocating another full-frame mask.
+            frame["period_start"] = starts
         for column in ("event_time", "period_end", "available_at"):
             if column in frame.columns:
                 frame[column] = pd.to_datetime(frame[column], utc=True)
@@ -113,11 +154,18 @@ class MarketDataStore:
         frame = frame.sort_values(sort_columns, kind="stable")
         return frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
 
-    def load_klines(self, request: DataRequest, interval: str | None = None) -> pd.DataFrame:
+    def load_klines(
+        self,
+        request: DataRequest,
+        interval: str | None = None,
+        *,
+        columns: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame:
         """Load canonical completed-candle records for a requested interval."""
 
         return self.load_dataset(
             request,
             DatasetKind.KLINES,
             interval=interval or request.strategy_interval,
+            columns=columns,
         )
