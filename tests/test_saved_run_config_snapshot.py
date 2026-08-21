@@ -17,6 +17,7 @@ def test_saved_run_snapshot_restores_current_fields_and_reports_retired(tmp_path
         timestamp_unit="ms",
         strategy_timeframe_minutes=240,
         intrabar_timeframe_minutes=1,
+        telemetry_interval_minutes=240,
         data_start_date="2025-01-01",
         risk_mode=RiskMode.ATR,
     )
@@ -30,6 +31,7 @@ def test_saved_run_snapshot_restores_current_fields_and_reports_retired(tmp_path
 
     assert restored.strategy_timeframe_minutes == 240
     assert restored.intrabar_timeframe_minutes == 1
+    assert restored.telemetry_interval_minutes == 240
     assert restored.data_start_date == "2025-01-01"
     assert restored.timestamp_unit == "ms"
     assert restored.risk_mode is RiskMode.ATR
