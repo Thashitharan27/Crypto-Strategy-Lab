@@ -58,7 +58,7 @@ class TradePair:
     Historical versions could hold simultaneous LONG and SHORT positions. That
     strategy is retired; current entry logic creates exactly one Position.
     """
-    pair_id: int; long: Optional[Position]; short: Optional[Position]; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; equity_after_trade: Optional[float] = None; both_open_timeout_triggered: bool = False; timeout_minutes: Optional[int] = None; timeout_exit_time: Optional[object] = None
+    pair_id: int; long: Optional[Position]; short: Optional[Position]; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; equity_after_trade: Optional[float] = None; profile_timeout_triggered: bool = False; timeout_minutes: Optional[int] = None; timeout_exit_time: Optional[object] = None
     market_structure: Optional[dict] = None
     _positions: tuple[Position, ...] = field(init=False, repr=False)
 
@@ -85,3 +85,12 @@ class TradePair:
     @property
     def is_open(self) -> bool:
         return self.position.is_open
+
+    @property
+    def both_open_timeout_triggered(self) -> bool:
+        """Deprecated compatibility alias for the current single-trade profile timeout."""
+        return self.profile_timeout_triggered
+
+    @both_open_timeout_triggered.setter
+    def both_open_timeout_triggered(self, value: bool) -> None:
+        self.profile_timeout_triggered = bool(value)
