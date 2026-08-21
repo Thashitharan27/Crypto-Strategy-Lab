@@ -93,6 +93,7 @@ jobs:
           tests/test_core_directional_features.py
           tests/test_market_context_features.py
           tests/test_support_resistance_features.py
+          tests/test_futures_positioning_features.py
           tests/test_feature_cache.py
           tests/test_binance_compact_adapters.py
           tests/test_data_lake_legacy_bridge.py
