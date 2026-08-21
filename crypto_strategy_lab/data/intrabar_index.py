@@ -71,6 +71,35 @@ class _TimestampAccessor:
     def _series(self) -> pd.Series:
         return self._frame._timestamp_series()
 
+    def _indexed_endpoint(self, *, maximum: bool):
+        index = getattr(self._frame, "_intrabar_timestamp_index", None)
+        if (
+            index is not None
+            and getattr(self._frame, "intrabar_index_mode", None) == "searchsorted"
+        ):
+            if len(index) == 0:
+                return pd.NaT
+            return index[-1] if maximum else index[0]
+        return None
+
+    def max(self, *args, **kwargs):
+        # The production engine calls timestamp.max() after each intrabar scan
+        # to distinguish end-of-data from ordinary overlap/gap cases. On a
+        # sorted 1m frame the last indexed timestamp is already the exact max,
+        # so avoid rescanning the full multi-year Series each time.
+        if not args and not kwargs:
+            endpoint = self._indexed_endpoint(maximum=True)
+            if endpoint is not None:
+                return endpoint
+        return self._series.max(*args, **kwargs)
+
+    def min(self, *args, **kwargs):
+        if not args and not kwargs:
+            endpoint = self._indexed_endpoint(maximum=False)
+            if endpoint is not None:
+                return endpoint
+        return self._series.min(*args, **kwargs)
+
     def __ge__(self, value):
         return _TimestampRange(id(self._frame), lower=self._utc(value), lower_inclusive=True)
 
