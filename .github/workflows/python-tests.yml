@@ -79,6 +79,7 @@ jobs:
           tests/test_binance_compact_adapters.py
           tests/test_data_lake_legacy_bridge.py
           tests/test_saved_run_config_snapshot.py
+          tests/test_data_lake_parity_tool.py
 
   full-suite-observation:
     runs-on: ubuntu-latest
