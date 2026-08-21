@@ -9,7 +9,7 @@ import pandas as pd
 from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore, MarketKind
 from crypto_strategy_lab.data.binance.discovery import discover_archives
 from crypto_strategy_lab.data.binance.klines import KlineArchiveAdapter
-from crypto_strategy_lab.data.timing import canonical_available_at, interval_to_timedelta
+from crypto_strategy_lab.data.timing import canonical_available_at, interval_to_timedelta, normalize_binance_interval
 
 
 UTC = timezone.utc
@@ -31,6 +31,10 @@ def _make_archive(root: Path) -> Path:
 def test_interval_and_availability_contract() -> None:
     start = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
     assert interval_to_timedelta("15m").total_seconds() == 900
+    assert normalize_binance_interval("60m") == "1h"
+    assert normalize_binance_interval("240m") == "4h"
+    assert normalize_binance_interval("1440m") == "1d"
+    assert normalize_binance_interval("90m") == "90m"
     assert canonical_available_at(DatasetKind.KLINES, start, interval="1m") == datetime(
         2026, 1, 1, 0, 1, tzinfo=UTC
     )
@@ -80,6 +84,18 @@ def test_market_data_store_catalogs_caches_and_loads_by_request(tmp_path: Path) 
     assert request.symbol == "BTCUSDT"
     assert frame["source_fingerprint"].nunique() == 1
     assert list((tmp_path / "cache" / "market").rglob("*.parquet"))
+
+
+def test_data_request_normalizes_gui_minute_intervals_for_archive_lookup() -> None:
+    request = DataRequest(
+        symbol="BTCUSDT",
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 2, tzinfo=UTC),
+        strategy_interval="240m",
+        intrabar_interval="60m",
+    )
+    assert request.strategy_interval == "4h"
+    assert request.intrabar_interval == "1h"
 
 
 def test_data_request_key_changes_when_the_data_slice_changes() -> None:
