@@ -102,10 +102,12 @@ def test_backtest_bundle_loads_structural_benchmark_from_store(tmp_path: Path) -
         "1767225600000,100,103,99,102,10,1767239999999,0,1,0,0,0",
         "1767240000000,102,104,101,103,11,1767254399999,0,1,0,0,0",
     ]
-    one_hour_rows = [
-        f"{1767225600000 + hour * 3600000},100,103,99,{101 + hour},10,{1767229199999 + hour * 3600000},0,1,0,0,0"
-        for hour in range(8)
-    ]
+    one_hour_rows = []
+    for hour in range(8):
+        close = 101 + hour
+        one_hour_rows.append(
+            f"{1767225600000 + hour * 3600000},{close - 1},{close + 1},{close - 2},{close},10,{1767229199999 + hour * 3600000},0,1,0,0,0"
+        )
     _write_kline_zip(root, "4h", four_hour_rows)
     _write_kline_zip(root, "1h", one_hour_rows)
 
