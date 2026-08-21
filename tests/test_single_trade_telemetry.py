@@ -82,8 +82,29 @@ def test_stop_loss_journey_analysis_tracks_the_single_stopped_trade() -> None:
 def test_partial_take_profit_summary_counts_directional_trades() -> None:
     trades = pd.DataFrame(
         [
-            {"long_entry_price": 100.0, "long_tp1_hit": True, "long_tp2_hit": False, "pair_gross_pnl": 1.0, "pair_total_fees": 0.1, "pair_net_pnl": 0.9, "equity_after_trade": 1000.9},
-            {"short_entry_price": 100.0, "short_tp1_hit": True, "short_tp2_hit": True, "pair_gross_pnl": 2.0, "pair_total_fees": 0.1, "pair_net_pnl": 1.9, "equity_after_trade": 1002.8},
+            {
+                "long_entry_price": 100.0,
+                "long_tp1_hit": True,
+                "long_tp2_hit": False,
+                "long_tp1_net_pnl": 0.4,
+                "long_stop_net_pnl": 0.5,
+                "pair_gross_pnl": 1.0,
+                "pair_total_fees": 0.1,
+                "pair_net_pnl": 0.9,
+                "equity_after_trade": 1000.9,
+            },
+            {
+                "short_entry_price": 100.0,
+                "short_tp1_hit": True,
+                "short_tp2_hit": True,
+                "short_tp1_net_pnl": 0.5,
+                "short_tp2_net_pnl": 1.4,
+                "short_stop_net_pnl": 0.0,
+                "pair_gross_pnl": 2.0,
+                "pair_total_fees": 0.1,
+                "pair_net_pnl": 1.9,
+                "equity_after_trade": 1002.8,
+            },
         ]
     )
 
