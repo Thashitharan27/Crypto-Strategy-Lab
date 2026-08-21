@@ -1,0 +1,111 @@
+name: Temporary profile timeout cleanup
+
+on:
+  push:
+    branches:
+      - cleanup/profile-timeout-reason-v15
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cleanup/profile-timeout-reason-v15
+          fetch-depth: 0
+
+      - name: Rewrite retired timeout identifiers
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_exact(path: str, old: str, new: str, expected: int = 1) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} occurrence(s), found {count}: {old!r}")
+              target.write_text(text.replace(old, new), encoding="utf-8")
+
+          replace_exact(
+              "crypto_strategy_lab/engine.py",
+              "ExitReason.BOTH_OPEN_TIMEOUT",
+              "ExitReason.PROFILE_TIMEOUT",
+          )
+          replace_exact(
+              "crypto_strategy_lab/engine.py",
+              "pair.both_open_timeout_triggered = True",
+              "pair.profile_timeout_triggered = True",
+          )
+          replace_exact(
+              "crypto_strategy_lab/engine.py",
+              'getattr(p, "both_open_timeout_triggered", False)',
+              'getattr(p, "profile_timeout_triggered", False)',
+          )
+
+          replace_exact(
+              "crypto_strategy_lab/trade.py",
+              'PROFILE_TIMEOUT="PROFILE_TIMEOUT"; BOTH_OPEN_TIMEOUT=PROFILE_TIMEOUT; END_OF_DATA="END_OF_DATA"',
+              'PROFILE_TIMEOUT="PROFILE_TIMEOUT"; END_OF_DATA="END_OF_DATA"',
+          )
+          replace_exact(
+              "crypto_strategy_lab/trade.py",
+              '''\n    @property\n    def both_open_timeout_triggered(self) -> bool:\n        """Deprecated compatibility alias for the current single-trade profile timeout."""\n        return self.profile_timeout_triggered\n\n    @both_open_timeout_triggered.setter\n    def both_open_timeout_triggered(self, value: bool) -> None:\n        self.profile_timeout_triggered = bool(value)\n''',
+              "\n",
+          )
+
+          replace_exact(
+              "crypto_strategy_lab/telemetry.py",
+              'if reason in ("BOTH_OPEN_TIMEOUT", "PROFILE_TIMEOUT"):',
+              'if reason == "PROFILE_TIMEOUT":',
+          )
+
+          replace_exact(
+              "crypto_strategy_lab/statistics.py",
+              '''    timeout_mask = _bool_column(trades, "profile_timeout_triggered")\n    if "profile_timeout_triggered" not in trades and "both_open_timeout_triggered" in trades:\n        timeout_mask = _bool_column(trades, "both_open_timeout_triggered")\n''',
+              '''    timeout_mask = _bool_column(trades, "profile_timeout_triggered")\n''',
+          )
+          replace_exact(
+              "crypto_strategy_lab/statistics.py",
+              '''    timeout = _bool_column(trades, "profile_timeout_triggered")\n    if "profile_timeout_triggered" not in trades and "both_open_timeout_triggered" in trades:\n        timeout = _bool_column(trades, "both_open_timeout_triggered")\n    timeout = timeout.loc[mask]\n''',
+              '''    timeout = _bool_column(trades, "profile_timeout_triggered").loc[mask]\n''',
+          )
+
+          replace_exact(
+              "tests/test_single_trade_telemetry.py",
+              'assert outcome_label(pd.Series({"short_exit_reason": "BOTH_OPEN_TIMEOUT"})) == "PROFILE_TIMEOUT"',
+              'assert outcome_label(pd.Series({"short_exit_reason": "PROFILE_TIMEOUT"})) == "PROFILE_TIMEOUT"',
+          )
+
+          old_test = '''def test_old_both_open_timeout_name_is_only_a_compatibility_alias() -> None:\n    pair = _pair(long=_position(Side.LONG))\n    assert pair.profile_timeout_triggered is False\n    assert pair.both_open_timeout_triggered is False\n\n    # Mature engine code still writes the old attribute. The model stores the\n    # state under the correct single-trade name until that engine call site is\n    # migrated in a later cleanup.\n    pair.both_open_timeout_triggered = True\n    assert pair.profile_timeout_triggered is True\n    assert pair.both_open_timeout_triggered is True\n'''
+          new_test = '''def test_profile_timeout_uses_only_canonical_state_and_reason() -> None:\n    pair = _pair(long=_position(Side.LONG))\n    assert pair.profile_timeout_triggered is False\n\n    pair.profile_timeout_triggered = True\n\n    assert pair.profile_timeout_triggered is True\n    assert ExitReason.PROFILE_TIMEOUT.value == "PROFILE_TIMEOUT"\n    assert not hasattr(ExitReason, "BOTH_OPEN_TIMEOUT")\n    assert not hasattr(pair, "both_open_timeout_triggered")\n'''
+          replace_exact("tests/test_trade_pair_fastpath.py", old_test, new_test)
+
+          roots = [Path("crypto_strategy_lab"), Path("tests")]
+          forbidden = ("BOTH_OPEN_TIMEOUT", "both_open_timeout_triggered")
+          leftovers = []
+          for root in roots:
+              for path in root.rglob("*.py"):
+                  text = path.read_text(encoding="utf-8")
+                  for token in forbidden:
+                      if token in text:
+                          leftovers.append(f"{path}: {token}")
+          if leftovers:
+              raise SystemExit("Retired timeout identifiers remain:\n" + "\n".join(leftovers))
+
+      - name: Commit rewrite
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crypto_strategy_lab/engine.py crypto_strategy_lab/trade.py crypto_strategy_lab/telemetry.py crypto_strategy_lab/statistics.py tests/test_single_trade_telemetry.py tests/test_trade_pair_fastpath.py
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Remove retired both-open timeout identifiers"
+          git push origin HEAD:cleanup/profile-timeout-reason-v15
