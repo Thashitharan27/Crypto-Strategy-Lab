@@ -1,10 +1,8 @@
-"""Run one backtest directly from the Binance Data Lake v2 path.
+"""Run one backtest directly from Binance Data Lake v2.
 
-This is the forward migration runner. Its JSON contains strategy settings only;
-market data and causal technical features are prepared through MarketDataStore
-before the stateful simulator starts.
+Strategy JSON contains strategy settings only. Market data and versioned causal
+feature blocks are prepared/cached before the stateful simulator starts.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -46,6 +44,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _feature_manifest(frame: pd.DataFrame) -> dict:
+    return {
+        "name": frame.attrs.get("feature_name"),
+        "version": frame.attrs.get("feature_version"),
+        "rows": len(frame),
+        "cache_hit": bool(frame.attrs.get("feature_cache_hit", False)),
+        "cache_key": frame.attrs.get("feature_cache_key"),
+        "effective_warmup_bars": frame.attrs.get("effective_warmup_bars"),
+    }
+
+
 def main() -> int:
     args = build_parser().parse_args()
     config = load_data_lake_config(args.config)
@@ -71,6 +80,9 @@ def main() -> int:
         atr_period=config.atr_period,
         adx_period=config.adx_period,
         di_pressure_lookback=config.di_pressure_lookback,
+        bb_period=config.bb_period,
+        bb_stddevs=config.bb_stddevs,
+        mean_reversion_period=config.mean_reversion_period,
     )
     engine = DataLakeBacktestEngine(
         bundle.strategy,
@@ -78,6 +90,7 @@ def main() -> int:
         bundle.intrabar,
         structural_benchmark=bundle.structural_benchmark,
         technical_features=bundle.technical_features,
+        context_features=bundle.context_features,
     )
     trades = engine.run()
 
@@ -85,7 +98,19 @@ def main() -> int:
     run_dir = args.output_dir / f"{request.symbol}_{request.strategy_interval}_{stamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
     trades.to_csv(run_dir / "trade_list.csv", index=False)
-    features = bundle.technical_features
+
+    directional_manifest = _feature_manifest(bundle.technical_features)
+    directional_manifest.update(
+        atr_period=bundle.technical_features.attrs.get("atr_period"),
+        adx_period=bundle.technical_features.attrs.get("adx_period"),
+        di_pressure_lookback=bundle.technical_features.attrs.get("di_pressure_lookback"),
+    )
+    context_manifest = _feature_manifest(bundle.context_features)
+    context_manifest.update(
+        bb_period=bundle.context_features.attrs.get("bb_period"),
+        bb_stddevs=bundle.context_features.attrs.get("bb_stddevs"),
+        mean_reversion_period=bundle.context_features.attrs.get("mean_reversion_period"),
+    )
     manifest = {
         "data_source": "binance_data_lake_v2",
         "config_contract": "data_lake_strategy_v2",
@@ -100,14 +125,9 @@ def main() -> int:
             "intrabar_interval": request.intrabar_interval,
         },
         "market_regime_method": config.market_regime_method,
-        "technical_features": {
-            "name": features.attrs.get("feature_name"),
-            "version": features.attrs.get("feature_version"),
-            "rows": len(features),
-            "atr_period": features.attrs.get("atr_period"),
-            "adx_period": features.attrs.get("adx_period"),
-            "di_pressure_lookback": features.attrs.get("di_pressure_lookback"),
-            "effective_warmup_bars": features.attrs.get("effective_warmup_bars"),
+        "features": {
+            "core_directional": directional_manifest,
+            "market_context": context_manifest,
         },
         "structural_benchmark_symbol": bundle.structural_benchmark_symbol,
         "structural_benchmark_interval": bundle.structural_benchmark_interval,
@@ -117,7 +137,6 @@ def main() -> int:
         "trade_rows": len(trades),
     }
     (run_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-
     print(json.dumps({**manifest, "run_dir": str(run_dir.resolve())}, indent=2))
     return 0
 
