@@ -1,5 +1,10 @@
 """Versioned feature-store contracts."""
 
+from .agg_trade_flow import (
+    AGG_TRADE_FLOW_FEATURE_NAME,
+    AGG_TRADE_FLOW_FEATURE_VERSION,
+    AggTradeFlowFeatureProvider,
+)
 from .base import FeatureDefinition, FeatureProvider
 from .basis import (
     BASIS_CONTEXT_FEATURE_NAME,
@@ -63,4 +68,7 @@ __all__ = [
     "BASIS_CONTEXT_FEATURE_NAME",
     "BASIS_CONTEXT_FEATURE_VERSION",
     "BasisContextFeatureProvider",
+    "AGG_TRADE_FLOW_FEATURE_NAME",
+    "AGG_TRADE_FLOW_FEATURE_VERSION",
+    "AggTradeFlowFeatureProvider",
 ]
