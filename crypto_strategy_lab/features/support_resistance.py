@@ -9,7 +9,12 @@ import pandas as pd
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
-from crypto_strategy_lab.support_resistance import SRContext, SupportResistanceDetector
+from crypto_strategy_lab.support_resistance import (
+    LocationClassification,
+    SRContext,
+    SupportResistanceDetector,
+    TradeLocationRating,
+)
 
 from .base import FeatureDefinition
 from .technical import CORE_DIRECTIONAL_FEATURE_NAME
@@ -40,6 +45,18 @@ def _primitive(value):
 
 def _flatten(prefix: str, context: SRContext) -> dict[str, object]:
     return {f"{prefix}_{field}": _primitive(getattr(context, field)) for field in _SR_FIELDS}
+
+
+def _optional_float(value):
+    return None if pd.isna(value) else float(value)
+
+
+def _optional_int(value):
+    return None if pd.isna(value) else int(value)
+
+
+def _float_or_nan(value):
+    return np.nan if pd.isna(value) else float(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +162,73 @@ class SupportResistanceFeatureProvider:
             }
         )
         return output
+
+
+class PreparedSupportResistanceContextReader:
+    """O(1) adapter exposing cached S/R rows through the legacy detector API."""
+
+    def __init__(self, frame: pd.DataFrame) -> None:
+        self.frame = frame.reset_index(drop=True)
+
+    @staticmethod
+    def _context_from_row(row: pd.Series, prefix: str) -> SRContext:
+        def value(field: str):
+            return row[f"{prefix}_{field}"]
+
+        return SRContext(
+            nearest_support_price=_optional_float(value("nearest_support_price")),
+            nearest_support_bar_index=_optional_int(value("nearest_support_bar_index")),
+            nearest_support_distance_atr=_float_or_nan(value("nearest_support_distance_atr")),
+            nearest_support_distance_price=_float_or_nan(value("nearest_support_distance_price")),
+            nearest_resistance_price=_optional_float(value("nearest_resistance_price")),
+            nearest_resistance_bar_index=_optional_int(value("nearest_resistance_bar_index")),
+            nearest_resistance_distance_atr=_float_or_nan(value("nearest_resistance_distance_atr")),
+            nearest_resistance_distance_price=_float_or_nan(value("nearest_resistance_distance_price")),
+            price_location=LocationClassification(str(value("price_location"))),
+            trade_location_rating=TradeLocationRating(str(value("trade_location_rating"))),
+            near_support=bool(value("near_support")),
+            near_resistance=bool(value("near_resistance")),
+            inside_support_zone=bool(value("inside_support_zone")),
+            inside_resistance_zone=bool(value("inside_resistance_zone")),
+            room_in_direction_atr=_float_or_nan(value("room_in_direction_atr")),
+            support_state=str(value("support_state")),
+            resistance_state=str(value("resistance_state")),
+            support_tested=bool(value("support_tested")),
+            resistance_tested=bool(value("resistance_tested")),
+            support_held=bool(value("support_held")),
+            resistance_held=bool(value("resistance_held")),
+            support_rejection_atr=_float_or_nan(value("support_rejection_atr")),
+            resistance_rejection_atr=_float_or_nan(value("resistance_rejection_atr")),
+            support_test_count=int(value("support_test_count")),
+            resistance_test_count=int(value("resistance_test_count")),
+            bars_since_support_test=_optional_int(value("bars_since_support_test")),
+            bars_since_resistance_test=_optional_int(value("bars_since_resistance_test")),
+            support_last_test_index=_optional_int(value("support_last_test_index")),
+            resistance_last_test_index=_optional_int(value("resistance_last_test_index")),
+            confirmation_rating=str(value("confirmation_rating")),
+            support_zone_low=_optional_float(value("support_zone_low")),
+            support_zone_high=_optional_float(value("support_zone_high")),
+            resistance_zone_low=_optional_float(value("resistance_zone_low")),
+            resistance_zone_high=_optional_float(value("resistance_zone_high")),
+        )
+
+    def analyze_price_location(
+        self,
+        index: int,
+        _open_prices,
+        _high_prices,
+        _low_prices,
+        _close_prices,
+        _atr_values,
+        direction: str,
+    ) -> SRContext:
+        if not 0 <= int(index) < len(self.frame):
+            raise IndexError(f"Prepared S/R index out of range: {index}")
+        normalized = str(direction).upper()
+        if normalized not in {"LONG", "SHORT"}:
+            raise ValueError(f"Unsupported S/R direction: {direction}")
+        prefix = normalized.lower()
+        return self._context_from_row(self.frame.iloc[int(index)], prefix)
 
 
 SR_CONTEXT_FIELDS = _SR_FIELDS
