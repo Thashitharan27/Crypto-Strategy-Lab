@@ -5,6 +5,7 @@ __pycache__/
 
 # Local market data and generated reports are large/reproducible.
 data/
+cache/
 output/
 outputs/
 
