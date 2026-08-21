@@ -360,7 +360,7 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
                 position,
                 i,
                 float(raw_open)*slip,
-                ExitReason.BOTH_OPEN_TIMEOUT,
+                ExitReason.PROFILE_TIMEOUT,
                 source,
                 timestamp,
             )
