@@ -20,7 +20,7 @@ from pathlib import Path
 import pstats
 import sys
 import time
-from typing import Callable, Iterator
+from typing import Iterator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -125,9 +125,9 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
     original_cached_multisource = backtest_service_module._cached_multisource_feature
     original_intrabar_index = backtest_service_module.as_searchsorted_intrabar
 
-    def timed_load_dataset(request, dataset, *, interval=None):
+    def timed_load_dataset(request, dataset, *, interval=None, columns=None):
         started = time.perf_counter()
-        frame = original_load_dataset(request, dataset, interval=interval)
+        frame = original_load_dataset(request, dataset, interval=interval, columns=columns)
         _record(
             events,
             category="dataset_load",
@@ -136,6 +136,7 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
             rows=_rows(frame),
             dataset=dataset.value,
             interval=interval,
+            projected_columns=list(columns) if columns is not None else None,
             request_start=request.start.isoformat(),
             request_end=request.end.isoformat(),
         )
