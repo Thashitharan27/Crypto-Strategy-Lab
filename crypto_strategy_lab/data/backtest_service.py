@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
+from crypto_strategy_lab.features.agg_trade_flow import AggTradeFlowFeatureProvider
 from crypto_strategy_lab.features.basis import BasisContextFeatureProvider
 from crypto_strategy_lab.features.cache import FeatureFrameCache
 from crypto_strategy_lab.features.context import MarketContextFeatureProvider
@@ -110,8 +111,15 @@ def _optional_futures_research_features(
     store: MarketDataStore,
     request: DataRequest,
     canonical: pd.DataFrame,
+    *,
+    include_agg_trade_flow: bool = False,
 ) -> dict[str, pd.DataFrame]:
-    """Load compact/reference futures research datasets when local coverage exists."""
+    """Load futures research blocks when local coverage exists.
+
+    Compact metrics/funding/reference-price datasets are inexpensive enough to
+    attach automatically. Aggregate trades can be very large, so trade-flow
+    aggregation is explicit opt-in.
+    """
     if request.market != MarketKind.FUTURES_UM:
         return {}
 
@@ -188,6 +196,23 @@ def _optional_futures_research_features(
             {DatasetKind.KLINES: canonical, **reference_frames},
             provider,
         )
+
+    if include_agg_trade_flow:
+        try:
+            agg_trades = store.load_dataset(
+                _dataset_request(request, DatasetKind.AGG_TRADES),
+                DatasetKind.AGG_TRADES,
+            )
+            if not agg_trades.empty:
+                provider = AggTradeFlowFeatureProvider()
+                result[provider.definition.name] = _cached_multisource_feature(
+                    store,
+                    request,
+                    {DatasetKind.KLINES: canonical, DatasetKind.AGG_TRADES: agg_trades},
+                    provider,
+                )
+        except DataNotAvailableError:
+            pass
     return result
 
 
@@ -219,14 +244,9 @@ def load_backtest_bundle(
     sr_hold_confirmation_atr: float = 0.25,
     sr_break_tolerance_atr: float = 0.25,
     sr_break_basis: str = "CLOSE",
+    include_agg_trade_flow: bool = False,
 ) -> BacktestDataBundle:
-    """Load market data and reusable causal feature blocks.
-
-    Same-timeframe support/resistance is prepared and cached here. Higher-timeframe
-    S/R remains on the mature complete-bar resampling path until the HTF feature
-    provider is migrated. Compact futures metrics/funding and mark/index/premium
-    archives are attached as optional research-only feature blocks when coverage exists.
-    """
+    """Load market data and reusable causal feature blocks."""
     if refresh_catalog:
         store.refresh_catalog()
 
@@ -269,7 +289,12 @@ def load_backtest_bundle(
             }, directional_dependency,
         )
 
-    research_features = _optional_futures_research_features(store, request, canonical)
+    research_features = _optional_futures_research_features(
+        store,
+        request,
+        canonical,
+        include_agg_trade_flow=include_agg_trade_flow,
+    )
 
     intrabar = None
     if request.intrabar_interval:
