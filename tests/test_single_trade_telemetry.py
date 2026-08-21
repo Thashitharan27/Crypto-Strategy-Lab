@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 
+import crypto_strategy_lab.telemetry as telemetry_module
 from crypto_strategy_lab.telemetry import (
     outcome_label,
     partial_take_profit_analysis,
@@ -116,3 +119,13 @@ def test_partial_take_profit_summary_counts_directional_trades() -> None:
     assert result["long_tp1_hit_rate"] == 1.0
     assert result["short_tp2_hit_rate"] == 1.0
     assert "total_legs" not in result.index
+
+
+def test_retired_double_sl_journey_alias_is_removed() -> None:
+    assert not hasattr(telemetry_module, "double_sl_journey_analysis")
+
+
+def test_gui_worker_uses_stop_loss_journey_export_name() -> None:
+    source = Path("crypto_strategy_lab/gui/worker.py").read_text(encoding="utf-8")
+    assert "stop_loss_journey_analysis.csv" in source
+    assert "double_sl_journey_analysis" not in source
