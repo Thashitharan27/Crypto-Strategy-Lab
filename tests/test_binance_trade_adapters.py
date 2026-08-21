@@ -42,14 +42,16 @@ def test_agg_trades_adapter_normalizes_aggressor_side(tmp_path: Path) -> None:
     assert frame.loc[1, "available_at"] == pd.Timestamp("2026-01-01T00:00:02Z")
 
 
-def test_store_loads_agg_trades_from_archive_catalog(tmp_path: Path) -> None:
+def test_store_preserves_distinct_agg_trades_with_same_event_timestamp(tmp_path: Path) -> None:
     raw = tmp_path / "raw"
     path = raw / "futures/usdm/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-01-01.zip"
     _zip(
         path,
         "BTCUSDT-aggTrades-2026-01-01.csv",
+        # Two aggregate trades can share a millisecond; identity is agg_trade_id,
+        # not event_time.
         "1,100,1,1,1,1767225601000,false\n"
-        "2,101,2,2,3,1767225602000,true\n",
+        "2,101,2,2,3,1767225601000,true\n",
     )
     store = MarketDataStore(raw, tmp_path / "cache")
     assert store.refresh_catalog() == 1
@@ -62,6 +64,8 @@ def test_store_loads_agg_trades_from_archive_catalog(tmp_path: Path) -> None:
     )
     frame = store.load_dataset(request, DatasetKind.AGG_TRADES)
     assert len(frame) == 2
+    assert list(frame["agg_trade_id"]) == [1, 2]
+    assert frame["event_time"].nunique() == 1
     assert frame["quantity"].sum() == 3
     assert frame.loc[1, "first_trade_id"] == 2
     assert frame.loc[1, "last_trade_id"] == 3
