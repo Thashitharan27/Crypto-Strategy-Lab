@@ -10,6 +10,16 @@ from .schemas import DatasetKind
 
 _INTERVAL_RE = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[smhdw])$")
 
+# Binance archive/native kline interval names. Requests may arrive from the
+# existing GUI as minute counts (for example 240m for a 4-hour strategy), so we
+# canonicalize equivalent fixed durations before catalog lookup/cache identity.
+_BINANCE_FIXED_INTERVALS = (
+    "1s",
+    "1m", "3m", "5m", "15m", "30m",
+    "1h", "2h", "4h", "6h", "8h", "12h",
+    "1d", "3d", "1w",
+)
+
 _CANDLE_DATASETS = {
     DatasetKind.KLINES,
     DatasetKind.MARK_PRICE_KLINES,
@@ -29,7 +39,8 @@ def ensure_utc(value: datetime) -> datetime:
 def interval_to_timedelta(interval: str) -> timedelta:
     """Convert fixed Binance intervals such as 1m, 15m, 4h or 1d."""
 
-    match = _INTERVAL_RE.fullmatch(str(interval).strip())
+    text = str(interval).strip()
+    match = _INTERVAL_RE.fullmatch(text)
     if not match:
         raise ValueError(f"Unsupported fixed interval: {interval!r}")
     count = int(match.group("count"))
@@ -43,6 +54,28 @@ def interval_to_timedelta(interval: str) -> timedelta:
     if unit == "d":
         return timedelta(days=count)
     return timedelta(weeks=count)
+
+
+def normalize_binance_interval(interval: str) -> str:
+    """Return the Binance-native name for an equivalent fixed interval.
+
+    This intentionally normalizes only durations Binance publishes natively.
+    Examples: ``60m -> 1h`` and ``240m -> 4h``. Non-native intervals remain in
+    their original fixed-duration spelling so a later resampling layer can deal
+    with them explicitly rather than silently changing their meaning.
+    """
+
+    text = str(interval).strip()
+    if not text:
+        raise ValueError("interval must not be empty")
+    if text == "1M":  # Binance calendar-month interval; not a fixed timedelta.
+        return text
+    lowered = text.lower()
+    requested = interval_to_timedelta(lowered)
+    for native in _BINANCE_FIXED_INTERVALS:
+        if interval_to_timedelta(native) == requested:
+            return native
+    return lowered
 
 
 def canonical_available_at(
