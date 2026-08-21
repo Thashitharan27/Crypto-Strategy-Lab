@@ -1,6 +1,11 @@
 """Versioned feature-store contracts."""
 
 from .base import FeatureDefinition, FeatureProvider
+from .basis import (
+    BASIS_CONTEXT_FEATURE_NAME,
+    BASIS_CONTEXT_FEATURE_VERSION,
+    BasisContextFeatureProvider,
+)
 from .cache import FeatureFrameCache
 from .context import (
     MARKET_CONTEXT_FEATURE_NAME,
@@ -55,4 +60,7 @@ __all__ = [
     "FUNDING_CONTEXT_FEATURE_NAME",
     "FUNDING_CONTEXT_FEATURE_VERSION",
     "FundingContextFeatureProvider",
+    "BASIS_CONTEXT_FEATURE_NAME",
+    "BASIS_CONTEXT_FEATURE_VERSION",
+    "BasisContextFeatureProvider",
 ]
