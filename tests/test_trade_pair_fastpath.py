@@ -51,8 +51,12 @@ def test_positions_is_single_leg_compatibility_tuple() -> None:
     long = _position(Side.LONG)
     short = _position(Side.SHORT)
 
-    assert _pair(long=long).positions() == (long,)
-    assert _pair(short=short).positions() == (short,)
+    long_pair = _pair(long=long)
+    short_pair = _pair(short=short)
+    assert long_pair.positions() == (long,)
+    assert short_pair.positions() == (short,)
+    assert long_pair.positions() is long_pair.positions()
+    assert short_pair.positions() is short_pair.positions()
 
 
 def test_is_open_tracks_the_single_position() -> None:
@@ -69,3 +73,13 @@ def test_is_open_tracks_the_single_position() -> None:
 
     short.exit_time = pd.Timestamp("2026-01-01T00:20:00Z")
     assert not pair.is_open
+
+
+def test_runtime_leg_mutation_cannot_resurrect_dual_leg_state() -> None:
+    pair = _pair(long=_position(Side.LONG))
+    pair.short = _position(Side.SHORT)
+
+    with pytest.raises(ValueError, match="simultaneous LONG\\+SHORT trades are retired"):
+        _ = pair.position
+    with pytest.raises(ValueError, match="simultaneous LONG\\+SHORT trades are retired"):
+        pair.positions()
