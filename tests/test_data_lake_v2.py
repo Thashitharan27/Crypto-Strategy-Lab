@@ -86,6 +86,30 @@ def test_market_data_store_catalogs_caches_and_loads_by_request(tmp_path: Path) 
     assert list((tmp_path / "cache" / "market").rglob("*.parquet"))
 
 
+def test_execution_kline_load_projects_filters_and_preserves_ohlcv(tmp_path: Path) -> None:
+    raw_root = tmp_path / "raw"
+    _make_archive(raw_root)
+    store = MarketDataStore(raw_root=raw_root, cache_root=tmp_path / "cache")
+    store.refresh_catalog()
+    request = DataRequest(
+        symbol="BTCUSDT",
+        start=datetime(2026, 1, 1, 0, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+        strategy_interval="1m",
+    )
+
+    projected = store.load_execution_klines(request, "1m")
+    canonical = store.load_klines(request, "1m")
+
+    assert list(projected.columns) == [
+        "period_start", "open", "high", "low", "close", "volume"
+    ]
+    pd.testing.assert_frame_equal(
+        projected,
+        canonical.loc[:, projected.columns].reset_index(drop=True),
+    )
+
+
 def test_data_request_normalizes_gui_minute_intervals_for_archive_lookup() -> None:
     request = DataRequest(
         symbol="BTCUSDT",

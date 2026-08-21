@@ -317,8 +317,10 @@ def load_backtest_bundle(
             market=request.market, exchange=request.exchange,
         )
         intrabar = as_searchsorted_intrabar(
-            _legacy_klines(
-                store, intrabar_request, request.intrabar_interval, "Intrabar data (Data Lake v2)"
+            _legacy_from_canonical(
+                store.load_execution_klines(intrabar_request, request.intrabar_interval),
+                request.intrabar_interval,
+                "Intrabar data (Data Lake v2)",
             )
         )
 

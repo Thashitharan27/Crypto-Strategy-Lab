@@ -120,6 +120,7 @@ def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int) -> list[
 def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iterator[None]:
     """Temporarily time the major preparation boundaries used by the real bundle loader."""
     original_load_dataset = store.load_dataset
+    original_load_execution_klines = store.load_execution_klines
     original_legacy = backtest_service_module._legacy_from_canonical
     original_cached_feature = backtest_service_module._cached_feature
     original_cached_multisource = backtest_service_module._cached_multisource_feature
@@ -136,6 +137,23 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
             rows=_rows(frame),
             dataset=dataset.value,
             interval=interval,
+            request_start=request.start.isoformat(),
+            request_end=request.end.isoformat(),
+        )
+        return frame
+
+    def timed_load_execution_klines(request, interval=None):
+        started = time.perf_counter()
+        frame = original_load_execution_klines(request, interval)
+        _record(
+            events,
+            category="dataset_load",
+            name=f"klines:{interval or request.intrabar_interval or request.strategy_interval}:projected",
+            started=started,
+            rows=_rows(frame),
+            dataset="klines",
+            interval=interval or request.intrabar_interval or request.strategy_interval,
+            projection="execution_ohlcv",
             request_start=request.start.isoformat(),
             request_end=request.end.isoformat(),
         )
@@ -208,6 +226,7 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
         return wrapped
 
     store.load_dataset = timed_load_dataset
+    store.load_execution_klines = timed_load_execution_klines
     backtest_service_module._legacy_from_canonical = timed_legacy
     backtest_service_module._cached_feature = timed_cached_feature
     backtest_service_module._cached_multisource_feature = timed_cached_multisource
@@ -216,6 +235,7 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
         yield
     finally:
         store.load_dataset = original_load_dataset
+        store.load_execution_klines = original_load_execution_klines
         backtest_service_module._legacy_from_canonical = original_legacy
         backtest_service_module._cached_feature = original_cached_feature
         backtest_service_module._cached_multisource_feature = original_cached_multisource

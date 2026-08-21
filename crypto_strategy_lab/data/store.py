@@ -113,6 +113,50 @@ class MarketDataStore:
         frame = frame.sort_values(sort_columns, kind="stable")
         return frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
 
+    def load_execution_klines(
+        self,
+        request: DataRequest,
+        interval: str | None = None,
+    ) -> pd.DataFrame:
+        """Load only the canonical columns needed by intrabar execution.
+
+        Unlike :meth:`load_dataset`, this path applies the requested time range
+        and OHLCV projection inside DuckDB.  A multi-year one-minute execution
+        frame therefore never materializes provenance and causal metadata that
+        the simulator cannot consume.
+        """
+
+        effective_interval = interval or request.intrabar_interval or request.strategy_interval
+        records = self.catalog.records_for(
+            self.raw_root,
+            request,
+            DatasetKind.KLINES,
+            effective_interval,
+        )
+        if not records:
+            raise DataNotAvailableError(
+                f"No catalog coverage for {request.symbol} {DatasetKind.KLINES.value} "
+                f"interval={effective_interval!r} from {request.start.isoformat()} "
+                f"to {request.end.isoformat()}"
+            )
+
+        parquet_paths = [str(self._ensure_canonical(record)) for record in records]
+        with duckdb.connect() as con:
+            frame = con.execute(
+                """
+                SELECT period_start, open, high, low, close, volume
+                FROM read_parquet(?)
+                WHERE period_start >= ? AND period_start < ?
+                ORDER BY period_start
+                """,
+                [parquet_paths, request.start, request.end],
+            ).df()
+        if frame.empty:
+            return frame
+
+        frame["period_start"] = pd.to_datetime(frame["period_start"], utc=True)
+        return frame.drop_duplicates("period_start", keep="last").reset_index(drop=True)
+
     def load_klines(self, request: DataRequest, interval: str | None = None) -> pd.DataFrame:
         """Load canonical completed-candle records for a requested interval."""
 
