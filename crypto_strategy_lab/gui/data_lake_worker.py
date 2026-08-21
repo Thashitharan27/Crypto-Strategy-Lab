@@ -32,6 +32,7 @@ class DataLakeGuiRunSpec:
     end: datetime
     intrabar_start: datetime | None = None
     refresh_catalog: bool = False
+    include_agg_trade_flow: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "raw_root", Path(self.raw_root))
@@ -92,6 +93,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             sr_hold_confirmation_atr=self.config.sr_hold_confirmation_atr,
             sr_break_tolerance_atr=self.config.sr_break_tolerance_atr,
             sr_break_basis=self.config.sr_break_basis,
+            include_agg_trade_flow=self.run_spec.include_agg_trade_flow,
         )
 
     @Slot()
@@ -131,7 +133,9 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 ]
                 self._log("Futures research: " + ", ".join(labels))
             else:
-                self._log("Futures research: no local metrics/funding coverage for this request")
+                self._log("Futures research: no local compact/reference coverage for this request")
+            if self.run_spec.include_agg_trade_flow and "agg_trade_flow" not in bundle.research_features:
+                self._log("AggTrades research requested but no local aggTrades coverage was found")
             if bundle.structural_benchmark is not None:
                 self._log(
                     f"Structural benchmark: {bundle.structural_benchmark_symbol} "
@@ -209,6 +213,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "support_resistance_feature_name": sr.attrs.get("feature_name") if sr is not None else None,
                     "support_resistance_feature_version": sr.attrs.get("feature_version") if sr is not None else None,
                     "research_feature_names": sorted(bundle.research_features),
+                    "include_agg_trade_flow": bool(self.run_spec.include_agg_trade_flow),
                 }
             )
             (run_dir / "summary.json").write_text(
@@ -240,6 +245,9 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                         self.run_spec.intrabar_start.isoformat()
                         if self.run_spec.intrabar_start is not None else None
                     ),
+                },
+                "research_options": {
+                    "include_agg_trade_flow": bool(self.run_spec.include_agg_trade_flow),
                 },
                 "strategy_rows": len(bundle.strategy),
                 "intrabar_rows": len(bundle.intrabar) if bundle.intrabar is not None else 0,
