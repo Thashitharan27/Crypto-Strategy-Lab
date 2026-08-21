@@ -64,10 +64,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy pandas duckdb pytest
-      - name: Compile data layer and migration tools
-        run: python -m compileall -q crypto_strategy_lab/data crypto_strategy_lab/features tools/data_lake_validate.py tools/data_lake_backtest_parity.py
-      - name: Smoke direct validator launch
-        run: python tools/data_lake_validate.py --help
+      - name: Compile Data Lake path and migration tools
+        run: >-
+          python -m compileall -q
+          crypto_strategy_lab/data
+          crypto_strategy_lab/features
+          crypto_strategy_lab/data_lake_engine.py
+          tools/data_lake_validate.py
+          tools/data_lake_backtest_parity.py
+          tools/data_lake_run.py
+      - name: Smoke direct Data Lake tools
+        run: |
+          python tools/data_lake_validate.py --help
+          python tools/data_lake_run.py --help
       - name: Run Data Lake v2 safety tests
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -80,6 +89,7 @@ jobs:
           tests/test_data_lake_legacy_bridge.py
           tests/test_saved_run_config_snapshot.py
           tests/test_data_lake_parity_tool.py
+          tests/test_data_lake_execution_path.py
 
   full-suite-observation:
     runs-on: ubuntu-latest
