@@ -36,3 +36,20 @@ class MainWindow(SRDynamicTPMainWindow):
         # research shortcut on the next row without restructuring the base UI.
         reports_layout = self.report_buttons["output"].parentWidget().layout()
         reports_layout.addWidget(button, 2, 0)
+
+    @staticmethod
+    def _percentage_points(value, decimals: int = 2) -> str:
+        """Format statistics that are already stored as percentage points."""
+        if value is None:
+            return "—"
+        return f"{float(value):.{decimals}f}%"
+
+    def populate_summary(self, summary, trades=None):
+        """Render ratio metrics and percentage-point metrics with correct units."""
+        super().populate_summary(summary, trades)
+        self.kpi_labels["Total Return"].setText(
+            self._percentage_points(summary.get("total_return_percentage"))
+        )
+        self.kpi_labels["Maximum Drawdown"].setText(
+            self._percentage_points(summary.get("maximum_drawdown_percentage"))
+        )
