@@ -58,3 +58,28 @@ def test_asset_return_warmup_covers_regime_lookback() -> None:
         assert strategy_warmup_period(config).days >= config.bull_regime_lookback_days
     finally:
         window.close()
+
+
+def test_summary_formats_percentage_points_without_multiplying_twice() -> None:
+    app()
+    window = MainWindow()
+    try:
+        summary = {
+            "ending_equity": 919.16,
+            "total_return_percentage": -8.0842,
+            "total_trades": 18,
+            "win_rate": 5 / 18,
+            "profit_factor": 0.35,
+            "maximum_drawdown_percentage": -8.762,
+            "average_net_r": -0.46,
+            "total_net_r": -8.34,
+            "total_fees": 7.75,
+            "signals_traded": 18,
+            "signals_evaluated": 18,
+        }
+        window.populate_summary(summary)
+        assert window.kpi_labels["Total Return"].text() == "-8.08%"
+        assert window.kpi_labels["Maximum Drawdown"].text() == "-8.76%"
+        assert window.kpi_labels["Win Rate"].text() == "27.78%"
+    finally:
+        window.close()
