@@ -41,6 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start", required=True, help="Inclusive UTC data start")
     parser.add_argument("--end", required=True, help="Exclusive UTC data end")
     parser.add_argument("--output-dir", type=Path, default=Path("output") / "data_lake_v2")
+    parser.add_argument(
+        "--include-agg-trades",
+        action="store_true",
+        help="Load heavy Binance aggTrades archives and attach causal trade-flow research",
+    )
     return parser
 
 
@@ -97,6 +102,7 @@ def main() -> int:
         sr_hold_confirmation_atr=config.sr_hold_confirmation_atr,
         sr_break_tolerance_atr=config.sr_break_tolerance_atr,
         sr_break_basis=config.sr_break_basis,
+        include_agg_trade_flow=bool(args.include_agg_trades),
     )
     engine = DataLakeProductionBacktestEngine(
         bundle.strategy,
@@ -140,6 +146,9 @@ def main() -> int:
             "end": request.end.isoformat(),
             "strategy_interval": request.strategy_interval,
             "intrabar_interval": request.intrabar_interval,
+        },
+        "research_options": {
+            "include_agg_trade_flow": bool(args.include_agg_trades),
         },
         "market_regime_method": config.market_regime_method,
         "features": {
