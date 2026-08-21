@@ -33,11 +33,36 @@ def open_csv_stream(path: Path) -> Iterator[BinaryIO]:
             members = [name for name in archive.namelist() if name.lower().endswith(".csv")]
             if not members:
                 raise ValueError(f"No CSV member found in Binance archive: {path}")
-            # Binance public archives normally contain one CSV. Choosing the
-            # largest member is robust to metadata/checksum sidecars.
             member = max(members, key=lambda name: archive.getinfo(name).file_size)
             with archive.open(member, "r") as stream:
                 yield stream
         return
     with path.open("rb") as stream:
         yield stream
+
+
+def timestamp_series(values: pd.Series) -> pd.Series:
+    """Parse Binance timestamps expressed as ms/us/ns integers or UTC text."""
+
+    numeric = pd.to_numeric(values, errors="coerce")
+    if bool(numeric.notna().all()):
+        magnitude = float(numeric.abs().median())
+        if magnitude >= 1e17:
+            unit = "ns"
+        elif magnitude >= 1e14:
+            unit = "us"
+        else:
+            unit = "ms"
+        return pd.to_datetime(numeric, unit=unit, utc=True, errors="raise")
+    return pd.to_datetime(values, utc=True, errors="raise")
+
+
+def normalize_header_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalize Binance header spelling without changing row values."""
+
+    result = frame.copy()
+    result.columns = [
+        str(column).strip().lower().replace(" ", "_").replace("-", "_")
+        for column in result.columns
+    ]
+    return result

@@ -1,4 +1,4 @@
-"""Canonical adapter for Binance kline archives."""
+"""Canonical adapters for Binance regular and reference-price kline archives."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pandas as pd
 
 from ..schemas import ArchiveRecord, DatasetKind
 from ..timing import interval_to_timedelta
-from .base_adapter import BinanceArchiveAdapter, open_csv_stream
+from .base_adapter import BinanceArchiveAdapter, open_csv_stream, timestamp_series
 
 
 _BINANCE_COLUMNS = [
@@ -24,27 +24,27 @@ _BINANCE_COLUMNS = [
     "ignore",
 ]
 
-
-def _timestamp_series(values: pd.Series) -> pd.Series:
-    numeric = pd.to_numeric(values, errors="raise")
-    magnitude = float(numeric.abs().median())
-    if magnitude >= 1e17:
-        unit = "ns"
-    elif magnitude >= 1e14:
-        unit = "us"
-    else:
-        unit = "ms"
-    return pd.to_datetime(numeric, unit=unit, utc=True)
+_KLINE_DATASETS = {
+    DatasetKind.KLINES,
+    DatasetKind.MARK_PRICE_KLINES,
+    DatasetKind.INDEX_PRICE_KLINES,
+    DatasetKind.PREMIUM_INDEX_KLINES,
+}
 
 
-class KlineArchiveAdapter(BinanceArchiveAdapter):
-    dataset = DatasetKind.KLINES
+class KlineLikeArchiveAdapter(BinanceArchiveAdapter):
+    """Normalizes all Binance kline-shaped public-data families."""
+
+    def __init__(self, dataset: DatasetKind) -> None:
+        if dataset not in _KLINE_DATASETS:
+            raise ValueError(f"Not a kline-shaped dataset: {dataset.value}")
+        self.dataset = dataset
 
     def read(self, record: ArchiveRecord) -> pd.DataFrame:
-        if record.dataset != DatasetKind.KLINES:
-            raise ValueError(f"KlineArchiveAdapter cannot read {record.dataset.value}")
+        if record.dataset != self.dataset:
+            raise ValueError(f"{self.__class__.__name__} cannot read {record.dataset.value}")
         if not record.interval:
-            raise ValueError(f"Kline archive has no interval metadata: {record.path}")
+            raise ValueError(f"Kline archive has no fixed interval metadata: {record.path}")
 
         with open_csv_stream(record.path) as stream:
             raw = pd.read_csv(stream, header=None, low_memory=False)
@@ -58,7 +58,7 @@ class KlineArchiveAdapter(BinanceArchiveAdapter):
         raw = raw.iloc[:, : min(raw.shape[1], len(_BINANCE_COLUMNS))].copy()
         raw.columns = _BINANCE_COLUMNS[: raw.shape[1]]
 
-        period_start = _timestamp_series(raw["open_time_raw"])
+        period_start = timestamp_series(raw["open_time_raw"])
         delta = interval_to_timedelta(record.interval)
         period_end = period_start + delta
 
@@ -101,3 +101,8 @@ class KlineArchiveAdapter(BinanceArchiveAdapter):
         if bool(invalid.any()):
             raise ValueError(f"Invalid OHLCV rows found in Binance archive: {record.path}")
         return frame
+
+
+class KlineArchiveAdapter(KlineLikeArchiveAdapter):
+    def __init__(self) -> None:
+        super().__init__(DatasetKind.KLINES)

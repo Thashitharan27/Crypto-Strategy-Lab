@@ -8,7 +8,8 @@ import duckdb
 import pandas as pd
 
 from .binance.discovery import discover_archives
-from .binance.klines import KlineArchiveAdapter
+from .binance.events import FundingRateArchiveAdapter, FuturesMetricsArchiveAdapter
+from .binance.klines import KlineArchiveAdapter, KlineLikeArchiveAdapter
 from .cache import CacheLayout
 from .catalog import DataCatalog
 from .query import DataRequest
@@ -27,7 +28,14 @@ class MarketDataStore:
         self.cache = CacheLayout(Path(cache_root))
         self.cache.ensure()
         self.catalog = DataCatalog(self.cache.catalog_db)
-        self._adapters = {DatasetKind.KLINES: KlineArchiveAdapter()}
+        self._adapters = {
+            DatasetKind.KLINES: KlineArchiveAdapter(),
+            DatasetKind.MARK_PRICE_KLINES: KlineLikeArchiveAdapter(DatasetKind.MARK_PRICE_KLINES),
+            DatasetKind.INDEX_PRICE_KLINES: KlineLikeArchiveAdapter(DatasetKind.INDEX_PRICE_KLINES),
+            DatasetKind.PREMIUM_INDEX_KLINES: KlineLikeArchiveAdapter(DatasetKind.PREMIUM_INDEX_KLINES),
+            DatasetKind.FUTURES_METRICS: FuturesMetricsArchiveAdapter(),
+            DatasetKind.FUNDING_RATE: FundingRateArchiveAdapter(),
+        }
 
     def refresh_catalog(self) -> int:
         records = discover_archives(self.raw_root)
@@ -49,6 +57,8 @@ class MarketDataStore:
             return target
         target.parent.mkdir(parents=True, exist_ok=True)
         frame = self._adapter_for(record.dataset).read(record)
+        if frame.empty:
+            raise ValueError(f"Recognized Binance archive contains no rows: {record.path}")
         temporary = target.with_suffix(".tmp.parquet")
         if temporary.exists():
             temporary.unlink()
@@ -86,8 +96,10 @@ class MarketDataStore:
         for column in ("event_time", "period_end", "available_at"):
             if column in frame.columns:
                 frame[column] = pd.to_datetime(frame[column], utc=True)
-        frame = frame.sort_values("period_start", kind="stable")
-        return frame.drop_duplicates(subset=["symbol", "interval", "period_start"], keep="last").reset_index(drop=True)
+        sort_column = "event_time" if "event_time" in frame.columns else "period_start"
+        frame = frame.sort_values(sort_column, kind="stable")
+        subset = [column for column in ("symbol", "interval", sort_column) if column in frame.columns]
+        return frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
 
     def load_klines(self, request: DataRequest, interval: str | None = None) -> pd.DataFrame:
         """Load canonical completed-candle records for a requested interval."""

@@ -18,6 +18,7 @@ _DATASET_ALIASES = {
     "markpriceklines": DatasetKind.MARK_PRICE_KLINES,
     "indexpriceklines": DatasetKind.INDEX_PRICE_KLINES,
     "premiumindexklines": DatasetKind.PREMIUM_INDEX_KLINES,
+    "premiumpriceklines": DatasetKind.PREMIUM_INDEX_KLINES,
     "aggtrades": DatasetKind.AGG_TRADES,
     "trades": DatasetKind.TRADES,
     "bookdepth": DatasetKind.BOOK_DEPTH,
@@ -48,10 +49,6 @@ def _infer_market(parts: tuple[str, ...]) -> MarketKind | None:
         return MarketKind.FUTURES_CM
     if "spot" in keys:
         return MarketKind.SPOT
-    # The user's collector is currently a USD-M futures lake. Accept common
-    # `futures/usdm` variants even when no literal `um` directory exists.
-    if "futures" in keys and keys.intersection({"usdm", "usdsm"}):
-        return MarketKind.FUTURES_UM
     return None
 
 

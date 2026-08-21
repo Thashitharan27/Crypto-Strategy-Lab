@@ -17,10 +17,6 @@ _CANDLE_DATASETS = {
     DatasetKind.PREMIUM_INDEX_KLINES,
 }
 
-_INTERVAL_AGGREGATE_DATASETS = {
-    DatasetKind.FUTURES_METRICS,
-}
-
 
 def ensure_utc(value: datetime) -> datetime:
     """Return an aware UTC datetime, treating a naive value as UTC."""
@@ -58,16 +54,24 @@ def canonical_available_at(
 ) -> datetime:
     """Return the earliest timestamp at which a source value may be consumed.
 
-    Candle and interval-aggregate datasets are withheld until their interval is
-    complete. Event datasets (funding, trades and order-book events) are usable
-    at their event timestamp.
+    Candle datasets are withheld until their candle is complete. Futures
+    metrics in Binance Vision are timestamped snapshots; if a provider later
+    supplies an explicit aggregate interval/period end, that later boundary is
+    used. Event datasets (funding, trades and order-book events) are usable at
+    their event timestamp.
     """
 
     event_time = ensure_utc(event_time)
-    if dataset in _CANDLE_DATASETS or dataset in _INTERVAL_AGGREGATE_DATASETS:
+    if dataset in _CANDLE_DATASETS:
         if period_end is not None:
             return ensure_utc(period_end)
         if interval is None:
             raise ValueError(f"{dataset.value} requires interval or period_end")
         return event_time + interval_to_timedelta(interval)
+    if dataset == DatasetKind.FUTURES_METRICS:
+        if period_end is not None:
+            return ensure_utc(period_end)
+        if interval is not None:
+            return event_time + interval_to_timedelta(interval)
+        return event_time
     return event_time
