@@ -56,7 +56,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+        uses:
+          actions/setup-python@v5
         with:
           python-version: "3.10"
           cache: pip
@@ -69,6 +70,7 @@ jobs:
           python -m compileall -q
           crypto_strategy_lab/data
           crypto_strategy_lab/features
+          crypto_strategy_lab/data_lake_config.py
           crypto_strategy_lab/data_lake_engine.py
           tools/data_lake_validate.py
           tools/data_lake_backtest_parity.py
@@ -92,6 +94,7 @@ jobs:
           tests/test_saved_run_config_snapshot.py
           tests/test_data_lake_parity_tool.py
           tests/test_data_lake_execution_path.py
+          tests/test_data_lake_config.py
           tests/test_rewrite_config_current.py
 
   full-suite-observation:
