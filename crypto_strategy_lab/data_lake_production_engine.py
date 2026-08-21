@@ -6,6 +6,8 @@ semantics while stateless features migrate out of the simulator in small slices.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 import pandas as pd
 
@@ -27,6 +29,8 @@ _REQUIRED_SR_COLUMNS = {
     ),
 }
 
+_RESEARCH_META_COLUMNS = {"timestamp", "available_at"}
+
 
 class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBacktestEngine):
     """Production engine with Data-Lake-prepared causal feature inputs."""
@@ -38,6 +42,7 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         technical_features: pd.DataFrame | None = None,
         context_features: pd.DataFrame | None = None,
         support_resistance_features: pd.DataFrame | None = None,
+        research_features: Mapping[str, pd.DataFrame] | None = None,
         **kwargs,
     ) -> None:
         # MarketContextFeatureProvider currently mirrors the base-engine MR/BB
@@ -46,6 +51,9 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         # production MR-v2 arrays until that provider is migrated separately.
         self.prepared_context_features = context_features
         self.support_resistance_features = support_resistance_features
+        self.research_features: dict[str, pd.DataFrame] = {}
+        self.research_output_columns: tuple[str, ...] = ()
+        self.research_feature_available_columns: tuple[str, ...] = ()
         super().__init__(
             *args,
             structural_benchmark=structural_benchmark,
@@ -54,6 +62,13 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             **kwargs,
         )
 
+        self._configure_support_resistance_feature(support_resistance_features)
+        self._configure_research_features(research_features or {})
+
+    def _configure_support_resistance_feature(
+        self,
+        support_resistance_features: pd.DataFrame | None,
+    ) -> None:
         if not self.config.enable_support_resistance_analysis:
             self.support_resistance_feature_source = "disabled"
             return
@@ -81,6 +96,81 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             f"{prepared.attrs.get('feature_name', 'support_resistance')}@"
             f"{prepared.attrs.get('feature_version', 'unknown')}"
         )
+
+    def _configure_research_features(self, frames: Mapping[str, pd.DataFrame]) -> None:
+        """Validate optional research-only frames aligned to strategy candles."""
+        output_columns: list[str] = []
+        available_columns: list[str] = []
+        used: set[str] = set()
+        for name in sorted(frames):
+            frame = frames[name]
+            prepared, data_times = self._aligned_feature_frame(
+                self.data,
+                frame,
+                f"research feature {name}",
+            )
+            self._assert_causal_availability(
+                prepared,
+                data_times,
+                self.config,
+                f"research feature {name}",
+            )
+            columns = [column for column in prepared.columns if column not in _RESEARCH_META_COLUMNS]
+            duplicates = sorted(used.intersection(columns))
+            if duplicates:
+                raise ValueError(
+                    f"Research feature {name} duplicates output columns: {duplicates}"
+                )
+            used.update(columns)
+            output_columns.extend(columns)
+            available_name = f"{name}_feature_available_at"
+            available_columns.append(available_name)
+            self.research_features[name] = prepared
+        self.research_output_columns = tuple(output_columns)
+        self.research_feature_available_columns = tuple(available_columns)
+
+    def _attach_research_features_to_pair(self, pair, indicator_index: int) -> None:
+        """Freeze research values from the exact completed signal candle used."""
+        pair.research_signal_index = int(indicator_index)
+        pair.research_signal_candle_open_time = pd.Timestamp(self.times[indicator_index])
+        pair.research_signal_available_at = (
+            pd.Timestamp(self.times[indicator_index]) + self.entry_delta
+        )
+        for name, frame in self.research_features.items():
+            row = frame.iloc[indicator_index]
+            setattr(pair, f"{name}_feature_available_at", row["available_at"])
+            for column in frame.columns:
+                if column in _RESEARCH_META_COLUMNS:
+                    continue
+                setattr(pair, column, row[column])
+
+    def _open_pair(
+        self,
+        i,
+        entry_filter_passed=True,
+        entry_filter_reason="Strategy profile passed",
+        schedule=None,
+    ):
+        indicator_index = schedule["indicator_index"] if schedule else i
+        previous_pair_id = self.next_pair_id
+        super()._open_pair(i, entry_filter_passed, entry_filter_reason, schedule)
+        if self.next_pair_id == previous_pair_id + 1 and self.active_pairs:
+            self._attach_research_features_to_pair(self.active_pairs[-1], indicator_index)
+
+    def _build_result_row(self, pair, row_kind, positions):
+        row = super()._build_result_row(pair, row_kind, positions)
+        row["research_signal_index"] = getattr(pair, "research_signal_index", np.nan)
+        row["research_signal_candle_open_time"] = getattr(
+            pair, "research_signal_candle_open_time", None
+        )
+        row["research_signal_available_at"] = getattr(
+            pair, "research_signal_available_at", None
+        )
+        for column in self.research_feature_available_columns:
+            row[column] = getattr(pair, column, None)
+        for column in self.research_output_columns:
+            row[column] = getattr(pair, column, np.nan)
+        return row
 
     @classmethod
     def _validate_support_resistance_features(
