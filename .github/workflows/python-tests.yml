@@ -96,9 +96,11 @@ jobs:
           tests/test_futures_positioning_features.py
           tests/test_funding_context_features.py
           tests/test_basis_context_features.py
+          tests/test_agg_trade_flow_features.py
           tests/test_research_feature_trade_rows.py
           tests/test_feature_cache.py
           tests/test_binance_compact_adapters.py
+          tests/test_binance_trade_adapters.py
           tests/test_data_lake_legacy_bridge.py
           tests/test_saved_run_config_snapshot.py
           tests/test_data_lake_parity_tool.py
