@@ -68,6 +68,19 @@ def prepared(frame: pd.DataFrame, atr_period=7, adx_period=6, lookback=3):
     )
 
 
+def four_hour_config() -> BacktestConfig:
+    return BacktestConfig(
+        strategy_timeframe_minutes=240,
+        intrabar_timeframe_minutes=1,
+        telemetry_interval_minutes=240,
+        use_intrabar_data=False,
+        atr_period=7,
+        adx_period=6,
+        di_pressure_lookback=3,
+        market_regime_method="ASSET_RETURN",
+    )
+
+
 def test_provider_matches_existing_atr_adx_dmi_math() -> None:
     frame = canonical_klines()
     features = prepared(frame)
@@ -117,15 +130,7 @@ def test_future_source_mutation_cannot_change_past_features() -> None:
 def test_data_lake_engine_reuses_prepared_features_and_preserves_di_pressure() -> None:
     frame = canonical_klines()
     data = legacy_frame(frame)
-    config = BacktestConfig(
-        strategy_timeframe_minutes=240,
-        intrabar_timeframe_minutes=1,
-        use_intrabar_data=False,
-        atr_period=7,
-        adx_period=6,
-        di_pressure_lookback=3,
-        market_regime_method="ASSET_RETURN",
-    )
+    config = four_hour_config()
     features = prepared(frame)
     legacy = BacktestEngine(data, config)
     lake = DataLakeBacktestEngine(data, config, technical_features=features)
@@ -156,15 +161,7 @@ def test_data_lake_engine_reuses_prepared_features_and_preserves_di_pressure() -
 def test_prepared_path_does_not_execute_legacy_atr_or_adx(monkeypatch) -> None:
     frame = canonical_klines()
     data = legacy_frame(frame)
-    config = BacktestConfig(
-        strategy_timeframe_minutes=240,
-        intrabar_timeframe_minutes=1,
-        use_intrabar_data=False,
-        atr_period=7,
-        adx_period=6,
-        di_pressure_lookback=3,
-        market_regime_method="ASSET_RETURN",
-    )
+    config = four_hour_config()
     features = prepared(frame)
 
     def forbidden(*_args, **_kwargs):
