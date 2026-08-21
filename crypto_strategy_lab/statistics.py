@@ -191,6 +191,22 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     }
 
 
+def _bucket_exit_counts(trades: pd.DataFrame, mask: pd.Series) -> dict[str, int]:
+    reasons = _single_trade_exit_reason(trades).loc[mask]
+    be_reasons = {"BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"}
+    timeout = _bool_column(trades, "profile_timeout_triggered")
+    if "profile_timeout_triggered" not in trades and "both_open_timeout_triggered" in trades:
+        timeout = _bool_column(trades, "both_open_timeout_triggered")
+    timeout = timeout.loc[mask]
+    return {
+        "TP Count": int(reasons.eq("TP").sum()),
+        "SL Count": int(reasons.eq("SL").sum()),
+        "BE Count": int(reasons.isin(be_reasons).sum()),
+        "Profile Timeout Count": int(timeout.sum()),
+        "End Of Data Count": int(reasons.eq("END_OF_DATA").sum()),
+    }
+
+
 def adx_analysis(trades: pd.DataFrame) -> pd.DataFrame:
     buckets = [(0,10),(10,15),(15,20),(20,25),(25,30),(30,35),(35,40),(40,None)]
     rows=[]
@@ -200,12 +216,17 @@ def adx_analysis(trades: pd.DataFrame) -> pd.DataFrame:
         mask = adx_values >= lo if hi is None else ((adx_values >= lo) & (adx_values < hi))
         pnl = pd.to_numeric(trades.get("pair_net_pnl", pd.Series(index=trades.index, dtype=float)), errors="coerce").loc[mask]
         duration = pd.to_numeric(trades.get("holding_minutes", pd.Series(index=trades.index, dtype=float)), errors="coerce").loc[mask]
-        long_reason = trades.get("long_exit_reason", pd.Series(index=trades.index, dtype=object)).loc[mask]
-        short_reason = trades.get("short_exit_reason", pd.Series(index=trades.index, dtype=object)).loc[mask]
         wins = pnl > 0; losses = pnl < 0
-        double_sl = long_reason.eq("SL") & short_reason.eq("SL")
-        tp_sl = (long_reason.eq("TP") & short_reason.eq("SL")) | (long_reason.eq("SL") & short_reason.eq("TP"))
-        rows.append({"Bucket": label, "Trades": int(mask.sum()), "Wins": int(wins.sum()), "Losses": int(losses.sum()), "Win rate": float(wins.mean()) if len(pnl) else 0.0, "Average PnL": float(pnl.mean()) if len(pnl) else 0.0, "Average duration": float(duration.mean()) if len(duration) else 0.0, "Double SL count": int(double_sl.sum()), "TP/SL count": int(tp_sl.sum())})
+        rows.append({
+            "Bucket": label,
+            "Trades": int(mask.sum()),
+            "Wins": int(wins.sum()),
+            "Losses": int(losses.sum()),
+            "Win rate": float(wins.mean()) if len(pnl) else 0.0,
+            "Average PnL": float(pnl.mean()) if len(pnl) else 0.0,
+            "Average duration": float(duration.mean()) if len(duration) else 0.0,
+            **_bucket_exit_counts(trades, mask),
+        })
     return pd.DataFrame(rows)
 
 
@@ -232,8 +253,6 @@ def bucket_analysis(trades: pd.DataFrame, column: str, buckets: list[tuple[float
     rows=[]; values=pd.to_numeric(trades.get(column, pd.Series(index=trades.index, dtype=float)), errors="coerce")
     all_pnl=pd.to_numeric(trades.get("pair_net_pnl",pd.Series(index=trades.index,dtype=float)),errors="coerce")
     all_holding=pd.to_numeric(trades.get("holding_minutes",pd.Series(index=trades.index,dtype=float)),errors="coerce")
-    all_long=trades.get("long_exit_reason",pd.Series(index=trades.index,dtype=object))
-    all_short=trades.get("short_exit_reason",pd.Series(index=trades.index,dtype=object))
     for lo, hi in buckets:
         label = f"{lo:g}+" if hi is None else f"{lo:g}-{hi:g}"
         if pct_labels:
@@ -241,8 +260,16 @@ def bucket_analysis(trades: pd.DataFrame, column: str, buckets: list[tuple[float
         mask = values >= lo if hi is None else ((values >= lo) & (values < hi))
         pnl=all_pnl.loc[mask]; holding=all_holding.loc[mask]
         wins=pnl>0; losses=pnl<0
-        double_sl=all_long.loc[mask].eq("SL") & all_short.loc[mask].eq("SL")
-        rows.append({"Bucket":label,"Trades":int(mask.sum()),"Wins":int(wins.sum()),"Losses":int(losses.sum()),"Win Rate":float(wins.mean()) if len(pnl) else 0.0,"Average Net PnL":float(pnl.mean()) if len(pnl) else 0.0,"Average Holding Time":float(holding.mean()) if len(holding) else 0.0,"Double SL Count":int(double_sl.sum())})
+        rows.append({
+            "Bucket":label,
+            "Trades":int(mask.sum()),
+            "Wins":int(wins.sum()),
+            "Losses":int(losses.sum()),
+            "Win Rate":float(wins.mean()) if len(pnl) else 0.0,
+            "Average Net PnL":float(pnl.mean()) if len(pnl) else 0.0,
+            "Average Holding Time":float(holding.mean()) if len(holding) else 0.0,
+            **_bucket_exit_counts(trades, mask),
+        })
     return pd.DataFrame(rows)
 
 
