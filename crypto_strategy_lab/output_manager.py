@@ -138,6 +138,48 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
+def load_config_snapshot(
+    path: str | Path,
+    *,
+    require_paths: bool = True,
+) -> tuple[BacktestConfig, tuple[str, ...]]:
+    """Rehydrate a saved run ``config.json`` into the current config contract.
+
+    Run outputs intentionally serialize the entire :class:`BacktestConfig`, so
+    historical snapshots can contain fields that have since been retired. Only
+    fields that still exist in the current dataclass are restored; retired fields
+    are returned to the caller for explicit reporting rather than silently
+    affecting current behavior.
+    """
+
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("Saved run config JSON must contain an object.")
+    if "input_csv" not in raw:
+        raise ValueError("Saved run config is missing input_csv.")
+
+    allowed = {field.name for field in fields(BacktestConfig)}
+    ignored = tuple(sorted(set(raw) - allowed))
+    current = {key: value for key, value in raw.items() if key in allowed}
+    for key in (
+        "input_csv",
+        "intrabar_csv",
+        "output_dir",
+        "structural_regime_benchmark_csv",
+        "output_run_dir",
+    ):
+        if key in current and current[key] not in (None, ""):
+            current[key] = Path(current[key])
+
+    config = BacktestConfig(**current)
+    if require_paths:
+        if not Path(config.input_csv).is_file():
+            raise ValueError(f"Strategy CSV does not exist: {config.input_csv}")
+        if config.use_intrabar_data and config.intrabar_csv and not Path(config.intrabar_csv).is_file():
+            raise ValueError(f"Intrabar CSV does not exist: {config.intrabar_csv}")
+    return config, ignored
+
+
 def write_config(config: BacktestConfig, run_dir: Path) -> None:
     (run_dir / "config.json").write_text(json.dumps(config_to_dict(config), indent=2, default=str))
 
@@ -228,123 +270,11 @@ TRADE_R_COLUMN_METADATA = {
     "configured_account_risk_percentage": "Configured account-equity percentage planned to be lost at the initial full stop before fees and slippage.",
     "estimated_all_in_stop_risk_percentage": "Estimated account-equity loss at stop after entry fee, stop-exit fee, and configured slippage.",
     "*_price_r": "Realized price movement divided by the full initial stop distance; 1.0 means one trade R of favourable price movement.",
-    "*_gross_r": "Gross cash PnL divided by that leg's planned risk_amount.",
-    "*_net_r": "Net cash PnL after fees divided by that leg's planned risk_amount.",
-    "*_account_r": "Cash PnL normalized by planned account risk for the leg.",
-    "pair_price_r": "Realized pair price movement expressed in trade R, where 1R is the full initial stop distance.",
-    "pair_gross_account_r": "Pair gross cash PnL divided by combined planned risk_amount for both legs.",
-    "pair_fee_account_r": "Pair fees divided by combined planned risk_amount for both legs.",
-    "pair_net_account_r": "Pair net cash PnL divided by combined planned risk_amount for both legs.",
-    "pair_gross_r": "Pair gross cash PnL divided by the pair's combined planned risk_amount.",
-    "pair_fee_r": "Pair fees divided by the pair's combined planned risk_amount.",
-    "pair_net_r": "Pair net cash PnL divided by the pair's combined planned risk_amount; valid for equal and asymmetric leg sizing.",
-    "pair_leg_gross_r_sum": "Legacy diagnostic: sum of each leg's independently normalized gross_r.",
-    "pair_leg_net_r_sum": "Legacy diagnostic: sum of each leg's independently normalized net_r.",
-    "adx": "Wilder ADX value from the 15-minute strategy candle evaluated before pair entry.",
-    "plus_di": "Wilder +DI value from the 15-minute strategy candle evaluated before pair entry.",
-    "minus_di": "Wilder -DI value from the 15-minute strategy candle evaluated before pair entry.",
-    "market_structure_direction": "Confirmed swing-high/swing-low direction at entry: LONG, SHORT, or ABSTAIN.",
-    "market_structure_reason": "Specific confirmed-structure classification or abstention reason.",
-    "market_structure_pivot_span": "Candles required on each side to confirm a swing pivot; currently two.",
-    "market_structure_minimum_displacement_atr": "Smaller directional change across the latest two swing highs/lows, normalized by entry ATR; telemetry only.",
-    "market_structure_maximum_displacement_atr": "Larger directional change across the latest two swing highs/lows, normalized by entry ATR; telemetry only.",
-    "market_structure_breakout_distance_atr": "Directional close distance beyond the prior swing boundary in ATR units; negative means no close breakout.",
-    "market_structure_breakout_confirmed_by_close": "Whether the entry candle closed beyond the prior directional swing boundary.",
-    "directional_di": "DI supporting the selected trade direction at signal time.",
-    "opposing_di": "DI opposing the selected trade direction at signal time.",
-    "directional_di_change": "Directional DI change over the configured analysis lookback.",
-    "opposing_di_change": "Opposing DI change over the configured analysis lookback.",
-    "di_spread_change": "Absolute DI spread change over the configured analysis lookback.",
-    "di_pressure_state": "Analysis-only EXPANDING, CONTRACTING, MIXED, or UNKNOWN classification.",
-    "di_pressure_lookback": "Number of past strategy candles used for DI pressure telemetry.",
-    "mean_price": "Causal EMA at entry using mean_reversion_period. Analysis-only; never changes trade selection.",
-    "mean_distance_atr": "Signed entry close minus EMA distance divided by configured ATR. Negative is below the mean; positive is above.",
-    "mean_distance_atr_previous": "Previous strategy candle's signed close-to-EMA distance in ATR units.",
-    "mean_distance_change_atr": "Change in signed mean distance versus the previous strategy candle.",
-    "mean_reversion_state": "Entry stretch bucket: strongly below, below, near, above, or strongly above the EMA.",
-    "mean_reversion_motion": "Whether absolute distance from the EMA is moving TOWARD_MEAN, AWAY_FROM_MEAN, FLAT, or UNKNOWN.",
-    "mean_reversion_alignment": "Alias of mean_reversion_di_alignment for DI research: FAVORS_REVERSION, AGAINST_REVERSION, NEUTRAL, or UNKNOWN.",
-    "mean_reversion_di_alignment": "Whether the DI-selected direction points back toward the EMA when price is at least 0.5 ATR away.",
-    "mean_reversion_trade_alignment": "Whether the final traded direction, after any Strategy Profile flip, points back toward the EMA.",
-    "mean_reversion_strength": "Analysis-only stretch magnitude score: 0 neutral, 1 weak, 2 moderate, 3 strong; -1 unavailable.",
-    "di_spread": "Absolute difference between +DI and -DI on the 15-minute strategy candle.",
-    "di_ratio": "max(+DI, -DI) divided by min(+DI, -DI), with division by zero protected as NaN.",
-    "di_spread_entry_5bar_change": "DI spread change at entry versus five strategy candles ago.",
-    "bb_middle": "Bollinger Bands middle SMA on the 15-minute strategy candle.",
-    "bb_upper": "Bollinger Bands upper band on the 15-minute strategy candle.",
-    "bb_lower": "Bollinger Bands lower band on the 15-minute strategy candle.",
-    "bb_width": "Raw Bollinger Band Width: (upper - lower) / middle.",
-    "bb_width_pct": "Bollinger Band Width expressed as a percentage.",
-    "bb_width_entry_5bar_change": "Raw BB width change at entry versus five strategy candles ago.",
-    "bb_width_entry_5bar_change_pct": "BB width percentage change at entry versus five strategy candles ago.",
-    "indicator_warmup_complete": "True when ADX and BB width were both available at entry; false rows include indicator_warmup_note explaining incomplete warm-up.",
-    "adx_available_at_entry": "True when ADX had enough warm-up history to be available at entry.",
-    "bb_width_available_at_entry": "True when Bollinger Band width had enough warm-up history to be available at entry.",
-    "indicator_warmup_note": "Explains whether missing entry indicators are due to incomplete indicator warm-up.",
-    "adx_filter_passed": "Whether the ADX entry filter allowed this traded signal.",
-    "adx_filter_reason": "Human-readable ADX filter decision for this signal.",
-    "both_open_timeout_enabled": "Whether the optional rule to close pairs that keep both legs open beyond the configured duration was enabled for this run.",
-    "max_both_open_minutes": "Configured maximum elapsed minutes from pair entry while both long and short remain open.",
-    "both_open_timeout_triggered": "True when both legs of this pair were closed by the both-open timeout rule.",
-    "timeout_exit_time": "Timestamp used for the both-open timeout exit, when applicable.",
-    "remaining_leg_timeout_after_first_sl_enabled": "Whether the optional remaining-leg timeout after the first normal SL was enabled for this pair.",
-    "remaining_leg_timeout_after_first_sl_minutes": "Configured remaining-leg waiting period in minutes.",
-    "remaining_leg_timeout_after_first_sl_started": "True only when one leg exited for the normal SL reason while its opposite leg remained open.",
-    "first_sl_side": "LONG or SHORT side whose normal SL started the remaining-leg timer.",
-    "first_sl_time": "Exact timestamp of the first normal SL that started the timer.",
-    "remaining_leg_timeout_deadline": "First normal SL timestamp plus the configured timeout minutes.",
-    "remaining_leg_timeout_triggered": "True when the opposite leg was still open and was market-closed at the deadline's first available execution candle.",
-    "remaining_leg_timeout_exit_time": "Timestamp of the intrabar or fallback strategy candle used for a triggered remaining-leg timeout.",
-    "remaining_leg_timeout_exit_side": "Side closed by the remaining-leg timeout.",
-    "remaining_leg_timeout_profit_extension_enabled": "Whether a remaining leg at or above the configured unrealized-profit R threshold receives another full timeout interval.",
-    "remaining_leg_timeout_profit_threshold_r": "Minimum unrealized price R required at a timeout checkpoint to keep the remaining leg open.",
-    "remaining_leg_timeout_checkpoint_count": "Number of timeout checkpoints evaluated for the remaining leg.",
-    "remaining_leg_timeout_extension_count": "Number of checkpoints that qualified for another full timeout interval.",
-    "remaining_leg_timeout_last_checkpoint_time": "Timestamp of the most recent remaining-leg timeout checkpoint.",
-    "remaining_leg_timeout_last_checkpoint_profit_r": "Remaining leg unrealized price R at its most recent timeout checkpoint.",
-    "checkpoint_reentry_gate_started": "True when a checkpoint timeout started a virtual TP/SL gate that blocks replacement entries.",
-    "checkpoint_reentry_gate_side": "Side of the virtually monitored leg.",
-    "checkpoint_reentry_gate_tp": "TP boundary monitored after the checkpoint close.",
-    "checkpoint_reentry_gate_sl": "Active SL boundary monitored after the checkpoint close.",
-    "checkpoint_reentry_gate_start_time": "Checkpoint close time when virtual monitoring began.",
-    "checkpoint_reentry_gate_release_time": "Candle time when TP or SL released the entry gate.",
-    "checkpoint_reentry_gate_release_reason": "TP, SL, or TP_AND_SL boundary that released the gate.",
-    "remaining_leg_checkpoint_score_extension_enabled": "Whether the configurable checkpoint condition score controls timeout extensions.",
-    "checkpoint_score_last_atr_pct": "ATR as a percentage of checkpoint price using the last completed strategy candle.",
-    "checkpoint_score_last_directional_di": "Direction-adjusted DI at the checkpoint: +DI-minus--DI for long, reversed for short.",
-    "checkpoint_score_last_bb_width_pct": "Bollinger Band width percentage at the checkpoint.",
-    "checkpoint_score_last_pass_count": "Number of enabled checkpoint conditions that passed at the most recent checkpoint.",
-    "checkpoint_score_last_condition_count": "Number of checkpoint score conditions enabled.",
-    "checkpoint_score_last_passed": "Whether the most recent checkpoint score reached the required condition count.",
-    "first_sl_survivor_partial_taken": "Whether part of the surviving leg was realized when the opposite leg hit its first normal SL.",
-    "first_sl_survivor_partial_side": "Side of the surviving leg that was partially closed.",
-    "first_sl_survivor_partial_time": "Execution time of the first-SL survivor partial close.",
-    "first_sl_survivor_partial_pct": "Configured percentage of the survivor closed at the first SL.",
-    "first_sl_survivor_partial_exit_price": "Executed partial-close price after normal directional slippage.",
-    "first_sl_survivor_partial_net_pnl": "Net realized PnL from the first-SL partial close after its exit fee.",
-    "checkpoint_zero_score_streak": "Current consecutive zero-score checkpoint count.",
-    "checkpoint_zero_score_max_streak": "Largest consecutive zero-score count reached by the pair.",
-    "checkpoint_zero_score_last_time": "Most recent zero-score checkpoint time.",
-    "checkpoint_zero_score_confirmed_close": "Whether the remaining leg closed after reaching the configured zero-score confirmation count.",
-    "*_original_sl": "The leg stop loss at entry before any break-even replacement.",
-    "*_current_sl": "The final active stop loss after any break-even replacement.",
-    "*_be_*": "Break-even-after-opposite-SL audit fields. COST_ADJUSTED estimates a zero-net exit using entry fee, estimated exit fee, and configured slippage; final realized net PnL may differ slightly because exit fee depends on actual exit notional.",
-    "pair_be_triggered": "True when one leg hit SL and the opposite leg stop was moved by the break-even rule.",
-    "intrabar_partial_tp_ordering": "PESSIMISTIC uses STOP_FIRST; OPTIMISTIC uses TP1_THEN_TP2_THEN_STOP. Each leg is resolved independently.",
-    "*_remaining_quantity": "Quantity still protected by reduce-only-equivalent exit logic after partial fills.",
-    "*_tp1_* / *_tp2_* / *_stop_*": "Independent partial-fill quantities, times, prices, gross PnL, fees, and net PnL; unused fills are null.",
-    "*_sr_context": "Pipe-separated entry-time S/R event labels for the leg (NEAR_SUPPORT, NEAR_RESISTANCE, SUPPORT_BOUNCE, RESISTANCE_REJECTION, RESISTANCE_BREAKOUT, SUPPORT_BREAKDOWN, or NO_NEARBY_SR); derived from the stored entry-time S/R snapshot only, never recalculated after entry.",
-    "*_sr_support_bounce": "True when support was tested and held at entry time (SUPPORT_BOUNCE label present).",
-    "*_sr_resistance_rejection": "True when resistance was tested and held at entry time (RESISTANCE_REJECTION label present).",
-    "*_sr_resistance_breakout": "True when resistance structure was already broken at entry time (RESISTANCE_BREAKOUT label present).",
-    "*_sr_support_breakdown": "True when support structure was already broken at entry time (SUPPORT_BREAKDOWN label present).",
-    "*_sr_support_zone_low / *_sr_support_zone_high": "Bottom/top price bounds of the nearest confirmed support zone at entry time.",
-    "*_sr_resistance_zone_low / *_sr_resistance_zone_high": "Bottom/top price bounds of the nearest confirmed resistance zone at entry time.",
-    "*_sr_level_price": "Nearest S/R level price relevant to the leg's direction (support for LONG, resistance for SHORT).",
-    "*_sr_zone_low / *_sr_zone_high": "Zone bounds of *_sr_level_price: support zone for LONG legs, resistance zone for SHORT legs.",
+    "*_account_r": "Realized account PnL divided by planned account risk at entry; 1.0 means one configured account-risk unit.",
+    "*_effective_leverage": "Entry notional divided by equity at the moment that leg was sized.",
+    "pair_account_r": "Pair-level realized account PnL divided by the pair planned account risk at entry.",
 }
 
 
 def write_trade_column_metadata(run_dir: Path) -> None:
-    """Write tooltip-style definitions for R and risk percentage columns in trade_list.csv."""
-    (run_dir / "trade_list_column_metadata.json").write_text(json.dumps(TRADE_R_COLUMN_METADATA, indent=2))
+    (run_dir / "trade_list_column_metadata.json").write_text(json.dumps(TRADE_R_COLUMN_METADATA, indent=2), encoding="utf-8")
