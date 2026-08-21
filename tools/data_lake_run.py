@@ -90,6 +90,11 @@ def main() -> int:
         bb_period=config.bb_period,
         bb_stddevs=config.bb_stddevs,
         mean_reversion_period=config.mean_reversion_period,
+        mean_reversion_mean_type=getattr(config, "mean_reversion_mean_type", "SMA"),
+        mean_reversion_bb_stddevs=getattr(config, "mean_reversion_bb_stddevs", 2.0),
+        mean_reversion_rsi_period=getattr(config, "mean_reversion_rsi_period", 14),
+        mean_reversion_rsi_oversold=getattr(config, "mean_reversion_rsi_oversold", 30.0),
+        mean_reversion_rsi_overbought=getattr(config, "mean_reversion_rsi_overbought", 70.0),
         enable_support_resistance_analysis=config.enable_support_resistance_analysis,
         sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
         sr_pivot_left=config.sr_pivot_left,
@@ -132,6 +137,11 @@ def main() -> int:
         bb_period=bundle.context_features.attrs.get("bb_period"),
         bb_stddevs=bundle.context_features.attrs.get("bb_stddevs"),
         mean_reversion_period=bundle.context_features.attrs.get("mean_reversion_period"),
+        mean_reversion_mean_type=bundle.context_features.attrs.get("mean_reversion_mean_type"),
+        mean_reversion_bb_stddevs=bundle.context_features.attrs.get("mean_reversion_bb_stddevs"),
+        mean_reversion_rsi_period=bundle.context_features.attrs.get("mean_reversion_rsi_period"),
+        mean_reversion_rsi_oversold=bundle.context_features.attrs.get("mean_reversion_rsi_oversold"),
+        mean_reversion_rsi_overbought=bundle.context_features.attrs.get("mean_reversion_rsi_overbought"),
     )
     manifest = {
         "data_source": "binance_data_lake_v2",
@@ -153,7 +163,7 @@ def main() -> int:
         "market_regime_method": config.market_regime_method,
         "features": {
             "core_directional": directional_manifest,
-            "market_context": context_manifest,
+            "production_market_context": context_manifest,
             "support_resistance": _feature_manifest(bundle.support_resistance_features),
             "research": {
                 name: _feature_manifest(frame)
