@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 import numpy as np
 import pandas as pd
@@ -126,7 +126,7 @@ def assert_context_equal(left: SRContext, right: SRContext) -> None:
     for field in fields(SRContext):
         a = getattr(left, field.name)
         b = getattr(right, field.name)
-        if isinstance(a, float) or isinstance(b, float):
+        if isinstance(a, (float, np.floating)) or isinstance(b, (float, np.floating)):
             if pd.isna(a) and pd.isna(b):
                 continue
             assert np.isclose(float(a), float(b)), field.name
@@ -204,13 +204,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 def test_production_engine_preserves_higher_timeframe_sr_path() -> None:
     frame = canonical_klines()
     directional, _sr, _ = prepared(frame)
-    cfg = config()
-    cfg = EnhancedBacktestConfig(
-        **{
-            **cfg.__dict__,
-            "sr_timeframe_minutes": 480,
-        }
-    )
+    cfg = replace(config(), sr_timeframe_minutes=480)
     engine = DataLakeProductionBacktestEngine(
         legacy_frame(frame),
         cfg,
