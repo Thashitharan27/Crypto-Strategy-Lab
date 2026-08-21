@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from crypto_strategy_lab.trade import Position, Side, TradePair
+from crypto_strategy_lab.trade import ExitReason, Position, Side, TradePair
 
 
 def _position(side: Side) -> Position:
@@ -83,3 +83,52 @@ def test_runtime_leg_mutation_cannot_resurrect_dual_leg_state() -> None:
         _ = pair.position
     with pytest.raises(ValueError, match="simultaneous LONG\\+SHORT trades are retired"):
         pair.positions()
+
+
+def test_retired_dual_leg_state_is_absent_from_models() -> None:
+    pair = _pair(long=_position(Side.LONG))
+
+    retired_pair_fields = (
+        "pair_be_triggered",
+        "remaining_leg_timeout_after_first_sl_started",
+        "first_sl_side",
+        "first_sl_time",
+        "remaining_leg_timeout_deadline",
+        "remaining_leg_timeout_triggered",
+        "remaining_leg_timeout_exit_time",
+        "remaining_leg_timeout_exit_side",
+        "remaining_leg_timeout_checkpoint_count",
+        "remaining_leg_timeout_extension_count",
+        "remaining_leg_timeout_last_checkpoint_time",
+        "remaining_leg_timeout_last_checkpoint_profit_r",
+        "checkpoint_score_last_atr_pct",
+        "checkpoint_score_last_directional_di",
+        "checkpoint_score_last_bb_width_pct",
+        "checkpoint_score_last_pass_count",
+        "checkpoint_score_last_condition_count",
+        "checkpoint_score_last_passed",
+        "checkpoint_zero_score_streak",
+        "checkpoint_zero_score_max_streak",
+        "checkpoint_zero_score_last_time",
+        "checkpoint_zero_score_confirmed_close",
+        "first_sl_survivor_partial_taken",
+        "first_sl_survivor_partial_side",
+        "first_sl_survivor_partial_time",
+        "first_sl_survivor_partial_pct",
+        "first_sl_survivor_partial_quantity",
+        "first_sl_survivor_partial_exit_price",
+        "first_sl_survivor_partial_gross_pnl",
+        "first_sl_survivor_partial_fee",
+        "first_sl_survivor_partial_net_pnl",
+        "checkpoint_reentry_gate_started",
+        "checkpoint_reentry_gate_side",
+        "checkpoint_reentry_gate_tp",
+        "checkpoint_reentry_gate_sl",
+        "checkpoint_reentry_gate_start_time",
+        "checkpoint_reentry_gate_release_time",
+        "checkpoint_reentry_gate_release_reason",
+    )
+    for name in retired_pair_fields:
+        assert not hasattr(pair, name), name
+
+    assert not hasattr(ExitReason, "REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL")

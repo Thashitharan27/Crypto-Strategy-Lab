@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Optional
 
 class Side(str, Enum): LONG="LONG"; SHORT="SHORT"
-class ExitReason(str, Enum): TP="TP"; SL="SL"; ATR_CHECKPOINT_PROFIT_LOCK="ATR_CHECKPOINT_PROFIT_LOCK"; R_STEP_TRAILING_STOP="R_STEP_TRAILING_STOP"; TRAILING_STOP="TRAILING_STOP"; BE="BE"; BE_COST_ADJUSTED="BE_COST_ADJUSTED"; BE_R_OFFSET="BE_R_OFFSET"; BOTH_OPEN_TIMEOUT="BOTH_OPEN_TIMEOUT"; REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL="REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL"; END_OF_DATA="END_OF_DATA"
+class ExitReason(str, Enum): TP="TP"; SL="SL"; ATR_CHECKPOINT_PROFIT_LOCK="ATR_CHECKPOINT_PROFIT_LOCK"; R_STEP_TRAILING_STOP="R_STEP_TRAILING_STOP"; TRAILING_STOP="TRAILING_STOP"; BE="BE"; BE_COST_ADJUSTED="BE_COST_ADJUSTED"; BE_R_OFFSET="BE_R_OFFSET"; BOTH_OPEN_TIMEOUT="BOTH_OPEN_TIMEOUT"; END_OF_DATA="END_OF_DATA"
 class ExitSource(str, Enum): INTRABAR="1M_INTRABAR"; FALLBACK_15M="15M_FALLBACK"; END_OF_DATA="END_OF_DATA"
 
 @dataclass
@@ -53,13 +53,12 @@ class Position:
 
 @dataclass
 class TradePair:
-    pair_id: int; long: Optional[Position]; short: Optional[Position]; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; pair_be_triggered: bool = False; equity_after_trade: Optional[float] = None; both_open_timeout_triggered: bool = False; timeout_minutes: Optional[int] = None; timeout_exit_time: Optional[object] = None
-    remaining_leg_timeout_after_first_sl_started: bool = False; first_sl_side: Optional[Side] = None; first_sl_time: Optional[object] = None; remaining_leg_timeout_deadline: Optional[object] = None; remaining_leg_timeout_triggered: bool = False; remaining_leg_timeout_exit_time: Optional[object] = None; remaining_leg_timeout_exit_side: Optional[Side] = None
-    remaining_leg_timeout_checkpoint_count: int = 0; remaining_leg_timeout_extension_count: int = 0; remaining_leg_timeout_last_checkpoint_time: Optional[object] = None; remaining_leg_timeout_last_checkpoint_profit_r: Optional[float] = None
-    checkpoint_score_last_atr_pct: Optional[float] = None; checkpoint_score_last_directional_di: Optional[float] = None; checkpoint_score_last_bb_width_pct: Optional[float] = None; checkpoint_score_last_pass_count: int = 0; checkpoint_score_last_condition_count: int = 0; checkpoint_score_last_passed: bool = False
-    checkpoint_zero_score_streak: int = 0; checkpoint_zero_score_max_streak: int = 0; checkpoint_zero_score_last_time: Optional[object] = None; checkpoint_zero_score_confirmed_close: bool = False
-    first_sl_survivor_partial_taken: bool = False; first_sl_survivor_partial_side: Optional[Side] = None; first_sl_survivor_partial_time: Optional[object] = None; first_sl_survivor_partial_pct: float = 0.0; first_sl_survivor_partial_quantity: float = 0.0; first_sl_survivor_partial_exit_price: Optional[float] = None; first_sl_survivor_partial_gross_pnl: float = 0.0; first_sl_survivor_partial_fee: float = 0.0; first_sl_survivor_partial_net_pnl: float = 0.0
-    checkpoint_reentry_gate_started: bool = False; checkpoint_reentry_gate_side: Optional[Side] = None; checkpoint_reentry_gate_tp: Optional[float] = None; checkpoint_reentry_gate_sl: Optional[float] = None; checkpoint_reentry_gate_start_time: Optional[object] = None; checkpoint_reentry_gate_release_time: Optional[object] = None; checkpoint_reentry_gate_release_reason: Optional[str] = None
+    """Compatibility container for one directional trade.
+
+    Historical versions could hold simultaneous LONG and SHORT positions. That
+    strategy is retired; current entry logic creates exactly one Position.
+    """
+    pair_id: int; long: Optional[Position]; short: Optional[Position]; equity_before_trade: float; strategy_candle_open_time: object; strategy_entry_time: object; strategy_entry_price: float; leverage_capped: bool = False; equity_after_trade: Optional[float] = None; both_open_timeout_triggered: bool = False; timeout_minutes: Optional[int] = None; timeout_exit_time: Optional[object] = None
     market_structure: Optional[dict] = None
     _positions: tuple[Position, ...] = field(init=False, repr=False)
 
@@ -78,8 +77,6 @@ class TradePair:
 
     def positions(self):
         """Compatibility tuple for reporting code that still expects pair.positions()."""
-        # Re-evaluate the invariant so accidental runtime leg mutation fails
-        # loudly instead of silently resurrecting the retired dual-leg model.
         position = self.position
         if self._positions[0] is not position:
             raise ValueError("TradePair leg mutation is not supported after construction")
