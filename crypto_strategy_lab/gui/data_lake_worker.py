@@ -1,9 +1,7 @@
 """GUI worker adapter for Data Lake v2 market data and prepared features.
 
-The reporting/output pipeline in :mod:`crypto_strategy_lab.gui.worker` remains
-valuable during migration. This adapter prepares market data and causal features
-through the Data Lake, then binds the forward ``DataLakeBacktestEngine`` for one
-worker run. No CSV market-data filename is resolved by this module.
+The mature reporting/output pipeline remains in place while market data and
+stateless context are prepared once through the Data Lake before simulation.
 """
 from __future__ import annotations
 
@@ -13,7 +11,6 @@ import json
 from pathlib import Path
 import traceback
 
-import pandas as pd
 from PySide6.QtCore import Slot
 
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
@@ -53,16 +50,13 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         super().__init__(config, strategy_data=None)
         self.run_spec = run_spec
         self.data_bundle: BacktestDataBundle | None = None
-        # Installed before MainWindow attaches its completion handler, so the
-        # manifest/research files normally exist when the GUI refreshes.
         self.finished.connect(self._write_data_lake_metadata_and_research)
 
     def _prepare_bundle(self) -> BacktestDataBundle:
         strategy_interval = f"{int(self.config.strategy_timeframe_minutes)}m"
         intrabar_interval = (
             f"{int(self.config.intrabar_timeframe_minutes)}m"
-            if self.config.use_intrabar_data
-            else None
+            if self.config.use_intrabar_data else None
         )
         request = DataRequest(
             symbol=self.run_spec.symbol,
@@ -83,16 +77,19 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             atr_period=self.config.atr_period,
             adx_period=self.config.adx_period,
             di_pressure_lookback=self.config.di_pressure_lookback,
+            bb_period=self.config.bb_period,
+            bb_stddevs=self.config.bb_stddevs,
+            mean_reversion_period=self.config.mean_reversion_period,
         )
 
     @Slot()
     def run(self) -> None:
-        """Prepare Data Lake inputs, then reuse the mature GUI output pipeline."""
-
         try:
             self._emit_stage("Loading Binance Data Lake", 0)
             self.data_bundle = self._prepare_bundle()
             bundle = self.data_bundle
+            directional = bundle.technical_features
+            context = bundle.context_features
             self._log(
                 f"Data Lake source: {self.run_spec.symbol} | "
                 f"strategy={bundle.request.strategy_interval} ({len(bundle.strategy):,} rows) | "
@@ -100,11 +97,11 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 f"({len(bundle.intrabar) if bundle.intrabar is not None else 0:,} rows)"
             )
             self._log(
-                "Prepared technical features: "
-                f"{bundle.technical_features.attrs.get('feature_name', 'core_directional')}@"
-                f"{bundle.technical_features.attrs.get('feature_version', 'unknown')} | "
-                f"ATR({self.config.atr_period}) ADX/DI({self.config.adx_period}) "
-                f"DI pressure lookback={self.config.di_pressure_lookback}"
+                f"Prepared features: {directional.attrs.get('feature_name')}@"
+                f"{directional.attrs.get('feature_version')} "
+                f"(cache={'hit' if directional.attrs.get('feature_cache_hit') else 'miss'}), "
+                f"{context.attrs.get('feature_name')}@{context.attrs.get('feature_version')} "
+                f"(cache={'hit' if context.attrs.get('feature_cache_hit') else 'miss'})"
             )
             if bundle.structural_benchmark is not None:
                 self._log(
@@ -116,13 +113,11 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             self.failed.emit(str(exc), traceback.format_exc())
             return
 
-        # BacktestWorker still calls module-level loader/engine hooks. Binding
-        # these only for this worker execution lets us reuse its reporting logic
-        # while the large legacy worker is progressively decomposed.
         original_loader = worker_module.load_backtest_data
         original_engine = worker_module.BacktestEngine
         benchmark = bundle.structural_benchmark
         technical_features = bundle.technical_features
+        context_features = bundle.context_features
 
         def prepared_loader(_config, _strategy_data=None):
             return bundle.strategy, bundle.intrabar
@@ -131,6 +126,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             def __init__(self, *args, **kwargs):
                 kwargs["structural_benchmark"] = benchmark
                 kwargs["technical_features"] = technical_features
+                kwargs["context_features"] = context_features
                 super().__init__(*args, **kwargs)
 
         worker_module.load_backtest_data = prepared_loader
@@ -141,6 +137,17 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             worker_module.load_backtest_data = original_loader
             worker_module.BacktestEngine = original_engine
 
+    @staticmethod
+    def _feature_manifest(frame):
+        return {
+            "name": frame.attrs.get("feature_name"),
+            "version": frame.attrs.get("feature_version"),
+            "rows": len(frame),
+            "cache_hit": bool(frame.attrs.get("feature_cache_hit", False)),
+            "cache_key": frame.attrs.get("feature_cache_key"),
+            "effective_warmup_bars": frame.attrs.get("effective_warmup_bars"),
+        }
+
     @Slot(dict, object, object, object)
     def _write_data_lake_metadata_and_research(self, summary, trades, _equity, run_dir) -> None:
         if self.data_bundle is None:
@@ -148,7 +155,8 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         run_dir = Path(run_dir)
         bundle = self.data_bundle
         request = bundle.request
-        features = bundle.technical_features
+        directional = bundle.technical_features
+        context = bundle.context_features
         try:
             summary.update(
                 {
@@ -158,12 +166,26 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "intrabar_interval": request.intrabar_interval,
                     "data_request_start": request.start.isoformat(),
                     "data_request_end": request.end.isoformat(),
-                    "technical_feature_name": features.attrs.get("feature_name"),
-                    "technical_feature_version": features.attrs.get("feature_version"),
+                    "technical_feature_name": directional.attrs.get("feature_name"),
+                    "technical_feature_version": directional.attrs.get("feature_version"),
+                    "context_feature_name": context.attrs.get("feature_name"),
+                    "context_feature_version": context.attrs.get("feature_version"),
                 }
             )
             (run_dir / "summary.json").write_text(
                 json.dumps(summary, indent=2, default=str), encoding="utf-8"
+            )
+            directional_manifest = self._feature_manifest(directional)
+            directional_manifest.update(
+                atr_period=directional.attrs.get("atr_period"),
+                adx_period=directional.attrs.get("adx_period"),
+                di_pressure_lookback=directional.attrs.get("di_pressure_lookback"),
+            )
+            context_manifest = self._feature_manifest(context)
+            context_manifest.update(
+                bb_period=context.attrs.get("bb_period"),
+                bb_stddevs=context.attrs.get("bb_stddevs"),
+                mean_reversion_period=context.attrs.get("mean_reversion_period"),
             )
             manifest = {
                 "data_source": "binance_data_lake_v2",
@@ -177,27 +199,20 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "intrabar_interval": request.intrabar_interval,
                     "intrabar_start": (
                         self.run_spec.intrabar_start.isoformat()
-                        if self.run_spec.intrabar_start is not None
-                        else None
+                        if self.run_spec.intrabar_start is not None else None
                     ),
                 },
                 "strategy_rows": len(bundle.strategy),
                 "intrabar_rows": len(bundle.intrabar) if bundle.intrabar is not None else 0,
-                "technical_features": {
-                    "name": features.attrs.get("feature_name"),
-                    "version": features.attrs.get("feature_version"),
-                    "rows": len(features),
-                    "atr_period": features.attrs.get("atr_period"),
-                    "adx_period": features.attrs.get("adx_period"),
-                    "di_pressure_lookback": features.attrs.get("di_pressure_lookback"),
-                    "effective_warmup_bars": features.attrs.get("effective_warmup_bars"),
+                "features": {
+                    "core_directional": directional_manifest,
+                    "market_context": context_manifest,
                 },
                 "structural_benchmark_symbol": bundle.structural_benchmark_symbol,
                 "structural_benchmark_interval": bundle.structural_benchmark_interval,
                 "benchmark_rows": (
                     len(bundle.structural_benchmark)
-                    if bundle.structural_benchmark is not None
-                    else 0
+                    if bundle.structural_benchmark is not None else 0
                 ),
                 "trade_rows": len(trades),
             }
@@ -207,6 +222,4 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             generate_state_transition_reports(bundle.strategy, trades, run_dir)
             self._log("Data Lake manifest and state-transition research reports saved")
         except Exception as exc:
-            # The core backtest has already completed. Ancillary metadata must
-            # never turn a valid run into a failed run.
             self._log(f"WARNING: Data Lake post-run metadata/research failed: {exc}")
