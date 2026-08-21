@@ -73,10 +73,12 @@ jobs:
           tools/data_lake_validate.py
           tools/data_lake_backtest_parity.py
           tools/data_lake_run.py
+          tools/rewrite_config_current.py
       - name: Smoke direct Data Lake tools
         run: |
           python tools/data_lake_validate.py --help
           python tools/data_lake_run.py --help
+          python tools/rewrite_config_current.py --help
       - name: Run Data Lake v2 safety tests
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -90,6 +92,7 @@ jobs:
           tests/test_saved_run_config_snapshot.py
           tests/test_data_lake_parity_tool.py
           tests/test_data_lake_execution_path.py
+          tests/test_rewrite_config_current.py
 
   full-suite-observation:
     runs-on: ubuntu-latest
