@@ -1,8 +1,8 @@
 """Run one backtest directly from the Binance Data Lake v2 path.
 
 This is the forward migration runner. Its JSON contains strategy settings only;
-strategy, intrabar and structural-regime market data all come from ``--raw-root``
-through MarketDataStore.
+market data and causal technical features are prepared through MarketDataStore
+before the stateful simulator starts.
 """
 
 from __future__ import annotations
@@ -68,12 +68,16 @@ def main() -> int:
         market_regime_method=config.market_regime_method,
         structural_regime_sma_days=config.structural_regime_sma_days,
         structural_regime_slope_lookback_days=config.structural_regime_slope_lookback_days,
+        atr_period=config.atr_period,
+        adx_period=config.adx_period,
+        di_pressure_lookback=config.di_pressure_lookback,
     )
     engine = DataLakeBacktestEngine(
         bundle.strategy,
         config,
         bundle.intrabar,
         structural_benchmark=bundle.structural_benchmark,
+        technical_features=bundle.technical_features,
     )
     trades = engine.run()
 
@@ -81,6 +85,7 @@ def main() -> int:
     run_dir = args.output_dir / f"{request.symbol}_{request.strategy_interval}_{stamp}"
     run_dir.mkdir(parents=True, exist_ok=False)
     trades.to_csv(run_dir / "trade_list.csv", index=False)
+    features = bundle.technical_features
     manifest = {
         "data_source": "binance_data_lake_v2",
         "config_contract": "data_lake_strategy_v2",
@@ -95,6 +100,15 @@ def main() -> int:
             "intrabar_interval": request.intrabar_interval,
         },
         "market_regime_method": config.market_regime_method,
+        "technical_features": {
+            "name": features.attrs.get("feature_name"),
+            "version": features.attrs.get("feature_version"),
+            "rows": len(features),
+            "atr_period": features.attrs.get("atr_period"),
+            "adx_period": features.attrs.get("adx_period"),
+            "di_pressure_lookback": features.attrs.get("di_pressure_lookback"),
+            "effective_warmup_bars": features.attrs.get("effective_warmup_bars"),
+        },
         "structural_benchmark_symbol": bundle.structural_benchmark_symbol,
         "structural_benchmark_interval": bundle.structural_benchmark_interval,
         "strategy_rows": len(bundle.strategy),
