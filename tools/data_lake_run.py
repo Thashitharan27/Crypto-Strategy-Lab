@@ -1,14 +1,13 @@
 """Run one backtest directly from the Binance Data Lake v2 path.
 
-This is the forward migration runner. It does not read strategy, intrabar or
-structural-regime CSV files from the configuration. The JSON supplies strategy
-settings only; market data comes from ``--raw-root`` through MarketDataStore.
+This is the forward migration runner. Its JSON contains strategy settings only;
+strategy, intrabar and structural-regime market data all come from ``--raw-root``
+through MarketDataStore.
 """
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -22,8 +21,8 @@ import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import load_backtest_bundle
+from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_engine import DataLakeBacktestEngine
-from crypto_strategy_lab.gui.config_logic import build_backtest_config, load_config_json
 
 
 def _utc(value: str) -> datetime:
@@ -37,7 +36,7 @@ def _utc(value: str) -> datetime:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run Crypto Strategy Lab directly from Data Lake v2")
-    parser.add_argument("--config", required=True, type=Path, help="Current GUI configuration JSON")
+    parser.add_argument("--config", required=True, type=Path, help="Data Lake strategy configuration JSON")
     parser.add_argument("--raw-root", required=True, type=Path)
     parser.add_argument("--cache-root", type=Path, default=Path("cache"))
     parser.add_argument("--symbol", required=True)
@@ -49,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    config = build_backtest_config(load_config_json(args.config), require_paths=False)
+    config = load_data_lake_config(args.config)
     strategy_interval = f"{int(config.strategy_timeframe_minutes)}m"
     intrabar_interval = (
         f"{int(config.intrabar_timeframe_minutes)}m" if config.use_intrabar_data else None
@@ -84,6 +83,7 @@ def main() -> int:
     trades.to_csv(run_dir / "trade_list.csv", index=False)
     manifest = {
         "data_source": "binance_data_lake_v2",
+        "config_contract": "data_lake_strategy_v2",
         "raw_root": str(args.raw_root.resolve()),
         "cache_root": str(args.cache_root.resolve()),
         "config_path": str(args.config.resolve()),
