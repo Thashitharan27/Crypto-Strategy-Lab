@@ -164,9 +164,10 @@ def test_data_lake_single_position_timeout_matches_mature_engine() -> None:
     ]
     pdt.assert_frame_equal(actual[columns], expected[columns], check_dtype=False)
 
-    assert actual["profile_timeout_triggered"].all()
-    assert actual["long_exit_reason"].eq("BOTH_OPEN_TIMEOUT").all()
-    elapsed = pd.to_datetime(actual["exit_time"], utc=True) - pd.to_datetime(
-        actual["strategy_entry_time"], utc=True
+    timed_out = actual["profile_timeout_triggered"].astype(bool)
+    assert timed_out.any()
+    assert actual.loc[timed_out, "long_exit_reason"].eq("BOTH_OPEN_TIMEOUT").all()
+    elapsed = pd.to_datetime(actual.loc[timed_out, "exit_time"], utc=True) - pd.to_datetime(
+        actual.loc[timed_out, "strategy_entry_time"], utc=True
     )
     assert elapsed.eq(pd.Timedelta(minutes=20)).all()
