@@ -10,7 +10,7 @@ from crypto_strategy_lab.data.intrabar_index import as_searchsorted_intrabar
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.gui.enhanced_config import EnhancedBacktestConfig
 from crypto_strategy_lab.sr_dynamic_tp_engine import SRDynamicTPBacktestEngine
-from crypto_strategy_lab.trade import Position, Side, TradePair
+from crypto_strategy_lab.trade import ExitReason, Position, Side, TradePair
 
 
 def _strategy_frame(periods: int = 12) -> pd.DataFrame:
@@ -72,6 +72,12 @@ def _force_long_sideways(engine) -> None:
     engine.minus_di_values[:] = 10.0
     engine.di_spread[:] = 40.0
     engine.di_ratio[:] = 5.0
+
+
+def test_profile_timeout_is_the_canonical_exit_reason_value() -> None:
+    assert ExitReason.PROFILE_TIMEOUT.value == "PROFILE_TIMEOUT"
+    assert ExitReason.BOTH_OPEN_TIMEOUT is ExitReason.PROFILE_TIMEOUT
+    assert ExitReason.BOTH_OPEN_TIMEOUT.value == "PROFILE_TIMEOUT"
 
 
 def test_data_lake_pair_exit_wrapper_uses_single_position_directly() -> None:
@@ -166,7 +172,7 @@ def test_data_lake_single_position_timeout_matches_mature_engine() -> None:
 
     timed_out = actual["profile_timeout_triggered"].astype(bool)
     assert timed_out.any()
-    assert actual.loc[timed_out, "long_exit_reason"].eq("BOTH_OPEN_TIMEOUT").all()
+    assert actual.loc[timed_out, "long_exit_reason"].eq("PROFILE_TIMEOUT").all()
     elapsed = pd.to_datetime(actual.loc[timed_out, "exit_time"], utc=True) - pd.to_datetime(
         actual.loc[timed_out, "strategy_entry_time"], utc=True
     )

@@ -17,7 +17,7 @@ def test_outcome_label_uses_one_actual_trade_exit() -> None:
     assert outcome_label(pd.Series({"long_exit_reason": "TP"})) == "TP"
     assert outcome_label(pd.Series({"short_exit_reason": "SL"})) == "SL"
     assert outcome_label(pd.Series({"long_exit_reason": "BE_R_OFFSET"})) == "BE"
-    assert outcome_label(pd.Series({"short_exit_reason": "BOTH_OPEN_TIMEOUT"})) == "PROFILE_TIMEOUT"
+    assert outcome_label(pd.Series({"short_exit_reason": "PROFILE_TIMEOUT"})) == "PROFILE_TIMEOUT"
     assert outcome_label(pd.Series({"long_exit_reason": "TP", "long_be_triggered": True})) == "TP_AFTER_BE_MOVE"
 
 
