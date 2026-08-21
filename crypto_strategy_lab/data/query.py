@@ -8,7 +8,7 @@ from hashlib import sha256
 import json
 
 from .schemas import DatasetKind, MarketKind
-from .timing import ensure_utc
+from .timing import ensure_utc, normalize_binance_interval
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +16,8 @@ class DataRequest:
     """A reproducible request for a slice of the market-data lake.
 
     `start` is inclusive and `end` is exclusive. Filenames are deliberately not
-    part of the request contract.
+    part of the request contract. Fixed kline intervals are normalized to the
+    equivalent Binance-native archive name (for example 240m becomes 4h).
     """
 
     symbol: str
@@ -43,9 +44,14 @@ class DataRequest:
         object.__setattr__(self, "symbol", symbol)
         object.__setattr__(self, "start", start)
         object.__setattr__(self, "end", end)
-        object.__setattr__(self, "strategy_interval", self.strategy_interval.strip())
+        object.__setattr__(self, "strategy_interval", normalize_binance_interval(self.strategy_interval))
         if self.intrabar_interval is not None:
-            object.__setattr__(self, "intrabar_interval", self.intrabar_interval.strip() or None)
+            interval = self.intrabar_interval.strip()
+            object.__setattr__(
+                self,
+                "intrabar_interval",
+                normalize_binance_interval(interval) if interval else None,
+            )
         object.__setattr__(self, "datasets", tuple(dict.fromkeys(self.datasets)))
 
     def cache_key(self) -> str:
