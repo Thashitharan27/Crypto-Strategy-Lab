@@ -47,6 +47,34 @@ jobs:
           tests/test_worker_profile_modes.py
           tests/test_gui_config_logic.py
 
+  data-lake-v2-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install focused dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas duckdb pytest
+      - name: Compile data layer and migration tools
+        run: python -m compileall -q crypto_strategy_lab/data crypto_strategy_lab/features tools/data_lake_validate.py tools/data_lake_backtest_parity.py
+      - name: Run Data Lake v2 safety tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: >-
+          python -m pytest -q
+          tests/test_data_lake_v2.py
+          tests/test_causal_data_layer.py
+          tests/test_feature_registry.py
+          tests/test_binance_compact_adapters.py
+          tests/test_data_lake_legacy_bridge.py
+
   full-suite-observation:
     runs-on: ubuntu-latest
     timeout-minutes: 30
