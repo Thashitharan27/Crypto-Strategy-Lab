@@ -132,3 +132,16 @@ def test_retired_dual_leg_state_is_absent_from_models() -> None:
         assert not hasattr(pair, name), name
 
     assert not hasattr(ExitReason, "REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL")
+
+
+def test_old_both_open_timeout_name_is_only_a_compatibility_alias() -> None:
+    pair = _pair(long=_position(Side.LONG))
+    assert pair.profile_timeout_triggered is False
+    assert pair.both_open_timeout_triggered is False
+
+    # Mature engine code still writes the old attribute. The model stores the
+    # state under the correct single-trade name until that engine call site is
+    # migrated in a later cleanup.
+    pair.both_open_timeout_triggered = True
+    assert pair.profile_timeout_triggered is True
+    assert pair.both_open_timeout_triggered is True
