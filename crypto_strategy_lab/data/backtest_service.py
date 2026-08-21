@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
+from crypto_strategy_lab.features.basis import BasisContextFeatureProvider
 from crypto_strategy_lab.features.cache import FeatureFrameCache
 from crypto_strategy_lab.features.context import MarketContextFeatureProvider
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
@@ -110,7 +111,7 @@ def _optional_futures_research_features(
     request: DataRequest,
     canonical: pd.DataFrame,
 ) -> dict[str, pd.DataFrame]:
-    """Load compact futures research datasets when the local archive has them."""
+    """Load compact/reference futures research datasets when local coverage exists."""
     if request.market != MarketKind.FUTURES_UM:
         return {}
 
@@ -148,6 +149,45 @@ def _optional_futures_research_features(
             )
     except DataNotAvailableError:
         pass
+
+    reference_start = request.start - interval_to_timedelta(request.strategy_interval)
+    reference_frames: dict[DatasetKind, pd.DataFrame] = {}
+    for dataset in (DatasetKind.MARK_PRICE_KLINES, DatasetKind.INDEX_PRICE_KLINES):
+        try:
+            frame = store.load_dataset(
+                _dataset_request(request, dataset, start=reference_start),
+                dataset,
+                interval=request.strategy_interval,
+            )
+            if not frame.empty:
+                reference_frames[dataset] = frame
+        except DataNotAvailableError:
+            pass
+    if (
+        DatasetKind.MARK_PRICE_KLINES in reference_frames
+        and DatasetKind.INDEX_PRICE_KLINES in reference_frames
+    ):
+        try:
+            premium = store.load_dataset(
+                _dataset_request(
+                    request,
+                    DatasetKind.PREMIUM_INDEX_KLINES,
+                    start=reference_start,
+                ),
+                DatasetKind.PREMIUM_INDEX_KLINES,
+                interval=request.strategy_interval,
+            )
+            if not premium.empty:
+                reference_frames[DatasetKind.PREMIUM_INDEX_KLINES] = premium
+        except DataNotAvailableError:
+            pass
+        provider = BasisContextFeatureProvider()
+        result[provider.definition.name] = _cached_multisource_feature(
+            store,
+            request,
+            {DatasetKind.KLINES: canonical, **reference_frames},
+            provider,
+        )
     return result
 
 
@@ -184,8 +224,8 @@ def load_backtest_bundle(
 
     Same-timeframe support/resistance is prepared and cached here. Higher-timeframe
     S/R remains on the mature complete-bar resampling path until the HTF feature
-    provider is migrated. Compact futures metrics/funding archives are attached as
-    optional research-only feature blocks when local coverage exists.
+    provider is migrated. Compact futures metrics/funding and mark/index/premium
+    archives are attached as optional research-only feature blocks when coverage exists.
     """
     if refresh_catalog:
         store.refresh_catalog()
