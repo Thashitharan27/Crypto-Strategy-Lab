@@ -1,9 +1,9 @@
 name: Temporary profile timeout cleanup
 
 on:
-  push:
+  pull_request:
     branches:
-      - cleanup/profile-timeout-reason-v15
+      - main
 
 permissions:
   contents: write
