@@ -27,6 +27,11 @@ from .futures_positioning import (
     FUTURES_POSITIONING_FEATURE_VERSION,
     FuturesPositioningFeatureProvider,
 )
+from .production_context import (
+    PRODUCTION_CONTEXT_FEATURE_NAME,
+    PRODUCTION_CONTEXT_FEATURE_VERSION,
+    ProductionContextFeatureProvider,
+)
 from .registry import FeatureRegistry
 from .support_resistance import (
     SUPPORT_RESISTANCE_FEATURE_NAME,
@@ -54,6 +59,9 @@ __all__ = [
     "MARKET_CONTEXT_FEATURE_NAME",
     "MARKET_CONTEXT_FEATURE_VERSION",
     "MarketContextFeatureProvider",
+    "PRODUCTION_CONTEXT_FEATURE_NAME",
+    "PRODUCTION_CONTEXT_FEATURE_VERSION",
+    "ProductionContextFeatureProvider",
     "SUPPORT_RESISTANCE_FEATURE_NAME",
     "SUPPORT_RESISTANCE_FEATURE_VERSION",
     "PreparedSupportResistanceContextReader",
