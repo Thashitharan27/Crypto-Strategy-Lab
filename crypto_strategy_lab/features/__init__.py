@@ -7,6 +7,11 @@ from .context import (
     MARKET_CONTEXT_FEATURE_VERSION,
     MarketContextFeatureProvider,
 )
+from .funding import (
+    FUNDING_CONTEXT_FEATURE_NAME,
+    FUNDING_CONTEXT_FEATURE_VERSION,
+    FundingContextFeatureProvider,
+)
 from .futures_positioning import (
     FUTURES_POSITIONING_FEATURE_NAME,
     FUTURES_POSITIONING_FEATURE_VERSION,
@@ -47,4 +52,7 @@ __all__ = [
     "FUTURES_POSITIONING_FEATURE_NAME",
     "FUTURES_POSITIONING_FEATURE_VERSION",
     "FuturesPositioningFeatureProvider",
+    "FUNDING_CONTEXT_FEATURE_NAME",
+    "FUNDING_CONTEXT_FEATURE_VERSION",
+    "FundingContextFeatureProvider",
 ]
