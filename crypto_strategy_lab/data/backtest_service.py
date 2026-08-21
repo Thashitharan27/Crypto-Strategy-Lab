@@ -5,14 +5,16 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import pandas as pd
 
-from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
 from crypto_strategy_lab.features.cache import FeatureFrameCache
 from crypto_strategy_lab.features.context import MarketContextFeatureProvider
+from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
+from crypto_strategy_lab.features.futures_positioning import FuturesPositioningFeatureProvider
 from crypto_strategy_lab.features.support_resistance import SupportResistanceFeatureProvider
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME, CoreDirectionalFeatureProvider
 from .legacy_bridge import canonical_to_legacy_ohlcv
 from .query import DataRequest
-from .store import MarketDataStore
+from .store import DataNotAvailableError, MarketDataStore
 from .timing import interval_to_timedelta
 
 
@@ -24,6 +26,7 @@ class BacktestDataBundle:
     technical_features: pd.DataFrame
     context_features: pd.DataFrame
     support_resistance_features: pd.DataFrame | None
+    research_features: dict[str, pd.DataFrame]
     structural_benchmark: pd.DataFrame | None
     structural_benchmark_symbol: str | None
     structural_benchmark_interval: str | None
@@ -63,6 +66,91 @@ def _cached_feature(store, request, canonical, provider, parameters, feature_fra
     return frame
 
 
+def _cached_multisource_feature(store, request, datasets, provider, parameters=None):
+    """Cache a feature that depends on klines plus one or more event datasets."""
+    parameters = dict(parameters or {})
+    canonical = datasets[DatasetKind.KLINES]
+    additional = tuple(
+        datasets[kind]
+        for kind in sorted(datasets, key=lambda item: item.value)
+        if kind != DatasetKind.KLINES
+    )
+    cache = FeatureFrameCache(store.cache.root)
+    key = cache.key(
+        provider.definition,
+        request,
+        parameters,
+        canonical,
+        additional_sources=additional,
+    )
+    cached = cache.load(provider.definition, request, key)
+    if cached is not None:
+        return cached
+    frame = provider.compute(request, datasets, parameters)
+    frame.attrs["feature_cache_hit"] = False
+    frame.attrs["feature_cache_key"] = key
+    cache.store(provider.definition, request, key, frame)
+    return frame
+
+
+def _dataset_request(request: DataRequest, dataset: DatasetKind, *, start=None) -> DataRequest:
+    return DataRequest(
+        symbol=request.symbol,
+        start=start or request.start,
+        end=request.end,
+        strategy_interval=request.strategy_interval,
+        market=request.market,
+        exchange=request.exchange,
+        datasets=(dataset,),
+    )
+
+
+def _optional_futures_research_features(
+    store: MarketDataStore,
+    request: DataRequest,
+    canonical: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
+    """Load compact futures research datasets when the local archive has them."""
+    if request.market != MarketKind.FUTURES_UM:
+        return {}
+
+    result: dict[str, pd.DataFrame] = {}
+    try:
+        metrics = store.load_dataset(
+            _dataset_request(request, DatasetKind.FUTURES_METRICS),
+            DatasetKind.FUTURES_METRICS,
+        )
+        if not metrics.empty:
+            provider = FuturesPositioningFeatureProvider()
+            result[provider.definition.name] = _cached_multisource_feature(
+                store,
+                request,
+                {DatasetKind.KLINES: canonical, DatasetKind.FUTURES_METRICS: metrics},
+                provider,
+            )
+    except DataNotAvailableError:
+        pass
+
+    try:
+        funding_request = _dataset_request(
+            request,
+            DatasetKind.FUNDING_RATE,
+            start=request.start - timedelta(hours=24),
+        )
+        funding = store.load_dataset(funding_request, DatasetKind.FUNDING_RATE)
+        if not funding.empty:
+            provider = FundingContextFeatureProvider()
+            result[provider.definition.name] = _cached_multisource_feature(
+                store,
+                request,
+                {DatasetKind.KLINES: canonical, DatasetKind.FUNDING_RATE: funding},
+                provider,
+            )
+    except DataNotAvailableError:
+        pass
+    return result
+
+
 def load_backtest_bundle(
     store: MarketDataStore,
     request: DataRequest,
@@ -96,7 +184,8 @@ def load_backtest_bundle(
 
     Same-timeframe support/resistance is prepared and cached here. Higher-timeframe
     S/R remains on the mature complete-bar resampling path until the HTF feature
-    provider is migrated, preserving its current timing semantics.
+    provider is migrated. Compact futures metrics/funding archives are attached as
+    optional research-only feature blocks when local coverage exists.
     """
     if refresh_catalog:
         store.refresh_catalog()
@@ -140,6 +229,8 @@ def load_backtest_bundle(
             }, directional_dependency,
         )
 
+    research_features = _optional_futures_research_features(store, request, canonical)
+
     intrabar = None
     if request.intrabar_interval:
         effective_start = max(request.start, intrabar_start) if intrabar_start else request.start
@@ -170,6 +261,7 @@ def load_backtest_bundle(
         request=request, strategy=strategy, intrabar=intrabar,
         technical_features=directional, context_features=context,
         support_resistance_features=sr_features,
+        research_features=research_features,
         structural_benchmark=benchmark,
         structural_benchmark_symbol=benchmark_symbol,
         structural_benchmark_interval=benchmark_interval_used,
