@@ -9,9 +9,9 @@ from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
 from crypto_strategy_lab.features.agg_trade_flow import AggTradeFlowFeatureProvider
 from crypto_strategy_lab.features.basis import BasisContextFeatureProvider
 from crypto_strategy_lab.features.cache import FeatureFrameCache
-from crypto_strategy_lab.features.context import MarketContextFeatureProvider
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
 from crypto_strategy_lab.features.futures_positioning import FuturesPositioningFeatureProvider
+from crypto_strategy_lab.features.production_context import ProductionContextFeatureProvider
 from crypto_strategy_lab.features.support_resistance import SupportResistanceFeatureProvider
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME, CoreDirectionalFeatureProvider
 from .legacy_bridge import canonical_to_legacy_ohlcv
@@ -232,6 +232,11 @@ def load_backtest_bundle(
     bb_period: int = 20,
     bb_stddevs: float = 2.0,
     mean_reversion_period: int = 20,
+    mean_reversion_mean_type: str = "SMA",
+    mean_reversion_bb_stddevs: float = 2.0,
+    mean_reversion_rsi_period: int = 14,
+    mean_reversion_rsi_oversold: float = 30.0,
+    mean_reversion_rsi_overbought: float = 70.0,
     enable_support_resistance_analysis: bool = False,
     sr_timeframe_minutes: int = 0,
     sr_pivot_left: int = 5,
@@ -262,10 +267,16 @@ def load_backtest_bundle(
     )
     directional_dependency = {CORE_DIRECTIONAL_FEATURE_NAME: directional}
     context = _cached_feature(
-        store, request, canonical, MarketContextFeatureProvider(),
+        store, request, canonical, ProductionContextFeatureProvider(),
         {
-            "bb_period": int(bb_period), "bb_stddevs": float(bb_stddevs),
+            "bb_period": int(bb_period),
+            "bb_stddevs": float(bb_stddevs),
             "mean_reversion_period": int(mean_reversion_period),
+            "mean_reversion_mean_type": str(mean_reversion_mean_type).upper(),
+            "mean_reversion_bb_stddevs": float(mean_reversion_bb_stddevs),
+            "mean_reversion_rsi_period": int(mean_reversion_rsi_period),
+            "mean_reversion_rsi_oversold": float(mean_reversion_rsi_oversold),
+            "mean_reversion_rsi_overbought": float(mean_reversion_rsi_overbought),
         }, directional_dependency,
     )
 
