@@ -4,8 +4,10 @@ import numpy as np
 import pandas as pd
 import pandas.testing as pdt
 
+from crypto_strategy_lab.data.backtest_service import _optional_futures_research_features
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data.store import DataNotAvailableError
 from crypto_strategy_lab.features.agg_trade_flow import AggTradeFlowFeatureProvider
 
 
@@ -122,3 +124,38 @@ def test_agg_trade_flow_records_no_trade_candle_without_inventing_pressure() -> 
     assert third["agg_aggressor_state"] == "NO_TRADES"
     assert np.isnan(third["agg_taker_imbalance"])
     assert pd.isna(third["agg_source_last_event_at"])
+
+
+class _MissingResearchStore:
+    def __init__(self) -> None:
+        self.calls: list[DatasetKind] = []
+
+    def load_dataset(self, _request, dataset, *, interval=None):
+        del interval
+        self.calls.append(dataset)
+        raise DataNotAvailableError("synthetic missing research data")
+
+
+def test_backtest_bundle_does_not_touch_agg_trades_unless_requested() -> None:
+    request = _request()
+    canonical = _klines()
+
+    normal = _MissingResearchStore()
+    result = _optional_futures_research_features(
+        normal,
+        request,
+        canonical,
+        include_agg_trade_flow=False,
+    )
+    assert result == {}
+    assert DatasetKind.AGG_TRADES not in normal.calls
+
+    heavy = _MissingResearchStore()
+    result = _optional_futures_research_features(
+        heavy,
+        request,
+        canonical,
+        include_agg_trade_flow=True,
+    )
+    assert result == {}
+    assert DatasetKind.AGG_TRADES in heavy.calls
