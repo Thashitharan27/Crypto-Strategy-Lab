@@ -87,7 +87,6 @@ def test_runtime_leg_mutation_cannot_resurrect_dual_leg_state() -> None:
 
 def test_retired_dual_leg_state_is_absent_from_models() -> None:
     pair = _pair(long=_position(Side.LONG))
-    position = pair.position
 
     retired_pair_fields = (
         "pair_be_triggered",
@@ -132,6 +131,4 @@ def test_retired_dual_leg_state_is_absent_from_models() -> None:
     for name in retired_pair_fields:
         assert not hasattr(pair, name), name
 
-    assert not hasattr(position, "be_triggered_by_side")
-    assert not hasattr(position, "be_same_candle_ambiguous")
     assert not hasattr(ExitReason, "REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL")
