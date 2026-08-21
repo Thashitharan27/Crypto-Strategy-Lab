@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from crypto_strategy_lab.trade import Position, Side, TradePair
 
@@ -33,31 +34,32 @@ def _pair(long=None, short=None) -> TradePair:
     )
 
 
-def test_positions_preserves_existing_leg_order_without_generator_filtering() -> None:
+def test_trade_pair_requires_exactly_one_position() -> None:
     long = _position(Side.LONG)
     short = _position(Side.SHORT)
 
-    assert _pair().positions() == ()
-    assert _pair(long=long).positions() == (long,)
-    assert _pair(short=short).positions() == (short,)
-    assert _pair(long=long, short=short).positions() == (long, short)
+    assert _pair(long=long).position is long
+    assert _pair(short=short).position is short
+
+    with pytest.raises(ValueError, match="exactly one position"):
+        _pair()
+    with pytest.raises(ValueError, match="simultaneous LONG\\+SHORT trades are retired"):
+        _pair(long=long, short=short)
 
 
-def test_is_open_reads_fixed_legs_directly() -> None:
+def test_positions_is_single_leg_compatibility_tuple() -> None:
     long = _position(Side.LONG)
     short = _position(Side.SHORT)
-    pair = _pair(long=long, short=short)
 
-    assert pair.is_open
-
-    long.exit_time = pd.Timestamp("2026-01-01T00:20:00Z")
-    assert pair.is_open
-
-    short.exit_time = pd.Timestamp("2026-01-01T00:21:00Z")
-    assert not pair.is_open
+    long_pair = _pair(long=long)
+    short_pair = _pair(short=short)
+    assert long_pair.positions() == (long,)
+    assert short_pair.positions() == (short,)
+    assert long_pair.positions() is long_pair.positions()
+    assert short_pair.positions() is short_pair.positions()
 
 
-def test_single_leg_is_open_semantics_are_unchanged() -> None:
+def test_is_open_tracks_the_single_position() -> None:
     long = _position(Side.LONG)
     pair = _pair(long=long)
     assert pair.is_open
@@ -73,23 +75,11 @@ def test_single_leg_is_open_semantics_are_unchanged() -> None:
     assert not pair.is_open
 
 
-def test_positions_and_is_open_follow_runtime_leg_reassignment() -> None:
-    long = _position(Side.LONG)
-    short = _position(Side.SHORT)
-    pair = _pair(long=long)
+def test_runtime_leg_mutation_cannot_resurrect_dual_leg_state() -> None:
+    pair = _pair(long=_position(Side.LONG))
+    pair.short = _position(Side.SHORT)
 
-    assert pair.positions() == (long,)
-    assert pair.is_open
-
-    pair.long = None
-    pair.short = short
-    assert pair.positions() == (short,)
-    assert pair.is_open
-
-    short.exit_time = pd.Timestamp("2026-01-01T00:30:00Z")
-    assert not pair.is_open
-
-    replacement = _position(Side.LONG)
-    pair.long = replacement
-    assert pair.positions() == (replacement, short)
-    assert pair.is_open
+    with pytest.raises(ValueError, match="simultaneous LONG\\+SHORT trades are retired"):
+        _ = pair.position
+    with pytest.raises(ValueError, match="simultaneous LONG\\+SHORT trades are retired"):
+        pair.positions()
