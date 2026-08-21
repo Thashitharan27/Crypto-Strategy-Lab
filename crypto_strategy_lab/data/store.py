@@ -113,6 +113,77 @@ class MarketDataStore:
         frame = frame.sort_values(sort_columns, kind="stable")
         return frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
 
+    def load_execution_klines(
+        self,
+        request: DataRequest,
+        interval: str | None = None,
+    ) -> pd.DataFrame:
+        """Load only the canonical columns needed by intrabar execution.
+
+        The request predicate, OHLCV projection, overlap resolution, and ordering
+        happen inside DuckDB so large execution frames do not materialize
+        provenance metadata that the simulator cannot consume. Cross-archive
+        duplicates use the same precedence as ``load_dataset``: catalog order is
+        stable and the last matching archive wins.
+        """
+
+        effective_interval = interval or request.intrabar_interval or request.strategy_interval
+        records = self.catalog.records_for(
+            self.raw_root,
+            request,
+            DatasetKind.KLINES,
+            effective_interval,
+        )
+        if not records:
+            raise DataNotAvailableError(
+                f"No catalog coverage for {request.symbol} {DatasetKind.KLINES.value} "
+                f"interval={effective_interval!r} from {request.start.isoformat()} "
+                f"to {request.end.isoformat()}"
+            )
+
+        parquet_paths = [str(self._ensure_canonical(record).resolve()) for record in records]
+        precedence_rows = [(path, rank) for rank, path in enumerate(parquet_paths)]
+        with duckdb.connect() as con:
+            con.execute(
+                "CREATE TEMP TABLE execution_source_precedence "
+                "(path VARCHAR PRIMARY KEY, source_rank INTEGER NOT NULL)"
+            )
+            con.executemany(
+                "INSERT INTO execution_source_precedence VALUES (?, ?)",
+                precedence_rows,
+            )
+            frame = con.execute(
+                """
+                WITH ranked AS (
+                    SELECT
+                        source.period_start,
+                        source.open,
+                        source.high,
+                        source.low,
+                        source.close,
+                        source.volume,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY source.period_start
+                            ORDER BY precedence.source_rank DESC
+                        ) AS duplicate_rank
+                    FROM read_parquet(?, filename = true) AS source
+                    JOIN execution_source_precedence AS precedence
+                      ON source.filename = precedence.path
+                    WHERE source.period_start >= ? AND source.period_start < ?
+                )
+                SELECT period_start, open, high, low, close, volume
+                FROM ranked
+                WHERE duplicate_rank = 1
+                ORDER BY period_start
+                """,
+                [parquet_paths, request.start, request.end],
+            ).df()
+        if frame.empty:
+            return frame
+
+        frame["period_start"] = pd.to_datetime(frame["period_start"], utc=True)
+        return frame.reset_index(drop=True)
+
     def load_klines(self, request: DataRequest, interval: str | None = None) -> pd.DataFrame:
         """Load canonical completed-candle records for a requested interval."""
 

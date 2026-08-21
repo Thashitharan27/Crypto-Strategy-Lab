@@ -95,6 +95,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_data_lake_v2.py
+          tests/test_execution_kline_projection.py
           tests/test_causal_data_layer.py
           tests/test_feature_registry.py
           tests/test_core_directional_features.py
