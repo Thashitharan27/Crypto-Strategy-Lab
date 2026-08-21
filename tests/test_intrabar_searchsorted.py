@@ -58,6 +58,21 @@ def test_searchsorted_frame_matches_boolean_timestamp_ranges() -> None:
         pdt.assert_frame_equal(actual, expected)
 
     assert indexed.timestamp.max() == plain.timestamp.max()
+    assert indexed.timestamp.min() == plain.timestamp.min()
+
+
+def test_sorted_timestamp_endpoints_do_not_scan_series(monkeypatch) -> None:
+    plain = intrabar_frame(30)
+    indexed = as_searchsorted_intrabar(plain)
+    expected_min = plain.timestamp.min()
+    expected_max = plain.timestamp.max()
+
+    def fail_if_series_is_requested(_self):
+        raise AssertionError("sorted timestamp endpoint should use the existing DatetimeIndex")
+
+    monkeypatch.setattr(SearchsortedIntrabarFrame, "_timestamp_series", fail_if_series_is_requested)
+    assert indexed.timestamp.min() == expected_min
+    assert indexed.timestamp.max() == expected_max
 
 
 def test_intrabar_window_tuple_iteration_matches_pandas_iterrows() -> None:
@@ -109,6 +124,8 @@ def test_unsorted_intrabar_falls_back_without_changing_rows() -> None:
     expected = plain[(plain.timestamp >= start) & (plain.timestamp < end)]
     actual = indexed[(indexed.timestamp >= start) & (indexed.timestamp < end)]
     pdt.assert_frame_equal(actual.reset_index(drop=True), expected.reset_index(drop=True))
+    assert indexed.timestamp.min() == plain.timestamp.min()
+    assert indexed.timestamp.max() == plain.timestamp.max()
 
 
 def _engine(intrabar: pd.DataFrame) -> BacktestEngine:
