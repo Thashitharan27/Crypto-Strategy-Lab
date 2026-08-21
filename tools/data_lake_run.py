@@ -1,7 +1,7 @@
 """Run one backtest directly from Binance Data Lake v2.
 
 Strategy JSON contains strategy settings only. Market data and versioned causal
-feature blocks are prepared/cached before the stateful simulator starts.
+feature blocks are prepared/cached before the production simulator starts.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import pandas as pd
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
-from crypto_strategy_lab.data_lake_engine import DataLakeBacktestEngine
+from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 
 
 def _utc(value: str) -> datetime:
@@ -44,7 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _feature_manifest(frame: pd.DataFrame) -> dict:
+def _feature_manifest(frame: pd.DataFrame | None) -> dict | None:
+    if frame is None:
+        return None
     return {
         "name": frame.attrs.get("feature_name"),
         "version": frame.attrs.get("feature_version"),
@@ -83,14 +85,27 @@ def main() -> int:
         bb_period=config.bb_period,
         bb_stddevs=config.bb_stddevs,
         mean_reversion_period=config.mean_reversion_period,
+        enable_support_resistance_analysis=config.enable_support_resistance_analysis,
+        sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
+        sr_pivot_left=config.sr_pivot_left,
+        sr_pivot_right=config.sr_pivot_right,
+        sr_lookback_bars=config.sr_lookback_bars,
+        sr_zone_width_atr=config.sr_zone_width_atr,
+        sr_near_distance_atr=config.sr_near_distance_atr,
+        enable_sr_hold_confirmation=config.enable_sr_hold_confirmation,
+        sr_hold_confirmation_bars=config.sr_hold_confirmation_bars,
+        sr_hold_confirmation_atr=config.sr_hold_confirmation_atr,
+        sr_break_tolerance_atr=config.sr_break_tolerance_atr,
+        sr_break_basis=config.sr_break_basis,
     )
-    engine = DataLakeBacktestEngine(
+    engine = DataLakeProductionBacktestEngine(
         bundle.strategy,
         config,
         bundle.intrabar,
         structural_benchmark=bundle.structural_benchmark,
         technical_features=bundle.technical_features,
         context_features=bundle.context_features,
+        support_resistance_features=bundle.support_resistance_features,
     )
     trades = engine.run()
 
@@ -114,6 +129,7 @@ def main() -> int:
     manifest = {
         "data_source": "binance_data_lake_v2",
         "config_contract": "data_lake_strategy_v2",
+        "production_engine": "DataLakeProductionBacktestEngine",
         "raw_root": str(args.raw_root.resolve()),
         "cache_root": str(args.cache_root.resolve()),
         "config_path": str(args.config.resolve()),
@@ -128,6 +144,7 @@ def main() -> int:
         "features": {
             "core_directional": directional_manifest,
             "market_context": context_manifest,
+            "support_resistance": _feature_manifest(bundle.support_resistance_features),
         },
         "structural_benchmark_symbol": bundle.structural_benchmark_symbol,
         "structural_benchmark_interval": bundle.structural_benchmark_interval,
