@@ -10,6 +10,7 @@ import pandas as pd
 from .binance.discovery import discover_archives
 from .binance.events import FundingRateArchiveAdapter, FuturesMetricsArchiveAdapter
 from .binance.klines import KlineArchiveAdapter, KlineLikeArchiveAdapter
+from .binance.trades import AggTradesArchiveAdapter
 from .cache import CacheLayout
 from .catalog import DataCatalog
 from .query import DataRequest
@@ -35,6 +36,7 @@ class MarketDataStore:
             DatasetKind.PREMIUM_INDEX_KLINES: KlineLikeArchiveAdapter(DatasetKind.PREMIUM_INDEX_KLINES),
             DatasetKind.FUTURES_METRICS: FuturesMetricsArchiveAdapter(),
             DatasetKind.FUNDING_RATE: FundingRateArchiveAdapter(),
+            DatasetKind.AGG_TRADES: AggTradesArchiveAdapter(),
         }
 
     def refresh_catalog(self) -> int:
