@@ -63,3 +63,29 @@ def test_feature_cache_roundtrip_and_invalidation(tmp_path: Path) -> None:
     changed_source = source.copy()
     changed_source["source_fingerprint"] = "archive-fingerprint-b"
     assert cache.key(provider.definition, req, params, changed_source) != key
+
+
+def test_feature_cache_key_tracks_additional_dataset_sources(tmp_path: Path) -> None:
+    provider = CoreDirectionalFeatureProvider()
+    source = source_frame()
+    req = request()
+    params = {"atr_period": 7, "adx_period": 6, "di_pressure_lookback": 3}
+    cache = FeatureFrameCache(tmp_path)
+
+    metrics_a = pd.DataFrame({"source_fingerprint": ["metrics-a"]})
+    metrics_b = pd.DataFrame({"source_fingerprint": ["metrics-b"]})
+    key_a = cache.key(
+        provider.definition,
+        req,
+        params,
+        source,
+        additional_sources=(metrics_a,),
+    )
+    key_b = cache.key(
+        provider.definition,
+        req,
+        params,
+        source,
+        additional_sources=(metrics_b,),
+    )
+    assert key_a != key_b
