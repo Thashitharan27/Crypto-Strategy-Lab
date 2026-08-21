@@ -7,9 +7,9 @@ The mature engine asks for intrabar rows with the idiom::
 On a multi-year 1m DataFrame that boolean expression scans every row for every
 strategy candle. ``SearchsortedIntrabarFrame`` preserves that public expression,
 but turns the paired timestamp predicates into positional ``searchsorted`` bounds.
-The resulting slice is a DataFrame-compatible intrabar window whose ``iterrows``
-uses pandas' much lighter tuple iterator. The stateful simulator therefore keeps
-its existing row-by-row exit order without allocating a Series for every 1m bar.
+The Data Lake production engine can additionally request an array-backed
+``FastIntrabarWindow`` so hot exit scans avoid constructing pandas windows while
+still consuming the exact same timestamp/OHLC sequence.
 """
 from __future__ import annotations
 
@@ -52,6 +52,53 @@ class _TimestampRange:
             upper=upper,
             upper_inclusive=upper_inclusive,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class FastIntrabarWindow:
+    """Zero-copy positional view over the sorted intrabar arrays."""
+
+    left: int
+    right: int
+    timestamps: pd.DatetimeIndex
+    opens: np.ndarray
+    highs: np.ndarray
+    lows: np.ndarray
+
+    @property
+    def empty(self) -> bool:
+        return self.left >= self.right
+
+    @property
+    def first_timestamp(self):
+        return pd.NaT if self.empty else self.timestamps[self.left]
+
+    def gap_pairs(self, expected: pd.Timedelta) -> tuple[tuple[pd.Timestamp, pd.Timestamp], ...]:
+        """Return adjacent timestamp pairs whose spacing exceeds ``expected``."""
+        if self.right - self.left <= 1:
+            return ()
+        values = self.timestamps.asi8[self.left : self.right]
+        gap_offsets = np.flatnonzero(np.diff(values) > int(expected.value))
+        if gap_offsets.size == 0:
+            return ()
+        return tuple(
+            (
+                self.timestamps[self.left + int(offset)],
+                self.timestamps[self.left + int(offset) + 1],
+            )
+            for offset in gap_offsets
+        )
+
+    def rows(self):
+        """Yield the same absolute row index and OHLC values as the pandas slice."""
+        for index in range(self.left, self.right):
+            yield (
+                index,
+                self.timestamps[index],
+                float(self.opens[index]),
+                float(self.highs[index]),
+                float(self.lows[index]),
+            )
 
 
 class _TimestampAccessor:
@@ -126,17 +173,10 @@ class _TimestampAccessor:
 
 
 class _IntrabarWindowFrame(pd.DataFrame):
-    """Internal engine window with Series-free row iteration.
-
-    ``BacktestEngine`` only reads row attributes (timestamp/open/high/low) from
-    these range slices. ``itertuples`` preserves those values and exact index
-    ordering while avoiding the much heavier Series construction performed by
-    pandas ``DataFrame.iterrows``.
-    """
+    """Internal compatibility window with Series-free row iteration."""
 
     @property
     def _constructor(self):
-        # Keep ordinary pandas behavior for any secondary DataFrame operation.
         return pd.DataFrame
 
     def iterrows(self):
@@ -147,7 +187,14 @@ class _IntrabarWindowFrame(pd.DataFrame):
 class SearchsortedIntrabarFrame(pd.DataFrame):
     """DataFrame whose timestamp range masks use a pre-built DatetimeIndex."""
 
-    _metadata = ["_intrabar_timestamp_index", "intrabar_index_mode", "intrabar_iteration_mode"]
+    _metadata = [
+        "_intrabar_timestamp_index",
+        "_intrabar_open_values",
+        "_intrabar_high_values",
+        "_intrabar_low_values",
+        "intrabar_index_mode",
+        "intrabar_iteration_mode",
+    ]
 
     @property
     def _constructor(self):
@@ -159,6 +206,30 @@ class SearchsortedIntrabarFrame(pd.DataFrame):
     @property
     def timestamp(self):
         return _TimestampAccessor(self)
+
+    def fast_window(self, start, end) -> FastIntrabarWindow | None:
+        """Return an array-backed [start, end) window when the sorted index is valid."""
+        index = getattr(self, "_intrabar_timestamp_index", None)
+        opens = getattr(self, "_intrabar_open_values", None)
+        highs = getattr(self, "_intrabar_high_values", None)
+        lows = getattr(self, "_intrabar_low_values", None)
+        if (
+            index is None
+            or opens is None
+            or highs is None
+            or lows is None
+            or getattr(self, "intrabar_index_mode", None) != "searchsorted"
+            or len(index) != len(self)
+            or len(opens) != len(self)
+            or len(highs) != len(self)
+            or len(lows) != len(self)
+        ):
+            return None
+        start_ts = _TimestampAccessor._utc(start)
+        end_ts = _TimestampAccessor._utc(end)
+        left = int(index.searchsorted(start_ts, side="left"))
+        right = int(index.searchsorted(end_ts, side="left"))
+        return FastIntrabarWindow(left, right, index, opens, highs, lows)
 
     def _boolean_mask_for_range(self, bounds: _TimestampRange) -> np.ndarray:
         series = pd.to_datetime(self._timestamp_series(), utc=True)
@@ -201,10 +272,13 @@ def as_searchsorted_intrabar(frame: pd.DataFrame | None) -> pd.DataFrame | None:
     wrapped = SearchsortedIntrabarFrame(frame.copy(deep=False))
     timestamps = pd.DatetimeIndex(pd.to_datetime(wrapped._timestamp_series(), utc=True))
     wrapped._intrabar_timestamp_index = timestamps
+    wrapped._intrabar_open_values = pd.DataFrame.__getitem__(wrapped, "open").to_numpy(float, copy=False)
+    wrapped._intrabar_high_values = pd.DataFrame.__getitem__(wrapped, "high").to_numpy(float, copy=False)
+    wrapped._intrabar_low_values = pd.DataFrame.__getitem__(wrapped, "low").to_numpy(float, copy=False)
     wrapped.intrabar_index_mode = (
         "searchsorted"
         if not timestamps.hasnans and timestamps.is_monotonic_increasing
         else "boolean_fallback"
     )
-    wrapped.intrabar_iteration_mode = "itertuples"
+    wrapped.intrabar_iteration_mode = "array_window"
     return wrapped
