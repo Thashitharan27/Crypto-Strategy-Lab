@@ -23,7 +23,7 @@ def test_summarize_events_groups_non_overlapping_stage_timings() -> None:
         "feature_cache": 1,
         "legacy_conversion": 1,
     }
-    assert summary["instrumented_seconds"] == 4.3
+    assert abs(summary["instrumented_seconds"] - 4.3) < 1e-12
     assert abs(summary["unattributed_seconds"] - 0.7) < 1e-12
 
 
