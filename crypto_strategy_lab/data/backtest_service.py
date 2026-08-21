@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 
-from crypto_strategy_lab.features.technical import prepare_core_directional_features
+from crypto_strategy_lab.features.cache import FeatureFrameCache
+from crypto_strategy_lab.features.technical import CoreDirectionalFeatureProvider
 
 from .legacy_bridge import canonical_to_legacy_ohlcv
 from .query import DataRequest
@@ -41,6 +42,38 @@ def _legacy_klines(store: MarketDataStore, request: DataRequest, interval: str, 
     return _legacy_from_canonical(store.load_klines(request, interval), interval, label)
 
 
+def _directional_features(
+    store: MarketDataStore,
+    request: DataRequest,
+    canonical_strategy: pd.DataFrame,
+    *,
+    atr_period: int,
+    adx_period: int,
+    di_pressure_lookback: int,
+) -> pd.DataFrame:
+    provider = CoreDirectionalFeatureProvider()
+    parameters = {
+        "atr_period": int(atr_period),
+        "adx_period": int(adx_period),
+        "di_pressure_lookback": int(di_pressure_lookback),
+    }
+    cache = FeatureFrameCache(store.cache.root)
+    key = cache.key(provider.definition, request, parameters, canonical_strategy)
+    cached = cache.load(provider.definition, request, key)
+    if cached is not None:
+        return cached
+
+    frame = provider.compute(
+        request,
+        {provider.definition.required_datasets[0]: canonical_strategy},
+        parameters,
+    )
+    frame.attrs["feature_cache_hit"] = False
+    frame.attrs["feature_cache_key"] = key
+    cache.store(provider.definition, request, key, frame)
+    return frame
+
+
 def load_backtest_bundle(
     store: MarketDataStore,
     request: DataRequest,
@@ -55,14 +88,13 @@ def load_backtest_bundle(
     adx_period: int = 14,
     di_pressure_lookback: int = 3,
 ) -> BacktestDataBundle:
-    """Load market data and calculate reusable causal technical features.
+    """Load market data and reusable causal technical features.
 
     Structural regime warm-up is fetched before the requested strategy start so
-    the first strategy candle can use only benchmark history that was already
-    available at that time. ``intrabar_start`` may be later than the strategy
-    request start, allowing indicator warm-up on strategy candles without
-    needlessly loading minute data before trading begins. The raw archive tree
-    remains read-only.
+    the first strategy candle can use only benchmark history already available at
+    that time. ``intrabar_start`` may be later than the strategy request start,
+    allowing strategy-feature warm-up without needless minute-data reads. Derived
+    feature cache entries are disposable and source/version/parameter keyed.
     """
 
     if refresh_catalog:
@@ -74,7 +106,8 @@ def load_backtest_bundle(
         request.strategy_interval,
         "Strategy data (Data Lake v2)",
     )
-    technical_features = prepare_core_directional_features(
+    technical_features = _directional_features(
+        store,
         request,
         canonical_strategy,
         atr_period=atr_period,
