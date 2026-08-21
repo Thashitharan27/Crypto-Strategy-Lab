@@ -48,6 +48,7 @@ jobs:
           tests/test_strategy_profiles.py
           tests/test_worker_profile_modes.py
           tests/test_gui_config_logic.py
+          tests/test_data_lake_gui.py
 
   data-lake-v2-safety:
     runs-on: ubuntu-latest
