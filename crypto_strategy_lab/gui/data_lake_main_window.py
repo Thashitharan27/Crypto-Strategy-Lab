@@ -18,7 +18,7 @@ import traceback
 
 import pandas as pd
 from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QFileDialog, QLabel, QMessageBox
+from PySide6.QtWidgets import QCheckBox, QFileDialog, QFormLayout, QLabel, QMessageBox
 
 from crypto_strategy_lab.data import MarketDataStore
 from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
@@ -98,8 +98,16 @@ class MainWindow(StateTransitionMainWindow):
         self.shared_data_note.setText(f"Binance Data Lake: {self.market_data_folder}")
         self.data_help.setText(
             "Strategy, intrabar and structural-regime candles are selected automatically "
-            "from the Binance archive catalog. No combined CSV is required."
+            "from the Binance archive catalog. Compact futures research is attached when "
+            "available; aggTrades flow is optional because it is much heavier."
         )
+        self.include_agg_trade_flow = QCheckBox("Include aggTrades trade-flow research (heavier)")
+        self.include_agg_trade_flow.setChecked(False)
+        self.include_agg_trade_flow.setToolTip(
+            "Loads Binance aggregate-trade archives and adds causal buy/sell pressure columns. "
+            "Leave off for normal fast backtests."
+        )
+
         # QFormLayout labels are QLabel children of the same Data group box.
         parent = self.input_csv.parentWidget()
         if parent is not None:
@@ -110,6 +118,11 @@ class MainWindow(StateTransitionMainWindow):
                     label.setText("Intrabar Data")
                 elif label.text() == "Shared Data":
                     label.setText("Data Lake Root")
+            layout = parent.layout()
+            if isinstance(layout, QFormLayout):
+                layout.addRow("Trade Flow Research", self.include_agg_trade_flow)
+            elif layout is not None:
+                layout.addWidget(self.include_agg_trade_flow)
 
     def _sync_dataset_paths(self, *_args) -> None:
         if not hasattr(self, "input_csv"):
@@ -253,6 +266,7 @@ class MainWindow(StateTransitionMainWindow):
             )
             request_end = trade_end
             intrabar_start = trade_start if intrabar_interval else None
+            include_agg_trade_flow = bool(self.include_agg_trade_flow.isChecked())
 
             self._validated_data_lake_spec = DataLakeGuiRunSpec(
                 raw_root=MARKET_DATA_ROOT,
@@ -262,6 +276,7 @@ class MainWindow(StateTransitionMainWindow):
                 end=request_end.to_pydatetime(),
                 intrabar_start=(intrabar_start.to_pydatetime() if intrabar_start is not None else None),
                 refresh_catalog=False,
+                include_agg_trade_flow=include_agg_trade_flow,
             )
             self._validated_data_lake_config = normalized_config
             self._validated_strategy_data = self._validated_data_lake_spec
@@ -278,8 +293,24 @@ class MainWindow(StateTransitionMainWindow):
                 [
                     f"Trading period: {trade_start} to {trade_end} (end exclusive)",
                     f"Strategy load incl. warm-up: {request_start} to {request_end}",
+                    f"AggTrades trade-flow research: {'enabled' if include_agg_trade_flow else 'disabled'}",
                 ]
             )
+            if include_agg_trade_flow:
+                agg_coverage = store.catalog.coverage(
+                    MARKET_DATA_ROOT,
+                    market=MarketKind.FUTURES_UM,
+                    dataset=DatasetKind.AGG_TRADES,
+                    symbol=symbol,
+                    interval=None,
+                )
+                if agg_coverage.archive_count:
+                    lines.append(
+                        f"AggTrades coverage: {agg_coverage.first_period} to {agg_coverage.last_period} "
+                        f"({agg_coverage.archive_count:,} archives)"
+                    )
+                else:
+                    lines.append("AggTrades coverage: none found; run will continue without trade-flow columns")
             if archive_count is not None:
                 lines.append(f"Cataloged archives: {archive_count:,}")
             self.dataset_info.setText("\n".join(lines))
