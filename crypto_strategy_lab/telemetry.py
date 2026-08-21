@@ -19,6 +19,7 @@ def _series(frame: pd.DataFrame, column: str, dtype=float) -> pd.Series:
         values = values.iloc[:, 0]
     return values
 
+
 MILESTONES = {15:"15m",30:"30m",45:"45m",60:"60m",120:"2h",240:"4h",480:"8h"}
 BASE_TELEMETRY_COLUMNS = ["pair_id","long_leg_id","short_leg_id","timestamp","elapsed_minutes","elapsed_strategy_bars","close","high","low","atr","adx","plus_di","minus_di","di_spread","di_ratio","bb_middle","bb_upper","bb_lower","bb_width","bb_width_pct","long_is_open","short_is_open","long_unrealized_pnl","short_unrealized_pnl","pair_unrealized_pnl","long_distance_to_sl","long_distance_to_tp","short_distance_to_sl","short_distance_to_tp","long_distance_to_sl_r","long_distance_to_tp_r","short_distance_to_sl_r","short_distance_to_tp_r","long_current_sl","short_current_sl","long_tp","short_tp","long_trailing_enabled","long_trailing_active","long_trailing_activation_price","long_current_trailing_stop","long_current_active_stop","long_highest_price_since_entry","long_distance_to_activation_r","long_distance_to_trailing_stop_r","long_unrealized_profit_r","short_trailing_enabled","short_trailing_active","short_trailing_activation_price","short_current_trailing_stop","short_current_active_stop","short_lowest_price_since_entry","short_distance_to_activation_r","short_distance_to_trailing_stop_r","short_unrealized_profit_r"]
 
@@ -26,6 +27,7 @@ for _side in ("long", "short"):
     BASE_TELEMETRY_COLUMNS.extend([f"{_side}_original_quantity", f"{_side}_remaining_quantity", f"{_side}_tp1_hit", f"{_side}_tp2_hit", f"{_side}_tp1_price", f"{_side}_tp2_price", f"{_side}_realized_pnl", f"{_side}_total_current_pnl"])
 
 TELEMETRY_COLUMNS = BASE_TELEMETRY_COLUMNS
+
 
 def telemetry_columns_for_direction(direction) -> list[str]:
     value = getattr(direction, "value", direction)
@@ -35,9 +37,12 @@ def telemetry_columns_for_direction(direction) -> list[str]:
         return [c for c in BASE_TELEMETRY_COLUMNS if not c.startswith("long_")]
     return BASE_TELEMETRY_COLUMNS
 
+
 def partial_take_profit_analysis(trades: pd.DataFrame) -> pd.DataFrame:
-    """Build a one-row audit summary for two-stage exits."""
-    pairs=len(trades); legs=sum(f"{s}_original_quantity" in trades for s in ("long","short"))*pairs
+    """Build a one-row audit summary for two-stage exits on directional trades."""
+    total=len(trades)
+    long_trades=int(trades.get("long_entry_price",pd.Series(index=trades.index,dtype=float)).notna().sum())
+    short_trades=int(trades.get("short_entry_price",pd.Series(index=trades.index,dtype=float)).notna().sum())
     def count(side, field):
         col=f"{side}_{field}"; return int(trades[col].fillna(False).astype(bool).sum()) if col in trades else 0
     l1,l2,s1,s2=(count("long","tp1_hit"),count("long","tp2_hit"),count("short","tp1_hit"),count("short","tp2_hit"))
@@ -47,7 +52,33 @@ def partial_take_profit_analysis(trades: pd.DataFrame) -> pd.DataFrame:
     eq=trades.get("equity_after_trade",pd.Series(dtype=float)); dd=float((eq-eq.cummax()).min()) if len(eq) else 0.0
     def avg(cols):
         values=pd.concat([trades[c].dropna() for c in cols if c in trades],ignore_index=True); return float(values.mean()) if len(values) else np.nan
-    return pd.DataFrame([{"total_pairs":pairs,"total_legs":legs,"long_tp1_hit_count":l1,"long_tp1_hit_rate":l1/pairs if pairs else 0,"long_tp2_hit_count":l2,"long_tp2_hit_rate":l2/pairs if pairs else 0,"short_tp1_hit_count":s1,"short_tp1_hit_rate":s1/pairs if pairs else 0,"short_tp2_hit_count":s2,"short_tp2_hit_rate":s2/pairs if pairs else 0,"legs_stopped_before_tp1":int(reasons.eq("SL").sum()),"legs_stopped_after_tp1":int(reasons.eq("TP1_THEN_SL").sum()),"legs_reached_tp1_and_tp2":l2+s2,"average_tp1_realized_pnl":avg(["long_tp1_net_pnl","short_tp1_net_pnl"]),"average_tp2_realized_pnl":avg(["long_tp2_net_pnl","short_tp2_net_pnl"]),"average_loss_before_tp1":avg(["long_stop_net_pnl","short_stop_net_pnl"]),"average_loss_after_tp1":avg(["long_stop_net_pnl","short_stop_net_pnl"]),"gross_pnl":gross,"total_fees":fees,"net_pnl":net,"profit_factor":gains/losses if losses else np.inf,"pair_win_rate":float((wins>0).mean()) if len(wins) else 0,"maximum_drawdown":dd}])
+    return pd.DataFrame([{
+        "total_trades":total,
+        "long_trades":long_trades,
+        "short_trades":short_trades,
+        "long_tp1_hit_count":l1,
+        "long_tp1_hit_rate":l1/long_trades if long_trades else 0,
+        "long_tp2_hit_count":l2,
+        "long_tp2_hit_rate":l2/long_trades if long_trades else 0,
+        "short_tp1_hit_count":s1,
+        "short_tp1_hit_rate":s1/short_trades if short_trades else 0,
+        "short_tp2_hit_count":s2,
+        "short_tp2_hit_rate":s2/short_trades if short_trades else 0,
+        "trades_stopped_before_tp1":int(reasons.eq("SL").sum()),
+        "trades_stopped_after_tp1":int(reasons.eq("TP1_THEN_SL").sum()),
+        "trades_reached_tp1_and_tp2":l2+s2,
+        "average_tp1_realized_pnl":avg(["long_tp1_net_pnl","short_tp1_net_pnl"]),
+        "average_tp2_realized_pnl":avg(["long_tp2_net_pnl","short_tp2_net_pnl"]),
+        "average_loss_before_tp1":avg(["long_stop_net_pnl","short_stop_net_pnl"]),
+        "average_loss_after_tp1":avg(["long_stop_net_pnl","short_stop_net_pnl"]),
+        "gross_pnl":gross,
+        "total_fees":fees,
+        "net_pnl":net,
+        "profit_factor":gains/losses if losses else np.inf,
+        "trade_win_rate":float((wins>0).mean()) if len(wins) else 0,
+        "maximum_drawdown":dd,
+    }])
+
 
 def _as_membership_values(values):
     if values is None:
@@ -61,18 +92,35 @@ def finite(value):
     return float(value) if pd.notna(value) and np.isfinite(value) else np.nan
 
 
+def _single_exit_reason(row: pd.Series):
+    reason = row.get("exit_reason")
+    if pd.notna(reason):
+        return reason
+    for side in ("long", "short"):
+        value = row.get(f"{side}_exit_reason")
+        if pd.notna(value):
+            return value
+    return None
+
+
+def _trade_be_triggered(row: pd.Series) -> bool:
+    return bool(row.get("long_be_triggered", False) or row.get("short_be_triggered", False))
+
+
 def outcome_label(row: pd.Series) -> str:
-    long = row.get("long_exit_reason")
-    short = row.get("short_exit_reason")
-    if long == "BOTH_OPEN_TIMEOUT" and short == "BOTH_OPEN_TIMEOUT": return "BOTH_OPEN_TIMEOUT"
-    if long == "END_OF_DATA" or short == "END_OF_DATA": return "END_OF_DATA"
-    be = {"BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"}
-    if long == "TP" and short == "SL": return "Long TP / Short SL"
-    if long == "SL" and short == "TP": return "Long SL / Short TP"
-    if long == "SL" and short == "SL": return "Long SL / Short SL"
-    if long == "SL" and short in be: return "Long SL / Short BE"
-    if long in be and short == "SL": return "Long BE / Short SL"
-    return "Other"
+    """Classify the one actual directional trade result on a row."""
+    reason = _single_exit_reason(row)
+    if reason in ("BOTH_OPEN_TIMEOUT", "PROFILE_TIMEOUT"):
+        return "PROFILE_TIMEOUT"
+    if reason == "END_OF_DATA":
+        return "END_OF_DATA"
+    if reason in ("BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"):
+        return "BE"
+    if reason == "TP" and _trade_be_triggered(row):
+        return "TP_AFTER_BE_MOVE"
+    if reason in ("TP", "SL", "TRAILING_STOP", "R_STEP_TRAILING_STOP", "ATR_CHECKPOINT_PROFIT_LOCK"):
+        return str(reason)
+    return str(reason) if reason is not None else "OTHER"
 
 
 def _at_or_before(group: pd.DataFrame, minutes: float, col: str):
@@ -138,9 +186,12 @@ def trade_journey_analysis(trades: pd.DataFrame) -> pd.DataFrame:
     cols = ["outcome","trade_count","average_holding_hours","median_holding_hours","average_adx_entry","average_adx_max","average_adx_change_first_hour","average_adx_slope_per_hour","average_di_spread_entry","average_di_spread_max","average_di_spread_change_first_hour","average_di_spread_slope_per_hour","average_bb_width_entry","average_bb_width_max","average_bb_width_change_first_hour","average_bb_width_journey_change_pct","average_bb_width_slope_per_hour","average_atr_entry","average_atr_max","average_atr_change_first_hour","average_atr_journey_change_pct","average_atr_slope_per_hour","average_net_pnl","total_net_pnl"]
     if trades.empty: return pd.DataFrame(columns=cols)
     t=trades.copy(); t["outcome"] = t.apply(outcome_label, axis=1); rows=[]
-    order=["Long TP / Short SL","Long SL / Short TP","Long SL / Short SL","Long SL / Short BE","Long BE / Short SL","BOTH_OPEN_TIMEOUT","END_OF_DATA","Other"]
+    preferred=["TP","TP_AFTER_BE_MOVE","SL","BE","TRAILING_STOP","R_STEP_TRAILING_STOP","ATR_CHECKPOINT_PROFIT_LOCK","PROFILE_TIMEOUT","END_OF_DATA","OTHER"]
+    seen=set(t["outcome"].dropna().astype(str)); order=preferred+[label for label in sorted(seen) if label not in preferred]
     for label in order:
         g=t[t.outcome==label]
+        if g.empty and label not in preferred:
+            continue
         rows.append({"outcome":label,"trade_count":len(g),"average_holding_hours":g.holding_hours.mean(),"median_holding_hours":g.holding_hours.median(),"average_net_pnl":g.pair_net_pnl.mean(),"total_net_pnl":g.pair_net_pnl.sum(), **{f"average_{c}":_series(g, c).mean() for c in ["adx_entry","adx_max","adx_change_first_hour","adx_slope_per_hour","di_spread_entry","di_spread_max","di_spread_change_first_hour","di_spread_slope_per_hour","bb_width_entry","bb_width_max","bb_width_change_first_hour","bb_width_journey_change_pct","bb_width_slope_per_hour","atr_entry","atr_max","atr_change_first_hour","atr_journey_change_pct","atr_slope_per_hour"] if c in g}})
     return pd.DataFrame(rows, columns=cols)
 
@@ -156,19 +207,36 @@ def winner_loser_journey_analysis(trades: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def double_sl_journey_analysis(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.DataFrame:
+def stop_loss_journey_analysis(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.DataFrame:
+    """Audit indicator paths for the directional trades that ultimately hit SL."""
     rows=[]; tel={pid:g.sort_values("timestamp") for pid,g in telemetry.groupby("pair_id", sort=False)} if not telemetry.empty else {}
-    long_exit = trades.get("long_exit_reason", pd.Series([], dtype=object))
-    short_exit = trades.get("short_exit_reason", pd.Series([], dtype=object))
-    ds=trades[(long_exit=="SL") & (short_exit=="SL")] if not trades.empty else trades
-    for _,r in ds.iterrows():
-        lt,st=pd.Timestamp(r.long_exit_time),pd.Timestamp(r.short_exit_time); first_side="long" if lt<=st else "short"; first_t=min(lt,st); second_t=max(lt,st); g=tel.get(r.pair_id,pd.DataFrame())
-        row={"pair_id":r.pair_id,"entry_time":r.entry_time,"first_sl_side":first_side,"first_sl_time":first_t,"second_sl_time":second_t,"minutes_between_sl_hits":(second_t-first_t).total_seconds()/60,"holding_hours":r.holding_hours,"pair_net_pnl":r.pair_net_pnl}
-        before=g[g.timestamp<=first_t] if not g.empty else g; after=g[g.timestamp>=first_t] if not g.empty else g
+    if trades.empty:
+        return pd.DataFrame()
+    reasons=trades.apply(_single_exit_reason,axis=1)
+    stopped=trades[reasons.eq("SL")]
+    for _,r in stopped.iterrows():
+        side=str(r.get("side",r.get("trade_direction","UNKNOWN"))).upper()
+        exit_time=r.get("exit_time")
+        if pd.isna(exit_time):
+            exit_time=r.get("long_exit_time") if side=="LONG" else r.get("short_exit_time")
+        stop_time=pd.Timestamp(exit_time) if pd.notna(exit_time) else pd.NaT
+        g=tel.get(r.pair_id,pd.DataFrame())
+        before=g[g.timestamp<=stop_time] if not g.empty and pd.notna(stop_time) else g
+        row={"pair_id":r.pair_id,"entry_time":r.get("entry_time"),"side":side,"stop_loss_time":stop_time,"holding_hours":r.get("holding_hours",np.nan),"pair_net_pnl":r.get("pair_net_pnl",np.nan)}
         for ind in INDICATORS:
-            row[f"{ind}_entry"]=r.get(f"{ind}_entry",np.nan); row[f"{ind}_at_first_sl"]=finite(_series(before, ind).iloc[-1]) if len(before) else np.nan; row[f"{ind}_max_before_first_sl"]=_series(before, ind).max() if len(before) else np.nan; row[f"{ind}_max_after_first_sl"]=_series(after, ind).max() if len(after) else np.nan; row[f"{ind}_change_first_hour"]=r.get(f"{ind}_change_first_hour",np.nan)
+            s=pd.to_numeric(_series(before,ind),errors="coerce")
+            row[f"{ind}_entry"]=r.get(f"{ind}_entry",np.nan)
+            row[f"{ind}_at_stop"]=finite(s.iloc[-1]) if len(s) else np.nan
+            row[f"{ind}_min_before_stop"]=finite(s.min()) if len(s) else np.nan
+            row[f"{ind}_max_before_stop"]=finite(s.max()) if len(s) else np.nan
+            row[f"{ind}_change_first_hour"]=r.get(f"{ind}_change_first_hour",np.nan)
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def double_sl_journey_analysis(trades: pd.DataFrame, telemetry: pd.DataFrame) -> pd.DataFrame:
+    """Temporary caller compatibility; simultaneous double-SL trades are retired."""
+    return stop_loss_journey_analysis(trades, telemetry)
 
 
 def save_journey_charts(trades: pd.DataFrame, telemetry: pd.DataFrame, charts_dir: Path) -> list[str]:
@@ -178,22 +246,21 @@ def save_journey_charts(trades: pd.DataFrame, telemetry: pd.DataFrame, charts_di
     except Exception as exc:
         return [f"Chart generation failed for journey charts: {exc}\n{traceback.format_exc()}"]
     charts_dir.mkdir(parents=True, exist_ok=True)
-    winners=trades[trades.apply(outcome_label, axis=1).isin(["Long TP / Short SL","Long SL / Short TP"])] if not trades.empty else trades
-    long_exit = trades.get("long_exit_reason", pd.Series([], dtype=object))
-    short_exit = trades.get("short_exit_reason", pd.Series([], dtype=object))
-    double=trades[(long_exit=="SL") & (short_exit=="SL")] if not trades.empty else trades
+    winners=trades[trades.get("pair_net_pnl",pd.Series(index=trades.index,dtype=float))>0] if not trades.empty else trades
+    losers=trades[trades.get("pair_net_pnl",pd.Series(index=trades.index,dtype=float))<0] if not trades.empty else trades
     for ind in INDICATORS:
         try:
             fig,ax=plt.subplots()
-            for label, ids in [("TP/SL winners", winners.pair_id if not winners.empty else []),("Double-SL trades", double.pair_id if not double.empty else [])]:
+            for label, ids in [("Winners", winners.pair_id if not winners.empty else []),("Losers", losers.pair_id if not losers.empty else [])]:
                 g=telemetry[telemetry.pair_id.isin(_as_membership_values(ids))] if not telemetry.empty else telemetry
                 if not g.empty: g.groupby("elapsed_minutes")[[ind]].mean()[ind].plot(ax=ax,label=label)
-            ax.set_xlabel("Elapsed minutes from entry"); ax.set_ylabel(ind); ax.legend(); fig.tight_layout(); fig.savefig(charts_dir / f"{ind}_journey_winners_vs_double_sl.png"); plt.close(fig)
+            ax.set_xlabel("Elapsed minutes from entry"); ax.set_ylabel(ind); ax.legend(); fig.tight_layout(); fig.savefig(charts_dir / f"{ind}_journey_winners_vs_losers.png"); plt.close(fig)
         except Exception as exc: warnings.append(f"Chart generation failed for {ind} journey: {exc}\n{traceback.format_exc()}")
         try:
             fig,ax=plt.subplots(); _series(trades, f"{ind}_change_first_hour").dropna().plot(kind="hist", bins=30, ax=ax); ax.set_title(f"{ind} first-hour change distribution"); fig.tight_layout(); fig.savefig(charts_dir / f"{ind}_first_hour_change_distribution.png"); plt.close(fig)
         except Exception as exc: warnings.append(f"Chart generation failed for {ind} first-hour distribution: {exc}\n{traceback.format_exc()}")
     return warnings
+
 
 def trailing_profit_analysis(trades: pd.DataFrame) -> pd.DataFrame:
     """Return a tidy, one-row trailing-profit performance report."""
