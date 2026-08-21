@@ -11,6 +11,7 @@ from collections.abc import Mapping
 import numpy as np
 import pandas as pd
 
+import crypto_strategy_lab.enhanced_engine as enhanced_engine_module
 from crypto_strategy_lab.data_lake_engine import DataLakeBacktestEngine
 from crypto_strategy_lab.features.support_resistance import (
     PreparedSupportResistanceContextReader,
@@ -29,6 +30,18 @@ _REQUIRED_SR_COLUMNS = {
     ),
 }
 
+_REQUIRED_PRODUCTION_CONTEXT_COLUMNS = {
+    "timestamp",
+    "available_at",
+    "mean_reversion_sigma",
+    "mean_reversion_bb_upper",
+    "mean_reversion_bb_lower",
+    "mean_reversion_bb_zscore",
+    "mean_reversion_rsi",
+    "mean_reversion_long_reentry",
+    "mean_reversion_short_reentry",
+}
+
 _RESEARCH_META_COLUMNS = {"timestamp", "available_at"}
 
 
@@ -45,25 +58,183 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         research_features: Mapping[str, pd.DataFrame] | None = None,
         **kwargs,
     ) -> None:
-        # MarketContextFeatureProvider currently mirrors the base-engine MR/BB
-        # block. Production uses the richer MR-v2 implementation, so keep this
-        # cached frame available for research/manifests but do not overwrite the
-        # production MR-v2 arrays until that provider is migrated separately.
         self.prepared_context_features = context_features
         self.support_resistance_features = support_resistance_features
         self.research_features: dict[str, pd.DataFrame] = {}
         self.research_output_columns: tuple[str, ...] = ()
         self.research_feature_available_columns: tuple[str, ...] = ()
-        super().__init__(
-            *args,
-            structural_benchmark=structural_benchmark,
-            technical_features=technical_features,
-            context_features=None,
-            **kwargs,
+
+        data = args[0] if args else kwargs.get("data")
+        config = args[1] if len(args) > 1 else kwargs.get("config")
+        if data is None or config is None:
+            raise TypeError("DataLakeProductionBacktestEngine requires strategy data and config")
+
+        production_context = (
+            self._validate_production_context(data, config, context_features)
+            if context_features is not None
+            else None
         )
+
+        originals = None
+        if production_context is not None:
+            originals = self._install_enhanced_context_shims(config, production_context)
+        try:
+            super().__init__(
+                *args,
+                structural_benchmark=structural_benchmark,
+                technical_features=technical_features,
+                context_features=production_context,
+                **kwargs,
+            )
+        finally:
+            if originals is not None:
+                self._restore_enhanced_context_shims(originals)
+
+        if production_context is not None:
+            # The enhanced engine is still the semantic authority; these arrays
+            # are simply the precomputed values it would have produced itself.
+            self.prepared_context_features = production_context
+            self.mean_reversion_mean = production_context["mean_reversion_mean"].to_numpy(float)
+            self.mean_reversion_distance_atr = production_context[
+                "mean_reversion_distance_atr"
+            ].to_numpy(float)
+            self.mean_reversion_distance_atr_previous = production_context[
+                "mean_reversion_distance_atr_previous"
+            ].to_numpy(float)
+            self.mean_reversion_sigma = production_context["mean_reversion_sigma"].to_numpy(float)
+            self.mean_reversion_bb_upper = production_context[
+                "mean_reversion_bb_upper"
+            ].to_numpy(float)
+            self.mean_reversion_bb_lower = production_context[
+                "mean_reversion_bb_lower"
+            ].to_numpy(float)
+            self.mean_reversion_bb_zscore = production_context[
+                "mean_reversion_bb_zscore"
+            ].to_numpy(float)
+            self.mean_reversion_rsi_values = production_context[
+                "mean_reversion_rsi"
+            ].to_numpy(float)
+            self.mean_reversion_long_reentry = production_context[
+                "mean_reversion_long_reentry"
+            ].to_numpy(bool)
+            self.mean_reversion_short_reentry = production_context[
+                "mean_reversion_short_reentry"
+            ].to_numpy(bool)
+            self.context_feature_source = (
+                f"{production_context.attrs.get('feature_name', 'production_market_context')}@"
+                f"{production_context.attrs.get('feature_version', 'unknown')}"
+            )
 
         self._configure_support_resistance_feature(support_resistance_features)
         self._configure_research_features(research_features or {})
+
+    @classmethod
+    def _validate_production_context(cls, data, config, frame: pd.DataFrame) -> pd.DataFrame:
+        missing = sorted(_REQUIRED_PRODUCTION_CONTEXT_COLUMNS - set(frame.columns))
+        if missing:
+            raise ValueError(f"Prepared production context is missing columns: {missing}")
+        prepared, data_times = cls._aligned_feature_frame(data, frame, "production market context")
+        cls._assert_causal_availability(prepared, data_times, config, "production market context")
+
+        expected = {
+            "bb_period": int(config.bb_period),
+            "bb_stddevs": float(config.bb_stddevs),
+            "mean_reversion_period": int(config.mean_reversion_period),
+            "mean_reversion_mean_type": str(getattr(config, "mean_reversion_mean_type", "SMA")).upper(),
+            "mean_reversion_bb_stddevs": float(getattr(config, "mean_reversion_bb_stddevs", 2.0)),
+            "mean_reversion_rsi_period": int(getattr(config, "mean_reversion_rsi_period", 14)),
+            "mean_reversion_rsi_oversold": float(getattr(config, "mean_reversion_rsi_oversold", 30.0)),
+            "mean_reversion_rsi_overbought": float(getattr(config, "mean_reversion_rsi_overbought", 70.0)),
+        }
+        for name, wanted in expected.items():
+            actual = prepared.attrs.get(name)
+            if isinstance(wanted, float):
+                if actual is None or not np.isclose(float(actual), wanted):
+                    raise ValueError(f"Prepared production context {name} does not match config")
+            elif str(actual) != str(wanted):
+                raise ValueError(f"Prepared production context {name} does not match config")
+        return prepared
+
+    @staticmethod
+    def _install_enhanced_context_shims(config, context: pd.DataFrame):
+        """Feed cached MR-v2 arrays through EnhancedBacktestEngine construction."""
+        originals = (
+            enhanced_engine_module.moving_mean,
+            enhanced_engine_module.distance_from_mean_atr,
+            enhanced_engine_module.bollinger_envelope,
+            enhanced_engine_module.bb_zscore,
+            enhanced_engine_module.rsi,
+            enhanced_engine_module.bollinger_reentry_flags,
+        )
+        mean = context["mean_reversion_mean"].to_numpy(float)
+        distance = context["mean_reversion_distance_atr"].to_numpy(float)
+        sigma = context["mean_reversion_sigma"].to_numpy(float)
+        upper = context["mean_reversion_bb_upper"].to_numpy(float)
+        lower = context["mean_reversion_bb_lower"].to_numpy(float)
+        zscore = context["mean_reversion_bb_zscore"].to_numpy(float)
+        rsi_values = context["mean_reversion_rsi"].to_numpy(float)
+        long_reentry = context["mean_reversion_long_reentry"].to_numpy(bool)
+        short_reentry = context["mean_reversion_short_reentry"].to_numpy(bool)
+
+        expected_period = int(config.mean_reversion_period)
+        expected_mean_type = str(getattr(config, "mean_reversion_mean_type", "SMA")).upper()
+        expected_stddevs = float(getattr(config, "mean_reversion_bb_stddevs", 2.0))
+        expected_rsi_period = int(getattr(config, "mean_reversion_rsi_period", 14))
+        expected_oversold = float(getattr(config, "mean_reversion_rsi_oversold", 30.0))
+        expected_overbought = float(getattr(config, "mean_reversion_rsi_overbought", 70.0))
+
+        def _moving_mean(_values, period, mean_type="SMA"):
+            if int(period) != expected_period or str(mean_type).upper() != expected_mean_type:
+                raise ValueError("Prepared MR mean settings do not match enhanced engine request")
+            return mean.copy()
+
+        def _distance(_close, _mean, _atr):
+            return distance.copy()
+
+        def _envelope(_values, _mean, period, stddevs=2.0):
+            if int(period) != expected_period or not np.isclose(float(stddevs), expected_stddevs):
+                raise ValueError("Prepared MR Bollinger settings do not match enhanced engine request")
+            return sigma.copy(), upper.copy(), lower.copy()
+
+        def _zscore(_close, _mean, _sigma):
+            return zscore.copy()
+
+        def _rsi(_values, period):
+            if int(period) != expected_rsi_period:
+                raise ValueError("Prepared MR RSI period does not match enhanced engine request")
+            return rsi_values.copy()
+
+        def _reentry(_close, _lower, _upper, _rsi, oversold, overbought):
+            if not np.isclose(float(oversold), expected_oversold) or not np.isclose(
+                float(overbought), expected_overbought
+            ):
+                raise ValueError("Prepared MR RSI thresholds do not match enhanced engine request")
+            return long_reentry.copy(), short_reentry.copy()
+
+        enhanced_engine_module.moving_mean = _moving_mean
+        enhanced_engine_module.distance_from_mean_atr = _distance
+        enhanced_engine_module.bollinger_envelope = _envelope
+        enhanced_engine_module.bb_zscore = _zscore
+        enhanced_engine_module.rsi = _rsi
+        enhanced_engine_module.bollinger_reentry_flags = _reentry
+        return originals
+
+    @staticmethod
+    def _restore_enhanced_context_shims(originals) -> None:
+        (
+            enhanced_engine_module.moving_mean,
+            enhanced_engine_module.distance_from_mean_atr,
+            enhanced_engine_module.bollinger_envelope,
+            enhanced_engine_module.bb_zscore,
+            enhanced_engine_module.rsi,
+            enhanced_engine_module.bollinger_reentry_flags,
+        ) = originals
+
+    def _mean_reversion_snapshot(self, i, di_direction, trade_direction=None):
+        """Preserve the mature enhanced MR-v2 snapshot using prepared arrays."""
+        return SRDynamicTPBacktestEngine._mean_reversion_snapshot(
+            self, i, di_direction, trade_direction
+        )
 
     def _configure_support_resistance_feature(
         self,
