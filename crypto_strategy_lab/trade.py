@@ -1,6 +1,6 @@
 """Trade state and result models."""
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
@@ -61,21 +61,29 @@ class TradePair:
     first_sl_survivor_partial_taken: bool = False; first_sl_survivor_partial_side: Optional[Side] = None; first_sl_survivor_partial_time: Optional[object] = None; first_sl_survivor_partial_pct: float = 0.0; first_sl_survivor_partial_quantity: float = 0.0; first_sl_survivor_partial_exit_price: Optional[float] = None; first_sl_survivor_partial_gross_pnl: float = 0.0; first_sl_survivor_partial_fee: float = 0.0; first_sl_survivor_partial_net_pnl: float = 0.0
     checkpoint_reentry_gate_started: bool = False; checkpoint_reentry_gate_side: Optional[Side] = None; checkpoint_reentry_gate_tp: Optional[float] = None; checkpoint_reentry_gate_sl: Optional[float] = None; checkpoint_reentry_gate_start_time: Optional[object] = None; checkpoint_reentry_gate_release_time: Optional[object] = None; checkpoint_reentry_gate_release_reason: Optional[str] = None
     market_structure: Optional[dict] = None
+    _positions: tuple[Position, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        position = self.position
+        self._positions = (position,)
+
+    @property
+    def position(self) -> Position:
+        """Return the only supported leg and reject retired dual-leg state."""
         if (self.long is None) == (self.short is None):
             raise ValueError(
                 "TradePair requires exactly one position; simultaneous LONG+SHORT trades are retired"
             )
-
-    @property
-    def position(self) -> Position:
-        """Return the single live trade object stored by this compatibility container."""
         return self.long if self.long is not None else self.short  # type: ignore[return-value]
 
     def positions(self):
         """Compatibility tuple for reporting code that still expects pair.positions()."""
-        return (self.position,)
+        # Re-evaluate the invariant so accidental runtime leg mutation fails
+        # loudly instead of silently resurrecting the retired dual-leg model.
+        position = self.position
+        if self._positions[0] is not position:
+            raise ValueError("TradePair leg mutation is not supported after construction")
+        return self._positions
 
     @property
     def is_open(self) -> bool:
