@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pandas as pd
 
-from .legacy_bridge import load_backtest_frames_from_store
+from .legacy_bridge import canonical_to_legacy_ohlcv
 from .query import DataRequest
 from .store import MarketDataStore
+from .timing import interval_to_timedelta
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +25,15 @@ class BacktestDataBundle:
     structural_benchmark_interval: str | None
 
 
+def _legacy_klines(store: MarketDataStore, request: DataRequest, interval: str, label: str) -> pd.DataFrame:
+    minutes = int(interval_to_timedelta(interval).total_seconds() // 60)
+    return canonical_to_legacy_ohlcv(
+        store.load_klines(request, interval),
+        label=label,
+        expected_timeframe_minutes=minutes,
+    )
+
+
 def load_backtest_bundle(
     store: MarketDataStore,
     request: DataRequest,
@@ -33,18 +43,48 @@ def load_backtest_bundle(
     structural_regime_slope_lookback_days: int = 30,
     benchmark_interval: str = "1h",
     refresh_catalog: bool = True,
+    intrabar_start: datetime | None = None,
 ) -> BacktestDataBundle:
     """Load strategy, intrabar and optional structural benchmark data.
 
     Structural regime warm-up is fetched before the requested strategy start so
     the first strategy candle can use only benchmark history that was already
-    available at that time. The raw archive tree remains read-only.
+    available at that time.  ``intrabar_start`` may be later than the strategy
+    request start, allowing indicator warm-up on strategy candles without
+    needlessly loading minute data before trading begins.  The raw archive tree
+    remains read-only.
     """
 
     if refresh_catalog:
         store.refresh_catalog()
 
-    strategy, intrabar = load_backtest_frames_from_store(store, request)
+    strategy = _legacy_klines(
+        store,
+        request,
+        request.strategy_interval,
+        "Strategy data (Data Lake v2)",
+    )
+
+    intrabar = None
+    if request.intrabar_interval:
+        effective_intrabar_start = request.start
+        if intrabar_start is not None:
+            effective_intrabar_start = max(request.start, intrabar_start)
+        intrabar_request = DataRequest(
+            symbol=request.symbol,
+            start=effective_intrabar_start,
+            end=request.end,
+            strategy_interval=request.intrabar_interval,
+            market=request.market,
+            exchange=request.exchange,
+        )
+        intrabar = _legacy_klines(
+            store,
+            intrabar_request,
+            request.intrabar_interval,
+            "Intrabar data (Data Lake v2)",
+        )
+
     benchmark = None
     benchmark_symbol = None
     benchmark_interval_used = None
