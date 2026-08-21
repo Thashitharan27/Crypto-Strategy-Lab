@@ -21,6 +21,9 @@ from .store import DataNotAvailableError, MarketDataStore
 from .timing import interval_to_timedelta
 
 
+_ENGINE_OHLCV_COLUMNS = ("period_start", "open", "high", "low", "close", "volume")
+
+
 @dataclass(frozen=True, slots=True)
 class BacktestDataBundle:
     request: DataRequest
@@ -41,7 +44,11 @@ def _legacy_from_canonical(canonical: pd.DataFrame, interval: str, label: str) -
 
 
 def _legacy_klines(store, request, interval, label):
-    return _legacy_from_canonical(store.load_klines(request, interval), interval, label)
+    return _legacy_from_canonical(
+        store.load_klines(request, interval, columns=_ENGINE_OHLCV_COLUMNS),
+        interval,
+        label,
+    )
 
 
 def _cached_feature(store, request, canonical, provider, parameters, feature_frames=None):
