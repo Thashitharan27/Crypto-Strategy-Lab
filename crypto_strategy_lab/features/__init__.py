@@ -11,6 +11,7 @@ from .registry import FeatureRegistry
 from .support_resistance import (
     SUPPORT_RESISTANCE_FEATURE_NAME,
     SUPPORT_RESISTANCE_FEATURE_VERSION,
+    PreparedSupportResistanceContextReader,
     SR_CONTEXT_FIELDS,
     SupportResistanceFeatureProvider,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "MarketContextFeatureProvider",
     "SUPPORT_RESISTANCE_FEATURE_NAME",
     "SUPPORT_RESISTANCE_FEATURE_VERSION",
+    "PreparedSupportResistanceContextReader",
     "SR_CONTEXT_FIELDS",
     "SupportResistanceFeatureProvider",
 ]
