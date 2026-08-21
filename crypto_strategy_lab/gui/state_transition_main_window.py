@@ -6,6 +6,8 @@ visible Summary report button for the generated state-transition folder.
 """
 from __future__ import annotations
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QPushButton
 
 from crypto_strategy_lab.gui import main_window as base_main_window_module
@@ -13,11 +15,14 @@ from crypto_strategy_lab.gui.state_transition_worker import StateTransitionBackt
 
 # BaseMainWindow.run_backtest resolves BacktestWorker from its defining module at
 # runtime. Replacing that module global preserves every enhanced/SR GUI layer
-# while adding the post-run research export.
+# while adding the post-run research export. Report-target state is intentionally
+# kept local to this subclass so importing it does not mutate base-GUI behavior.
 base_main_window_module.BacktestWorker = StateTransitionBacktestWorker
-base_main_window_module.REPORT_TARGETS["state"] = "state_transition_research"
 
 from crypto_strategy_lab.gui.sr_dynamic_tp_main_window import MainWindow as SRDynamicTPMainWindow
+
+
+_STATE_REPORT_TARGET = "state_transition_research"
 
 
 class MainWindow(SRDynamicTPMainWindow):
@@ -36,6 +41,26 @@ class MainWindow(SRDynamicTPMainWindow):
         # research shortcut on the next row without restructuring the base UI.
         reports_layout = self.report_buttons["output"].parentWidget().layout()
         reports_layout.addWidget(button, 2, 0)
+
+    def _refresh_report_buttons(self):
+        super()._refresh_report_buttons()
+        button = self.report_buttons.get("state")
+        if button is None:
+            return
+        available = bool(
+            self.completed_run_dir is not None
+            and (self.completed_run_dir / _STATE_REPORT_TARGET).exists()
+        )
+        button.setEnabled(available)
+
+    def _open_report(self, name):
+        if name != "state":
+            return super()._open_report(name)
+        if self.completed_run_dir is None:
+            return
+        target = (self.completed_run_dir / _STATE_REPORT_TARGET).resolve()
+        if target.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
     @staticmethod
     def _percentage_points(value, decimals: int = 2) -> str:
