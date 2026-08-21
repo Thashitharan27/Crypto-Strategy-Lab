@@ -62,6 +62,14 @@ class TradePair:
     checkpoint_reentry_gate_started: bool = False; checkpoint_reentry_gate_side: Optional[Side] = None; checkpoint_reentry_gate_tp: Optional[float] = None; checkpoint_reentry_gate_sl: Optional[float] = None; checkpoint_reentry_gate_start_time: Optional[object] = None; checkpoint_reentry_gate_release_time: Optional[object] = None; checkpoint_reentry_gate_release_reason: Optional[str] = None
     market_structure: Optional[dict] = None
     def positions(self):
-        return tuple(p for p in (self.long, self.short) if p is not None)
+        if self.long is None:
+            return () if self.short is None else (self.short,)
+        if self.short is None:
+            return (self.long,)
+        return (self.long, self.short)
     @property
-    def is_open(self) -> bool: return any(p.is_open for p in self.positions())
+    def is_open(self) -> bool:
+        return bool(
+            (self.long is not None and self.long.is_open)
+            or (self.short is not None and self.short.is_open)
+        )
