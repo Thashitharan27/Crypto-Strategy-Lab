@@ -38,13 +38,19 @@ class FeatureFrameCache:
         canonical_source: pd.DataFrame,
         *,
         dependency_keys: Sequence[str] = (),
+        additional_sources: Sequence[pd.DataFrame] = (),
     ) -> str:
         payload = {
             "feature": definition.name,
             "version": definition.version,
             "request": request.cache_key(),
             "parameters": dict(parameters),
+            # Keep the primary source field stable so existing single-source
+            # feature cache identities do not change during this migration.
             "source": self._source_signature(canonical_source),
+            "additional_sources": [
+                self._source_signature(source) for source in additional_sources
+            ],
             "dependencies": list(dependency_keys),
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
