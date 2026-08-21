@@ -127,23 +127,21 @@ def test_retired_dual_leg_state_is_absent_from_models() -> None:
         "checkpoint_reentry_gate_start_time",
         "checkpoint_reentry_gate_release_time",
         "checkpoint_reentry_gate_release_reason",
+        "both_open_timeout_triggered",
     )
     for name in retired_pair_fields:
         assert not hasattr(pair, name), name
 
     assert not hasattr(ExitReason, "REMAINING_LEG_TIMEOUT_AFTER_FIRST_SL")
+    assert not hasattr(ExitReason, "BOTH_OPEN_TIMEOUT")
 
 
-def test_internal_timeout_alias_emits_only_canonical_profile_timeout_value() -> None:
+def test_profile_timeout_uses_only_canonical_state_and_reason() -> None:
     pair = _pair(long=_position(Side.LONG))
 
     assert ExitReason.PROFILE_TIMEOUT.value == "PROFILE_TIMEOUT"
-    assert ExitReason.BOTH_OPEN_TIMEOUT is ExitReason.PROFILE_TIMEOUT
-    assert ExitReason.BOTH_OPEN_TIMEOUT.value == "PROFILE_TIMEOUT"
     assert pair.profile_timeout_triggered is False
-    assert pair.both_open_timeout_triggered is False
 
-    pair.both_open_timeout_triggered = True
+    pair.profile_timeout_triggered = True
 
     assert pair.profile_timeout_triggered is True
-    assert pair.both_open_timeout_triggered is True

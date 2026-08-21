@@ -809,8 +809,8 @@ class BacktestEngine:
         for pos in pair.positions():
             if pos.is_open:
                 slip = 1-self.config.slippage if pos.side == Side.LONG else 1+self.config.slippage
-                self._close_position(pos, i, float(raw_open)*slip, ExitReason.BOTH_OPEN_TIMEOUT, source, timestamp)
-        pair.both_open_timeout_triggered = True
+                self._close_position(pos, i, float(raw_open)*slip, ExitReason.PROFILE_TIMEOUT, source, timestamp)
+        pair.profile_timeout_triggered = True
         pair.timeout_minutes = int(minutes)
         pair.timeout_exit_time = timestamp
         self.last_timeout_exit_time = timestamp
@@ -1363,7 +1363,7 @@ class BacktestEngine:
             "break_even_offset_r": primary.be_offset_r if primary.be_enabled else None,
             "profile_timeout_enabled": bool(getattr(p, "profile_timeout_enabled", False)),
             "profile_timeout_minutes": getattr(p, "profile_timeout_minutes", None),
-            "profile_timeout_triggered": bool(getattr(p, "both_open_timeout_triggered", False)),
+            "profile_timeout_triggered": bool(getattr(p, "profile_timeout_triggered", False)),
             "profile_timeout_exit_time": getattr(p, "timeout_exit_time", None),
             "configured_account_risk_percentage": self.config.risk_per_leg,
             "estimated_all_in_stop_risk_percentage": estimated_stop_risk,

@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Optional
 
 class Side(str, Enum): LONG="LONG"; SHORT="SHORT"
-class ExitReason(str, Enum): TP="TP"; SL="SL"; ATR_CHECKPOINT_PROFIT_LOCK="ATR_CHECKPOINT_PROFIT_LOCK"; R_STEP_TRAILING_STOP="R_STEP_TRAILING_STOP"; TRAILING_STOP="TRAILING_STOP"; BE="BE"; BE_COST_ADJUSTED="BE_COST_ADJUSTED"; BE_R_OFFSET="BE_R_OFFSET"; PROFILE_TIMEOUT="PROFILE_TIMEOUT"; BOTH_OPEN_TIMEOUT=PROFILE_TIMEOUT; END_OF_DATA="END_OF_DATA"
+class ExitReason(str, Enum): TP="TP"; SL="SL"; ATR_CHECKPOINT_PROFIT_LOCK="ATR_CHECKPOINT_PROFIT_LOCK"; R_STEP_TRAILING_STOP="R_STEP_TRAILING_STOP"; TRAILING_STOP="TRAILING_STOP"; BE="BE"; BE_COST_ADJUSTED="BE_COST_ADJUSTED"; BE_R_OFFSET="BE_R_OFFSET"; PROFILE_TIMEOUT="PROFILE_TIMEOUT"; END_OF_DATA="END_OF_DATA"
 class ExitSource(str, Enum): INTRABAR="1M_INTRABAR"; FALLBACK_15M="15M_FALLBACK"; END_OF_DATA="END_OF_DATA"
 
 @dataclass
@@ -85,12 +85,3 @@ class TradePair:
     @property
     def is_open(self) -> bool:
         return self.position.is_open
-
-    @property
-    def both_open_timeout_triggered(self) -> bool:
-        """Deprecated compatibility alias for the current single-trade profile timeout."""
-        return self.profile_timeout_triggered
-
-    @both_open_timeout_triggered.setter
-    def both_open_timeout_triggered(self, value: bool) -> None:
-        self.profile_timeout_triggered = bool(value)

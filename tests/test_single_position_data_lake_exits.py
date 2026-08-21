@@ -74,10 +74,9 @@ def _force_long_sideways(engine) -> None:
     engine.di_ratio[:] = 5.0
 
 
-def test_profile_timeout_is_the_canonical_exit_reason_value() -> None:
+def test_profile_timeout_is_the_only_timeout_exit_reason() -> None:
     assert ExitReason.PROFILE_TIMEOUT.value == "PROFILE_TIMEOUT"
-    assert ExitReason.BOTH_OPEN_TIMEOUT is ExitReason.PROFILE_TIMEOUT
-    assert ExitReason.BOTH_OPEN_TIMEOUT.value == "PROFILE_TIMEOUT"
+    assert not hasattr(ExitReason, "BOTH_OPEN_TIMEOUT")
 
 
 def test_data_lake_pair_exit_wrapper_uses_single_position_directly() -> None:

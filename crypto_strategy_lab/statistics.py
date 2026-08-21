@@ -81,8 +81,6 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
     }
 
     timeout_mask = _bool_column(trades, "profile_timeout_triggered")
-    if "profile_timeout_triggered" not in trades and "both_open_timeout_triggered" in trades:
-        timeout_mask = _bool_column(trades, "both_open_timeout_triggered")
     timeout_trades = trades[timeout_mask]
 
     exit_reason = _single_trade_exit_reason(trades)
@@ -194,10 +192,7 @@ def summarize(trades: pd.DataFrame, initial_equity: float = 1000.0) -> dict[str,
 def _bucket_exit_counts(trades: pd.DataFrame, mask: pd.Series) -> dict[str, int]:
     reasons = _single_trade_exit_reason(trades).loc[mask]
     be_reasons = {"BE", "BE_COST_ADJUSTED", "BE_R_OFFSET"}
-    timeout = _bool_column(trades, "profile_timeout_triggered")
-    if "profile_timeout_triggered" not in trades and "both_open_timeout_triggered" in trades:
-        timeout = _bool_column(trades, "both_open_timeout_triggered")
-    timeout = timeout.loc[mask]
+    timeout = _bool_column(trades, "profile_timeout_triggered").loc[mask]
     return {
         "TP Count": int(reasons.eq("TP").sum()),
         "SL Count": int(reasons.eq("SL").sum()),

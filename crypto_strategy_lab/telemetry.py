@@ -110,7 +110,7 @@ def _trade_be_triggered(row: pd.Series) -> bool:
 def outcome_label(row: pd.Series) -> str:
     """Classify the one actual directional trade result on a row."""
     reason = _single_exit_reason(row)
-    if reason in ("BOTH_OPEN_TIMEOUT", "PROFILE_TIMEOUT"):
+    if reason == "PROFILE_TIMEOUT":
         return "PROFILE_TIMEOUT"
     if reason == "END_OF_DATA":
         return "END_OF_DATA"
