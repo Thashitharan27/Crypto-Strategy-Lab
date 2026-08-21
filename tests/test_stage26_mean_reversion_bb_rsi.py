@@ -137,5 +137,6 @@ def test_di_0_30_report_uses_only_agree_disagree_no_signal():
         ]
     )
     report = mean_reversion_analysis_v2(trades)
-    assert set(report["MR State"]) == {"AGREE", "DISAGREE", "NO_SIGNAL"}
-    assert report["Trades"].sum() == 3
+    primary = report.loc[report["Section"] == "DI 0-30 Confirmed MR Alignment"]
+    assert set(primary["Confirmed Alignment"].dropna()) == {"AGREE", "DISAGREE", "NO_SIGNAL"}
+    assert int(primary["Trades"].sum()) == 3
