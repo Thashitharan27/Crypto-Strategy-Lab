@@ -8,6 +8,12 @@ from .context import (
     MarketContextFeatureProvider,
 )
 from .registry import FeatureRegistry
+from .support_resistance import (
+    SUPPORT_RESISTANCE_FEATURE_NAME,
+    SUPPORT_RESISTANCE_FEATURE_VERSION,
+    SR_CONTEXT_FIELDS,
+    SupportResistanceFeatureProvider,
+)
 from .technical import (
     CORE_DIRECTIONAL_FEATURE_NAME,
     CORE_DIRECTIONAL_FEATURE_VERSION,
@@ -27,4 +33,8 @@ __all__ = [
     "MARKET_CONTEXT_FEATURE_NAME",
     "MARKET_CONTEXT_FEATURE_VERSION",
     "MarketContextFeatureProvider",
+    "SUPPORT_RESISTANCE_FEATURE_NAME",
+    "SUPPORT_RESISTANCE_FEATURE_VERSION",
+    "SR_CONTEXT_FIELDS",
+    "SupportResistanceFeatureProvider",
 ]
