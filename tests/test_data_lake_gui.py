@@ -25,10 +25,12 @@ def test_data_lake_gui_does_not_expose_csv_paths_as_strategy_config() -> None:
         assert window.market_data_folder == MARKET_DATA_ROOT
         assert "Data Lake" in window.input_csv.text()
         assert "Data Lake" in window.intrabar_csv.text()
+        assert window.include_agg_trade_flow.isChecked() is False
         values = window._data_lake_strategy_values()
         assert "input_csv" not in values
         assert "intrabar_csv" not in values
         assert "structural_regime_benchmark_csv" not in values
+        assert "include_agg_trade_flow" not in values
         config = window._build_data_lake_config()
         assert config.intrabar_csv is None
         assert config.input_csv.name.endswith("_DATA_LAKE.csv")
