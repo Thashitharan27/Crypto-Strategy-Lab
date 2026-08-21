@@ -4,7 +4,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import duckdb
 import pandas as pd
@@ -36,6 +36,8 @@ class FeatureFrameCache:
         request: DataRequest,
         parameters: Mapping[str, object],
         canonical_source: pd.DataFrame,
+        *,
+        dependency_keys: Sequence[str] = (),
     ) -> str:
         payload = {
             "feature": definition.name,
@@ -43,6 +45,7 @@ class FeatureFrameCache:
             "request": request.cache_key(),
             "parameters": dict(parameters),
             "source": self._source_signature(canonical_source),
+            "dependencies": list(dependency_keys),
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
         return sha256(raw).hexdigest()
