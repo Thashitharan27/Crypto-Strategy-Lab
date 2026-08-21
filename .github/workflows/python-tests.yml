@@ -107,6 +107,7 @@ jobs:
           tests/test_data_lake_parity_tool.py
           tests/test_data_lake_execution_path.py
           tests/test_data_lake_intrabar_window.py
+          tests/test_intrabar_searchsorted.py
           tests/test_data_lake_config.py
           tests/test_rewrite_config_current.py
 
