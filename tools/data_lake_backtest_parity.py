@@ -17,6 +17,14 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sys
+
+# Direct execution (``python tools/...py``) puts ``tools`` on sys.path instead of
+# the repository root. Add the root explicitly so project imports work on a clean
+# Windows checkout without requiring PYTHONPATH or an editable install.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 
