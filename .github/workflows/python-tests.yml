@@ -94,6 +94,7 @@ jobs:
           tests/test_market_context_features.py
           tests/test_support_resistance_features.py
           tests/test_futures_positioning_features.py
+          tests/test_funding_context_features.py
           tests/test_feature_cache.py
           tests/test_binance_compact_adapters.py
           tests/test_data_lake_legacy_bridge.py
@@ -139,7 +140,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+        uses:
+          actions/setup-python@v5
         with:
           python-version: "3.10"
           cache: pip
