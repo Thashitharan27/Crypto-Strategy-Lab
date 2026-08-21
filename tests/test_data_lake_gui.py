@@ -51,7 +51,9 @@ def test_asset_return_warmup_covers_regime_lookback() -> None:
     app()
     window = MainWindow()
     try:
-        window.market_regime_method.setCurrentText("ASSET_RETURN")
+        window.profile_editor.regime_method.setCurrentIndex(
+            window.profile_editor.regime_method.findData("ASSET_RETURN")
+        )
         config = window._build_data_lake_config()
         assert strategy_warmup_period(config).days >= config.bull_regime_lookback_days
     finally:
