@@ -14,6 +14,7 @@ from crypto_strategy_lab.features.futures_positioning import FuturesPositioningF
 from crypto_strategy_lab.features.production_context import ProductionContextFeatureProvider
 from crypto_strategy_lab.features.support_resistance import SupportResistanceFeatureProvider
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME, CoreDirectionalFeatureProvider
+from .intrabar_index import as_searchsorted_intrabar
 from .legacy_bridge import canonical_to_legacy_ohlcv
 from .query import DataRequest
 from .store import DataNotAvailableError, MarketDataStore
@@ -315,8 +316,10 @@ def load_backtest_bundle(
             strategy_interval=request.intrabar_interval,
             market=request.market, exchange=request.exchange,
         )
-        intrabar = _legacy_klines(
-            store, intrabar_request, request.intrabar_interval, "Intrabar data (Data Lake v2)"
+        intrabar = as_searchsorted_intrabar(
+            _legacy_klines(
+                store, intrabar_request, request.intrabar_interval, "Intrabar data (Data Lake v2)"
+            )
         )
 
     benchmark = None
