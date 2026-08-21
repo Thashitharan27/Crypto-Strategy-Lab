@@ -80,6 +80,7 @@ def load_backtest_bundle(
     bb_stddevs: float = 2.0,
     mean_reversion_period: int = 20,
     enable_support_resistance_analysis: bool = False,
+    sr_timeframe_minutes: int = 0,
     sr_pivot_left: int = 5,
     sr_pivot_right: int = 5,
     sr_lookback_bars: int = 200,
@@ -91,7 +92,12 @@ def load_backtest_bundle(
     sr_break_tolerance_atr: float = 0.25,
     sr_break_basis: str = "CLOSE",
 ) -> BacktestDataBundle:
-    """Load market data and reusable causal feature blocks."""
+    """Load market data and reusable causal feature blocks.
+
+    Same-timeframe support/resistance is prepared and cached here. Higher-timeframe
+    S/R remains on the mature complete-bar resampling path until the HTF feature
+    provider is migrated, preserving its current timing semantics.
+    """
     if refresh_catalog:
         store.refresh_catalog()
 
@@ -115,7 +121,9 @@ def load_backtest_bundle(
     )
 
     sr_features = None
-    if enable_support_resistance_analysis:
+    strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
+    effective_sr_minutes = int(sr_timeframe_minutes or strategy_minutes)
+    if enable_support_resistance_analysis and effective_sr_minutes == strategy_minutes:
         sr_features = _cached_feature(
             store, request, canonical, SupportResistanceFeatureProvider(),
             {
