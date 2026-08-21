@@ -42,6 +42,7 @@ def test_searchsorted_frame_matches_boolean_timestamp_ranges() -> None:
     indexed = as_searchsorted_intrabar(plain)
     assert isinstance(indexed, SearchsortedIntrabarFrame)
     assert indexed.intrabar_index_mode == "searchsorted"
+    assert indexed.intrabar_iteration_mode == "itertuples"
 
     for start, end in (
         ("2026-01-01T00:00:00Z", "2026-01-01T00:15:00Z"),
@@ -59,11 +60,39 @@ def test_searchsorted_frame_matches_boolean_timestamp_ranges() -> None:
     assert indexed.timestamp.max() == plain.timestamp.max()
 
 
+def test_intrabar_window_tuple_iteration_matches_pandas_iterrows() -> None:
+    plain = intrabar_frame(30)
+    plain.loc[7, "high"] = 111.25
+    plain.loc[11, "low"] = 88.75
+    indexed = as_searchsorted_intrabar(plain)
+    start = pd.Timestamp("2026-01-01T00:05:00Z")
+    end = pd.Timestamp("2026-01-01T00:18:00Z")
+
+    expected = plain[(plain.timestamp >= start) & (plain.timestamp < end)]
+    actual = indexed[(indexed.timestamp >= start) & (indexed.timestamp < end)]
+
+    expected_rows = [
+        (idx, row.timestamp, row.open, row.high, row.low, row.close, row.volume)
+        for idx, row in expected.iterrows()
+    ]
+    actual_rows = []
+    for idx, row in actual.iterrows():
+        # The fast window intentionally avoids allocating a pandas Series for
+        # every minute while preserving the attributes consumed by the engine.
+        assert not isinstance(row, pd.Series)
+        actual_rows.append(
+            (idx, row.timestamp, row.open, row.high, row.low, row.close, row.volume)
+        )
+
+    assert actual_rows == expected_rows
+
+
 def test_engine_reset_index_preserves_searchsorted_acceleration() -> None:
     indexed = as_searchsorted_intrabar(intrabar_frame())
     reset = indexed.reset_index(drop=True)
     assert isinstance(reset, SearchsortedIntrabarFrame)
     assert reset.intrabar_index_mode == "searchsorted"
+    assert reset.intrabar_iteration_mode == "itertuples"
     start = pd.Timestamp("2026-01-01T00:30:00Z")
     end = pd.Timestamp("2026-01-01T00:45:00Z")
     assert len(reset[(reset.timestamp >= start) & (reset.timestamp < end)]) == 15
@@ -74,6 +103,7 @@ def test_unsorted_intrabar_falls_back_without_changing_rows() -> None:
     indexed = as_searchsorted_intrabar(plain)
     assert isinstance(indexed, SearchsortedIntrabarFrame)
     assert indexed.intrabar_index_mode == "boolean_fallback"
+    assert indexed.intrabar_iteration_mode == "itertuples"
     start = pd.Timestamp("2026-01-01T00:01:00Z")
     end = pd.Timestamp("2026-01-01T00:04:00Z")
     expected = plain[(plain.timestamp >= start) & (plain.timestamp < end)]
