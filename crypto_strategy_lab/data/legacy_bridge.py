@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
+from pandas.api.types import is_numeric_dtype
 
 from crypto_strategy_lab.loader import DataSummary
 
@@ -32,6 +33,29 @@ class FrameParity:
             self.rows_left == self.rows_right
             and self.timestamp_mismatches == 0
             and self.value_mismatches == 0
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TradeParity:
+    """Deterministic row/column comparison of two engine trade lists."""
+
+    rows_left: int
+    rows_right: int
+    columns_compared: tuple[str, ...]
+    columns_only_left: tuple[str, ...]
+    columns_only_right: tuple[str, ...]
+    mismatched_rows: int
+    column_mismatches: dict[str, int]
+    max_abs_diff: dict[str, float]
+
+    @property
+    def exact(self) -> bool:
+        return (
+            self.rows_left == self.rows_right
+            and not self.columns_only_left
+            and not self.columns_only_right
+            and self.mismatched_rows == 0
         )
 
 
@@ -129,5 +153,77 @@ def compare_ohlcv_frames(left: pd.DataFrame, right: pd.DataFrame, *, tolerance: 
         overlapping_rows=len(merged),
         timestamp_mismatches=timestamp_mismatches,
         value_mismatches=int(mismatch_mask.sum()),
+        max_abs_diff=max_abs_diff,
+    )
+
+
+def _datetime_like(column: str) -> bool:
+    name = column.lower()
+    return any(token in name for token in ("time", "timestamp", "date"))
+
+
+def compare_trade_frames(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    *,
+    tolerance: float = 1e-10,
+    ignored_columns: tuple[str, ...] = (),
+) -> TradeParity:
+    """Compare complete engine trade rows without depending on one fixed schema.
+
+    The engine is deterministic, so migration parity should preserve row order as
+    well as every output value. Numeric columns use an absolute tolerance;
+    datetime-like columns are normalized to UTC; other columns compare exactly.
+    """
+
+    ignored = set(ignored_columns)
+    left_columns = [column for column in left.columns if column not in ignored]
+    right_columns = [column for column in right.columns if column not in ignored]
+    common = tuple(column for column in left_columns if column in right_columns)
+    only_left = tuple(column for column in left_columns if column not in right_columns)
+    only_right = tuple(column for column in right_columns if column not in left_columns)
+
+    overlap = min(len(left), len(right))
+    left_frame = left.iloc[:overlap].reset_index(drop=True)
+    right_frame = right.iloc[:overlap].reset_index(drop=True)
+    row_mismatch = pd.Series(False, index=range(overlap), dtype=bool)
+    column_mismatches: dict[str, int] = {}
+    max_abs_diff: dict[str, float] = {}
+
+    for column in common:
+        left_values = left_frame[column]
+        right_values = right_frame[column]
+        if is_numeric_dtype(left_values.dtype) and is_numeric_dtype(right_values.dtype):
+            a = pd.to_numeric(left_values, errors="coerce")
+            b = pd.to_numeric(right_values, errors="coerce")
+            both_na = a.isna() & b.isna()
+            both_values = a.notna() & b.notna()
+            diff = (a - b).abs()
+            same = both_na | (both_values & (diff <= tolerance))
+            valid_diff = diff[both_values]
+            max_abs_diff[column] = float(valid_diff.max()) if not valid_diff.empty else 0.0
+        elif _datetime_like(column):
+            a = pd.to_datetime(left_values, utc=True, errors="coerce")
+            b = pd.to_datetime(right_values, utc=True, errors="coerce")
+            same = (a.eq(b)) | (a.isna() & b.isna())
+        else:
+            a = left_values.astype("string")
+            b = right_values.astype("string")
+            same = a.eq(b).fillna(False) | (a.isna() & b.isna())
+        mismatches = ~same.fillna(False)
+        count = int(mismatches.sum())
+        if count:
+            column_mismatches[column] = count
+            row_mismatch |= mismatches
+
+    mismatched_rows = int(row_mismatch.sum()) + abs(len(left) - len(right))
+    return TradeParity(
+        rows_left=len(left),
+        rows_right=len(right),
+        columns_compared=common,
+        columns_only_left=only_left,
+        columns_only_right=only_right,
+        mismatched_rows=mismatched_rows,
+        column_mismatches=column_mismatches,
         max_abs_diff=max_abs_diff,
     )
