@@ -39,7 +39,11 @@ def test_qprocess_without_create_modifier_still_initializes(monkeypatch):
         MergedChannels = object()
 
         def __init__(self, parent=None):
+            # Mirror the normal QProcess signal surface. This test intentionally
+            # removes only setCreateProcessArgumentsModifier.
             self.readyReadStandardOutput = SignalStub()
+            self.started = SignalStub()
+            self.errorOccurred = SignalStub()
             self.finished = SignalStub()
 
         def setProcessChannelMode(self, mode):
