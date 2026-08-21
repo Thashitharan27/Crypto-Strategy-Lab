@@ -19,6 +19,7 @@ class FeatureDefinition:
     version: str
     required_datasets: tuple[DatasetKind, ...]
     output_columns: tuple[str, ...]
+    required_features: tuple[str, ...] = ()
     warmup_bars: int = 0
     availability_rule: str = "max_dependency_available_at"
 
@@ -29,12 +30,14 @@ class FeatureDefinition:
             raise ValueError("feature version must not be empty")
         if not self.output_columns:
             raise ValueError("feature must declare output columns")
+        if self.name in self.required_features:
+            raise ValueError("feature cannot depend on itself")
         if self.warmup_bars < 0:
             raise ValueError("warmup_bars must be non-negative")
 
 
 class FeatureProvider(Protocol):
-    """Computes a causal feature frame from canonical source datasets."""
+    """Computes a causal feature frame from datasets and prepared dependencies."""
 
     definition: FeatureDefinition
 
@@ -43,5 +46,6 @@ class FeatureProvider(Protocol):
         request: DataRequest,
         datasets: Mapping[DatasetKind, pd.DataFrame],
         parameters: Mapping[str, object],
+        feature_frames: Mapping[str, pd.DataFrame] | None = None,
     ) -> pd.DataFrame:
         ...
