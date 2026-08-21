@@ -36,7 +36,11 @@ def _align_reference(
 ) -> pd.DataFrame:
     if frame.empty:
         result = decisions[["timestamp", "decision_time"]].copy()
-        result[f"{prefix}_source_available_at"] = pd.NaT
+        result[f"{prefix}_source_available_at"] = pd.Series(
+            pd.NaT,
+            index=result.index,
+            dtype="datetime64[ns, UTC]",
+        )
         result[f"{prefix}_price"] = np.nan
         return result
     required = {"available_at", "close"}
