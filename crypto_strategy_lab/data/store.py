@@ -12,7 +12,7 @@ from .binance.discovery import discover_archives
 from .binance.events import FundingRateArchiveAdapter, FuturesMetricsArchiveAdapter
 from .binance.klines import KlineArchiveAdapter, KlineLikeArchiveAdapter
 from .binance.trades import AggTradesArchiveAdapter
-from .cache import CacheLayout
+from .cache import CANONICAL_CACHE_FORMAT_VERSION, CacheLayout
 from .catalog import DataCatalog
 from .query import DataRequest
 from .schemas import ArchiveRecord, DatasetKind
@@ -65,7 +65,12 @@ class MarketDataStore:
         if target.is_file() and manifest.is_file():
             try:
                 metadata = json.loads(manifest.read_text(encoding="utf-8"))
-                if metadata.get("canonical_identity") == identity:
+                if (
+                    metadata.get("cache_format_version") == CANONICAL_CACHE_FORMAT_VERSION
+                    and metadata.get("canonical_identity") == identity
+                    and metadata.get("raw_source_fingerprint") == record.fingerprint
+                    and metadata.get("contract") == contract
+                ):
                     with duckdb.connect() as con:
                         con.execute("SELECT * FROM read_parquet(?) LIMIT 0", [str(target)])
                     self.canonical_cache_events["hit"] += 1
@@ -79,16 +84,26 @@ class MarketDataStore:
             raise ValueError(f"Recognized Binance archive contains no rows: {record.path}")
         temporary = target.with_suffix(".tmp.parquet")
         temporary_manifest = manifest.with_suffix(".tmp.json")
-        if temporary.exists():
-            temporary.unlink()
+        for path in (temporary, temporary_manifest):
+            path.unlink(missing_ok=True)
         with duckdb.connect() as con:
             con.register("canonical_frame", frame)
             escaped = str(temporary).replace("'", "''")
             con.execute(f"COPY canonical_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)")
-        temporary_manifest.write_text(json.dumps({
-            "cache_format_version": 1, "canonical_identity": identity,
-            "raw_source_fingerprint": record.fingerprint, "contract": contract,
-        }, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        temporary_manifest.write_text(
+            json.dumps(
+                {
+                    "cache_format_version": CANONICAL_CACHE_FORMAT_VERSION,
+                    "canonical_identity": identity,
+                    "raw_source_fingerprint": record.fingerprint,
+                    "contract": contract,
+                },
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         temporary.replace(target)
         temporary_manifest.replace(manifest)
         return target
@@ -98,9 +113,13 @@ class MarketDataStore:
         if not records:
             raise DataNotAvailableError(f"No catalog coverage for {request.symbol} {dataset.value}")
         adapter = self._adapter_for(dataset)
-        return SourceSignature.from_canonical_identities(dataset, [
-            canonical_partition_identity(record, adapter.canonical_contract()) for record in records
-        ])
+        return SourceSignature.from_canonical_identities(
+            dataset,
+            [
+                canonical_partition_identity(record, adapter.canonical_contract())
+                for record in records
+            ],
+        )
 
     def load_dataset(
         self,
