@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -171,13 +172,10 @@ def config_hashes(
     }
 
 
-def _real_canonical_partition_identity(record: Any) -> str | None:
-    """Return the exact identity used by MarketDataStore canonical L1."""
-    from .data.schemas import ArchiveRecord, DatasetKind
-
-    if not isinstance(record, ArchiveRecord):
-        return None
-
+@lru_cache(maxsize=None)
+def _canonical_contract_for_dataset(dataset: Any) -> Mapping[str, Any]:
+    """Resolve the canonical adapter contract once per DatasetKind."""
+    from .data.schemas import DatasetKind
     from .data.binance.events import (
         BookDepthArchiveAdapter,
         BookTickerArchiveAdapter,
@@ -186,7 +184,6 @@ def _real_canonical_partition_identity(record: Any) -> str | None:
     )
     from .data.binance.klines import KlineArchiveAdapter, KlineLikeArchiveAdapter
     from .data.binance.trades import AggTradesArchiveAdapter, TradesArchiveAdapter
-    from .data.source_identity import canonical_partition_identity
 
     adapters = {
         DatasetKind.KLINES: KlineArchiveAdapter(),
@@ -206,8 +203,20 @@ def _real_canonical_partition_identity(record: Any) -> str | None:
         DatasetKind.BOOK_TICKER: BookTickerArchiveAdapter(),
         DatasetKind.BOOK_DEPTH: BookDepthArchiveAdapter(),
     }
-    adapter = adapters[record.dataset]
-    return canonical_partition_identity(record, adapter.canonical_contract())
+    return adapters[dataset].canonical_contract()
+
+
+def _real_canonical_partition_identity(record: Any) -> str | None:
+    """Return the exact identity used by MarketDataStore canonical L1."""
+    from .data.schemas import ArchiveRecord
+
+    if not isinstance(record, ArchiveRecord):
+        return None
+    from .data.source_identity import canonical_partition_identity
+
+    return canonical_partition_identity(
+        record, dict(_canonical_contract_for_dataset(record.dataset))
+    )
 
 
 def source_record(record: Any) -> dict[str, Any]:
@@ -281,11 +290,17 @@ def artifact_path(
     root = Path(run_dir).resolve(strict=True)
     if relative.is_absolute() or ".." in relative.parts:
         raise RunArtifactError("unsafe artifact catalog path")
+
+    candidate = root
+    for part in relative.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            raise RunArtifactError("artifact catalog path contains a symlink")
     try:
-        path = (root / relative).resolve(strict=True)
+        path = candidate.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise RunArtifactError(f"artifact is missing: {name}") from exc
-    if root not in path.parents or path.is_symlink() or not path.is_file():
+    if root not in path.parents or not path.is_file():
         raise RunArtifactError("artifact escapes completed run")
     if verify and file_sha256(path) != entry.get("sha256"):
         raise RunArtifactError(f"artifact integrity error: {name}")
