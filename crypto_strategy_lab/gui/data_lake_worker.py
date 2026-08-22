@@ -16,7 +16,7 @@ from PySide6.QtCore import Slot
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
-from crypto_strategy_lab.state_transition_research import generate_state_transition_reports
+from crypto_strategy_lab.state_transition_prepared_reports import generate_prepared_state_transition_reports
 from crypto_strategy_lab.gui import worker as worker_module
 from crypto_strategy_lab.gui.worker import BacktestWorker
 
@@ -86,6 +86,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             mean_reversion_rsi_period=getattr(self.config, "mean_reversion_rsi_period", 14),
             mean_reversion_rsi_oversold=getattr(self.config, "mean_reversion_rsi_oversold", 30.0),
             mean_reversion_rsi_overbought=getattr(self.config, "mean_reversion_rsi_overbought", 70.0),
+            mean_reversion_require_reentry=getattr(self.config, "mean_reversion_require_reentry", True),
             enable_support_resistance_analysis=self.config.enable_support_resistance_analysis,
             sr_timeframe_minutes=int(getattr(self.config, "sr_timeframe_minutes", 0) or 0),
             sr_pivot_left=self.config.sr_pivot_left,
@@ -129,7 +130,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     f"(cache={'hit' if sr.attrs.get('feature_cache_hit') else 'miss'})"
                 )
             elif self.config.enable_support_resistance_analysis:
-                self._log("S/R: higher-timeframe mature engine path (prepared HTF provider pending)")
+                self._log("WARNING: S/R enabled but no prepared S/R context was produced")
             if bundle.research_features:
                 labels = [
                     f"{name}@{frame.attrs.get('feature_version')} "
@@ -202,6 +203,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         directional = bundle.technical_features
         context = bundle.context_features
         sr = bundle.support_resistance_features
+        daily_state = bundle.state_transition_daily_features
         try:
             summary.update(
                 {
@@ -217,6 +219,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "context_feature_version": context.attrs.get("feature_version"),
                     "support_resistance_feature_name": sr.attrs.get("feature_name") if sr is not None else None,
                     "support_resistance_feature_version": sr.attrs.get("feature_version") if sr is not None else None,
+                    "state_transition_daily_feature_version": daily_state.attrs.get("feature_version") if daily_state is not None else None,
                     "research_feature_names": sorted(bundle.research_features),
                     "include_agg_trade_flow": bool(self.run_spec.include_agg_trade_flow),
                 }
@@ -240,6 +243,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 mean_reversion_rsi_period=context.attrs.get("mean_reversion_rsi_period"),
                 mean_reversion_rsi_oversold=context.attrs.get("mean_reversion_rsi_oversold"),
                 mean_reversion_rsi_overbought=context.attrs.get("mean_reversion_rsi_overbought"),
+                mean_reversion_require_reentry=context.attrs.get("mean_reversion_require_reentry"),
             )
             manifest = {
                 "data_source": "binance_data_lake_v2",
@@ -265,6 +269,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "core_directional": directional_manifest,
                     "production_market_context": context_manifest,
                     "support_resistance": self._feature_manifest(sr),
+                    "state_transition_daily": self._feature_manifest(daily_state),
                     "research": {
                         name: self._feature_manifest(frame)
                         for name, frame in sorted(bundle.research_features.items())
@@ -282,7 +287,9 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             (run_dir / "run_manifest.json").write_text(
                 json.dumps(manifest, indent=2), encoding="utf-8"
             )
-            generate_state_transition_reports(bundle.strategy, trades, run_dir)
+            if daily_state is None:
+                raise ValueError("Data Lake state-transition reports require prepared daily features")
+            generate_prepared_state_transition_reports(daily_state, trades, run_dir)
             self._log("Data Lake manifest and state-transition research reports saved")
         except Exception as exc:
             self._log(f"WARNING: Data Lake post-run metadata/research failed: {exc}")
