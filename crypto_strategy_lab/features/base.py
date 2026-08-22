@@ -91,6 +91,8 @@ class FeatureDefinition:
             def inferred(name: str) -> OutputField:
                 if name in {"timestamp", "available_at", "date"} or name.endswith("_at") or name.endswith("_time"):
                     return OutputField("datetime")
+                if name == "close_location":
+                    return OutputField("numeric")
                 if (
                     name in {"funding_bias", "bb_reentry"}
                     or name.endswith(("_confirmation", "_setup_strength"))
@@ -114,8 +116,6 @@ class FeatureDefinition:
             schema = {**{name: inferred(name) for name in self.output_columns}, **schema}
         if not schema and self.output_schema_factory is None:
             raise ValueError("feature must declare an output schema")
-        # Timeline/provenance is part of every frame contract unless explicitly
-        # declared (daily features use date as an additional field).
         schema.setdefault("available_at", OutputField("datetime", nullable=False))
         if "timestamp" not in schema and "date" not in schema:
             schema["timestamp"] = OutputField("datetime", nullable=False)
