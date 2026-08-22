@@ -7,8 +7,11 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data.timing import interval_to_timedelta
+from crypto_strategy_lab.higher_timeframe_sr import HigherTimeframeSRDetector, resample_ohlc_for_sr
 from crypto_strategy_lab.support_resistance import (
     LocationClassification,
     SRContext,
@@ -21,7 +24,7 @@ from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 SUPPORT_RESISTANCE_FEATURE_NAME = "support_resistance"
-SUPPORT_RESISTANCE_FEATURE_VERSION = "1"
+SUPPORT_RESISTANCE_FEATURE_VERSION = "2"
 
 _SR_FIELDS = (
     "nearest_support_price", "nearest_support_bar_index", "nearest_support_distance_atr",
@@ -68,13 +71,16 @@ class SupportResistanceFeatureProvider:
         version=SUPPORT_RESISTANCE_FEATURE_VERSION,
         required_datasets=(DatasetKind.KLINES,),
         required_features=(CORE_DIRECTIONAL_FEATURE_NAME,),
-        output_columns=tuple(
-            f"{direction}_{field}"
-            for direction in ("long", "short")
-            for field in _SR_FIELDS
+        output_columns=(
+            *tuple(
+                f"{direction}_{field}"
+                for direction in ("long", "short")
+                for field in _SR_FIELDS
+            ),
+            "sr_completed_candle_time",
         ),
         warmup_bars=10,
-        availability_rule="confirmed_pivots_through_current_completed_kline",
+        availability_rule="confirmed_pivots_through_latest_completed_configured_sr_candle",
     )
 
     def compute(
@@ -106,7 +112,7 @@ class SupportResistanceFeatureProvider:
         if not source_times.equals(dependency_times):
             raise ValueError("S/R dependency timestamps do not match klines")
 
-        config = {
+        detector_config = {
             "pivot_left": int(parameters.get("sr_pivot_left", 5)),
             "pivot_right": int(parameters.get("sr_pivot_right", 5)),
             "lookback_bars": int(parameters.get("sr_lookback_bars", 200)),
@@ -118,44 +124,110 @@ class SupportResistanceFeatureProvider:
             "break_tolerance_atr": float(parameters.get("sr_break_tolerance_atr", 0.25)),
             "break_basis": str(parameters.get("sr_break_basis", "CLOSE")).upper(),
         }
-        detector = SupportResistanceDetector(**config)
+        strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
+        configured_minutes = int(parameters.get("sr_timeframe_minutes", 0) or 0)
+        effective_minutes = configured_minutes or strategy_minutes
+        atr_period = int(parameters.get("atr_period", 14))
+        if effective_minutes < strategy_minutes or effective_minutes % strategy_minutes:
+            raise ValueError("S/R timeframe must be the strategy timeframe or an integer multiple")
+        if atr_period <= 0:
+            raise ValueError("S/R ATR period must be positive")
+
         open_ = pd.to_numeric(source["open"], errors="raise").to_numpy(float)
         high = pd.to_numeric(source["high"], errors="raise").to_numpy(float)
         low = pd.to_numeric(source["low"], errors="raise").to_numpy(float)
         close = pd.to_numeric(source["close"], errors="raise").to_numpy(float)
         atr_values = pd.to_numeric(directional["atr"], errors="raise").to_numpy(float)
+        source_available = pd.to_datetime(source["available_at"], utc=True).reset_index(drop=True)
+        dependency_available = pd.to_datetime(directional["available_at"], utc=True).reset_index(drop=True)
+        available = pd.concat([source_available, dependency_available], axis=1).max(axis=1)
 
         rows: list[dict[str, object]] = []
-        for i in range(len(source)):
-            long_context = detector.analyze_price_location(
-                i, open_, high, low, close, atr_values, "LONG"
+        if effective_minutes == strategy_minutes:
+            detector = SupportResistanceDetector(**detector_config)
+            for i in range(len(source)):
+                long_context = detector.analyze_price_location(
+                    i, open_, high, low, close, atr_values, "LONG"
+                )
+                short_context = detector.analyze_price_location(
+                    i, open_, high, low, close, atr_values, "SHORT"
+                )
+                row = {
+                    "timestamp": source_times.iloc[i],
+                    "available_at": available.iloc[i],
+                    "sr_completed_candle_time": available.iloc[i],
+                }
+                row.update(_flatten("long", long_context))
+                row.update(_flatten("short", short_context))
+                rows.append(row)
+        else:
+            legacy = pd.DataFrame(
+                {
+                    "timestamp": source_times,
+                    "open": open_,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                }
             )
-            short_context = detector.analyze_price_location(
-                i, open_, high, low, close, atr_values, "SHORT"
-            )
-            row = {
-                "timestamp": source_times.iloc[i],
-                "available_at": max(
-                    pd.Timestamp(source.loc[i, "available_at"]),
-                    pd.Timestamp(directional.loc[i, "available_at"]),
-                ),
-            }
-            row.update(_flatten("long", long_context))
-            row.update(_flatten("short", short_context))
-            rows.append(row)
+            htf = resample_ohlc_for_sr(legacy, strategy_minutes, effective_minutes)
+            htf_open = htf["open"].to_numpy(float)
+            htf_high = htf["high"].to_numpy(float)
+            htf_low = htf["low"].to_numpy(float)
+            htf_close = htf["close"].to_numpy(float)
+            htf_atr = atr(htf_high, htf_low, htf_close, atr_period)
+            htf_end = pd.to_datetime(htf["end_time"], utc=True)
+            htf_end_ns = htf_end.to_numpy(dtype="datetime64[ns]")
+            detector = HigherTimeframeSRDetector(**detector_config)
+            for i in range(len(source)):
+                available_i = pd.Timestamp(available.iloc[i])
+                needle = np.datetime64(available_i.tz_convert("UTC").tz_localize(None).to_datetime64(), "ns")
+                htf_i = int(np.searchsorted(htf_end_ns, needle, side="right") - 1)
+                if htf_i < 0:
+                    long_context = detector._default_context()
+                    short_context = detector._default_context()
+                    completed = pd.NaT
+                else:
+                    long_context = detector.analyze_external_price(
+                        htf_i, htf_open, htf_high, htf_low, htf_close, htf_atr,
+                        "LONG", float(close[i]),
+                    )
+                    short_context = detector.analyze_external_price(
+                        htf_i, htf_open, htf_high, htf_low, htf_close, htf_atr,
+                        "SHORT", float(close[i]),
+                    )
+                    completed = htf_end.iloc[htf_i]
+                row = {
+                    "timestamp": source_times.iloc[i],
+                    "available_at": available_i,
+                    "sr_completed_candle_time": completed,
+                }
+                row.update(_flatten("long", long_context))
+                row.update(_flatten("short", short_context))
+                rows.append(row)
 
         output = pd.DataFrame(rows)
         output["available_at"] = pd.to_datetime(output["available_at"], utc=True)
+        output["sr_completed_candle_time"] = pd.to_datetime(
+            output["sr_completed_candle_time"], utc=True, errors="coerce"
+        )
         if bool((output["available_at"] < source_times).any()):
             raise ValueError("S/R feature availability precedes its source candle")
+        completed = output["sr_completed_candle_time"].dropna()
+        if not completed.empty:
+            aligned_available = output.loc[completed.index, "available_at"]
+            if bool((completed > aligned_available).any()):
+                raise ValueError("S/R context uses a higher-timeframe candle not yet completed")
         output.attrs.update(
             {
                 "feature_name": self.definition.name,
                 "feature_version": self.definition.version,
-                **{f"parameter_{key}": value for key, value in config.items()},
+                **{f"parameter_{key}": value for key, value in detector_config.items()},
+                "parameter_sr_timeframe_minutes": effective_minutes,
+                "parameter_atr_period": atr_period,
                 "effective_warmup_bars": max(
-                    config["pivot_left"] + config["pivot_right"] + 1,
-                    config["hold_confirmation_bars"] + 1,
+                    detector_config["pivot_left"] + detector_config["pivot_right"] + 1,
+                    detector_config["hold_confirmation_bars"] + 1,
                 ),
                 "request_cache_key": request.cache_key(),
                 "core_directional_cache_key": directional.attrs.get("feature_cache_key"),
@@ -172,7 +244,7 @@ class PreparedSupportResistanceContextReader:
         self.arrays = None if self.frame is not None else frame
 
     @staticmethod
-    def _context_from_row(row: pd.Series, prefix: str) -> SRContext:
+    def _context_from_row(row, prefix: str) -> SRContext:
         def value(field: str):
             return row[f"{prefix}_{field}"]
 

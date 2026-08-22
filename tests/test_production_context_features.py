@@ -105,6 +105,7 @@ def prepared(frame: pd.DataFrame):
             "mean_reversion_rsi_period": cfg.mean_reversion_rsi_period,
             "mean_reversion_rsi_oversold": cfg.mean_reversion_rsi_oversold,
             "mean_reversion_rsi_overbought": cfg.mean_reversion_rsi_overbought,
+            "mean_reversion_require_reentry": cfg.mean_reversion_require_reentry,
         },
         {"core_directional": directional},
     )
@@ -161,7 +162,7 @@ def test_production_context_matches_mature_enhanced_engine_arrays_and_snapshots(
         lake.mean_reversion_short_reentry,
         legacy.mean_reversion_short_reentry,
     )
-    assert lake.context_feature_source == "production_market_context@1"
+    assert lake.context_feature_source == "production_market_context@2"
 
     snapshot_fields = (
         "mean_price",
@@ -182,6 +183,15 @@ def test_production_context_matches_mature_enhanced_engine_arrays_and_snapshots(
         "mr_signal",
         "mr_signal_direction",
     )
+    prepared_snapshot_columns = {
+        "mean_reversion_bb_location": "mean_reversion_bb_location",
+        "mean_reversion_rsi_state": "mean_reversion_rsi_state",
+        "mean_reversion_signal": "mean_reversion_signal",
+        "mean_reversion_signal_direction": "mean_reversion_signal_direction",
+        "bb_reentry": "bb_reentry",
+        "mr_signal": "mr_signal",
+        "mr_signal_direction": "mr_signal_direction",
+    }
     for index in (45, 80, 120):
         for di_direction, trade_direction in (("LONG", "LONG"), ("SHORT", "LONG")):
             left = legacy._mean_reversion_snapshot(index, di_direction, trade_direction)
@@ -195,6 +205,8 @@ def test_production_context_matches_mature_enhanced_engine_arrays_and_snapshots(
                     assert np.isclose(float(a), float(b)), (index, field, a, b)
                 else:
                     assert a == b, (index, field, a, b)
+            for field, column in prepared_snapshot_columns.items():
+                assert context.iloc[index][column] == left[field], (index, field)
 
 
 def test_future_mutation_cannot_change_past_production_context() -> None:
@@ -213,6 +225,10 @@ def test_future_mutation_cannot_change_past_production_context() -> None:
         "mean_reversion_rsi",
         "mean_reversion_long_reentry",
         "mean_reversion_short_reentry",
+        "mean_reversion_bb_location",
+        "mean_reversion_rsi_state",
+        "mean_reversion_signal",
+        "mean_reversion_signal_direction",
         "session_vwap",
         "close_location",
     ]
@@ -238,8 +254,8 @@ def test_prepared_production_context_skips_legacy_bb_and_mr_v2_math(monkeypatch)
     monkeypatch.setattr(engine_module, "distance_from_mean_atr", forbidden)
 
     # DataLakeProductionBacktestEngine must likewise replace all enhanced MR-v2
-    # functions during construction. Profile RSI lives in engine_module and is
-    # intentionally not part of this feature migration.
+    # functions during legacy construction. Profile RSI lives in engine_module and
+    # is intentionally not part of this feature migration.
     monkeypatch.setattr(enhanced_engine_module, "moving_mean", forbidden)
     monkeypatch.setattr(enhanced_engine_module, "distance_from_mean_atr", forbidden)
     monkeypatch.setattr(enhanced_engine_module, "bollinger_envelope", forbidden)
@@ -253,4 +269,4 @@ def test_prepared_production_context_skips_legacy_bb_and_mr_v2_math(monkeypatch)
         technical_features=directional,
         context_features=context,
     )
-    assert engine.context_feature_source == "production_market_context@1"
+    assert engine.context_feature_source == "production_market_context@2"

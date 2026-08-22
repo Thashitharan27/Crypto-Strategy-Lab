@@ -27,7 +27,6 @@ from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_b
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
-from crypto_strategy_lab.features.market_regime import structural_regime_values
 
 
 _FINGERPRINT_COLUMNS = (
@@ -110,6 +109,11 @@ def _feature_cache_hits(bundle: BacktestDataBundle) -> dict[str, object]:
             if bundle.support_resistance_features is not None
             else None
         ),
+        "state_transition_daily": (
+            bool(bundle.state_transition_daily_features.attrs.get("feature_cache_hit", False))
+            if bundle.state_transition_daily_features is not None
+            else None
+        ),
         "research": {
             name: bool(frame.attrs.get("feature_cache_hit", False))
             for name, frame in sorted(bundle.research_features.items())
@@ -137,6 +141,7 @@ def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
         mean_reversion_rsi_period=getattr(config, "mean_reversion_rsi_period", 14),
         mean_reversion_rsi_oversold=getattr(config, "mean_reversion_rsi_oversold", 30.0),
         mean_reversion_rsi_overbought=getattr(config, "mean_reversion_rsi_overbought", 70.0),
+        mean_reversion_require_reentry=getattr(config, "mean_reversion_require_reentry", True),
         enable_support_resistance_analysis=config.enable_support_resistance_analysis,
         sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
         sr_pivot_left=config.sr_pivot_left,
@@ -154,11 +159,8 @@ def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
 
 
 def _engine(bundle: BacktestDataBundle, config):
-    prepared, intrabar = from_data_lake_bundle(bundle)
-    regimes = None
-    if config.market_regime_method != "ASSET_RETURN":
-        regimes = structural_regime_values(prepared.timestamp, bundle.structural_benchmark, sma_days=config.structural_regime_sma_days, slope_lookback_days=config.structural_regime_slope_lookback_days)
-    return DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config, market_regime_values=regimes)
+    prepared, intrabar = from_data_lake_bundle(bundle, config)
+    return DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
 
 
 def _median(records: list[dict], key: str) -> float:

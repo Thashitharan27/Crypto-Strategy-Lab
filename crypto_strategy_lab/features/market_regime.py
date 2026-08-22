@@ -19,6 +19,43 @@ STRUCTURAL_REGIME_DEFINITION = FeatureDefinition(
 )
 
 
+def causal_trailing_return(strategy_times, close, delta: pd.Timedelta) -> np.ndarray:
+    """Close return against the latest candle at or before ``time - delta``."""
+    times = pd.DatetimeIndex(pd.to_datetime(strategy_times, utc=True))
+    values = np.asarray(close, dtype=float)
+    result = np.full(len(times), np.nan)
+    prior = np.searchsorted(times.asi8, (times - delta).asi8, side="right") - 1
+    valid = prior >= 0
+    result[valid] = values[valid] / values[prior[valid]] - 1.0
+    return result
+
+
+def prepare_policy_market_features(strategy_times, close, config, benchmark=None):
+    """Prepare causal return, regime and configured momentum arrays for policy."""
+    bull = causal_trailing_return(
+        strategy_times, close, pd.Timedelta(days=config.bull_regime_lookback_days)
+    )
+    if config.market_regime_method == "ASSET_RETURN":
+        threshold = abs(float(config.bull_regime_return_threshold))
+        regime = np.array([
+            None if not np.isfinite(value) else
+            ("BULL" if value >= threshold else "BEAR" if value <= -threshold else "SIDEWAYS")
+            for value in bull
+        ], dtype=object)
+    else:
+        regime = structural_regime_values(
+            strategy_times, benchmark,
+            sma_days=int(config.structural_regime_sma_days),
+            slope_lookback_days=int(config.structural_regime_slope_lookback_days),
+        )
+    hours = {int(profile.momentum_lookback_hours) for profile in config.strategy_profiles.values()}
+    momentum = {
+        lookback: causal_trailing_return(strategy_times, close, pd.Timedelta(hours=lookback))
+        for lookback in hours
+    }
+    return bull, regime, momentum
+
+
 def _benchmark_timestamp_column(frame: pd.DataFrame) -> str:
     for column in ("period_start", "timestamp", "open_time", "time", "datetime", "date"):
         if column in frame.columns:

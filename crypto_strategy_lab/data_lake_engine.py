@@ -285,6 +285,36 @@ class DataLakeBacktestEngine(BacktestEngine):
 
     def _mean_reversion_snapshot(self, i, di_direction, trade_direction=None):
         """Read prepared MR state/motion and calculate only direction-dependent alignment."""
+        if self.context_features is None and hasattr(self, "prepared_frame"):
+            result = {
+                "mean_reversion_enabled": bool(self.config.enable_mean_reversion_analysis),
+                "mean_reversion_period": int(self.config.mean_reversion_period),
+                "mean_price": np.nan, "mean_distance_atr": np.nan,
+                "mean_distance_atr_previous": np.nan, "mean_distance_change_atr": np.nan,
+                "mean_reversion_state": "UNKNOWN", "mean_reversion_motion": "UNKNOWN",
+                "mean_reversion_alignment": "UNKNOWN", "mean_reversion_di_alignment": "UNKNOWN",
+                "mean_reversion_trade_alignment": "UNKNOWN", "mean_reversion_strength": -1,
+                "mean_reversion_strength_label": "UNKNOWN",
+            }
+            if not self.config.enable_mean_reversion_analysis:
+                return result
+            distance = float(self.mean_reversion_distance_atr[i])
+            result.update(
+                mean_price=float(self.mean_reversion_mean[i]),
+                mean_distance_atr=distance,
+                mean_distance_atr_previous=float(self.mean_reversion_distance_atr_previous[i]),
+                mean_distance_change_atr=float(self.mean_reversion_distance_change_atr[i]),
+                mean_reversion_state=str(self.mean_reversion_state[i]),
+                mean_reversion_motion=str(self.mean_reversion_motion[i]),
+                mean_reversion_strength=int(self.mean_reversion_strength[i]),
+                mean_reversion_strength_label=str(self.mean_reversion_strength_label[i]),
+            )
+            di_alignment = classify_alignment(distance, di_direction)
+            trade_alignment = classify_alignment(distance, trade_direction or di_direction)
+            result.update(mean_reversion_alignment=di_alignment,
+                          mean_reversion_di_alignment=di_alignment,
+                          mean_reversion_trade_alignment=trade_alignment)
+            return result
         if self.context_features is None:
             return super()._mean_reversion_snapshot(i, di_direction, trade_direction)
         result = {
