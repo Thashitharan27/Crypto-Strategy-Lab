@@ -88,8 +88,7 @@ def config() -> EnhancedBacktestConfig:
     )
 
 
-def prepared(frame: pd.DataFrame):
-    cfg = config()
+def directional_for(frame: pd.DataFrame, cfg: EnhancedBacktestConfig):
     req = request_for(frame)
     directional = CoreDirectionalFeatureProvider().compute(
         req,
@@ -101,7 +100,16 @@ def prepared(frame: pd.DataFrame):
         },
     )
     directional.attrs["feature_cache_key"] = "directional-sr-test"
+    return directional
+
+
+def prepared(frame: pd.DataFrame, cfg: EnhancedBacktestConfig | None = None):
+    cfg = cfg or config()
+    req = request_for(frame)
+    directional = directional_for(frame, cfg)
     parameters = {
+        "atr_period": cfg.atr_period,
+        "sr_timeframe_minutes": int(cfg.sr_timeframe_minutes or cfg.strategy_timeframe_minutes),
         "sr_pivot_left": cfg.sr_pivot_left,
         "sr_pivot_right": cfg.sr_pivot_right,
         "sr_lookback_bars": cfg.sr_lookback_bars,
@@ -190,7 +198,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 
     assert isinstance(engine, SRDynamicTPBacktestEngine)
     assert isinstance(engine.sr_detector, PreparedSupportResistanceContextReader)
-    assert engine.support_resistance_feature_source == "support_resistance@1"
+    assert engine.support_resistance_feature_source == "support_resistance@2"
     assert engine.sr_uses_higher_timeframe is False
 
     index = 75
@@ -201,10 +209,10 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
     assert_context_equal(expected, actual)
 
 
-def test_production_engine_preserves_higher_timeframe_sr_path() -> None:
+def test_production_engine_preserves_higher_timeframe_sr_path_for_legacy_callers() -> None:
     frame = canonical_klines()
-    directional, _sr, _ = prepared(frame)
     cfg = replace(config(), sr_timeframe_minutes=480)
+    directional = directional_for(frame, cfg)
     engine = DataLakeProductionBacktestEngine(
         legacy_frame(frame),
         cfg,
@@ -213,3 +221,41 @@ def test_production_engine_preserves_higher_timeframe_sr_path() -> None:
     )
     assert engine.sr_uses_higher_timeframe is True
     assert engine.support_resistance_feature_source == "higher_timeframe_engine"
+
+
+def test_prepared_higher_timeframe_sr_matches_mature_engine_and_is_causal() -> None:
+    frame = canonical_klines(180)
+    cfg = replace(config(), sr_timeframe_minutes=480)
+    directional, sr, _ = prepared(frame, cfg)
+    reader = PreparedSupportResistanceContextReader(sr)
+    mature = DataLakeProductionBacktestEngine(
+        legacy_frame(frame), cfg, technical_features=directional,
+        support_resistance_features=None,
+    )
+
+    completed = pd.to_datetime(sr["sr_completed_candle_time"], utc=True)
+    available = pd.to_datetime(sr["available_at"], utc=True)
+    assert bool(completed.notna().any())
+    assert bool((completed.dropna() <= available.loc[completed.dropna().index]).all())
+
+    for i in range(len(frame)):
+        for direction in ("LONG", "SHORT"):
+            expected = mature._analyze_support_resistance(i, direction)
+            cached = reader.analyze_price_location(i, None, None, None, None, None, direction)
+            assert_context_equal(expected, cached)
+
+
+def test_future_mutation_cannot_change_past_higher_timeframe_sr() -> None:
+    frame = canonical_klines(180)
+    cfg = replace(config(), sr_timeframe_minutes=480)
+    _, before, _ = prepared(frame, cfg)
+    cutoff = 100
+    changed = frame.copy()
+    changed.loc[cutoff + 1 :, ["open", "high", "low", "close"]] *= 2.0
+    _, after, _ = prepared(changed, cfg)
+    columns = [column for column in before.columns if column not in {"timestamp", "available_at"}]
+    pdt.assert_frame_equal(
+        before.loc[:cutoff, columns].reset_index(drop=True),
+        after.loc[:cutoff, columns].reset_index(drop=True),
+        check_dtype=False,
+    )
