@@ -77,12 +77,14 @@ jobs:
           crypto_strategy_lab/research_runner.py
           crypto_strategy_lab/research_adapters.py
           crypto_strategy_lab/research_reporting.py
+          crypto_strategy_lab/feature_research.py
           tools/data_lake_validate.py
           tools/data_lake_run.py
           tools/data_lake_benchmark.py
           tools/data_lake_profile.py
           tools/data_lake_preparation_profile.py
           tools/rewrite_config_current.py
+          tools/research_query.py
       - name: Smoke direct Data Lake tools
         run: |
           python tools/data_lake_validate.py --help
@@ -91,6 +93,7 @@ jobs:
           python tools/data_lake_profile.py --help
           python tools/data_lake_preparation_profile.py --help
           python tools/rewrite_config_current.py --help
+          python tools/research_query.py --help
       - name: Run Data Lake v2 safety tests
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -134,6 +137,7 @@ jobs:
           tests/test_data_lake_config.py
           tests/test_task11_research_config.py
           tests/test_research_runner.py
+          tests/test_feature_research.py
           tests/test_rewrite_config_current.py
 
   full-suite-observation:

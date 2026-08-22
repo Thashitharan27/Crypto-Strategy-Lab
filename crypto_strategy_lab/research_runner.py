@@ -37,6 +37,7 @@ class Reporter(Protocol):
 class ResearchRunContext:
     config: Any
     bundle: BacktestDataBundle
+    prepared: Any
 
 
 @dataclass(frozen=True)
@@ -215,7 +216,9 @@ class ResearchRunner:
         )
 
         report_started = time.perf_counter()
-        context = ResearchRunContext(run_config, bundle)
+        # Reporters receive the already-built frame so artifact production can
+        # serialize decision context without reopening data or rebuilding it.
+        context = ResearchRunContext(run_config, bundle, prepared)
         for reporter in self.reporters:
             reporter.report(result, context)
         timings["reporting"] = time.perf_counter() - report_started
