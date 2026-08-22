@@ -1,9 +1,9 @@
 """Profile Data Lake v2 preparation without changing production semantics.
 
 The execution benchmark reports preparation as one number. This tool decomposes
-that number into market-dataset loads, canonical-to-engine OHLCV conversion,
-feature-cache access, and intrabar index construction while also collecting a
-cProfile ranking for the complete ``load_backtest_bundle`` call.
+that number into canonical market-dataset loads and research feature-cache
+access while also collecting a cProfile ranking for the complete
+``load_backtest_bundle`` call.
 
 Instrumentation is installed only for the duration of this process and restored
 before exit. Production data/loading code is not modified by the profiler.
@@ -20,7 +20,7 @@ from pathlib import Path
 import pstats
 import sys
 import time
-from typing import Callable, Iterator
+from typing import Iterator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -74,7 +74,7 @@ def _record(
 
 
 def _summarize_events(events: list[Event], total_seconds: float) -> dict[str, object]:
-    """Aggregate non-overlapping instrumentation events and residual overhead."""
+    """Aggregate instrumented preparation timings and residual overhead."""
     category_seconds: dict[str, float] = defaultdict(float)
     category_calls: dict[str, int] = defaultdict(int)
     for event in events:
@@ -118,14 +118,11 @@ def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int) -> list[
 
 @contextmanager
 def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iterator[None]:
-    """Temporarily time the major preparation boundaries used by the real bundle loader."""
+    """Temporarily time boundaries that still exist in canonical preparation."""
     original_load_dataset = store.load_dataset
     original_load_execution_klines = store.load_execution_klines
-    original_legacy = backtest_service_module._legacy_from_canonical
-    original_cached_feature = backtest_service_module._cached_feature
     original_cached_multisource = backtest_service_module._cached_multisource_feature
     original_cached_catalog = backtest_service_module._cached_catalog_feature
-    original_intrabar_index = backtest_service_module.as_searchsorted_intrabar
 
     def timed_load_dataset(request, dataset, *, interval=None):
         started = time.perf_counter()
@@ -149,47 +146,14 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
         _record(
             events,
             category="dataset_load",
-            name=f"klines:{interval or request.intrabar_interval or request.strategy_interval}:projected",
+            name=f"klines:{interval or request.intrabar_interval or request.strategy_interval}:execution",
             started=started,
             rows=_rows(frame),
             dataset="klines",
             interval=interval or request.intrabar_interval or request.strategy_interval,
-            projection="execution_ohlcv",
+            projection="canonical_execution_ohlcv",
             request_start=request.start.isoformat(),
             request_end=request.end.isoformat(),
-        )
-        return frame
-
-    def timed_legacy(canonical, interval, label):
-        started = time.perf_counter()
-        frame = original_legacy(canonical, interval, label)
-        _record(
-            events,
-            category="legacy_conversion",
-            name=label,
-            started=started,
-            rows=_rows(frame),
-            interval=interval,
-        )
-        return frame
-
-    def timed_cached_feature(store_arg, request, canonical, provider, parameters, feature_frames=None):
-        started = time.perf_counter()
-        frame = original_cached_feature(
-            store_arg,
-            request,
-            canonical,
-            provider,
-            parameters,
-            feature_frames,
-        )
-        _record(
-            events,
-            category="feature_cache",
-            name=provider.definition.name,
-            started=started,
-            rows=_rows(frame),
-            cache_hit=bool(frame.attrs.get("feature_cache_hit", False)),
         )
         return frame
 
@@ -230,37 +194,17 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
         )
         return frame
 
-    def timed_intrabar_index(frame):
-        started = time.perf_counter()
-        wrapped = original_intrabar_index(frame)
-        _record(
-            events,
-            category="intrabar_index",
-            name="as_searchsorted_intrabar",
-            started=started,
-            rows=_rows(wrapped),
-            index_mode=getattr(wrapped, "intrabar_index_mode", None),
-            iteration_mode=getattr(wrapped, "intrabar_iteration_mode", None),
-        )
-        return wrapped
-
     store.load_dataset = timed_load_dataset
     store.load_execution_klines = timed_load_execution_klines
-    backtest_service_module._legacy_from_canonical = timed_legacy
-    backtest_service_module._cached_feature = timed_cached_feature
     backtest_service_module._cached_multisource_feature = timed_cached_multisource
     backtest_service_module._cached_catalog_feature = timed_cached_catalog
-    backtest_service_module.as_searchsorted_intrabar = timed_intrabar_index
     try:
         yield
     finally:
         store.load_dataset = original_load_dataset
         store.load_execution_klines = original_load_execution_klines
-        backtest_service_module._legacy_from_canonical = original_legacy
-        backtest_service_module._cached_feature = original_cached_feature
         backtest_service_module._cached_multisource_feature = original_cached_multisource
         backtest_service_module._cached_catalog_feature = original_cached_catalog
-        backtest_service_module.as_searchsorted_intrabar = original_intrabar_index
 
 
 def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades) -> BacktestDataBundle:
@@ -369,8 +313,7 @@ def main() -> int:
         "events": sorted(events, key=lambda event: float(event["seconds"]), reverse=True),
         "strategy_rows": len(bundle.strategy),
         "intrabar_rows": len(bundle.intrabar) if bundle.intrabar is not None else 0,
-        "intrabar_index_mode": getattr(bundle.intrabar, "intrabar_index_mode", None),
-        "intrabar_iteration_mode": getattr(bundle.intrabar, "intrabar_iteration_mode", None),
+        "intrabar_representation": "canonical_execution_ohlcv" if bundle.intrabar is not None else None,
         "feature_cache_hits": {
             "core_directional": bool(bundle.technical_features.attrs.get("feature_cache_hit", False)),
             "production_market_context": bool(bundle.context_features.attrs.get("feature_cache_hit", False)),
