@@ -12,7 +12,7 @@ import pandas as pd
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.data.quality import validate_feature_timeline
-from .base import FeatureDefinition, FeatureProvider
+from .base import FeatureDataResource, FeatureDefinition, FeatureProvider
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +105,7 @@ class FeatureRegistry:
     def identity(
         resolved: ResolvedFeature,
         request: DataRequest,
-        source_identities: Mapping[DatasetKind, str],
+        source_identities: Mapping[object, str],
         dependency_identities: Mapping[str, str],
     ) -> str:
         definition = resolved.definition
@@ -113,6 +113,12 @@ class FeatureRegistry:
         material_datasets.update(
             kind for kind in definition.optional_datasets if kind in source_identities
         )
+        roles = {definition.name, definition.name.removesuffix("_context")}
+        auxiliary = [
+            key
+            for key in source_identities
+            if isinstance(key, FeatureDataResource) and key.role in roles
+        ]
         missing_sources = set(definition.required_datasets) - set(source_identities)
         if missing_sources:
             raise ValueError(
@@ -129,15 +135,26 @@ class FeatureRegistry:
                 kind.value: source_identities[kind]
                 for kind in sorted(material_datasets, key=lambda item: item.value)
             },
+            "auxiliary_sources": {
+                f"{key.dataset.value}:{key.interval}:{key.role}": source_identities[key]
+                for key in sorted(
+                    auxiliary,
+                    key=lambda item: (item.dataset.value, item.interval, item.role),
+                )
+            },
             "dependencies": {
                 name: dependency_identities[name]
                 for name in sorted(definition.required_features)
             },
-            "schema": {name: {"kind": field.kind, "nullable": field.nullable}
-                       for name, field in definition.output_schema.items()},
+            "schema": {
+                name: {"kind": field.kind, "nullable": field.nullable}
+                for name, field in definition.output_schema.items()
+            },
         }
         return sha256(
-            json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+            json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), default=str
+            ).encode()
         ).hexdigest()
 
     def definition_hash(self, feature_names: Sequence[str]) -> str:
@@ -165,16 +182,16 @@ class FeatureRegistry:
         self,
         feature_names: Sequence[str],
         request: DataRequest,
-        datasets: Mapping[DatasetKind, pd.DataFrame],
+        datasets: Mapping[object, pd.DataFrame],
         *,
         parameters=None,
         cache=None,
-        source_identities: Mapping[DatasetKind, str] | None = None,
+        source_identities: Mapping[object, str] | None = None,
     ) -> dict[str, pd.DataFrame]:
         frames, identities = {}, {}
         source_ids = source_identities or {
-            kind: frame.attrs.get("canonical_source_identity") or
-                  (cache._source_signature(frame) if cache else "uncached")
+            kind: frame.attrs.get("canonical_source_identity")
+            or (cache._source_signature(frame) if cache else "uncached")
             for kind, frame in datasets.items()
         }
         for resolved in self.resolve(feature_names, parameters):
@@ -194,9 +211,13 @@ class FeatureRegistry:
                     frame = None
             if frame is None:
                 provider = self.get(definition.name)
-                dependencies = {name: frames[name] for name in definition.required_features}
+                dependencies = {
+                    name: frames[name] for name in definition.required_features
+                }
                 if "feature_frames" in inspect.signature(provider.compute).parameters:
-                    frame = provider.compute(request, datasets, resolved.parameters, dependencies)
+                    frame = provider.compute(
+                        request, datasets, resolved.parameters, dependencies
+                    )
                 else:
                     frame = provider.compute(request, datasets, resolved.parameters)
                 definition.validate_output(frame, resolved.parameters)

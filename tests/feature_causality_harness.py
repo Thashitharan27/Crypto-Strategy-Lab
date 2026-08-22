@@ -6,8 +6,6 @@ from typing import Callable, Mapping
 
 import pandas as pd
 
-from crypto_strategy_lab.data import DatasetKind
-
 
 FrameMutator = Callable[[pd.DataFrame, pd.Timestamp], None]
 RegistryFactory = Callable[[Mapping[str, pd.DataFrame]], object]
@@ -18,9 +16,9 @@ class CausalityCase:
     feature_name: str
     registry_factory: RegistryFactory
     request: object
-    datasets: Mapping[DatasetKind, pd.DataFrame]
+    datasets: Mapping[object, pd.DataFrame]
     parameters: Mapping[str, Mapping[str, object]]
-    future_mutators: Mapping[DatasetKind, FrameMutator]
+    future_mutators: Mapping[object, FrameMutator]
     context: Mapping[str, pd.DataFrame] = field(default_factory=dict)
     future_context_mutators: Mapping[str, FrameMutator] = field(default_factory=dict)
 
@@ -47,13 +45,25 @@ def _comparison_columns(registry, case: CausalityCase) -> list[str]:
     return list(definition.schema_for(target_parameters))
 
 
+def _resource_label(key: object) -> str:
+    value = getattr(key, "value", None)
+    if value is not None:
+        return str(value)
+    dataset = getattr(key, "dataset", None)
+    interval = getattr(key, "interval", None)
+    role = getattr(key, "role", None)
+    if dataset is not None and interval is not None and role is not None:
+        return f"{getattr(dataset, 'value', dataset)}:{interval}:{role}"
+    return repr(key)
+
+
 def assert_future_mutation_invariant(case: CausalityCase) -> None:
     """Recompute the complete registry graph without cache for every material source.
 
     The cutoff is an output ``available_at`` timestamp. Mutators may modify only
     source observations not yet available at that cutoff. The target feature is
     then recomputed through FeatureRegistry and every already-available declared
-    output field must remain byte-for-byte semantically identical.
+    output field must remain semantically identical.
     """
     base_datasets = _copy_frames(case.datasets)
     base_context = _copy_frames(case.context)
@@ -81,7 +91,8 @@ def assert_future_mutation_invariant(case: CausalityCase) -> None:
         before = changed_datasets[kind].copy(deep=True)
         mutate(changed_datasets[kind], cutoff)
         assert not changed_datasets[kind].equals(before), (
-            f"mutator did not change future {kind.value} source for {case.feature_name}"
+            f"mutator did not change future {_resource_label(kind)} source "
+            f"for {case.feature_name}"
         )
         _, actual = _execute(case, changed_datasets, changed_context)
         actual_available = pd.to_datetime(actual["available_at"], utc=True, errors="raise")

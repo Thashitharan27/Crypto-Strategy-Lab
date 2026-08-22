@@ -18,6 +18,19 @@ _MISSING = object()
 
 
 @dataclass(frozen=True, slots=True)
+class FeatureDataResource:
+    """Identity for an auxiliary feature input sharing a DatasetKind.
+
+    Unlike the strategy ``KLINES`` slot, this key carries interval and role, so
+    an independently requested research timeline cannot overwrite it.
+    """
+
+    dataset: DatasetKind
+    interval: str
+    role: str
+
+
+@dataclass(frozen=True, slots=True)
 class ParameterDefinition:
     """One accepted parameter, including its canonical representation."""
 
