@@ -12,7 +12,7 @@ import pandas as pd
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.data.quality import validate_feature_timeline
-from .base import FeatureDefinition, FeatureProvider
+from .base import FeatureDataResource, FeatureDefinition, FeatureProvider
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +105,7 @@ class FeatureRegistry:
     def identity(
         resolved: ResolvedFeature,
         request: DataRequest,
-        source_identities: Mapping[DatasetKind, str],
+        source_identities: Mapping[object, str],
         dependency_identities: Mapping[str, str],
     ) -> str:
         definition = resolved.definition
@@ -113,6 +113,9 @@ class FeatureRegistry:
         material_datasets.update(
             kind for kind in definition.optional_datasets if kind in source_identities
         )
+        auxiliary = [key for key in source_identities if isinstance(key, FeatureDataResource)
+                     and key.role == definition.name.removesuffix("_context")
+                     and key.interval == resolved.parameters.get(f"{key.role}_interval")]
         missing_sources = set(definition.required_datasets) - set(source_identities)
         if missing_sources:
             raise ValueError(
@@ -128,6 +131,10 @@ class FeatureRegistry:
             "sources": {
                 kind.value: source_identities[kind]
                 for kind in sorted(material_datasets, key=lambda item: item.value)
+            },
+            "auxiliary_sources": {
+                f"{key.dataset.value}:{key.interval}:{key.role}": source_identities[key]
+                for key in sorted(auxiliary, key=lambda item: (item.dataset.value, item.interval, item.role))
             },
             "dependencies": {
                 name: dependency_identities[name]
@@ -169,7 +176,7 @@ class FeatureRegistry:
         *,
         parameters=None,
         cache=None,
-        source_identities: Mapping[DatasetKind, str] | None = None,
+        source_identities: Mapping[object, str] | None = None,
     ) -> dict[str, pd.DataFrame]:
         frames, identities = {}, {}
         source_ids = source_identities or {

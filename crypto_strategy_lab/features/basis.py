@@ -11,11 +11,11 @@ from crypto_strategy_lab.data.alignment import causal_asof_join
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 
-from .base import FeatureDefinition
+from .base import FeatureDefinition, ParameterDefinition
 
 
 BASIS_CONTEXT_FEATURE_NAME = "basis_context"
-BASIS_CONTEXT_FEATURE_VERSION = "1"
+BASIS_CONTEXT_FEATURE_VERSION = "2"
 
 
 def _basis_state(values: np.ndarray, neutral_bps: float = 1.0) -> np.ndarray:
@@ -86,6 +86,8 @@ class BasisContextFeatureProvider:
             DatasetKind.INDEX_PRICE_KLINES,
         ),
         optional_datasets=(DatasetKind.PREMIUM_INDEX_KLINES,),
+        parameters={"basis_zscore_window_days": ParameterDefinition(float, 7.0),
+                    "basis_zscore_min_samples": ParameterDefinition(int, 5)},
         output_columns=(
             "mark_source_available_at",
             "mark_age_seconds",
@@ -103,6 +105,10 @@ class BasisContextFeatureProvider:
             "trade_mark_basis_bps",
             "trade_index_basis",
             "trade_index_basis_bps",
+            "mark_index_basis_change",
+            "mark_index_basis_zscore_7d",
+            "premium_index_change",
+            "premium_index_zscore_7d",
         ),
         warmup_bars=0,
         availability_rule="reference_klines_available_at_or_before_strategy_candle_close",
@@ -115,7 +121,8 @@ class BasisContextFeatureProvider:
         parameters: Mapping[str, object],
         feature_frames: Mapping[str, pd.DataFrame] | None = None,
     ) -> pd.DataFrame:
-        del parameters, feature_frames
+        del feature_frames
+        parameters = self.definition.normalize_parameters(parameters)
         try:
             klines = datasets[DatasetKind.KLINES].copy()
             mark = datasets[DatasetKind.MARK_PRICE_KLINES].copy()
@@ -176,6 +183,18 @@ class BasisContextFeatureProvider:
         output["trade_mark_basis_bps"] = trade_mark * 10000.0
         output["trade_index_basis"] = trade_index
         output["trade_index_basis_bps"] = trade_index * 10000.0
+        # Reference sources normally share cadence. Changes and time-window statistics
+        # remain nullable across partial history and never use centered/future rows.
+        window = f'{float(parameters["basis_zscore_window_days"])}D'
+        minimum = int(parameters["basis_zscore_min_samples"])
+        for column in ("mark_index_basis", "premium_index_close"):
+            prefix = "mark_index_basis" if column == "mark_index_basis" else "premium_index"
+            values = output[column]
+            output[f"{prefix}_change"] = values.diff()
+            series = pd.Series(values.to_numpy(float), index=pd.DatetimeIndex(output.available_at))
+            rolling = series.rolling(window, min_periods=minimum)
+            std = rolling.std(ddof=0)
+            output[f"{prefix}_zscore_7d"] = ((series-rolling.mean())/std.where(std > 0)).to_numpy()
 
         for prefix in ("mark", "index", "premium"):
             source = output[f"{prefix}_source_available_at"]

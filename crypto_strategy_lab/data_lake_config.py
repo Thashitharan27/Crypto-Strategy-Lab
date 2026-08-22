@@ -63,6 +63,13 @@ class FeatureConfig:
     bull_regime_lookback_days: int = 90
     bull_regime_return_threshold: float = 0.20
     include_agg_trade_flow: bool = False
+    taker_flow_interval: str = "5m"
+    oi_zscore_window_days: float = 7.0
+    oi_zscore_min_samples: int = 20
+    funding_zscore_window_days: float = 7.0
+    funding_zscore_min_samples: int = 6
+    funding_extreme_zscore: float = 2.0
+    basis_zscore_window_days: float = 7.0
 
     def registry_parameters(self, *, strategy_timeframe_minutes: int | None = None) -> dict[str, dict[str, Any]]:
         """Authoritative registered-feature parameters owned by FeatureConfig."""
@@ -86,6 +93,17 @@ class FeatureConfig:
             "core_directional": directional,
             "production_market_context": context,
         }
+        result["futures_positioning"] = {
+            "oi_zscore_window_days": float(self.oi_zscore_window_days),
+            "oi_zscore_min_samples": int(self.oi_zscore_min_samples),
+        }
+        result["funding_context"] = {
+            "funding_zscore_window_days": float(self.funding_zscore_window_days),
+            "funding_zscore_min_samples": int(self.funding_zscore_min_samples),
+            "funding_extreme_zscore": float(self.funding_extreme_zscore),
+        }
+        result["taker_flow_context"] = {"taker_flow_interval": str(self.taker_flow_interval)}
+        result["basis_context"] = {"basis_zscore_window_days": float(self.basis_zscore_window_days)}
         if self.enable_support_resistance_analysis:
             if strategy_timeframe_minutes is None:
                 raise ValueError("strategy timeframe is required for S/R feature parameters")

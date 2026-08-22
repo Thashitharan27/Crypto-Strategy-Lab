@@ -11,11 +11,11 @@ from crypto_strategy_lab.data.alignment import causal_asof_join
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 
-from .base import FeatureDefinition
+from .base import FeatureDefinition, OutputField, ParameterDefinition
 
 
 FUNDING_CONTEXT_FEATURE_NAME = "funding_context"
-FUNDING_CONTEXT_FEATURE_VERSION = "1"
+FUNDING_CONTEXT_FEATURE_VERSION = "2"
 
 
 def _funding_bias(rate: np.ndarray) -> np.ndarray:
@@ -56,6 +56,11 @@ class FundingContextFeatureProvider:
         name=FUNDING_CONTEXT_FEATURE_NAME,
         version=FUNDING_CONTEXT_FEATURE_VERSION,
         required_datasets=(DatasetKind.KLINES, DatasetKind.FUNDING_RATE),
+        parameters={
+            "funding_zscore_window_days": ParameterDefinition(float, 7.0),
+            "funding_zscore_min_samples": ParameterDefinition(int, 6),
+            "funding_extreme_zscore": ParameterDefinition(float, 2.0),
+        },
         output_columns=(
             "funding_source_available_at",
             "funding_age_hours",
@@ -67,7 +72,16 @@ class FundingContextFeatureProvider:
             "funding_24h_sum",
             "funding_24h_sum_bps",
             "funding_24h_count",
+            "funding_previous",
+            "funding_change",
+            "funding_3_event_mean",
+            "funding_7d_zscore",
+            "funding_extreme_positive",
+            "funding_extreme_negative",
+            "time_to_next_funding",
         ),
+        output_schema={"funding_extreme_positive": OutputField("bool"),
+                       "funding_extreme_negative": OutputField("bool")},
         warmup_bars=0,
         availability_rule="funding_events_available_at_or_before_strategy_candle_close",
     )
@@ -79,7 +93,8 @@ class FundingContextFeatureProvider:
         parameters: Mapping[str, object],
         feature_frames: Mapping[str, pd.DataFrame] | None = None,
     ) -> pd.DataFrame:
-        del parameters, feature_frames
+        del feature_frames
+        parameters = self.definition.normalize_parameters(parameters)
         try:
             klines = datasets[DatasetKind.KLINES].copy()
             funding = datasets[DatasetKind.FUNDING_RATE].copy()
@@ -119,6 +134,19 @@ class FundingContextFeatureProvider:
             "available_at", keep="last"
         ).reset_index(drop=True)
 
+        # All derivatives are calculated once on the event timeline, before alignment.
+        right["funding_previous"] = right["funding_rate"].shift(1)
+        right["funding_change"] = right["funding_rate"] - right["funding_previous"]
+        right["funding_3_event_mean"] = right["funding_rate"].rolling(3, min_periods=3).mean()
+        event_series = pd.Series(right["funding_rate"].to_numpy(float),
+                                 index=pd.DatetimeIndex(right["available_at"]))
+        rolling = event_series.rolling(
+            f'{float(parameters["funding_zscore_window_days"])}D',
+            min_periods=int(parameters["funding_zscore_min_samples"]),
+        )
+        std = rolling.std(ddof=0)
+        right["funding_7d_zscore"] = ((event_series-rolling.mean())/std.where(std > 0)).to_numpy()
+
         joined = causal_asof_join(decisions, right)
         output = pd.DataFrame(
             {
@@ -126,6 +154,10 @@ class FundingContextFeatureProvider:
                 "available_at": pd.to_datetime(joined["decision_time"], utc=True),
                 "funding_source_available_at": pd.to_datetime(joined["available_at"], utc=True),
                 "funding_rate": pd.to_numeric(joined["funding_rate"], errors="coerce"),
+                "funding_previous": pd.to_numeric(joined["funding_previous"], errors="coerce"),
+                "funding_change": pd.to_numeric(joined["funding_change"], errors="coerce"),
+                "funding_3_event_mean": pd.to_numeric(joined["funding_3_event_mean"], errors="coerce"),
+                "funding_7d_zscore": pd.to_numeric(joined["funding_7d_zscore"], errors="coerce"),
             }
         )
         output["funding_age_hours"] = (
@@ -138,6 +170,19 @@ class FundingContextFeatureProvider:
             else np.nan
         )
         output["funding_bias"] = _funding_bias(output["funding_rate"].to_numpy(float))
+        threshold = float(parameters["funding_extreme_zscore"])
+        z = output["funding_7d_zscore"]
+        output["funding_extreme_positive"] = pd.array(
+            np.where(z.notna(), z >= threshold, False), dtype="bool")
+        output["funding_extreme_negative"] = pd.array(
+            np.where(z.notna(), z <= -threshold, False), dtype="bool")
+        # Schedule uses only the latest published event and its known interval. It never reads next row.
+        interval = output["funding_interval_hours"]
+        output["time_to_next_funding"] = (
+            output["funding_source_available_at"] + pd.to_timedelta(interval, unit="h")
+            - output["available_at"]
+        ).dt.total_seconds()
+        output.loc[interval.isna(), "time_to_next_funding"] = np.nan
 
         current_source = output["funding_source_available_at"]
         previous_source = current_source.shift(1)

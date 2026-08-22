@@ -5,7 +5,9 @@ from .agg_trade_flow import (
     AGG_TRADE_FLOW_FEATURE_VERSION,
     AggTradeFlowFeatureProvider,
 )
-from .base import FeatureDefinition, FeatureProvider, OutputField, ParameterDefinition
+from .base import FeatureDataResource, FeatureDefinition, FeatureProvider, OutputField, ParameterDefinition
+from .taker_flow import (TAKER_FLOW_CONTEXT_FEATURE_NAME, TAKER_FLOW_CONTEXT_FEATURE_VERSION,
+                         TakerFlowContextFeatureProvider, taker_flow_resource)
 from .basis import (
     BASIS_CONTEXT_FEATURE_NAME,
     BASIS_CONTEXT_FEATURE_VERSION,
@@ -55,6 +57,7 @@ from .technical import (
 
 __all__ = [
     "FeatureDefinition",
+    "FeatureDataResource",
     "FeatureProvider",
     "OutputField",
     "ParameterDefinition",
@@ -90,6 +93,8 @@ __all__ = [
     "AGG_TRADE_FLOW_FEATURE_NAME",
     "AGG_TRADE_FLOW_FEATURE_VERSION",
     "AggTradeFlowFeatureProvider",
+    "TAKER_FLOW_CONTEXT_FEATURE_NAME", "TAKER_FLOW_CONTEXT_FEATURE_VERSION",
+    "TakerFlowContextFeatureProvider", "taker_flow_resource",
 ]
 
 
@@ -106,6 +111,7 @@ def production_feature_registry(*, structural_benchmark=None) -> FeatureRegistry
         FuturesPositioningFeatureProvider(),
         FundingContextFeatureProvider(),
         BasisContextFeatureProvider(),
+        TakerFlowContextFeatureProvider(),
         AggTradeFlowFeatureProvider(),
     ):
         registry.register(provider)
