@@ -4,7 +4,10 @@ import pytest
 
 from crypto_strategy_lab.data import DataRequest, DatasetKind
 from crypto_strategy_lab.features import production_feature_registry
-from crypto_strategy_lab.features.trade_flow import trade_flow_resource
+from crypto_strategy_lab.features.trade_flow import (
+    TradeFlowContextFeatureProvider,
+    trade_flow_resource,
+)
 from feature_causality_harness import CausalityCase, assert_future_mutation_invariant
 
 
@@ -94,3 +97,38 @@ def test_trade_flow_context_uses_generic_available_at_causality_harness(source):
         future_mutators={resource: _mutate_future_aggregate},
     )
     assert_future_mutation_invariant(case)
+
+
+def test_trade_flow_alignment_normalizes_microsecond_aggregate_and_nanosecond_strategy():
+    source = DatasetKind.AGG_TRADES
+    aggregate = _aggregate(source)
+    # Mirror recent Binance/Parquet behavior where the compact aggregate
+    # materializes as datetime64[us, UTC] while strategy klines remain ns.
+    for column in ("period_start", "period_end", "available_at", "last_event_at"):
+        aggregate[column] = aggregate[column].astype("datetime64[us, UTC]")
+
+    klines = _klines().iloc[::60].reset_index(drop=True)
+    assert str(aggregate["available_at"].dtype) == "datetime64[us, UTC]"
+    assert str(klines["available_at"].dtype) == "datetime64[ns, UTC]"
+
+    request = DataRequest(
+        "BTCUSDT",
+        klines.period_start.iloc[0].to_pydatetime(),
+        klines.period_end.iloc[-1].to_pydatetime(),
+        "1h",
+    )
+    output = TradeFlowContextFeatureProvider().compute(
+        request,
+        {
+            DatasetKind.KLINES: klines,
+            trade_flow_resource(source): aggregate,
+        },
+        {
+            "trade_flow_source": source.name,
+            "trade_flow_windows": ("1m", "5m", "15m", "1h"),
+        },
+    )
+
+    assert len(output) == len(klines)
+    assert str(output["available_at"].dtype) == "datetime64[ns, UTC]"
+    assert output["trade_source_covered"].any()
