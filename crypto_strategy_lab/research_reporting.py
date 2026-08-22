@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 
+from .feature_research import (FEATURE_RESEARCH_ARTIFACT_CONTRACT,
+                               write_research_artifacts)
+
 
 class CsvManifestReporter:
     def __init__(self, output_root: Path): self.output_root = Path(output_root)
@@ -14,6 +17,7 @@ class CsvManifestReporter:
         run_dir = self.output_root / f"{result.request.symbol}_{result.request.strategy_interval}_{stamp}"
         run_dir.mkdir(parents=True, exist_ok=False)
         result.trades.to_csv(run_dir / "trade_list.csv", index=False)
+        write_research_artifacts(run_dir, result, context)
         manifest = {
             "config_contract": "research_run_config_v3",
             "request": {"symbol": result.request.symbol, "start": result.request.start.isoformat(),
@@ -25,6 +29,8 @@ class CsvManifestReporter:
             "strategy_rows": result.strategy_rows, "intrabar_rows": result.intrabar_rows,
             "prepared_rows": result.prepared_rows, "trade_rows": len(result.trades),
             "data_quality": result.data_quality.to_dict() if result.data_quality else None,
+            "feature_research": {"contract": FEATURE_RESEARCH_ARTIFACT_CONTRACT,
+                                 "manifest": "research/research_manifest.json"},
         }
         (run_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         if result.data_quality:
