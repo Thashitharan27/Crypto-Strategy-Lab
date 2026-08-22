@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 import pytest
@@ -15,18 +15,27 @@ from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 REQUEST = DataRequest(
-    symbol="BTCUSDT", start=datetime(2026, 1, 1, tzinfo=UTC),
-    end=datetime(2026, 1, 2, tzinfo=UTC), strategy_interval="4h",
+    symbol="BTCUSDT", start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    end=datetime(2026, 1, 2, tzinfo=timezone.utc), strategy_interval="4h",
 )
 
 
 class Provider:
-    def __init__(self, name, *, version="1", dependencies=(), warmup=0, parameters=None):
+    def __init__(
+        self,
+        name,
+        *,
+        version="1",
+        dependencies=(),
+        warmup=0,
+        parameters=None,
+        optional_datasets=(),
+    ):
         self.calls = 0
         self.definition = FeatureDefinition(
             name=name, version=version, required_datasets=(DatasetKind.KLINES,),
-            required_features=dependencies, warmup_bars=warmup,
-            parameters=parameters or {},
+            required_features=dependencies, optional_datasets=optional_datasets,
+            warmup_bars=warmup, parameters=parameters or {},
             output_schema={"value": OutputField("numeric", False)},
         )
 
@@ -46,6 +55,16 @@ def test_parameter_contract_defaults_normalizes_and_rejects_unknown() -> None:
     assert definition.normalize_parameters({"period": "20"}) == {"period": 20}
     with pytest.raises(ValueError, match="Unknown parameters"):
         definition.normalize_parameters({"typo": 1})
+
+
+def test_boolean_parameter_strings_are_canonical_not_python_truthiness() -> None:
+    definition = Provider(
+        "a", parameters={"enabled": ParameterDefinition(bool, True)}
+    ).definition
+    assert definition.normalize_parameters({"enabled": "false"}) == {"enabled": False}
+    assert definition.normalize_parameters({"enabled": "TRUE"}) == {"enabled": True}
+    with pytest.raises(ValueError, match="invalid parameter value"):
+        definition.normalize_parameters({"enabled": "not-a-bool"})
 
 
 def test_required_parameter_and_output_schema_are_enforced() -> None:
@@ -68,10 +87,14 @@ def test_graph_is_deterministic_deduplicated_and_propagates_warmup() -> None:
         Provider("right", dependencies=("leaf",), warmup=4),
         Provider("root", dependencies=("right", "left"), warmup=5),
     )
-    for provider in (root, right, leaf, left): registry.register(provider)
+    for provider in (root, right, leaf, left):
+        registry.register(provider)
     assert registry.dependency_order(["root"]) == ("leaf", "left", "right", "root")
     assert registry.effective_warmup(["root"]) == 11
-    registry.execute(["root"], REQUEST, {DatasetKind.KLINES: pd.DataFrame()}, source_identities={DatasetKind.KLINES: "source"})
+    registry.execute(
+        ["root"], REQUEST, {DatasetKind.KLINES: pd.DataFrame()},
+        source_identities={DatasetKind.KLINES: "source"},
+    )
     assert leaf.calls == left.calls == right.calls == root.calls == 1
 
 
@@ -81,9 +104,11 @@ def test_identity_propagates_only_related_definition_and_parameters() -> None:
         child = Provider("child", version=child_version, parameters={"period": ParameterDefinition(int, 14)})
         parent = Provider("parent", dependencies=("child",))
         unrelated = Provider("unrelated", version=unrelated_version)
-        for provider in (child, parent, unrelated): registry.register(provider)
+        for provider in (child, parent, unrelated):
+            registry.register(provider)
         resolved = registry.resolve(["parent", "unrelated"], {"child": {"period": period}})
-        values = {}; source = {DatasetKind.KLINES: "source"}
+        values = {}
+        source = {DatasetKind.KLINES: "source"}
         for item in resolved:
             values[item.definition.name] = registry.identity(item, REQUEST, source, values)
         return values
@@ -94,6 +119,29 @@ def test_identity_propagates_only_related_definition_and_parameters() -> None:
     assert base["unrelated"] == changed_parameter["unrelated"]
     changed_version = identities(child_version="2")
     assert base["parent"] != changed_version["parent"]
+
+
+def test_optional_material_dataset_changes_identity_only_when_present() -> None:
+    registry = FeatureRegistry()
+    provider = Provider("a", optional_datasets=(DatasetKind.PREMIUM_INDEX_KLINES,))
+    registry.register(provider)
+    resolved = registry.resolve(["a"])[0]
+    base_sources = {DatasetKind.KLINES: "kline-source"}
+    without_optional = registry.identity(resolved, REQUEST, base_sources, {})
+    with_optional = registry.identity(
+        resolved,
+        REQUEST,
+        {**base_sources, DatasetKind.PREMIUM_INDEX_KLINES: "premium-v1"},
+        {},
+    )
+    changed_optional = registry.identity(
+        resolved,
+        REQUEST,
+        {**base_sources, DatasetKind.PREMIUM_INDEX_KLINES: "premium-v2"},
+        {},
+    )
+    assert without_optional != with_optional
+    assert with_optional != changed_optional
 
 
 def test_production_registry_exposes_core_authoritative_metadata() -> None:
