@@ -33,9 +33,9 @@ class BacktestDataBundle:
     state_transition_daily_features: pd.DataFrame | None = None
 
 
-def _cached_multisource_feature(store, request, datasets, provider, parameters=None):
+def _cached_multisource_feature(store, request, datasets, provider, parameters=None, *, registry=None):
     """Cache a feature that depends on klines plus one or more event datasets."""
-    registry = production_feature_registry()
+    registry = registry if registry is not None else production_feature_registry()
     return registry.execute(
         [provider.definition.name], request, datasets,
         parameters={provider.definition.name: dict(parameters or {})},
@@ -50,6 +50,7 @@ def _cached_catalog_feature(
     dataset,
     provider,
     parameters=None,
+    registry=None,
 ):
     """Resolve a multisource feature cache before materializing its event data."""
     parameters = dict(parameters or {})
@@ -60,7 +61,7 @@ def _cached_catalog_feature(
         ),
         store.source_signature(_dataset_request(request, dataset), dataset),
     )
-    registry = production_feature_registry()
+    registry = registry if registry is not None else production_feature_registry()
     resolved = registry.resolve(
         [provider.definition.name], {provider.definition.name: parameters}
     )[0]
@@ -107,6 +108,7 @@ def _optional_futures_research_features(
     canonical: pd.DataFrame,
     *,
     include_agg_trade_flow: bool = False,
+    registry=None,
 ) -> dict[str, pd.DataFrame]:
     """Load futures research blocks when local coverage exists.
 
@@ -121,7 +123,7 @@ def _optional_futures_research_features(
     try:
         provider = FuturesPositioningFeatureProvider()
         positioning = _cached_catalog_feature(
-            store, request, canonical, DatasetKind.FUTURES_METRICS, provider
+            store, request, canonical, DatasetKind.FUTURES_METRICS, provider, registry=registry
         )
         if positioning is not None:
             result[provider.definition.name] = positioning
@@ -142,6 +144,7 @@ def _optional_futures_research_features(
                 request,
                 {DatasetKind.KLINES: canonical, DatasetKind.FUNDING_RATE: funding},
                 provider,
+                registry=registry,
             )
     except DataNotAvailableError:
         pass
@@ -183,6 +186,7 @@ def _optional_futures_research_features(
             request,
             {DatasetKind.KLINES: canonical, **reference_frames},
             provider,
+            registry=registry,
         )
 
     if include_agg_trade_flow:
@@ -198,6 +202,7 @@ def _optional_futures_research_features(
                     request,
                     {DatasetKind.KLINES: canonical, DatasetKind.AGG_TRADES: agg_trades},
                     provider,
+                    registry=registry,
                 )
         except DataNotAvailableError:
             pass
@@ -239,6 +244,7 @@ def load_backtest_bundle(
     sr_break_tolerance_atr: float = 0.25,
     sr_break_basis: str = "CLOSE",
     include_agg_trade_flow: bool = False,
+    feature_registry=None,
 ) -> BacktestDataBundle:
     """Load market data and reusable causal feature blocks."""
     if refresh_catalog:
@@ -247,7 +253,7 @@ def load_backtest_bundle(
     canonical = store.load_klines(request, request.strategy_interval)
     strategy = canonical
 
-    registry = production_feature_registry()
+    registry = feature_registry if feature_registry is not None else production_feature_registry()
     requested = ["production_market_context", "state_transition_daily"]
     if enable_support_resistance_analysis:
         requested.append("support_resistance")
@@ -299,6 +305,7 @@ def load_backtest_bundle(
         request,
         canonical,
         include_agg_trade_flow=include_agg_trade_flow,
+        registry=registry,
     )
 
     intrabar = None
