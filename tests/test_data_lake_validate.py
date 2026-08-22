@@ -43,9 +43,10 @@ def test_validator_cli_has_no_legacy_csv_options() -> None:
     assert "timestamp_unit" not in options
 
 
-def test_validator_uses_full_canonical_klines_for_intrabar_validation() -> None:
+def test_validator_cli_delegates_to_shared_quality_service() -> None:
     source = (Path(__file__).resolve().parents[1] / "tools/data_lake_validate.py").read_text(
         encoding="utf-8"
     )
-    assert "load_execution_klines" not in source
-    assert "store.load_klines(intrabar_request, request.intrabar_interval)" in source
+    assert "store.data_quality_report(" in source
+    assert "store.load_execution_klines" not in source
+    assert "store.load_klines(intrabar_request" not in source

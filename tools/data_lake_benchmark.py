@@ -129,6 +129,17 @@ def _median(records: list[dict], key: str) -> float:
     return float(statistics.median(float(record[key]) for record in records))
 
 
+def _quality_summary(data_quality) -> tuple[dict[str, str], dict[str, int]]:
+    if data_quality is None:
+        return {}, {"hit": 0, "miss": 0}
+    datasets = {
+        item.display_key: item.status.value
+        for item in data_quality.datasets
+    }
+    hits = sum(bool(item.cache_hit) for item in data_quality.datasets)
+    return datasets, {"hit": hits, "miss": len(data_quality.datasets) - hits}
+
+
 def main() -> int:
     args = build_parser().parse_args()
     if args.iterations < 1:
@@ -196,6 +207,7 @@ def main() -> int:
         total_seconds = time.perf_counter() - total_started
         fingerprint = _trade_fingerprint(trades)
         fingerprints.append(fingerprint)
+        quality_datasets, quality_cache = _quality_summary(result_run.data_quality)
         records.append(
             {
                 "iteration": iteration,
@@ -214,6 +226,13 @@ def main() -> int:
                 "prepared_cache_key": result_run.prepared_cache_key,
                 "canonical_cache": canonical_delta,
                 "trade_fingerprint": fingerprint,
+                "data_quality_status": (
+                    result_run.data_quality.overall_status.value
+                    if result_run.data_quality
+                    else None
+                ),
+                "data_quality_datasets": quality_datasets,
+                "data_quality_cache": quality_cache,
             }
         )
 

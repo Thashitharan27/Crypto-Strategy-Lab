@@ -24,7 +24,12 @@ class CsvManifestReporter:
             "features": result.feature_cache_metadata, "canonical_cache": result.canonical_cache_metadata,
             "strategy_rows": result.strategy_rows, "intrabar_rows": result.intrabar_rows,
             "prepared_rows": result.prepared_rows, "trade_rows": len(result.trades),
+            "data_quality": result.data_quality.to_dict() if result.data_quality else None,
         }
         (run_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        if result.data_quality:
+            (run_dir / "data_quality.json").write_text(
+                json.dumps(result.data_quality.to_dict(), indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
         object.__setattr__(result, "output_dir", run_dir)
-

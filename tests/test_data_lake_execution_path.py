@@ -85,15 +85,19 @@ def test_data_lake_engine_ignores_missing_benchmark_csv_when_frame_is_injected()
     )
 
     assert len(engine.market_regime_values) == len(engine.data)
-    assert any(value in {"BULL", "BEAR", "SIDEWAYS"} for value in engine.market_regime_values if value is not None)
+    assert any(
+        value in {"BULL", "BEAR", "SIDEWAYS"}
+        for value in engine.market_regime_values
+        if value is not None
+    )
 
 
-def _write_kline_zip(root: Path, interval: str, rows: list[str]) -> None:
+def _write_kline_zip(root: Path, interval: str, rows: list[str], day: str = "2026-01-01") -> None:
     directory = root / "raw" / "futures" / "um" / "daily" / "klines" / "BTCUSDT" / interval
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"BTCUSDT-{interval}-2026-01-01.zip"
+    path = directory / f"BTCUSDT-{interval}-{day}.zip"
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr(f"BTCUSDT-{interval}-2026-01-01.csv", "\n".join(rows) + "\n")
+        archive.writestr(f"BTCUSDT-{interval}-{day}.csv", "\n".join(rows) + "\n")
 
 
 def test_backtest_bundle_loads_structural_benchmark_from_store(tmp_path: Path) -> None:
@@ -102,14 +106,23 @@ def test_backtest_bundle_loads_structural_benchmark_from_store(tmp_path: Path) -
         "1767225600000,100,103,99,102,10,1767239999999,0,1,0,0,0",
         "1767240000000,102,104,101,103,11,1767254399999,0,1,0,0,0",
     ]
-    one_hour_rows = []
-    for hour in range(8):
-        close = 101 + hour
-        one_hour_rows.append(
-            f"{1767225600000 + hour * 3600000},{close - 1},{close + 1},{close - 2},{close},10,{1767229199999 + hour * 3600000},0,1,0,0,0"
-        )
     _write_kline_zip(root, "4h", four_hour_rows)
-    _write_kline_zip(root, "1h", one_hour_rows)
+
+    # Structural preparation requests sma + slope + 7 days of causal warmup.
+    # Give the catalog honest daily archive metadata for that whole window rather
+    # than hiding old rows in a file named only for 2026-01-01.
+    for day_offset in range(-10, 1):
+        day = pd.Timestamp("2026-01-01T00:00:00Z") + pd.Timedelta(days=day_offset)
+        start_ms = int(day.timestamp() * 1000)
+        rows = []
+        for hour in range(24):
+            close = 100.0 + (day_offset + 10) * 0.5 + hour * 0.1
+            open_ms = start_ms + hour * 3_600_000
+            rows.append(
+                f"{open_ms},{close - 0.5},{close + 1},{close - 1},{close},10,"
+                f"{open_ms + 3_599_999},0,1,0,0,0"
+            )
+        _write_kline_zip(root, "1h", rows, day.date().isoformat())
 
     store = MarketDataStore(root, tmp_path / "cache")
     request = DataRequest(
@@ -132,6 +145,6 @@ def test_backtest_bundle_loads_structural_benchmark_from_store(tmp_path: Path) -
     assert bundle.strategy.attrs["canonical_source_identity"]
     assert bundle.intrabar is None
     assert bundle.structural_benchmark is not None
-    assert len(bundle.structural_benchmark) == 8
+    assert len(bundle.structural_benchmark) == 10 * 24 + 8
     assert bundle.structural_benchmark_symbol == "BTCUSDT"
     assert bundle.structural_benchmark_interval == "1h"

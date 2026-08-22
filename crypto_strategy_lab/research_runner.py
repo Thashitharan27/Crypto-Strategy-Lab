@@ -1,7 +1,7 @@
 """Composition-based application service for validated Data Lake research."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import time
 from typing import Any, Mapping, Protocol, Sequence
@@ -9,7 +9,8 @@ from typing import Any, Mapping, Protocol, Sequence
 import pandas as pd
 
 from .data.backtest_service import BacktestDataBundle, load_backtest_bundle
-from .data.timing import normalize_binance_interval
+from .data.timing import interval_to_timedelta, normalize_binance_interval
+from .data.quality import DataQualityReport
 from .prepared_backtest import from_data_lake_bundle, intrabar_from_data_lake_bundle
 from .prepared_cache import bundle_prepared_identity
 from .research_adapters import prepared_policy_config
@@ -51,6 +52,7 @@ class ResearchRunResult:
     prepared_rows: int
     stage_timings: Mapping[str, float]
     output_dir: Path | None = None
+    data_quality: DataQualityReport | None = None
 
 
 class ResearchRunner:
@@ -102,6 +104,7 @@ class ResearchRunner:
             intrabar_start=intrabar_start,
             feature_registry=self.feature_registry,
             feature_config=run_config.features,
+            data_config=run_config.data,
         )
         timings["data_features"] = time.perf_counter() - started
 
@@ -125,6 +128,28 @@ class ResearchRunner:
             intrabar.validate_compatible(prepared)
         timings["prepared_cache"] = time.perf_counter() - started
 
+        # The request/config contract remains the user's requested resolution.
+        # Only the simulator boundary receives an effective DataConfig when an
+        # explicitly configured quality fallback selected another resolution.
+        effective_data_config = run_config.data
+        actual_intrabar_interval = getattr(
+            bundle,
+            "intrabar_interval",
+            request.intrabar_interval if getattr(bundle, "intrabar", None) is not None else None,
+        )
+        if request.intrabar_interval and actual_intrabar_interval != request.intrabar_interval:
+            if actual_intrabar_interval is None:
+                effective_data_config = replace(run_config.data, use_intrabar_data=False)
+            else:
+                actual_minutes = int(
+                    interval_to_timedelta(actual_intrabar_interval).total_seconds() // 60
+                )
+                effective_data_config = replace(
+                    run_config.data,
+                    intrabar_timeframe_minutes=actual_minutes,
+                    use_intrabar_data=True,
+                )
+
         policy = self.strategy.bind(prepared, run_config.strategy)
         simulation_started = time.perf_counter()
         trades = self.simulator.run(
@@ -132,7 +157,7 @@ class ResearchRunner:
             intrabar,
             policy,
             run_config.execution,
-            data_config=run_config.data,
+            data_config=effective_data_config,
             feature_config=run_config.features,
         )
         simulation_total = time.perf_counter() - simulation_started
@@ -177,6 +202,7 @@ class ResearchRunner:
             intrabar_rows=len(bundle.intrabar) if bundle.intrabar is not None else 0,
             prepared_rows=len(prepared),
             stage_timings=timings,
+            data_quality=getattr(bundle, "data_quality", None),
         )
 
         report_started = time.perf_counter()
