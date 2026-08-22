@@ -167,8 +167,9 @@ class SupportResistanceFeatureProvider:
 class PreparedSupportResistanceContextReader:
     """O(1) adapter exposing cached S/R rows through the legacy detector API."""
 
-    def __init__(self, frame: pd.DataFrame) -> None:
-        self.frame = frame.reset_index(drop=True)
+    def __init__(self, frame) -> None:
+        self.frame = frame.reset_index(drop=True) if isinstance(frame, pd.DataFrame) else None
+        self.arrays = None if self.frame is not None else frame
 
     @staticmethod
     def _context_from_row(row: pd.Series, prefix: str) -> SRContext:
@@ -222,13 +223,17 @@ class PreparedSupportResistanceContextReader:
         _atr_values,
         direction: str,
     ) -> SRContext:
-        if not 0 <= int(index) < len(self.frame):
+        length = len(self.frame) if self.frame is not None else len(next(iter(self.arrays.values())))
+        if not 0 <= int(index) < length:
             raise IndexError(f"Prepared S/R index out of range: {index}")
         normalized = str(direction).upper()
         if normalized not in {"LONG", "SHORT"}:
             raise ValueError(f"Unsupported S/R direction: {direction}")
         prefix = normalized.lower()
-        return self._context_from_row(self.frame.iloc[int(index)], prefix)
+        row = self.frame.iloc[int(index)] if self.frame is not None else {
+            name: values[int(index)] for name, values in self.arrays.items()
+        }
+        return self._context_from_row(row, prefix)
 
 
 SR_CONTEXT_FIELDS = _SR_FIELDS
