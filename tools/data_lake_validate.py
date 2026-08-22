@@ -14,9 +14,6 @@ from datetime import datetime
 from pathlib import Path
 import sys
 
-# Direct execution (``python tools/...py``) puts ``tools`` on sys.path instead of
-# the repository root. Add the root explicitly so project imports work on a clean
-# Windows checkout without requiring PYTHONPATH or an editable install.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -24,7 +21,11 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from crypto_strategy_lab.data import (
-    DataQualityReport, DataRequest, DatasetKind, MarketDataStore, validate_dataset,
+    DataQualityReport,
+    DataRequest,
+    DatasetKind,
+    MarketDataStore,
+    validate_dataset,
 )
 
 
@@ -45,25 +46,38 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def validate_canonical_klines(frame: pd.DataFrame, request: DataRequest, label: str) -> None:
-    """Compatibility facade over the production validator."""
+    """Compatibility facade over the production validator for supplied test slices."""
     dataset_report = validate_dataset(
-        frame, request, DatasetKind.KLINES, interval=request.strategy_interval, required=True
+        frame,
+        request,
+        DatasetKind.KLINES,
+        interval=request.strategy_interval,
+        required=True,
     )
-    # The legacy helper validates a supplied slice, which need not represent the
-    # whole request. Full CLI and production paths use the unfiltered report.
-    integrity = tuple(i for i in dataset_report.issues if "COVERAGE_GAP" not in i.code
-                      and i.code != "MISSING_INTERNAL_INTERVAL")
-    if any(i.severity.value == "ERROR" for i in integrity):
-        raise ValueError(f"{label} failed canonical validation: {[i.code for i in integrity]}")
+    # This helper validates a supplied slice, which need not represent the whole
+    # request. The normal CLI and production path use MarketDataStore's complete
+    # cached coverage/overlap-aware quality report below.
+    integrity = tuple(
+        issue
+        for issue in dataset_report.issues
+        if "COVERAGE_GAP" not in issue.code and issue.code != "MISSING_INTERNAL_INTERVAL"
+    )
+    if any(issue.severity.value == "ERROR" for issue in integrity):
+        raise ValueError(
+            f"{label} failed canonical validation: {[issue.code for issue in integrity]}"
+        )
 
 
 def print_report(report: DataQualityReport) -> None:
     print("\nDATA QUALITY")
-    print(f"{'Dataset':28} {'Status':9} Details")
+    print(f"{'Dataset':38} {'Status':9} {'Rows':>10} Details")
     for item in report.datasets:
-        details = ", ".join(f"{issue.code} ({issue.count})" for issue in item.issues)
-        print(f"{item.dataset + (' ' + item.interval if item.interval else ''):28} "
-              f"{item.status.value:9} {details}")
+        details = ", ".join(
+            f"{issue.code} ({issue.count})" for issue in item.issues
+        )
+        print(
+            f"{item.display_key:38} {item.status.value:9} {item.row_count:10d} {details}"
+        )
 
 
 def main() -> int:
@@ -71,22 +85,6 @@ def main() -> int:
     store = MarketDataStore(args.raw_root, args.cache_root)
     count = store.refresh_catalog()
     print(f"Cataloged archives: {count}")
-    coverage = store.catalog.coverage(
-        args.raw_root,
-        market=DataRequest(
-            symbol=args.symbol,
-            start=args.start,
-            end=args.end,
-            strategy_interval=args.strategy_interval,
-        ).market,
-        dataset=DatasetKind.KLINES,
-        symbol=args.symbol,
-        interval=args.strategy_interval,
-    )
-    print(
-        "Strategy kline coverage: "
-        f"archives={coverage.archive_count}, first={coverage.first_period}, last={coverage.last_period}"
-    )
 
     request = DataRequest(
         symbol=args.symbol,
@@ -95,12 +93,14 @@ def main() -> int:
         strategy_interval=args.strategy_interval,
         intrabar_interval=args.intrabar_interval,
     )
-    strategy = store.load_klines(request, request.strategy_interval)
-    reports = [validate_dataset(strategy, request, DatasetKind.KLINES,
-                                interval=request.strategy_interval, required=True)]
-    print(
-        f"Strategy rows: {len(strategy)} | {strategy.period_start.min()} -> {strategy.period_start.max()}"
-    )
+    reports = [
+        store.data_quality_report(
+            request,
+            DatasetKind.KLINES,
+            interval=request.strategy_interval,
+            required=True,
+        )
+    ]
     if request.intrabar_interval:
         intrabar_request = DataRequest(
             symbol=request.symbol,
@@ -110,15 +110,15 @@ def main() -> int:
             market=request.market,
             exchange=request.exchange,
         )
-        # Validation needs the full canonical contract. The narrower execution
-        # projection is intentionally validated later by IntrabarExecutionData.
-        intrabar = store.load_klines(intrabar_request, request.intrabar_interval)
-        reports.append(validate_dataset(intrabar, intrabar_request, DatasetKind.KLINES,
-                                        interval=request.intrabar_interval, required=True))
-        print(
-            f"Intrabar rows: {len(intrabar)} | "
-            f"{intrabar.period_start.min()} -> {intrabar.period_start.max()}"
+        reports.append(
+            store.data_quality_report(
+                intrabar_request,
+                DatasetKind.KLINES,
+                interval=request.intrabar_interval,
+                required=True,
+            )
         )
+
     report = DataQualityReport(tuple(reports))
     print_report(report)
     report.raise_for_errors()
