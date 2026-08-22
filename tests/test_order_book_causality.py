@@ -78,8 +78,16 @@ def _mutate_future_ticker(frame, cutoff):
 def _mutate_future_depth(frame, cutoff):
     mask = pd.to_datetime(frame["available_at"], utc=True) > cutoff
     assert mask.any()
-    for column in [c for c in frame if "_depth_" in c or "_notional_" in c]:
-        frame.loc[mask, column] *= 9
+    numeric_band_columns = [
+        column
+        for column in frame
+        if column.startswith("book_bid_depth_")
+        or column.startswith("book_ask_depth_")
+        or column.startswith("book_bid_notional_")
+        or column.startswith("book_ask_notional_")
+    ]
+    assert numeric_band_columns
+    frame.loc[mask, numeric_band_columns] *= 9
 
 
 @pytest.mark.parametrize("source", ["ticker", "depth"])
