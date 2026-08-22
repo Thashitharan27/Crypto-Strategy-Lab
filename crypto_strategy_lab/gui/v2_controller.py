@@ -1,0 +1,108 @@
+"""Application boundary for the v2 GUI.
+
+Qt widgets depend on this module rather than data-lake implementation details.
+Only this controller composes and invokes :class:`ResearchRunner`.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+import json
+from pathlib import Path
+from typing import Callable
+
+from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore, MarketKind
+from crypto_strategy_lab.data_lake_config import ResearchRunConfig, load_data_lake_config
+from crypto_strategy_lab.features import production_feature_registry
+from crypto_strategy_lab.prepared_cache import PreparedRunCache
+from crypto_strategy_lab.research_adapters import NativeSimulator, NativeStrategyPolicy
+from crypto_strategy_lab.research_reporting import CsvManifestReporter
+from crypto_strategy_lab.research_runner import ResearchRunner
+
+
+@dataclass(frozen=True)
+class GuiResearchRequest:
+    exchange: str
+    market: MarketKind
+    symbol: str
+    period_start: datetime
+    period_end: datetime
+    strategy_timeframe: str
+    intrabar_timeframe: str | None
+
+    def to_data_request(self, datasets=(DatasetKind.KLINES,)) -> DataRequest:
+        return DataRequest(symbol=self.symbol, start=self.period_start, end=self.period_end,
+                           strategy_interval=self.strategy_timeframe,
+                           intrabar_interval=self.intrabar_timeframe, datasets=tuple(datasets),
+                           market=self.market, exchange=self.exchange)
+
+
+class CatalogStatusService:
+    """Read-only catalog facade; it never discovers or opens raw archives."""
+    def __init__(self, store: MarketDataStore):
+        self._store = store
+
+    def inventory(self, market=MarketKind.FUTURES_UM) -> list[dict]:
+        return self._store.catalog.inventory(self._store.raw_root, market=market)
+
+    def symbols(self, market=MarketKind.FUTURES_UM) -> list[str]:
+        return sorted({row["symbol"] for row in self.inventory(market)})
+
+    def coverage(self, request: GuiResearchRequest) -> list[dict]:
+        rows = [r for r in self.inventory(request.market) if r["symbol"] == request.symbol.upper()]
+        for row in rows:
+            first, last = row["first_period"], row["last_period"]
+            row["state"] = ("UNAVAILABLE" if not row["archive_count"] else
+                            "PARTIAL" if first is None or last is None or
+                            first > request.period_start or last < request.period_end else "AVAILABLE")
+        return rows
+
+
+class CompletedRunReader:
+    """Resolve summaries and navigation solely through the canonical manifest."""
+    def read(self, run_dir: Path) -> tuple[dict, dict]:
+        manifest = json.loads((Path(run_dir) / "run_manifest.json").read_text(encoding="utf-8"))
+        if manifest.get("run_status") != "COMPLETED":
+            raise ValueError("The selected run is not completed")
+        summary = json.loads(self.artifact_path(run_dir, manifest, "summary").read_text(encoding="utf-8"))
+        return manifest, summary
+
+    @staticmethod
+    def artifact_path(run_dir: Path, manifest: dict, name: str) -> Path:
+        entry = manifest.get("artifacts", {}).get(name)
+        if not entry or not entry.get("path"):
+            raise KeyError(f"Artifact is not present: {name}")
+        path = (Path(run_dir) / entry["path"]).resolve()
+        if Path(run_dir).resolve() not in path.parents:
+            raise ValueError("Artifact path escapes the completed run")
+        return path
+
+
+class GuiApplicationService:
+    def __init__(self, raw_root: Path, cache_root: Path,
+                 runner_factory: Callable | None = None):
+        self.raw_root, self.cache_root = Path(raw_root), Path(cache_root)
+        self.store = MarketDataStore(self.raw_root, self.cache_root)
+        self.catalog = CatalogStatusService(self.store)
+        self.completed_runs = CompletedRunReader()
+        self._runner_factory = runner_factory
+
+    def _runner(self, output_root: Path):
+        if self._runner_factory:
+            return self._runner_factory(output_root)
+        return ResearchRunner(self.store, production_feature_registry(),
+                              PreparedRunCache(self.cache_root), NativeStrategyPolicy(),
+                              NativeSimulator(), (CsvManifestReporter(output_root),))
+
+    def run(self, request: GuiResearchRequest, config: ResearchRunConfig):
+        config.validate()
+        return self._runner(Path(config.reporting.output_dir)).run(request.to_data_request(), config)
+
+    @staticmethod
+    def save_config(path: Path, config: ResearchRunConfig) -> None:
+        config.validate()
+        Path(path).write_text(json.dumps(config.to_dict(), indent=2), encoding="utf-8")
+
+    @staticmethod
+    def load_config(path: Path) -> ResearchRunConfig:
+        return load_data_lake_config(path)
