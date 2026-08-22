@@ -20,7 +20,11 @@ from crypto_strategy_lab.mean_reversion_v2 import (
     bb_zscore,
     bollinger_envelope,
     bollinger_reentry_flags,
+    classify_bb_location,
+    classify_rsi_state,
+    classify_signal,
     moving_mean,
+    signal_direction,
 )
 
 from .base import FeatureDefinition
@@ -28,7 +32,7 @@ from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 PRODUCTION_CONTEXT_FEATURE_NAME = "production_market_context"
-PRODUCTION_CONTEXT_FEATURE_VERSION = "1"
+PRODUCTION_CONTEXT_FEATURE_VERSION = "2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,9 +67,18 @@ class ProductionContextFeatureProvider:
             "mean_reversion_bb_upper",
             "mean_reversion_bb_lower",
             "mean_reversion_bb_zscore",
+            "mean_reversion_bb_location",
             "mean_reversion_rsi",
+            "mean_reversion_rsi_state",
             "mean_reversion_long_reentry",
             "mean_reversion_short_reentry",
+            "mean_reversion_reentry_confirmation",
+            "mean_reversion_signal",
+            "mean_reversion_signal_direction",
+            "mean_reversion_setup_strength",
+            "bb_reentry",
+            "mr_signal",
+            "mr_signal_direction",
             "session_vwap",
             "close_location",
         ),
@@ -110,6 +123,7 @@ class ProductionContextFeatureProvider:
         rsi_period = int(parameters.get("mean_reversion_rsi_period", 14))
         oversold = float(parameters.get("mean_reversion_rsi_oversold", 30.0))
         overbought = float(parameters.get("mean_reversion_rsi_overbought", 70.0))
+        require_reentry = bool(parameters.get("mean_reversion_require_reentry", True))
         if bb_period <= 0 or bb_stddevs <= 0 or mean_period <= 0 or mr_stddevs <= 0 or rsi_period <= 0:
             raise ValueError("Production context periods/deviations must be positive")
         if mean_type not in {"SMA", "EMA"}:
@@ -161,6 +175,37 @@ class ProductionContextFeatureProvider:
             oversold,
             overbought,
         )
+        bb_location = np.array(
+            [classify_bb_location(c, m, lo, hi) for c, m, lo, hi in zip(close, mean, mr_lower, mr_upper)],
+            dtype=object,
+        )
+        rsi_state = np.array(
+            [classify_rsi_state(value, oversold, overbought) for value in mr_rsi], dtype=object
+        )
+        signals = np.array(
+            [
+                classify_signal(c, lo, hi, rsi_value, oversold, overbought, long_flag, short_flag, require_reentry)
+                for c, lo, hi, rsi_value, long_flag, short_flag in zip(
+                    close, mr_lower, mr_upper, mr_rsi, long_reentry, short_reentry
+                )
+            ],
+            dtype=object,
+        )
+        signal_directions = np.array([signal_direction(value) for value in signals], dtype=object)
+        reentry_direction = np.full(len(close), "NONE", dtype=object)
+        reentry_direction[short_reentry] = "SHORT"
+        reentry_direction[long_reentry] = "LONG"
+        setup_strength = np.array(
+            [
+                "STRONG" if str(value).startswith("STRONG_")
+                else "POTENTIAL" if str(value).startswith("POTENTIAL_")
+                else "NEUTRAL" if value == "NEUTRAL"
+                else "UNKNOWN"
+                for value in signals
+            ],
+            dtype=object,
+        )
+        confirmed_signal = np.where(reentry_direction != "NONE", "CONFIRMED", "NO_SIGNAL").astype(object)
 
         typical = (high + low + close) / 3.0
         sessions = source_times.dt.floor("D")
@@ -213,9 +258,18 @@ class ProductionContextFeatureProvider:
                 "mean_reversion_bb_upper": mr_upper,
                 "mean_reversion_bb_lower": mr_lower,
                 "mean_reversion_bb_zscore": zscore,
+                "mean_reversion_bb_location": bb_location,
                 "mean_reversion_rsi": mr_rsi,
+                "mean_reversion_rsi_state": rsi_state,
                 "mean_reversion_long_reentry": long_reentry,
                 "mean_reversion_short_reentry": short_reentry,
+                "mean_reversion_reentry_confirmation": reentry_direction,
+                "mean_reversion_signal": signals,
+                "mean_reversion_signal_direction": signal_directions,
+                "mean_reversion_setup_strength": setup_strength,
+                "bb_reentry": reentry_direction,
+                "mr_signal": confirmed_signal,
+                "mr_signal_direction": reentry_direction,
                 "session_vwap": session_vwap,
                 "close_location": close_location,
             }
@@ -234,6 +288,7 @@ class ProductionContextFeatureProvider:
                 "mean_reversion_rsi_period": rsi_period,
                 "mean_reversion_rsi_oversold": oversold,
                 "mean_reversion_rsi_overbought": overbought,
+                "mean_reversion_require_reentry": require_reentry,
                 "effective_warmup_bars": max(bb_period, mean_period, rsi_period, 6),
                 "request_cache_key": request.cache_key(),
                 "core_directional_cache_key": directional.attrs.get("feature_cache_key"),
