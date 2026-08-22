@@ -43,6 +43,8 @@ class OrderBookSnapshotStore:
     def __init__(self, store: MarketDataStore) -> None:
         self.store = store
         self.root = Path(store.cache.root) / "order_book"
+        if not hasattr(store, "order_book_snapshot_cache_events"):
+            store.order_book_snapshot_cache_events = {}
 
     @staticmethod
     def _validate(dataset: DatasetKind, interval: str) -> None:
@@ -305,7 +307,6 @@ class OrderBookSnapshotStore:
                 json.dumps(metadata, sort_keys=True, indent=2) + "\n",
                 encoding="utf-8",
             )
-            # Validate the manifest before publishing either cache artifact.
             if json.loads(tmp_manifest.read_text(encoding="utf-8")) != metadata:
                 raise ValueError("order-book snapshot manifest validation failed")
             os.replace(tmp, parquet)
@@ -426,14 +427,22 @@ class OrderBookSnapshotStore:
                     combined["period_start"]
                     < pd.Timestamp(record.period_end).ceil("min")
                 )
-        combined[f"{prefix}_covered"] = combined[f"{prefix}_covered"].fillna(
-            catalog_covered
-        ).astype(bool)
+        combined[f"{prefix}_covered"] = combined[f"{prefix}_covered"].astype(
+            "boolean"
+        ).fillna(catalog_covered).astype(bool)
         combined[f"{prefix}_observed"] = combined[
             f"{prefix}_observed"
-        ].fillna(False).astype(bool)
+        ].astype("boolean").fillna(False).astype(bool)
         combined["period_end"] = combined["period_start"] + pd.Timedelta(minutes=1)
         combined["available_at"] = combined["period_end"]
+
+        telemetry = self.store.order_book_snapshot_cache_events.setdefault(
+            dataset.value,
+            {"partitions_built": 0, "partitions_reused": 0},
+        )
+        telemetry["partitions_built"] += int(built)
+        telemetry["partitions_reused"] += int(reused)
+
         return OrderBookSnapshotResult(
             combined,
             self._combined(dataset, identities),
@@ -471,9 +480,7 @@ class OrderBookSnapshotStore:
                 request, dataset
             ).cache_identity()
         except DataNotAvailableError:
-            return validate_dataset(
-                None, request, dataset, required=required
-            )
+            return validate_dataset(None, request, dataset, required=required)
 
         cache = DataQualityCache(self.store.cache.root)
         cached = cache.get_cached(
@@ -545,13 +552,11 @@ class OrderBookSnapshotStore:
                     row_count += len(frame)
                     first = frame["event_time"].min()
                     last = frame["event_time"].max()
-                    observed_start = (
-                        first
-                        if observed_start is None
-                        else min(observed_start, first)
+                    observed_start = first if observed_start is None else min(
+                        observed_start, first
                     )
-                    observed_end = (
-                        last if observed_end is None else max(observed_end, last)
+                    observed_end = last if observed_end is None else max(
+                        observed_end, last
                     )
             if frame.empty:
                 continue
@@ -566,9 +571,6 @@ class OrderBookSnapshotStore:
             )
             issues.extend(partition_report.issues)
 
-        # Preserve the existing archive-overlap semantics without requiring the
-        # normal all-history event-frame load. Only overlapping participants are
-        # materialized by this helper.
         issues.extend(self.store._archive_overlap_issues(request, dataset))
 
         complete_start = pd.Timestamp(request.start)
@@ -576,30 +578,30 @@ class OrderBookSnapshotStore:
         if coverage.first_period is not None and pd.Timestamp(
             coverage.first_period
         ) > pd.Timestamp(request.start):
-            severity = (
-                DataQualityStatus.ERROR if required else DataQualityStatus.WARN
-            )
+            severity = DataQualityStatus.ERROR if required else DataQualityStatus.WARN
             issues.append(
                 DataQualityIssue(
                     "LEADING_SOURCE_COVERAGE_GAP",
                     severity,
                     "Catalog source coverage begins after the requested start",
-                    details={"coverage_start": pd.Timestamp(coverage.first_period).isoformat()},
+                    details={
+                        "coverage_start": pd.Timestamp(coverage.first_period).isoformat()
+                    },
                 )
             )
             complete_start = pd.Timestamp(coverage.first_period)
         if coverage.last_period is not None and pd.Timestamp(
             coverage.last_period
         ) < pd.Timestamp(request.end):
-            severity = (
-                DataQualityStatus.ERROR if required else DataQualityStatus.WARN
-            )
+            severity = DataQualityStatus.ERROR if required else DataQualityStatus.WARN
             issues.append(
                 DataQualityIssue(
                     "TRAILING_SOURCE_COVERAGE_GAP",
                     severity,
                     "Catalog source coverage ends before the requested end",
-                    details={"coverage_end": pd.Timestamp(coverage.last_period).isoformat()},
+                    details={
+                        "coverage_end": pd.Timestamp(coverage.last_period).isoformat()
+                    },
                 )
             )
             complete_end = pd.Timestamp(coverage.last_period)
