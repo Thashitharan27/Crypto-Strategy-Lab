@@ -87,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--intrabar-start")
-    parser.add_argument("--include-agg-trades", action="store_true")
+    parser.add_argument("--include-trade-flow", action="store_true")
     parser.add_argument("--top", type=int, default=30)
     parser.add_argument("--output", type=Path)
     return parser
@@ -99,10 +99,10 @@ def main() -> int:
         raise SystemExit("--top must be at least 1")
 
     config = load_data_lake_config(args.config)
-    if args.include_agg_trades:
+    if args.include_trade_flow:
         config = replace(
             config,
-            features=replace(config.features, include_agg_trade_flow=True),
+            features=replace(config.features, trade_flow_enabled=True),
         )
     request = DataRequest(
         symbol=args.symbol,

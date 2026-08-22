@@ -9,7 +9,8 @@ import pandas as pd
 
 from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
 from crypto_strategy_lab.features import production_feature_registry
-from crypto_strategy_lab.features.agg_trade_flow import AggTradeFlowFeatureProvider
+from crypto_strategy_lab.features.trade_flow import TradeFlowContextFeatureProvider, trade_flow_resource
+from crypto_strategy_lab.data.trade_aggregates import TradeAggregateStore
 from crypto_strategy_lab.features.basis import BasisContextFeatureProvider
 from crypto_strategy_lab.features.cache import FeatureFrameCache
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
@@ -264,7 +265,9 @@ def _optional_futures_research_features(
     request: DataRequest,
     canonical: pd.DataFrame,
     *,
-    include_agg_trade_flow: bool = False,
+    trade_flow_enabled: bool = False,
+    trade_flow_source: DatasetKind = DatasetKind.AGG_TRADES,
+    large_trade_quote_threshold: float | None = None,
     registry=None,
     usable_datasets: set[DatasetKind] | None = None,
     feature_parameters: Mapping[str, Mapping[str, object]] | None = None,
@@ -496,31 +499,30 @@ def _optional_futures_research_features(
             registry=registry,
         )
 
-    if include_agg_trade_flow:
-        if allowed is not None and DatasetKind.AGG_TRADES not in allowed:
+    if trade_flow_enabled:
+        if allowed is not None and trade_flow_source not in allowed:
             raise DataNotAvailableError(
-                "agg_trade_flow was explicitly requested but validated aggTrades are unavailable"
+                f"trade_flow_context requested but {trade_flow_source.value} is unavailable"
             )
         try:
-            agg_trades = store.load_dataset(
-                _dataset_request(request, DatasetKind.AGG_TRADES),
-                DatasetKind.AGG_TRADES,
-            )
-            if not agg_trades.empty:
-                provider = AggTradeFlowFeatureProvider()
-                result[provider.definition.name] = _cached_multisource_feature(
-                    store,
-                    request,
-                    {
-                        DatasetKind.KLINES: canonical,
-                        DatasetKind.AGG_TRADES: agg_trades,
-                    },
-                    provider,
-                    registry=registry,
-                )
+            aggregate = TradeAggregateStore(store).load(
+                _dataset_request(request, trade_flow_source), trade_flow_source,
+                large_trade_quote_threshold=large_trade_quote_threshold)
+            provider = TradeFlowContextFeatureProvider()
+            resource = trade_flow_resource(trade_flow_source)
+            parameters = _research_parameters(feature_parameters, provider.definition.name)
+            source_ids = {DatasetKind.KLINES: store.source_signature(_dataset_request(request, DatasetKind.KLINES), DatasetKind.KLINES, interval=request.strategy_interval).cache_identity(),
+                          resource: aggregate.source_identity}
+            result[provider.definition.name] = _cached_feature_by_identities(
+                store, request, provider, parameters, source_ids,
+                lambda: {DatasetKind.KLINES: canonical, resource: aggregate.frame}, registry=registry)
+            result[provider.definition.name].attrs.update(
+                trade_aggregate_cache_hit=aggregate.cache_hit,
+                partitions_built=aggregate.partitions_built,
+                partitions_reused=aggregate.partitions_reused)
         except DataNotAvailableError as exc:
             raise DataNotAvailableError(
-                "agg_trade_flow was explicitly requested but aggTrades are unavailable"
+                f"trade_flow_context requested but {trade_flow_source.value} is unavailable"
             ) from exc
     return result
 
@@ -559,7 +561,9 @@ def load_backtest_bundle(
     sr_hold_confirmation_atr: float = 0.25,
     sr_break_tolerance_atr: float = 0.25,
     sr_break_basis: str = "CLOSE",
-    include_agg_trade_flow: bool = False,
+    trade_flow_enabled: bool = False,
+    trade_flow_source: DatasetKind = DatasetKind.AGG_TRADES,
+    large_trade_quote_threshold: float | None = None,
     feature_registry=None,
     feature_config=None,
     data_config=None,
@@ -598,7 +602,9 @@ def load_backtest_bundle(
         enable_support_resistance_analysis = bool(
             feature_config.enable_support_resistance_analysis
         )
-        include_agg_trade_flow = bool(feature_config.include_agg_trade_flow)
+        trade_flow_enabled = bool(feature_config.trade_flow_enabled)
+        trade_flow_source = DatasetKind[str(feature_config.trade_flow_source).upper()]
+        large_trade_quote_threshold = feature_config.large_trade_quote_threshold
         feature_parameters = feature_config.registry_parameters(
             strategy_timeframe_minutes=strategy_minutes
         )
@@ -695,15 +701,32 @@ def load_backtest_bundle(
         quality_reports.append(taker_report)
         taker_flow_usable = _quality_is_usable_optional(taker_report)
 
-        if include_agg_trade_flow:
-            agg_report = store.data_quality_report(
-                request,
-                DatasetKind.AGG_TRADES,
-                required=True,
-            )
+        if trade_flow_enabled:
+            coverage = store.catalog.coverage(store.raw_root, market=request.market,
+                dataset=trade_flow_source, symbol=request.symbol)
+            missing = coverage.archive_count == 0
+            partial = (not missing and (coverage.first_period is None or coverage.last_period is None
+                or coverage.first_period > request.start or coverage.last_period < request.end))
+            issues = ()
+            if missing:
+                issues = (DataQualityIssue("MISSING_SOURCE", DataQualityStatus.ERROR,
+                    f"No {trade_flow_source.value} source coverage", details={}),)
+            elif partial:
+                issues = (DataQualityIssue("PARTIAL_SOURCE_COVERAGE", DataQualityStatus.WARN,
+                    f"Partial {trade_flow_source.value} source coverage", details={}),)
+            agg_report = DatasetQualityReport(dataset=trade_flow_source.value,
+                symbol=request.symbol, interval=None, required=True,
+                requested_start=request.start.isoformat(), requested_end=request.end.isoformat(),
+                observed_start=str(coverage.first_period) if coverage.first_period else None,
+                observed_end=str(coverage.last_period) if coverage.last_period else None,
+                complete_start=str(coverage.first_period) if coverage.first_period else None,
+                complete_end=str(coverage.last_period) if coverage.last_period else None,
+                row_count=0, source_identity=None,
+                status=(DataQualityStatus.ERROR if missing else DataQualityStatus.WARN if partial else DataQualityStatus.OK),
+                issues=issues)
             quality_reports.append(agg_report)
             DataQualityReport((agg_report,)).raise_for_errors()
-            usable_research_datasets.add(DatasetKind.AGG_TRADES)
+            usable_research_datasets.add(trade_flow_source)
 
     registry = (
         feature_registry if feature_registry is not None else production_feature_registry()
@@ -733,7 +756,9 @@ def load_backtest_bundle(
         store,
         request,
         canonical,
-        include_agg_trade_flow=include_agg_trade_flow,
+        trade_flow_enabled=trade_flow_enabled,
+        trade_flow_source=trade_flow_source if trade_flow_enabled else DatasetKind.AGG_TRADES,
+        large_trade_quote_threshold=large_trade_quote_threshold if trade_flow_enabled else None,
         registry=registry,
         usable_datasets=usable_research_datasets,
         feature_parameters=feature_parameters,

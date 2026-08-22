@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use the existing Data Lake catalog instead of refreshing it once before timing runs",
     )
     parser.add_argument(
-        "--include-agg-trades",
+        "--include-trade-flow",
         action="store_true",
         help="Include the heavy optional aggTrades research feature in preparation timings",
     )
@@ -146,10 +146,10 @@ def main() -> int:
         raise SystemExit("--iterations must be at least 1")
 
     config = load_data_lake_config(args.config)
-    if args.include_agg_trades:
+    if args.include_trade_flow:
         config = replace(
             config,
-            features=replace(config.features, include_agg_trade_flow=True),
+            features=replace(config.features, trade_flow_enabled=True),
         )
     request = DataRequest(
         symbol=args.symbol,
@@ -253,7 +253,7 @@ def main() -> int:
         "iterations": args.iterations,
         "catalog_refresh_seconds": catalog_seconds,
         "catalog_refresh_skipped": bool(args.skip_catalog_refresh),
-        "include_agg_trade_flow": bool(args.include_agg_trades),
+        "trade_flow_enabled": bool(args.include_trade_flow),
         "trade_fingerprints_identical": len(set(fingerprints)) <= 1,
         "warm_median_seconds": {
             "preparation": _median(warm_records, "preparation_seconds"),

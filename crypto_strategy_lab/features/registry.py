@@ -113,7 +113,8 @@ class FeatureRegistry:
         material_datasets.update(
             kind for kind in definition.optional_datasets if kind in source_identities
         )
-        roles = {definition.name, definition.name.removesuffix("_context")}
+        base_role = definition.name.removesuffix("_context")
+        roles = {definition.name, base_role, f"{base_role}_aggregate"}
         auxiliary = [
             key
             for key in source_identities

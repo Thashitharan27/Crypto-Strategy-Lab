@@ -62,7 +62,11 @@ class FeatureConfig:
     structural_regime_slope_lookback_days: int = 30
     bull_regime_lookback_days: int = 90
     bull_regime_return_threshold: float = 0.20
-    include_agg_trade_flow: bool = False
+    trade_flow_enabled: bool = False
+    trade_flow_source: str = "AGG_TRADES"
+    trade_flow_base_interval: str = "1m"
+    trade_flow_windows: tuple[str, ...] = ("1m", "5m", "15m", "1h")
+    large_trade_quote_threshold: float | None = None
     taker_flow_interval: str = "5m"
     oi_zscore_window_days: float = 7.0
     oi_zscore_min_samples: int = 20
@@ -104,6 +108,18 @@ class FeatureConfig:
         }
         result["taker_flow_context"] = {"taker_flow_interval": str(self.taker_flow_interval)}
         result["basis_context"] = {"basis_zscore_window_days": float(self.basis_zscore_window_days)}
+        if self.trade_flow_enabled:
+            source = str(self.trade_flow_source).upper()
+            if source not in {"AGG_TRADES", "TRADES"}:
+                raise ValueError("trade_flow_source must be AGG_TRADES or TRADES")
+            if self.trade_flow_base_interval != "1m":
+                raise ValueError("trade_flow_base_interval must be 1m")
+            if self.large_trade_quote_threshold is not None and self.large_trade_quote_threshold <= 0:
+                raise ValueError("large_trade_quote_threshold must be positive or null")
+            result["trade_flow_context"] = {
+                "trade_flow_source": source,
+                "trade_flow_windows": tuple(self.trade_flow_windows),
+            }
         if self.enable_support_resistance_analysis:
             if strategy_timeframe_minutes is None:
                 raise ValueError("strategy timeframe is required for S/R feature parameters")
@@ -291,6 +307,14 @@ class ResearchRunConfig:
             raise ValueError("MR RSI thresholds are invalid")
         if features.market_regime_method not in {"ASSET_RETURN", "BTC_STRUCTURAL", "ASSET_STRUCTURAL"}:
             raise ValueError("invalid market regime method")
+        if features.trade_flow_source not in {"AGG_TRADES", "TRADES"}:
+            raise ValueError("trade_flow_source must be AGG_TRADES or TRADES")
+        if features.trade_flow_base_interval != "1m":
+            raise ValueError("trade_flow_base_interval must be 1m")
+        if not features.trade_flow_windows or not set(features.trade_flow_windows) <= {"1m", "5m", "15m", "1h"}:
+            raise ValueError("invalid trade_flow_windows")
+        if features.large_trade_quote_threshold is not None and features.large_trade_quote_threshold <= 0:
+            raise ValueError("large_trade_quote_threshold must be positive or null")
         if features.bull_regime_lookback_days <= 0 or features.bull_regime_return_threshold <= -1:
             raise ValueError("asset-return regime settings are invalid")
         if features.sr_break_basis not in {"CLOSE", "WICK"}:
@@ -352,6 +376,8 @@ def _strict(cls, raw, label):
         values["entry_rules"] = tuple(values["entry_rules"])
     if cls is ReportingConfig and isinstance(values.get("lifecycle_early_checkpoints"), list):
         values["lifecycle_early_checkpoints"] = tuple(values["lifecycle_early_checkpoints"])
+    if cls is FeatureConfig and isinstance(values.get("trade_flow_windows"), list):
+        values["trade_flow_windows"] = tuple(values["trade_flow_windows"])
     return cls(**values)
 
 
