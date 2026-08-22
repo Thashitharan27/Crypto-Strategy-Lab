@@ -1,8 +1,9 @@
 """Profile only the production Data Lake stateful simulation loop.
 
 This complements ``data_lake_benchmark.py``. Market-data/cache preparation and
-engine construction happen outside cProfile so the report identifies the Python
-hotspots inside ``DataLakeProductionBacktestEngine.run()`` itself.
+native prepared-frame construction happen outside cProfile so the report
+identifies the Python hotspots inside ``DataLakeProductionBacktestEngine.run()``
+itself.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
+from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
 
 
 _FINGERPRINT_COLUMNS = (
@@ -89,6 +91,7 @@ def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
         mean_reversion_rsi_period=getattr(config, "mean_reversion_rsi_period", 14),
         mean_reversion_rsi_oversold=getattr(config, "mean_reversion_rsi_oversold", 30.0),
         mean_reversion_rsi_overbought=getattr(config, "mean_reversion_rsi_overbought", 70.0),
+        mean_reversion_require_reentry=getattr(config, "mean_reversion_require_reentry", True),
         enable_support_resistance_analysis=config.enable_support_resistance_analysis,
         sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
         sr_pivot_left=config.sr_pivot_left,
@@ -106,16 +109,8 @@ def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
 
 
 def _engine(bundle: BacktestDataBundle, config):
-    return DataLakeProductionBacktestEngine(
-        bundle.strategy,
-        config,
-        bundle.intrabar,
-        structural_benchmark=bundle.structural_benchmark,
-        technical_features=bundle.technical_features,
-        context_features=bundle.context_features,
-        support_resistance_features=bundle.support_resistance_features,
-        research_features=bundle.research_features,
-    )
+    prepared, intrabar = from_data_lake_bundle(bundle, config)
+    return DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
 
 
 def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int) -> list[dict[str, object]]:
