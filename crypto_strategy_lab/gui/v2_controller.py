@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Callable
 
+import pandas as pd
+
 from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore, MarketKind
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig, load_data_lake_config
 from crypto_strategy_lab.features import production_feature_registry
@@ -18,6 +20,15 @@ from crypto_strategy_lab.prepared_cache import PreparedRunCache
 from crypto_strategy_lab.research_adapters import NativeSimulator, NativeStrategyPolicy
 from crypto_strategy_lab.research_reporting import CsvManifestReporter
 from crypto_strategy_lab.research_runner import ResearchRunner
+from crypto_strategy_lab.run_manifest import artifact_path, load_completed_manifest
+
+
+def _utc(value):
+    if value is None:
+        return None
+    timestamp = pd.Timestamp(value)
+    return (timestamp.tz_localize("UTC") if timestamp.tzinfo is None
+            else timestamp.tz_convert("UTC")).to_pydatetime()
 
 
 @dataclass(frozen=True)
@@ -51,7 +62,9 @@ class CatalogStatusService:
     def coverage(self, request: GuiResearchRequest) -> list[dict]:
         rows = [r for r in self.inventory(request.market) if r["symbol"] == request.symbol.upper()]
         for row in rows:
-            first, last = row["first_period"], row["last_period"]
+            first = _utc(row["first_period"])
+            last = _utc(row["last_period"])
+            row["first_period"], row["last_period"] = first, last
             row["state"] = ("UNAVAILABLE" if not row["archive_count"] else
                             "PARTIAL" if first is None or last is None or
                             first > request.period_start or last < request.period_end else "AVAILABLE")
@@ -61,21 +74,13 @@ class CatalogStatusService:
 class CompletedRunReader:
     """Resolve summaries and navigation solely through the canonical manifest."""
     def read(self, run_dir: Path) -> tuple[dict, dict]:
-        manifest = json.loads((Path(run_dir) / "run_manifest.json").read_text(encoding="utf-8"))
-        if manifest.get("run_status") != "COMPLETED":
-            raise ValueError("The selected run is not completed")
+        manifest = load_completed_manifest(Path(run_dir))
         summary = json.loads(self.artifact_path(run_dir, manifest, "summary").read_text(encoding="utf-8"))
         return manifest, summary
 
     @staticmethod
     def artifact_path(run_dir: Path, manifest: dict, name: str) -> Path:
-        entry = manifest.get("artifacts", {}).get(name)
-        if not entry or not entry.get("path"):
-            raise KeyError(f"Artifact is not present: {name}")
-        path = (Path(run_dir) / entry["path"]).resolve()
-        if Path(run_dir).resolve() not in path.parents:
-            raise ValueError("Artifact path escapes the completed run")
-        return path
+        return artifact_path(Path(run_dir), manifest, name, verify=True)
 
 
 class GuiApplicationService:
@@ -86,6 +91,10 @@ class GuiApplicationService:
         self.catalog = CatalogStatusService(self.store)
         self.completed_runs = CompletedRunReader()
         self._runner_factory = runner_factory
+
+    def refresh_catalog(self) -> int:
+        """Refresh discovery only at the application-service boundary."""
+        return self.store.refresh_catalog()
 
     def _runner(self, output_root: Path):
         if self._runner_factory:

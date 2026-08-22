@@ -5,12 +5,20 @@ import ast
 from dataclasses import replace
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 
+import pytest
 from crypto_strategy_lab.data import MarketKind
-from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+from crypto_strategy_lab.data.quality import (DataQualityIssue, DataQualityReport,
+    DataQualityStatus, DatasetQualityReport)
+from crypto_strategy_lab.data_lake_config import (ExecutionProfileConfig, FeatureConfig,
+    ResearchRunConfig, StrategyProfileConfig)
 from crypto_strategy_lab.gui.v2_controller import (CompletedRunReader,
-    GuiApplicationService, GuiResearchRequest)
+    CatalogStatusService, GuiApplicationService, GuiResearchRequest)
+from crypto_strategy_lab.run_manifest import (FEATURE_RESEARCH_ARTIFACT_CONTRACT,
+    FEATURE_RESEARCH_ARTIFACT_VERSION, RUN_MANIFEST_CONTRACT, RUN_MANIFEST_VERSION,
+    RunArtifactError, file_sha256)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +85,20 @@ def test_controller_invokes_injected_runner_exactly_once(tmp_path):
     assert len(calls) == 1
 
 
+def test_catalog_coverage_is_utc_normalized_and_path_free(tmp_path):
+    class Catalog:
+        def inventory(self, *_args, **_kwargs):
+            return [{"exchange":"binance","symbol":"BTCUSDT","dataset":"klines",
+                "interval":"4h","first_period":datetime(2026,1,1),
+                "last_period":datetime(2026,1,3),"archive_count":2}]
+    store=type("Store",(),{"raw_root":tmp_path,"catalog":Catalog()})()
+    request=GuiResearchRequest("binance",MarketKind.FUTURES_UM,"BTCUSDT",
+        datetime(2026,1,1,tzinfo=timezone.utc),datetime(2026,1,2,tzinfo=timezone.utc),"4h","1m")
+    row=CatalogStatusService(store).coverage(request)[0]
+    assert row["first_period"].tzinfo is not None and row["last_period"].tzinfo is not None
+    assert row["state"] == "AVAILABLE" and "path" not in row
+
+
 def test_native_v3_save_load_preserves_profiles_and_output_is_nonsemantic(tmp_path):
     service=object.__new__(GuiApplicationService); path=tmp_path/"native.json"
     original=ResearchRunConfig(); changed=replace(original,
@@ -89,12 +111,20 @@ def test_native_v3_save_load_preserves_profiles_and_output_is_nonsemantic(tmp_pa
 
 def test_results_are_resolved_from_manifest_catalog(tmp_path):
     (tmp_path/"artifacts").mkdir(); (tmp_path/"artifacts/summary.json").write_text('{"total_trades": 7}')
-    manifest={"run_status":"COMPLETED","artifacts":{"summary":{"path":"artifacts/summary.json"},
-              "signals":{"path":"artifacts/signals.parquet"}}}
+    (tmp_path/"artifacts/signals.parquet").write_bytes(b"canonical-signal-double")
+    summary_path=tmp_path/"artifacts/summary.json"
+    manifest={"run_manifest_contract":RUN_MANIFEST_CONTRACT,"run_manifest_version":RUN_MANIFEST_VERSION,
+              "run_status":"COMPLETED","research":{"artifact_contract":FEATURE_RESEARCH_ARTIFACT_CONTRACT,
+              "artifact_version":FEATURE_RESEARCH_ARTIFACT_VERSION},
+              "artifacts":{"summary":{"path":"artifacts/summary.json","sha256":file_sha256(summary_path)},
+              "signals":{"path":"artifacts/signals.parquet","sha256":file_sha256(tmp_path/"artifacts/signals.parquet")}}}
     (tmp_path/"run_manifest.json").write_text(json.dumps(manifest))
     loaded,summary=CompletedRunReader().read(tmp_path)
     assert summary["total_trades"] == 7
     assert CompletedRunReader.artifact_path(tmp_path,loaded,"signals").name == "signals.parquet"
+    (tmp_path/"artifacts/signals.parquet").write_bytes(b"tampered")
+    with pytest.raises(RunArtifactError,match="integrity"):
+        CompletedRunReader.artifact_path(tmp_path,loaded,"signals")
 
 
 def test_only_controller_constructs_research_runner():
@@ -102,3 +132,91 @@ def test_only_controller_constructs_research_runner():
     assert "ResearchRunner" not in gui_source
     assert "ResearchRunner(" in controller_source
     assert 'run_manifest.json").write' not in gui_source + controller_source
+
+
+def _qt_window():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    from crypto_strategy_lab.gui.v2_main_window import MainWindow
+    app = widgets.QApplication.instance() or widgets.QApplication([])
+    class Catalog:
+        def symbols(self): return ["BTCUSDT"]
+        def coverage(self, _request): return []
+    class Service:
+        catalog=Catalog()
+        def refresh_catalog(self): return 0
+    return app, MainWindow(service=Service())
+
+
+def test_main_window_constructs_offscreen_and_timeframes_roundtrip():
+    _app, window = _qt_window()
+    try:
+        from crypto_strategy_lab.gui.v2_main_window import timeframe_label, timeframe_minutes
+        assert {label: timeframe_minutes(label) for label in ("15m","1h","4h","1d")} == {
+            "15m":15,"1h":60,"4h":240,"1d":1440}
+        assert [timeframe_label(value) for value in (15,60,240,1440)] == ["15m","1h","4h","1d"]
+        for label in ("15m","1h","4h","1d"):
+            config=ResearchRunConfig(data=replace(ResearchRunConfig().data,
+                strategy_timeframe_minutes=timeframe_minutes(label), use_intrabar_data=False))
+            window.apply_config(config)
+            assert window.build_config() == config
+    finally: window.close()
+
+
+def test_full_native_config_and_profiles_survive_gui_roundtrip():
+    _app, window = _qt_window()
+    try:
+        base=ResearchRunConfig()
+        rules=({"indicator":"ADX","operator":">=","value":23.5,"action":"REJECT","enabled":True},)
+        strategy_profiles=dict(base.strategy.profiles); execution_profiles=dict(base.execution.profiles)
+        strategy_profiles["bull_long"]=replace(strategy_profiles["bull_long"],enabled=False,
+            flip_direction=True,entry_rules=rules,flip_rule_match_mode="ALL",reject_rule_match_mode="ALL",
+            rsi_period=base.features.mean_reversion_rsi_period,momentum_lookback_hours=48)
+        execution_profiles["bull_long"]=replace(execution_profiles["bull_long"],reward_risk_ratio=2.25,
+            risk_multiplier=.75,partial_stop_enabled=True,partial_profit_enabled=True,trailing_enabled=True,
+            break_even_enabled=True,timeout_enabled=True,r_step_trailing_enabled=True,
+            atr_checkpoint_tp_extension_enabled=True)
+        config=replace(base,
+            features=replace(base.features,trade_flow_enabled=True,trade_flow_windows=("1m","1h"),
+                order_book_enabled=True,enable_support_resistance_analysis=True),
+            strategy=replace(base.strategy,profiles=strategy_profiles,entry_interval=3,
+                enable_daily_entry_schedule=True),
+            execution=replace(base.execution,profiles=execution_profiles,risk_mode="PERCENT",
+                maker_fee=.00123456,tie_policy="OPTIMISTIC"))
+        window.apply_config(config)
+        assert set(window.strategy_form.widgets) == set(config.strategy.__dataclass_fields__) - {"profiles"}
+        assert set(window.feature_form.widgets) == set(config.features.__dataclass_fields__)
+        assert set(window.execution_form.widgets) == set(config.execution.__dataclass_fields__) - {"profiles"}
+        assert set(window.profile_editor.strategy_form.widgets) == set(StrategyProfileConfig.__dataclass_fields__) - {"entry_rules"}
+        assert set(window.profile_editor.execution_form.widgets) == set(ExecutionProfileConfig.__dataclass_fields__)
+        assert window.build_config() == config
+        assert window.build_config().strategy.profiles["bull_long"].entry_rules == rules
+    finally: window.close()
+
+
+def test_apply_config_does_not_corrupt_current_profile():
+    _app, window = _qt_window()
+    try:
+        base=ResearchRunConfig(); profiles=dict(base.strategy.profiles)
+        profiles["bear_short"]=replace(profiles["bear_short"],enabled=False,flip_direction=True)
+        config=replace(base,strategy=replace(base.strategy,profiles=profiles))
+        window.profile_editor.selector.setCurrentText("bear_short")
+        window.apply_config(config)
+        assert window.build_config().strategy.profiles == profiles
+    finally: window.close()
+
+
+def test_data_quality_completion_uses_overall_and_dataset_status():
+    _app, window = _qt_window()
+    try:
+        issue=DataQualityIssue("GAP",DataQualityStatus.WARN,"coverage gap")
+        dataset=DatasetQualityReport("klines","BTCUSDT","4h",True,"a","b","a","b","a","b",10,
+            None,DataQualityStatus.WARN,(issue,),False)
+        window.render_data_quality(DataQualityReport((dataset,)))
+        assert window.quality.text() == "Data quality: WARN"
+        assert window.quality_table.item(0,4).text() == "WARN"
+        assert window.quality_table.item(0,5).text() == "GAP"
+        window.render_resolution({"request":{"requested_intrabar_interval":"1m",
+            "effective_intrabar_interval":"15m"}})
+        assert window.resolution.text() == "Requested: 1m | Effective: 15m | FALLBACK"
+    finally: window.close()
