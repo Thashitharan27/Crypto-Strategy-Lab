@@ -83,7 +83,7 @@ def _schema(params):
         ):
             schema[f"{name}_{suffix}"] = OutputField("numeric")
         if minutes == 1:
-            # For TRADES this is the true individual-trade median.  For
+            # For TRADES this is the true individual-trade median. For
             # AGG_TRADES it is deliberately named as a source-event median.
             schema["median_source_event_size_1m"] = OutputField("numeric")
     return schema
@@ -180,7 +180,7 @@ class TradeFlowContextFeatureProvider:
             large = {
                 name: numeric[name]
                 .rolling(minutes, min_periods=minutes)
-                .sum(min_count=minutes)
+                .sum()
                 .where(valid)
                 for name in _LARGE_FIELDS
             }
@@ -229,15 +229,15 @@ class TradeFlowContextFeatureProvider:
                     agg["median_source_event_size"], errors="coerce"
                 ).where(covered)
 
-        # CVD is deterministic with respect to request start.  The aggregate
-        # loader supplies the UTC-day prefix.  If a source minute is unavailable,
+        # CVD is deterministic with respect to request start. The aggregate
+        # loader supplies the UTC-day prefix. If a source minute is unavailable,
         # later CVD values for that UTC day remain unknown rather than treating the
         # missing flow as zero.
         bucket_day = agg["period_start"].dt.floor("D")
         day_complete = covered.groupby(bucket_day).cummin().astype(bool)
         day_cvd = numeric["trade_delta_base"].where(covered).groupby(bucket_day).cumsum()
         day_cvd = day_cvd.where(day_complete)
-        # The 23:59--00:00 bucket belongs to the previous UTC day.  At exactly
+        # The 23:59--00:00 bucket belongs to the previous UTC day. At exactly
         # 00:00 the new day's completed-bucket CVD is zero.
         crossed_midnight = agg["available_at"].dt.floor("D") != bucket_day
         day_cvd.loc[crossed_midnight & covered] = 0.0
