@@ -92,9 +92,6 @@ def feature_context_frame(prepared) -> pd.DataFrame:
     reserved = set(values)
     research_parity_columns: set[str] = set()
 
-    # Task 16 is a compact decision-context artifact, not a second OHLCV or
-    # intrabar history store. ``close`` is useful descriptive context; raw
-    # execution OHLCV except close is intentionally excluded.
     excluded = {
         "timestamp",
         "strategy_interval",
@@ -207,7 +204,11 @@ def _empty_trade_schema(trades: pd.DataFrame) -> pd.DataFrame:
         elif column in datetime_columns:
             result[column] = pd.Series(dtype="datetime64[ns, UTC]")
         else:
-            result[column] = pd.Series(dtype="object")
+            result[column] = pd.Series(dtype="string")
+    # Empty object columns can otherwise be inferred as INTEGER by DuckDB.
+    # Normalize the fields used by SQL expressions even when the simulator
+    # returned a zero-row frame with an existing but untyped column.
+    result["side"] = result["side"].astype("string")
     return result
 
 
@@ -279,8 +280,6 @@ def write_research_artifacts(run_dir: Path, result, context) -> dict[str, Any]:
     }
     _atomic_json(manifest_path, manifest)
 
-    # The manifest is the publication marker. Re-open it through the standalone
-    # query service before advertising it from the parent run manifest.
     try:
         with ResearchQueryService(run_dir):
             pass
@@ -461,10 +460,12 @@ class ResearchQueryService:
         if {"plus_di", "minus_di"} <= context_columns:
             select.extend(
                 [
-                    "CASE WHEN upper(t.side)='LONG' THEN c.plus_di "
-                    "WHEN upper(t.side)='SHORT' THEN c.minus_di END AS directional_di",
-                    "CASE WHEN upper(t.side)='LONG' THEN c.minus_di "
-                    "WHEN upper(t.side)='SHORT' THEN c.plus_di END AS opposing_di",
+                    "CASE WHEN upper(cast(t.side AS VARCHAR))='LONG' THEN c.plus_di "
+                    "WHEN upper(cast(t.side AS VARCHAR))='SHORT' THEN c.minus_di "
+                    "END AS directional_di",
+                    "CASE WHEN upper(cast(t.side AS VARCHAR))='LONG' THEN c.minus_di "
+                    "WHEN upper(cast(t.side AS VARCHAR))='SHORT' THEN c.plus_di "
+                    "END AS opposing_di",
                 ]
             )
         self.connection.execute(
