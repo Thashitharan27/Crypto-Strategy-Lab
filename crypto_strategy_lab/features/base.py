@@ -30,6 +30,13 @@ class ParameterDefinition:
 
     def normalize(self, value: object) -> object:
         try:
+            if self.normalizer is bool and isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in {"true", "1", "yes", "on"}:
+                    return True
+                if normalized in {"false", "0", "no", "off"}:
+                    return False
+                raise ValueError(f"invalid boolean parameter value {value!r}")
             return self.normalizer(value)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"invalid parameter value {value!r}") from exc
@@ -69,18 +76,27 @@ class FeatureDefinition:
     parameters: Mapping[str, ParameterDefinition] = field(default_factory=dict)
     output_schema: Mapping[str, OutputField] = field(default_factory=dict)
     required_features: tuple[str, ...] = ()
+    optional_datasets: tuple[DatasetKind, ...] = ()
     warmup_bars: int = 0
     availability_rule: str = "max_dependency_available_at"
 
     def __post_init__(self) -> None:
         if not self.name.strip() or not self.version.strip():
             raise ValueError("feature name and version must not be empty")
+        if set(self.required_datasets) & set(self.optional_datasets):
+            raise ValueError("dataset cannot be both required and optional")
         schema = dict(self.output_schema)
         if self.output_columns:
             def inferred(name: str) -> OutputField:
                 if name in {"timestamp", "available_at", "date"} or name.endswith("_at") or name.endswith("_time"):
                     return OutputField("datetime")
-                if name == "funding_bias" or any(token in name for token in ("state", "rating", "location", "signal", "regime", "motion", "strength_label", "basis_state")):
+                if name == "funding_bias" or name.endswith("_confirmation") or any(
+                    token in name
+                    for token in (
+                        "state", "rating", "location", "signal", "regime", "motion",
+                        "strength_label", "basis_state",
+                    )
+                ):
                     return OutputField("string")
                 if name.startswith(("near_", "inside_")) or name.endswith(("_tested", "_held", "_changed", "_reentry")):
                     return OutputField("bool")
