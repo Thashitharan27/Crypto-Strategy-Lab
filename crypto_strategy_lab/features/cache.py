@@ -10,6 +10,7 @@ import duckdb
 import pandas as pd
 
 from crypto_strategy_lab.data.query import DataRequest
+from crypto_strategy_lab.data.source_identity import SourceSignature
 
 from .base import FeatureDefinition
 
@@ -54,6 +55,30 @@ class FeatureFrameCache:
             "dependencies": list(dependency_keys),
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        return sha256(raw).hexdigest()
+
+    def key_from_signatures(
+        self,
+        definition: FeatureDefinition,
+        request: DataRequest,
+        parameters: Mapping[str, object],
+        source_signatures: Sequence[SourceSignature],
+        *,
+        dependency_keys: Sequence[str] = (),
+    ) -> str:
+        """Build a key from catalog metadata, before source frames are loaded."""
+
+        payload = {
+            "feature": definition.name,
+            "version": definition.version,
+            "request": request.cache_key(),
+            "parameters": dict(parameters),
+            "sources": [signature.cache_identity() for signature in source_signatures],
+            "dependencies": list(dependency_keys),
+        }
+        raw = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
         return sha256(raw).hexdigest()
 
     def paths(

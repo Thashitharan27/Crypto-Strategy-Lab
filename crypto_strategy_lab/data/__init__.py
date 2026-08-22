@@ -3,6 +3,7 @@
 from .query import DataRequest
 from .schemas import ArchiveRecord, Coverage, DatasetKind, MarketKind
 from .store import DataNotAvailableError, MarketDataStore
+from .source_identity import SourceSignature
 
 __all__ = [
     "ArchiveRecord",
@@ -12,4 +13,5 @@ __all__ = [
     "DatasetKind",
     "MarketDataStore",
     "MarketKind",
+    "SourceSignature",
 ]

@@ -96,6 +96,43 @@ def _cached_multisource_feature(store, request, datasets, provider, parameters=N
     return frame
 
 
+def _cached_catalog_feature(
+    store,
+    request,
+    canonical,
+    dataset,
+    provider,
+    parameters=None,
+):
+    """Resolve a multisource feature cache before materializing its event data."""
+    parameters = dict(parameters or {})
+    kline_request = _dataset_request(request, DatasetKind.KLINES)
+    signatures = (
+        store.source_signature(
+            kline_request, DatasetKind.KLINES, interval=request.strategy_interval
+        ),
+        store.source_signature(_dataset_request(request, dataset), dataset),
+    )
+    cache = FeatureFrameCache(store.cache.root)
+    key = cache.key_from_signatures(
+        provider.definition, request, parameters, signatures
+    )
+    cached = cache.load(provider.definition, request, key)
+    if cached is not None:
+        return cached
+
+    source = store.load_dataset(_dataset_request(request, dataset), dataset)
+    if source.empty:
+        return None
+    frame = provider.compute(
+        request, {DatasetKind.KLINES: canonical, dataset: source}, parameters
+    )
+    frame.attrs["feature_cache_hit"] = False
+    frame.attrs["feature_cache_key"] = key
+    cache.store(provider.definition, request, key, frame)
+    return frame
+
+
 def _dataset_request(request: DataRequest, dataset: DatasetKind, *, start=None) -> DataRequest:
     return DataRequest(
         symbol=request.symbol,
@@ -126,18 +163,12 @@ def _optional_futures_research_features(
 
     result: dict[str, pd.DataFrame] = {}
     try:
-        metrics = store.load_dataset(
-            _dataset_request(request, DatasetKind.FUTURES_METRICS),
-            DatasetKind.FUTURES_METRICS,
+        provider = FuturesPositioningFeatureProvider()
+        positioning = _cached_catalog_feature(
+            store, request, canonical, DatasetKind.FUTURES_METRICS, provider
         )
-        if not metrics.empty:
-            provider = FuturesPositioningFeatureProvider()
-            result[provider.definition.name] = _cached_multisource_feature(
-                store,
-                request,
-                {DatasetKind.KLINES: canonical, DatasetKind.FUTURES_METRICS: metrics},
-                provider,
-            )
+        if positioning is not None:
+            result[provider.definition.name] = positioning
     except DataNotAvailableError:
         pass
 
