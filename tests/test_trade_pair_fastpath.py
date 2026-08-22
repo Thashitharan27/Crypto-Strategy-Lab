@@ -75,6 +75,24 @@ def test_is_open_tracks_the_single_position() -> None:
     assert not pair.is_open
 
 
+def test_trade_result_timestamps_normalize_naive_values_to_utc() -> None:
+    position = _position(Side.LONG)
+    pair = TradePair(
+        pair_id=1,
+        long=position,
+        short=None,
+        equity_before_trade=1000.0,
+        strategy_candle_open_time=pd.Timestamp("2026-01-01T00:00:00"),
+        strategy_entry_time=pd.Timestamp("2026-01-01T00:15:00"),
+        strategy_entry_price=100.0,
+    )
+    position.exit_time = pd.Timestamp("2026-01-01T00:20:00")
+
+    assert str(pair.strategy_candle_open_time) == "2026-01-01 00:00:00+00:00"
+    assert str(pair.strategy_entry_time) == "2026-01-01 00:15:00+00:00"
+    assert str(position.exit_time) == "2026-01-01 00:20:00+00:00"
+
+
 def test_runtime_leg_mutation_cannot_resurrect_dual_leg_state() -> None:
     pair = _pair(long=_position(Side.LONG))
     pair.short = _position(Side.SHORT)
