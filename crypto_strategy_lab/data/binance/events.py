@@ -5,7 +5,12 @@ from __future__ import annotations
 import pandas as pd
 
 from ..schemas import ArchiveRecord, DatasetKind
-from .base_adapter import BinanceArchiveAdapter, normalize_header_columns, open_csv_stream, timestamp_series
+from .base_adapter import (
+    BinanceArchiveAdapter,
+    normalize_header_columns,
+    open_csv_stream,
+    timestamp_series,
+)
 
 
 def _read_header_frame(record: ArchiveRecord) -> pd.DataFrame:
@@ -40,9 +45,18 @@ def _base_event_frame(record: ArchiveRecord, event_time: pd.Series) -> pd.DataFr
 
 
 class FuturesMetricsArchiveAdapter(BinanceArchiveAdapter):
-    """Open-interest/positioning snapshot fields from Binance Vision metrics."""
+    """Open-interest/positioning snapshot fields from Binance Vision metrics.
+
+    Binance occasionally leaves individual compact metric columns blank while
+    the snapshot itself remains valid. Optional numeric facts are therefore
+    stored with pandas' nullable Float64 dtype: missing means unknown, whereas
+    supplied non-finite or negative values are still rejected by data-quality
+    validation. The normalizer version is bumped so existing L1 cache entries
+    created before this nullable contract are not reused.
+    """
 
     dataset = DatasetKind.FUTURES_METRICS
+    normalizer_version = 2
 
     _FIELD_MAP = {
         "sum_open_interest": "open_interest",
@@ -55,7 +69,9 @@ class FuturesMetricsArchiveAdapter(BinanceArchiveAdapter):
 
     def read(self, record: ArchiveRecord) -> pd.DataFrame:
         if record.dataset != self.dataset:
-            raise ValueError(f"FuturesMetricsArchiveAdapter cannot read {record.dataset.value}")
+            raise ValueError(
+                f"FuturesMetricsArchiveAdapter cannot read {record.dataset.value}"
+            )
         raw = _read_header_frame(record)
         if raw.empty:
             return pd.DataFrame()
@@ -64,14 +80,18 @@ class FuturesMetricsArchiveAdapter(BinanceArchiveAdapter):
         frame = _base_event_frame(record, event_time)
         for source, target in self._FIELD_MAP.items():
             if source in raw.columns:
-                frame[target] = pd.to_numeric(raw[source], errors="coerce")
+                frame[target] = pd.to_numeric(raw[source], errors="coerce").astype(
+                    "Float64"
+                )
         if "symbol" in raw.columns:
             symbols = raw["symbol"].astype(str).str.upper()
             mismatch = symbols.ne(record.symbol) & symbols.ne("")
             if bool(mismatch.any()):
                 raise ValueError(f"Metrics symbol mismatch in {record.path}")
         frame = frame.sort_values("event_time", kind="stable")
-        return frame.drop_duplicates(subset=["symbol", "event_time"], keep="last").reset_index(drop=True)
+        return frame.drop_duplicates(
+            subset=["symbol", "event_time"], keep="last"
+        ).reset_index(drop=True)
 
 
 class FundingRateArchiveAdapter(BinanceArchiveAdapter):
@@ -81,22 +101,40 @@ class FundingRateArchiveAdapter(BinanceArchiveAdapter):
 
     def read(self, record: ArchiveRecord) -> pd.DataFrame:
         if record.dataset != self.dataset:
-            raise ValueError(f"FundingRateArchiveAdapter cannot read {record.dataset.value}")
+            raise ValueError(
+                f"FundingRateArchiveAdapter cannot read {record.dataset.value}"
+            )
         raw = _read_header_frame(record)
         if raw.empty:
             return pd.DataFrame()
-        timestamp_col = _first_column(raw, ("calc_time", "funding_time", "fundingtime", "timestamp", "time"))
-        rate_col = _first_column(raw, ("last_funding_rate", "funding_rate", "fundingrate"))
+        timestamp_col = _first_column(
+            raw,
+            ("calc_time", "funding_time", "fundingtime", "timestamp", "time"),
+        )
+        rate_col = _first_column(
+            raw, ("last_funding_rate", "funding_rate", "fundingrate")
+        )
         event_time = timestamp_series(raw[timestamp_col])
         frame = _base_event_frame(record, event_time)
         frame["funding_rate"] = pd.to_numeric(raw[rate_col], errors="raise")
-        interval_col = next((name for name in ("funding_interval_hours", "funding_interval") if name in raw.columns), None)
+        interval_col = next(
+            (
+                name
+                for name in ("funding_interval_hours", "funding_interval")
+                if name in raw.columns
+            ),
+            None,
+        )
         if interval_col is not None:
-            frame["funding_interval_hours"] = pd.to_numeric(raw[interval_col], errors="coerce")
+            frame["funding_interval_hours"] = pd.to_numeric(
+                raw[interval_col], errors="coerce"
+            )
         if "symbol" in raw.columns:
             symbols = raw["symbol"].astype(str).str.upper()
             mismatch = symbols.ne(record.symbol) & symbols.ne("")
             if bool(mismatch.any()):
                 raise ValueError(f"Funding symbol mismatch in {record.path}")
         frame = frame.sort_values("event_time", kind="stable")
-        return frame.drop_duplicates(subset=["symbol", "event_time"], keep="last").reset_index(drop=True)
+        return frame.drop_duplicates(
+            subset=["symbol", "event_time"], keep="last"
+        ).reset_index(drop=True)
