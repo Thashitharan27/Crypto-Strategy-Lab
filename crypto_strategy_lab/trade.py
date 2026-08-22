@@ -4,6 +4,17 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+import pandas as pd
+
+
+def _utc_timestamp(value):
+    """Normalize externally published trade timestamps to UTC-aware pandas values."""
+    if value is None:
+        return None
+    timestamp = pd.Timestamp(value)
+    return timestamp.tz_localize("UTC") if timestamp.tzinfo is None else timestamp.tz_convert("UTC")
+
+
 class Side(str, Enum): LONG="LONG"; SHORT="SHORT"
 class ExitReason(str, Enum): TP="TP"; SL="SL"; ATR_CHECKPOINT_PROFIT_LOCK="ATR_CHECKPOINT_PROFIT_LOCK"; R_STEP_TRAILING_STOP="R_STEP_TRAILING_STOP"; TRAILING_STOP="TRAILING_STOP"; BE="BE"; BE_COST_ADJUSTED="BE_COST_ADJUSTED"; BE_R_OFFSET="BE_R_OFFSET"; PROFILE_TIMEOUT="PROFILE_TIMEOUT"; END_OF_DATA="END_OF_DATA"
 class ExitSource(str, Enum): INTRABAR="1M_INTRABAR"; FALLBACK_15M="15M_FALLBACK"; END_OF_DATA="END_OF_DATA"
@@ -48,6 +59,15 @@ class Position:
     sr_support_zone_low: Optional[float] = None; sr_support_zone_high: Optional[float] = None
     sr_resistance_zone_low: Optional[float] = None; sr_resistance_zone_high: Optional[float] = None
     sr_level_price: Optional[float] = None; sr_zone_low: Optional[float] = None; sr_zone_high: Optional[float] = None
+
+    def __setattr__(self, name, value):
+        # Exit timestamps are published trade results. Normalize only at assignment
+        # after internal execution comparisons have already completed, leaving the
+        # hot-path entry/checkpoint timestamps in their native representation.
+        if name == "exit_time" and value is not None:
+            value = _utc_timestamp(value)
+        object.__setattr__(self, name, value)
+
     @property
     def is_open(self) -> bool: return self.exit_time is None
 
@@ -63,6 +83,11 @@ class TradePair:
     _positions: tuple[Position, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        # Trade-facing timestamps are part of the public result contract and have
+        # historically been UTC-aware. PreparedBacktestFrame stores UTC instants
+        # efficiently as datetime64[ns], so restore the timezone when publishing.
+        self.strategy_candle_open_time = _utc_timestamp(self.strategy_candle_open_time)
+        self.strategy_entry_time = _utc_timestamp(self.strategy_entry_time)
         position = self.position
         self._positions = (position,)
 
