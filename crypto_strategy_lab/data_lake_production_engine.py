@@ -95,8 +95,8 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
                 self._restore_enhanced_context_shims(originals)
 
         if production_context is not None:
-            # The enhanced engine is still the semantic authority; these arrays
-            # are simply the precomputed values it would have produced itself.
+            # The enhanced engine is still the semantic authority for legacy
+            # construction; these arrays simply replace duplicate raw indicator work.
             self.prepared_context_features = production_context
             self.mean_reversion_mean = production_context["mean_reversion_mean"].to_numpy(float)
             self.mean_reversion_distance_atr = production_context[
@@ -200,6 +200,13 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         self.mean_reversion_motion = prepared.mean_reversion_motion
         self.mean_reversion_strength = prepared.mean_reversion_strength
         self.mean_reversion_strength_label = prepared.mean_reversion_strength_label
+        for name in (
+            "mean_reversion_bb_location", "mean_reversion_rsi_state",
+            "mean_reversion_reentry_confirmation", "mean_reversion_signal",
+            "mean_reversion_signal_direction", "mean_reversion_setup_strength",
+            "bb_reentry", "mr_signal", "mr_signal_direction",
+        ):
+            setattr(self, name, getattr(prepared, name))
         periods = {p.rsi_period for p in config.strategy_profiles.values()}
         expected_period = int(getattr(config, "mean_reversion_rsi_period", 14))
         if any(int(period) != expected_period for period in periods):
@@ -227,42 +234,69 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         self.daily_entry_tz=ZoneInfo(config.daily_entry_timezone)
         hh, mm=[int(part) for part in str(config.daily_entry_time).split(":", 1)]; self.daily_entry_minutes=hh*60+mm
         self.sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or config.strategy_timeframe_minutes)
-        self.sr_uses_higher_timeframe=False; self.sr_htf_frame=None; self.sr_htf_end_times=np.array([], dtype="datetime64[ns]")
+        self.sr_uses_higher_timeframe=bool(
+            config.enable_support_resistance_analysis
+            and self.sr_timeframe_minutes > int(config.strategy_timeframe_minutes)
+        )
+        self.sr_htf_frame=None
+        completed = None if sr_block is None else sr_block.values.get("sr_completed_candle_time")
+        if self.sr_uses_higher_timeframe and completed is not None:
+            completed_values = np.asarray(completed, dtype="datetime64[ns]")
+            self.sr_htf_end_times = np.unique(completed_values[~np.isnat(completed_values)])
+        else:
+            self.sr_htf_end_times=np.array([], dtype="datetime64[ns]")
         self.prepared_context_features=None; self.support_resistance_features=None
         self.research_features={block.name: block for block in prepared.research if block.name != "support_resistance"}
         self.research_output_columns=tuple(column for block in self.research_features.values() for column in block.values)
         self.research_feature_available_columns=tuple(f"{name}_feature_available_at" for name in self.research_features)
         self.technical_features=None; self.context_features=None
-        self.technical_feature_source="prepared_backtest_frame"; self.context_feature_source="prepared_backtest_frame"; self.support_resistance_feature_source="runtime_policy" if self.sr_detector else "disabled"
+        self.technical_feature_source="prepared_backtest_frame"; self.context_feature_source="prepared_backtest_frame"
+        self.support_resistance_feature_source=(
+            "prepared_backtest_frame_htf" if self.sr_uses_higher_timeframe
+            else "prepared_backtest_frame" if self.sr_detector else "disabled"
+        )
         return self
 
     def _di_pressure_snapshot(self, i, direction):
         """Select LONG/SHORT policy meaning from direction-neutral prepared DI values."""
+        if not hasattr(self, "prepared_frame"):
+            return super()._di_pressure_snapshot(i, direction)
         plus, minus = float(self.plus_di_values[i]), float(self.minus_di_values[i])
         result = {
             "plus_di": plus, "minus_di": minus, "directional_di": np.nan,
-            "opposing_di": np.nan, "plus_di_change": float(self.plus_di_change[i]),
-            "minus_di_change": float(self.minus_di_change[i]),
+            "opposing_di": np.nan, "plus_di_change": np.nan,
+            "minus_di_change": np.nan,
             "directional_di_change": np.nan, "opposing_di_change": np.nan,
             "di_spread": float(self.di_spread[i]),
-            "di_spread_change": float(self.di_pressure_spread_change[i]),
+            "di_spread_change": np.nan,
             "di_pressure_state": "UNKNOWN",
             "di_pressure_lookback": self.config.di_pressure_lookback,
         }
+        if direction not in ("LONG", "SHORT") or not np.isfinite(plus) or not np.isfinite(minus):
+            return result
         if direction == "LONG":
-            result.update(directional_di=plus, opposing_di=minus,
-                          directional_di_change=float(self.long_directional_di_change[i]),
-                          opposing_di_change=float(self.long_opposing_di_change[i]),
-                          di_pressure_state=str(self.long_di_pressure_state[i]))
-        elif direction == "SHORT":
-            result.update(directional_di=minus, opposing_di=plus,
-                          directional_di_change=float(self.short_directional_di_change[i]),
-                          opposing_di_change=float(self.short_opposing_di_change[i]),
-                          di_pressure_state=str(self.short_di_pressure_state[i]))
+            result.update(directional_di=plus, opposing_di=minus)
+            directional_change=float(self.long_directional_di_change[i])
+            opposing_change=float(self.long_opposing_di_change[i])
+            pressure_state=str(self.long_di_pressure_state[i])
+        else:
+            result.update(directional_di=minus, opposing_di=plus)
+            directional_change=float(self.short_directional_di_change[i])
+            opposing_change=float(self.short_opposing_di_change[i])
+            pressure_state=str(self.short_di_pressure_state[i])
         if not self.config.enable_di_pressure_analysis:
-            result.update(plus_di_change=np.nan, minus_di_change=np.nan,
-                          directional_di_change=np.nan, opposing_di_change=np.nan,
-                          di_spread_change=np.nan, di_pressure_state="UNKNOWN")
+            return result
+        plus_change=float(self.plus_di_change[i]); minus_change=float(self.minus_di_change[i])
+        if not np.isfinite(plus_change) or not np.isfinite(minus_change):
+            return result
+        result.update(
+            plus_di_change=plus_change,
+            minus_di_change=minus_change,
+            directional_di_change=directional_change,
+            opposing_di_change=opposing_change,
+            di_spread_change=float(self.di_pressure_spread_change[i]),
+            di_pressure_state=pressure_state,
+        )
         return result
 
     @classmethod
@@ -368,10 +402,114 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         ) = originals
 
     def _mean_reversion_snapshot(self, i, di_direction, trade_direction=None):
-        """Preserve the mature enhanced MR-v2 snapshot using prepared arrays."""
-        return SRDynamicTPBacktestEngine._mean_reversion_snapshot(
+        """Use prepared MR-v2 market classifications; keep only direction alignment as policy."""
+        if not hasattr(self, "prepared_frame"):
+            return SRDynamicTPBacktestEngine._mean_reversion_snapshot(
+                self, i, di_direction, trade_direction
+            )
+        result = DataLakeBacktestEngine._mean_reversion_snapshot(
             self, i, di_direction, trade_direction
         )
+        config = self.config
+        distance_alignment = result.get("mean_reversion_alignment", "UNKNOWN")
+        result.update(
+            {
+                "mean_reversion_mean_type": str(getattr(config, "mean_reversion_mean_type", "EMA")).upper(),
+                "mean_reversion_bb_stddevs": float(getattr(config, "mean_reversion_bb_stddevs", 2.0)),
+                "mean_reversion_rsi_period": int(getattr(config, "mean_reversion_rsi_period", 14)),
+                "mean_reversion_rsi_oversold": float(getattr(config, "mean_reversion_rsi_oversold", 30.0)),
+                "mean_reversion_rsi_overbought": float(getattr(config, "mean_reversion_rsi_overbought", 70.0)),
+                "mean_reversion_require_reentry": bool(getattr(config, "mean_reversion_require_reentry", True)),
+                "mean_reversion_track_atr_distance": bool(getattr(config, "mean_reversion_track_atr_distance", True)),
+                "mean_reversion_track_motion": bool(getattr(config, "mean_reversion_track_motion", True)),
+                "mean_reversion_bb_upper": np.nan,
+                "mean_reversion_bb_lower": np.nan,
+                "mean_reversion_bb_sigma": np.nan,
+                "mean_reversion_bb_zscore": np.nan,
+                "mean_reversion_bb_location": "UNKNOWN",
+                "mean_reversion_rsi": np.nan,
+                "mean_reversion_rsi_state": "UNKNOWN",
+                "mean_reversion_long_reentry": False,
+                "mean_reversion_short_reentry": False,
+                "mean_reversion_reentry_confirmation": "NONE",
+                "mean_reversion_signal": "UNKNOWN",
+                "mean_reversion_signal_direction": "NONE",
+                "mean_reversion_setup_strength": "UNKNOWN",
+                "mean_reversion_distance_alignment": distance_alignment,
+                "mean_reversion_signal_di_alignment": "UNKNOWN",
+                "mean_reversion_signal_trade_alignment": "UNKNOWN",
+                "bb_reentry": "NONE",
+                "mr_signal": "NO_SIGNAL",
+                "mr_signal_direction": "NONE",
+                "mr_trade_alignment": "NO_SIGNAL",
+            }
+        )
+        if not config.enable_mean_reversion_analysis:
+            return result
+
+        signal = str(self.mean_reversion_signal[i])
+        reentry_direction = str(self.mean_reversion_reentry_confirmation[i])
+        di_signal_alignment = enhanced_engine_module.signal_alignment(signal, di_direction)
+        trade_signal_alignment = enhanced_engine_module.signal_alignment(
+            signal, trade_direction or di_direction
+        )
+        confirmed_trade_alignment = self._confirmed_alignment(
+            reentry_direction, trade_direction or di_direction
+        )
+        result.update(
+            {
+                "mean_price": float(self.mean_reversion_mean[i]) if np.isfinite(self.mean_reversion_mean[i]) else np.nan,
+                "mean_reversion_bb_upper": float(self.mean_reversion_bb_upper[i]) if np.isfinite(self.mean_reversion_bb_upper[i]) else np.nan,
+                "mean_reversion_bb_lower": float(self.mean_reversion_bb_lower[i]) if np.isfinite(self.mean_reversion_bb_lower[i]) else np.nan,
+                "mean_reversion_bb_sigma": float(self.mean_reversion_sigma[i]) if np.isfinite(self.mean_reversion_sigma[i]) else np.nan,
+                "mean_reversion_bb_zscore": float(self.mean_reversion_bb_zscore[i]) if np.isfinite(self.mean_reversion_bb_zscore[i]) else np.nan,
+                "mean_reversion_bb_location": str(self.mean_reversion_bb_location[i]),
+                "mean_reversion_rsi": float(self.mean_reversion_rsi_values[i]) if np.isfinite(self.mean_reversion_rsi_values[i]) else np.nan,
+                "mean_reversion_rsi_state": str(self.mean_reversion_rsi_state[i]),
+                "mean_reversion_long_reentry": bool(self.mean_reversion_long_reentry[i]),
+                "mean_reversion_short_reentry": bool(self.mean_reversion_short_reentry[i]),
+                "mean_reversion_reentry_confirmation": reentry_direction,
+                "mean_reversion_signal": signal,
+                "mean_reversion_signal_direction": str(self.mean_reversion_signal_direction[i]),
+                "mean_reversion_setup_strength": str(self.mean_reversion_setup_strength[i]),
+                "mean_reversion_distance_alignment": distance_alignment,
+                "mean_reversion_signal_di_alignment": di_signal_alignment,
+                "mean_reversion_signal_trade_alignment": trade_signal_alignment,
+                "bb_reentry": str(self.bb_reentry[i]),
+                "mr_signal": str(self.mr_signal[i]),
+                "mr_signal_direction": str(self.mr_signal_direction[i]),
+                "mr_trade_alignment": confirmed_trade_alignment,
+                "mean_reversion_alignment": di_signal_alignment,
+                "mean_reversion_di_alignment": di_signal_alignment,
+                "mean_reversion_trade_alignment": trade_signal_alignment,
+            }
+        )
+        if not bool(getattr(config, "mean_reversion_track_atr_distance", True)):
+            result.update(
+                {
+                    "mean_distance_atr": np.nan,
+                    "mean_distance_atr_previous": np.nan,
+                    "mean_distance_change_atr": np.nan,
+                    "mean_reversion_state": "UNKNOWN",
+                    "mean_reversion_strength": -1,
+                    "mean_reversion_strength_label": "UNKNOWN",
+                    "mean_reversion_distance_alignment": "UNKNOWN",
+                }
+            )
+        if not bool(getattr(config, "mean_reversion_track_motion", True)):
+            result["mean_distance_change_atr"] = np.nan
+            result["mean_reversion_motion"] = "UNKNOWN"
+        return result
+
+    def _analyze_support_resistance(self, i, direction):
+        """Native runs consume provider-prepared S/R even for higher timeframes."""
+        if hasattr(self, "prepared_frame"):
+            if self.sr_detector is None:
+                return None
+            return self.sr_detector.analyze_price_location(
+                i, None, None, None, None, None, direction
+            )
+        return super()._analyze_support_resistance(i, direction)
 
     def _update_positions_to_strategy_index(self, i):
         """Advance each active directional trade without rebuilding a pair tuple."""
@@ -520,7 +658,8 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         configured_minutes = int(getattr(self.config, "sr_timeframe_minutes", 0) or 0)
         effective_minutes = configured_minutes or strategy_minutes
         if effective_minutes > strategy_minutes:
-            # EnhancedBacktestEngine owns the complete-bar higher-timeframe path.
+            # Legacy construction retains the mature engine path. Native runs
+            # use PreparedSupportResistanceContextReader in from_prepared().
             self.support_resistance_feature_source = "higher_timeframe_engine"
             return
 
