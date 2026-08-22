@@ -132,12 +132,17 @@ class ResearchRunner:
         # Only the simulator boundary receives an effective DataConfig when an
         # explicitly configured quality fallback selected another resolution.
         effective_data_config = run_config.data
-        if request.intrabar_interval and bundle.intrabar_interval != request.intrabar_interval:
-            if bundle.intrabar_interval is None:
+        actual_intrabar_interval = getattr(
+            bundle,
+            "intrabar_interval",
+            request.intrabar_interval if getattr(bundle, "intrabar", None) is not None else None,
+        )
+        if request.intrabar_interval and actual_intrabar_interval != request.intrabar_interval:
+            if actual_intrabar_interval is None:
                 effective_data_config = replace(run_config.data, use_intrabar_data=False)
             else:
                 actual_minutes = int(
-                    interval_to_timedelta(bundle.intrabar_interval).total_seconds() // 60
+                    interval_to_timedelta(actual_intrabar_interval).total_seconds() // 60
                 )
                 effective_data_config = replace(
                     run_config.data,
