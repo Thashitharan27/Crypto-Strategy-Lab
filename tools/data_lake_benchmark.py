@@ -1,13 +1,8 @@
-"""Benchmark the production Data Lake v2 execution path on local market data.
-
-The tool intentionally skips report/export work so timings isolate the parts we
-can optimize independently: catalog refresh, Data Lake/cache preparation, engine
-construction, and stateful simulation. Repeated iterations also verify that the
-core trade results remain identical while caches warm up.
-"""
+"""Benchmark the authoritative composed Data Lake execution path on local data."""
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import datetime
 import hashlib
 import json
@@ -23,7 +18,6 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
-from crypto_strategy_lab.data.backtest_service import BacktestDataBundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.prepared_cache import PreparedRunCache
@@ -90,7 +84,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _trade_fingerprint(trades: pd.DataFrame) -> str:
-    """Return a stable hash of core execution results, independent of DataFrame attrs."""
     columns = [column for column in _FINGERPRINT_COLUMNS if column in trades.columns]
     if not columns:
         payload = f"rows={len(trades)};columns={','.join(map(str, trades.columns))}"
@@ -102,23 +95,32 @@ def _trade_fingerprint(trades: pd.DataFrame) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _feature_cache_hits(bundle: BacktestDataBundle) -> dict[str, object]:
+def _cache_hits(metadata: dict[str, dict]) -> dict[str, object]:
+    core_names = {
+        "core_directional",
+        "production_market_context",
+        "support_resistance",
+        "state_transition_daily",
+    }
     return {
-        "core_directional": bool(bundle.technical_features.attrs.get("feature_cache_hit", False)),
-        "production_market_context": bool(bundle.context_features.attrs.get("feature_cache_hit", False)),
+        "core_directional": bool(metadata["core_directional"]["cache_hit"]),
+        "production_market_context": bool(
+            metadata["production_market_context"]["cache_hit"]
+        ),
         "support_resistance": (
-            bool(bundle.support_resistance_features.attrs.get("feature_cache_hit", False))
-            if bundle.support_resistance_features is not None
+            bool(metadata["support_resistance"]["cache_hit"])
+            if "support_resistance" in metadata
             else None
         ),
         "state_transition_daily": (
-            bool(bundle.state_transition_daily_features.attrs.get("feature_cache_hit", False))
-            if bundle.state_transition_daily_features is not None
+            bool(metadata["state_transition_daily"]["cache_hit"])
+            if "state_transition_daily" in metadata
             else None
         ),
         "research": {
-            name: bool(frame.attrs.get("feature_cache_hit", False))
-            for name, frame in sorted(bundle.research_features.items())
+            name: bool(values["cache_hit"])
+            for name, values in sorted(metadata.items())
+            if name not in core_names
         },
     }
 
@@ -133,22 +135,33 @@ def main() -> int:
         raise SystemExit("--iterations must be at least 1")
 
     config = load_data_lake_config(args.config)
+    if args.include_agg_trades:
+        config = replace(
+            config,
+            features=replace(config.features, include_agg_trade_flow=True),
+        )
     request = DataRequest(
         symbol=args.symbol,
         start=_utc(args.start),
         end=_utc(args.end),
         strategy_interval=f"{int(config.data.strategy_timeframe_minutes)}m",
         intrabar_interval=(
-            f"{int(config.data.intrabar_timeframe_minutes)}m" if config.data.use_intrabar_data else None
+            f"{int(config.data.intrabar_timeframe_minutes)}m"
+            if config.data.use_intrabar_data
+            else None
         ),
     )
     intrabar_start = _utc(args.intrabar_start) if args.intrabar_start else None
     store = MarketDataStore(args.raw_root, args.cache_root)
-    if args.include_agg_trades:
-        from dataclasses import replace
-        config = replace(config, features=replace(config.features, include_agg_trade_flow=True))
-    runner = ResearchRunner(store, production_feature_registry(), PreparedRunCache(args.cache_root),
-                            NativeStrategyPolicy(), NativeSimulator(), ())
+    simulator = NativeSimulator()
+    runner = ResearchRunner(
+        store,
+        production_feature_registry(),
+        PreparedRunCache(args.cache_root),
+        NativeStrategyPolicy(),
+        simulator,
+        (),
+    )
 
     catalog_seconds = 0.0
     if not args.skip_catalog_refresh:
@@ -161,26 +174,33 @@ def main() -> int:
     for iteration in range(1, args.iterations + 1):
         total_started = time.perf_counter()
         canonical_before = dict(store.canonical_cache_events)
-
-        result_run = runner.run(request, config, refresh_catalog=False, intrabar_start=intrabar_start)
-        preparation_seconds = result_run.stage_timings["data_features"]
+        result_run = runner.run(
+            request,
+            config,
+            refresh_catalog=False,
+            intrabar_start=intrabar_start,
+        )
         canonical_after = dict(store.canonical_cache_events)
         canonical_delta = {
             name: int(canonical_after.get(name, 0) - canonical_before.get(name, 0))
             for name in sorted(set(canonical_before) | set(canonical_after))
         }
 
-        engine_init_seconds = result_run.stage_timings["prepared_cache"]
+        preparation_seconds = float(result_run.stage_timings["data_features"])
+        prepared_cache_seconds = float(result_run.stage_timings["prepared_cache"])
+        engine_init_seconds = prepared_cache_seconds + float(
+            result_run.stage_timings.get("engine_init", 0.0)
+        )
+        simulation_seconds = float(result_run.stage_timings["simulation"])
         trades = result_run.trades
-        simulation_seconds = result_run.stage_timings["simulation"]
         total_seconds = time.perf_counter() - total_started
-
         fingerprint = _trade_fingerprint(trades)
         fingerprints.append(fingerprint)
         records.append(
             {
                 "iteration": iteration,
                 "preparation_seconds": preparation_seconds,
+                "prepared_cache_seconds": prepared_cache_seconds,
                 "engine_init_seconds": engine_init_seconds,
                 "simulation_seconds": simulation_seconds,
                 "total_seconds": total_seconds,
@@ -189,7 +209,7 @@ def main() -> int:
                 "trade_rows": len(trades),
                 "intrabar_index_mode": None,
                 "intrabar_iteration_mode": None,
-                "feature_cache_hits": {k:v["cache_hit"] for k,v in result_run.feature_cache_metadata.items()},
+                "feature_cache_hits": _cache_hits(dict(result_run.feature_cache_metadata)),
                 "prepared_cache_hit": result_run.prepared_cache_hit,
                 "prepared_cache_key": result_run.prepared_cache_key,
                 "canonical_cache": canonical_delta,
@@ -218,6 +238,7 @@ def main() -> int:
         "trade_fingerprints_identical": len(set(fingerprints)) <= 1,
         "warm_median_seconds": {
             "preparation": _median(warm_records, "preparation_seconds"),
+            "prepared_cache": _median(warm_records, "prepared_cache_seconds"),
             "engine_init": _median(warm_records, "engine_init_seconds"),
             "simulation": _median(warm_records, "simulation_seconds"),
             "total": _median(warm_records, "total_seconds"),
