@@ -10,12 +10,16 @@ NATIVE_MODULES = (
     "crypto_strategy_lab/data_lake_production_engine.py",
     "tools/data_lake_run.py",
     "tools/data_lake_benchmark.py",
+    "tools/data_lake_profile.py",
+    "tools/data_lake_preparation_profile.py",
     "crypto_strategy_lab/gui/data_lake_worker.py",
 )
 FORBIDDEN = (
     "crypto_strategy_lab.data.legacy_bridge",
     "legacy_bridge",
     "canonical_to_legacy_ohlcv",
+    "_legacy_from_canonical",
+    "legacy_conversion",
     "load_ohlcv_csv",
     "load_backtest_data",
     "input_csv",
