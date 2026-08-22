@@ -105,10 +105,9 @@ class AggTradesArchiveAdapter(BinanceArchiveAdapter):
         )
         if bool(invalid.any()):
             raise ValueError(f"Invalid Binance aggTrades rows found in {record.path}")
-        frame = frame.sort_values(["event_time", "agg_trade_id"], kind="stable")
-        return frame.drop_duplicates(
-            subset=["symbol", "agg_trade_id"], keep="last"
-        ).reset_index(drop=True)
+        if bool(frame["agg_trade_id"].duplicated().any()):
+            raise ValueError(f"Duplicate Binance aggregate trade IDs found in {record.path}")
+        return frame.sort_values(["event_time", "agg_trade_id"], kind="stable").reset_index(drop=True)
 
 
 class TradesArchiveAdapter(BinanceArchiveAdapter):
