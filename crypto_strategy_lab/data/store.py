@@ -9,7 +9,8 @@ import duckdb
 import pandas as pd
 
 from .binance.discovery import discover_archives
-from .binance.events import FundingRateArchiveAdapter, FuturesMetricsArchiveAdapter
+from .binance.events import (BookDepthArchiveAdapter, BookTickerArchiveAdapter,
+                             FundingRateArchiveAdapter, FuturesMetricsArchiveAdapter)
 from .binance.klines import KlineArchiveAdapter, KlineLikeArchiveAdapter
 from .binance.trades import AggTradesArchiveAdapter, TradesArchiveAdapter
 from .cache import CANONICAL_CACHE_FORMAT_VERSION, CacheLayout
@@ -41,6 +42,8 @@ class MarketDataStore:
             DatasetKind.FUNDING_RATE: FundingRateArchiveAdapter(),
             DatasetKind.AGG_TRADES: AggTradesArchiveAdapter(),
             DatasetKind.TRADES: TradesArchiveAdapter(),
+            DatasetKind.BOOK_TICKER: BookTickerArchiveAdapter(),
+            DatasetKind.BOOK_DEPTH: BookDepthArchiveAdapter(),
         }
 
     def refresh_catalog(self) -> int:
@@ -157,6 +160,12 @@ class MarketDataStore:
         elif "trade_id" in frame.columns:
             sort_columns = [sort_column, "trade_id"]
             subset = [column for column in ("symbol", "trade_id") if column in frame.columns]
+        elif "update_id" in frame.columns:
+            sort_columns = [sort_column, "update_id"]
+            subset = [column for column in ("symbol", "update_id") if column in frame.columns]
+        elif "percentage" in frame.columns:
+            sort_columns = [sort_column, "percentage"]
+            subset = [column for column in ("symbol", sort_column, "percentage") if column in frame.columns]
         else:
             sort_columns = [sort_column]
             subset = [column for column in ("symbol", "interval", sort_column) if column in frame.columns]

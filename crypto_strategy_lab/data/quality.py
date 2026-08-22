@@ -290,6 +290,20 @@ CONTRACTS.update(
             positive_fields=("price",),
             non_negative_fields=("quantity", "trade_id"),
         ),
+        DatasetKind.BOOK_TICKER: DatasetValidationContract(
+            dataset=DatasetKind.BOOK_TICKER, timeline="event", timestamp_column="event_time",
+            logical_key=("update_id",),
+            required_columns=("event_time", *_IDENTITY, "transaction_time", "update_id",
+                              "best_bid_price", "best_bid_qty", "best_ask_price", "best_ask_qty"),
+            positive_fields=("best_bid_price", "best_ask_price"),
+            non_negative_fields=("update_id", "best_bid_qty", "best_ask_qty"),
+        ),
+        DatasetKind.BOOK_DEPTH: DatasetValidationContract(
+            dataset=DatasetKind.BOOK_DEPTH, timeline="event", timestamp_column="event_time",
+            logical_key=("event_time", "percentage"),
+            required_columns=("event_time", *_IDENTITY, "percentage", "depth", "notional"),
+            numeric_fields=("percentage",), non_negative_fields=("depth", "notional"),
+        ),
     }
 )
 
@@ -639,6 +653,33 @@ def validate_dataset(
                     timestamps=timestamps,
                 )
             )
+
+    if dataset is DatasetKind.BOOK_TICKER and {"best_bid_price", "best_ask_price"} <= set(frame):
+        bid = pd.to_numeric(frame["best_bid_price"], errors="coerce")
+        ask = pd.to_numeric(frame["best_ask_price"], errors="coerce")
+        crossed = bid > ask
+        locked = bid == ask
+        if crossed.any():
+            issues.append(_issue("CROSSED_BOOK", DataQualityStatus.ERROR,
+                                 "best bid exceeds best ask", mask=crossed, timestamps=timestamps))
+        if locked.any():
+            issues.append(_issue("LOCKED_BOOK", DataQualityStatus.WARN,
+                                 "best bid equals best ask", mask=locked, timestamps=timestamps))
+
+    if dataset is DatasetKind.BOOK_DEPTH and "percentage" in frame:
+        percentage = pd.to_numeric(frame["percentage"], errors="coerce")
+        zero = percentage.eq(0)
+        if zero.any():
+            issues.append(_issue("ZERO_DEPTH_PERCENTAGE", DataQualityStatus.ERROR,
+                                 "percentage-distance band cannot be zero", mask=zero, timestamps=timestamps))
+        expected = {-5., -4., -3., -2., -1., 1., 2., 3., 4., 5.}
+        partial_times = [time for time, group in frame.groupby("event_time", sort=False)
+                         if not expected.issubset(set(pd.to_numeric(group["percentage"], errors="coerce")))]
+        if partial_times:
+            partial_index = pd.DatetimeIndex(partial_times)
+            issues.append(_issue("PARTIAL_DEPTH_SNAPSHOT", DataQualityStatus.WARN,
+                                 "percentage-band snapshot is incomplete",
+                                 timestamps=partial_index, count=len(partial_index)))
 
     for taker, total in (
         ("taker_buy_base_volume", "volume"),

@@ -39,6 +39,69 @@ def _base_event_frame(record: ArchiveRecord, event_time: pd.Series) -> pd.DataFr
     )
 
 
+def _numeric(raw: pd.DataFrame, candidates: tuple[str, ...], *, integer: bool = False) -> pd.Series:
+    values = pd.to_numeric(raw[_first_column(raw, candidates)], errors="raise")
+    return values.astype("int64") if integer else values.astype(float)
+
+
+class BookTickerArchiveAdapter(BinanceArchiveAdapter):
+    """Canonical Binance best-bid/best-ask events (not a reconstructed book)."""
+
+    dataset = DatasetKind.BOOK_TICKER
+    canonical_schema_version = 1
+
+    def read(self, record: ArchiveRecord) -> pd.DataFrame:
+        if record.dataset != self.dataset:
+            raise ValueError(f"BookTickerArchiveAdapter cannot read {record.dataset.value}")
+        raw = _read_header_frame(record)
+        if raw.empty:
+            return pd.DataFrame()
+        event_time = timestamp_series(raw[_first_column(raw, ("event_time", "eventtime", "e"))])
+        transaction_time = timestamp_series(
+            raw[_first_column(raw, ("transaction_time", "transactiontime", "t"))]
+        )
+        frame = _base_event_frame(record, event_time)
+        frame["update_id"] = _numeric(raw, ("update_id", "updateid", "u"), integer=True)
+        frame["best_bid_price"] = _numeric(raw, ("best_bid_price", "best_bid", "bid_price", "b"))
+        frame["best_bid_qty"] = _numeric(raw, ("best_bid_qty", "best_bid_quantity", "bid_qty", "b_qty", "bq"))
+        frame["best_ask_price"] = _numeric(raw, ("best_ask_price", "best_ask", "ask_price", "a"))
+        frame["best_ask_qty"] = _numeric(raw, ("best_ask_qty", "best_ask_quantity", "ask_qty", "a_qty", "aq"))
+        frame["transaction_time"] = transaction_time
+        compare = ["event_time", "transaction_time", "best_bid_price", "best_bid_qty", "best_ask_price", "best_ask_qty"]
+        duplicates = frame["update_id"].duplicated(keep=False)
+        for _, group in frame.loc[duplicates].groupby("update_id", sort=False):
+            if any(group[column].nunique(dropna=False) > 1 for column in compare):
+                raise ValueError("Conflicting duplicate bookTicker update_id")
+        frame = frame.drop_duplicates("update_id", keep="first")
+        return frame.sort_values(["event_time", "update_id"], kind="stable").reset_index(drop=True)
+
+
+class BookDepthArchiveAdapter(BinanceArchiveAdapter):
+    """Canonical public percentage-distance depth-band snapshots."""
+
+    dataset = DatasetKind.BOOK_DEPTH
+    canonical_schema_version = 1
+
+    def read(self, record: ArchiveRecord) -> pd.DataFrame:
+        if record.dataset != self.dataset:
+            raise ValueError(f"BookDepthArchiveAdapter cannot read {record.dataset.value}")
+        raw = _read_header_frame(record)
+        if raw.empty:
+            return pd.DataFrame()
+        event_time = timestamp_series(raw[_first_column(raw, ("event_time", "timestamp", "time", "t"))])
+        frame = _base_event_frame(record, event_time)
+        frame["percentage"] = _numeric(raw, ("percentage", "percent"))
+        frame["depth"] = _numeric(raw, ("depth",))
+        frame["notional"] = _numeric(raw, ("notional",))
+        key = ["event_time", "percentage"]
+        duplicates = frame.duplicated(key, keep=False)
+        for _, group in frame.loc[duplicates].groupby(key, sort=False):
+            if group[["depth", "notional"]].drop_duplicates().shape[0] > 1:
+                raise ValueError("Conflicting duplicate bookDepth timestamp/percentage")
+        frame = frame.drop_duplicates(key, keep="first")
+        return frame.sort_values(key, kind="stable").reset_index(drop=True)
+
+
 class FuturesMetricsArchiveAdapter(BinanceArchiveAdapter):
     """Open-interest/positioning snapshot fields from Binance Vision metrics."""
 
