@@ -23,24 +23,36 @@ implemented.
 `OrderBookSnapshotStore` processes one immutable archive partition at a time
 and writes Parquet under
 `cache/order_book/<book_ticker|book_depth>/<symbol>/1m/<identity>.parquet`, with
-an atomic JSON manifest. Schema version 1 identities include the exchange,
-market, dataset, symbol, source fingerprint, adapter contract, base interval,
-and snapshot/cache versions. Consequently a changed archive invalidates only
-its own compact partition; strategy, execution, fee, TP/SL, and reporting
-configuration are absent from this identity.
+an atomic JSON manifest. Snapshot schema version 2 identities include the
+exchange, market, dataset, symbol, source fingerprint, adapter contract, base
+interval, and snapshot/cache versions. Consequently a changed archive
+invalidates only its own compact partition; strategy, execution, fee, TP/SL,
+and reporting configuration are absent from this identity.
+
+Temporary snapshot Parquet is reread and checked for the expected compact
+schema and row count before atomic publication. The manifest records both
+compact row count and raw source-event count, so warm cache reuse preserves the
+same observability without reopening the source archive.
 
 For bucket `[11:59, 12:00)`, only observations strictly before `12:00` belong to
 the bucket. The last complete observation is stored with `period_start=11:59`,
 `period_end=available_at=12:00`, while `source_event_at` remains the original
 event timestamp. Thus 11:59:59.999 is visible at the 12:00 decision and an event
 at exactly 12:00 first becomes visible at 12:01. All alignment keys are
-explicitly normalized to `datetime64[ns, UTC]`.
+explicitly normalized to `datetime64[ns, UTC]`, including compact sources that
+materialize from Parquet at microsecond resolution.
 
-The feature layer receives compact resources only. It performs a backward
-causal alignment to strategy decision availability and exposes event age as
-`available_at - source_event_at`. Raw update IDs, transactions, percentage
-rows, and event streams never enter prepared simulator state. The data module
-does not import strategy, engine, execution, GUI, or reporting modules.
+The feature layer receives compact `FeatureDataResource` inputs with the generic
+`order_book` role only. `DatasetKind` keeps ticker and depth identities distinct.
+`FeatureRegistry` therefore uses its normal auxiliary-resource identity rules;
+unrelated trade-flow or other auxiliary resources do not invalidate
+`order_book_context`.
+
+The provider explicitly rejects raw update IDs, raw event timestamps,
+transaction timestamps, raw percentage/depth/notional event rows, and other
+raw event-stream columns at its boundary. Raw book events never enter prepared
+simulator state. The data module does not import strategy, engine, execution,
+GUI, or reporting modules.
 
 ## Features and staleness
 
@@ -61,7 +73,14 @@ formula. No opaque pressure signal or trading interpretation is produced.
 `book_ticker_max_age_seconds` and `book_depth_max_age_seconds` are research-only
 settings and participate in the L2 feature identity. Values older than their
 limit become `NaN` and the source-specific stale flag becomes true; there is no
-indefinite value forward-fill.
+indefinite value forward-fill. `book_depth_snapshot_complete` is nullable so a
+stale/missing depth snapshot is unknown rather than falsely reported complete
+or incomplete.
+
+The compact loader always includes at least the immediately preceding minute
+and can request a larger source prefix when a caller needs a larger staleness
+window. This source lookback changes which partitions are considered, not the
+identity of an immutable compact partition itself.
 
 ## Coverage and quality
 
@@ -74,11 +93,32 @@ error. Missing depth bands remain `NaN`, the atomic snapshot is retained,
 `book_depth_snapshot_complete` is false, and quality is `WARN`; a prior band's
 value is never carried forward.
 
-Quality reuses the Task 12 contracts/cache. Prices must be finite and positive,
-quantities/depth/notional finite and non-negative, timestamps valid, and depth
-percentage finite and nonzero. Crossed ticker books and conflicting duplicate
-keys are errors; locked books and partial depth snapshots are warnings.
-Metadata-first quality cache behavior remains unchanged.
+Quality reuses the Task 12 contracts and `DataQualityCache`, but cold order-book
+validation is deliberately bounded: each immutable archive is read and
+validated independently instead of concatenating a multi-year raw event frame.
+The final dataset report aggregates those partition results plus catalog
+coverage and archive-overlap issues. A warm quality check is metadata-only and
+does not reopen raw order-book archives.
+
+Prices must be finite and positive, quantities/depth/notional finite and
+non-negative, timestamps valid, and depth percentage finite and nonzero.
+Crossed ticker books and conflicting duplicate keys are errors; locked books
+and partial depth snapshots are warnings.
+
+## Causality, caching, and benchmark observability
+
+Blocking Task-12 causality tests mutate only future compact ticker/depth facts
+and recompute through `FeatureRegistry`; values available at or before the
+cutoff must remain identical. Separate tests cover exact minute boundaries,
+ms/us source timestamps against an ns strategy timeline, stale observations,
+partial depth snapshots, raw-event boundary rejection, bounded quality, and
+partition-local snapshot invalidation.
+
+The benchmark supports `--include-order-book`. When enabled it reports whether
+`order_book_context` was an L2 hit and an exact `book_snapshot_cache` breakdown
+per available source with `partitions_built`, `partitions_reused`, and a derived
+warm-hit flag. This allows a bounded real-data smoke to prove that the first run
+builds compact partitions while a second identical run reuses them.
 
 These fields are descriptive research context only. They are available through
 `research_features`, prepared research context, and the existing causal
