@@ -63,7 +63,7 @@ jobs:
       - name: Install focused dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas duckdb pytest
+          pip install numpy pandas duckdb openpyxl 'mcp>=2.0,<3' pytest
       - name: Compile Data Lake path and composition tools
         run: >-
           python -m compileall -q
@@ -77,7 +77,9 @@ jobs:
           crypto_strategy_lab/research_runner.py
           crypto_strategy_lab/research_adapters.py
           crypto_strategy_lab/research_reporting.py
+          crypto_strategy_lab/run_manifest.py
           crypto_strategy_lab/feature_research.py
+          mcp_server/server.py
           tools/data_lake_validate.py
           tools/data_lake_run.py
           tools/data_lake_benchmark.py
@@ -138,6 +140,8 @@ jobs:
           tests/test_task11_research_config.py
           tests/test_research_runner.py
           tests/test_feature_research.py
+          tests/test_task17_reporting.py
+          tests/test_mcp_server.py
           tests/test_rewrite_config_current.py
 
   full-suite-observation:

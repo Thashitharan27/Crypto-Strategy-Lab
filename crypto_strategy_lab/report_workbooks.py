@@ -142,9 +142,9 @@ def build_backtest_workbook(summary: Mapping[str, Any], config: Any, run_dir: Pa
               "Direction - Regime": direction_regime if direction_regime is not None else pd.DataFrame()}
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         dashboard_frame = pd.DataFrame(_dashboard_metrics(summary, config, run_dir), columns=["Metric", "Value"])
-        _excel_safe_frame(dashboard_frame).to_excel(writer, "Dashboard", index=False)
+        _excel_safe_frame(dashboard_frame).to_excel(writer, sheet_name="Dashboard", index=False)
         for name, frame in tables.items():
-            _excel_safe_frame(frame).to_excel(writer, name, index=False)
+            _excel_safe_frame(frame).to_excel(writer, sheet_name=name, index=False)
         for sheet in writer.book.worksheets:
             _format_table_sheet(sheet)
         dashboard = writer.book["Dashboard"]

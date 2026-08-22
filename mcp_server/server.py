@@ -1,4 +1,4 @@
-"""A deliberately small, read-only MCP server for saved backtest output."""
+"""Read-only MCP server for canonical completed backtest artifacts."""
 from __future__ import annotations
 
 import csv
@@ -6,30 +6,34 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import duckdb
 from openpyxl import load_workbook
 
+from crypto_strategy_lab.run_manifest import (
+    RunArtifactError,
+    artifact_path,
+    load_completed_manifest,
+)
+
 LOGGER = logging.getLogger("crypto_strategy_lab.mcp")
 SUPPORTED = {".csv", ".xlsx", ".json", ".txt"}
+MAX_QUERY_ROWS = 5000
 FORBIDDEN_SQL = re.compile(
     r"\b(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|COPY|EXPORT|IMPORT|ATTACH|DETACH|"
-    r"INSTALL|LOAD|PRAGMA|CALL|SET|RESET|TRUNCATE|VACUUM)\b", re.IGNORECASE
+    r"INSTALL|LOAD|PRAGMA|CALL|SET|RESET|TRUNCATE|VACUUM)\b",
+    re.IGNORECASE,
 )
 ALLOWED_SQL = re.compile(r"^\s*(?:SELECT|WITH|DESCRIBE|SHOW)\b", re.IGNORECASE)
 EXTERNAL_SQL = re.compile(
     r"\b(?:read_csv(?:_auto)?|read_json(?:_auto)?|read_parquet|read_text|glob|"
-    r"sqlite_scan|postgres_scan|mysql_scan|delta_scan|iceberg_scan)\s*\(|"
+    r"parquet_scan|csv_scan|sqlite_scan|postgres_scan|mysql_scan|delta_scan|iceberg_scan)\s*\(|"
     r"\b(?:FROM|JOIN)\s*['\"]",
     re.IGNORECASE,
 )
-
-
-def _iso(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
 
 
 def _json_value(value: Any) -> Any:
@@ -38,6 +42,29 @@ def _json_value(value: Any) -> Any:
     if hasattr(value, "item"):
         return value.item()
     return value
+
+
+def _validate_sql(sql: str) -> None:
+    if ";" in sql:
+        raise ValueError("Semicolons and multiple SQL statements are not allowed")
+    if (
+        not ALLOWED_SQL.match(sql)
+        or FORBIDDEN_SQL.search(sql)
+        or EXTERNAL_SQL.search(sql)
+    ):
+        raise ValueError(
+            "Only read-only SELECT, WITH, DESCRIBE, and SHOW queries are allowed"
+        )
+
+
+def _code_identity(manifest: dict[str, Any]) -> tuple[Any, ...]:
+    dirty = manifest.get("code_dirty")
+    return (
+        manifest.get("code_commit"),
+        dirty,
+        manifest.get("tracked_diff_sha256") if dirty else None,
+        tuple(manifest.get("untracked_source_paths", ())) if dirty else (),
+    )
 
 
 class BacktestReports:
@@ -52,7 +79,9 @@ class BacktestReports:
     def _inside(self, path: Path) -> bool:
         return path == self.root or self.root in path.parents
 
-    def _resolve(self, relative: str | Path, *, directory: bool | None = None) -> Path:
+    def _resolve(
+        self, relative: str | Path, *, directory: bool | None = None
+    ) -> Path:
         raw = Path(relative)
         if raw.is_absolute():
             raise ValueError("Absolute paths are not allowed")
@@ -85,76 +114,117 @@ class BacktestReports:
             return {}
 
     @staticmethod
-    def _pick(sources: list[dict[str, Any]], *names: str) -> Any:
-        normalized = {re.sub(r"[^a-z0-9]", "", str(k).lower()): v for source in sources for k, v in source.items()}
-        for name in names:
-            value = normalized.get(re.sub(r"[^a-z0-9]", "", name.lower()))
-            if value is not None:
-                return value
-        return None
-
-    def _metadata(self, run: Path) -> dict[str, Any]:
-        config = self._load_json(run / "config.json") if (run / "config.json").is_file() else {}
-        summary = self._load_json(run / "summary.json") if (run / "summary.json").is_file() else {}
-        sources = [summary, config]
+    def _metadata(run: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+        request = manifest["request"]
+        hashes = manifest["hashes"]
         return {
-            "run_name": self._pick(sources, "run_name") or run.name,
             "folder_name": run.name,
-            "modified_time": _iso(run.stat().st_mtime),
-            "symbol": self._pick(sources, "symbol", "ticker"),
-            "strategy_timeframe": self._pick(sources, "strategy_timeframe", "strategy_timeframe_minutes", "timeframe"),
-            "risk_mode": self._pick(sources, "risk_mode"),
-            "atr_period": self._pick(sources, "atr_period"),
-            "atr_multiplier": self._pick(sources, "atr_multiplier"),
-            "trade_count": self._pick(sources, "trade_count", "total_trades", "trades"),
+            "run_id": manifest["run_id"],
+            "run_started_at": manifest["run_started_at"],
+            "run_completed_at": manifest["run_completed_at"],
+            "symbol": request["symbol"],
+            "start": request["start"],
+            "end": request["end"],
+            "strategy_timeframe": request["requested_strategy_interval"],
+            "execution_timeframe": request["effective_intrabar_interval"],
+            "trade_count": manifest["execution_result"]["completed_trade_rows"],
+            "strategy_hash": hashes["strategy_hash"],
+            "execution_hash": hashes["execution_hash"],
+            "code_commit": manifest.get("code_commit"),
+            "reproducibility_status": manifest.get("reproducibility_status"),
         }
 
     def list_runs(self, limit: int = 50) -> list[dict[str, Any]]:
         if not 1 <= limit <= 1000:
             raise ValueError("limit must be between 1 and 1000")
-        runs = [p for p in self.root.iterdir() if p.is_dir() and not p.is_symlink()]
-        runs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return [self._metadata(run) for run in runs[:limit]]
+        runs: list[dict[str, Any]] = []
+        for path in self.root.iterdir():
+            if not path.is_dir() or path.is_symlink():
+                continue
+            try:
+                manifest = load_completed_manifest(path)
+            except RunArtifactError:
+                continue
+            runs.append(self._metadata(path, manifest))
+        runs.sort(key=lambda item: item["run_started_at"], reverse=True)
+        return runs[:limit]
 
     def latest_run(self) -> dict[str, Any]:
         runs = self.list_runs(1)
         if not runs:
             raise ValueError("No completed backtest runs were found")
         run = self.resolve_run(runs[0]["folder_name"])
-        result = {**runs[0], "path": run.name, "available_files": [x["filename"] for x in self.list_run_files(run.name)]}
-        if (run / "summary.json").is_file():
-            result["summary"] = self._load_json(run / "summary.json")
+        manifest = load_completed_manifest(run)
+        result = {
+            **runs[0],
+            "path": run.name,
+            "artifact_availability": {
+                name: True for name in manifest["artifacts"]
+            },
+        }
+        result["summary"] = self._load_json(
+            artifact_path(run, manifest, "summary")
+        )
         return result
+
+    def get_run_manifest(self, run: str) -> dict[str, Any]:
+        return load_completed_manifest(self.resolve_run(run))
 
     def list_run_files(self, run: str) -> list[dict[str, Any]]:
         folder = self.resolve_run(run)
+        manifest = load_completed_manifest(folder)
         result = []
-        for path in folder.rglob("*"):
-            if len(result) >= 2000:
-                break
-            if path.is_file() and not path.is_symlink() and self._inside(path.resolve()):
-                stat = path.stat()
-                result.append({"filename": path.relative_to(folder).as_posix(), "extension": path.suffix.lower(), "size": stat.st_size, "modified_time": _iso(stat.st_mtime)})
-        return sorted(result, key=lambda item: item["filename"].lower())
+        for name, item in manifest["artifacts"].items():
+            result.append(
+                {
+                    "artifact": name,
+                    "filename": item["path"],
+                    "extension": "." + item["format"],
+                    "size": item["bytes"],
+                    "sha256": item["sha256"],
+                }
+            )
+        return sorted(result, key=lambda item: item["artifact"])
 
     def _report_path(self, run: str, filename: str) -> Path:
         folder = self.resolve_run(run)
-        path = self._resolve(Path(run) / filename, directory=False)
-        if folder not in path.parents or path.suffix.lower() not in SUPPORTED:
+        manifest = load_completed_manifest(folder)
+        matches = [
+            name
+            for name, item in manifest["artifacts"].items()
+            if item["path"] == filename
+        ]
+        if len(matches) != 1:
+            raise ValueError("Report is not present in the artifact catalog")
+        path = artifact_path(folder, manifest, matches[0])
+        if path.suffix.lower() not in SUPPORTED:
             raise ValueError("Unsupported report path or file type")
         return path
 
-    def read_report(self, run: str, filename: str, sheet: str | None = None, limit: int = 200) -> dict[str, Any]:
-        if not 1 <= limit <= 5000:
-            raise ValueError("limit must be between 1 and 5000")
+    def read_report(
+        self,
+        run: str,
+        filename: str,
+        sheet: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= MAX_QUERY_ROWS:
+            raise ValueError(f"limit must be between 1 and {MAX_QUERY_ROWS}")
         path = self._report_path(run, filename)
         suffix = path.suffix.lower()
         if suffix == ".json":
-            return {"type": "json", "data": json.loads(path.read_text(encoding="utf-8-sig"))}
+            return {
+                "type": "json",
+                "data": json.loads(path.read_text(encoding="utf-8-sig")),
+            }
         if suffix == ".txt":
             with path.open("r", encoding="utf-8-sig", errors="replace") as handle:
                 text = handle.read(1_000_001)
-            return {"type": "text", "text": text[:1_000_000], "truncated": len(text) > 1_000_000}
+            return {
+                "type": "text",
+                "text": text[:1_000_000],
+                "truncated": len(text) > 1_000_000,
+            }
         if suffix == ".csv":
             with path.open("r", encoding="utf-8-sig", newline="") as handle:
                 reader = csv.reader(handle)
@@ -164,70 +234,165 @@ class BacktestReports:
                     total += 1
                     if len(rows) < limit:
                         rows.append(row)
-            return {"type": "table", "columns": columns, "rows": rows, "row_count": total, "truncated": total > limit}
+            return {
+                "type": "table",
+                "columns": columns,
+                "rows": rows,
+                "row_count": total,
+                "truncated": total > limit,
+            }
         workbook = load_workbook(path, read_only=True, data_only=True)
         try:
             if sheet is not None and sheet not in workbook.sheetnames:
-                raise ValueError(f"Unknown sheet; available sheets: {workbook.sheetnames}")
+                raise ValueError(
+                    f"Unknown sheet; available sheets: {workbook.sheetnames}"
+                )
             ws = workbook[sheet] if sheet else workbook[workbook.sheetnames[0]]
             iterator = ws.iter_rows(values_only=True)
-            columns = [str(v) if v is not None else "" for v in next(iterator, ())]
+            columns = [
+                str(value) if value is not None else ""
+                for value in next(iterator, ())
+            ]
             rows, total = [], 0
             for row in iterator:
                 total += 1
                 if len(rows) < limit:
-                    rows.append([_json_value(v) for v in row])
-            return {"type": "table", "sheet": ws.title, "available_sheets": workbook.sheetnames, "columns": columns, "rows": rows, "row_count": total, "truncated": total > limit}
+                    rows.append([_json_value(value) for value in row])
+            return {
+                "type": "table",
+                "sheet": ws.title,
+                "available_sheets": workbook.sheetnames,
+                "columns": columns,
+                "rows": rows,
+                "row_count": total,
+                "truncated": total > limit,
+            }
         finally:
             workbook.close()
 
-    def query_trades(self, run: str, sql: str) -> dict[str, Any]:
-        path = self.resolve_run(run) / "trade_list.csv"
-        if not path.is_file():
-            raise ValueError(f"trade_list.csv does not exist for run {run}")
-        if ";" in sql:
-            raise ValueError("Semicolons and multiple SQL statements are not allowed")
-        if not ALLOWED_SQL.match(sql) or FORBIDDEN_SQL.search(sql) or EXTERNAL_SQL.search(sql):
-            raise ValueError("Only read-only SELECT, WITH, DESCRIBE, and SHOW queries are allowed")
+    def _query_parquet(
+        self, run: str, artifact: str, relation: str, sql: str
+    ) -> dict[str, Any]:
+        folder = self.resolve_run(run)
+        manifest = load_completed_manifest(folder)
+        path = artifact_path(folder, manifest, artifact)
+        _validate_sql(sql)
         with duckdb.connect(":memory:") as connection:
-            connection.register("trades", connection.read_csv(str(path), header=True, auto_detect=True))
+            escaped = str(path).replace("'", "''")
+            connection.execute(
+                f"CREATE VIEW {relation} AS SELECT * FROM read_parquet('{escaped}')"
+            )
             cursor = connection.execute(sql)
             columns = [item[0] for item in (cursor.description or [])]
-            rows = cursor.fetchmany(5001)
-        truncated = len(rows) > 5000
-        rows = rows[:5000]
-        return {"columns": columns, "rows": [[_json_value(v) for v in row] for row in rows], "row_count": len(rows), "truncated": truncated}
+            rows = cursor.fetchmany(MAX_QUERY_ROWS + 1)
+        truncated = len(rows) > MAX_QUERY_ROWS
+        rows = rows[:MAX_QUERY_ROWS]
+        return {
+            "columns": columns,
+            "rows": [[_json_value(value) for value in row] for row in rows],
+            "row_count": len(rows),
+            "truncated": truncated,
+        }
+
+    def query_trades(self, run: str, sql: str) -> dict[str, Any]:
+        return self._query_parquet(run, "trades", "trades", sql)
+
+    def query_signals(self, run: str, sql: str) -> dict[str, Any]:
+        return self._query_parquet(run, "signals", "signals", sql)
+
+    def query_telemetry(self, run: str, sql: str) -> dict[str, Any]:
+        return self._query_parquet(run, "telemetry", "telemetry", sql)
+
+    def research_aggregate(
+        self, run: str, spec: dict[str, Any]
+    ) -> dict[str, Any]:
+        from crypto_strategy_lab.feature_research import ResearchQueryService
+
+        with ResearchQueryService(self.resolve_run(run)) as service:
+            frame = service.query(spec)
+        total = len(frame)
+        truncated = total > MAX_QUERY_ROWS
+        frame = frame.head(MAX_QUERY_ROWS)
+        return {
+            "columns": list(frame.columns),
+            "rows": [
+                {key: _json_value(value) for key, value in row.items()}
+                for row in frame.to_dict(orient="records")
+            ],
+            "row_count": len(frame),
+            "truncated": truncated,
+        }
 
     def compare_runs(self, runs: list[str]) -> list[dict[str, Any]]:
         if not 2 <= len(runs) <= 10 or len(set(runs)) != len(runs):
             raise ValueError("Provide 2-10 distinct run folder names")
-        result = []
-        aliases = {
-            "symbol": ("symbol", "ticker"), "timeframe": ("timeframe", "strategy_timeframe", "strategy_timeframe_minutes"),
-            "atr_period": ("atr_period",), "atr_multiplier": ("atr_multiplier",), "total_trades": ("total_trades", "trade_count", "trades"),
-            "wins": ("wins", "winning_trades"), "losses": ("losses", "losing_trades"), "win_rate": ("win_rate", "win_rate_percentage"),
-            "ending_equity": ("ending_equity", "final_equity"), "total_return_percentage": ("total_return_percentage", "total_return_pct", "return_pct"),
-            "profit_factor": ("profit_factor",), "max_drawdown": ("max_drawdown", "max_drawdown_percentage"), "net_profit": ("net_profit", "total_profit"),
-        }
+        result: list[dict[str, Any]] = []
+        manifests: list[dict[str, Any]] = []
         for name in runs:
             folder = self.resolve_run(name)
-            summary = self._load_json(folder / "summary.json") if (folder / "summary.json").is_file() else {}
-            config = self._load_json(folder / "config.json") if (folder / "config.json").is_file() else {}
-            row = {"run": name}
-            row.update({field: self._pick([summary, config], *keys) for field, keys in aliases.items()})
-            if row["total_trades"] is None and (folder / "trade_list.csv").is_file():
-                with (folder / "trade_list.csv").open("r", encoding="utf-8-sig", newline="") as handle:
-                    row["total_trades"] = max(sum(1 for _ in handle) - 1, 0)
-            result.append(row)
+            manifest = load_completed_manifest(folder)
+            manifests.append(manifest)
+            summary = self._load_json(artifact_path(folder, manifest, "summary"))
+            initial_equity = float(
+                manifest.get("config", {})
+                .get("execution", {})
+                .get("initial_equity", 0.0)
+                or 0.0
+            )
+            net_pnl = summary.get("net_pnl")
+            if net_pnl is None and summary.get("ending_equity") is not None:
+                net_pnl = float(summary["ending_equity"]) - initial_equity
+            result.append(
+                {
+                    "run": name,
+                    "symbol": manifest["request"]["symbol"],
+                    **manifest["hashes"],
+                    "code_commit": manifest.get("code_commit"),
+                    "source_snapshot": manifest["catalog"][
+                        "catalog_snapshot_digest"
+                    ],
+                    "total_trades": summary.get("total_trades"),
+                    "win_rate": summary.get("win_rate"),
+                    "net_r": summary.get("total_net_r"),
+                    "avg_r": summary.get("average_net_r"),
+                    "net_pnl": net_pnl,
+                }
+            )
+        baseline = manifests[0]
+        baseline_code = _code_identity(baseline)
+        for row, manifest in zip(result, manifests):
+            row["provenance_vs_first"] = {
+                "same_code": _code_identity(manifest) == baseline_code,
+                "same_sources": manifest["catalog"]["catalog_snapshot_digest"]
+                == baseline["catalog"]["catalog_snapshot_digest"],
+                "same_features": manifest["hashes"]["feature_config_hash"]
+                == baseline["hashes"]["feature_config_hash"]
+                and manifest["features"] == baseline["features"],
+                "same_strategy": manifest["hashes"]["strategy_hash"]
+                == baseline["hashes"]["strategy_hash"],
+                "same_execution": manifest["hashes"]["execution_hash"]
+                == baseline["hashes"]["execution_hash"],
+            }
         return result
 
 
 def resolve_output_root() -> Path:
     configured = os.environ.get("CRYPTO_STRATEGY_LAB_OUTPUT_DIR")
-    candidate = Path(configured).expanduser() if configured else Path(__file__).resolve().parents[1] / "output"
+    candidate = (
+        Path(configured).expanduser()
+        if configured
+        else Path(__file__).resolve().parents[1] / "output"
+    )
     if not candidate.is_dir():
-        source = "CRYPTO_STRATEGY_LAB_OUTPUT_DIR" if configured else "the project's default output directory"
-        raise RuntimeError(f"Could not resolve {source}: {candidate}. Create it or set CRYPTO_STRATEGY_LAB_OUTPUT_DIR.")
+        source = (
+            "CRYPTO_STRATEGY_LAB_OUTPUT_DIR"
+            if configured
+            else "the project's default output directory"
+        )
+        raise RuntimeError(
+            f"Could not resolve {source}: {candidate}. "
+            "Create it or set CRYPTO_STRATEGY_LAB_OUTPUT_DIR."
+        )
     return candidate.resolve(strict=True)
 
 
@@ -247,12 +412,22 @@ def create_server(reports: BacktestReports):
         return reports.latest_run()
 
     @server.tool()
+    def get_run_manifest(run: str) -> dict[str, Any]:
+        LOGGER.info("MCP tool called: get_run_manifest run=%s", run)
+        return reports.get_run_manifest(run)
+
+    @server.tool()
     def list_run_files(run: str) -> list[dict[str, Any]]:
         LOGGER.info("MCP tool called: list_run_files run=%s", run)
         return reports.list_run_files(run)
 
     @server.tool()
-    def read_report(run: str, filename: str, sheet: str | None = None, limit: int = 200) -> dict[str, Any]:
+    def read_report(
+        run: str,
+        filename: str,
+        sheet: str | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
         LOGGER.info("MCP tool called: read_report run=%s filename=%s", run, filename)
         return reports.read_report(run, filename, sheet, limit)
 
@@ -262,14 +437,33 @@ def create_server(reports: BacktestReports):
         return reports.query_trades(run, sql)
 
     @server.tool()
+    def query_signals(run: str, sql: str) -> dict[str, Any]:
+        LOGGER.info("MCP tool called: query_signals run=%s", run)
+        return reports.query_signals(run, sql)
+
+    @server.tool()
+    def query_telemetry(run: str, sql: str) -> dict[str, Any]:
+        LOGGER.info("MCP tool called: query_telemetry run=%s", run)
+        return reports.query_telemetry(run, sql)
+
+    @server.tool()
+    def research_aggregate(run: str, spec: dict[str, Any]) -> dict[str, Any]:
+        LOGGER.info("MCP tool called: research_aggregate run=%s", run)
+        return reports.research_aggregate(run, spec)
+
+    @server.tool()
     def compare_runs(runs: list[str]) -> list[dict[str, Any]]:
         LOGGER.info("MCP tool called: compare_runs count=%d", len(runs))
         return reports.compare_runs(runs)
+
     return server
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     root = resolve_output_root()
     host = "127.0.0.1"
     try:
@@ -277,12 +471,18 @@ def main() -> None:
         if not 1 <= port <= 65535:
             raise ValueError
     except ValueError as exc:
-        raise SystemExit("CRYPTO_STRATEGY_LAB_MCP_PORT must be an integer from 1 to 65535") from exc
+        raise SystemExit(
+            "CRYPTO_STRATEGY_LAB_MCP_PORT must be an integer from 1 to 65535"
+        ) from exc
     LOGGER.info("MCP server starting")
     LOGGER.info("Allowed output root: %s", root)
     LOGGER.info("Host: %s", host)
     LOGGER.info("Port: %s", port)
-    LOGGER.info("Available tools: list_runs, latest_run, list_run_files, read_report, query_trades, compare_runs")
+    LOGGER.info(
+        "Available tools: list_runs, latest_run, get_run_manifest, "
+        "list_run_files, read_report, query_trades, query_signals, "
+        "query_telemetry, research_aggregate, compare_runs"
+    )
     create_server(BacktestReports(root)).run(
         transport="streamable-http",
         host=host,
