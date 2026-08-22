@@ -74,12 +74,91 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+_TRADE_FINGERPRINT_COLUMNS = (
+    "pair_id",
+    "side",
+    "entry_time",
+    "exit_time",
+    "pair_net_pnl",
+    "pair_net_r",
+    "research_signal_index",
+    "research_signal_candle_open_time",
+    "research_signal_available_at",
+)
+_TRADE_FINGERPRINT_DATETIME_COLUMNS = (
+    "entry_time",
+    "exit_time",
+    "research_signal_candle_open_time",
+    "research_signal_available_at",
+)
+
+
+def _canonical_identifier(value: Any) -> str:
+    if pd.isna(value):
+        return "<NA>"
+    if isinstance(value, bool):
+        return str(value)
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if math.isfinite(numeric) and numeric.is_integer():
+        return str(int(numeric))
+    return str(value)
+
+
 def _trade_fingerprint(trades: pd.DataFrame) -> str:
-    canonical = trades.sort_index(axis=1).to_csv(
-        index=False,
-        date_format="%Y-%m-%dT%H:%M:%S.%fZ",
+    """Hash stable completed-trade semantics, not pandas/Parquet rendering details."""
+    missing = set(_TRADE_FINGERPRINT_COLUMNS) - set(trades.columns)
+    if missing:
+        raise ResearchArtifactError(
+            f"trade fingerprint missing required columns: {sorted(missing)}"
+        )
+
+    canonical = pd.DataFrame(index=range(len(trades)))
+    canonical["pair_id"] = [
+        _canonical_identifier(value) for value in trades["pair_id"].tolist()
+    ]
+    canonical["side"] = (
+        trades["side"].astype("string").fillna("<NA>").str.upper().tolist()
     )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    for column in _TRADE_FINGERPRINT_DATETIME_COLUMNS:
+        values = pd.to_datetime(trades[column], utc=True, errors="coerce")
+        if bool(values.isna().any()):
+            raise ResearchArtifactError(
+                f"trade fingerprint contains invalid timestamp values: {column}"
+            )
+        canonical[column] = [str(pd.Timestamp(value).value) for value in values]
+
+    for column in ("pair_net_pnl", "pair_net_r"):
+        values = pd.to_numeric(trades[column], errors="coerce").to_numpy(float)
+        if not all(math.isfinite(float(value)) for value in values):
+            raise ResearchArtifactError(
+                f"trade fingerprint contains non-finite numeric values: {column}"
+            )
+        canonical[column] = [float(value).hex() for value in values]
+
+    signal_index = pd.to_numeric(
+        trades["research_signal_index"], errors="coerce"
+    ).to_numpy(float)
+    if not all(
+        math.isfinite(float(value)) and float(value).is_integer()
+        for value in signal_index
+    ):
+        raise ResearchArtifactError(
+            "trade fingerprint contains invalid research_signal_index values"
+        )
+    canonical["research_signal_index"] = [
+        str(int(value)) for value in signal_index
+    ]
+
+    payload = json.dumps(
+        canonical.loc[:, _TRADE_FINGERPRINT_COLUMNS].to_dict(orient="records"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def feature_context_frame(prepared) -> pd.DataFrame:
@@ -268,6 +347,7 @@ def write_research_artifacts(run_dir: Path, result, context) -> dict[str, Any]:
         "trades_parquet": "trades.parquet",
         "context_parquet": "feature_context.parquet",
         "trade_fingerprint": _trade_fingerprint(trades),
+        "trade_fingerprint_contract": "completed_trade_semantics_v1",
         "artifact_sha256": {
             "trades": _file_sha256(trades_path),
             "feature_context": _file_sha256(context_path),
@@ -594,6 +674,8 @@ class ResearchQueryService:
                 "trades parquet contains non-finite pair_net_r"
             )
 
+        if self.manifest.get("trade_fingerprint_contract") != "completed_trade_semantics_v1":
+            raise ResearchArtifactError("trade fingerprint contract is invalid")
         actual_fingerprint = _trade_fingerprint(
             self.connection.execute("SELECT * FROM trades").fetchdf()
         )
