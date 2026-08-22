@@ -371,7 +371,7 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             # instead of the Data Lake searchsorted wrapper.
             return super()._scan_pair_exit(pair, i)
 
-        start = max(pd.Timestamp(pair.strategy_entry_time), pd.Timestamp(self.times[i]))
+        start = max(pd.Timestamp(position.entry_time), pd.Timestamp(self.times[i]))
         end = pd.Timestamp(self.times[i]) + self.entry_delta
         expected = pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
         if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
@@ -453,7 +453,7 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         minutes = getattr(pair, "profile_timeout_minutes", None)
         if minutes is None:
             return False
-        timeout_at = pd.Timestamp(pair.strategy_entry_time) + pd.Timedelta(minutes=minutes)
+        timeout_at = pd.Timestamp(position.entry_time) + pd.Timedelta(minutes=minutes)
         timestamp = pd.Timestamp(timestamp)
         if timestamp < timeout_at:
             return False
