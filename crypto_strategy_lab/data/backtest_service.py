@@ -12,6 +12,7 @@ from crypto_strategy_lab.features.cache import FeatureFrameCache
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
 from crypto_strategy_lab.features.futures_positioning import FuturesPositioningFeatureProvider
 from crypto_strategy_lab.features.production_context import ProductionContextFeatureProvider
+from crypto_strategy_lab.features.state_transition import StateTransitionDailyFeatureProvider
 from crypto_strategy_lab.features.support_resistance import SupportResistanceFeatureProvider
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME, CoreDirectionalFeatureProvider
 from .intrabar_index import as_searchsorted_intrabar
@@ -33,6 +34,7 @@ class BacktestDataBundle:
     structural_benchmark: pd.DataFrame | None
     structural_benchmark_symbol: str | None
     structural_benchmark_interval: str | None
+    state_transition_daily_features: pd.DataFrame | None = None
 
 
 def _legacy_from_canonical(canonical: pd.DataFrame, interval: str, label: str) -> pd.DataFrame:
@@ -269,6 +271,7 @@ def load_backtest_bundle(
     mean_reversion_rsi_period: int = 14,
     mean_reversion_rsi_oversold: float = 30.0,
     mean_reversion_rsi_overbought: float = 70.0,
+    mean_reversion_require_reentry: bool = True,
     enable_support_resistance_analysis: bool = False,
     sr_timeframe_minutes: int = 0,
     sr_pivot_left: int = 5,
@@ -309,16 +312,19 @@ def load_backtest_bundle(
             "mean_reversion_rsi_period": int(mean_reversion_rsi_period),
             "mean_reversion_rsi_oversold": float(mean_reversion_rsi_oversold),
             "mean_reversion_rsi_overbought": float(mean_reversion_rsi_overbought),
+            "mean_reversion_require_reentry": bool(mean_reversion_require_reentry),
         }, directional_dependency,
     )
 
     sr_features = None
     strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
     effective_sr_minutes = int(sr_timeframe_minutes or strategy_minutes)
-    if enable_support_resistance_analysis and effective_sr_minutes == strategy_minutes:
+    if enable_support_resistance_analysis:
         sr_features = _cached_feature(
             store, request, canonical, SupportResistanceFeatureProvider(),
             {
+                "atr_period": int(atr_period),
+                "sr_timeframe_minutes": effective_sr_minutes,
                 "sr_pivot_left": int(sr_pivot_left),
                 "sr_pivot_right": int(sr_pivot_right),
                 "sr_lookback_bars": int(sr_lookback_bars),
@@ -331,6 +337,10 @@ def load_backtest_bundle(
                 "sr_break_basis": str(sr_break_basis).upper(),
             }, directional_dependency,
         )
+
+    state_transition_daily = _cached_feature(
+        store, request, canonical, StateTransitionDailyFeatureProvider(), {}
+    )
 
     research_features = _optional_futures_research_features(
         store,
@@ -377,4 +387,5 @@ def load_backtest_bundle(
         structural_benchmark=benchmark,
         structural_benchmark_symbol=benchmark_symbol,
         structural_benchmark_interval=benchmark_interval_used,
+        state_transition_daily_features=state_transition_daily,
     )
