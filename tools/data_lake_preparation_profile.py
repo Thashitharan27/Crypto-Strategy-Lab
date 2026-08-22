@@ -124,6 +124,7 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
     original_legacy = backtest_service_module._legacy_from_canonical
     original_cached_feature = backtest_service_module._cached_feature
     original_cached_multisource = backtest_service_module._cached_multisource_feature
+    original_cached_catalog = backtest_service_module._cached_catalog_feature
     original_intrabar_index = backtest_service_module.as_searchsorted_intrabar
 
     def timed_load_dataset(request, dataset, *, interval=None):
@@ -211,6 +212,24 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
         )
         return frame
 
+    def timed_cached_catalog(
+        store_arg, request, canonical, dataset, provider, parameters=None
+    ):
+        started = time.perf_counter()
+        frame = original_cached_catalog(
+            store_arg, request, canonical, dataset, provider, parameters
+        )
+        _record(
+            events,
+            category="research_feature_cache",
+            name=provider.definition.name,
+            started=started,
+            rows=_rows(frame),
+            cache_hit=bool(frame is not None and frame.attrs.get("feature_cache_hit", False)),
+            identity_source="catalog",
+        )
+        return frame
+
     def timed_intrabar_index(frame):
         started = time.perf_counter()
         wrapped = original_intrabar_index(frame)
@@ -230,6 +249,7 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
     backtest_service_module._legacy_from_canonical = timed_legacy
     backtest_service_module._cached_feature = timed_cached_feature
     backtest_service_module._cached_multisource_feature = timed_cached_multisource
+    backtest_service_module._cached_catalog_feature = timed_cached_catalog
     backtest_service_module.as_searchsorted_intrabar = timed_intrabar_index
     try:
         yield
@@ -239,6 +259,7 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
         backtest_service_module._legacy_from_canonical = original_legacy
         backtest_service_module._cached_feature = original_cached_feature
         backtest_service_module._cached_multisource_feature = original_cached_multisource
+        backtest_service_module._cached_catalog_feature = original_cached_catalog
         backtest_service_module.as_searchsorted_intrabar = original_intrabar_index
 
 

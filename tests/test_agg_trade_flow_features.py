@@ -135,6 +135,11 @@ class _MissingResearchStore:
         self.calls.append(dataset)
         raise DataNotAvailableError("synthetic missing research data")
 
+    def source_signature(self, _request, dataset, *, interval=None):
+        del interval
+        self.calls.append(dataset)
+        raise DataNotAvailableError("synthetic missing research data")
+
 
 def test_backtest_bundle_does_not_touch_agg_trades_unless_requested() -> None:
     request = _request()

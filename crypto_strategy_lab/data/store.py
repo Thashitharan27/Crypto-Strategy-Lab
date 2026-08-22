@@ -15,6 +15,7 @@ from .cache import CacheLayout
 from .catalog import DataCatalog
 from .query import DataRequest
 from .schemas import ArchiveRecord, DatasetKind
+from .source_identity import SourceSignature
 
 
 class DataNotAvailableError(RuntimeError):
@@ -112,6 +113,23 @@ class MarketDataStore:
 
         frame = frame.sort_values(sort_columns, kind="stable")
         return frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
+
+    def source_signature(
+        self,
+        request: DataRequest,
+        dataset: DatasetKind,
+        *,
+        interval: str | None = None,
+    ) -> SourceSignature:
+        """Return catalog-based identity without reading canonical or raw rows."""
+
+        records = self.catalog.records_for(self.raw_root, request, dataset, interval)
+        if not records:
+            raise DataNotAvailableError(
+                f"No catalog coverage for {request.symbol} {dataset.value} "
+                f"interval={interval!r} from {request.start.isoformat()} to {request.end.isoformat()}"
+            )
+        return SourceSignature.from_records(dataset, records)
 
     def load_execution_klines(
         self,
