@@ -13,8 +13,6 @@ from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
 from crypto_strategy_lab.features.futures_positioning import FuturesPositioningFeatureProvider
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
-from .intrabar_index import as_searchsorted_intrabar
-from .legacy_bridge import canonical_to_legacy_ohlcv
 from .query import DataRequest
 from .store import DataNotAvailableError, MarketDataStore
 from .timing import interval_to_timedelta
@@ -33,17 +31,6 @@ class BacktestDataBundle:
     structural_benchmark_symbol: str | None
     structural_benchmark_interval: str | None
     state_transition_daily_features: pd.DataFrame | None = None
-
-
-def _legacy_from_canonical(canonical: pd.DataFrame, interval: str, label: str) -> pd.DataFrame:
-    minutes = int(interval_to_timedelta(interval).total_seconds() // 60)
-    result = canonical_to_legacy_ohlcv(canonical, label=label, expected_timeframe_minutes=minutes)
-    result.attrs.update(canonical.attrs)
-    return result
-
-
-def _legacy_klines(store, request, interval, label):
-    return _legacy_from_canonical(store.load_klines(request, interval), interval, label)
 
 
 def _cached_multisource_feature(store, request, datasets, provider, parameters=None):
@@ -258,7 +245,7 @@ def load_backtest_bundle(
         store.refresh_catalog()
 
     canonical = store.load_klines(request, request.strategy_interval)
-    strategy = _legacy_from_canonical(canonical, request.strategy_interval, "Strategy data (Data Lake v2)")
+    strategy = canonical
 
     registry = production_feature_registry()
     requested = ["production_market_context", "state_transition_daily"]
@@ -322,12 +309,8 @@ def load_backtest_bundle(
             strategy_interval=request.intrabar_interval,
             market=request.market, exchange=request.exchange,
         )
-        intrabar = as_searchsorted_intrabar(
-            _legacy_from_canonical(
-                store.load_execution_klines(intrabar_request, request.intrabar_interval),
-                request.intrabar_interval,
-                "Intrabar data (Data Lake v2)",
-            )
+        intrabar = store.load_execution_klines(
+            intrabar_request, request.intrabar_interval
         )
 
     benchmark = None

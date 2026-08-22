@@ -1,11 +1,10 @@
-"""Validate Data Lake v2 coverage and optionally compare it with a legacy CSV.
+"""Validate canonical Data Lake coverage, schema, provenance, and causality.
 
 Example:
     python tools/data_lake_validate.py \
       --raw-root "C:\\CryptoBots\\Binance Market Data" \
       --symbol BTCUSDT --strategy-interval 15m --intrabar-interval 1m \
-      --start 2025-01-01 --end 2025-02-01 \
-      --legacy-strategy-csv "C:\\path\\BTCUSDT_15m.csv"
+      --start 2025-01-01 --end 2025-02-01
 """
 
 from __future__ import annotations
@@ -25,10 +24,6 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore
-from crypto_strategy_lab.data.legacy_bridge import compare_ohlcv_frames, load_backtest_frames_from_store
-from crypto_strategy_lab.loader import load_ohlcv_csv
-
-
 def _utc_datetime(text: str) -> datetime:
     return pd.Timestamp(text, tz="UTC").to_pydatetime()
 
@@ -42,9 +37,38 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--intrabar-interval")
     parser.add_argument("--start", required=True, type=_utc_datetime)
     parser.add_argument("--end", required=True, type=_utc_datetime)
-    parser.add_argument("--legacy-strategy-csv", type=Path)
-    parser.add_argument("--timestamp-unit", default="ms")
     return parser
+
+
+def validate_canonical_klines(frame: pd.DataFrame, request: DataRequest, label: str) -> None:
+    """Fail loudly when a loaded projection violates the native kline contract."""
+    required = {
+        "period_start", "period_end", "available_at", "open", "high", "low",
+        "close", "volume", "symbol", "exchange", "market", "dataset", "interval",
+    }
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"{label} is missing canonical columns: {missing}")
+    if frame.empty:
+        raise ValueError(f"{label} has no rows in the requested interval")
+    starts = pd.to_datetime(frame["period_start"], utc=True, errors="raise")
+    ends = pd.to_datetime(frame["period_end"], utc=True, errors="raise")
+    available = pd.to_datetime(frame["available_at"], utc=True, errors="raise")
+    if not starts.is_monotonic_increasing or starts.duplicated().any():
+        raise ValueError(f"{label} period_start must be strictly ordered and unique")
+    if (ends < starts).any() or (available < ends).any():
+        raise ValueError(f"{label} violates causal period/availability ordering")
+    if starts.iloc[0] < pd.Timestamp(request.start) or starts.iloc[-1] >= pd.Timestamp(request.end):
+        raise ValueError(f"{label} contains rows outside the requested interval")
+    expected = {
+        "symbol": request.symbol, "exchange": request.exchange,
+        "market": request.market.value, "dataset": DatasetKind.KLINES.value,
+    }
+    for column, value in expected.items():
+        if set(frame[column].astype(str)) != {str(value)}:
+            raise ValueError(f"{label} has unexpected canonical {column} identity")
+    if not frame.attrs.get("canonical_source_identity"):
+        raise ValueError(f"{label} is missing canonical source provenance")
 
 
 def main() -> int:
@@ -76,25 +100,23 @@ def main() -> int:
         strategy_interval=args.strategy_interval,
         intrabar_interval=args.intrabar_interval,
     )
-    strategy, intrabar = load_backtest_frames_from_store(store, request)
+    strategy = store.load_klines(request, request.strategy_interval)
+    validate_canonical_klines(strategy, request, "strategy klines")
     print(
-        f"Strategy rows: {len(strategy)} | {strategy.timestamp.min()} -> {strategy.timestamp.max()}"
+        f"Strategy rows: {len(strategy)} | {strategy.period_start.min()} -> {strategy.period_start.max()}"
     )
-    if intrabar is not None:
-        print(f"Intrabar rows: {len(intrabar)} | {intrabar.timestamp.min()} -> {intrabar.timestamp.max()}")
-
-    if args.legacy_strategy_csv:
-        legacy = load_ohlcv_csv(str(args.legacy_strategy_csv), timestamp_unit=args.timestamp_unit)
-        window = legacy.loc[(legacy.timestamp >= request.start) & (legacy.timestamp < request.end)].reset_index(drop=True)
-        parity = compare_ohlcv_frames(strategy, window)
-        print(f"Legacy parity exact: {parity.exact}")
-        print(
-            f"rows new/legacy={parity.rows_left}/{parity.rows_right}, "
-            f"timestamp_mismatches={parity.timestamp_mismatches}, "
-            f"value_mismatches={parity.value_mismatches}"
+    if request.intrabar_interval:
+        intrabar_request = DataRequest(
+            symbol=request.symbol, start=request.start, end=request.end,
+            strategy_interval=request.intrabar_interval, market=request.market,
+            exchange=request.exchange,
         )
-        print(f"max_abs_diff={parity.max_abs_diff}")
-        return 0 if parity.exact else 2
+        intrabar = store.load_execution_klines(intrabar_request, request.intrabar_interval)
+        validate_canonical_klines(intrabar, intrabar_request, "intrabar klines")
+        print(
+            f"Intrabar rows: {len(intrabar)} | "
+            f"{intrabar.period_start.min()} -> {intrabar.period_start.max()}"
+        )
     return 0
 
 

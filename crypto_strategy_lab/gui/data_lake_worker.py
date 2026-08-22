@@ -17,7 +17,7 @@ from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.state_transition_prepared_reports import generate_prepared_state_transition_reports
-from crypto_strategy_lab.gui import worker as worker_module
+from crypto_strategy_lab.prepared_cache import prepare_bundle_with_cache
 from crypto_strategy_lab.gui.worker import BacktestWorker
 
 
@@ -51,6 +51,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
         super().__init__(config, strategy_data=None)
         self.run_spec = run_spec
         self.data_bundle: BacktestDataBundle | None = None
+        self._prepared_inputs = None
         self.finished.connect(self._write_data_lake_metadata_and_research)
 
     def _prepare_bundle(self) -> BacktestDataBundle:
@@ -152,33 +153,23 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             self.failed.emit(str(exc), traceback.format_exc())
             return
 
-        original_loader = worker_module.load_backtest_data
-        original_engine = worker_module.BacktestEngine
-        benchmark = bundle.structural_benchmark
-        technical_features = bundle.technical_features
-        context_features = bundle.context_features
-        sr_features = bundle.support_resistance_features
-        research_features = bundle.research_features
+        self._prepared_inputs = prepare_bundle_with_cache(
+            self.run_spec.cache_root, bundle, self.config
+        )[:2]
+        super().run()
 
-        def prepared_loader(_config, _strategy_data=None):
-            return bundle.strategy, bundle.intrabar
+    def _load_runtime_inputs(self):
+        if self._prepared_inputs is None:
+            raise RuntimeError("Data Lake inputs were not prepared")
+        return self._prepared_inputs
 
-        class BoundDataLakeEngine(DataLakeProductionBacktestEngine):
-            def __init__(self, *args, **kwargs):
-                kwargs["structural_benchmark"] = benchmark
-                kwargs["technical_features"] = technical_features
-                kwargs["context_features"] = context_features
-                kwargs["support_resistance_features"] = sr_features
-                kwargs["research_features"] = research_features
-                super().__init__(*args, **kwargs)
+    def _runtime_period(self, data):
+        return data.timestamp[0], data.timestamp[-1]
 
-        worker_module.load_backtest_data = prepared_loader
-        worker_module.BacktestEngine = BoundDataLakeEngine
-        try:
-            super().run()
-        finally:
-            worker_module.load_backtest_data = original_loader
-            worker_module.BacktestEngine = original_engine
+    def _build_engine(self, data, config, intrabar, **kwargs):
+        return DataLakeProductionBacktestEngine.from_prepared(
+            data, intrabar, config, **kwargs
+        )
 
     @staticmethod
     def _feature_manifest(frame):

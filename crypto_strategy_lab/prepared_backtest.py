@@ -342,7 +342,9 @@ class IntrabarExecutionWindow:
 def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, IntrabarExecutionData | None]:
     """Bounded adapter from today's Data Lake bundle; no simulator routing."""
     strategy, technical, context = bundle.strategy, bundle.technical_features, bundle.context_features
-    required_strategy = {"timestamp", "open", "high", "low", "close", "volume"}
+    required_strategy = {
+        "period_start", "available_at", "open", "high", "low", "close", "volume"
+    }
     directional_names = {
         "atr", "atr_pct", "adx", "plus_di", "minus_di", "di_spread",
         "di_spread_1", "di_spread_3", "di_spread_5", "di_spread_change",
@@ -378,7 +380,9 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
         if missing:
             raise ValueError(f"{label} is missing required columns: {missing}")
 
-    strategy_timestamps = _aligned_timestamps(strategy["timestamp"], "strategy data timestamp")
+    strategy_timestamps = _aligned_timestamps(
+        strategy["period_start"], "strategy data period_start"
+    )
     _require_exact_timeline(strategy_timestamps, technical["timestamp"], "technical features")
     _require_exact_timeline(strategy_timestamps, context["timestamp"], "context features")
 
@@ -453,7 +457,7 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
     intrabar = None
     if bundle.intrabar is not None:
         intrabar = IntrabarExecutionData(
-            bundle.intrabar["timestamp"].to_numpy(),
+            bundle.intrabar["period_start"].to_numpy(),
             pd.Timedelta(bundle.request.intrabar_interval),
             bundle.intrabar["open"].to_numpy(), bundle.intrabar["high"].to_numpy(),
             bundle.intrabar["low"].to_numpy(),
@@ -467,7 +471,7 @@ def intrabar_from_data_lake_bundle(bundle) -> IntrabarExecutionData | None:
     if bundle.intrabar is None:
         return None
     return IntrabarExecutionData(
-        bundle.intrabar["timestamp"].to_numpy(),
+        bundle.intrabar["period_start"].to_numpy(),
         pd.Timedelta(bundle.request.intrabar_interval),
         bundle.intrabar["open"].to_numpy(), bundle.intrabar["high"].to_numpy(),
         bundle.intrabar["low"].to_numpy(),

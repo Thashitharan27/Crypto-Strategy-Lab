@@ -127,6 +127,9 @@ def test_backtest_bundle_loads_structural_benchmark_from_store(tmp_path: Path) -
     )
 
     assert len(bundle.strategy) == 2
+    assert "period_start" in bundle.strategy
+    assert "timestamp" not in bundle.strategy
+    assert bundle.strategy.attrs["canonical_source_identity"]
     assert bundle.intrabar is None
     assert bundle.structural_benchmark is not None
     assert len(bundle.structural_benchmark) == 8

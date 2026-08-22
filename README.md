@@ -119,13 +119,8 @@ Use **Validate Data** before a run to check timeframe, coverage, duplicates, inv
 
 ## Offline utilities
 
-The desktop downloader is the normal data workflow. Historical Binance ZIP/CSV archives can still be combined when needed:
-
-```powershell
-.\.venv\Scripts\python.exe -m tools.combine_binance_data "path\to\archive-folder" -o "data\BTCUSDT_1h.csv"
-```
-
-Other maintenance utilities are kept in `tools/` and should be run as modules from the repository root.
+The Binance Data Lake reads immutable exchange archives directly. Other maintenance
+utilities are kept in `tools/` and should be run as modules from the repository root.
 
 ## Tests
 
