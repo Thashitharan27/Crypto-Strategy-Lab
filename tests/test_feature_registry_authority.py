@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -10,6 +12,10 @@ from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.features import (
     FeatureDefinition, FeatureRegistry, OutputField, ParameterDefinition,
     production_feature_registry,
+)
+from crypto_strategy_lab.features.market_regime import (
+    POLICY_MARKET_FEATURE_NAME,
+    prepare_policy_market_features,
 )
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
 
@@ -144,11 +150,47 @@ def test_optional_material_dataset_changes_identity_only_when_present() -> None:
     assert with_optional != changed_optional
 
 
+def test_policy_market_schema_expands_from_registered_momentum_parameters() -> None:
+    definition = production_feature_registry().get(POLICY_MARKET_FEATURE_NAME).definition
+    parameters = definition.normalize_parameters({"momentum_lookback_hours": [48, 12, 12]})
+    schema = definition.schema_for(parameters)
+    assert parameters["momentum_lookback_hours"] == (12, 48)
+    assert {"momentum_return_12h", "momentum_return_48h"} <= set(schema)
+
+
+def test_policy_market_compatibility_adapter_executes_through_registry(monkeypatch) -> None:
+    calls: list[tuple[str, ...]] = []
+    original = FeatureRegistry.execute
+
+    def recording_execute(self, feature_names, *args, **kwargs):
+        calls.append(tuple(feature_names))
+        return original(self, feature_names, *args, **kwargs)
+
+    monkeypatch.setattr(FeatureRegistry, "execute", recording_execute)
+    times = pd.date_range("2026-01-01", periods=16, freq="4h", tz="UTC")
+    close = np.linspace(100.0, 110.0, len(times))
+    config = SimpleNamespace(
+        strategy_timeframe_minutes=240,
+        market_symbol="BTCUSDT",
+        market_regime_method="ASSET_RETURN",
+        bull_regime_lookback_days=1,
+        bull_regime_return_threshold=0.01,
+        structural_regime_sma_days=2,
+        structural_regime_slope_lookback_days=1,
+        strategy_profiles={"only": SimpleNamespace(momentum_lookback_hours=24)},
+    )
+    bull, regime, momentum = prepare_policy_market_features(times, close, config)
+    assert calls == [(POLICY_MARKET_FEATURE_NAME,)]
+    assert len(bull) == len(regime) == len(times)
+    assert set(momentum) == {24}
+    assert len(momentum[24]) == len(times)
+
+
 def test_production_registry_exposes_core_authoritative_metadata() -> None:
     registry = production_feature_registry()
-    expected = {"core_directional", "production_market_context", "support_resistance",
-                "state_transition_daily", "funding_context", "basis_context",
-                "futures_positioning", "agg_trade_flow"}
+    expected = {"core_directional", "production_market_context", "policy_market_context",
+                "support_resistance", "state_transition_daily", "funding_context",
+                "basis_context", "futures_positioning", "agg_trade_flow"}
     assert expected <= set(registry.names())
     core = registry.get(CORE_DIRECTIONAL_FEATURE_NAME).definition
     assert core.availability_rule == "current_completed_kline_available_at"
@@ -157,3 +199,11 @@ def test_production_registry_exposes_core_authoritative_metadata() -> None:
     assert daily.availability_rule == "daily_state_available_from_following_utc_midnight"
     context = registry.get("production_market_context").definition
     assert context.required_features == (CORE_DIRECTIONAL_FEATURE_NAME,)
+    assert context.output_schema["mean_reversion_reentry_confirmation"].kind == "string"
+    policy = registry.get(POLICY_MARKET_FEATURE_NAME).definition
+    assert set(policy.parameters) == {
+        "market_regime_method", "bull_regime_lookback_days",
+        "bull_regime_return_threshold", "structural_regime_sma_days",
+        "structural_regime_slope_lookback_days", "momentum_lookback_hours",
+    }
+    assert "structural_daily_state_available_following_utc_midnight" in policy.availability_rule
