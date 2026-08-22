@@ -94,18 +94,33 @@ def aggregate_fixture(starts: pd.DatetimeIndex, *, covered=True) -> pd.DataFrame
     )
 
 
-def test_raw_trades_adapter_direction_and_ms_us_timestamps(tmp_path):
-    path = tmp_path / "trades.csv"
+def test_raw_trades_adapter_direction_and_microsecond_timestamps(tmp_path):
+    path = tmp_path / "trades-us.csv"
     write_trades(
         path,
         [
             "1,100,2,200,1767225599999000,false",
-            "2,101,1,101,1767225600000,true",
+            "2,101,1,101,1767225600000000,true",
         ],
     )
     frame = TradesArchiveAdapter().read(record(path))
     assert frame.taker_side.tolist() == ["BUY", "SELL"]
     assert frame.available_at.equals(frame.event_time)
+    assert frame.event_time.iloc[0] == pd.Timestamp("2025-12-31 23:59:59.999Z")
+    assert frame.event_time.iloc[1] == pd.Timestamp("2026-01-01 00:00:00Z")
+
+
+def test_raw_trades_adapter_millisecond_timestamps(tmp_path):
+    path = tmp_path / "trades-ms.csv"
+    write_trades(
+        path,
+        [
+            "1,100,2,200,1767225599999,false",
+            "2,101,1,101,1767225600000,true",
+        ],
+    )
+    frame = TradesArchiveAdapter().read(record(path))
+    assert frame.taker_side.tolist() == ["BUY", "SELL"]
     assert frame.event_time.iloc[0] == pd.Timestamp("2025-12-31 23:59:59.999Z")
     assert frame.event_time.iloc[1] == pd.Timestamp("2026-01-01 00:00:00Z")
 
