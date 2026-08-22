@@ -1,17 +1,27 @@
 """Prepare simulator inputs from the Binance Data Lake."""
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+
 import pandas as pd
 
 from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
+from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.features.agg_trade_flow import AggTradeFlowFeatureProvider
 from crypto_strategy_lab.features.basis import BasisContextFeatureProvider
 from crypto_strategy_lab.features.cache import FeatureFrameCache
-from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
-from crypto_strategy_lab.features.futures_positioning import FuturesPositioningFeatureProvider
+from crypto_strategy_lab.features.futures_positioning import (
+    FUTURES_POSITIONING_PRICE_INTERVAL,
+    FuturesPositioningFeatureProvider,
+    futures_positioning_price_resource,
+)
+from crypto_strategy_lab.features.taker_flow import (
+    TakerFlowContextFeatureProvider,
+    taker_flow_resource,
+)
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
 from .query import DataRequest
 from .store import DataNotAvailableError, MarketDataStore
@@ -21,6 +31,7 @@ from .quality import (
     DataQualityReport,
     DataQualityStatus,
     DatasetQualityReport,
+    validate_feature_timeline,
 )
 
 
@@ -41,11 +52,21 @@ class BacktestDataBundle:
     intrabar_interval: str | None = None
 
 
-def _cached_multisource_feature(store, request, datasets, provider, parameters=None, *, registry=None):
+def _cached_multisource_feature(
+    store,
+    request,
+    datasets,
+    provider,
+    parameters=None,
+    *,
+    registry=None,
+):
     """Cache a feature that depends on klines plus one or more event datasets."""
     registry = registry if registry is not None else production_feature_registry()
     return registry.execute(
-        [provider.definition.name], request, datasets,
+        [provider.definition.name],
+        request,
+        datasets,
         parameters={provider.definition.name: dict(parameters or {})},
         cache=FeatureFrameCache(store.cache.root),
     )[provider.definition.name]
@@ -82,7 +103,8 @@ def _cached_catalog_feature(
     cached = cache.load(provider.definition, request, key)
     if cached is not None:
         try:
-            provider.definition.validate_output(cached)
+            provider.definition.validate_output(cached, resolved.parameters)
+            validate_feature_timeline(provider.definition, cached, resolved.parameters)
             return cached
         except ValueError:
             pass
@@ -91,16 +113,62 @@ def _cached_catalog_feature(
     if source.empty:
         return None
     frame = provider.compute(
-        request, {DatasetKind.KLINES: canonical, dataset: source}, resolved.parameters
+        request,
+        {DatasetKind.KLINES: canonical, dataset: source},
+        resolved.parameters,
     )
-    provider.definition.validate_output(frame)
+    provider.definition.validate_output(frame, resolved.parameters)
+    validate_feature_timeline(provider.definition, frame, resolved.parameters)
     frame.attrs["feature_cache_hit"] = False
     frame.attrs["feature_cache_key"] = key
     cache.store(provider.definition, request, key, frame)
     return frame
 
 
-def _dataset_request(request: DataRequest, dataset: DatasetKind, *, start=None) -> DataRequest:
+def _cached_feature_by_identities(
+    store: MarketDataStore,
+    request: DataRequest,
+    provider,
+    parameters: Mapping[str, object] | None,
+    source_identities: Mapping[object, str],
+    datasets_loader: Callable[[], Mapping[object, pd.DataFrame]],
+    *,
+    registry=None,
+) -> pd.DataFrame:
+    """Resolve L2 from catalog identities before materializing auxiliary sources."""
+    registry = registry if registry is not None else production_feature_registry()
+    normalized = dict(parameters or {})
+    resolved = registry.resolve(
+        [provider.definition.name],
+        {provider.definition.name: normalized},
+    )[0]
+    key = registry.identity(resolved, request, source_identities, {})
+    cache = FeatureFrameCache(store.cache.root)
+    cached = cache.load(provider.definition, request, key)
+    if cached is not None:
+        try:
+            provider.definition.validate_output(cached, resolved.parameters)
+            validate_feature_timeline(provider.definition, cached, resolved.parameters)
+            return cached
+        except ValueError:
+            pass
+
+    datasets = datasets_loader()
+    frame = provider.compute(request, datasets, resolved.parameters)
+    provider.definition.validate_output(frame, resolved.parameters)
+    validate_feature_timeline(provider.definition, frame, resolved.parameters)
+    frame.attrs["feature_cache_hit"] = False
+    frame.attrs["feature_cache_key"] = key
+    cache.store(provider.definition, request, key, frame)
+    return frame
+
+
+def _dataset_request(
+    request: DataRequest,
+    dataset: DatasetKind,
+    *,
+    start=None,
+) -> DataRequest:
     return DataRequest(
         symbol=request.symbol,
         start=start or request.start,
@@ -112,10 +180,42 @@ def _dataset_request(request: DataRequest, dataset: DatasetKind, *, start=None) 
     )
 
 
+def _interval_dataset_request(
+    request: DataRequest,
+    dataset: DatasetKind,
+    interval: str,
+    *,
+    start=None,
+) -> DataRequest:
+    return DataRequest(
+        symbol=request.symbol,
+        start=start or request.start,
+        end=request.end,
+        strategy_interval=interval,
+        market=request.market,
+        exchange=request.exchange,
+        datasets=(dataset,),
+    )
+
+
+_OPTIONAL_COVERAGE_ISSUES = {
+    "LEADING_COVERAGE_GAP",
+    "TRAILING_COVERAGE_GAP",
+    "MISSING_INTERNAL_INTERVAL",
+    "LEADING_SOURCE_COVERAGE_GAP",
+    "TRAILING_SOURCE_COVERAGE_GAP",
+}
+
+
 def _quality_is_usable_optional(report: DatasetQualityReport) -> bool:
+    """Allow partial research coverage while rejecting source-integrity errors."""
     if report.status is DataQualityStatus.MISSING:
         return False
-    return not any(issue.severity is DataQualityStatus.ERROR for issue in report.issues)
+    return not any(
+        issue.severity is DataQualityStatus.ERROR
+        and issue.code not in _OPTIONAL_COVERAGE_ISSUES
+        for issue in report.issues
+    )
 
 
 def _nonfatal_fallback_report(
@@ -134,7 +234,10 @@ def _nonfatal_fallback_report(
     fallback = DataQualityIssue(
         code="EXPLICIT_INTRABAR_FALLBACK",
         severity=DataQualityStatus.WARN,
-        message="Requested intrabar data was unavailable or invalid; explicit fallback policy was used",
+        message=(
+            "Requested intrabar data was unavailable or invalid; explicit "
+            "fallback policy was used"
+        ),
         details={
             "requested_interval": requested_interval,
             "actual_interval": actual_interval,
@@ -149,6 +252,13 @@ def _nonfatal_fallback_report(
     )
 
 
+def _research_parameters(
+    feature_parameters: Mapping[str, Mapping[str, object]] | None,
+    name: str,
+) -> dict[str, object]:
+    return dict((feature_parameters or {}).get(name, {}))
+
+
 def _optional_futures_research_features(
     store: MarketDataStore,
     request: DataRequest,
@@ -157,54 +267,195 @@ def _optional_futures_research_features(
     include_agg_trade_flow: bool = False,
     registry=None,
     usable_datasets: set[DatasetKind] | None = None,
+    feature_parameters: Mapping[str, Mapping[str, object]] | None = None,
+    positioning_price_usable: bool = False,
+    taker_flow_usable: bool = False,
 ) -> dict[str, pd.DataFrame]:
-    """Load futures research blocks when validated local coverage exists.
+    """Load compact futures research blocks when validated coverage exists.
 
-    Compact metrics/funding/reference-price datasets are inexpensive enough to
-    attach automatically. Aggregate trades can be very large, so trade-flow
-    aggregation is explicit opt-in. Optional data with integrity errors is
-    reported by the quality layer and is not fed to a feature provider.
+    Statistics are calculated on their native source timelines before causal
+    alignment to strategy decisions. Partial optional history remains queryable;
+    rows before source coverage stay NaN/UNKNOWN rather than becoming synthetic
+    zeroes or causing the whole provider to disappear.
     """
     if request.market != MarketKind.FUTURES_UM:
         return {}
 
     allowed = usable_datasets
     result: dict[str, pd.DataFrame] = {}
+
     if allowed is None or DatasetKind.FUTURES_METRICS in allowed:
         try:
             provider = FuturesPositioningFeatureProvider()
-            positioning = _cached_catalog_feature(
-                store, request, canonical, DatasetKind.FUTURES_METRICS, provider,
+            parameters = _research_parameters(
+                feature_parameters, provider.definition.name
+            )
+            warmup_days = max(
+                1.0,
+                float(parameters.get("oi_zscore_window_days", 7.0)),
+            )
+            metrics_request = _dataset_request(
+                request,
+                DatasetKind.FUTURES_METRICS,
+                start=request.start - timedelta(days=warmup_days),
+            )
+            strategy_signature = store.source_signature(
+                _dataset_request(request, DatasetKind.KLINES),
+                DatasetKind.KLINES,
+                interval=request.strategy_interval,
+            )
+            metrics_signature = store.source_signature(
+                metrics_request,
+                DatasetKind.FUTURES_METRICS,
+            )
+            source_ids: dict[object, str] = {
+                DatasetKind.KLINES: strategy_signature.cache_identity(),
+                DatasetKind.FUTURES_METRICS: metrics_signature.cache_identity(),
+            }
+            price_resource = futures_positioning_price_resource()
+            price_request = _interval_dataset_request(
+                request,
+                DatasetKind.KLINES,
+                FUTURES_POSITIONING_PRICE_INTERVAL,
+                start=request.start - pd.Timedelta(hours=1),
+            )
+            if positioning_price_usable:
+                price_signature = store.source_signature(
+                    price_request,
+                    DatasetKind.KLINES,
+                    interval=FUTURES_POSITIONING_PRICE_INTERVAL,
+                )
+                source_ids[price_resource] = price_signature.cache_identity()
+
+            def positioning_loader():
+                datasets: dict[object, pd.DataFrame] = {
+                    DatasetKind.KLINES: canonical,
+                    DatasetKind.FUTURES_METRICS: store.load_dataset(
+                        metrics_request, DatasetKind.FUTURES_METRICS
+                    ),
+                }
+                if positioning_price_usable:
+                    datasets[price_resource] = store.load_dataset(
+                        price_request,
+                        DatasetKind.KLINES,
+                        interval=FUTURES_POSITIONING_PRICE_INTERVAL,
+                    )
+                return datasets
+
+            result[provider.definition.name] = _cached_feature_by_identities(
+                store,
+                request,
+                provider,
+                parameters,
+                source_ids,
+                positioning_loader,
                 registry=registry,
             )
-            if positioning is not None:
-                result[provider.definition.name] = positioning
         except DataNotAvailableError:
             pass
 
     if allowed is None or DatasetKind.FUNDING_RATE in allowed:
         try:
+            provider = FundingContextFeatureProvider()
+            parameters = _research_parameters(
+                feature_parameters, provider.definition.name
+            )
+            warmup_days = max(
+                1.0,
+                float(parameters.get("funding_zscore_window_days", 7.0)),
+            )
             funding_request = _dataset_request(
                 request,
                 DatasetKind.FUNDING_RATE,
-                start=request.start - timedelta(hours=24),
+                start=request.start - timedelta(days=warmup_days),
             )
-            funding = store.load_dataset(funding_request, DatasetKind.FUNDING_RATE)
+            funding = store.load_dataset(
+                funding_request, DatasetKind.FUNDING_RATE
+            )
             if not funding.empty:
-                provider = FundingContextFeatureProvider()
                 result[provider.definition.name] = _cached_multisource_feature(
                     store,
                     request,
-                    {DatasetKind.KLINES: canonical, DatasetKind.FUNDING_RATE: funding},
+                    {
+                        DatasetKind.KLINES: canonical,
+                        DatasetKind.FUNDING_RATE: funding,
+                    },
                     provider,
+                    parameters,
                     registry=registry,
                 )
         except DataNotAvailableError:
             pass
 
-    reference_start = request.start - interval_to_timedelta(request.strategy_interval)
+    if taker_flow_usable:
+        try:
+            provider = TakerFlowContextFeatureProvider()
+            parameters = _research_parameters(
+                feature_parameters, provider.definition.name
+            )
+            interval = str(parameters.get("taker_flow_interval", "5m"))
+            interval_to_timedelta(interval)
+            resource = taker_flow_resource(interval)
+            source_request = _interval_dataset_request(
+                request,
+                DatasetKind.KLINES,
+                interval,
+                start=request.start - timedelta(hours=1),
+            )
+            strategy_signature = store.source_signature(
+                _dataset_request(request, DatasetKind.KLINES),
+                DatasetKind.KLINES,
+                interval=request.strategy_interval,
+            )
+            source_signature = store.source_signature(
+                source_request,
+                DatasetKind.KLINES,
+                interval=interval,
+            )
+            source_ids = {
+                DatasetKind.KLINES: strategy_signature.cache_identity(),
+                resource: source_signature.cache_identity(),
+            }
+
+            def taker_loader():
+                return {
+                    DatasetKind.KLINES: canonical,
+                    resource: store.load_dataset(
+                        source_request,
+                        DatasetKind.KLINES,
+                        interval=interval,
+                    ),
+                }
+
+            result[provider.definition.name] = _cached_feature_by_identities(
+                store,
+                request,
+                provider,
+                parameters,
+                source_ids,
+                taker_loader,
+                registry=registry,
+            )
+        except DataNotAvailableError:
+            pass
+
+    basis_provider = BasisContextFeatureProvider()
+    basis_parameters = _research_parameters(
+        feature_parameters, basis_provider.definition.name
+    )
+    basis_warmup_days = max(
+        0.0,
+        float(basis_parameters.get("basis_zscore_window_days", 7.0)),
+    )
+    reference_start = min(
+        request.start - timedelta(days=basis_warmup_days),
+        request.start - interval_to_timedelta(request.strategy_interval),
+    )
     reference_frames: dict[DatasetKind, pd.DataFrame] = {}
-    for dataset in (DatasetKind.MARK_PRICE_KLINES, DatasetKind.INDEX_PRICE_KLINES):
+    for dataset in (
+        DatasetKind.MARK_PRICE_KLINES,
+        DatasetKind.INDEX_PRICE_KLINES,
+    ):
         if allowed is not None and dataset not in allowed:
             continue
         try:
@@ -236,12 +487,12 @@ def _optional_futures_research_features(
                     reference_frames[DatasetKind.PREMIUM_INDEX_KLINES] = premium
             except DataNotAvailableError:
                 pass
-        provider = BasisContextFeatureProvider()
-        result[provider.definition.name] = _cached_multisource_feature(
+        result[basis_provider.definition.name] = _cached_multisource_feature(
             store,
             request,
             {DatasetKind.KLINES: canonical, **reference_frames},
-            provider,
+            basis_provider,
+            basis_parameters,
             registry=registry,
         )
 
@@ -260,7 +511,10 @@ def _optional_futures_research_features(
                 result[provider.definition.name] = _cached_multisource_feature(
                     store,
                     request,
-                    {DatasetKind.KLINES: canonical, DatasetKind.AGG_TRADES: agg_trades},
+                    {
+                        DatasetKind.KLINES: canonical,
+                        DatasetKind.AGG_TRADES: agg_trades,
+                    },
                     provider,
                     registry=registry,
                 )
@@ -386,10 +640,9 @@ def load_backtest_bundle(
                 "sr_break_basis": str(sr_break_basis).upper(),
             }
 
-    # Validate optional/required futures source families before executing the
-    # corresponding research providers. Missing optional data remains visible;
-    # invalid optional data is not converted into synthetic feature values.
     usable_research_datasets: set[DatasetKind] | None = None
+    positioning_price_usable = False
+    taker_flow_usable = False
     if request.market == MarketKind.FUTURES_UM:
         usable_research_datasets = set()
         for dataset, interval in (
@@ -408,6 +661,40 @@ def load_backtest_bundle(
             quality_reports.append(report)
             if _quality_is_usable_optional(report):
                 usable_research_datasets.add(dataset)
+
+        price_quality_request = _interval_dataset_request(
+            request,
+            DatasetKind.KLINES,
+            FUTURES_POSITIONING_PRICE_INTERVAL,
+        )
+        price_report = store.data_quality_report(
+            price_quality_request,
+            DatasetKind.KLINES,
+            interval=FUTURES_POSITIONING_PRICE_INTERVAL,
+            required=False,
+        )
+        quality_reports.append(price_report)
+        positioning_price_usable = _quality_is_usable_optional(price_report)
+
+        taker_parameters = _research_parameters(
+            feature_parameters, "taker_flow_context"
+        )
+        taker_interval = str(taker_parameters.get("taker_flow_interval", "5m"))
+        interval_to_timedelta(taker_interval)
+        taker_quality_request = _interval_dataset_request(
+            request,
+            DatasetKind.KLINES,
+            taker_interval,
+        )
+        taker_report = store.data_quality_report(
+            taker_quality_request,
+            DatasetKind.KLINES,
+            interval=taker_interval,
+            required=False,
+        )
+        quality_reports.append(taker_report)
+        taker_flow_usable = _quality_is_usable_optional(taker_report)
+
         if include_agg_trade_flow:
             agg_report = store.data_quality_report(
                 request,
@@ -418,15 +705,23 @@ def load_backtest_bundle(
             DataQualityReport((agg_report,)).raise_for_errors()
             usable_research_datasets.add(DatasetKind.AGG_TRADES)
 
-    registry = feature_registry if feature_registry is not None else production_feature_registry()
+    registry = (
+        feature_registry if feature_registry is not None else production_feature_registry()
+    )
     requested = ["production_market_context", "state_transition_daily"]
     if enable_support_resistance_analysis:
         requested.append("support_resistance")
+    main_parameter_names = set(registry.dependency_order(requested))
+    main_feature_parameters = {
+        name: parameters
+        for name, parameters in feature_parameters.items()
+        if name in main_parameter_names
+    }
     frames = registry.execute(
         requested,
         request,
         {DatasetKind.KLINES: canonical},
-        parameters=feature_parameters,
+        parameters=main_feature_parameters,
         cache=FeatureFrameCache(store.cache.root),
     )
     directional = frames[CORE_DIRECTIONAL_FEATURE_NAME]
@@ -441,12 +736,17 @@ def load_backtest_bundle(
         include_agg_trade_flow=include_agg_trade_flow,
         registry=registry,
         usable_datasets=usable_research_datasets,
+        feature_parameters=feature_parameters,
+        positioning_price_usable=positioning_price_usable,
+        taker_flow_usable=taker_flow_usable,
     )
 
     intrabar = None
     actual_intrabar_interval = None
     if request.intrabar_interval:
-        effective_start = max(request.start, intrabar_start) if intrabar_start else request.start
+        effective_start = (
+            max(request.start, intrabar_start) if intrabar_start else request.start
+        )
         intrabar_request = DataRequest(
             symbol=request.symbol,
             start=effective_start,
@@ -462,13 +762,19 @@ def load_backtest_bundle(
             required=True,
         )
         if requested_quality.status is DataQualityStatus.ERROR:
-            policy = str(getattr(data_config, "intrabar_missing_policy", "ERROR")).upper()
+            policy = str(
+                getattr(data_config, "intrabar_missing_policy", "ERROR")
+            ).upper()
             if policy == "ERROR":
                 DataQualityReport((requested_quality,)).raise_for_errors()
             elif policy == "WARN_AND_USE_15M":
                 fallback_interval = "15m"
-                if interval_to_timedelta(fallback_interval) >= interval_to_timedelta(request.strategy_interval):
-                    raise ValueError("15m intrabar fallback must remain below the strategy timeframe")
+                if interval_to_timedelta(fallback_interval) >= interval_to_timedelta(
+                    request.strategy_interval
+                ):
+                    raise ValueError(
+                        "15m intrabar fallback must remain below the strategy timeframe"
+                    )
                 quality_reports.append(
                     _nonfatal_fallback_report(
                         requested_quality,
@@ -493,7 +799,9 @@ def load_backtest_bundle(
                 )
                 DataQualityReport((fallback_quality,)).raise_for_errors()
                 quality_reports.append(fallback_quality)
-                intrabar = store.load_execution_klines(fallback_request, fallback_interval)
+                intrabar = store.load_execution_klines(
+                    fallback_request, fallback_interval
+                )
                 actual_intrabar_interval = fallback_interval
             elif policy == "WARN_AND_CONTINUE":
                 quality_reports.append(
@@ -508,7 +816,9 @@ def load_backtest_bundle(
                 raise ValueError(f"Unsupported intrabar missing policy: {policy}")
         else:
             quality_reports.append(requested_quality)
-            intrabar = store.load_execution_klines(intrabar_request, request.intrabar_interval)
+            intrabar = store.load_execution_klines(
+                intrabar_request, request.intrabar_interval
+            )
             actual_intrabar_interval = request.intrabar_interval
 
     benchmark = None
