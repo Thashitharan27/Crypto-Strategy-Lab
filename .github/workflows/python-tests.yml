@@ -63,7 +63,7 @@ jobs:
       - name: Install focused dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas duckdb openpyxl pytest
+          pip install numpy pandas duckdb openpyxl 'mcp>=2.0,<3' pytest
       - name: Compile Data Lake path and composition tools
         run: >-
           python -m compileall -q
