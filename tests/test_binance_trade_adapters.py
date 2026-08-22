@@ -5,6 +5,7 @@ from pathlib import Path
 import zipfile
 
 import pandas as pd
+import pytest
 
 from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore
 from crypto_strategy_lab.data.binance.discovery import discover_archives
@@ -40,6 +41,20 @@ def test_agg_trades_adapter_normalizes_aggressor_side(tmp_path: Path) -> None:
     assert frame.loc[0, "quote_quantity"] == 201.0
     assert frame.loc[0, "event_time"] == pd.Timestamp("2026-01-01T00:00:01Z")
     assert frame.loc[1, "available_at"] == pd.Timestamp("2026-01-01T00:00:02Z")
+
+
+def test_agg_trades_adapter_rejects_duplicate_ids_within_one_archive(tmp_path: Path) -> None:
+    path = tmp_path / "raw/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-01-01.zip"
+    _zip(
+        path,
+        "BTCUSDT-aggTrades-2026-01-01.csv",
+        "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n"
+        "10,100.5,2.0,20,21,1767225601000,false\n"
+        "10,100.6,1.0,22,22,1767225602000,true\n",
+    )
+    record = discover_archives(tmp_path / "raw")[0]
+    with pytest.raises(ValueError, match="Duplicate Binance aggregate trade IDs"):
+        AggTradesArchiveAdapter().read(record)
 
 
 def test_store_preserves_distinct_agg_trades_with_same_event_timestamp(tmp_path: Path) -> None:
