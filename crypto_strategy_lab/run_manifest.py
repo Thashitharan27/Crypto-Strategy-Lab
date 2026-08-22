@@ -69,6 +69,7 @@ def new_run_identity() -> tuple[str, str]:
 
 
 def capture_code_provenance(repo: Path | None = None) -> dict[str, Any]:
+    """Capture code identity without treating generated outputs as code changes."""
     repo = Path(repo or Path(__file__).resolve().parents[1])
     try:
         commit = subprocess.run(
@@ -85,7 +86,16 @@ def capture_code_provenance(repo: Path | None = None) -> dict[str, Any]:
             capture_output=True,
             text=True,
         ).stdout
-        dirty = bool(status.strip())
+        lines = [line for line in status.splitlines() if line.strip()]
+        tracked_changes = [line for line in lines if not line.startswith("?? ")]
+        untracked_source_paths = sorted(
+            line[3:]
+            for line in lines
+            if line.startswith("?? ")
+            and Path(line[3:]).suffix in {".py", ".toml", ".yaml", ".yml"}
+            and Path(line[3:]).name != ".env"
+        )
+        dirty = bool(tracked_changes or untracked_source_paths)
         result: dict[str, Any] = {
             "code_commit": commit,
             "code_dirty": dirty,
@@ -102,13 +112,7 @@ def capture_code_provenance(repo: Path | None = None) -> dict[str, Any]:
                 capture_output=True,
             ).stdout
             result["tracked_diff_sha256"] = hashlib.sha256(diff).hexdigest()
-            result["untracked_source_paths"] = sorted(
-                line[3:]
-                for line in status.splitlines()
-                if line.startswith("?? ")
-                and Path(line[3:]).suffix in {".py", ".toml", ".yaml", ".yml"}
-                and Path(line[3:]).name != ".env"
-            )
+            result["untracked_source_paths"] = untracked_source_paths
         return result
     except (OSError, subprocess.SubprocessError):
         return {
@@ -168,12 +172,7 @@ def config_hashes(
 
 
 def _real_canonical_partition_identity(record: Any) -> str | None:
-    """Return the same partition identity used by MarketDataStore canonical L1.
-
-    This deliberately uses adapter contracts rather than inventing a reporting-only
-    hash.  Non-ArchiveRecord test doubles return ``None`` and receive a clearly
-    versioned provenance fallback in ``source_record``.
-    """
+    """Return the exact identity used by MarketDataStore canonical L1."""
     from .data.schemas import ArchiveRecord, DatasetKind
 
     if not isinstance(record, ArchiveRecord):
