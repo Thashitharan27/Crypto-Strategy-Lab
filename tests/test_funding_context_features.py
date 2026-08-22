@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pandas.testing as pdt
+import pytest
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
@@ -51,7 +52,7 @@ def request(frame: pd.DataFrame) -> DataRequest:
     )
 
 
-def prepared(kline_frame=None, funding_frame=None) -> pd.DataFrame:
+def prepared(kline_frame=None, funding_frame=None, parameters=None) -> pd.DataFrame:
     kline_frame = klines() if kline_frame is None else kline_frame
     funding_frame = funding_events() if funding_frame is None else funding_frame
     return FundingContextFeatureProvider().compute(
@@ -60,39 +61,84 @@ def prepared(kline_frame=None, funding_frame=None) -> pd.DataFrame:
             DatasetKind.KLINES: kline_frame,
             DatasetKind.FUNDING_RATE: funding_frame,
         },
-        {},
+        parameters or {},
     )
 
 
 def test_latest_funding_event_is_causally_aligned() -> None:
     result = prepared()
 
-    # First strategy candle closes at 04:00, so the 04:05 event is future data.
     assert result.loc[0, "funding_source_available_at"] == pd.Timestamp("2026-01-01T00:00:00Z")
     assert np.isclose(result.loc[0, "funding_rate"], 0.0002)
     assert np.isclose(result.loc[0, "funding_rate_bps"], 2.0)
     assert result.loc[0, "funding_bias"] == "POSITIVE"
     assert np.isclose(result.loc[0, "funding_age_hours"], 4.0)
+    assert result.loc[0, "time_to_next_funding"] == pytest.approx(4 * 3600)
 
-    # 08:00 can use the settlement stamped exactly at 08:00.
     assert result.loc[1, "funding_source_available_at"] == pd.Timestamp("2026-01-01T08:00:00Z")
     assert np.isclose(result.loc[1, "funding_rate"], -0.0001)
     assert result.loc[1, "funding_bias"] == "NEGATIVE"
     assert result.loc[1, "funding_event_changed"]
+    assert result.loc[1, "time_to_next_funding"] == pytest.approx(8 * 3600)
     assert bool((result["funding_source_available_at"] <= result["available_at"]).all())
+
+
+def test_funding_previous_change_and_three_event_mean_use_event_timeline() -> None:
+    result = prepared()
+    row = result.loc[1]  # 08:00 strategy decision, latest event is exactly 08:00
+    assert row["funding_previous"] == pytest.approx(0.0099)
+    assert row["funding_change"] == pytest.approx(-0.0100)
+    assert row["funding_3_event_mean"] == pytest.approx((0.0002 + 0.0099 - 0.0001) / 3)
+    # The early decision has insufficient 7d sample history: unknown is nullable,
+    # not silently converted to False / "not extreme".
+    assert pd.isna(result.loc[0, "funding_extreme_positive"])
+    assert pd.isna(result.loc[0, "funding_extreme_negative"])
 
 
 def test_trailing_24h_funding_uses_only_events_known_by_decision_time() -> None:
     result = prepared()
 
-    # At 04:00, the causal 24h window includes 12/31 16:00 and 01/01 00:00,
-    # but not the deliberately future 04:05 row.
     assert result.loc[0, "funding_24h_count"] == 2
     assert np.isclose(result.loc[0, "funding_24h_sum"], 0.0003)
-
-    # At 08:00 the 04:05 row is now known, along with the 08:00 settlement.
     assert result.loc[1, "funding_24h_count"] == 4
     assert np.isclose(result.loc[1, "funding_24h_sum"], 0.0101)
+
+
+def test_time_to_next_funding_rolls_known_cadence_without_reading_a_future_event() -> None:
+    strategy = klines(5)  # final decision at 20:00
+    events = pd.DataFrame(
+        {
+            "available_at": pd.to_datetime(
+                ["2025-12-31T16:00:00Z", "2026-01-01T00:00:00Z", "2026-01-01T08:00:00Z"],
+                utc=True,
+            ),
+            "funding_rate": [0.0001, 0.0002, -0.0001],
+            "funding_interval_hours": [8.0, 8.0, 8.0],
+        }
+    )
+    out = prepared(strategy, events)
+    final = out.iloc[-1]
+    assert final["funding_source_available_at"] == pd.Timestamp("2026-01-01T08:00:00Z")
+    # 16:00 is a missed expected event; based only on the already-known 8h cadence,
+    # the next scheduled boundary after 20:00 is 00:00 -> four hours away.
+    assert final["time_to_next_funding"] == pytest.approx(4 * 3600)
+
+
+def test_funding_interval_can_be_inferred_only_from_past_published_events() -> None:
+    strategy = klines(5)
+    events = pd.DataFrame(
+        {
+            "available_at": pd.to_datetime(
+                ["2025-12-31T16:00:00Z", "2026-01-01T00:00:00Z", "2026-01-01T08:00:00Z", "2026-01-01T16:00:00Z"],
+                utc=True,
+            ),
+            "funding_rate": [0.0001, 0.0002, -0.0001, 0.0003],
+        }
+    )
+    out = prepared(strategy, events)
+    final = out.iloc[-1]
+    assert final["funding_interval_hours"] == pytest.approx(8.0)
+    assert final["time_to_next_funding"] == pytest.approx(4 * 3600)
 
 
 def test_future_funding_mutation_cannot_change_past_context() -> None:
@@ -107,10 +153,14 @@ def test_future_funding_mutation_cannot_change_past_context() -> None:
     mask = before.available_at <= cutoff
     columns = [
         "funding_rate",
+        "funding_previous",
+        "funding_change",
+        "funding_3_event_mean",
         "funding_rate_bps",
         "funding_bias",
         "funding_24h_sum",
         "funding_24h_count",
+        "time_to_next_funding",
     ]
     pdt.assert_frame_equal(
         before.loc[mask, columns].reset_index(drop=True),
