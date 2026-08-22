@@ -18,6 +18,8 @@ RUN_MANIFEST_CONTRACT = "crypto_strategy_lab_run_v1"
 RUN_MANIFEST_VERSION = 1
 CATALOG_SNAPSHOT_CONTRACT = "selected_source_catalog_v1"
 PREPARED_CACHE_CONTRACT = "prepared_backtest_frame_v1"
+FEATURE_RESEARCH_ARTIFACT_CONTRACT = "feature_research_v1"
+FEATURE_RESEARCH_ARTIFACT_VERSION = 1
 
 
 class RunArtifactError(ValueError):
@@ -25,7 +27,13 @@ class RunArtifactError(ValueError):
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
 
 
 def canonical_sha256(value: Any) -> str:
@@ -45,8 +53,11 @@ def atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            stream.write(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n")
-            stream.flush(); os.fsync(stream.fileno())
+            stream.write(
+                json.dumps(value, indent=2, sort_keys=True, default=str) + "\n"
+            )
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
@@ -60,69 +71,176 @@ def new_run_identity() -> tuple[str, str]:
 def capture_code_provenance(repo: Path | None = None) -> dict[str, Any]:
     repo = Path(repo or Path(__file__).resolve().parents[1])
     try:
-        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
-                                capture_output=True, text=True).stdout.strip()
-        status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"],
-                                cwd=repo, check=True, capture_output=True, text=True).stdout
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
         dirty = bool(status.strip())
         result: dict[str, Any] = {
-            "code_commit": commit, "code_dirty": dirty,
-            "code_provenance_status": "DIRTY_WORKTREE" if dirty else "CLEAN_COMMIT",
+            "code_commit": commit,
+            "code_dirty": dirty,
+            "code_provenance_status": (
+                "DIRTY_WORKTREE" if dirty else "CLEAN_COMMIT"
+            ),
             "reproducibility_status": "PARTIAL" if dirty else "REPRODUCIBLE",
         }
         if dirty:
-            diff = subprocess.run(["git", "diff", "--binary", "HEAD"], cwd=repo,
-                                  check=True, capture_output=True).stdout
+            diff = subprocess.run(
+                ["git", "diff", "--binary", "HEAD"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            ).stdout
             result["tracked_diff_sha256"] = hashlib.sha256(diff).hexdigest()
             result["untracked_source_paths"] = sorted(
-                line[3:] for line in status.splitlines()
-                if line.startswith("?? ") and Path(line[3:]).suffix in {".py", ".toml", ".yaml", ".yml"}
+                line[3:]
+                for line in status.splitlines()
+                if line.startswith("?? ")
+                and Path(line[3:]).suffix in {".py", ".toml", ".yaml", ".yml"}
                 and Path(line[3:]).name != ".env"
             )
         return result
     except (OSError, subprocess.SubprocessError):
-        return {"code_commit": None, "code_dirty": None,
-                "code_provenance_status": "GIT_UNAVAILABLE", "reproducibility_status": "PARTIAL"}
+        return {
+            "code_commit": None,
+            "code_dirty": None,
+            "code_provenance_status": "GIT_UNAVAILABLE",
+            "reproducibility_status": "PARTIAL",
+        }
 
 
 def runtime_provenance(repo: Path | None = None) -> dict[str, Any]:
-    requirements = Path(repo or Path(__file__).resolve().parents[1]) / "requirements.txt"
-    return {"python_version": sys.version, "platform": platform.platform(),
-            "project_config_contract": "research_run_config_v3", "project_config_version": 3,
-            "requirements_sha256": file_sha256(requirements) if requirements.is_file() else None}
+    requirements = (
+        Path(repo or Path(__file__).resolve().parents[1]) / "requirements.txt"
+    )
+    return {
+        "python_version": sys.version,
+        "platform": platform.platform(),
+        "project_config_contract": "research_run_config_v3",
+        "project_config_version": 3,
+        "requirements_sha256": (
+            file_sha256(requirements) if requirements.is_file() else None
+        ),
+    }
 
 
 def config_snapshot(config: Any) -> dict[str, Any]:
-    value = config.to_dict() if hasattr(config, "to_dict") else asdict(config) if is_dataclass(config) else dict(config)
-    return value
+    if hasattr(config, "to_dict"):
+        return config.to_dict()
+    if is_dataclass(config):
+        return asdict(config)
+    return dict(config)
 
 
-def config_hashes(config: Any, effective_intrabar_interval: str | None) -> dict[str, str]:
+def config_hashes(
+    config: Any, effective_intrabar_interval: str | None
+) -> dict[str, str]:
+    """Hash semantic config scopes without letting reporting invalidate execution."""
     snapshot = config_snapshot(config)
+    data = snapshot["data"]
+    execution_data = {
+        "strategy_timeframe_minutes": data.get("strategy_timeframe_minutes"),
+        "use_intrabar_data": data.get("use_intrabar_data"),
+        "requested_intrabar_timeframe_minutes": data.get(
+            "intrabar_timeframe_minutes"
+        ),
+        "effective_intrabar_interval": effective_intrabar_interval,
+        "intrabar_missing_policy": data.get("intrabar_missing_policy"),
+    }
     return {
         "strategy_hash": canonical_sha256(snapshot["strategy"]),
-        "execution_hash": canonical_sha256({"execution": snapshot["execution"],
-                                             "effective_intrabar_interval": effective_intrabar_interval,
-                                             "use_intrabar_data": snapshot["data"].get("use_intrabar_data")}),
+        "execution_hash": canonical_sha256(
+            {"execution": snapshot["execution"], "execution_data": execution_data}
+        ),
         "feature_config_hash": canonical_sha256(snapshot["features"]),
         "data_config_hash": canonical_sha256(snapshot["data"]),
     }
 
 
+def _real_canonical_partition_identity(record: Any) -> str | None:
+    """Return the same partition identity used by MarketDataStore canonical L1.
+
+    This deliberately uses adapter contracts rather than inventing a reporting-only
+    hash.  Non-ArchiveRecord test doubles return ``None`` and receive a clearly
+    versioned provenance fallback in ``source_record``.
+    """
+    from .data.schemas import ArchiveRecord, DatasetKind
+
+    if not isinstance(record, ArchiveRecord):
+        return None
+
+    from .data.binance.events import (
+        BookDepthArchiveAdapter,
+        BookTickerArchiveAdapter,
+        FundingRateArchiveAdapter,
+        FuturesMetricsArchiveAdapter,
+    )
+    from .data.binance.klines import KlineArchiveAdapter, KlineLikeArchiveAdapter
+    from .data.binance.trades import AggTradesArchiveAdapter, TradesArchiveAdapter
+    from .data.source_identity import canonical_partition_identity
+
+    adapters = {
+        DatasetKind.KLINES: KlineArchiveAdapter(),
+        DatasetKind.MARK_PRICE_KLINES: KlineLikeArchiveAdapter(
+            DatasetKind.MARK_PRICE_KLINES
+        ),
+        DatasetKind.INDEX_PRICE_KLINES: KlineLikeArchiveAdapter(
+            DatasetKind.INDEX_PRICE_KLINES
+        ),
+        DatasetKind.PREMIUM_INDEX_KLINES: KlineLikeArchiveAdapter(
+            DatasetKind.PREMIUM_INDEX_KLINES
+        ),
+        DatasetKind.FUTURES_METRICS: FuturesMetricsArchiveAdapter(),
+        DatasetKind.FUNDING_RATE: FundingRateArchiveAdapter(),
+        DatasetKind.AGG_TRADES: AggTradesArchiveAdapter(),
+        DatasetKind.TRADES: TradesArchiveAdapter(),
+        DatasetKind.BOOK_TICKER: BookTickerArchiveAdapter(),
+        DatasetKind.BOOK_DEPTH: BookDepthArchiveAdapter(),
+    }
+    adapter = adapters[record.dataset]
+    return canonical_partition_identity(record, adapter.canonical_contract())
+
+
 def source_record(record: Any) -> dict[str, Any]:
-    value = {"exchange": record.exchange, "market": getattr(record.market, "value", record.market),
-             "dataset": getattr(record.dataset, "value", record.dataset), "symbol": record.symbol,
-             "interval": record.interval, "frequency": record.frequency,
-             "period_start": record.period_start.isoformat() if record.period_start else None,
-             "period_end": record.period_end.isoformat() if record.period_end else None,
-             "size_bytes": int(record.size_bytes), "mtime_ns": int(record.mtime_ns),
-             "raw_archive_fingerprint": record.fingerprint}
-    value["canonical_partition_identity"] = canonical_sha256(value)
+    value = {
+        "exchange": record.exchange,
+        "market": getattr(record.market, "value", record.market),
+        "dataset": getattr(record.dataset, "value", record.dataset),
+        "symbol": record.symbol,
+        "interval": record.interval,
+        "frequency": record.frequency,
+        "period_start": (
+            record.period_start.isoformat() if record.period_start else None
+        ),
+        "period_end": record.period_end.isoformat() if record.period_end else None,
+        "size_bytes": int(record.size_bytes),
+        "mtime_ns": int(record.mtime_ns),
+        "raw_archive_fingerprint": record.fingerprint,
+    }
+    canonical_identity = _real_canonical_partition_identity(record)
+    if canonical_identity is None:
+        canonical_identity = canonical_sha256(
+            {"provenance_test_double_v1": value}
+        )
+    value["canonical_partition_identity"] = canonical_identity
     return value
 
 
-def selected_source_snapshot(records: tuple[Any, ...] | list[Any]) -> tuple[list[dict[str, Any]], str]:
-    unique = {canonical_json(source_record(item)): source_record(item) for item in records}
+def selected_source_snapshot(
+    records: tuple[Any, ...] | list[Any],
+) -> tuple[list[dict[str, Any]], str]:
+    values = [source_record(item) for item in records]
+    unique = {canonical_json(item): item for item in values}
     rows = sorted(unique.values(), key=canonical_json)
     return rows, canonical_sha256(rows)
 
@@ -133,14 +251,30 @@ def load_completed_manifest(run_dir: Path) -> dict[str, Any]:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RunArtifactError("completed run manifest is missing or corrupt") from exc
-    if (manifest.get("run_manifest_contract") != RUN_MANIFEST_CONTRACT or
-            manifest.get("run_manifest_version") != RUN_MANIFEST_VERSION or
-            manifest.get("run_status") != "COMPLETED"):
+    if (
+        manifest.get("run_manifest_contract") != RUN_MANIFEST_CONTRACT
+        or manifest.get("run_manifest_version") != RUN_MANIFEST_VERSION
+        or manifest.get("run_status") != "COMPLETED"
+    ):
         raise RunArtifactError("incompatible or incomplete run manifest")
+    research = manifest.get("research")
+    if not isinstance(research, Mapping):
+        raise RunArtifactError("completed run research contract is missing")
+    if (
+        research.get("artifact_contract") != FEATURE_RESEARCH_ARTIFACT_CONTRACT
+        or research.get("artifact_version") != FEATURE_RESEARCH_ARTIFACT_VERSION
+    ):
+        raise RunArtifactError("incompatible feature research artifact version")
     return manifest
 
 
-def artifact_path(run_dir: Path, manifest: Mapping[str, Any], name: str, *, verify: bool = True) -> Path:
+def artifact_path(
+    run_dir: Path,
+    manifest: Mapping[str, Any],
+    name: str,
+    *,
+    verify: bool = True,
+) -> Path:
     entry = manifest.get("artifacts", {}).get(name)
     if not isinstance(entry, Mapping) or not entry.get("path"):
         raise RunArtifactError(f"artifact is not cataloged: {name}")
@@ -148,8 +282,10 @@ def artifact_path(run_dir: Path, manifest: Mapping[str, Any], name: str, *, veri
     root = Path(run_dir).resolve(strict=True)
     if relative.is_absolute() or ".." in relative.parts:
         raise RunArtifactError("unsafe artifact catalog path")
-    try: path = (root / relative).resolve(strict=True)
-    except (OSError, RuntimeError) as exc: raise RunArtifactError(f"artifact is missing: {name}") from exc
+    try:
+        path = (root / relative).resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise RunArtifactError(f"artifact is missing: {name}") from exc
     if root not in path.parents or path.is_symlink() or not path.is_file():
         raise RunArtifactError("artifact escapes completed run")
     if verify and file_sha256(path) != entry.get("sha256"):
