@@ -37,7 +37,9 @@ class BacktestDataBundle:
 
 def _legacy_from_canonical(canonical: pd.DataFrame, interval: str, label: str) -> pd.DataFrame:
     minutes = int(interval_to_timedelta(interval).total_seconds() // 60)
-    return canonical_to_legacy_ohlcv(canonical, label=label, expected_timeframe_minutes=minutes)
+    result = canonical_to_legacy_ohlcv(canonical, label=label, expected_timeframe_minutes=minutes)
+    result.attrs.update(canonical.attrs)
+    return result
 
 
 def _legacy_klines(store, request, interval, label):

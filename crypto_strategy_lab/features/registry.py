@@ -121,7 +121,8 @@ class FeatureRegistry:
         payload = {
             "feature": definition.name,
             "version": definition.version,
-            "request": request.cache_key(),
+            "cache_format_version": 2,
+            "request_scope": request.feature_scope_key(),
             "parameters": dict(resolved.parameters),
             "sources": {
                 kind.value: source_identities[kind]
@@ -131,6 +132,8 @@ class FeatureRegistry:
                 name: dependency_identities[name]
                 for name in sorted(definition.required_features)
             },
+            "schema": {name: {"kind": field.kind, "nullable": field.nullable}
+                       for name, field in definition.output_schema.items()},
         }
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
@@ -169,7 +172,8 @@ class FeatureRegistry:
     ) -> dict[str, pd.DataFrame]:
         frames, identities = {}, {}
         source_ids = source_identities or {
-            kind: cache._source_signature(frame) if cache else "uncached"
+            kind: frame.attrs.get("canonical_source_identity") or
+                  (cache._source_signature(frame) if cache else "uncached")
             for kind, frame in datasets.items()
         }
         for resolved in self.resolve(feature_names, parameters):

@@ -11,6 +11,7 @@ from crypto_strategy_lab.prepared_backtest import (
 )
 from crypto_strategy_lab.config import BacktestConfig
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
+from crypto_strategy_lab.prepared_cache import PreparedRunCache
 
 
 def valid_kwargs(n=3):
@@ -57,6 +58,30 @@ def valid_kwargs(n=3):
         momentum_returns_by_hours={24: np.zeros(n)},
         decision_available_at=timestamp + np.timedelta64(4, "h"),
     )
+
+
+def test_prepared_run_cache_persistent_round_trip_and_corruption(tmp_path):
+    cache = PreparedRunCache(tmp_path)
+    key = cache.identity(request_identity="slice", feature_identities={"di": "v2"},
+                         canonical_identities={"klines": "canonical-v1"}, prepared_inputs={})
+    original = PreparedBacktestFrame(**valid_kwargs())
+    cache.store(key, original, provenance={"request_identity": "slice"})
+    loaded = cache.load(key)
+    assert loaded is not None
+    assert np.array_equal(loaded.timestamp, original.timestamp)
+    assert not loaded.close.flags.writeable
+    cache.paths(key)[0].write_bytes(b"broken")
+    assert cache.load(key) is None
+
+
+def test_prepared_run_identity_is_dependency_aware(tmp_path):
+    cache = PreparedRunCache(tmp_path)
+    common = dict(request_identity="slice", canonical_identities={"klines": "k1"}, prepared_inputs={})
+    first = cache.identity(feature_identities={"di": "d1", "funding": "f1"}, **common)
+    assert first == cache.identity(feature_identities={"di": "d1", "funding": "f1"}, **common)
+    assert first != cache.identity(feature_identities={"di": "d2", "funding": "f1"}, **common)
+    # Execution/reporting fields never enter this explicit prepared input contract.
+    assert first == cache.identity(feature_identities={"di": "d1", "funding": "f1"}, **common)
 
 
 def data_lake_bundle():

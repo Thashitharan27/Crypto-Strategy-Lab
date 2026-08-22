@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import duckdb
 import pandas as pd
@@ -15,7 +16,7 @@ from .cache import CacheLayout
 from .catalog import DataCatalog
 from .query import DataRequest
 from .schemas import ArchiveRecord, DatasetKind
-from .source_identity import SourceSignature
+from .source_identity import SourceSignature, canonical_partition_identity
 
 
 class DataNotAvailableError(RuntimeError):
@@ -30,6 +31,7 @@ class MarketDataStore:
         self.cache = CacheLayout(Path(cache_root))
         self.cache.ensure()
         self.catalog = DataCatalog(self.cache.catalog_db)
+        self.canonical_cache_events = {"hit": 0, "miss": 0}
         self._adapters = {
             DatasetKind.KLINES: KlineArchiveAdapter(),
             DatasetKind.MARK_PRICE_KLINES: KlineLikeArchiveAdapter(DatasetKind.MARK_PRICE_KLINES),
@@ -55,22 +57,50 @@ class MarketDataStore:
             ) from exc
 
     def _ensure_canonical(self, record: ArchiveRecord) -> Path:
-        target = self.cache.archive_parquet(record)
-        if target.exists():
-            return target
+        adapter = self._adapter_for(record.dataset)
+        contract = adapter.canonical_contract()
+        identity = canonical_partition_identity(record, contract)
+        target = self.cache.archive_parquet(record, identity)
+        manifest = self.cache.archive_manifest(record, identity)
+        if target.is_file() and manifest.is_file():
+            try:
+                metadata = json.loads(manifest.read_text(encoding="utf-8"))
+                if metadata.get("canonical_identity") == identity:
+                    with duckdb.connect() as con:
+                        con.execute("SELECT * FROM read_parquet(?) LIMIT 0", [str(target)])
+                    self.canonical_cache_events["hit"] += 1
+                    return target
+            except Exception:
+                pass
+        self.canonical_cache_events["miss"] += 1
         target.parent.mkdir(parents=True, exist_ok=True)
-        frame = self._adapter_for(record.dataset).read(record)
+        frame = adapter.read(record)
         if frame.empty:
             raise ValueError(f"Recognized Binance archive contains no rows: {record.path}")
         temporary = target.with_suffix(".tmp.parquet")
+        temporary_manifest = manifest.with_suffix(".tmp.json")
         if temporary.exists():
             temporary.unlink()
         with duckdb.connect() as con:
             con.register("canonical_frame", frame)
             escaped = str(temporary).replace("'", "''")
             con.execute(f"COPY canonical_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+        temporary_manifest.write_text(json.dumps({
+            "cache_format_version": 1, "canonical_identity": identity,
+            "raw_source_fingerprint": record.fingerprint, "contract": contract,
+        }, sort_keys=True, indent=2) + "\n", encoding="utf-8")
         temporary.replace(target)
+        temporary_manifest.replace(manifest)
         return target
+
+    def canonical_source_identity(self, request, dataset, *, interval=None) -> SourceSignature:
+        records = self.catalog.records_for(self.raw_root, request, dataset, interval)
+        if not records:
+            raise DataNotAvailableError(f"No catalog coverage for {request.symbol} {dataset.value}")
+        adapter = self._adapter_for(dataset)
+        return SourceSignature.from_canonical_identities(dataset, [
+            canonical_partition_identity(record, adapter.canonical_contract()) for record in records
+        ])
 
     def load_dataset(
         self,
@@ -112,7 +142,11 @@ class MarketDataStore:
             subset = [column for column in ("symbol", "interval", sort_column) if column in frame.columns]
 
         frame = frame.sort_values(sort_columns, kind="stable")
-        return frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
+        frame = frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
+        frame.attrs["canonical_source_identity"] = self.canonical_source_identity(
+            request, dataset, interval=interval
+        ).cache_identity()
+        return frame
 
     def source_signature(
         self,
@@ -129,7 +163,7 @@ class MarketDataStore:
                 f"No catalog coverage for {request.symbol} {dataset.value} "
                 f"interval={interval!r} from {request.start.isoformat()} to {request.end.isoformat()}"
             )
-        return SourceSignature.from_records(dataset, records)
+        return self.canonical_source_identity(request, dataset, interval=interval)
 
     def load_execution_klines(
         self,

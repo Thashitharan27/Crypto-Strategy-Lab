@@ -69,3 +69,11 @@ class DataRequest:
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return sha256(raw).hexdigest()
+
+    def feature_scope_key(self) -> str:
+        """Identity of the strategy slice, excluding execution-only request fields."""
+        payload = {"exchange": self.exchange, "market": self.market.value,
+                   "symbol": self.symbol, "start": self.start.isoformat(),
+                   "end": self.end.isoformat(),
+                   "strategy_interval": self.strategy_interval}
+        return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()

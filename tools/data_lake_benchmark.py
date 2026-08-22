@@ -26,7 +26,8 @@ from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
-from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
+from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle, intrabar_from_data_lake_bundle
+from crypto_strategy_lab.prepared_cache import PreparedRunCache, bundle_prepared_identity
 
 
 _FINGERPRINT_COLUMNS = (
@@ -158,8 +159,16 @@ def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
     )
 
 
-def _engine(bundle: BacktestDataBundle, config):
-    prepared, intrabar = from_data_lake_bundle(bundle, config)
+def _engine(bundle: BacktestDataBundle, config, prepared_cache):
+    key, provenance = bundle_prepared_identity(prepared_cache, bundle, config)
+    prepared, hit = prepared_cache.get_or_build(
+        key, lambda: from_data_lake_bundle(bundle, config)[0], provenance=provenance
+    )
+    # Intrabar is explicitly outside L3 and must always reflect execution data.
+    intrabar = intrabar_from_data_lake_bundle(bundle)
+    if intrabar is not None:
+        intrabar.validate_compatible(prepared)
+    prepared_cache.last_hit = hit
     return DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
 
 
@@ -184,6 +193,7 @@ def main() -> int:
     )
     intrabar_start = _utc(args.intrabar_start) if args.intrabar_start else None
     store = MarketDataStore(args.raw_root, args.cache_root)
+    prepared_cache = PreparedRunCache(args.cache_root)
 
     catalog_seconds = 0.0
     if not args.skip_catalog_refresh:
@@ -207,7 +217,7 @@ def main() -> int:
         preparation_seconds = time.perf_counter() - prepare_started
 
         init_started = time.perf_counter()
-        engine = _engine(bundle, config)
+        engine = _engine(bundle, config, prepared_cache)
         engine_init_seconds = time.perf_counter() - init_started
 
         simulation_started = time.perf_counter()
@@ -230,6 +240,8 @@ def main() -> int:
                 "intrabar_index_mode": getattr(bundle.intrabar, "intrabar_index_mode", None),
                 "intrabar_iteration_mode": getattr(bundle.intrabar, "intrabar_iteration_mode", None),
                 "feature_cache_hits": _feature_cache_hits(bundle),
+                "prepared_cache_hit": prepared_cache.last_hit,
+                "canonical_cache": dict(store.canonical_cache_events),
                 "trade_fingerprint": fingerprint,
             }
         )

@@ -17,6 +17,18 @@ class BinanceArchiveAdapter(ABC):
     """Exchange-specific schema adapter; never computes research features."""
 
     dataset: DatasetKind
+    # These are deliberately dataset-adapter properties: changing the kline
+    # normalizer must not invalidate funding (and vice versa).
+    normalizer_version: int = 1
+    canonical_schema_version: int = 1
+
+    def canonical_contract(self) -> dict[str, object]:
+        return {
+            "dataset": self.dataset.value,
+            "adapter": f"{type(self).__module__}.{type(self).__qualname__}",
+            "normalizer_version": self.normalizer_version,
+            "schema_version": self.canonical_schema_version,
+        }
 
     @abstractmethod
     def read(self, record: ArchiveRecord) -> pd.DataFrame:

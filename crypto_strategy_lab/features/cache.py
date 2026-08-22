@@ -20,6 +20,7 @@ class FeatureFrameCache:
 
     def __init__(self, cache_root: Path) -> None:
         self.root = Path(cache_root) / "features"
+        self.format_version = 2
 
     @staticmethod
     def _source_signature(canonical_source: pd.DataFrame) -> str:
@@ -44,7 +45,8 @@ class FeatureFrameCache:
         payload = {
             "feature": definition.name,
             "version": definition.version,
-            "request": request.cache_key(),
+            "format_version": self.format_version,
+            "request_scope": request.feature_scope_key(),
             "parameters": dict(parameters),
             # Keep the primary source field stable so existing single-source
             # feature cache identities do not change during this migration.
@@ -71,7 +73,8 @@ class FeatureFrameCache:
         payload = {
             "feature": definition.name,
             "version": definition.version,
-            "request": request.cache_key(),
+            "format_version": self.format_version,
+            "request_scope": request.feature_scope_key(),
             "parameters": dict(parameters),
             "sources": [signature.cache_identity() for signature in source_signatures],
             "dependencies": list(dependency_keys),
@@ -143,6 +146,7 @@ class FeatureFrameCache:
                 f"COPY feature_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
             )
         metadata = {
+            "cache_format_version": self.format_version,
             "feature_name": definition.name,
             "feature_version": definition.version,
             "feature_cache_key": key,
