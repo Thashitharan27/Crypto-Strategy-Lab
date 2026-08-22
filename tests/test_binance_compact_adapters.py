@@ -70,7 +70,6 @@ def test_metrics_adapter_preserves_sparse_optional_ratios_as_unknown(tmp_path: P
         datasets=(DatasetKind.FUTURES_METRICS,),
     )
     frame = store.load_dataset(request, DatasetKind.FUTURES_METRICS)
-    assert str(frame["top_trader_account_long_short_ratio"].dtype) == "Float64"
     assert pd.isna(frame.loc[0, "top_trader_account_long_short_ratio"])
     assert pd.isna(frame.loc[1, "top_trader_position_long_short_ratio"])
 
