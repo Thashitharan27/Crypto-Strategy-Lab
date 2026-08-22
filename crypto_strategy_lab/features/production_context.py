@@ -27,7 +27,7 @@ from crypto_strategy_lab.mean_reversion_v2 import (
     signal_direction,
 )
 
-from .base import FeatureDefinition
+from .base import FeatureDefinition, ParameterDefinition
 from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
@@ -44,6 +44,17 @@ class ProductionContextFeatureProvider:
         version=PRODUCTION_CONTEXT_FEATURE_VERSION,
         required_datasets=(DatasetKind.KLINES,),
         required_features=(CORE_DIRECTIONAL_FEATURE_NAME,),
+        parameters={
+            "bb_period": ParameterDefinition(int, 20),
+            "bb_stddevs": ParameterDefinition(float, 2.0),
+            "mean_reversion_period": ParameterDefinition(int, 20),
+            "mean_reversion_mean_type": ParameterDefinition(lambda value: str(value).upper(), "SMA"),
+            "mean_reversion_bb_stddevs": ParameterDefinition(float, 2.0),
+            "mean_reversion_rsi_period": ParameterDefinition(int, 14),
+            "mean_reversion_rsi_oversold": ParameterDefinition(float, 30.0),
+            "mean_reversion_rsi_overbought": ParameterDefinition(float, 70.0),
+            "mean_reversion_require_reentry": ParameterDefinition(bool, True),
+        },
         output_columns=(
             "bb_middle",
             "bb_upper",

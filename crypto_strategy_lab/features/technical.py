@@ -19,7 +19,7 @@ from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.indicators import lag
 
-from .base import FeatureDefinition
+from .base import FeatureDefinition, ParameterDefinition
 
 
 CORE_DIRECTIONAL_FEATURE_NAME = "core_directional"
@@ -43,6 +43,11 @@ class CoreDirectionalFeatureProvider:
         name=CORE_DIRECTIONAL_FEATURE_NAME,
         version=CORE_DIRECTIONAL_FEATURE_VERSION,
         required_datasets=(DatasetKind.KLINES,),
+        parameters={
+            "atr_period": ParameterDefinition(int, 14),
+            "adx_period": ParameterDefinition(int, 14),
+            "di_pressure_lookback": ParameterDefinition(int, 3),
+        },
         output_columns=(
             "atr",
             "atr_pct",

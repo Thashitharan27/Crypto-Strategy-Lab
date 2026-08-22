@@ -98,6 +98,7 @@ jobs:
           tests/test_execution_kline_projection.py
           tests/test_causal_data_layer.py
           tests/test_feature_registry.py
+          tests/test_feature_registry_authority.py
           tests/test_core_directional_features.py
           tests/test_market_context_features.py
           tests/test_production_context_features.py

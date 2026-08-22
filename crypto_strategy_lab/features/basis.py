@@ -85,6 +85,7 @@ class BasisContextFeatureProvider:
             DatasetKind.MARK_PRICE_KLINES,
             DatasetKind.INDEX_PRICE_KLINES,
         ),
+        optional_datasets=(DatasetKind.PREMIUM_INDEX_KLINES,),
         output_columns=(
             "mark_source_available_at",
             "mark_age_seconds",
