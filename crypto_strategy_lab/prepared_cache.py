@@ -31,7 +31,7 @@ def _digest(payload: object) -> str:
     ).hexdigest()
 
 
-def prepared_policy_inputs(config) -> dict[str, object]:
+def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object]:
     """Only definitions/configuration physically materialized into the prepared frame.
 
     TP/SL, trailing, fees, slippage, portfolio behavior and reporting/UI values
@@ -42,7 +42,8 @@ def prepared_policy_inputs(config) -> dict[str, object]:
     """
     if config is None:
         return {"policy_features": False}
-    policy_definition = production_feature_registry().definition_hash(
+    registry = feature_registry if feature_registry is not None else production_feature_registry()
+    policy_definition = registry.definition_hash(
         [POLICY_MARKET_FEATURE_NAME]
     )
     return {
@@ -210,7 +211,7 @@ class PreparedRunCache:
         return frame, False
 
 
-def bundle_prepared_identity(cache: PreparedRunCache, bundle, config):
+def bundle_prepared_identity(cache: PreparedRunCache, bundle, config, *, feature_registry=None):
     features = {}
     frames = {
         "core_directional": bundle.technical_features,
@@ -232,7 +233,7 @@ def bundle_prepared_identity(cache: PreparedRunCache, bundle, config):
             "canonical_source_identity", ""
         )
     request_identity = bundle.request.feature_scope_key()
-    inputs = prepared_policy_inputs(config)
+    inputs = prepared_policy_inputs(config, feature_registry=feature_registry)
     key = cache.identity(
         request_identity=request_identity,
         feature_identities=features,

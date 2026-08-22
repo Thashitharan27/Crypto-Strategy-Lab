@@ -64,7 +64,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy pandas duckdb pytest
-      - name: Compile Data Lake path and migration tools
+      - name: Compile Data Lake path and composition tools
         run: >-
           python -m compileall -q
           crypto_strategy_lab/data
@@ -74,6 +74,9 @@ jobs:
           crypto_strategy_lab/data_lake_config.py
           crypto_strategy_lab/data_lake_engine.py
           crypto_strategy_lab/data_lake_production_engine.py
+          crypto_strategy_lab/research_runner.py
+          crypto_strategy_lab/research_adapters.py
+          crypto_strategy_lab/research_reporting.py
           tools/data_lake_validate.py
           tools/data_lake_run.py
           tools/data_lake_benchmark.py
@@ -122,6 +125,8 @@ jobs:
           tests/test_data_lake_profile.py
           tests/test_data_lake_preparation_profile.py
           tests/test_data_lake_config.py
+          tests/test_task11_research_config.py
+          tests/test_research_runner.py
           tests/test_rewrite_config_current.py
 
   full-suite-observation:

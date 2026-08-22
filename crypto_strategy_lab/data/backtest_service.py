@@ -33,9 +33,9 @@ class BacktestDataBundle:
     state_transition_daily_features: pd.DataFrame | None = None
 
 
-def _cached_multisource_feature(store, request, datasets, provider, parameters=None):
+def _cached_multisource_feature(store, request, datasets, provider, parameters=None, *, registry=None):
     """Cache a feature that depends on klines plus one or more event datasets."""
-    registry = production_feature_registry()
+    registry = registry if registry is not None else production_feature_registry()
     return registry.execute(
         [provider.definition.name], request, datasets,
         parameters={provider.definition.name: dict(parameters or {})},
@@ -50,6 +50,7 @@ def _cached_catalog_feature(
     dataset,
     provider,
     parameters=None,
+    registry=None,
 ):
     """Resolve a multisource feature cache before materializing its event data."""
     parameters = dict(parameters or {})
@@ -60,7 +61,7 @@ def _cached_catalog_feature(
         ),
         store.source_signature(_dataset_request(request, dataset), dataset),
     )
-    registry = production_feature_registry()
+    registry = registry if registry is not None else production_feature_registry()
     resolved = registry.resolve(
         [provider.definition.name], {provider.definition.name: parameters}
     )[0]
@@ -81,7 +82,9 @@ def _cached_catalog_feature(
     source = store.load_dataset(_dataset_request(request, dataset), dataset)
     if source.empty:
         return None
-    frame = provider.compute(request, {DatasetKind.KLINES: canonical, dataset: source}, resolved.parameters)
+    frame = provider.compute(
+        request, {DatasetKind.KLINES: canonical, dataset: source}, resolved.parameters
+    )
     provider.definition.validate_output(frame)
     frame.attrs["feature_cache_hit"] = False
     frame.attrs["feature_cache_key"] = key
@@ -107,6 +110,7 @@ def _optional_futures_research_features(
     canonical: pd.DataFrame,
     *,
     include_agg_trade_flow: bool = False,
+    registry=None,
 ) -> dict[str, pd.DataFrame]:
     """Load futures research blocks when local coverage exists.
 
@@ -121,7 +125,8 @@ def _optional_futures_research_features(
     try:
         provider = FuturesPositioningFeatureProvider()
         positioning = _cached_catalog_feature(
-            store, request, canonical, DatasetKind.FUTURES_METRICS, provider
+            store, request, canonical, DatasetKind.FUTURES_METRICS, provider,
+            registry=registry,
         )
         if positioning is not None:
             result[provider.definition.name] = positioning
@@ -142,6 +147,7 @@ def _optional_futures_research_features(
                 request,
                 {DatasetKind.KLINES: canonical, DatasetKind.FUNDING_RATE: funding},
                 provider,
+                registry=registry,
             )
     except DataNotAvailableError:
         pass
@@ -183,6 +189,7 @@ def _optional_futures_research_features(
             request,
             {DatasetKind.KLINES: canonical, **reference_frames},
             provider,
+            registry=registry,
         )
 
     if include_agg_trade_flow:
@@ -198,6 +205,7 @@ def _optional_futures_research_features(
                     request,
                     {DatasetKind.KLINES: canonical, DatasetKind.AGG_TRADES: agg_trades},
                     provider,
+                    registry=registry,
                 )
         except DataNotAvailableError:
             pass
@@ -208,7 +216,7 @@ def load_backtest_bundle(
     store: MarketDataStore,
     request: DataRequest,
     *,
-    market_regime_method: str,
+    market_regime_method: str | None = None,
     structural_regime_sma_days: int = 200,
     structural_regime_slope_lookback_days: int = 30,
     benchmark_interval: str = "1h",
@@ -239,39 +247,61 @@ def load_backtest_bundle(
     sr_break_tolerance_atr: float = 0.25,
     sr_break_basis: str = "CLOSE",
     include_agg_trade_flow: bool = False,
+    feature_registry=None,
+    feature_config=None,
 ) -> BacktestDataBundle:
-    """Load market data and reusable causal feature blocks."""
+    """Load canonical market data and reusable causal feature blocks.
+
+    The composed path supplies ``feature_config`` and ``feature_registry``. The
+    individual keyword arguments remain temporarily for genuine non-composed
+    callers; they are not the authoritative ResearchRunner contract.
+    """
     if refresh_catalog:
         store.refresh_catalog()
 
     canonical = store.load_klines(request, request.strategy_interval)
     strategy = canonical
+    strategy_minutes = int(
+        interval_to_timedelta(request.strategy_interval).total_seconds() // 60
+    )
 
-    registry = production_feature_registry()
-    requested = ["production_market_context", "state_transition_daily"]
-    if enable_support_resistance_analysis:
-        requested.append("support_resistance")
-    strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
-    effective_sr_minutes = int(sr_timeframe_minutes or strategy_minutes)
-    feature_parameters = {
-        CORE_DIRECTIONAL_FEATURE_NAME: {
-            "atr_period": int(atr_period), "adx_period": int(adx_period),
-            "di_pressure_lookback": int(di_pressure_lookback),
-        },
-        "production_market_context": {
-            "bb_period": int(bb_period),
-            "bb_stddevs": float(bb_stddevs),
-            "mean_reversion_period": int(mean_reversion_period),
-            "mean_reversion_mean_type": str(mean_reversion_mean_type).upper(),
-            "mean_reversion_bb_stddevs": float(mean_reversion_bb_stddevs),
-            "mean_reversion_rsi_period": int(mean_reversion_rsi_period),
-            "mean_reversion_rsi_oversold": float(mean_reversion_rsi_oversold),
-            "mean_reversion_rsi_overbought": float(mean_reversion_rsi_overbought),
-            "mean_reversion_require_reentry": bool(mean_reversion_require_reentry),
-        },
-    }
-    if enable_support_resistance_analysis:
-        feature_parameters["support_resistance"] = {
+    if feature_config is not None:
+        market_regime_method = str(feature_config.market_regime_method)
+        structural_regime_sma_days = int(feature_config.structural_regime_sma_days)
+        structural_regime_slope_lookback_days = int(
+            feature_config.structural_regime_slope_lookback_days
+        )
+        enable_support_resistance_analysis = bool(
+            feature_config.enable_support_resistance_analysis
+        )
+        include_agg_trade_flow = bool(feature_config.include_agg_trade_flow)
+        feature_parameters = feature_config.registry_parameters(
+            strategy_timeframe_minutes=strategy_minutes
+        )
+    else:
+        if market_regime_method is None:
+            raise ValueError("market_regime_method is required without FeatureConfig")
+        effective_sr_minutes = int(sr_timeframe_minutes or strategy_minutes)
+        feature_parameters = {
+            CORE_DIRECTIONAL_FEATURE_NAME: {
+                "atr_period": int(atr_period),
+                "adx_period": int(adx_period),
+                "di_pressure_lookback": int(di_pressure_lookback),
+            },
+            "production_market_context": {
+                "bb_period": int(bb_period),
+                "bb_stddevs": float(bb_stddevs),
+                "mean_reversion_period": int(mean_reversion_period),
+                "mean_reversion_mean_type": str(mean_reversion_mean_type).upper(),
+                "mean_reversion_bb_stddevs": float(mean_reversion_bb_stddevs),
+                "mean_reversion_rsi_period": int(mean_reversion_rsi_period),
+                "mean_reversion_rsi_oversold": float(mean_reversion_rsi_oversold),
+                "mean_reversion_rsi_overbought": float(mean_reversion_rsi_overbought),
+                "mean_reversion_require_reentry": bool(mean_reversion_require_reentry),
+            },
+        }
+        if enable_support_resistance_analysis:
+            feature_parameters["support_resistance"] = {
                 "atr_period": int(atr_period),
                 "sr_timeframe_minutes": effective_sr_minutes,
                 "sr_pivot_left": int(sr_pivot_left),
@@ -284,10 +314,18 @@ def load_backtest_bundle(
                 "sr_hold_confirmation_atr": float(sr_hold_confirmation_atr),
                 "sr_break_tolerance_atr": float(sr_break_tolerance_atr),
                 "sr_break_basis": str(sr_break_basis).upper(),
-        }
+            }
+
+    registry = feature_registry if feature_registry is not None else production_feature_registry()
+    requested = ["production_market_context", "state_transition_daily"]
+    if enable_support_resistance_analysis:
+        requested.append("support_resistance")
     frames = registry.execute(
-        requested, request, {DatasetKind.KLINES: canonical},
-        parameters=feature_parameters, cache=FeatureFrameCache(store.cache.root),
+        requested,
+        request,
+        {DatasetKind.KLINES: canonical},
+        parameters=feature_parameters,
+        cache=FeatureFrameCache(store.cache.root),
     )
     directional = frames[CORE_DIRECTIONAL_FEATURE_NAME]
     context = frames["production_market_context"]
@@ -299,15 +337,19 @@ def load_backtest_bundle(
         request,
         canonical,
         include_agg_trade_flow=include_agg_trade_flow,
+        registry=registry,
     )
 
     intrabar = None
     if request.intrabar_interval:
         effective_start = max(request.start, intrabar_start) if intrabar_start else request.start
         intrabar_request = DataRequest(
-            symbol=request.symbol, start=effective_start, end=request.end,
+            symbol=request.symbol,
+            start=effective_start,
+            end=request.end,
             strategy_interval=request.intrabar_interval,
-            market=request.market, exchange=request.exchange,
+            market=request.market,
+            exchange=request.exchange,
         )
         intrabar = store.load_execution_klines(
             intrabar_request, request.intrabar_interval
@@ -317,19 +359,33 @@ def load_backtest_bundle(
     benchmark_symbol = None
     benchmark_interval_used = None
     if market_regime_method in {"BTC_STRUCTURAL", "ASSET_STRUCTURAL"}:
-        benchmark_symbol = "BTCUSDT" if market_regime_method == "BTC_STRUCTURAL" else request.symbol
-        benchmark_interval_used = benchmark_interval
-        warmup_days = int(structural_regime_sma_days) + int(structural_regime_slope_lookback_days) + 7
-        benchmark_request = DataRequest(
-            symbol=benchmark_symbol, start=request.start - timedelta(days=warmup_days),
-            end=request.end, strategy_interval=benchmark_interval,
-            market=request.market, exchange=request.exchange,
+        benchmark_symbol = (
+            "BTCUSDT" if market_regime_method == "BTC_STRUCTURAL" else request.symbol
         )
-        benchmark = store.load_klines(benchmark_request, benchmark_request.strategy_interval)
+        benchmark_interval_used = benchmark_interval
+        warmup_days = (
+            int(structural_regime_sma_days)
+            + int(structural_regime_slope_lookback_days)
+            + 7
+        )
+        benchmark_request = DataRequest(
+            symbol=benchmark_symbol,
+            start=request.start - timedelta(days=warmup_days),
+            end=request.end,
+            strategy_interval=benchmark_interval,
+            market=request.market,
+            exchange=request.exchange,
+        )
+        benchmark = store.load_klines(
+            benchmark_request, benchmark_request.strategy_interval
+        )
 
     return BacktestDataBundle(
-        request=request, strategy=strategy, intrabar=intrabar,
-        technical_features=directional, context_features=context,
+        request=request,
+        strategy=strategy,
+        intrabar=intrabar,
+        technical_features=directional,
+        context_features=context,
         support_resistance_features=sr_features,
         research_features=research_features,
         structural_benchmark=benchmark,

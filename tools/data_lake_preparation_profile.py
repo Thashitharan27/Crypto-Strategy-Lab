@@ -1,19 +1,11 @@
-"""Profile Data Lake v2 preparation without changing production semantics.
-
-The execution benchmark reports preparation as one number. This tool decomposes
-that number into canonical market-dataset loads and research feature-cache
-access while also collecting a cProfile ranking for the complete
-``load_backtest_bundle`` call.
-
-Instrumentation is installed only for the duration of this process and restored
-before exit. Production data/loading code is not modified by the profiler.
-"""
+"""Profile canonical data/feature preparation used by ResearchRunner."""
 from __future__ import annotations
 
 import argparse
 from collections import defaultdict
 from contextlib import contextmanager
 import cProfile
+from dataclasses import replace
 from datetime import datetime
 import json
 from pathlib import Path
@@ -29,9 +21,9 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
-from crypto_strategy_lab.data import backtest_service as backtest_service_module
-from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
+from crypto_strategy_lab.data.backtest_service import load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
+from crypto_strategy_lab.features import production_feature_registry
 
 
 Event = dict[str, object]
@@ -53,16 +45,8 @@ def _rows(value) -> int | None:
         return None
 
 
-def _record(
-    events: list[Event],
-    *,
-    category: str,
-    name: str,
-    started: float,
-    rows: int | None = None,
-    **metadata,
-) -> None:
-    event: Event = {
+def _record(events, *, category, name, started, rows=None, **metadata):
+    event = {
         "category": category,
         "name": name,
         "seconds": float(time.perf_counter() - started),
@@ -74,32 +58,30 @@ def _record(
 
 
 def _summarize_events(events: list[Event], total_seconds: float) -> dict[str, object]:
-    """Aggregate instrumented preparation timings and residual overhead."""
     category_seconds: dict[str, float] = defaultdict(float)
     category_calls: dict[str, int] = defaultdict(int)
     for event in events:
         category = str(event["category"])
         category_seconds[category] += float(event["seconds"])
         category_calls[category] += 1
-
     measured = float(sum(category_seconds.values()))
-    residual = max(0.0, float(total_seconds) - measured)
     return {
         "category_seconds": {
             key: float(value)
-            for key, value in sorted(category_seconds.items(), key=lambda item: item[1], reverse=True)
+            for key, value in sorted(
+                category_seconds.items(), key=lambda item: item[1], reverse=True
+            )
         },
         "category_calls": dict(sorted(category_calls.items())),
         "instrumented_seconds": measured,
-        "unattributed_seconds": residual,
+        "unattributed_seconds": max(0.0, float(total_seconds) - measured),
     }
 
 
-def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int) -> list[dict[str, object]]:
-    stats = pstats.Stats(profile)
-    rows: list[dict[str, object]] = []
-    for (filename, line, function), values in stats.stats.items():
-        primitive_calls, total_calls, self_seconds, cumulative_seconds, _callers = values
+def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int):
+    rows = []
+    for (filename, line, function), values in pstats.Stats(profile).stats.items():
+        primitive_calls, total_calls, self_seconds, cumulative_seconds, _ = values
         rows.append(
             {
                 "function": function,
@@ -118,11 +100,9 @@ def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int) -> list[
 
 @contextmanager
 def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iterator[None]:
-    """Temporarily time boundaries that still exist in canonical preparation."""
+    """Instrument canonical dataset boundaries without replacing feature authority."""
     original_load_dataset = store.load_dataset
     original_load_execution_klines = store.load_execution_klines
-    original_cached_multisource = backtest_service_module._cached_multisource_feature
-    original_cached_catalog = backtest_service_module._cached_catalog_feature
 
     def timed_load_dataset(request, dataset, *, interval=None):
         started = time.perf_counter()
@@ -135,8 +115,6 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
             rows=_rows(frame),
             dataset=dataset.value,
             interval=interval,
-            request_start=request.start.isoformat(),
-            request_end=request.end.isoformat(),
         )
         return frame
 
@@ -146,107 +124,27 @@ def _instrument_preparation(store: MarketDataStore, events: list[Event]) -> Iter
         _record(
             events,
             category="dataset_load",
-            name=f"klines:{interval or request.intrabar_interval or request.strategy_interval}:execution",
+            name=f"klines:{interval or request.strategy_interval}:execution",
             started=started,
             rows=_rows(frame),
             dataset="klines",
-            interval=interval or request.intrabar_interval or request.strategy_interval,
-            projection="canonical_execution_ohlcv",
-            request_start=request.start.isoformat(),
-            request_end=request.end.isoformat(),
-        )
-        return frame
-
-    def timed_cached_multisource(store_arg, request, datasets, provider, parameters=None):
-        started = time.perf_counter()
-        frame = original_cached_multisource(
-            store_arg,
-            request,
-            datasets,
-            provider,
-            parameters,
-        )
-        _record(
-            events,
-            category="research_feature_cache",
-            name=provider.definition.name,
-            started=started,
-            rows=_rows(frame),
-            cache_hit=bool(frame.attrs.get("feature_cache_hit", False)),
-        )
-        return frame
-
-    def timed_cached_catalog(
-        store_arg, request, canonical, dataset, provider, parameters=None
-    ):
-        started = time.perf_counter()
-        frame = original_cached_catalog(
-            store_arg, request, canonical, dataset, provider, parameters
-        )
-        _record(
-            events,
-            category="research_feature_cache",
-            name=provider.definition.name,
-            started=started,
-            rows=_rows(frame),
-            cache_hit=bool(frame is not None and frame.attrs.get("feature_cache_hit", False)),
-            identity_source="catalog",
+            interval=interval or request.strategy_interval,
+            projection="canonical_execution_ohlv",
         )
         return frame
 
     store.load_dataset = timed_load_dataset
     store.load_execution_klines = timed_load_execution_klines
-    backtest_service_module._cached_multisource_feature = timed_cached_multisource
-    backtest_service_module._cached_catalog_feature = timed_cached_catalog
     try:
         yield
     finally:
         store.load_dataset = original_load_dataset
         store.load_execution_klines = original_load_execution_klines
-        backtest_service_module._cached_multisource_feature = original_cached_multisource
-        backtest_service_module._cached_catalog_feature = original_cached_catalog
-
-
-def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades) -> BacktestDataBundle:
-    return load_backtest_bundle(
-        store,
-        request,
-        market_regime_method=config.market_regime_method,
-        structural_regime_sma_days=config.structural_regime_sma_days,
-        structural_regime_slope_lookback_days=config.structural_regime_slope_lookback_days,
-        refresh_catalog=False,
-        intrabar_start=intrabar_start,
-        atr_period=config.atr_period,
-        adx_period=config.adx_period,
-        di_pressure_lookback=config.di_pressure_lookback,
-        bb_period=config.bb_period,
-        bb_stddevs=config.bb_stddevs,
-        mean_reversion_period=config.mean_reversion_period,
-        mean_reversion_mean_type=getattr(config, "mean_reversion_mean_type", "SMA"),
-        mean_reversion_bb_stddevs=getattr(config, "mean_reversion_bb_stddevs", 2.0),
-        mean_reversion_rsi_period=getattr(config, "mean_reversion_rsi_period", 14),
-        mean_reversion_rsi_oversold=getattr(config, "mean_reversion_rsi_oversold", 30.0),
-        mean_reversion_rsi_overbought=getattr(config, "mean_reversion_rsi_overbought", 70.0),
-        mean_reversion_require_reentry=getattr(config, "mean_reversion_require_reentry", True),
-        enable_support_resistance_analysis=config.enable_support_resistance_analysis,
-        sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
-        sr_pivot_left=config.sr_pivot_left,
-        sr_pivot_right=config.sr_pivot_right,
-        sr_lookback_bars=config.sr_lookback_bars,
-        sr_zone_width_atr=config.sr_zone_width_atr,
-        sr_near_distance_atr=config.sr_near_distance_atr,
-        enable_sr_hold_confirmation=config.enable_sr_hold_confirmation,
-        sr_hold_confirmation_bars=config.sr_hold_confirmation_bars,
-        sr_hold_confirmation_atr=config.sr_hold_confirmation_atr,
-        sr_break_tolerance_atr=config.sr_break_tolerance_atr,
-        sr_break_basis=config.sr_break_basis,
-        include_agg_trade_flow=bool(include_agg_trades),
-    )
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Profile Crypto Strategy Lab Data Lake v2 preparation stages"
+        description="Profile ResearchRunner canonical data/feature preparation"
     )
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--raw-root", required=True, type=Path)
@@ -256,8 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--end", required=True)
     parser.add_argument("--intrabar-start")
     parser.add_argument("--include-agg-trades", action="store_true")
-    parser.add_argument("--top", type=int, default=30, help="Functions to show per cProfile ranking")
-    parser.add_argument("--output", type=Path, help="Optional JSON output path")
+    parser.add_argument("--top", type=int, default=30)
+    parser.add_argument("--output", type=Path)
     return parser
 
 
@@ -267,35 +165,44 @@ def main() -> int:
         raise SystemExit("--top must be at least 1")
 
     config = load_data_lake_config(args.config)
+    if args.include_agg_trades:
+        config = replace(
+            config,
+            features=replace(config.features, include_agg_trade_flow=True),
+        )
     request = DataRequest(
         symbol=args.symbol,
         start=_utc(args.start),
         end=_utc(args.end),
-        strategy_interval=f"{int(config.strategy_timeframe_minutes)}m",
+        strategy_interval=f"{config.data.strategy_timeframe_minutes}m",
         intrabar_interval=(
-            f"{int(config.intrabar_timeframe_minutes)}m" if config.use_intrabar_data else None
+            f"{config.data.intrabar_timeframe_minutes}m"
+            if config.data.use_intrabar_data
+            else None
         ),
     )
     intrabar_start = _utc(args.intrabar_start) if args.intrabar_start else None
     store = MarketDataStore(args.raw_root, args.cache_root)
+    registry = production_feature_registry()
 
     events: list[Event] = []
     profile = cProfile.Profile()
-    preparation_started = time.perf_counter()
+    started = time.perf_counter()
     with _instrument_preparation(store, events):
         profile.enable()
-        bundle = _load_bundle(
+        bundle = load_backtest_bundle(
             store,
             request,
-            config,
+            refresh_catalog=False,
             intrabar_start=intrabar_start,
-            include_agg_trades=args.include_agg_trades,
+            feature_registry=registry,
+            feature_config=config.features,
         )
         profile.disable()
-    preparation_seconds = time.perf_counter() - preparation_started
+    elapsed = time.perf_counter() - started
 
     result = {
-        "profile_contract": "data_lake_preparation_profile_v1",
+        "profile_contract": "research_runner_preparation_profile_v2",
         "config_path": str(args.config.resolve()),
         "raw_root": str(args.raw_root.resolve()),
         "cache_root": str(args.cache_root.resolve()),
@@ -307,16 +214,19 @@ def main() -> int:
             "intrabar_interval": request.intrabar_interval,
             "intrabar_start": intrabar_start.isoformat() if intrabar_start else None,
         },
-        "include_agg_trade_flow": bool(args.include_agg_trades),
-        "preparation_seconds_profiled": float(preparation_seconds),
-        "stage_summary": _summarize_events(events, preparation_seconds),
+        "include_agg_trade_flow": bool(config.features.include_agg_trade_flow),
+        "preparation_seconds_profiled": elapsed,
+        "stage_summary": _summarize_events(events, elapsed),
         "events": sorted(events, key=lambda event: float(event["seconds"]), reverse=True),
         "strategy_rows": len(bundle.strategy),
         "intrabar_rows": len(bundle.intrabar) if bundle.intrabar is not None else 0,
-        "intrabar_representation": "canonical_execution_ohlcv" if bundle.intrabar is not None else None,
         "feature_cache_hits": {
-            "core_directional": bool(bundle.technical_features.attrs.get("feature_cache_hit", False)),
-            "production_market_context": bool(bundle.context_features.attrs.get("feature_cache_hit", False)),
+            "core_directional": bool(
+                bundle.technical_features.attrs.get("feature_cache_hit", False)
+            ),
+            "production_market_context": bool(
+                bundle.context_features.attrs.get("feature_cache_hit", False)
+            ),
             "support_resistance": (
                 bool(bundle.support_resistance_features.attrs.get("feature_cache_hit", False))
                 if bundle.support_resistance_features is not None
@@ -335,7 +245,6 @@ def main() -> int:
         "top_by_cumulative": _profile_rows(profile, "cumulative", args.top),
         "top_by_self": _profile_rows(profile, "self", args.top),
     }
-
     text = json.dumps(result, indent=2, default=str)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

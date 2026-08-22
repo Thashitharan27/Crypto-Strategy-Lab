@@ -1,13 +1,8 @@
-"""Benchmark the production Data Lake v2 execution path on local market data.
-
-The tool intentionally skips report/export work so timings isolate the parts we
-can optimize independently: catalog refresh, Data Lake/cache preparation, engine
-construction, and stateful simulation. Repeated iterations also verify that the
-core trade results remain identical while caches warm up.
-"""
+"""Benchmark the authoritative composed Data Lake execution path on local data."""
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import datetime
 import hashlib
 import json
@@ -23,10 +18,11 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
-from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
-from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
-from crypto_strategy_lab.prepared_cache import prepare_bundle_with_cache
+from crypto_strategy_lab.features import production_feature_registry
+from crypto_strategy_lab.prepared_cache import PreparedRunCache
+from crypto_strategy_lab.research_adapters import NativeSimulator, NativeStrategyPolicy
+from crypto_strategy_lab.research_runner import ResearchRunner
 
 
 _FINGERPRINT_COLUMNS = (
@@ -88,7 +84,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _trade_fingerprint(trades: pd.DataFrame) -> str:
-    """Return a stable hash of core execution results, independent of DataFrame attrs."""
     columns = [column for column in _FINGERPRINT_COLUMNS if column in trades.columns]
     if not columns:
         payload = f"rows={len(trades)};columns={','.join(map(str, trades.columns))}"
@@ -100,70 +95,34 @@ def _trade_fingerprint(trades: pd.DataFrame) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _feature_cache_hits(bundle: BacktestDataBundle) -> dict[str, object]:
+def _cache_hits(metadata: dict[str, dict]) -> dict[str, object]:
+    core_names = {
+        "core_directional",
+        "production_market_context",
+        "support_resistance",
+        "state_transition_daily",
+    }
     return {
-        "core_directional": bool(bundle.technical_features.attrs.get("feature_cache_hit", False)),
-        "production_market_context": bool(bundle.context_features.attrs.get("feature_cache_hit", False)),
+        "core_directional": bool(metadata["core_directional"]["cache_hit"]),
+        "production_market_context": bool(
+            metadata["production_market_context"]["cache_hit"]
+        ),
         "support_resistance": (
-            bool(bundle.support_resistance_features.attrs.get("feature_cache_hit", False))
-            if bundle.support_resistance_features is not None
+            bool(metadata["support_resistance"]["cache_hit"])
+            if "support_resistance" in metadata
             else None
         ),
         "state_transition_daily": (
-            bool(bundle.state_transition_daily_features.attrs.get("feature_cache_hit", False))
-            if bundle.state_transition_daily_features is not None
+            bool(metadata["state_transition_daily"]["cache_hit"])
+            if "state_transition_daily" in metadata
             else None
         ),
         "research": {
-            name: bool(frame.attrs.get("feature_cache_hit", False))
-            for name, frame in sorted(bundle.research_features.items())
+            name: bool(values["cache_hit"])
+            for name, values in sorted(metadata.items())
+            if name not in core_names
         },
     }
-
-
-def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
-    return load_backtest_bundle(
-        store,
-        request,
-        market_regime_method=config.market_regime_method,
-        structural_regime_sma_days=config.structural_regime_sma_days,
-        structural_regime_slope_lookback_days=config.structural_regime_slope_lookback_days,
-        refresh_catalog=False,
-        intrabar_start=intrabar_start,
-        atr_period=config.atr_period,
-        adx_period=config.adx_period,
-        di_pressure_lookback=config.di_pressure_lookback,
-        bb_period=config.bb_period,
-        bb_stddevs=config.bb_stddevs,
-        mean_reversion_period=config.mean_reversion_period,
-        mean_reversion_mean_type=getattr(config, "mean_reversion_mean_type", "SMA"),
-        mean_reversion_bb_stddevs=getattr(config, "mean_reversion_bb_stddevs", 2.0),
-        mean_reversion_rsi_period=getattr(config, "mean_reversion_rsi_period", 14),
-        mean_reversion_rsi_oversold=getattr(config, "mean_reversion_rsi_oversold", 30.0),
-        mean_reversion_rsi_overbought=getattr(config, "mean_reversion_rsi_overbought", 70.0),
-        mean_reversion_require_reentry=getattr(config, "mean_reversion_require_reentry", True),
-        enable_support_resistance_analysis=config.enable_support_resistance_analysis,
-        sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
-        sr_pivot_left=config.sr_pivot_left,
-        sr_pivot_right=config.sr_pivot_right,
-        sr_lookback_bars=config.sr_lookback_bars,
-        sr_zone_width_atr=config.sr_zone_width_atr,
-        sr_near_distance_atr=config.sr_near_distance_atr,
-        enable_sr_hold_confirmation=config.enable_sr_hold_confirmation,
-        sr_hold_confirmation_bars=config.sr_hold_confirmation_bars,
-        sr_hold_confirmation_atr=config.sr_hold_confirmation_atr,
-        sr_break_tolerance_atr=config.sr_break_tolerance_atr,
-        sr_break_basis=config.sr_break_basis,
-        include_agg_trade_flow=bool(include_agg_trades),
-    )
-
-
-def _engine(bundle: BacktestDataBundle, config, cache_root):
-    prepared, intrabar, hit, key = prepare_bundle_with_cache(cache_root, bundle, config)
-    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
-    engine.prepared_cache_hit = hit
-    engine.prepared_cache_key = key
-    return engine
 
 
 def _median(records: list[dict], key: str) -> float:
@@ -176,17 +135,33 @@ def main() -> int:
         raise SystemExit("--iterations must be at least 1")
 
     config = load_data_lake_config(args.config)
+    if args.include_agg_trades:
+        config = replace(
+            config,
+            features=replace(config.features, include_agg_trade_flow=True),
+        )
     request = DataRequest(
         symbol=args.symbol,
         start=_utc(args.start),
         end=_utc(args.end),
-        strategy_interval=f"{int(config.strategy_timeframe_minutes)}m",
+        strategy_interval=f"{int(config.data.strategy_timeframe_minutes)}m",
         intrabar_interval=(
-            f"{int(config.intrabar_timeframe_minutes)}m" if config.use_intrabar_data else None
+            f"{int(config.data.intrabar_timeframe_minutes)}m"
+            if config.data.use_intrabar_data
+            else None
         ),
     )
     intrabar_start = _utc(args.intrabar_start) if args.intrabar_start else None
     store = MarketDataStore(args.raw_root, args.cache_root)
+    simulator = NativeSimulator()
+    runner = ResearchRunner(
+        store,
+        production_feature_registry(),
+        PreparedRunCache(args.cache_root),
+        NativeStrategyPolicy(),
+        simulator,
+        (),
+    )
 
     catalog_seconds = 0.0
     if not args.skip_catalog_refresh:
@@ -199,48 +174,44 @@ def main() -> int:
     for iteration in range(1, args.iterations + 1):
         total_started = time.perf_counter()
         canonical_before = dict(store.canonical_cache_events)
-
-        prepare_started = time.perf_counter()
-        bundle = _load_bundle(
-            store,
+        result_run = runner.run(
             request,
             config,
+            refresh_catalog=False,
             intrabar_start=intrabar_start,
-            include_agg_trades=args.include_agg_trades,
         )
-        preparation_seconds = time.perf_counter() - prepare_started
         canonical_after = dict(store.canonical_cache_events)
         canonical_delta = {
             name: int(canonical_after.get(name, 0) - canonical_before.get(name, 0))
             for name in sorted(set(canonical_before) | set(canonical_after))
         }
 
-        init_started = time.perf_counter()
-        engine = _engine(bundle, config, args.cache_root)
-        engine_init_seconds = time.perf_counter() - init_started
-
-        simulation_started = time.perf_counter()
-        trades = engine.run()
-        simulation_seconds = time.perf_counter() - simulation_started
+        preparation_seconds = float(result_run.stage_timings["data_features"])
+        prepared_cache_seconds = float(result_run.stage_timings["prepared_cache"])
+        engine_init_seconds = prepared_cache_seconds + float(
+            result_run.stage_timings.get("engine_init", 0.0)
+        )
+        simulation_seconds = float(result_run.stage_timings["simulation"])
+        trades = result_run.trades
         total_seconds = time.perf_counter() - total_started
-
         fingerprint = _trade_fingerprint(trades)
         fingerprints.append(fingerprint)
         records.append(
             {
                 "iteration": iteration,
                 "preparation_seconds": preparation_seconds,
+                "prepared_cache_seconds": prepared_cache_seconds,
                 "engine_init_seconds": engine_init_seconds,
                 "simulation_seconds": simulation_seconds,
                 "total_seconds": total_seconds,
-                "strategy_rows": len(bundle.strategy),
-                "intrabar_rows": len(bundle.intrabar) if bundle.intrabar is not None else 0,
+                "strategy_rows": result_run.strategy_rows,
+                "intrabar_rows": result_run.intrabar_rows,
                 "trade_rows": len(trades),
-                "intrabar_index_mode": getattr(bundle.intrabar, "intrabar_index_mode", None),
-                "intrabar_iteration_mode": getattr(bundle.intrabar, "intrabar_iteration_mode", None),
-                "feature_cache_hits": _feature_cache_hits(bundle),
-                "prepared_cache_hit": bool(engine.prepared_cache_hit),
-                "prepared_cache_key": engine.prepared_cache_key,
+                "intrabar_index_mode": None,
+                "intrabar_iteration_mode": None,
+                "feature_cache_hits": _cache_hits(dict(result_run.feature_cache_metadata)),
+                "prepared_cache_hit": result_run.prepared_cache_hit,
+                "prepared_cache_key": result_run.prepared_cache_key,
                 "canonical_cache": canonical_delta,
                 "trade_fingerprint": fingerprint,
             }
@@ -267,6 +238,7 @@ def main() -> int:
         "trade_fingerprints_identical": len(set(fingerprints)) <= 1,
         "warm_median_seconds": {
             "preparation": _median(warm_records, "preparation_seconds"),
+            "prepared_cache": _median(warm_records, "prepared_cache_seconds"),
             "engine_init": _median(warm_records, "engine_init_seconds"),
             "simulation": _median(warm_records, "simulation_seconds"),
             "total": _median(warm_records, "total_seconds"),
