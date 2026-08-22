@@ -27,6 +27,11 @@ from .futures_positioning import (
     FUTURES_POSITIONING_FEATURE_VERSION,
     FuturesPositioningFeatureProvider,
 )
+from .market_regime import (
+    POLICY_MARKET_FEATURE_NAME,
+    POLICY_MARKET_FEATURE_VERSION,
+    PolicyMarketFeatureProvider,
+)
 from .production_context import (
     PRODUCTION_CONTEXT_FEATURE_NAME,
     PRODUCTION_CONTEXT_FEATURE_VERSION,
@@ -65,6 +70,9 @@ __all__ = [
     "PRODUCTION_CONTEXT_FEATURE_NAME",
     "PRODUCTION_CONTEXT_FEATURE_VERSION",
     "ProductionContextFeatureProvider",
+    "POLICY_MARKET_FEATURE_NAME",
+    "POLICY_MARKET_FEATURE_VERSION",
+    "PolicyMarketFeatureProvider",
     "SUPPORT_RESISTANCE_FEATURE_NAME",
     "SUPPORT_RESISTANCE_FEATURE_VERSION",
     "PreparedSupportResistanceContextReader",
@@ -85,14 +93,19 @@ __all__ = [
 ]
 
 
-def production_feature_registry() -> FeatureRegistry:
+def production_feature_registry(*, structural_benchmark=None) -> FeatureRegistry:
     """Return the authoritative catalog of native production/research features."""
     registry = FeatureRegistry()
     for provider in (
-        CoreDirectionalFeatureProvider(), MarketContextFeatureProvider(),
-        ProductionContextFeatureProvider(), SupportResistanceFeatureProvider(),
-        StateTransitionDailyFeatureProvider(), FuturesPositioningFeatureProvider(),
-        FundingContextFeatureProvider(), BasisContextFeatureProvider(),
+        CoreDirectionalFeatureProvider(),
+        MarketContextFeatureProvider(),
+        ProductionContextFeatureProvider(),
+        PolicyMarketFeatureProvider(structural_benchmark=structural_benchmark),
+        SupportResistanceFeatureProvider(),
+        StateTransitionDailyFeatureProvider(),
+        FuturesPositioningFeatureProvider(),
+        FundingContextFeatureProvider(),
+        BasisContextFeatureProvider(),
         AggTradeFlowFeatureProvider(),
     ):
         registry.register(provider)
