@@ -171,3 +171,30 @@ class DataCatalog:
                 [root_text, market.value, dataset.value, symbol.upper(), interval, interval],
             ).fetchone()
         return Coverage(row[0], row[1], int(row[2]))
+
+    def inventory(self, raw_root: Path, *, market: MarketKind) -> list[dict]:
+        """Return presentation-safe availability metadata from the catalog only.
+
+        This intentionally exposes no archive paths.  Clients such as the GUI can
+        discover symbols and coverage without walking or opening the immutable raw
+        lake.
+        """
+        root_text = str(Path(raw_root).resolve())
+        with self._connect() as con:
+            rows = con.execute(
+                """
+                SELECT exchange, symbol, dataset, interval, min(period_start),
+                       max(period_end), count(*)
+                FROM archives
+                WHERE raw_root = ? AND market = ?
+                GROUP BY exchange, symbol, dataset, interval
+                ORDER BY symbol, dataset, interval NULLS FIRST
+                """,
+                [root_text, market.value],
+            ).fetchall()
+        return [
+            {"exchange": row[0], "symbol": row[1], "dataset": row[2],
+             "interval": row[3], "first_period": row[4], "last_period": row[5],
+             "archive_count": int(row[6])}
+            for row in rows
+        ]
