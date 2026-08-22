@@ -78,8 +78,6 @@ class FeatureRegistry:
         result = []
         for name in order:
             definition = self.get(name).definition
-            # Sequential transformations need their own history after their
-            # deepest dependency: sum along the longest graph path.
             inherited = max((warmups[d] for d in definition.required_features), default=0)
             warmups[name] = inherited + definition.warmup_bars
             result.append(
@@ -148,6 +146,7 @@ class FeatureRegistry:
                     name: {"kind": field.kind, "nullable": field.nullable}
                     for name, field in item.definition.output_schema.items()
                 },
+                "parameterized_schema": item.definition.output_schema_factory is not None,
                 "datasets": [d.value for d in item.definition.required_datasets],
                 "optional_datasets": [d.value for d in item.definition.optional_datasets],
                 "dependencies": list(item.definition.required_features),
@@ -185,7 +184,7 @@ class FeatureRegistry:
             frame = cache.load(definition, request, identity) if cache else None
             if frame is not None:
                 try:
-                    definition.validate_output(frame)
+                    definition.validate_output(frame, resolved.parameters)
                 except ValueError:
                     frame = None
             if frame is None:
@@ -195,7 +194,7 @@ class FeatureRegistry:
                     frame = provider.compute(request, datasets, resolved.parameters, dependencies)
                 else:
                     frame = provider.compute(request, datasets, resolved.parameters)
-                definition.validate_output(frame)
+                definition.validate_output(frame, resolved.parameters)
                 frame.attrs.update(
                     feature_cache_hit=False,
                     feature_cache_key=identity,
