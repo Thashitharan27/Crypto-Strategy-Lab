@@ -460,3 +460,15 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
         )
         intrabar.validate_compatible(prepared)
     return prepared, intrabar
+
+
+def intrabar_from_data_lake_bundle(bundle) -> IntrabarExecutionData | None:
+    """Project execution-resolution data without touching persistent L2/L3."""
+    if bundle.intrabar is None:
+        return None
+    return IntrabarExecutionData(
+        bundle.intrabar["timestamp"].to_numpy(),
+        pd.Timedelta(bundle.request.intrabar_interval),
+        bundle.intrabar["open"].to_numpy(), bundle.intrabar["high"].to_numpy(),
+        bundle.intrabar["low"].to_numpy(),
+    )

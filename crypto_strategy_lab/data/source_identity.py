@@ -8,6 +8,24 @@ from typing import Iterable
 
 from .schemas import ArchiveRecord, DatasetKind
 
+CANONICAL_IDENTITY_VERSION = 1
+
+
+def canonical_partition_identity(record: ArchiveRecord, contract: dict[str, object]) -> str:
+    """Central identity for one canonicalized immutable raw partition."""
+    payload = {
+        "identity_version": CANONICAL_IDENTITY_VERSION,
+        "exchange": record.exchange,
+        "market": record.market.value,
+        "dataset": record.dataset.value,
+        "symbol": record.symbol,
+        "interval": record.interval,
+        "raw_fingerprint": record.fingerprint,
+        "canonical_contract": contract,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return sha256(raw).hexdigest()
+
 
 @dataclass(frozen=True, slots=True)
 class SourceSignature:
@@ -21,6 +39,7 @@ class SourceSignature:
     dataset: DatasetKind
     digest: str
     partition_count: int
+    identity_version: int = 2
 
     @classmethod
     def from_records(
@@ -54,4 +73,10 @@ class SourceSignature:
         return cls(dataset, sha256(encoded).hexdigest(), len(partitions))
 
     def cache_identity(self) -> str:
-        return f"catalog-v1:{self.dataset.value}:{self.partition_count}:{self.digest}"
+        return f"canonical-v{self.identity_version}:{self.dataset.value}:{self.partition_count}:{self.digest}"
+
+    @classmethod
+    def from_canonical_identities(cls, dataset, identities):
+        values = sorted(identities)
+        raw = json.dumps({"dataset": dataset.value, "canonical": values}, sort_keys=True).encode()
+        return cls(dataset, sha256(raw).hexdigest(), len(values))

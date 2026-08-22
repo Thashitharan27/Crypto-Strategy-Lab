@@ -26,7 +26,7 @@ from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
-from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
+from crypto_strategy_lab.prepared_cache import prepare_bundle_with_cache
 
 
 _FINGERPRINT_COLUMNS = (
@@ -158,9 +158,12 @@ def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
     )
 
 
-def _engine(bundle: BacktestDataBundle, config):
-    prepared, intrabar = from_data_lake_bundle(bundle, config)
-    return DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
+def _engine(bundle: BacktestDataBundle, config, cache_root):
+    prepared, intrabar, hit, key = prepare_bundle_with_cache(cache_root, bundle, config)
+    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
+    engine.prepared_cache_hit = hit
+    engine.prepared_cache_key = key
+    return engine
 
 
 def _median(records: list[dict], key: str) -> float:
@@ -195,6 +198,7 @@ def main() -> int:
     fingerprints: list[str] = []
     for iteration in range(1, args.iterations + 1):
         total_started = time.perf_counter()
+        canonical_before = dict(store.canonical_cache_events)
 
         prepare_started = time.perf_counter()
         bundle = _load_bundle(
@@ -205,9 +209,14 @@ def main() -> int:
             include_agg_trades=args.include_agg_trades,
         )
         preparation_seconds = time.perf_counter() - prepare_started
+        canonical_after = dict(store.canonical_cache_events)
+        canonical_delta = {
+            name: int(canonical_after.get(name, 0) - canonical_before.get(name, 0))
+            for name in sorted(set(canonical_before) | set(canonical_after))
+        }
 
         init_started = time.perf_counter()
-        engine = _engine(bundle, config)
+        engine = _engine(bundle, config, args.cache_root)
         engine_init_seconds = time.perf_counter() - init_started
 
         simulation_started = time.perf_counter()
@@ -230,6 +239,9 @@ def main() -> int:
                 "intrabar_index_mode": getattr(bundle.intrabar, "intrabar_index_mode", None),
                 "intrabar_iteration_mode": getattr(bundle.intrabar, "intrabar_iteration_mode", None),
                 "feature_cache_hits": _feature_cache_hits(bundle),
+                "prepared_cache_hit": bool(engine.prepared_cache_hit),
+                "prepared_cache_key": engine.prepared_cache_key,
+                "canonical_cache": canonical_delta,
                 "trade_fingerprint": fingerprint,
             }
         )

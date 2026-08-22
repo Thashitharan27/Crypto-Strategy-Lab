@@ -71,6 +71,8 @@ jobs:
           python -m compileall -q
           crypto_strategy_lab/data
           crypto_strategy_lab/features
+          crypto_strategy_lab/prepared_backtest.py
+          crypto_strategy_lab/prepared_cache.py
           crypto_strategy_lab/data_lake_config.py
           crypto_strategy_lab/data_lake_engine.py
           crypto_strategy_lab/data_lake_production_engine.py
@@ -99,6 +101,7 @@ jobs:
           tests/test_causal_data_layer.py
           tests/test_feature_registry.py
           tests/test_feature_registry_authority.py
+          tests/test_cache_hierarchy.py
           tests/test_core_directional_features.py
           tests/test_market_context_features.py
           tests/test_production_context_features.py
