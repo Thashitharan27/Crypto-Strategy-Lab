@@ -37,3 +37,37 @@ def test_native_runtime_reads_prepared_feature_families(monkeypatch):
     assert engine.mean_reversion_state is prepared.mean_reversion_state
     assert engine.market_regime_values is prepared.market_regime
     assert engine.profile_momentum_values[24] is prepared.momentum_returns_by_hours[24]
+
+
+def test_native_mr_snapshot_uses_prepared_market_classifications(monkeypatch):
+    prepared = PreparedBacktestFrame(**valid_kwargs(30))
+    config = replace(
+        BacktestConfig(), strategy_timeframe_minutes=240,
+        telemetry_interval_minutes=240,
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("native runtime recalculated an MR market classification")
+
+    for name in ("classify_bb_location", "classify_rsi_state", "classify_signal", "signal_direction"):
+        monkeypatch.setattr(f"crypto_strategy_lab.enhanced_engine.{name}", forbidden)
+    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, None, config)
+    snapshot = engine._mean_reversion_snapshot(5, "LONG", "LONG")
+    assert snapshot["mean_reversion_bb_location"] == prepared.mean_reversion_bb_location[5]
+    assert snapshot["mean_reversion_rsi_state"] == prepared.mean_reversion_rsi_state[5]
+    assert snapshot["mean_reversion_signal"] == prepared.mean_reversion_signal[5]
+    assert snapshot["mean_reversion_signal_direction"] == prepared.mean_reversion_signal_direction[5]
+
+
+def test_native_di_snapshot_preserves_unknown_direction_semantics():
+    prepared = PreparedBacktestFrame(**valid_kwargs(30))
+    config = replace(
+        BacktestConfig(), strategy_timeframe_minutes=240,
+        telemetry_interval_minutes=240,
+    )
+    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, None, config)
+    snapshot = engine._di_pressure_snapshot(5, None)
+    assert np.isnan(snapshot["plus_di_change"])
+    assert np.isnan(snapshot["minus_di_change"])
+    assert np.isnan(snapshot["di_spread_change"])
+    assert snapshot["di_pressure_state"] == "UNKNOWN"
