@@ -1,5 +1,6 @@
 """Blocking contract tests for Task-17 provenance and passive result artifacts."""
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -74,6 +75,40 @@ def test_selected_snapshot_is_deterministic_and_sensitive_to_contributors():
     assert selected_source_snapshot([Record()])[1] == digest
     Record.fingerprint = "two"
     assert selected_source_snapshot([Record()])[1] != digest
+
+
+def test_selected_snapshot_normalizes_equivalent_source_instants_to_utc():
+    instant = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    sri_lanka = timezone(timedelta(hours=5, minutes=30))
+    common = {
+        "exchange": "binance",
+        "market": "futures_um",
+        "dataset": "klines",
+        "symbol": "BTCUSDT",
+        "interval": "1m",
+        "frequency": "monthly",
+        "size_bytes": 10,
+        "mtime_ns": 20,
+        "fingerprint": "same-archive",
+    }
+    utc_record = SimpleNamespace(
+        **common,
+        period_start=instant,
+        period_end=instant + timedelta(days=1),
+    )
+    local_record = SimpleNamespace(
+        **common,
+        period_start=instant.astimezone(sri_lanka),
+        period_end=(instant + timedelta(days=1)).astimezone(sri_lanka),
+    )
+
+    utc_row = source_record(utc_record)
+    local_row = source_record(local_record)
+    assert utc_row["period_start"] == "2026-01-01T00:00:00+00:00"
+    assert utc_row == local_row
+    assert selected_source_snapshot([utc_record])[1] == selected_source_snapshot(
+        [local_record]
+    )[1]
 
 
 def test_source_record_uses_real_canonical_partition_identity(tmp_path: Path):
