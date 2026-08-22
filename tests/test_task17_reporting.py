@@ -119,9 +119,12 @@ def test_incomplete_wrong_or_incompatible_research_manifest_is_not_completed(tmp
 
 
 def _research_frames():
+    # PreparedBacktestFrame stores canonical UTC instants in datetime64[ns]
+    # without a timezone tag.  Keep the fixture faithful to that contract so
+    # cross-type TIMESTAMP/TIMESTAMPTZ comparisons cannot hide in UTC CI.
     times = pd.to_datetime(
         ["2026-01-01T00:00:00Z", "2026-01-01T04:00:00Z"], utc=True
-    )
+    ).tz_localize(None)
     available = times + pd.Timedelta(hours=4)
     context = pd.DataFrame(
         {
@@ -196,6 +199,8 @@ def test_signal_frame_uses_same_run_rejections_and_exact_causal_rows(tmp_path: P
     assert list(signals["strategy_index"]) == [0, 1]
     assert signals.loc[0, "side"] == "SHORT"
     assert signals.loc[1, "side"] == "LONG"
+    assert str(signals["candle_open_time"].dtype) == "datetime64[ns]"
+    assert str(signals["decision_available_at"].dtype) == "datetime64[ns]"
 
     signals_path = tmp_path / "signals.parquet"
     context_path = tmp_path / "context.parquet"
