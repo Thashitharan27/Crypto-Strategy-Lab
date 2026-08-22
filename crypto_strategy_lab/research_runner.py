@@ -10,6 +10,7 @@ import pandas as pd
 
 from .data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from .data.timing import normalize_binance_interval
+from .data.quality import DataQualityReport
 from .prepared_backtest import from_data_lake_bundle, intrabar_from_data_lake_bundle
 from .prepared_cache import bundle_prepared_identity
 from .research_adapters import prepared_policy_config
@@ -51,6 +52,7 @@ class ResearchRunResult:
     prepared_rows: int
     stage_timings: Mapping[str, float]
     output_dir: Path | None = None
+    data_quality: DataQualityReport | None = None
 
 
 class ResearchRunner:
@@ -177,6 +179,7 @@ class ResearchRunner:
             intrabar_rows=len(bundle.intrabar) if bundle.intrabar is not None else 0,
             prepared_rows=len(prepared),
             stage_timings=timings,
+            data_quality=getattr(bundle, "data_quality", None),
         )
 
         report_started = time.perf_counter()

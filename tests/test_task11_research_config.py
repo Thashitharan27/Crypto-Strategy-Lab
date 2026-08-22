@@ -24,7 +24,7 @@ def test_v3_defaults_preserve_pre_split_data_lake_semantics():
     config = ResearchRunConfig()
     assert config.data.strategy_timeframe_minutes == 15
     assert config.data.intrabar_timeframe_minutes == 1
-    assert config.data.intrabar_missing_policy == "WARN_AND_USE_15M"
+    assert config.data.intrabar_missing_policy == "ERROR"
     assert config.features.market_regime_method == "BTC_STRUCTURAL"
     assert config.features.bull_regime_lookback_days == 90
     assert config.features.bull_regime_return_threshold == pytest.approx(0.20)

@@ -11,6 +11,7 @@ import pandas as pd
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data.quality import validate_feature_timeline
 from .base import FeatureDefinition, FeatureProvider
 
 
@@ -188,7 +189,7 @@ class FeatureRegistry:
             frame = cache.load(definition, request, identity) if cache else None
             if frame is not None:
                 try:
-                    definition.validate_output(frame, resolved.parameters)
+                    validate_feature_timeline(definition, frame, resolved.parameters)
                 except ValueError:
                     frame = None
             if frame is None:
@@ -199,6 +200,7 @@ class FeatureRegistry:
                 else:
                     frame = provider.compute(request, datasets, resolved.parameters)
                 definition.validate_output(frame, resolved.parameters)
+                validate_feature_timeline(definition, frame, resolved.parameters)
                 frame.attrs.update(
                     feature_cache_hit=False,
                     feature_cache_key=identity,

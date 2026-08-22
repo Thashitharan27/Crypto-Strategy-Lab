@@ -16,6 +16,7 @@ from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
 from .query import DataRequest
 from .store import DataNotAvailableError, MarketDataStore
 from .timing import interval_to_timedelta
+from .quality import DataQualityCache, DataQualityReport, validate_dataset
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +32,7 @@ class BacktestDataBundle:
     structural_benchmark_symbol: str | None
     structural_benchmark_interval: str | None
     state_transition_daily_features: pd.DataFrame | None = None
+    data_quality: DataQualityReport | None = None
 
 
 def _cached_multisource_feature(store, request, datasets, provider, parameters=None, *, registry=None):
@@ -207,8 +209,10 @@ def _optional_futures_research_features(
                     provider,
                     registry=registry,
                 )
-        except DataNotAvailableError:
-            pass
+        except DataNotAvailableError as exc:
+            raise DataNotAvailableError(
+                "agg_trade_flow was explicitly requested but aggTrades are unavailable"
+            ) from exc
     return result
 
 
@@ -260,6 +264,12 @@ def load_backtest_bundle(
         store.refresh_catalog()
 
     canonical = store.load_klines(request, request.strategy_interval)
+    quality_cache = DataQualityCache(store.cache.root)
+    quality_reports = [quality_cache.get_or_validate(
+        canonical, request, DatasetKind.KLINES,
+        interval=request.strategy_interval, required=True,
+    )]
+    DataQualityReport(tuple(quality_reports)).raise_for_errors()
     strategy = canonical
     strategy_minutes = int(
         interval_to_timedelta(request.strategy_interval).total_seconds() // 60
@@ -351,9 +361,13 @@ def load_backtest_bundle(
             market=request.market,
             exchange=request.exchange,
         )
-        intrabar = store.load_execution_klines(
-            intrabar_request, request.intrabar_interval
-        )
+        full_intrabar = store.load_klines(intrabar_request, request.intrabar_interval)
+        quality_reports.append(quality_cache.get_or_validate(
+            full_intrabar, intrabar_request, DatasetKind.KLINES,
+            interval=request.intrabar_interval, required=True,
+        ))
+        DataQualityReport(tuple(quality_reports)).raise_for_errors()
+        intrabar = store.load_execution_klines(intrabar_request, request.intrabar_interval)
 
     benchmark = None
     benchmark_symbol = None
@@ -380,6 +394,24 @@ def load_backtest_bundle(
             benchmark_request, benchmark_request.strategy_interval
         )
 
+    # Auto-attached futures contexts are optional, but absence is provenance,
+    # never an implicit neutral/zero feature frame.
+    if request.market == MarketKind.FUTURES_UM:
+        optional_features = {
+            DatasetKind.FUTURES_METRICS: "futures_positioning",
+            DatasetKind.FUNDING_RATE: "funding_context",
+        }
+        for dataset, feature_name in optional_features.items():
+            if feature_name not in research_features:
+                quality_reports.append(validate_dataset(None, request, dataset, required=False))
+        if "basis_context" not in research_features:
+            for dataset in (DatasetKind.MARK_PRICE_KLINES, DatasetKind.INDEX_PRICE_KLINES):
+                quality_reports.append(validate_dataset(None, request, dataset,
+                                                        interval=request.strategy_interval,
+                                                        required=False))
+
+    data_quality = DataQualityReport(tuple(quality_reports))
+    data_quality.raise_for_errors()
     return BacktestDataBundle(
         request=request,
         strategy=strategy,
@@ -392,4 +424,5 @@ def load_backtest_bundle(
         structural_benchmark_symbol=benchmark_symbol,
         structural_benchmark_interval=benchmark_interval_used,
         state_transition_daily_features=state_transition_daily,
+        data_quality=data_quality,
     )

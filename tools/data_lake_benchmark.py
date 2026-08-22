@@ -214,6 +214,11 @@ def main() -> int:
                 "prepared_cache_key": result_run.prepared_cache_key,
                 "canonical_cache": canonical_delta,
                 "trade_fingerprint": fingerprint,
+                "data_quality_status": (result_run.data_quality.overall_status.value
+                                        if result_run.data_quality else None),
+                "data_quality_datasets": ({item.dataset: item.status.value
+                                           for item in result_run.data_quality.datasets}
+                                          if result_run.data_quality else {}),
             }
         )
 

@@ -23,7 +23,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import pandas as pd
 
-from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore
+from crypto_strategy_lab.data import (
+    DataQualityReport, DataRequest, DatasetKind, MarketDataStore, validate_dataset,
+)
 
 
 def _utc_datetime(text: str) -> datetime:
@@ -43,36 +45,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def validate_canonical_klines(frame: pd.DataFrame, request: DataRequest, label: str) -> None:
-    """Fail loudly when a full canonical kline frame violates the native contract."""
-    required = {
-        "period_start", "period_end", "available_at", "open", "high", "low",
-        "close", "volume", "symbol", "exchange", "market", "dataset", "interval",
-    }
-    missing = sorted(required - set(frame.columns))
-    if missing:
-        raise ValueError(f"{label} is missing canonical columns: {missing}")
-    if frame.empty:
-        raise ValueError(f"{label} has no rows in the requested interval")
-    starts = pd.to_datetime(frame["period_start"], utc=True, errors="raise")
-    ends = pd.to_datetime(frame["period_end"], utc=True, errors="raise")
-    available = pd.to_datetime(frame["available_at"], utc=True, errors="raise")
-    if not starts.is_monotonic_increasing or starts.duplicated().any():
-        raise ValueError(f"{label} period_start must be strictly ordered and unique")
-    if (ends < starts).any() or (available < ends).any():
-        raise ValueError(f"{label} violates causal period/availability ordering")
-    if starts.iloc[0] < pd.Timestamp(request.start) or starts.iloc[-1] >= pd.Timestamp(request.end):
-        raise ValueError(f"{label} contains rows outside the requested interval")
-    expected = {
-        "symbol": request.symbol,
-        "exchange": request.exchange,
-        "market": request.market.value,
-        "dataset": DatasetKind.KLINES.value,
-    }
-    for column, value in expected.items():
-        if set(frame[column].astype(str)) != {str(value)}:
-            raise ValueError(f"{label} has unexpected canonical {column} identity")
-    if not frame.attrs.get("canonical_source_identity"):
-        raise ValueError(f"{label} is missing canonical source provenance")
+    """Compatibility facade over the production validator."""
+    dataset_report = validate_dataset(
+        frame, request, DatasetKind.KLINES, interval=request.strategy_interval, required=True
+    )
+    # The legacy helper validates a supplied slice, which need not represent the
+    # whole request. Full CLI and production paths use the unfiltered report.
+    integrity = tuple(i for i in dataset_report.issues if "COVERAGE_GAP" not in i.code
+                      and i.code != "MISSING_INTERNAL_INTERVAL")
+    if any(i.severity.value == "ERROR" for i in integrity):
+        raise ValueError(f"{label} failed canonical validation: {[i.code for i in integrity]}")
+
+
+def print_report(report: DataQualityReport) -> None:
+    print("\nDATA QUALITY")
+    print(f"{'Dataset':28} {'Status':9} Details")
+    for item in report.datasets:
+        details = ", ".join(f"{issue.code} ({issue.count})" for issue in item.issues)
+        print(f"{item.dataset + (' ' + item.interval if item.interval else ''):28} "
+              f"{item.status.value:9} {details}")
 
 
 def main() -> int:
@@ -105,7 +96,8 @@ def main() -> int:
         intrabar_interval=args.intrabar_interval,
     )
     strategy = store.load_klines(request, request.strategy_interval)
-    validate_canonical_klines(strategy, request, "strategy klines")
+    reports = [validate_dataset(strategy, request, DatasetKind.KLINES,
+                                interval=request.strategy_interval, required=True)]
     print(
         f"Strategy rows: {len(strategy)} | {strategy.period_start.min()} -> {strategy.period_start.max()}"
     )
@@ -121,11 +113,15 @@ def main() -> int:
         # Validation needs the full canonical contract. The narrower execution
         # projection is intentionally validated later by IntrabarExecutionData.
         intrabar = store.load_klines(intrabar_request, request.intrabar_interval)
-        validate_canonical_klines(intrabar, intrabar_request, "intrabar klines")
+        reports.append(validate_dataset(intrabar, intrabar_request, DatasetKind.KLINES,
+                                        interval=request.intrabar_interval, required=True))
         print(
             f"Intrabar rows: {len(intrabar)} | "
             f"{intrabar.period_start.min()} -> {intrabar.period_start.max()}"
         )
+    report = DataQualityReport(tuple(reports))
+    print_report(report)
+    report.raise_for_errors()
     return 0
 
 

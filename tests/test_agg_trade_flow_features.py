@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pandas.testing as pdt
+import pytest
 
 from crypto_strategy_lab.data.backtest_service import _optional_futures_research_features
 from crypto_strategy_lab.data.query import DataRequest
@@ -156,11 +157,11 @@ def test_backtest_bundle_does_not_touch_agg_trades_unless_requested() -> None:
     assert DatasetKind.AGG_TRADES not in normal.calls
 
     heavy = _MissingResearchStore()
-    result = _optional_futures_research_features(
-        heavy,
-        request,
-        canonical,
-        include_agg_trade_flow=True,
-    )
-    assert result == {}
+    with pytest.raises(DataNotAvailableError, match="explicitly requested"):
+        _optional_futures_research_features(
+            heavy,
+            request,
+            canonical,
+            include_agg_trade_flow=True,
+        )
     assert DatasetKind.AGG_TRADES in heavy.calls

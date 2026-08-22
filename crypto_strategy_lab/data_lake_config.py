@@ -26,7 +26,7 @@ class DataConfig:
     strategy_timeframe_minutes: int = 15
     intrabar_timeframe_minutes: int = 1
     use_intrabar_data: bool = True
-    intrabar_missing_policy: str = "WARN_AND_USE_15M"
+    intrabar_missing_policy: str = "ERROR"
 
 
 @dataclass(frozen=True)
