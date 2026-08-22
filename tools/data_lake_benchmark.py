@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--include-trade-flow",
         action="store_true",
-        help="Include the heavy optional aggTrades research feature in preparation timings",
+        help="Include aggregate-cache-backed trade-flow research in preparation timings",
     )
     parser.add_argument(
         "--output",
@@ -123,6 +123,14 @@ def _cache_hits(metadata: dict[str, dict]) -> dict[str, object]:
             if name not in core_names
         },
     }
+
+
+def _trade_aggregate_cache(metadata: Mapping[str, dict]) -> dict[str, object] | None:
+    trade_flow = metadata.get("trade_flow_context")
+    if not trade_flow:
+        return None
+    value = trade_flow.get("trade_aggregate_cache")
+    return dict(value) if isinstance(value, dict) else None
 
 
 def _median(records: list[dict], key: str) -> float:
@@ -208,6 +216,7 @@ def main() -> int:
         fingerprint = _trade_fingerprint(trades)
         fingerprints.append(fingerprint)
         quality_datasets, quality_cache = _quality_summary(result_run.data_quality)
+        feature_metadata = dict(result_run.feature_cache_metadata)
         records.append(
             {
                 "iteration": iteration,
@@ -221,7 +230,8 @@ def main() -> int:
                 "trade_rows": len(trades),
                 "intrabar_index_mode": None,
                 "intrabar_iteration_mode": None,
-                "feature_cache_hits": _cache_hits(dict(result_run.feature_cache_metadata)),
+                "feature_cache_hits": _cache_hits(feature_metadata),
+                "trade_aggregate_cache": _trade_aggregate_cache(feature_metadata),
                 "prepared_cache_hit": result_run.prepared_cache_hit,
                 "prepared_cache_key": result_run.prepared_cache_key,
                 "canonical_cache": canonical_delta,
