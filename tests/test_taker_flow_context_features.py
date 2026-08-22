@@ -170,7 +170,6 @@ def test_authoritative_optional_research_path_attaches_taker_flow_and_reuses_l2(
     source = _source("2025-12-31 23:05", 110)
     store = _FakeStore(tmp_path, source)
     kwargs = dict(
-        include_agg_trade_flow=False,
         registry=production_feature_registry(),
         usable_datasets=set(),
         feature_parameters={
