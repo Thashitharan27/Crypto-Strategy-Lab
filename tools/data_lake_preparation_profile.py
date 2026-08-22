@@ -283,6 +283,7 @@ def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades) 
         mean_reversion_rsi_period=getattr(config, "mean_reversion_rsi_period", 14),
         mean_reversion_rsi_oversold=getattr(config, "mean_reversion_rsi_oversold", 30.0),
         mean_reversion_rsi_overbought=getattr(config, "mean_reversion_rsi_overbought", 70.0),
+        mean_reversion_require_reentry=getattr(config, "mean_reversion_require_reentry", True),
         enable_support_resistance_analysis=config.enable_support_resistance_analysis,
         sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
         sr_pivot_left=config.sr_pivot_left,
@@ -376,6 +377,11 @@ def main() -> int:
             "support_resistance": (
                 bool(bundle.support_resistance_features.attrs.get("feature_cache_hit", False))
                 if bundle.support_resistance_features is not None
+                else None
+            ),
+            "state_transition_daily": (
+                bool(bundle.state_transition_daily_features.attrs.get("feature_cache_hit", False))
+                if bundle.state_transition_daily_features is not None
                 else None
             ),
             "research": {
