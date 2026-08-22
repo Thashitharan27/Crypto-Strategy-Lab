@@ -56,4 +56,4 @@ def test_intrabar_start_avoids_loading_strategy_warmup_minutes(tmp_path: Path) -
     assert len(bundle.strategy) == 2
     assert bundle.intrabar is not None
     assert len(bundle.intrabar) == 4 * 60
-    assert bundle.intrabar["timestamp"].min() == datetime(2026, 1, 1, 4, 0, tzinfo=UTC)
+    assert bundle.intrabar["period_start"].min() == datetime(2026, 1, 1, 4, 0, tzinfo=UTC)

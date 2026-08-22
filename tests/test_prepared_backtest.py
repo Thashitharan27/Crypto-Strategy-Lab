@@ -87,7 +87,8 @@ def test_prepared_run_identity_is_dependency_aware(tmp_path):
 def data_lake_bundle():
     times = pd.date_range("2025-01-01", periods=3, freq="4h", tz="UTC")
     strategy = pd.DataFrame({
-        "timestamp": times, "open": 1.0, "high": 2.0, "low": .5,
+        "period_start": times, "available_at": times + pd.Timedelta(hours=4),
+        "open": 1.0, "high": 2.0, "low": .5,
         "close": 1.5, "volume": 10.0,
     })
     technical = pd.DataFrame({
@@ -131,7 +132,7 @@ def data_lake_bundle():
     })
     intrabar_times = pd.date_range(times[0], periods=720, freq="1min", tz="UTC")
     intrabar = pd.DataFrame({
-        "timestamp": intrabar_times, "open": 1.0, "high": 2.0, "low": .5,
+        "period_start": intrabar_times, "open": 1.0, "high": 2.0, "low": .5,
     })
     research = pd.DataFrame({
         "timestamp": times, "available_at": times + pd.Timedelta(hours=4), "funding": .01,
@@ -263,6 +264,11 @@ def test_intrabar_partial_coverage_is_compatible_when_it_overlaps():
 def test_constructs_from_current_data_lake_bundle_path():
     prepared, execution = from_data_lake_bundle(data_lake_bundle())
     assert len(prepared) == 3
+    assert np.array_equal(
+        prepared.timestamp,
+        data_lake_bundle().strategy["period_start"].to_numpy(dtype="datetime64[ns]"),
+    )
+    assert np.array_equal(prepared.open, np.ones(3))
     assert prepared.research[0].name == "funding"
     assert execution is not None and len(execution.timestamp) == 720
 

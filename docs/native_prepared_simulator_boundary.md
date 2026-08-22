@@ -16,4 +16,4 @@ No loader, benchmark loader, feature provider, indicator function, legacy bridge
 
 ## Reused execution logic
 
-The established `run()` event loop and entry, sizing, portfolio, exit, ambiguity, timeout, fee/slippage, partial-exit, break-even, trailing, closure, telemetry, and result-row methods are reused unchanged. The only newly extracted execution primitive is the immutable array-backed intrabar window. The legacy DataFrame constructors and `legacy_bridge.py` remain available to callers outside this path.
+The established `run()` event loop and entry, sizing, portfolio, exit, ambiguity, timeout, fee/slippage, partial-exit, break-even, trailing, closure, telemetry, and result-row methods are reused unchanged. The only newly extracted execution primitive is the immutable array-backed intrabar window. Data Lake preparation consumes canonical frames directly; standalone CSV constructors remain available only to non-Data-Lake callers.

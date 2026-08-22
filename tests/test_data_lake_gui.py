@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import os
+from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -10,6 +13,7 @@ qtwidgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
 QApplication = qtwidgets.QApplication
 
 from crypto_strategy_lab.gui.data_lake_main_window import MainWindow, _parse_gui_period, strategy_warmup_period
+from crypto_strategy_lab.gui.data_lake_worker import DataLakeGuiBacktestWorker, DataLakeGuiRunSpec
 from crypto_strategy_lab.paths import MARKET_DATA_ROOT
 
 
@@ -36,6 +40,48 @@ def test_data_lake_gui_does_not_expose_csv_paths_as_strategy_config() -> None:
         assert config.input_csv.name.endswith("_DATA_LAKE.csv")
     finally:
         window.close()
+
+
+def test_data_lake_worker_emits_failure_when_prepared_cache_build_fails(monkeypatch, tmp_path) -> None:
+    app()
+    config = SimpleNamespace(enable_support_resistance_analysis=False)
+    spec = DataLakeGuiRunSpec(
+        raw_root=tmp_path,
+        cache_root=tmp_path / "cache",
+        symbol="BTCUSDT",
+        start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end=datetime(2026, 1, 2, tzinfo=timezone.utc),
+    )
+    worker = DataLakeGuiBacktestWorker(config, spec)
+
+    directional = pd.DataFrame({"value": [1.0]})
+    directional.attrs.update(feature_name="core_directional", feature_version=1, feature_cache_hit=True)
+    context = pd.DataFrame({"value": [1.0]})
+    context.attrs.update(feature_name="production_market_context", feature_version=1, feature_cache_hit=True)
+    bundle = SimpleNamespace(
+        request=SimpleNamespace(strategy_interval="4h", intrabar_interval=None),
+        strategy=pd.DataFrame({"period_start": [pd.Timestamp("2026-01-01T00:00:00Z")]}),
+        intrabar=None,
+        technical_features=directional,
+        context_features=context,
+        support_resistance_features=None,
+        research_features={},
+        structural_benchmark=None,
+    )
+    monkeypatch.setattr(worker, "_prepare_bundle", lambda: bundle)
+
+    def fail_cache(*_args, **_kwargs):
+        raise RuntimeError("prepared cache boom")
+
+    monkeypatch.setattr("crypto_strategy_lab.gui.data_lake_worker.prepare_bundle_with_cache", fail_cache)
+    failures = []
+    worker.failed.connect(lambda message, trace: failures.append((message, trace)))
+
+    worker.run()
+
+    assert failures
+    assert "prepared cache boom" in failures[0][0]
+    assert worker._prepared_inputs is None
 
 
 def test_date_only_gui_end_is_next_day_exclusive() -> None:

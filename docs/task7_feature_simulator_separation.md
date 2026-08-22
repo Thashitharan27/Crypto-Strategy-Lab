@@ -181,7 +181,7 @@ Legacy code intentionally remains for later cleanup:
 - the compatibility Data Lake constructor still uses temporary feature-injection shims;
 - the legacy higher-timeframe S/R engine path remains available to non-native callers;
 - the current GUI worker still binds the mature constructor-based engine for its existing reporting pipeline, although its Data Lake feature inputs and state-transition reporting are prepared/cached;
-- `legacy_bridge.py` remains untouched.
+- At Task 7 completion, `legacy_bridge.py` remained untouched; Task 10 subsequently retired it after the native boundary was proven.
 
 These are not the canonical native benchmark/reference path and are scheduled for later migration/cleanup rather than being hidden behind new compatibility wrappers.
 

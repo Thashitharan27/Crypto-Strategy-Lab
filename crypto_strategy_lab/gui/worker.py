@@ -97,6 +97,15 @@ class BacktestWorker(QObject):
         )
         self._output_progress(detail, int(percent))
 
+    def _load_runtime_inputs(self):
+        return load_backtest_data(self.config, self.strategy_data)
+
+    def _runtime_period(self, data) -> tuple[object, object]:
+        return data["timestamp"].min(), data["timestamp"].max()
+
+    def _build_engine(self, data, config, intrabar, **kwargs):
+        return BacktestEngine(data, config, intrabar, **kwargs)
+
     def _heartbeat(self, stop: threading.Event) -> None:
         """Keep Qt's queued status stream active during long pandas/matplotlib calls."""
         while not stop.wait(1.0):
@@ -127,7 +136,7 @@ class BacktestWorker(QObject):
                     percent,processed,total,completed,opened,remaining,
                 )
             progress_interval=250 if config.strategy_timeframe_minutes<=1 else 50
-            trades=BacktestEngine(data,config,intrabar,progress_callback=isolated_progress,progress_interval=progress_interval).run()
+            trades=self._build_engine(data,config,intrabar,progress_callback=isolated_progress,progress_interval=progress_interval).run()
             _pop_heavy_trade_attrs(trades)
             profile_dir=isolated_dir/profile_name; profile_dir.mkdir(parents=True,exist_ok=True)
             summary=summarize(trades,self.config.initial_equity); equity=equity_curve(trades,self.config.initial_equity)
@@ -151,11 +160,12 @@ class BacktestWorker(QObject):
         self._started = time.time()
         try:
             self._emit_stage("Loading data", 0)
-            data, intrabar = load_backtest_data(self.config, self.strategy_data)
+            data, intrabar = self._load_runtime_inputs()
             self._emit_stage("Loading data", 10, 0, len(data))
             self._log(f"Loaded {len(data):,} strategy candles")
             if intrabar is not None: self._log(f"Loaded {len(intrabar):,} intrabar candles")
-            self._log(f"Period: {data['timestamp'].min()} to {data['timestamp'].max()}")
+            period_start, period_end = self._runtime_period(data)
+            self._log(f"Period: {period_start} to {period_end}")
             self._check(); self._emit_stage("ATR calculation", 10, 0, len(data))
             self._log(f"Running {self.config.risk_mode.value}, ATR({self.config.atr_period}), multiplier {self.config.atr_multiplier}")
             self._log(f"Intrabar config: use_intrabar_data={self.config.use_intrabar_data}, intrabar_csv={self.config.intrabar_csv}, intrabar_timeframe={self.config.intrabar_timeframe_minutes}m")
@@ -166,7 +176,7 @@ class BacktestWorker(QObject):
             # updates reduce cross-thread overhead without changing simulation
             # resolution, ordering, trades, or any saved output.
             progress_interval = 250 if self.config.strategy_timeframe_minutes <= 1 else 50
-            engine = BacktestEngine(data, self.config, intrabar, progress_callback=self._backtest_progress, progress_interval=progress_interval)
+            engine = self._build_engine(data, self.config, intrabar, progress_callback=self._backtest_progress, progress_interval=progress_interval)
             self._check(); self._emit_stage("ATR calculation", 20, 0, len(data))
             trades = engine.run()
             detached_trade_attrs = _pop_heavy_trade_attrs(trades)
@@ -228,7 +238,7 @@ class BacktestWorker(QObject):
                     self._check(); self._log(f"Running isolated profile: {profile_name}")
                     isolated_profiles={key:replace(value,enabled=(key==profile_name)) for key,value in self.config.strategy_profiles.items()}
                     isolated_config=replace(self.config,strategy_profile_run_mode="COMBINED_SHARED_CAPITAL",strategy_profiles=isolated_profiles)
-                    isolated_trades=BacktestEngine(data,isolated_config,intrabar).run()
+                    isolated_trades=self._build_engine(data,isolated_config,intrabar).run()
                     isolated_trades.to_csv(isolated_dir/f"{profile_name}_trade_list.csv",index=False)
                     isolated_summary=summarize(isolated_trades,self.config.initial_equity)
                     comparison.append({"profile":profile_name,"trades":len(isolated_trades),"net_profit":isolated_summary.get("ending_equity",self.config.initial_equity)-self.config.initial_equity,"return_pct":isolated_summary.get("total_return_percentage",0.0),"win_rate":isolated_summary.get("win_rate",0.0),"profit_factor":isolated_summary.get("profit_factor",0.0),"max_drawdown_pct":isolated_summary.get("maximum_drawdown_percentage",0.0)})

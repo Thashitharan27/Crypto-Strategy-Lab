@@ -34,8 +34,6 @@ jobs:
           pip install pytest
       - name: Compile source
         run: python -m compileall -q crypto_strategy_lab mcp_server tools app.py
-      - name: Smoke direct parity-tool launch
-        run: python tools/data_lake_backtest_parity.py --help
       - name: Run strategy-profile safety tests
         env:
           QT_QPA_PLATFORM: offscreen
@@ -77,7 +75,6 @@ jobs:
           crypto_strategy_lab/data_lake_engine.py
           crypto_strategy_lab/data_lake_production_engine.py
           tools/data_lake_validate.py
-          tools/data_lake_backtest_parity.py
           tools/data_lake_run.py
           tools/data_lake_benchmark.py
           tools/data_lake_profile.py
@@ -114,10 +111,10 @@ jobs:
           tests/test_feature_cache.py
           tests/test_binance_compact_adapters.py
           tests/test_binance_trade_adapters.py
-          tests/test_data_lake_legacy_bridge.py
           tests/test_saved_run_config_snapshot.py
-          tests/test_data_lake_parity_tool.py
           tests/test_data_lake_execution_path.py
+          tests/test_data_lake_native_architecture.py
+          tests/test_data_lake_validate.py
           tests/test_data_lake_intrabar_window.py
           tests/test_intrabar_searchsorted.py
           tests/test_single_position_data_lake_exits.py
