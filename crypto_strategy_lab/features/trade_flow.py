@@ -13,7 +13,7 @@ from .base import FeatureDataResource, FeatureDefinition, OutputField, Parameter
 
 
 TRADE_FLOW_FEATURE_NAME = "trade_flow_context"
-TRADE_FLOW_FEATURE_VERSION = "1"
+TRADE_FLOW_FEATURE_VERSION = "2"
 
 
 def trade_flow_resource(source: DatasetKind, interval: str = "1m") -> FeatureDataResource:
@@ -32,6 +32,18 @@ def _windows(value: object) -> tuple[int, ...]:
     if not values or len(set(values)) != len(values):
         raise ValueError("trade_flow_windows must be non-empty and unique")
     return values
+
+
+def _utc_ns(values: pd.Series) -> pd.Series:
+    """Normalize UTC timestamps to one merge-compatible nanosecond dtype.
+
+    Binance public archives can switch between millisecond and microsecond
+    epochs. Pandas may preserve those as datetime64[ms/us, UTC], while strategy
+    klines are commonly datetime64[ns, UTC]. merge_asof requires the units to
+    match exactly even when the instants are equivalent.
+    """
+
+    return pd.to_datetime(values, utc=True, errors="coerce").astype("datetime64[ns, UTC]")
 
 
 _BASE_FIELDS = (
@@ -149,9 +161,9 @@ class TradeFlowContextFeatureProvider:
         if missing:
             raise ValueError(f"compact trade aggregate missing {missing}")
 
-        agg = agg.sort_values("available_at", kind="stable").reset_index(drop=True)
         for column in ("period_start", "period_end", "available_at", "last_event_at"):
-            agg[column] = pd.to_datetime(agg[column], utc=True, errors="coerce")
+            agg[column] = _utc_ns(agg[column])
+        agg = agg.sort_values("available_at", kind="stable").reset_index(drop=True)
         if agg[["period_start", "period_end", "available_at"]].isna().any().any():
             raise ValueError("compact trade aggregate has malformed bucket timestamps")
         if agg["available_at"].duplicated().any():
@@ -276,17 +288,19 @@ class TradeFlowContextFeatureProvider:
         ).dt.total_seconds()
         facts["trade_flow_source"] = source.value
 
-        klines = datasets[DatasetKind.KLINES].copy().sort_values("available_at")
+        klines = datasets[DatasetKind.KLINES].copy()
         required_kline = {"period_start", "available_at"}
         missing_kline = sorted(required_kline - set(klines))
         if missing_kline:
             raise ValueError(f"strategy klines missing {missing_kline}")
-        decision = pd.to_datetime(klines["available_at"], utc=True)
+        klines["period_start"] = _utc_ns(klines["period_start"])
+        klines["available_at"] = _utc_ns(klines["available_at"])
+        klines = klines.sort_values("available_at", kind="stable")
         aligned = pd.merge_asof(
             pd.DataFrame(
                 {
-                    "timestamp": pd.to_datetime(klines["period_start"], utc=True),
-                    "available_at": decision,
+                    "timestamp": klines["period_start"],
+                    "available_at": klines["available_at"],
                 }
             ).sort_values("available_at"),
             facts.sort_values("available_at"),
