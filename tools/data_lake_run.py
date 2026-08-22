@@ -22,7 +22,6 @@ from crypto_strategy_lab.data.backtest_service import load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
-from crypto_strategy_lab.features.market_regime import structural_regime_values
 
 
 def _utc(value: str) -> datetime:
@@ -97,6 +96,7 @@ def main() -> int:
         mean_reversion_rsi_period=getattr(config, "mean_reversion_rsi_period", 14),
         mean_reversion_rsi_oversold=getattr(config, "mean_reversion_rsi_oversold", 30.0),
         mean_reversion_rsi_overbought=getattr(config, "mean_reversion_rsi_overbought", 70.0),
+        mean_reversion_require_reentry=getattr(config, "mean_reversion_require_reentry", True),
         enable_support_resistance_analysis=config.enable_support_resistance_analysis,
         sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
         sr_pivot_left=config.sr_pivot_left,
@@ -112,10 +112,7 @@ def main() -> int:
         include_agg_trade_flow=bool(args.include_agg_trades),
     )
     prepared, intrabar = from_data_lake_bundle(bundle, config)
-    regimes = None
-    if config.market_regime_method != "ASSET_RETURN":
-        regimes = structural_regime_values(prepared.timestamp, bundle.structural_benchmark, sma_days=config.structural_regime_sma_days, slope_lookback_days=config.structural_regime_slope_lookback_days)
-    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config, market_regime_values=regimes)
+    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
     trades = engine.run()
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -139,6 +136,7 @@ def main() -> int:
         mean_reversion_rsi_period=bundle.context_features.attrs.get("mean_reversion_rsi_period"),
         mean_reversion_rsi_oversold=bundle.context_features.attrs.get("mean_reversion_rsi_oversold"),
         mean_reversion_rsi_overbought=bundle.context_features.attrs.get("mean_reversion_rsi_overbought"),
+        mean_reversion_require_reentry=bundle.context_features.attrs.get("mean_reversion_require_reentry"),
     )
     manifest = {
         "data_source": "binance_data_lake_v2",
@@ -162,6 +160,7 @@ def main() -> int:
             "core_directional": directional_manifest,
             "production_market_context": context_manifest,
             "support_resistance": _feature_manifest(bundle.support_resistance_features),
+            "state_transition_daily": _feature_manifest(bundle.state_transition_daily_features),
             "research": {
                 name: _feature_manifest(frame)
                 for name, frame in sorted(bundle.research_features.items())
