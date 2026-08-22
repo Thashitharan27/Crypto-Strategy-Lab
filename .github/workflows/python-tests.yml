@@ -113,6 +113,7 @@ jobs:
           tests/test_trade_flow_aggregates.py
           tests/test_trade_flow_causality.py
           tests/test_order_book_research.py
+          tests/test_order_book_causality.py
           tests/test_research_feature_trade_rows.py
           tests/test_feature_cache.py
           tests/test_binance_compact_adapters.py
