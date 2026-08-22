@@ -219,6 +219,17 @@ def _real_canonical_partition_identity(record: Any) -> str | None:
     )
 
 
+def _utc_iso(value: Any) -> str | None:
+    """Serialize a source boundary as one host-independent UTC instant."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+    return value.isoformat()
+
+
 def source_record(record: Any) -> dict[str, Any]:
     value = {
         "exchange": record.exchange,
@@ -227,10 +238,8 @@ def source_record(record: Any) -> dict[str, Any]:
         "symbol": record.symbol,
         "interval": record.interval,
         "frequency": record.frequency,
-        "period_start": (
-            record.period_start.isoformat() if record.period_start else None
-        ),
-        "period_end": record.period_end.isoformat() if record.period_end else None,
+        "period_start": _utc_iso(record.period_start),
+        "period_end": _utc_iso(record.period_end),
         "size_bytes": int(record.size_bytes),
         "mtime_ns": int(record.mtime_ns),
         "raw_archive_fingerprint": record.fingerprint,
