@@ -24,6 +24,8 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore
+
+
 def _utc_datetime(text: str) -> datetime:
     return pd.Timestamp(text, tz="UTC").to_pydatetime()
 
@@ -41,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def validate_canonical_klines(frame: pd.DataFrame, request: DataRequest, label: str) -> None:
-    """Fail loudly when a loaded projection violates the native kline contract."""
+    """Fail loudly when a full canonical kline frame violates the native contract."""
     required = {
         "period_start", "period_end", "available_at", "open", "high", "low",
         "close", "volume", "symbol", "exchange", "market", "dataset", "interval",
@@ -61,8 +63,10 @@ def validate_canonical_klines(frame: pd.DataFrame, request: DataRequest, label: 
     if starts.iloc[0] < pd.Timestamp(request.start) or starts.iloc[-1] >= pd.Timestamp(request.end):
         raise ValueError(f"{label} contains rows outside the requested interval")
     expected = {
-        "symbol": request.symbol, "exchange": request.exchange,
-        "market": request.market.value, "dataset": DatasetKind.KLINES.value,
+        "symbol": request.symbol,
+        "exchange": request.exchange,
+        "market": request.market.value,
+        "dataset": DatasetKind.KLINES.value,
     }
     for column, value in expected.items():
         if set(frame[column].astype(str)) != {str(value)}:
@@ -107,11 +111,16 @@ def main() -> int:
     )
     if request.intrabar_interval:
         intrabar_request = DataRequest(
-            symbol=request.symbol, start=request.start, end=request.end,
-            strategy_interval=request.intrabar_interval, market=request.market,
+            symbol=request.symbol,
+            start=request.start,
+            end=request.end,
+            strategy_interval=request.intrabar_interval,
+            market=request.market,
             exchange=request.exchange,
         )
-        intrabar = store.load_execution_klines(intrabar_request, request.intrabar_interval)
+        # Validation needs the full canonical contract. The narrower execution
+        # projection is intentionally validated later by IntrabarExecutionData.
+        intrabar = store.load_klines(intrabar_request, request.intrabar_interval)
         validate_canonical_klines(intrabar, intrabar_request, "intrabar klines")
         print(
             f"Intrabar rows: {len(intrabar)} | "
