@@ -291,11 +291,11 @@ def _empty_trade_schema(trades: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def write_research_artifacts(run_dir: Path, result, context) -> dict[str, Any]:
+def write_research_artifacts(run_dir: Path, result, context, *, authoritative_layout: bool = False) -> dict[str, Any]:
     """Publish immutable Parquets derived only from this already-completed run."""
     started = time.perf_counter()
     run_dir = Path(run_dir)
-    research_dir = run_dir / "research"
+    research_dir = run_dir / ("artifacts" if authoritative_layout else "research")
     research_dir.mkdir(parents=True, exist_ok=True)
 
     trades = result.trades.copy()
@@ -314,7 +314,6 @@ def write_research_artifacts(run_dir: Path, result, context) -> dict[str, Any]:
 
     trades_path = research_dir / "trades.parquet"
     context_path = research_dir / "feature_context.parquet"
-    manifest_path = research_dir / "research_manifest.json"
 
     _write_parquet_atomic(trades, trades_path)
     _write_parquet_atomic(feature_context, context_path)
@@ -358,14 +357,8 @@ def write_research_artifacts(run_dir: Path, result, context) -> dict[str, Any]:
         },
         "artifact_write_seconds": time.perf_counter() - started,
     }
-    _atomic_json(manifest_path, manifest)
-
-    try:
-        with ResearchQueryService(run_dir):
-            pass
-    except Exception:
-        manifest_path.unlink(missing_ok=True)
-        raise
+    if not authoritative_layout:
+        _atomic_json(research_dir / "research_manifest.json", manifest)
     return manifest
 
 
@@ -434,36 +427,29 @@ class ResearchQueryService:
 
     def __init__(self, run_dir: Path):
         self.run_dir = Path(run_dir)
-        manifest_path = self.run_dir / "research" / "research_manifest.json"
-        if not manifest_path.is_file():
-            raise ResearchArtifactError(
-                "run does not contain Task-16 research artifacts"
-            )
         try:
-            self.manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ResearchArtifactError("research manifest is corrupt") from exc
-
-        if (
-            self.manifest.get("artifact_contract")
-            != FEATURE_RESEARCH_ARTIFACT_CONTRACT
-            or self.manifest.get("artifact_version")
-            != FEATURE_RESEARCH_ARTIFACT_VERSION
-        ):
-            raise ResearchArtifactError(
-                "incompatible feature research artifact version"
-            )
+            from .run_manifest import artifact_path, load_completed_manifest
+            run_manifest = load_completed_manifest(self.run_dir)
+            trades_path = artifact_path(self.run_dir, run_manifest, "trades")
+            context_path = artifact_path(self.run_dir, run_manifest, "feature_context")
+            research = run_manifest.get("research", {})
+            self.manifest = research
+        except Exception as exc:
+            legacy_path = self.run_dir / "research" / "research_manifest.json"
+            if not legacy_path.is_file():
+                raise ResearchArtifactError("run does not contain Task-16 or valid Task-17 research artifacts") from exc
+            try:
+                self.manifest = json.loads(legacy_path.read_text(encoding="utf-8"))
+                trades_path = _artifact_path(legacy_path.parent, self.manifest.get("trades_parquet"))
+                context_path = _artifact_path(legacy_path.parent, self.manifest.get("context_parquet"))
+            except Exception as legacy_exc:
+                raise ResearchArtifactError("research manifest is corrupt") from legacy_exc
 
         self.connection = duckdb.connect()
         self.last_query_seconds: float | None = None
         try:
-            research_dir = manifest_path.parent
-            self._trades = _artifact_path(
-                research_dir, self.manifest.get("trades_parquet")
-            )
-            self._context = _artifact_path(
-                research_dir, self.manifest.get("context_parquet")
-            )
+            self._trades = trades_path
+            self._context = context_path
             if not self._trades.is_file() or not self._context.is_file():
                 raise ResearchArtifactError("research parquet artifact is missing")
             self._validate_file_hashes()

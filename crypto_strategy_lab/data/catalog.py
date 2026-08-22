@@ -15,6 +15,10 @@ class DataCatalog:
 
     def __init__(self, db_path: Path) -> None:
         self.db_path = Path(db_path)
+        # Run-scoped observation of catalog selections.  These are metadata
+        # records already selected by the normal loading path; reporters never
+        # need to reopen an archive.
+        self.selected_records: list[ArchiveRecord] = []
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
 
@@ -122,7 +126,7 @@ class DataCatalog:
                     request.end,
                 ],
             ).fetchall()
-        return [
+        result = [
             ArchiveRecord(
                 raw_root=Path(row[0]),
                 path=Path(row[1]),
@@ -140,6 +144,11 @@ class DataCatalog:
             )
             for row in rows
         ]
+        self.selected_records.extend(result)
+        return result
+
+    def reset_selected_records(self) -> None:
+        self.selected_records.clear()
 
     def coverage(
         self,

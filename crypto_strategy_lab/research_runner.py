@@ -38,6 +38,7 @@ class ResearchRunContext:
     config: Any
     bundle: BacktestDataBundle
     prepared: Any
+    selected_source_records: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,8 @@ class ResearchRunResult:
     intrabar_rows: int
     prepared_rows: int
     stage_timings: Mapping[str, float]
+    signals: pd.DataFrame | None = None
+    telemetry: pd.DataFrame | None = None
     output_dir: Path | None = None
     data_quality: DataQualityReport | None = None
 
@@ -110,6 +113,13 @@ class ResearchRunner:
 
     def run(self, request, run_config, *, refresh_catalog=True, intrabar_start=None):
         self._validate_request_contract(request, run_config)
+        for reporter in self.reporters:
+            begin = getattr(reporter, "begin", None)
+            if begin is not None:
+                begin(request, run_config)
+        catalog = getattr(self.data_store, "catalog", None)
+        if catalog is not None and hasattr(catalog, "reset_selected_records"):
+            catalog.reset_selected_records()
         timings: dict[str, float] = {}
         before = dict(getattr(self.data_store, "canonical_cache_events", {}))
 
@@ -196,6 +206,20 @@ class ResearchRunner:
             frames["state_transition_daily"] = bundle.state_transition_daily_features
         frames.update(bundle.research_features)
         features = {name: _feature_metadata(frame) for name, frame in frames.items()}
+        configured_parameters = run_config.features.registry_parameters(
+            strategy_timeframe_minutes=run_config.data.strategy_timeframe_minutes
+        )
+        for name, metadata in features.items():
+            try:
+                definition = self.feature_registry.get(name).definition
+            except (KeyError, AttributeError):
+                continue
+            metadata.update({
+                "provider_version": definition.version,
+                "parameters": configured_parameters.get(name, {}),
+                "dependencies": list(definition.required_features),
+                "source_datasets": [item.value for item in definition.required_datasets],
+            })
         after = dict(getattr(self.data_store, "canonical_cache_events", {}))
         canonical = {
             name: int(after.get(name, 0) - before.get(name, 0))
@@ -212,13 +236,16 @@ class ResearchRunner:
             intrabar_rows=len(bundle.intrabar) if bundle.intrabar is not None else 0,
             prepared_rows=len(prepared),
             stage_timings=timings,
+            signals=getattr(self.simulator, "last_signals", None),
+            telemetry=getattr(self.simulator, "last_telemetry", None),
             data_quality=getattr(bundle, "data_quality", None),
         )
 
         report_started = time.perf_counter()
         # Reporters receive the already-built frame so artifact production can
         # serialize decision context without reopening data or rebuilding it.
-        context = ResearchRunContext(run_config, bundle, prepared)
+        selected = tuple(getattr(catalog, "selected_records", ())) if catalog else ()
+        context = ResearchRunContext(run_config, bundle, prepared, selected)
         for reporter in self.reporters:
             reporter.report(result, context)
         timings["reporting"] = time.perf_counter() - report_started
