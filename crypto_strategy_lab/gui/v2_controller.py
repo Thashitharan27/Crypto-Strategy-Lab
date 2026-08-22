@@ -31,10 +31,15 @@ def _utc(value):
             else timestamp.tz_convert("UTC")).to_pydatetime()
 
 
+def _market_kind(value: MarketKind | str) -> MarketKind:
+    """Normalize Qt/user-data strings at the GUI application boundary."""
+    return value if isinstance(value, MarketKind) else MarketKind(str(value))
+
+
 @dataclass(frozen=True)
 class GuiResearchRequest:
     exchange: str
-    market: MarketKind
+    market: MarketKind | str
     symbol: str
     period_start: datetime
     period_end: datetime
@@ -45,7 +50,7 @@ class GuiResearchRequest:
         return DataRequest(symbol=self.symbol, start=self.period_start, end=self.period_end,
                            strategy_interval=self.strategy_timeframe,
                            intrabar_interval=self.intrabar_timeframe, datasets=tuple(datasets),
-                           market=self.market, exchange=self.exchange)
+                           market=_market_kind(self.market), exchange=self.exchange)
 
 
 class CatalogStatusService:
@@ -54,7 +59,7 @@ class CatalogStatusService:
         self._store = store
 
     def inventory(self, market=MarketKind.FUTURES_UM) -> list[dict]:
-        return self._store.catalog.inventory(self._store.raw_root, market=market)
+        return self._store.catalog.inventory(self._store.raw_root, market=_market_kind(market))
 
     def symbols(self, market=MarketKind.FUTURES_UM) -> list[str]:
         return sorted({row["symbol"] for row in self.inventory(market)})
