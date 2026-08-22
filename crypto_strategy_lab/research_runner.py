@@ -1,7 +1,7 @@
 """Composition-based application service for validated Data Lake research."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 import time
 from typing import Any, Mapping, Protocol, Sequence
@@ -11,11 +11,20 @@ import pandas as pd
 from .data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from .prepared_backtest import from_data_lake_bundle, intrabar_from_data_lake_bundle
 from .prepared_cache import bundle_prepared_identity
-from .research_adapters import native_simulator_config
+from .research_adapters import prepared_policy_config
 
 
 class Simulator(Protocol):
-    def run(self, prepared, intrabar, strategy, execution_config, *, native_config): ...
+    def run(
+        self,
+        prepared,
+        intrabar,
+        strategy,
+        execution_config,
+        *,
+        data_config,
+        feature_config,
+    ): ...
 
 
 class Reporter(Protocol):
@@ -44,9 +53,17 @@ class ResearchRunResult:
 
 
 class ResearchRunner:
-    """Coordinates dependencies; it contains no market-feature or fill formulas."""
-    def __init__(self, data_store, feature_registry, prepared_cache, strategy, simulator,
-                 reporters: Sequence[Reporter] = ()):
+    """Coordinate injected services without owning feature or fill formulas."""
+
+    def __init__(
+        self,
+        data_store,
+        feature_registry,
+        prepared_cache,
+        strategy,
+        simulator,
+        reporters: Sequence[Reporter] = (),
+    ):
         self.data_store = data_store
         self.feature_registry = feature_registry
         self.prepared_cache = prepared_cache
@@ -56,65 +73,97 @@ class ResearchRunner:
 
     def run(self, request, run_config, *, refresh_catalog=True, intrabar_start=None):
         run_config.validate(request)
-        native = native_simulator_config(run_config)
-        timings = {}
+        timings: dict[str, float] = {}
         before = dict(getattr(self.data_store, "canonical_cache_events", {}))
+
         started = time.perf_counter()
-        f = run_config.features
         bundle = load_backtest_bundle(
-            self.data_store, request, refresh_catalog=refresh_catalog,
-            intrabar_start=intrabar_start, feature_registry=self.feature_registry,
-            market_regime_method=f.market_regime_method,
-            structural_regime_sma_days=f.structural_regime_sma_days,
-            structural_regime_slope_lookback_days=f.structural_regime_slope_lookback_days,
-            atr_period=f.atr_period, adx_period=f.adx_period,
-            di_pressure_lookback=f.di_pressure_lookback, bb_period=f.bb_period,
-            bb_stddevs=f.bb_stddevs, mean_reversion_period=f.mean_reversion_period,
-            mean_reversion_mean_type=f.mean_reversion_mean_type,
-            mean_reversion_bb_stddevs=f.mean_reversion_bb_stddevs,
-            mean_reversion_rsi_period=f.mean_reversion_rsi_period,
-            mean_reversion_rsi_oversold=f.mean_reversion_rsi_oversold,
-            mean_reversion_rsi_overbought=f.mean_reversion_rsi_overbought,
-            mean_reversion_require_reentry=f.mean_reversion_require_reentry,
-            enable_support_resistance_analysis=f.enable_support_resistance_analysis,
-            sr_timeframe_minutes=f.sr_timeframe_minutes, sr_pivot_left=f.sr_pivot_left,
-            sr_pivot_right=f.sr_pivot_right, sr_lookback_bars=f.sr_lookback_bars,
-            sr_zone_width_atr=f.sr_zone_width_atr, sr_near_distance_atr=f.sr_near_distance_atr,
-            enable_sr_hold_confirmation=f.enable_sr_hold_confirmation,
-            sr_hold_confirmation_bars=f.sr_hold_confirmation_bars,
-            sr_hold_confirmation_atr=f.sr_hold_confirmation_atr,
-            sr_break_tolerance_atr=f.sr_break_tolerance_atr, sr_break_basis=f.sr_break_basis,
-            include_agg_trade_flow=f.include_agg_trade_flow)
+            self.data_store,
+            request,
+            refresh_catalog=refresh_catalog,
+            intrabar_start=intrabar_start,
+            feature_registry=self.feature_registry,
+            feature_config=run_config.features,
+        )
         timings["data_features"] = time.perf_counter() - started
+
+        # L3 sees only the config projection that is physically materialized in
+        # PreparedBacktestFrame. Execution and reporting never participate.
+        prepared_policy = prepared_policy_config(run_config)
         started = time.perf_counter()
-        key, provenance = bundle_prepared_identity(self.prepared_cache, bundle, native,
-                                                    feature_registry=self.feature_registry)
+        key, provenance = bundle_prepared_identity(
+            self.prepared_cache,
+            bundle,
+            prepared_policy,
+            feature_registry=self.feature_registry,
+        )
         prepared, hit = self.prepared_cache.get_or_build(
-            key, lambda: from_data_lake_bundle(bundle, native)[0], provenance=provenance)
+            key,
+            lambda: from_data_lake_bundle(bundle, prepared_policy)[0],
+            provenance=provenance,
+        )
         intrabar = intrabar_from_data_lake_bundle(bundle)
-        if intrabar is not None: intrabar.validate_compatible(prepared)
+        if intrabar is not None:
+            intrabar.validate_compatible(prepared)
         timings["prepared_cache"] = time.perf_counter() - started
-        started = time.perf_counter()
+
         policy = self.strategy.bind(prepared, run_config.strategy)
-        trades = self.simulator.run(prepared, intrabar, policy, run_config.execution,
-                                    native_config=native)
-        timings["simulation"] = time.perf_counter() - started
-        frames = {"core_directional": bundle.technical_features,
-                  "production_market_context": bundle.context_features}
+        simulation_started = time.perf_counter()
+        trades = self.simulator.run(
+            prepared,
+            intrabar,
+            policy,
+            run_config.execution,
+            data_config=run_config.data,
+            feature_config=run_config.features,
+        )
+        simulation_total = time.perf_counter() - simulation_started
+        engine_init = float(getattr(self.simulator, "last_engine_init_seconds", 0.0) or 0.0)
+        simulator_run = getattr(self.simulator, "last_simulation_seconds", None)
+        timings["engine_init"] = engine_init
+        timings["simulation"] = (
+            float(simulator_run) if simulator_run is not None else simulation_total
+        )
+        timings["strategy_simulation_total"] = simulation_total
+
+        frames = {
+            "core_directional": bundle.technical_features,
+            "production_market_context": bundle.context_features,
+        }
         if bundle.support_resistance_features is not None:
             frames["support_resistance"] = bundle.support_resistance_features
+        if bundle.state_transition_daily_features is not None:
+            frames["state_transition_daily"] = bundle.state_transition_daily_features
         frames.update(bundle.research_features)
-        features = {name: {"cache_hit": bool(frame.attrs.get("feature_cache_hit", False)),
-                           "cache_key": frame.attrs.get("feature_cache_key"), "rows": len(frame)}
-                    for name, frame in frames.items()}
+        features = {
+            name: {
+                "cache_hit": bool(frame.attrs.get("feature_cache_hit", False)),
+                "cache_key": frame.attrs.get("feature_cache_key"),
+                "rows": len(frame),
+            }
+            for name, frame in frames.items()
+        }
         after = dict(getattr(self.data_store, "canonical_cache_events", {}))
-        canonical = {k: int(after.get(k, 0) - before.get(k, 0)) for k in set(before) | set(after)}
-        result = ResearchRunResult(request, trades, hit, key, features, canonical,
-                                   len(bundle.strategy), len(bundle.intrabar) if bundle.intrabar is not None else 0,
-                                   len(prepared), timings)
+        canonical = {
+            name: int(after.get(name, 0) - before.get(name, 0))
+            for name in sorted(set(before) | set(after))
+        }
+        result = ResearchRunResult(
+            request=request,
+            trades=trades,
+            prepared_cache_hit=hit,
+            prepared_cache_key=key,
+            feature_cache_metadata=features,
+            canonical_cache_metadata=canonical,
+            strategy_rows=len(bundle.strategy),
+            intrabar_rows=len(bundle.intrabar) if bundle.intrabar is not None else 0,
+            prepared_rows=len(prepared),
+            stage_timings=timings,
+        )
+
         report_started = time.perf_counter()
         context = ResearchRunContext(run_config, bundle)
-        for reporter in self.reporters: reporter.report(result, context)
+        for reporter in self.reporters:
+            reporter.report(result, context)
         timings["reporting"] = time.perf_counter() - report_started
         return result
-
