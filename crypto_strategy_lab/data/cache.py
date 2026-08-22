@@ -9,6 +9,9 @@ from pathlib import Path
 from .schemas import ArchiveRecord
 
 
+CANONICAL_CACHE_FORMAT_VERSION = 1
+
+
 def stat_fingerprint(path: Path) -> str:
     """Fast source fingerprint without hashing multi-gigabyte archive contents."""
 
