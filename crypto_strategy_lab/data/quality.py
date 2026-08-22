@@ -22,7 +22,7 @@ from .schemas import DatasetKind
 from .timing import interval_to_timedelta
 
 
-VALIDATION_CONTRACT_VERSION = "2"
+VALIDATION_CONTRACT_VERSION = "3"
 QUALITY_CACHE_FORMAT_VERSION = 1
 
 
@@ -186,6 +186,9 @@ class DatasetValidationContract:
     numeric_fields: tuple[str, ...] = ()
     positive_fields: tuple[str, ...] = ()
     non_negative_fields: tuple[str, ...] = ()
+    nullable_numeric_fields: tuple[str, ...] = ()
+    nullable_positive_fields: tuple[str, ...] = ()
+    nullable_non_negative_fields: tuple[str, ...] = ()
 
 
 _IDENTITY = ("symbol", "exchange", "market", "dataset", "available_at")
@@ -216,8 +219,8 @@ CONTRACTS: dict[DatasetKind, DatasetValidationContract] = {
         required_columns=_CANDLE,
         numeric_fields=("open", "high", "low", "close", "volume"),
         positive_fields=("open", "high", "low", "close"),
-        non_negative_fields=(
-            "volume",
+        non_negative_fields=("volume",),
+        nullable_non_negative_fields=(
             "quote_volume",
             "trade_count",
             "taker_buy_base_volume",
@@ -230,15 +233,16 @@ CONTRACTS.update(
     {
         # The current Binance metrics adapter does not preserve a declared row
         # interval, so metrics are validated as timestamped snapshots rather
-        # than manufacturing a fixed grid. Future adapters may make cadence
-        # machine-readable and opt into fixed-cadence checks then.
+        # than manufacturing a fixed grid. Compact metric fields are sparse in
+        # some genuine Binance archives: missing means unknown, while supplied
+        # values still have to be finite and non-negative.
         DatasetKind.FUTURES_METRICS: DatasetValidationContract(
             dataset=DatasetKind.FUTURES_METRICS,
             timeline="event",
             timestamp_column="event_time",
             logical_key=("event_time",),
             required_columns=("event_time", *_IDENTITY),
-            non_negative_fields=(
+            nullable_non_negative_fields=(
                 "open_interest",
                 "open_interest_value",
                 "top_trader_account_long_short_ratio",
@@ -254,7 +258,7 @@ CONTRACTS.update(
             logical_key=("event_time",),
             required_columns=("event_time", *_IDENTITY, "funding_rate"),
             numeric_fields=("funding_rate",),
-            positive_fields=("funding_interval_hours",),
+            nullable_positive_fields=("funding_interval_hours",),
         ),
         DatasetKind.AGG_TRADES: DatasetValidationContract(
             dataset=DatasetKind.AGG_TRADES,
@@ -556,32 +560,49 @@ def validate_dataset(
                 )
             )
 
+    nullable_fields = {
+        *contract.nullable_numeric_fields,
+        *contract.nullable_positive_fields,
+        *contract.nullable_non_negative_fields,
+    }
     checked_numeric = set()
     for column in (
         *contract.numeric_fields,
         *contract.positive_fields,
         *contract.non_negative_fields,
+        *contract.nullable_numeric_fields,
+        *contract.nullable_positive_fields,
+        *contract.nullable_non_negative_fields,
     ):
         if column not in frame or column in checked_numeric:
             continue
         checked_numeric.add(column)
-        values = pd.to_numeric(frame[column], errors="coerce")
-        invalid_numeric = ~np.isfinite(values)
+        raw_values = frame[column]
+        values = pd.to_numeric(raw_values, errors="coerce")
+        if column in nullable_fields:
+            present = raw_values.notna()
+            invalid_numeric = present & ~np.isfinite(values)
+        else:
+            present = pd.Series(True, index=values.index)
+            invalid_numeric = ~np.isfinite(values)
         if invalid_numeric.any():
             issues.append(
                 _issue(
                     "INVALID_NUMERIC",
                     DataQualityStatus.ERROR,
-                    f"{column} must be finite",
+                    f"{column} must be finite when present",
                     mask=invalid_numeric,
                     timestamps=timestamps,
                     details={"column": column},
                 )
             )
-        if column in contract.positive_fields:
-            invalid_domain = values <= 0
-        elif column in contract.non_negative_fields:
-            invalid_domain = values < 0
+        if column in contract.positive_fields or column in contract.nullable_positive_fields:
+            invalid_domain = present & (values <= 0)
+        elif (
+            column in contract.non_negative_fields
+            or column in contract.nullable_non_negative_fields
+        ):
+            invalid_domain = present & (values < 0)
         else:
             invalid_domain = pd.Series(False, index=values.index)
         if invalid_domain.any():
