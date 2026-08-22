@@ -184,6 +184,128 @@ class MarketDataStore:
             )
         return self.canonical_source_identity(request, dataset, interval=interval)
 
+    @staticmethod
+    def _records_overlap(left: ArchiveRecord, right: ArchiveRecord) -> bool:
+        if left.period_start is None or left.period_end is None:
+            return True
+        if right.period_start is None or right.period_end is None:
+            return True
+        return max(left.period_start, right.period_start) < min(left.period_end, right.period_end)
+
+    def _archive_overlap_issues(
+        self,
+        request: DataRequest,
+        dataset: DatasetKind,
+        *,
+        interval: str | None = None,
+    ):
+        """Inspect overlapping immutable source partitions only on a quality-cache miss."""
+        from .quality import CONTRACTS, classify_archive_overlap
+
+        records = self.catalog.records_for(self.raw_root, request, dataset, interval)
+        participants: set[int] = set()
+        for left_index, left in enumerate(records):
+            for right_index in range(left_index + 1, len(records)):
+                if self._records_overlap(left, records[right_index]):
+                    participants.add(left_index)
+                    participants.add(right_index)
+        if not participants:
+            return ()
+
+        frames: list[pd.DataFrame] = []
+        for index in sorted(participants):
+            path = self._ensure_canonical(records[index])
+            with duckdb.connect() as con:
+                frame = con.read_parquet(str(path)).df()
+            if frame.empty or "period_start" not in frame:
+                continue
+            starts = pd.to_datetime(frame["period_start"], utc=True, errors="coerce")
+            mask = (starts >= request.start) & (starts < request.end)
+            frame = frame.loc[mask].copy()
+            if frame.empty:
+                continue
+            frame["period_start"] = starts.loc[mask]
+            for column in ("event_time", "period_end", "available_at"):
+                if column in frame.columns:
+                    frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce")
+            frames.append(frame.reset_index(drop=True))
+        if len(frames) < 2:
+            return ()
+        return classify_archive_overlap(frames, CONTRACTS[dataset].logical_key)
+
+    def data_quality_report(
+        self,
+        request: DataRequest,
+        dataset: DatasetKind,
+        *,
+        interval: str | None = None,
+        required: bool = True,
+        frame: pd.DataFrame | None = None,
+    ):
+        """Return cached-or-computed quality using catalog identity before row loading.
+
+        Warm validation is metadata-only until the caller independently needs the
+        data. On a cache miss we validate canonical rows, coverage, and raw archive
+        overlap once and persist a disposable JSON result independent of L2/L3.
+        """
+        from .quality import DataQualityCache, validate_dataset
+
+        quality_cache = DataQualityCache(self.cache.root)
+        try:
+            source_identity = self.canonical_source_identity(
+                request, dataset, interval=interval
+            ).cache_identity()
+        except DataNotAvailableError:
+            return validate_dataset(
+                None,
+                request,
+                dataset,
+                interval=interval,
+                required=required,
+            )
+
+        cached = quality_cache.get_cached(
+            request,
+            dataset,
+            interval=interval,
+            required=required,
+            source_identity=source_identity,
+        )
+        if cached is not None:
+            return cached
+
+        if frame is None:
+            frame = self.load_dataset(request, dataset, interval=interval)
+        coverage = self.catalog.coverage(
+            self.raw_root,
+            market=request.market,
+            dataset=dataset,
+            symbol=request.symbol,
+            interval=interval,
+        )
+        overlap_issues = self._archive_overlap_issues(
+            request, dataset, interval=interval
+        )
+        report = validate_dataset(
+            frame,
+            request,
+            dataset,
+            interval=interval,
+            required=required,
+            source_identity=source_identity,
+            coverage_start=coverage.first_period,
+            coverage_end=coverage.last_period,
+            extra_issues=overlap_issues,
+        )
+        quality_cache.store(
+            request,
+            dataset,
+            report,
+            interval=interval,
+            required=required,
+        )
+        return report
+
     def load_execution_klines(
         self,
         request: DataRequest,
