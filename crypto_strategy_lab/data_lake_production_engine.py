@@ -21,7 +21,6 @@ from crypto_strategy_lab.features.support_resistance import (
 from crypto_strategy_lab.sr_dynamic_tp_engine import SRDynamicTPBacktestEngine
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
 from crypto_strategy_lab.prepared_backtest import PreparedBacktestFrame, IntrabarExecutionData
-from crypto_strategy_lab.indicators import lag
 from zoneinfo import ZoneInfo
 
 
@@ -171,22 +170,20 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         )
         self.atr_values, self.atr_pct_values = prepared.atr, prepared.atr_pct
         self.adx_values, self.plus_di_values, self.minus_di_values = prepared.adx, prepared.plus_di, prepared.minus_di
-        self.bb_width, self.bb_width_pct = prepared.bb_width, prepared.bb_width_pct
-        # These legacy report columns are not decision inputs on the production path.
-        self.bb_middle = self.bb_upper = self.bb_lower = np.full(len(prepared), np.nan)
-        self.bb_width_1, self.bb_width_3, self.bb_width_5 = (lag(self.bb_width, n) for n in (1, 3, 5))
-        self.bb_width_change = self.bb_width - self.bb_width_5
-        self.bb_width_change_pct = np.divide(self.bb_width_change, self.bb_width_5, out=np.full(len(prepared), np.nan), where=np.isfinite(self.bb_width_5) & (self.bb_width_5 != 0))
-        self.di_spread = np.abs(self.plus_di_values - self.minus_di_values)
-        self.di_spread_1, self.di_spread_3, self.di_spread_5 = (lag(self.di_spread, n) for n in (1, 3, 5))
-        self.di_spread_change = self.di_spread - self.di_spread_5
-        mx, mn = np.maximum(self.plus_di_values, self.minus_di_values), np.minimum(self.plus_di_values, self.minus_di_values)
-        self.di_ratio = np.divide(mx, mn, out=np.full(len(prepared), np.nan), where=np.isfinite(mn) & (mn != 0))
-        self.bull_regime_return_values = self._trailing_return_array(config.bull_regime_lookback_days)
+        for name in (
+            "bb_middle", "bb_upper", "bb_lower", "bb_width", "bb_width_pct",
+            "bb_width_1", "bb_width_3", "bb_width_5", "bb_width_change",
+            "bb_width_change_pct", "di_spread", "di_spread_1", "di_spread_3",
+            "di_spread_5", "di_spread_change", "di_ratio", "plus_di_change",
+            "minus_di_change", "di_pressure_spread_change",
+            "long_directional_di_change", "long_opposing_di_change",
+            "long_di_pressure_state", "short_directional_di_change",
+            "short_opposing_di_change", "short_di_pressure_state",
+        ):
+            setattr(self, name, getattr(prepared, name))
+        self.bull_regime_return_values = prepared.bull_regime_return
         if market_regime_values is None:
-            if config.market_regime_method != "ASSET_RETURN":
-                raise ValueError("prepared native runtime requires externally prepared structural market regimes")
-            self.market_regime_values = self._market_regime_array()
+            self.market_regime_values = prepared.market_regime
         else:
             self.market_regime_values = np.asarray(market_regime_values, dtype=object)
             if len(self.market_regime_values) != len(prepared):
@@ -198,12 +195,21 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         self.mean_reversion_sigma, self.mean_reversion_bb_upper, self.mean_reversion_bb_lower = prepared.mean_reversion_sigma, prepared.mean_reversion_bb_upper, prepared.mean_reversion_bb_lower
         self.mean_reversion_bb_zscore, self.mean_reversion_rsi_values = prepared.mean_reversion_bb_zscore, prepared.mean_reversion_rsi
         self.mean_reversion_long_reentry, self.mean_reversion_short_reentry = prepared.mean_reversion_long_reentry, prepared.mean_reversion_short_reentry
+        self.mean_reversion_distance_change_atr = prepared.mean_reversion_distance_change_atr
+        self.mean_reversion_state = prepared.mean_reversion_state
+        self.mean_reversion_motion = prepared.mean_reversion_motion
+        self.mean_reversion_strength = prepared.mean_reversion_strength
+        self.mean_reversion_strength_label = prepared.mean_reversion_strength_label
         periods = {p.rsi_period for p in config.strategy_profiles.values()}
         expected_period = int(getattr(config, "mean_reversion_rsi_period", 14))
         if any(int(period) != expected_period for period in periods):
             raise ValueError("native runtime requires prepared profile RSI periods")
         self.profile_rsi_values = {period: prepared.mean_reversion_rsi for period in periods}
-        self.profile_momentum_values = {h: self._trailing_return_hours_array(h) for h in {p.momentum_lookback_hours for p in config.strategy_profiles.values()}}
+        required_momentum = {int(p.momentum_lookback_hours) for p in config.strategy_profiles.values()}
+        missing_momentum = required_momentum - set(prepared.momentum_returns_by_hours)
+        if missing_momentum:
+            raise ValueError(f"native runtime requires prepared momentum lookbacks: {sorted(missing_momentum)}")
+        self.profile_momentum_values = dict(prepared.momentum_returns_by_hours)
         self.risk = self._risk_array()
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]
         self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1
@@ -229,6 +235,35 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         self.technical_features=None; self.context_features=None
         self.technical_feature_source="prepared_backtest_frame"; self.context_feature_source="prepared_backtest_frame"; self.support_resistance_feature_source="runtime_policy" if self.sr_detector else "disabled"
         return self
+
+    def _di_pressure_snapshot(self, i, direction):
+        """Select LONG/SHORT policy meaning from direction-neutral prepared DI values."""
+        plus, minus = float(self.plus_di_values[i]), float(self.minus_di_values[i])
+        result = {
+            "plus_di": plus, "minus_di": minus, "directional_di": np.nan,
+            "opposing_di": np.nan, "plus_di_change": float(self.plus_di_change[i]),
+            "minus_di_change": float(self.minus_di_change[i]),
+            "directional_di_change": np.nan, "opposing_di_change": np.nan,
+            "di_spread": float(self.di_spread[i]),
+            "di_spread_change": float(self.di_pressure_spread_change[i]),
+            "di_pressure_state": "UNKNOWN",
+            "di_pressure_lookback": self.config.di_pressure_lookback,
+        }
+        if direction == "LONG":
+            result.update(directional_di=plus, opposing_di=minus,
+                          directional_di_change=float(self.long_directional_di_change[i]),
+                          opposing_di_change=float(self.long_opposing_di_change[i]),
+                          di_pressure_state=str(self.long_di_pressure_state[i]))
+        elif direction == "SHORT":
+            result.update(directional_di=minus, opposing_di=plus,
+                          directional_di_change=float(self.short_directional_di_change[i]),
+                          opposing_di_change=float(self.short_opposing_di_change[i]),
+                          di_pressure_state=str(self.short_di_pressure_state[i]))
+        if not self.config.enable_di_pressure_analysis:
+            result.update(plus_di_change=np.nan, minus_di_change=np.nan,
+                          directional_di_change=np.nan, opposing_di_change=np.nan,
+                          di_spread_change=np.nan, di_pressure_state="UNKNOWN")
+        return result
 
     @classmethod
     def _validate_production_context(cls, data, config, frame: pd.DataFrame) -> pd.DataFrame:

@@ -27,7 +27,6 @@ from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_b
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
-from crypto_strategy_lab.features.market_regime import structural_regime_values
 
 
 _FINGERPRINT_COLUMNS = (
@@ -154,11 +153,8 @@ def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
 
 
 def _engine(bundle: BacktestDataBundle, config):
-    prepared, intrabar = from_data_lake_bundle(bundle)
-    regimes = None
-    if config.market_regime_method != "ASSET_RETURN":
-        regimes = structural_regime_values(prepared.timestamp, bundle.structural_benchmark, sma_days=config.structural_regime_sma_days, slope_lookback_days=config.structural_regime_slope_lookback_days)
-    return DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config, market_regime_values=regimes)
+    prepared, intrabar = from_data_lake_bundle(bundle, config)
+    return DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
 
 
 def _median(records: list[dict], key: str) -> float:

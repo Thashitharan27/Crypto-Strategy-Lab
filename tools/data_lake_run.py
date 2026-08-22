@@ -111,7 +111,7 @@ def main() -> int:
         sr_break_basis=config.sr_break_basis,
         include_agg_trade_flow=bool(args.include_agg_trades),
     )
-    prepared, intrabar = from_data_lake_bundle(bundle)
+    prepared, intrabar = from_data_lake_bundle(bundle, config)
     regimes = None
     if config.market_regime_method != "ASSET_RETURN":
         regimes = structural_regime_values(prepared.timestamp, bundle.structural_benchmark, sma_days=config.structural_regime_sma_days, slope_lookback_days=config.structural_regime_slope_lookback_days)

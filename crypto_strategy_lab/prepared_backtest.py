@@ -19,6 +19,18 @@ _FLOAT_FIELDS = (
     "mean_reversion_distance_atr_previous", "mean_reversion_sigma",
     "mean_reversion_bb_upper", "mean_reversion_bb_lower",
     "mean_reversion_bb_zscore", "mean_reversion_rsi",
+    "di_spread", "di_spread_1", "di_spread_3", "di_spread_5",
+    "di_spread_change", "di_ratio", "plus_di_change", "minus_di_change",
+    "di_pressure_spread_change", "long_directional_di_change",
+    "long_opposing_di_change", "short_directional_di_change",
+    "short_opposing_di_change", "bb_middle", "bb_upper", "bb_lower",
+    "bb_width_1", "bb_width_3", "bb_width_5", "bb_width_change",
+    "bb_width_change_pct", "mean_reversion_distance_change_atr",
+)
+_TEXT_FIELDS = (
+    "long_di_pressure_state", "short_di_pressure_state",
+    "mean_reversion_state", "mean_reversion_motion",
+    "mean_reversion_strength_label",
 )
 _REQUIRED_FINITE = ("open", "high", "low", "close", "volume")
 
@@ -121,6 +133,37 @@ class PreparedBacktestFrame:
     mean_reversion_rsi: np.ndarray
     mean_reversion_long_reentry: np.ndarray
     mean_reversion_short_reentry: np.ndarray
+    di_spread: np.ndarray
+    di_spread_1: np.ndarray
+    di_spread_3: np.ndarray
+    di_spread_5: np.ndarray
+    di_spread_change: np.ndarray
+    di_ratio: np.ndarray
+    plus_di_change: np.ndarray
+    minus_di_change: np.ndarray
+    di_pressure_spread_change: np.ndarray
+    long_directional_di_change: np.ndarray
+    long_opposing_di_change: np.ndarray
+    long_di_pressure_state: np.ndarray
+    short_directional_di_change: np.ndarray
+    short_opposing_di_change: np.ndarray
+    short_di_pressure_state: np.ndarray
+    bb_middle: np.ndarray
+    bb_upper: np.ndarray
+    bb_lower: np.ndarray
+    bb_width_1: np.ndarray
+    bb_width_3: np.ndarray
+    bb_width_5: np.ndarray
+    bb_width_change: np.ndarray
+    bb_width_change_pct: np.ndarray
+    mean_reversion_distance_change_atr: np.ndarray
+    mean_reversion_state: np.ndarray
+    mean_reversion_motion: np.ndarray
+    mean_reversion_strength: np.ndarray
+    mean_reversion_strength_label: np.ndarray
+    bull_regime_return: np.ndarray
+    market_regime: np.ndarray
+    momentum_returns_by_hours: Mapping[int, np.ndarray]
     decision_available_at: np.ndarray
     research: tuple[ResearchContext, ...] = ()
 
@@ -137,12 +180,32 @@ class PreparedBacktestFrame:
             object.__setattr__(self, name, _readonly(getattr(self, name), np.float64, name))
         for name in ("mean_reversion_long_reentry", "mean_reversion_short_reentry"):
             object.__setattr__(self, name, _readonly(getattr(self, name), np.bool_, name))
+        for name in _TEXT_FIELDS:
+            object.__setattr__(self, name, _readonly(getattr(self, name), object, name))
+        object.__setattr__(self, "mean_reversion_strength", _readonly(
+            self.mean_reversion_strength, np.int64, "mean_reversion_strength"
+        ))
+        object.__setattr__(self, "bull_regime_return", _readonly(
+            self.bull_regime_return, np.float64, "bull_regime_return"
+        ))
+        object.__setattr__(self, "market_regime", _readonly(
+            self.market_regime, object, "market_regime"
+        ))
+        momentum = {
+            int(hours): _readonly(values, np.float64, f"momentum return {hours}h")
+            for hours, values in self.momentum_returns_by_hours.items()
+        }
+        if any(hours <= 0 for hours in momentum):
+            raise ValueError("momentum lookback hours must be positive")
+        object.__setattr__(self, "momentum_returns_by_hours", MappingProxyType(momentum))
 
         length = len(self.timestamp)
         for field in fields(self):
             value = getattr(self, field.name)
             if isinstance(value, np.ndarray) and len(value) != length:
                 raise ValueError(f"{field.name} length {len(value)} does not match timestamp length {length}")
+        if any(len(value) != length for value in self.momentum_returns_by_hours.values()):
+            raise ValueError("momentum return arrays are not aligned to strategy rows")
         if np.isnat(self.timestamp).any():
             raise ValueError("timestamps cannot contain missing values")
         if np.isnat(self.decision_available_at).any():
@@ -263,17 +326,31 @@ class IntrabarExecutionWindow:
             )
 
 
-def from_data_lake_bundle(bundle) -> tuple[PreparedBacktestFrame, IntrabarExecutionData | None]:
+def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, IntrabarExecutionData | None]:
     """Bounded adapter from today's Data Lake bundle; no simulator routing."""
     strategy, technical, context = bundle.strategy, bundle.technical_features, bundle.context_features
     required_strategy = {"timestamp", "open", "high", "low", "close", "volume"}
-    required_technical = {"timestamp", "available_at", "atr", "atr_pct", "adx", "plus_di", "minus_di"}
+    directional_names = {
+        "atr", "atr_pct", "adx", "plus_di", "minus_di", "di_spread",
+        "di_spread_1", "di_spread_3", "di_spread_5", "di_spread_change",
+        "di_ratio", "plus_di_change", "minus_di_change",
+        "di_pressure_spread_change", "long_directional_di_change",
+        "long_opposing_di_change", "long_di_pressure_state",
+        "short_directional_di_change", "short_opposing_di_change",
+        "short_di_pressure_state",
+    }
+    required_technical = {"timestamp", "available_at", *directional_names}
     required_context = {
-        "timestamp", "available_at", "bb_width", "bb_width_pct", "session_vwap",
+        "timestamp", "available_at", "bb_middle", "bb_upper", "bb_lower",
+        "bb_width", "bb_width_pct", "bb_width_1", "bb_width_3", "bb_width_5",
+        "bb_width_change", "bb_width_change_pct", "session_vwap",
         "close_location", "mean_reversion_mean", "mean_reversion_distance_atr",
         "mean_reversion_distance_atr_previous", "mean_reversion_sigma",
         "mean_reversion_bb_upper", "mean_reversion_bb_lower", "mean_reversion_bb_zscore",
         "mean_reversion_rsi", "mean_reversion_long_reentry", "mean_reversion_short_reentry",
+        "mean_reversion_distance_change_atr", "mean_reversion_state",
+        "mean_reversion_motion", "mean_reversion_strength",
+        "mean_reversion_strength_label",
     }
     for label, frame, required in (
         ("strategy data", strategy, required_strategy),
@@ -297,11 +374,15 @@ def from_data_lake_bundle(bundle) -> tuple[PreparedBacktestFrame, IntrabarExecut
     available = np.maximum(technical_available, context_available)
 
     kwargs = {name: context[name].to_numpy() for name in (
-        "bb_width", "bb_width_pct", "session_vwap", "close_location",
+        "bb_middle", "bb_upper", "bb_lower", "bb_width", "bb_width_pct",
+        "bb_width_1", "bb_width_3", "bb_width_5", "bb_width_change",
+        "bb_width_change_pct", "session_vwap", "close_location",
         "mean_reversion_mean", "mean_reversion_distance_atr",
         "mean_reversion_distance_atr_previous", "mean_reversion_sigma",
         "mean_reversion_bb_upper", "mean_reversion_bb_lower", "mean_reversion_bb_zscore",
         "mean_reversion_rsi", "mean_reversion_long_reentry", "mean_reversion_short_reentry",
+        "mean_reversion_distance_change_atr", "mean_reversion_state",
+        "mean_reversion_motion", "mean_reversion_strength", "mean_reversion_strength_label",
     )}
 
     research_blocks: list[ResearchContext] = []
@@ -327,15 +408,25 @@ def from_data_lake_bundle(bundle) -> tuple[PreparedBacktestFrame, IntrabarExecut
         )
     research = tuple(research_blocks)
 
+    bull_return = np.full(len(strategy), np.nan)
+    regimes = np.full(len(strategy), None, dtype=object)
+    momentum: dict[int, np.ndarray] = {}
+    if config is not None:
+        from crypto_strategy_lab.features.market_regime import prepare_policy_market_features
+        bull_return, regimes, momentum = prepare_policy_market_features(
+            strategy_timestamps, strategy["close"].to_numpy(float), config,
+            getattr(bundle, "structural_benchmark", None),
+        )
     prepared = PreparedBacktestFrame(
         timestamp=strategy_timestamps,
         strategy_interval=pd.Timedelta(bundle.request.strategy_interval),
         open=strategy["open"].to_numpy(), high=strategy["high"].to_numpy(),
         low=strategy["low"].to_numpy(), close=strategy["close"].to_numpy(),
         volume=strategy["volume"].to_numpy(),
-        atr=technical["atr"].to_numpy(), atr_pct=technical["atr_pct"].to_numpy(),
-        adx=technical["adx"].to_numpy(), plus_di=technical["plus_di"].to_numpy(),
-        minus_di=technical["minus_di"].to_numpy(), decision_available_at=available,
+        **{name: technical[name].to_numpy() for name in directional_names},
+        bull_regime_return=bull_return, market_regime=regimes,
+        momentum_returns_by_hours=momentum,
+        decision_available_at=available,
         research=research, **kwargs,
     )
     intrabar = None

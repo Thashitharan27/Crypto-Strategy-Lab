@@ -24,12 +24,28 @@ def valid_kwargs(n=3):
             "mean_reversion_distance_atr_previous", "mean_reversion_sigma",
             "mean_reversion_bb_upper", "mean_reversion_bb_lower",
             "mean_reversion_bb_zscore", "mean_reversion_rsi",
+            "di_spread", "di_spread_1", "di_spread_3", "di_spread_5",
+            "di_spread_change", "di_ratio", "plus_di_change", "minus_di_change",
+            "di_pressure_spread_change", "long_directional_di_change",
+            "long_opposing_di_change", "short_directional_di_change",
+            "short_opposing_di_change", "bb_middle", "bb_upper", "bb_lower",
+            "bb_width_1", "bb_width_3", "bb_width_5", "bb_width_change",
+            "bb_width_change_pct", "mean_reversion_distance_change_atr",
         )
     }
     return dict(
         timestamp=timestamp, strategy_interval=pd.Timedelta(hours=4), **floats,
         mean_reversion_long_reentry=np.zeros(n, dtype=bool),
         mean_reversion_short_reentry=np.ones(n, dtype=bool),
+        long_di_pressure_state=np.full(n, "EXPANDING", dtype=object),
+        short_di_pressure_state=np.full(n, "CONTRACTING", dtype=object),
+        mean_reversion_state=np.full(n, "ABOVE_MEAN", dtype=object),
+        mean_reversion_motion=np.full(n, "AWAY_FROM_MEAN", dtype=object),
+        mean_reversion_strength=np.ones(n, dtype=int),
+        mean_reversion_strength_label=np.full(n, "MODERATE", dtype=object),
+        bull_regime_return=np.zeros(n),
+        market_regime=np.full(n, "SIDEWAYS", dtype=object),
+        momentum_returns_by_hours={24: np.zeros(n)},
         decision_available_at=timestamp + np.timedelta64(4, "h"),
     )
 
@@ -43,19 +59,32 @@ def data_lake_bundle():
     technical = pd.DataFrame({
         "timestamp": times, "available_at": times + pd.Timedelta(hours=4),
         "atr": 1.0, "atr_pct": .1, "adx": 20.0, "plus_di": 15.0, "minus_di": 10.0,
+        **{name: 1.0 for name in (
+            "di_spread", "di_spread_1", "di_spread_3", "di_spread_5",
+            "di_spread_change", "di_ratio", "plus_di_change", "minus_di_change",
+            "di_pressure_spread_change", "long_directional_di_change",
+            "long_opposing_di_change", "short_directional_di_change",
+            "short_opposing_di_change")},
+        "long_di_pressure_state": "EXPANDING", "short_di_pressure_state": "CONTRACTING",
     })
     context_names = (
-        "bb_width", "bb_width_pct", "session_vwap", "close_location",
+        "bb_middle", "bb_upper", "bb_lower", "bb_width", "bb_width_pct",
+        "bb_width_1", "bb_width_3", "bb_width_5", "bb_width_change",
+        "bb_width_change_pct", "session_vwap", "close_location",
         "mean_reversion_mean", "mean_reversion_distance_atr",
         "mean_reversion_distance_atr_previous", "mean_reversion_sigma",
         "mean_reversion_bb_upper", "mean_reversion_bb_lower", "mean_reversion_bb_zscore",
-        "mean_reversion_rsi",
+        "mean_reversion_rsi", "mean_reversion_distance_change_atr",
     )
     context = pd.DataFrame({
         "timestamp": times, "available_at": times + pd.Timedelta(hours=4),
         **{name: 1.0 for name in context_names},
         "mean_reversion_long_reentry": False,
         "mean_reversion_short_reentry": True,
+        "mean_reversion_state": "ABOVE_MEAN",
+        "mean_reversion_motion": "AWAY_FROM_MEAN",
+        "mean_reversion_strength": 1,
+        "mean_reversion_strength_label": "MODERATE",
     })
     intrabar_times = pd.date_range(times[0], periods=720, freq="1min", tz="UTC")
     intrabar = pd.DataFrame({
