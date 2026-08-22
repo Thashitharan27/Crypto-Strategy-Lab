@@ -54,6 +54,31 @@ class Provider:
         })
 
 
+class InvalidFrameCache:
+    def __init__(self) -> None:
+        self.stored = None
+
+    def load(self, definition, request, identity):
+        return pd.DataFrame({
+            "timestamp": pd.to_datetime(["2026-01-01"], utc=True),
+            "available_at": pd.to_datetime(["2026-01-01 04:00"], utc=True),
+        })
+
+    def store(self, definition, request, identity, frame):
+        self.stored = frame.copy()
+
+
+def test_registration_rejects_duplicates_and_missing_dependencies() -> None:
+    registry = FeatureRegistry()
+    registry.register(Provider("a"))
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register(Provider("a"))
+    registry = FeatureRegistry()
+    registry.register(Provider("root", dependencies=("missing",)))
+    with pytest.raises(KeyError, match="Unknown feature"):
+        registry.dependency_order(["root"])
+
+
 def test_parameter_contract_defaults_normalizes_and_rejects_unknown() -> None:
     provider = Provider("a", parameters={"period": ParameterDefinition(int, 14)})
     definition = provider.definition
@@ -84,6 +109,24 @@ def test_required_parameter_and_output_schema_are_enforced() -> None:
     bad = pd.DataFrame({"timestamp": ["not-datetime"], "available_at": ["no"], "value": ["x"]})
     with pytest.raises(ValueError, match="must be"):
         definition.validate_output(bad)
+
+
+def test_invalid_cached_schema_is_recomputed_and_replaced() -> None:
+    registry = FeatureRegistry()
+    provider = Provider("a")
+    registry.register(provider)
+    cache = InvalidFrameCache()
+    frames = registry.execute(
+        ["a"],
+        REQUEST,
+        {DatasetKind.KLINES: pd.DataFrame()},
+        cache=cache,
+        source_identities={DatasetKind.KLINES: "source"},
+    )
+    assert provider.calls == 1
+    assert list(frames["a"]["value"]) == [1.0]
+    assert cache.stored is not None
+    assert list(cache.stored["value"]) == [1.0]
 
 
 def test_graph_is_deterministic_deduplicated_and_propagates_warmup() -> None:
@@ -200,6 +243,7 @@ def test_production_registry_exposes_core_authoritative_metadata() -> None:
     context = registry.get("production_market_context").definition
     assert context.required_features == (CORE_DIRECTIONAL_FEATURE_NAME,)
     assert context.output_schema["mean_reversion_reentry_confirmation"].kind == "string"
+    assert context.output_schema["close_location"].kind == "numeric"
     policy = registry.get(POLICY_MARKET_FEATURE_NAME).definition
     assert set(policy.parameters) == {
         "market_regime_method", "bull_regime_lookback_days",
