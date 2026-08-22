@@ -279,6 +279,9 @@ class OrderBookContextFeatureProvider:
             ].gt(max_age)
             stale = result["book_depth_stale"]
             result.loc[stale, value_columns] = np.nan
+            result["book_depth_snapshot_complete"] = result[
+                "book_depth_snapshot_complete"
+            ].astype("boolean")
             result.loc[stale, "book_depth_snapshot_complete"] = pd.NA
             for column in (
                 "book_depth_covered",
@@ -286,9 +289,6 @@ class OrderBookContextFeatureProvider:
                 "book_depth_stale",
             ):
                 result[column] = result[column].fillna(False).astype(bool)
-            result["book_depth_snapshot_complete"] = result[
-                "book_depth_snapshot_complete"
-            ].astype("boolean")
 
         for band in range(1, 6):
             bid, ask = (
