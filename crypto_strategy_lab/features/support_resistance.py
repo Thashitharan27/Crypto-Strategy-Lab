@@ -19,7 +19,7 @@ from crypto_strategy_lab.support_resistance import (
     TradeLocationRating,
 )
 
-from .base import FeatureDefinition
+from .base import FeatureDefinition, ParameterDefinition
 from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
@@ -71,6 +71,20 @@ class SupportResistanceFeatureProvider:
         version=SUPPORT_RESISTANCE_FEATURE_VERSION,
         required_datasets=(DatasetKind.KLINES,),
         required_features=(CORE_DIRECTIONAL_FEATURE_NAME,),
+        parameters={
+            "atr_period": ParameterDefinition(int, 14),
+            "sr_timeframe_minutes": ParameterDefinition(int, 0),
+            "sr_pivot_left": ParameterDefinition(int, 5),
+            "sr_pivot_right": ParameterDefinition(int, 5),
+            "sr_lookback_bars": ParameterDefinition(int, 200),
+            "sr_zone_width_atr": ParameterDefinition(float, 0.5),
+            "sr_near_distance_atr": ParameterDefinition(float, 0.75),
+            "enable_sr_hold_confirmation": ParameterDefinition(bool, False),
+            "sr_hold_confirmation_bars": ParameterDefinition(int, 3),
+            "sr_hold_confirmation_atr": ParameterDefinition(float, 0.25),
+            "sr_break_tolerance_atr": ParameterDefinition(float, 0.25),
+            "sr_break_basis": ParameterDefinition(lambda value: str(value).upper(), "CLOSE"),
+        },
         output_columns=(
             *tuple(
                 f"{direction}_{field}"

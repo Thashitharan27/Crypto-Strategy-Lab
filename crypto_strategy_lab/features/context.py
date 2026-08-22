@@ -18,7 +18,7 @@ from crypto_strategy_lab.mean_reversion import (
     ema,
 )
 
-from .base import FeatureDefinition
+from .base import FeatureDefinition, ParameterDefinition
 from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
@@ -35,6 +35,11 @@ class MarketContextFeatureProvider:
         version=MARKET_CONTEXT_FEATURE_VERSION,
         required_datasets=(DatasetKind.KLINES,),
         required_features=(CORE_DIRECTIONAL_FEATURE_NAME,),
+        parameters={
+            "bb_period": ParameterDefinition(int, 20),
+            "bb_stddevs": ParameterDefinition(float, 2.0),
+            "mean_reversion_period": ParameterDefinition(int, 20),
+        },
         output_columns=(
             "bb_middle",
             "bb_upper",

@@ -13,7 +13,7 @@ from crypto_strategy_lab.state_transition_research import (
     daily_state_frame,
 )
 
-from .base import FeatureDefinition
+from .base import FeatureDefinition, ParameterDefinition
 
 
 STATE_TRANSITION_DAILY_FEATURE_NAME = "state_transition_daily"
@@ -28,6 +28,19 @@ class StateTransitionDailyFeatureProvider:
         name=STATE_TRANSITION_DAILY_FEATURE_NAME,
         version=STATE_TRANSITION_DAILY_FEATURE_VERSION,
         required_datasets=(DatasetKind.KLINES,),
+        parameters={
+            "regime_lookback_days": ParameterDefinition(int, 20),
+            "bull_return_threshold": ParameterDefinition(float, 0.05),
+            "bear_return_threshold": ParameterDefinition(float, -0.05),
+            "volatility_lookback_days": ParameterDefinition(int, 20),
+            "volatility_reference_days": ParameterDefinition(int, 252),
+            "volatility_low_quantile": ParameterDefinition(float, 0.33),
+            "volatility_high_quantile": ParameterDefinition(float, 0.67),
+            "di_bucket_edges": ParameterDefinition(tuple, (0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, float("inf"))),
+            "di_stable_tolerance": ParameterDefinition(float, 0.5),
+            "minimum_state_observations": ParameterDefinition(int, 30),
+            "minimum_trade_observations": ParameterDefinition(int, 20),
+        },
         output_columns=(
             "date",
             "available_at",

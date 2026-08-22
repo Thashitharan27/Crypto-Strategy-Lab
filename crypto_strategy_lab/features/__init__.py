@@ -5,7 +5,7 @@ from .agg_trade_flow import (
     AGG_TRADE_FLOW_FEATURE_VERSION,
     AggTradeFlowFeatureProvider,
 )
-from .base import FeatureDefinition, FeatureProvider
+from .base import FeatureDefinition, FeatureProvider, OutputField, ParameterDefinition
 from .basis import (
     BASIS_CONTEXT_FEATURE_NAME,
     BASIS_CONTEXT_FEATURE_VERSION,
@@ -33,6 +33,7 @@ from .production_context import (
     ProductionContextFeatureProvider,
 )
 from .registry import FeatureRegistry
+from .state_transition import StateTransitionDailyFeatureProvider
 from .support_resistance import (
     SUPPORT_RESISTANCE_FEATURE_NAME,
     SUPPORT_RESISTANCE_FEATURE_VERSION,
@@ -50,6 +51,8 @@ from .technical import (
 __all__ = [
     "FeatureDefinition",
     "FeatureProvider",
+    "OutputField",
+    "ParameterDefinition",
     "FeatureRegistry",
     "FeatureFrameCache",
     "CORE_DIRECTIONAL_FEATURE_NAME",
@@ -80,3 +83,20 @@ __all__ = [
     "AGG_TRADE_FLOW_FEATURE_VERSION",
     "AggTradeFlowFeatureProvider",
 ]
+
+
+def production_feature_registry() -> FeatureRegistry:
+    """Return the authoritative catalog of native production/research features."""
+    registry = FeatureRegistry()
+    for provider in (
+        CoreDirectionalFeatureProvider(), MarketContextFeatureProvider(),
+        ProductionContextFeatureProvider(), SupportResistanceFeatureProvider(),
+        StateTransitionDailyFeatureProvider(), FuturesPositioningFeatureProvider(),
+        FundingContextFeatureProvider(), BasisContextFeatureProvider(),
+        AggTradeFlowFeatureProvider(),
+    ):
+        registry.register(provider)
+    return registry
+
+
+__all__.append("production_feature_registry")

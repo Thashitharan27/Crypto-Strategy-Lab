@@ -9,12 +9,10 @@ from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
 from crypto_strategy_lab.features.agg_trade_flow import AggTradeFlowFeatureProvider
 from crypto_strategy_lab.features.basis import BasisContextFeatureProvider
 from crypto_strategy_lab.features.cache import FeatureFrameCache
+from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
 from crypto_strategy_lab.features.futures_positioning import FuturesPositioningFeatureProvider
-from crypto_strategy_lab.features.production_context import ProductionContextFeatureProvider
-from crypto_strategy_lab.features.state_transition import StateTransitionDailyFeatureProvider
-from crypto_strategy_lab.features.support_resistance import SupportResistanceFeatureProvider
-from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME, CoreDirectionalFeatureProvider
+from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
 from .intrabar_index import as_searchsorted_intrabar
 from .legacy_bridge import canonical_to_legacy_ohlcv
 from .query import DataRequest
@@ -46,56 +44,14 @@ def _legacy_klines(store, request, interval, label):
     return _legacy_from_canonical(store.load_klines(request, interval), interval, label)
 
 
-def _cached_feature(store, request, canonical, provider, parameters, feature_frames=None):
-    dependency_keys = tuple(
-        str(frame.attrs.get("feature_cache_key") or f"uncached-{name}")
-        for name, frame in sorted((feature_frames or {}).items())
-    )
-    cache = FeatureFrameCache(store.cache.root)
-    key = cache.key(
-        provider.definition, request, parameters, canonical,
-        dependency_keys=dependency_keys,
-    )
-    cached = cache.load(provider.definition, request, key)
-    if cached is not None:
-        return cached
-    if feature_frames:
-        frame = provider.compute(
-            request, {DatasetKind.KLINES: canonical}, parameters, feature_frames
-        )
-    else:
-        frame = provider.compute(request, {DatasetKind.KLINES: canonical}, parameters)
-    frame.attrs["feature_cache_hit"] = False
-    frame.attrs["feature_cache_key"] = key
-    cache.store(provider.definition, request, key, frame)
-    return frame
-
-
 def _cached_multisource_feature(store, request, datasets, provider, parameters=None):
     """Cache a feature that depends on klines plus one or more event datasets."""
-    parameters = dict(parameters or {})
-    canonical = datasets[DatasetKind.KLINES]
-    additional = tuple(
-        datasets[kind]
-        for kind in sorted(datasets, key=lambda item: item.value)
-        if kind != DatasetKind.KLINES
-    )
-    cache = FeatureFrameCache(store.cache.root)
-    key = cache.key(
-        provider.definition,
-        request,
-        parameters,
-        canonical,
-        additional_sources=additional,
-    )
-    cached = cache.load(provider.definition, request, key)
-    if cached is not None:
-        return cached
-    frame = provider.compute(request, datasets, parameters)
-    frame.attrs["feature_cache_hit"] = False
-    frame.attrs["feature_cache_key"] = key
-    cache.store(provider.definition, request, key, frame)
-    return frame
+    registry = production_feature_registry()
+    return registry.execute(
+        [provider.definition.name], request, datasets,
+        parameters={provider.definition.name: dict(parameters or {})},
+        cache=FeatureFrameCache(store.cache.root),
+    )[provider.definition.name]
 
 
 def _cached_catalog_feature(
@@ -115,20 +71,29 @@ def _cached_catalog_feature(
         ),
         store.source_signature(_dataset_request(request, dataset), dataset),
     )
+    registry = production_feature_registry()
+    resolved = registry.resolve(
+        [provider.definition.name], {provider.definition.name: parameters}
+    )[0]
+    source_ids = {
+        kind: signature.cache_identity()
+        for kind, signature in zip(provider.definition.required_datasets, signatures)
+    }
+    key = registry.identity(resolved, request, source_ids, {})
     cache = FeatureFrameCache(store.cache.root)
-    key = cache.key_from_signatures(
-        provider.definition, request, parameters, signatures
-    )
     cached = cache.load(provider.definition, request, key)
     if cached is not None:
-        return cached
+        try:
+            provider.definition.validate_output(cached)
+            return cached
+        except ValueError:
+            pass
 
     source = store.load_dataset(_dataset_request(request, dataset), dataset)
     if source.empty:
         return None
-    frame = provider.compute(
-        request, {DatasetKind.KLINES: canonical, dataset: source}, parameters
-    )
+    frame = provider.compute(request, {DatasetKind.KLINES: canonical, dataset: source}, resolved.parameters)
+    provider.definition.validate_output(frame)
     frame.attrs["feature_cache_hit"] = False
     frame.attrs["feature_cache_key"] = key
     cache.store(provider.definition, request, key, frame)
@@ -293,17 +258,18 @@ def load_backtest_bundle(
     canonical = store.load_klines(request, request.strategy_interval)
     strategy = _legacy_from_canonical(canonical, request.strategy_interval, "Strategy data (Data Lake v2)")
 
-    directional = _cached_feature(
-        store, request, canonical, CoreDirectionalFeatureProvider(),
-        {
+    registry = production_feature_registry()
+    requested = ["production_market_context", "state_transition_daily"]
+    if enable_support_resistance_analysis:
+        requested.append("support_resistance")
+    strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
+    effective_sr_minutes = int(sr_timeframe_minutes or strategy_minutes)
+    feature_parameters = {
+        CORE_DIRECTIONAL_FEATURE_NAME: {
             "atr_period": int(atr_period), "adx_period": int(adx_period),
             "di_pressure_lookback": int(di_pressure_lookback),
         },
-    )
-    directional_dependency = {CORE_DIRECTIONAL_FEATURE_NAME: directional}
-    context = _cached_feature(
-        store, request, canonical, ProductionContextFeatureProvider(),
-        {
+        "production_market_context": {
             "bb_period": int(bb_period),
             "bb_stddevs": float(bb_stddevs),
             "mean_reversion_period": int(mean_reversion_period),
@@ -313,16 +279,10 @@ def load_backtest_bundle(
             "mean_reversion_rsi_oversold": float(mean_reversion_rsi_oversold),
             "mean_reversion_rsi_overbought": float(mean_reversion_rsi_overbought),
             "mean_reversion_require_reentry": bool(mean_reversion_require_reentry),
-        }, directional_dependency,
-    )
-
-    sr_features = None
-    strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
-    effective_sr_minutes = int(sr_timeframe_minutes or strategy_minutes)
+        },
+    }
     if enable_support_resistance_analysis:
-        sr_features = _cached_feature(
-            store, request, canonical, SupportResistanceFeatureProvider(),
-            {
+        feature_parameters["support_resistance"] = {
                 "atr_period": int(atr_period),
                 "sr_timeframe_minutes": effective_sr_minutes,
                 "sr_pivot_left": int(sr_pivot_left),
@@ -335,12 +295,15 @@ def load_backtest_bundle(
                 "sr_hold_confirmation_atr": float(sr_hold_confirmation_atr),
                 "sr_break_tolerance_atr": float(sr_break_tolerance_atr),
                 "sr_break_basis": str(sr_break_basis).upper(),
-            }, directional_dependency,
-        )
-
-    state_transition_daily = _cached_feature(
-        store, request, canonical, StateTransitionDailyFeatureProvider(), {}
+        }
+    frames = registry.execute(
+        requested, request, {DatasetKind.KLINES: canonical},
+        parameters=feature_parameters, cache=FeatureFrameCache(store.cache.root),
     )
+    directional = frames[CORE_DIRECTIONAL_FEATURE_NAME]
+    context = frames["production_market_context"]
+    sr_features = frames.get("support_resistance")
+    state_transition_daily = frames["state_transition_daily"]
 
     research_features = _optional_futures_research_features(
         store,
