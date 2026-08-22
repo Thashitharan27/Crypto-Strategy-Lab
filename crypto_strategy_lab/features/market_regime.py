@@ -2,12 +2,50 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Mapping
+
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 
-from .base import FeatureDefinition
+from .base import FeatureDefinition, OutputField, ParameterDefinition
+
+
+POLICY_MARKET_FEATURE_NAME = "policy_market_context"
+POLICY_MARKET_FEATURE_VERSION = "1"
+
+
+def _normalize_market_regime_method(value: object) -> str:
+    method = str(value).upper()
+    if method not in {"ASSET_RETURN", "BTC_STRUCTURAL", "ASSET_STRUCTURAL"}:
+        raise ValueError(f"unsupported market regime method {value!r}")
+    return method
+
+
+def _normalize_momentum_lookback_hours(value: object) -> tuple[int, ...]:
+    if isinstance(value, (str, bytes)):
+        values = [item.strip() for item in str(value).split(",") if item.strip()]
+    elif isinstance(value, (int, float, np.integer, np.floating)):
+        values = [value]
+    else:
+        try:
+            values = list(value)  # type: ignore[arg-type]
+        except TypeError as exc:
+            raise ValueError("momentum lookbacks must be a number or iterable") from exc
+    normalized = tuple(sorted({int(item) for item in values}))
+    if not normalized or any(item <= 0 for item in normalized):
+        raise ValueError("momentum lookbacks must contain positive hours")
+    return normalized
+
+
+def _policy_output_schema(parameters: Mapping[str, object]) -> Mapping[str, OutputField]:
+    return {
+        f"momentum_return_{hours}h": OutputField("numeric")
+        for hours in parameters["momentum_lookback_hours"]  # type: ignore[index]
+    }
 
 
 STRUCTURAL_REGIME_DEFINITION = FeatureDefinition(
@@ -31,7 +69,7 @@ def causal_trailing_return(strategy_times, close, delta: pd.Timedelta) -> np.nda
 
 
 def prepare_policy_market_features(strategy_times, close, config, benchmark=None):
-    """Prepare causal return, regime and configured momentum arrays for policy."""
+    """Legacy-shaped helper retained as the semantic reference for policy features."""
     bull = causal_trailing_return(
         strategy_times, close, pd.Timedelta(days=config.bull_regime_lookback_days)
     )
@@ -54,6 +92,113 @@ def prepare_policy_market_features(strategy_times, close, config, benchmark=None
         for lookback in hours
     }
     return bull, regime, momentum
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyMarketFeatureProvider:
+    """Prepare asset/structural regime and policy momentum through the registry."""
+
+    structural_benchmark: pd.DataFrame | None = None
+
+    definition: FeatureDefinition = FeatureDefinition(
+        name=POLICY_MARKET_FEATURE_NAME,
+        version=POLICY_MARKET_FEATURE_VERSION,
+        required_datasets=(DatasetKind.KLINES,),
+        parameters={
+            "market_regime_method": ParameterDefinition(
+                _normalize_market_regime_method, "ASSET_RETURN"
+            ),
+            "bull_regime_lookback_days": ParameterDefinition(int, 90),
+            "bull_regime_return_threshold": ParameterDefinition(float, 0.20),
+            "structural_regime_sma_days": ParameterDefinition(int, 200),
+            "structural_regime_slope_lookback_days": ParameterDefinition(int, 30),
+            "momentum_lookback_hours": ParameterDefinition(
+                _normalize_momentum_lookback_hours, (24,)
+            ),
+        },
+        output_schema={
+            "bull_regime_return": OutputField("numeric"),
+            "market_regime": OutputField("string"),
+        },
+        output_schema_factory=_policy_output_schema,
+        warmup_bars=0,
+        availability_rule=(
+            "completed_strategy_candle; structural_daily_state_available_following_utc_midnight"
+        ),
+    )
+
+    def compute(
+        self,
+        request: DataRequest,
+        datasets: Mapping[DatasetKind, pd.DataFrame],
+        parameters: Mapping[str, object],
+        feature_frames: Mapping[str, pd.DataFrame] | None = None,
+    ) -> pd.DataFrame:
+        del feature_frames
+        try:
+            source = datasets[DatasetKind.KLINES].copy()
+        except KeyError as exc:
+            raise ValueError("policy_market_context requires canonical strategy klines") from exc
+        required = {"period_start", "available_at", "close"}
+        missing = sorted(required - set(source.columns))
+        if missing:
+            raise ValueError(f"Canonical policy kline frame is missing columns: {missing}")
+        if source.empty:
+            raise ValueError("Cannot prepare policy market features from an empty frame")
+
+        source = source.sort_values("period_start", kind="stable").drop_duplicates(
+            "period_start", keep="last"
+        ).reset_index(drop=True)
+        strategy_times = pd.to_datetime(source["period_start"], utc=True, errors="raise")
+        available_at = pd.to_datetime(source["available_at"], utc=True, errors="raise")
+        close = pd.to_numeric(source["close"], errors="raise").to_numpy(float)
+
+        bull_days = int(parameters["bull_regime_lookback_days"])
+        if bull_days <= 0:
+            raise ValueError("bull_regime_lookback_days must be positive")
+        bull = causal_trailing_return(
+            strategy_times, close, pd.Timedelta(days=bull_days)
+        )
+
+        method = str(parameters["market_regime_method"])
+        if method == "ASSET_RETURN":
+            threshold = abs(float(parameters["bull_regime_return_threshold"]))
+            regime = np.array(
+                [
+                    None if not np.isfinite(value) else
+                    ("BULL" if value >= threshold else "BEAR" if value <= -threshold else "SIDEWAYS")
+                    for value in bull
+                ],
+                dtype=object,
+            )
+        else:
+            regime = structural_regime_values(
+                strategy_times,
+                self.structural_benchmark,
+                sma_days=int(parameters["structural_regime_sma_days"]),
+                slope_lookback_days=int(parameters["structural_regime_slope_lookback_days"]),
+            )
+
+        output = pd.DataFrame(
+            {
+                "timestamp": strategy_times,
+                "available_at": available_at,
+                "bull_regime_return": bull,
+                "market_regime": regime,
+            }
+        )
+        for hours in parameters["momentum_lookback_hours"]:  # type: ignore[index]
+            output[f"momentum_return_{hours}h"] = causal_trailing_return(
+                strategy_times,
+                close,
+                pd.Timedelta(hours=int(hours)),
+            )
+        output.attrs.update(
+            feature_name=self.definition.name,
+            feature_version=self.definition.version,
+            request_cache_key=request.cache_key(),
+        )
+        return output
 
 
 def _benchmark_timestamp_column(frame: pd.DataFrame) -> str:
