@@ -75,6 +75,7 @@ class FeatureDefinition:
     output_columns: tuple[str, ...] = ()
     parameters: Mapping[str, ParameterDefinition] = field(default_factory=dict)
     output_schema: Mapping[str, OutputField] = field(default_factory=dict)
+    output_schema_factory: Callable[[Mapping[str, object]], Mapping[str, OutputField]] | None = None
     required_features: tuple[str, ...] = ()
     optional_datasets: tuple[DatasetKind, ...] = ()
     warmup_bars: int = 0
@@ -102,7 +103,7 @@ class FeatureDefinition:
                     return OutputField("bool")
                 return OutputField("numeric")
             schema = {**{name: inferred(name) for name in self.output_columns}, **schema}
-        if not schema:
+        if not schema and self.output_schema_factory is None:
             raise ValueError("feature must declare an output schema")
         # Timeline/provenance is part of every frame contract unless explicitly
         # declared (daily features use date as an additional field).
@@ -135,11 +136,23 @@ class FeatureDefinition:
             normalized[name] = spec.normalize(value)
         return normalized
 
-    def validate_output(self, frame: pd.DataFrame) -> None:
-        missing = sorted(set(self.output_schema) - set(frame.columns))
+    def schema_for(self, parameters: Mapping[str, object] | None = None) -> dict[str, OutputField]:
+        schema = dict(self.output_schema)
+        if self.output_schema_factory is not None:
+            normalized = self.normalize_parameters(parameters)
+            schema.update(self.output_schema_factory(normalized))
+        return schema
+
+    def validate_output(
+        self,
+        frame: pd.DataFrame,
+        parameters: Mapping[str, object] | None = None,
+    ) -> None:
+        schema = self.schema_for(parameters)
+        missing = sorted(set(schema) - set(frame.columns))
         if missing:
             raise ValueError(f"Invalid {self.name} output; missing columns: {missing}")
-        for name, field in self.output_schema.items():
+        for name, field in schema.items():
             field.validate(frame[name], name)
 
 
