@@ -9,6 +9,7 @@ from typing import Any, Mapping, Protocol, Sequence
 import pandas as pd
 
 from .data.backtest_service import BacktestDataBundle, load_backtest_bundle
+from .data.timing import normalize_binance_interval
 from .prepared_backtest import from_data_lake_bundle, intrabar_from_data_lake_bundle
 from .prepared_cache import bundle_prepared_identity
 from .research_adapters import prepared_policy_config
@@ -71,8 +72,25 @@ class ResearchRunner:
         self.simulator = simulator
         self.reporters = tuple(reporters)
 
+    @staticmethod
+    def _validate_request_contract(request, run_config) -> None:
+        run_config.validate()
+        data = run_config.data
+        expected_strategy = normalize_binance_interval(
+            f"{int(data.strategy_timeframe_minutes)}m"
+        )
+        expected_intrabar = (
+            normalize_binance_interval(f"{int(data.intrabar_timeframe_minutes)}m")
+            if data.use_intrabar_data
+            else None
+        )
+        if request.strategy_interval != expected_strategy:
+            raise ValueError("DataRequest strategy interval disagrees with DataConfig")
+        if request.intrabar_interval != expected_intrabar:
+            raise ValueError("DataRequest intrabar interval disagrees with DataConfig")
+
     def run(self, request, run_config, *, refresh_catalog=True, intrabar_start=None):
-        run_config.validate(request)
+        self._validate_request_contract(request, run_config)
         timings: dict[str, float] = {}
         before = dict(getattr(self.data_store, "canonical_cache_events", {}))
 
