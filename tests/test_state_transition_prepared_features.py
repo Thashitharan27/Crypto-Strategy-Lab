@@ -55,7 +55,8 @@ def test_future_mutation_cannot_change_past_daily_state_feature():
     cutoff = 300
     changed = frame.copy()
     changed.loc[cutoff + 1 :, "close"] *= 3.0
-    changed.loc[cutoff + 1 :, ["open", "high", "low"]] = changed.loc[cutoff + 1 :, "close"].to_numpy()[:, None]
+    future_close = changed.loc[cutoff + 1 :, "close"].to_numpy()[:, None]
+    changed.loc[cutoff + 1 :, ["open", "high", "low"]] = np.repeat(future_close, 3, axis=1)
     after = provider.compute(_request(changed), {DatasetKind.KLINES: changed}, {})
     pdt.assert_frame_equal(
         before.iloc[: cutoff + 1].reset_index(drop=True),
