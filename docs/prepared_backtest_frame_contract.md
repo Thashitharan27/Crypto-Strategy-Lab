@@ -29,6 +29,8 @@ contains only externally prepared row values, never mutable simulation state.
 
 **A — execution-critical:** timestamp, OHLCV and ATR. These determine scheduling,
 prices, bar-path exits, sizing, stop/target distances, and price-location analysis.
+Volume is therefore required by the bounded Data Lake adapter; it is never fabricated
+when absent.
 
 **B — strategy-decision context:** ATR%, ADX, +/-DI, Bollinger width/width%, session
 VWAP, close location, and the mean-reversion mean/distance/envelope/RSI/re-entry
@@ -39,9 +41,17 @@ values. The simulator may interpret them but must not generate them.
 aligned and causally validated, but structurally separated so adding research does
 not widen or silently influence the executable core.
 
+The bounded adapter requires technical, production-context, and research feature
+frames to match the strategy timestamps exactly row-for-row after UTC normalization.
+Equal length alone is not sufficient; shifted, reordered, missing, or duplicate rows
+are rejected before values are attached to the native contract.
+
 Intrabar timestamp/open/high/low belong exclusively to `IntrabarExecutionData`.
-Its interval, coverage, grid alignment and strict timestamp ordering are validated
-against the strategy frame. It is intentionally not embedded in the decision frame.
+Its interval, time-grid alignment and strict timestamp ordering are validated against
+the strategy frame. Compatibility requires overlap with the strategy execution period,
+not complete coverage of it, because the current Data Lake path intentionally supports
+an `intrabar_start` later than the strategy start and missing-data policy remains a
+simulator concern.
 
 ## Intentional exclusions and remaining legacy dependencies
 
