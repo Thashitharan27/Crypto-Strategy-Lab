@@ -6,9 +6,9 @@ not consume these objects yet.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from types import MappingProxyType
-from collections.abc import Mapping
 
 import numpy as np
 import pandas as pd
@@ -45,6 +45,21 @@ def _readonly(values, dtype, name: str) -> np.ndarray:
     return result
 
 
+def _aligned_timestamps(values, name: str) -> np.ndarray:
+    """Normalize a timeline for adapter-level row-for-row alignment checks."""
+    result = _readonly(values, "datetime64[ns]", name)
+    if np.isnat(result).any():
+        raise ValueError(f"{name} contains missing timestamps")
+    return result
+
+
+def _require_exact_timeline(reference: np.ndarray, values, label: str) -> np.ndarray:
+    candidate = _aligned_timestamps(values, f"{label} timestamp")
+    if len(candidate) != len(reference) or not np.array_equal(candidate, reference):
+        raise ValueError(f"{label} timestamps are not exactly aligned to strategy timestamps")
+    return candidate
+
+
 @dataclass(frozen=True, slots=True)
 class ResearchContext:
     """One reporting-only, timestamp-aligned feature block."""
@@ -57,6 +72,8 @@ class ResearchContext:
         if not self.name:
             raise ValueError("research context name is required")
         available = _readonly(self.available_at, "datetime64[ns]", "research available_at")
+        if np.isnat(available).any():
+            raise ValueError("research available_at contains missing timestamps")
         clean: dict[str, np.ndarray] = {}
         for name, value in self.values.items():
             if name in {"timestamp", "available_at"}:
@@ -128,6 +145,10 @@ class PreparedBacktestFrame:
             value = getattr(self, field.name)
             if isinstance(value, np.ndarray) and len(value) != length:
                 raise ValueError(f"{field.name} length {len(value)} does not match timestamp length {length}")
+        if np.isnat(self.timestamp).any():
+            raise ValueError("timestamps cannot contain missing values")
+        if np.isnat(self.decision_available_at).any():
+            raise ValueError("decision_available_at cannot contain missing values")
         if length and (np.diff(self.timestamp).astype("timedelta64[ns]") <= np.timedelta64(0, "ns")).any():
             raise ValueError("timestamps must be strictly increasing and unique")
         for name in _REQUIRED_FINITE:
@@ -177,12 +198,15 @@ class IntrabarExecutionData:
         length = len(self.timestamp)
         if any(len(getattr(self, name)) != length for name in ("open", "high", "low")):
             raise ValueError("intrabar arrays must have equal lengths")
+        if np.isnat(self.timestamp).any():
+            raise ValueError("intrabar timestamps cannot contain missing values")
         if length and (np.diff(self.timestamp) <= np.timedelta64(0, "ns")).any():
             raise ValueError("intrabar timestamps must be strictly increasing and unique")
         if any(not np.isfinite(getattr(self, name)).all() for name in ("open", "high", "low")):
             raise ValueError("intrabar OHLC contains missing or non-finite values")
 
     def validate_compatible(self, strategy: PreparedBacktestFrame) -> None:
+        """Validate execution-grid compatibility without requiring full-period coverage."""
         if self.interval >= strategy.strategy_interval:
             raise ValueError("intrabar interval must be smaller than the strategy interval")
         if strategy.strategy_interval % self.interval:
@@ -193,14 +217,14 @@ class IntrabarExecutionData:
             offsets = (self.timestamp - strategy_start).astype("timedelta64[ns]").astype(np.int64)
             if np.any(offsets % self.interval.value):
                 raise ValueError("intrabar timestamps are not aligned to the strategy time grid")
-            if self.timestamp[0] > strategy_start or self.timestamp[-1] >= strategy_end:
-                raise ValueError("intrabar coverage is incompatible with the strategy timeline")
+            if self.timestamp[-1] < strategy_start or self.timestamp[0] >= strategy_end:
+                raise ValueError("intrabar data does not overlap the strategy execution period")
 
 
 def from_data_lake_bundle(bundle) -> tuple[PreparedBacktestFrame, IntrabarExecutionData | None]:
     """Bounded adapter from today's Data Lake bundle; no simulator routing."""
     strategy, technical, context = bundle.strategy, bundle.technical_features, bundle.context_features
-    required_strategy = {"timestamp", "open", "high", "low", "close"}
+    required_strategy = {"timestamp", "open", "high", "low", "close", "volume"}
     required_technical = {"timestamp", "available_at", "atr", "atr_pct", "adx", "plus_di", "minus_di"}
     required_context = {
         "timestamp", "available_at", "bb_width", "bb_width_pct", "session_vwap",
@@ -217,12 +241,19 @@ def from_data_lake_bundle(bundle) -> tuple[PreparedBacktestFrame, IntrabarExecut
         missing = sorted(required - set(frame.columns))
         if missing:
             raise ValueError(f"{label} is missing required columns: {missing}")
-    n = len(strategy)
-    volume = strategy["volume"].to_numpy() if "volume" in strategy else np.ones(n)
-    available = np.maximum(
-        pd.to_datetime(technical["available_at"], utc=True).to_numpy(dtype="datetime64[ns]"),
-        pd.to_datetime(context["available_at"], utc=True).to_numpy(dtype="datetime64[ns]"),
+
+    strategy_timestamps = _aligned_timestamps(strategy["timestamp"], "strategy data timestamp")
+    _require_exact_timeline(strategy_timestamps, technical["timestamp"], "technical features")
+    _require_exact_timeline(strategy_timestamps, context["timestamp"], "context features")
+
+    technical_available = _aligned_timestamps(
+        technical["available_at"], "technical features available_at"
     )
+    context_available = _aligned_timestamps(
+        context["available_at"], "context features available_at"
+    )
+    available = np.maximum(technical_available, context_available)
+
     kwargs = {name: context[name].to_numpy() for name in (
         "bb_width", "bb_width_pct", "session_vwap", "close_location",
         "mean_reversion_mean", "mean_reversion_distance_atr",
@@ -230,18 +261,32 @@ def from_data_lake_bundle(bundle) -> tuple[PreparedBacktestFrame, IntrabarExecut
         "mean_reversion_bb_upper", "mean_reversion_bb_lower", "mean_reversion_bb_zscore",
         "mean_reversion_rsi", "mean_reversion_long_reentry", "mean_reversion_short_reentry",
     )}
-    research = tuple(
-        ResearchContext(
-            name, frame["available_at"].to_numpy(),
-            {column: frame[column].to_numpy() for column in frame.columns if column not in {"timestamp", "available_at"}},
+
+    research_blocks: list[ResearchContext] = []
+    for name, frame in sorted(bundle.research_features.items()):
+        missing = sorted({"timestamp", "available_at"} - set(frame.columns))
+        if missing:
+            raise ValueError(f"research feature {name} is missing required columns: {missing}")
+        _require_exact_timeline(strategy_timestamps, frame["timestamp"], f"research feature {name}")
+        research_blocks.append(
+            ResearchContext(
+                name,
+                frame["available_at"].to_numpy(),
+                {
+                    column: frame[column].to_numpy()
+                    for column in frame.columns
+                    if column not in {"timestamp", "available_at"}
+                },
+            )
         )
-        for name, frame in sorted(bundle.research_features.items())
-    )
+    research = tuple(research_blocks)
+
     prepared = PreparedBacktestFrame(
-        timestamp=strategy["timestamp"].to_numpy(),
+        timestamp=strategy_timestamps,
         strategy_interval=pd.Timedelta(bundle.request.strategy_interval),
         open=strategy["open"].to_numpy(), high=strategy["high"].to_numpy(),
-        low=strategy["low"].to_numpy(), close=strategy["close"].to_numpy(), volume=volume,
+        low=strategy["low"].to_numpy(), close=strategy["close"].to_numpy(),
+        volume=strategy["volume"].to_numpy(),
         atr=technical["atr"].to_numpy(), atr_pct=technical["atr_pct"].to_numpy(),
         adx=technical["adx"].to_numpy(), plus_di=technical["plus_di"].to_numpy(),
         minus_di=technical["minus_di"].to_numpy(), decision_available_at=available,
