@@ -1,7 +1,7 @@
 """Typed, dataset-aware validation for canonical market data.
 
 This module deliberately has no dependency on features, strategies, simulators,
-or reporting.  A validated frame may therefore be handed to any downstream
+or reporting. A validated frame may therefore be handed to any downstream
 consumer with the same operational contract.
 """
 from __future__ import annotations
@@ -10,10 +10,10 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from hashlib import sha256
 import json
-import math
 import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -21,7 +21,9 @@ import pandas as pd
 from .schemas import DatasetKind
 from .timing import interval_to_timedelta
 
-VALIDATION_CONTRACT_VERSION = "1"
+
+VALIDATION_CONTRACT_VERSION = "2"
+QUALITY_CACHE_FORMAT_VERSION = 1
 
 
 class DataQualityStatus(str, Enum):
@@ -43,8 +45,10 @@ class DataQualityIssue:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "code": self.code, "severity": self.severity.value,
-            "message": self.message, "count": int(self.count),
+            "code": self.code,
+            "severity": self.severity.value,
+            "message": self.message,
+            "count": int(self.count),
             "first_timestamp": self.first_timestamp,
             "last_timestamp": self.last_timestamp,
             "details": dict(sorted(self.details.items())),
@@ -52,9 +56,15 @@ class DataQualityIssue:
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "DataQualityIssue":
-        return cls(value["code"], DataQualityStatus(value["severity"]), value["message"],
-                   int(value.get("count", 1)), value.get("first_timestamp"),
-                   value.get("last_timestamp"), value.get("details", {}))
+        return cls(
+            code=str(value["code"]),
+            severity=DataQualityStatus(value["severity"]),
+            message=str(value["message"]),
+            count=int(value.get("count", 1)),
+            first_timestamp=value.get("first_timestamp"),
+            last_timestamp=value.get("last_timestamp"),
+            details=value.get("details", {}),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,21 +85,49 @@ class DatasetQualityReport:
     issues: tuple[DataQualityIssue, ...] = ()
     cache_hit: bool = False
 
+    @property
+    def display_key(self) -> str:
+        interval = self.interval or "event"
+        return f"{self.dataset}:{self.symbol}:{interval}"
+
     def to_dict(self) -> dict[str, Any]:
         return {
-            "dataset": self.dataset, "symbol": self.symbol, "interval": self.interval,
-            "required": self.required, "requested_start": self.requested_start,
-            "requested_end": self.requested_end, "observed_start": self.observed_start,
-            "observed_end": self.observed_end, "complete_start": self.complete_start,
-            "complete_end": self.complete_end, "row_count": self.row_count,
-            "source_identity": self.source_identity, "status": self.status.value,
-            "issues": [item.to_dict() for item in self.issues], "cache_hit": self.cache_hit,
+            "dataset": self.dataset,
+            "symbol": self.symbol,
+            "interval": self.interval,
+            "required": self.required,
+            "requested_start": self.requested_start,
+            "requested_end": self.requested_end,
+            "observed_start": self.observed_start,
+            "observed_end": self.observed_end,
+            "complete_start": self.complete_start,
+            "complete_end": self.complete_end,
+            "row_count": int(self.row_count),
+            "source_identity": self.source_identity,
+            "status": self.status.value,
+            "issues": [item.to_dict() for item in self.issues],
+            "cache_hit": bool(self.cache_hit),
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "DatasetQualityReport":
-        return cls(**{**value, "status": DataQualityStatus(value["status"]),
-                      "issues": tuple(DataQualityIssue.from_dict(x) for x in value["issues"])})
+        return cls(
+            dataset=str(value["dataset"]),
+            symbol=str(value["symbol"]),
+            interval=value.get("interval"),
+            required=bool(value["required"]),
+            requested_start=str(value["requested_start"]),
+            requested_end=str(value["requested_end"]),
+            observed_start=value.get("observed_start"),
+            observed_end=value.get("observed_end"),
+            complete_start=value.get("complete_start"),
+            complete_end=value.get("complete_end"),
+            row_count=int(value["row_count"]),
+            source_identity=value.get("source_identity"),
+            status=DataQualityStatus(value["status"]),
+            issues=tuple(DataQualityIssue.from_dict(item) for item in value.get("issues", ())),
+            cache_hit=bool(value.get("cache_hit", False)),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,17 +148,26 @@ class DataQualityReport:
         return tuple(issue for report in self.datasets for issue in report.issues)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"contract_version": VALIDATION_CONTRACT_VERSION,
-                "overall_status": self.overall_status.value,
-                "datasets": [item.to_dict() for item in self.datasets],
-                "summary": {"dataset_count": len(self.datasets),
-                            "issue_count": len(self.issues)}}
+        return {
+            "contract_version": VALIDATION_CONTRACT_VERSION,
+            "overall_status": self.overall_status.value,
+            "datasets": [item.to_dict() for item in self.datasets],
+            "summary": {
+                "dataset_count": len(self.datasets),
+                "issue_count": len(self.issues),
+                "cache_hits": sum(bool(item.cache_hit) for item in self.datasets),
+            },
+        }
 
     def raise_for_errors(self) -> None:
-        errors = [i for i in self.datasets if i.status is DataQualityStatus.ERROR]
-        if errors:
-            detail = "; ".join(f"{r.dataset}: {', '.join(i.code for i in r.issues)}" for r in errors)
-            raise DataQualityError(f"Required market data failed validation: {detail}", self)
+        errors = [item for item in self.datasets if item.status is DataQualityStatus.ERROR]
+        if not errors:
+            return
+        detail = "; ".join(
+            f"{report.display_key}: {', '.join(issue.code for issue in report.issues)}"
+            for report in errors
+        )
+        raise DataQualityError(f"Required market data failed validation: {detail}", self)
 
 
 class DataQualityError(ValueError):
@@ -132,7 +179,7 @@ class DataQualityError(ValueError):
 @dataclass(frozen=True, slots=True)
 class DatasetValidationContract:
     dataset: DatasetKind
-    timeline: str
+    timeline: str  # "fixed" or "event"
     timestamp_column: str
     logical_key: tuple[str, ...]
     required_columns: tuple[str, ...]
@@ -142,206 +189,771 @@ class DatasetValidationContract:
 
 
 _IDENTITY = ("symbol", "exchange", "market", "dataset", "available_at")
-_CANDLE = ("period_start", "period_end", *_IDENTITY, "interval", "open", "high", "low", "close")
+_CANDLE = (
+    "period_start",
+    "period_end",
+    *_IDENTITY,
+    "interval",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+)
+_KLINE_KINDS = (
+    DatasetKind.KLINES,
+    DatasetKind.MARK_PRICE_KLINES,
+    DatasetKind.INDEX_PRICE_KLINES,
+    DatasetKind.PREMIUM_INDEX_KLINES,
+)
+
 CONTRACTS: dict[DatasetKind, DatasetValidationContract] = {
-    kind: DatasetValidationContract(kind, "fixed", "period_start", ("period_start",), _CANDLE,
-        ("open", "high", "low", "close"), ("open", "high", "low", "close"),
-        ("volume", "trade_count", "taker_buy_base_volume", "taker_buy_quote_volume"))
-    for kind in (DatasetKind.KLINES, DatasetKind.MARK_PRICE_KLINES,
-                 DatasetKind.INDEX_PRICE_KLINES, DatasetKind.PREMIUM_INDEX_KLINES)
+    kind: DatasetValidationContract(
+        dataset=kind,
+        timeline="fixed",
+        timestamp_column="period_start",
+        logical_key=("period_start",),
+        required_columns=_CANDLE,
+        numeric_fields=("open", "high", "low", "close", "volume"),
+        positive_fields=("open", "high", "low", "close"),
+        non_negative_fields=(
+            "volume",
+            "quote_volume",
+            "trade_count",
+            "taker_buy_base_volume",
+            "taker_buy_quote_volume",
+        ),
+    )
+    for kind in _KLINE_KINDS
 }
-CONTRACTS.update({
-    DatasetKind.FUTURES_METRICS: DatasetValidationContract(
-        DatasetKind.FUTURES_METRICS, "fixed", "period_start", ("period_start",),
-        ("period_start", *_IDENTITY), non_negative_fields=("open_interest", "open_interest_value",
-         "long_short_ratio", "top_trader_long_short_ratio", "taker_long_short_ratio")),
-    DatasetKind.FUNDING_RATE: DatasetValidationContract(
-        DatasetKind.FUNDING_RATE, "event", "event_time", ("event_time",),
-        ("event_time", *_IDENTITY, "funding_rate"), numeric_fields=("funding_rate",),
-        positive_fields=("funding_interval_hours",)),
-    DatasetKind.AGG_TRADES: DatasetValidationContract(
-        DatasetKind.AGG_TRADES, "event", "event_time", ("event_time", "agg_trade_id"),
-        ("event_time", *_IDENTITY, "agg_trade_id", "price", "quantity"),
-        positive_fields=("price",), non_negative_fields=("quantity", "agg_trade_id")),
-    DatasetKind.TRADES: DatasetValidationContract(
-        DatasetKind.TRADES, "event", "event_time", ("event_time", "trade_id"),
-        ("event_time", *_IDENTITY, "trade_id", "price", "quantity"),
-        positive_fields=("price",), non_negative_fields=("quantity", "trade_id")),
-})
+CONTRACTS.update(
+    {
+        # The current Binance metrics adapter does not preserve a declared row
+        # interval, so metrics are validated as timestamped snapshots rather
+        # than manufacturing a fixed grid. Future adapters may make cadence
+        # machine-readable and opt into fixed-cadence checks then.
+        DatasetKind.FUTURES_METRICS: DatasetValidationContract(
+            dataset=DatasetKind.FUTURES_METRICS,
+            timeline="event",
+            timestamp_column="event_time",
+            logical_key=("event_time",),
+            required_columns=("event_time", *_IDENTITY),
+            non_negative_fields=(
+                "open_interest",
+                "open_interest_value",
+                "top_trader_account_long_short_ratio",
+                "top_trader_position_long_short_ratio",
+                "global_long_short_account_ratio",
+                "taker_long_short_volume_ratio",
+            ),
+        ),
+        DatasetKind.FUNDING_RATE: DatasetValidationContract(
+            dataset=DatasetKind.FUNDING_RATE,
+            timeline="event",
+            timestamp_column="event_time",
+            logical_key=("event_time",),
+            required_columns=("event_time", *_IDENTITY, "funding_rate"),
+            numeric_fields=("funding_rate",),
+            positive_fields=("funding_interval_hours",),
+        ),
+        DatasetKind.AGG_TRADES: DatasetValidationContract(
+            dataset=DatasetKind.AGG_TRADES,
+            timeline="event",
+            timestamp_column="event_time",
+            logical_key=("event_time", "agg_trade_id"),
+            required_columns=(
+                "event_time",
+                *_IDENTITY,
+                "agg_trade_id",
+                "price",
+                "quantity",
+            ),
+            positive_fields=("price",),
+            non_negative_fields=("quantity", "agg_trade_id"),
+        ),
+        DatasetKind.TRADES: DatasetValidationContract(
+            dataset=DatasetKind.TRADES,
+            timeline="event",
+            timestamp_column="event_time",
+            logical_key=("event_time", "trade_id"),
+            required_columns=(
+                "event_time",
+                *_IDENTITY,
+                "trade_id",
+                "price",
+                "quantity",
+            ),
+            positive_fields=("price",),
+            non_negative_fields=("quantity", "trade_id"),
+        ),
+    }
+)
 
 
 def _iso(value: Any) -> str | None:
-    if value is None or pd.isna(value): return None
+    if value is None or pd.isna(value):
+        return None
     return pd.Timestamp(value).isoformat()
 
 
-def _issue(code, severity, message, mask=None, timestamps=None, **details):
-    count = int(mask.sum()) if mask is not None else int(details.pop("count", 1))
-    selected = timestamps[mask] if mask is not None and timestamps is not None else timestamps
-    return DataQualityIssue(code, severity, message, count,
-        _iso(selected.min()) if selected is not None and len(selected) else None,
-        _iso(selected.max()) if selected is not None and len(selected) else None, details)
+def _issue(
+    code: str,
+    severity: DataQualityStatus,
+    message: str,
+    *,
+    mask=None,
+    timestamps=None,
+    count: int | None = None,
+    details: Mapping[str, Any] | None = None,
+) -> DataQualityIssue:
+    if mask is not None:
+        issue_count = int(mask.sum())
+        selected = timestamps[mask] if timestamps is not None else None
+    else:
+        issue_count = int(count if count is not None else 1)
+        selected = timestamps
+    return DataQualityIssue(
+        code=code,
+        severity=severity,
+        message=message,
+        count=issue_count,
+        first_timestamp=_iso(selected.min()) if selected is not None and len(selected) else None,
+        last_timestamp=_iso(selected.max()) if selected is not None and len(selected) else None,
+        details=dict(details or {}),
+    )
 
 
-def _status(required: bool, issues: Iterable[DataQualityIssue], missing=False):
+def _status(
+    required: bool,
+    issues: Iterable[DataQualityIssue],
+    *,
+    missing: bool = False,
+) -> DataQualityStatus:
     issues = tuple(issues)
-    if missing: return DataQualityStatus.ERROR if required else DataQualityStatus.MISSING
-    if any(x.severity is DataQualityStatus.ERROR for x in issues):
+    if missing:
+        return DataQualityStatus.ERROR if required else DataQualityStatus.MISSING
+    if any(item.severity is DataQualityStatus.ERROR for item in issues):
         return DataQualityStatus.ERROR if required else DataQualityStatus.WARN
     return DataQualityStatus.WARN if issues else DataQualityStatus.OK
 
 
-def validate_dataset(frame: pd.DataFrame | None, request, dataset: DatasetKind, *,
-                     interval: str | None = None, required: bool = True,
-                     source_identity: str | None = None) -> DatasetQualityReport:
+def _gap_ranges(values: pd.DatetimeIndex, delta: pd.Timedelta, limit: int = 10) -> list[dict[str, Any]]:
+    if not len(values):
+        return []
+    result: list[dict[str, Any]] = []
+    start = previous = values[0]
+    count = 1
+    for current in values[1:]:
+        if current - previous == delta:
+            count += 1
+        else:
+            result.append({"start": _iso(start), "end": _iso(previous), "missing_count": count})
+            if len(result) >= limit:
+                return result
+            start = current
+            count = 1
+        previous = current
+    if len(result) < limit:
+        result.append({"start": _iso(start), "end": _iso(previous), "missing_count": count})
+    return result
+
+
+def validate_dataset(
+    frame: pd.DataFrame | None,
+    request,
+    dataset: DatasetKind,
+    *,
+    interval: str | None = None,
+    required: bool = True,
+    source_identity: str | None = None,
+    coverage_start: Any | None = None,
+    coverage_end: Any | None = None,
+    extra_issues: Iterable[DataQualityIssue] = (),
+) -> DatasetQualityReport:
     """Validate one canonical frame without manufacturing an event-stream grid."""
-    contract = CONTRACTS[dataset]
-    start, end = pd.Timestamp(request.start), pd.Timestamp(request.end)
-    source_identity = source_identity or (frame.attrs.get("canonical_source_identity") if frame is not None else None)
+    try:
+        contract = CONTRACTS[dataset]
+    except KeyError as exc:
+        raise ValueError(f"No data-quality contract for {dataset.value}") from exc
+
+    start = pd.Timestamp(request.start)
+    end = pd.Timestamp(request.end)
+    source_identity = source_identity or (
+        frame.attrs.get("canonical_source_identity") if frame is not None else None
+    )
+    extras = tuple(extra_issues)
+
     if frame is None or frame.empty:
-        issue = DataQualityIssue("DATASET_MISSING", DataQualityStatus.ERROR if required else DataQualityStatus.MISSING,
-                                 "No canonical rows are available for the requested range", 0)
-        return DatasetQualityReport(dataset.value, request.symbol, interval, required, _iso(start), _iso(end),
-                                    None, None, None, None, 0, source_identity,
-                                    _status(required, (issue,), True), (issue,))
-    issues: list[DataQualityIssue] = []
-    missing = sorted(set(contract.required_columns) - set(frame.columns))
-    if missing:
-        issues.append(DataQualityIssue("MISSING_REQUIRED_COLUMN", DataQualityStatus.ERROR,
-                                       f"Missing canonical columns: {missing}", len(missing), details={"columns": missing}))
+        missing_issue = DataQualityIssue(
+            "DATASET_MISSING",
+            DataQualityStatus.ERROR if required else DataQualityStatus.MISSING,
+            "No canonical rows are available for the requested range",
+            0,
+        )
+        issues = (missing_issue, *extras)
+        return DatasetQualityReport(
+            dataset=dataset.value,
+            symbol=request.symbol,
+            interval=interval,
+            required=required,
+            requested_start=_iso(start),
+            requested_end=_iso(end),
+            observed_start=None,
+            observed_end=None,
+            complete_start=None,
+            complete_end=None,
+            row_count=0,
+            source_identity=source_identity,
+            status=_status(required, issues, missing=True),
+            issues=issues,
+        )
+
+    issues: list[DataQualityIssue] = list(extras)
+    missing_columns = sorted(set(contract.required_columns) - set(frame.columns))
+    if missing_columns:
+        issues.append(
+            DataQualityIssue(
+                "MISSING_REQUIRED_COLUMN",
+                DataQualityStatus.ERROR,
+                f"Missing canonical columns: {missing_columns}",
+                len(missing_columns),
+                details={"columns": missing_columns},
+            )
+        )
     if not source_identity:
-        issues.append(DataQualityIssue("MISSING_SOURCE_IDENTITY", DataQualityStatus.ERROR,
-                                       "Canonical source identity is absent"))
-    if contract.timestamp_column not in frame:
-        timestamps = pd.Series([], dtype="datetime64[ns, UTC]")
+        issues.append(
+            DataQualityIssue(
+                "MISSING_SOURCE_IDENTITY",
+                DataQualityStatus.ERROR,
+                "Canonical source identity is absent",
+            )
+        )
+
+    if contract.timestamp_column in frame:
+        timestamps = pd.to_datetime(
+            frame[contract.timestamp_column], utc=True, errors="coerce"
+        )
+        malformed = timestamps.isna()
+        if malformed.any():
+            issues.append(
+                _issue(
+                    "MALFORMED_TIMESTAMP",
+                    DataQualityStatus.ERROR,
+                    "Timeline timestamp is not parseable",
+                    mask=malformed,
+                    timestamps=timestamps,
+                )
+            )
+        if not timestamps.dropna().is_monotonic_increasing:
+            issues.append(
+                DataQualityIssue(
+                    "NON_MONOTONIC_TIMELINE",
+                    DataQualityStatus.ERROR,
+                    "Canonical timestamps are not monotonically increasing",
+                )
+            )
     else:
-        parsed = pd.to_datetime(frame[contract.timestamp_column], utc=True, errors="coerce")
-        invalid = parsed.isna()
-        if invalid.any(): issues.append(_issue("MALFORMED_TIMESTAMP", DataQualityStatus.ERROR,
-                                               "Timeline timestamp is not parseable", invalid, parsed))
-        timestamps = parsed
-        if not parsed.dropna().is_monotonic_increasing:
-            issues.append(DataQualityIssue("NON_MONOTONIC_TIMELINE", DataQualityStatus.ERROR,
-                                           "Canonical timestamps are not monotonically increasing"))
-    present_keys = [x for x in contract.logical_key if x in frame]
+        timestamps = pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns, UTC]")
+
+    present_keys = [column for column in contract.logical_key if column in frame]
     if len(present_keys) == len(contract.logical_key):
         duplicate = frame.duplicated(present_keys, keep=False)
-        if duplicate.any(): issues.append(_issue("DUPLICATE_LOGICAL_KEY", DataQualityStatus.ERROR,
-                                                 "Canonical logical keys are duplicated", duplicate, timestamps))
-    for column, expected in (("symbol", request.symbol), ("exchange", request.exchange),
-                             ("market", request.market.value), ("dataset", dataset.value)):
-        if column in frame and set(frame[column].dropna().astype(str)) != {str(expected)}:
-            issues.append(DataQualityIssue("IDENTITY_MISMATCH", DataQualityStatus.ERROR,
-                                           f"Canonical {column} does not match request", details={"column": column}))
-    available = pd.to_datetime(frame.get("available_at"), utc=True, errors="coerce") if "available_at" in frame else None
-    if available is not None:
-        invalid = available.isna()
-        if invalid.any(): issues.append(_issue("MALFORMED_AVAILABLE_AT", DataQualityStatus.ERROR,
-                                               "available_at is missing or malformed", invalid, timestamps))
-        comparison = pd.to_datetime(frame.get("period_end"), utc=True, errors="coerce") if contract.timeline == "fixed" and "period_end" in frame else timestamps
+        if duplicate.any():
+            issues.append(
+                _issue(
+                    "DUPLICATE_LOGICAL_KEY",
+                    DataQualityStatus.ERROR,
+                    "Canonical logical keys are duplicated",
+                    mask=duplicate,
+                    timestamps=timestamps,
+                )
+            )
+
+    for column, expected in (
+        ("symbol", request.symbol),
+        ("exchange", request.exchange),
+        ("market", request.market.value),
+        ("dataset", dataset.value),
+    ):
+        if column not in frame:
+            continue
+        observed = set(frame[column].dropna().astype(str))
+        if observed != {str(expected)}:
+            issues.append(
+                DataQualityIssue(
+                    "IDENTITY_MISMATCH",
+                    DataQualityStatus.ERROR,
+                    f"Canonical {column} does not match request",
+                    details={"column": column, "observed": sorted(observed)},
+                )
+            )
+
+    if "interval" in frame.columns and interval is not None:
+        observed_intervals = set(frame["interval"].dropna().astype(str))
+        if observed_intervals and observed_intervals != {str(interval)}:
+            issues.append(
+                DataQualityIssue(
+                    "INTERVAL_MISMATCH",
+                    DataQualityStatus.ERROR,
+                    "Canonical interval does not match the requested interval",
+                    details={"expected": interval, "observed": sorted(observed_intervals)},
+                )
+            )
+
+    available = None
+    if "available_at" in frame:
+        available = pd.to_datetime(frame["available_at"], utc=True, errors="coerce")
+        malformed_available = available.isna()
+        if malformed_available.any():
+            issues.append(
+                _issue(
+                    "MALFORMED_AVAILABLE_AT",
+                    DataQualityStatus.ERROR,
+                    "available_at is missing or malformed",
+                    mask=malformed_available,
+                    timestamps=timestamps,
+                )
+            )
+        if contract.timeline == "fixed" and "period_end" in frame:
+            comparison = pd.to_datetime(frame["period_end"], utc=True, errors="coerce")
+        else:
+            comparison = timestamps
         early = available < comparison
-        if early.any(): issues.append(_issue("NON_CAUSAL_AVAILABILITY", DataQualityStatus.ERROR,
-                                             "available_at precedes the source observation", early, timestamps))
+        if early.any():
+            issues.append(
+                _issue(
+                    "NON_CAUSAL_AVAILABILITY",
+                    DataQualityStatus.ERROR,
+                    "available_at precedes the source observation",
+                    mask=early,
+                    timestamps=timestamps,
+                )
+            )
+
+    period_end = None
     if contract.timeline == "fixed" and "period_end" in frame:
-        period_end = pd.to_datetime(frame.period_end, utc=True, errors="coerce")
-        bad = timestamps >= period_end
-        if bad.any(): issues.append(_issue("INVALID_PERIOD", DataQualityStatus.ERROR,
-                                           "period_start must precede period_end", bad, timestamps))
-    for column in contract.numeric_fields + contract.positive_fields + contract.non_negative_fields:
-        if column not in frame: continue
+        period_end = pd.to_datetime(frame["period_end"], utc=True, errors="coerce")
+        malformed_end = period_end.isna()
+        if malformed_end.any():
+            issues.append(
+                _issue(
+                    "MALFORMED_PERIOD_END",
+                    DataQualityStatus.ERROR,
+                    "period_end is missing or malformed",
+                    mask=malformed_end,
+                    timestamps=timestamps,
+                )
+            )
+        bad_period = timestamps >= period_end
+        if bad_period.any():
+            issues.append(
+                _issue(
+                    "INVALID_PERIOD",
+                    DataQualityStatus.ERROR,
+                    "period_start must precede period_end",
+                    mask=bad_period,
+                    timestamps=timestamps,
+                )
+            )
+
+    checked_numeric = set()
+    for column in (
+        *contract.numeric_fields,
+        *contract.positive_fields,
+        *contract.non_negative_fields,
+    ):
+        if column not in frame or column in checked_numeric:
+            continue
+        checked_numeric.add(column)
         values = pd.to_numeric(frame[column], errors="coerce")
-        invalid = ~np.isfinite(values)
-        if invalid.any(): issues.append(_issue("INVALID_NUMERIC", DataQualityStatus.ERROR,
-                                               f"{column} must be finite", invalid, timestamps, column=column))
-        invalid = values <= 0 if column in contract.positive_fields else values < 0
-        if invalid.any(): issues.append(_issue("INVALID_DOMAIN_VALUE", DataQualityStatus.ERROR,
-                                               f"{column} is outside its valid domain", invalid, timestamps, column=column))
-    if all(x in frame for x in ("open", "high", "low", "close")):
-        bad = ((frame.low > frame.high) | (frame.open < frame.low) | (frame.open > frame.high) |
-               (frame.close < frame.low) | (frame.close > frame.high))
-        if bad.any(): issues.append(_issue("INVALID_OHLC", DataQualityStatus.ERROR,
-                                           "OHLC values violate candle bounds", bad, timestamps))
-    for taker, total in (("taker_buy_base_volume", "volume"), ("taker_buy_quote_volume", "quote_volume")):
-        if taker in frame and total in frame:
-            bad = frame[taker] > frame[total] + np.maximum(frame[total].abs() * 1e-12, 1e-12)
-            if bad.any(): issues.append(_issue("TAKER_VOLUME_EXCEEDS_TOTAL", DataQualityStatus.ERROR,
-                                               f"{taker} exceeds {total}", bad, timestamps))
-    complete_start, complete_end = _iso(start), _iso(end)
-    if contract.timeline == "fixed" and interval and len(timestamps.dropna()):
+        invalid_numeric = ~np.isfinite(values)
+        if invalid_numeric.any():
+            issues.append(
+                _issue(
+                    "INVALID_NUMERIC",
+                    DataQualityStatus.ERROR,
+                    f"{column} must be finite",
+                    mask=invalid_numeric,
+                    timestamps=timestamps,
+                    details={"column": column},
+                )
+            )
+        if column in contract.positive_fields:
+            invalid_domain = values <= 0
+        elif column in contract.non_negative_fields:
+            invalid_domain = values < 0
+        else:
+            invalid_domain = pd.Series(False, index=values.index)
+        if invalid_domain.any():
+            issues.append(
+                _issue(
+                    "INVALID_DOMAIN_VALUE",
+                    DataQualityStatus.ERROR,
+                    f"{column} is outside its valid domain",
+                    mask=invalid_domain,
+                    timestamps=timestamps,
+                    details={"column": column},
+                )
+            )
+
+    if all(column in frame for column in ("open", "high", "low", "close")):
+        open_ = pd.to_numeric(frame["open"], errors="coerce")
+        high = pd.to_numeric(frame["high"], errors="coerce")
+        low = pd.to_numeric(frame["low"], errors="coerce")
+        close = pd.to_numeric(frame["close"], errors="coerce")
+        invalid_ohlc = (
+            (low > high)
+            | (open_ < low)
+            | (open_ > high)
+            | (close < low)
+            | (close > high)
+        )
+        if invalid_ohlc.any():
+            issues.append(
+                _issue(
+                    "INVALID_OHLC",
+                    DataQualityStatus.ERROR,
+                    "OHLC values violate candle bounds",
+                    mask=invalid_ohlc,
+                    timestamps=timestamps,
+                )
+            )
+
+    for taker, total in (
+        ("taker_buy_base_volume", "volume"),
+        ("taker_buy_quote_volume", "quote_volume"),
+    ):
+        if taker not in frame or total not in frame:
+            continue
+        taker_values = pd.to_numeric(frame[taker], errors="coerce")
+        total_values = pd.to_numeric(frame[total], errors="coerce")
+        tolerance = np.maximum(total_values.abs() * 1e-12, 1e-12)
+        exceeds = taker_values > total_values + tolerance
+        if exceeds.any():
+            issues.append(
+                _issue(
+                    "TAKER_VOLUME_EXCEEDS_TOTAL",
+                    DataQualityStatus.ERROR,
+                    f"{taker} exceeds {total}",
+                    mask=exceeds,
+                    timestamps=timestamps,
+                    details={"taker_column": taker, "total_column": total},
+                )
+            )
+
+    complete_start = _iso(start)
+    complete_end = _iso(end)
+    valid_timestamps = pd.DatetimeIndex(timestamps.dropna())
+    if contract.timeline == "fixed" and interval and len(valid_timestamps):
         delta = interval_to_timedelta(interval)
-        valid = timestamps.dropna()
         expected = pd.date_range(start=start, end=end, freq=delta, inclusive="left")
-        missing_grid = expected.difference(pd.DatetimeIndex(valid))
-        off_grid = valid[~((valid - start) % delta == pd.Timedelta(0))]
-        if len(off_grid): issues.append(_issue("OFF_GRID_TIMESTAMP", DataQualityStatus.ERROR,
-                                               "Fixed-cadence timestamps are off grid", timestamps=off_grid, count=len(off_grid)))
+        missing_grid = expected.difference(valid_timestamps)
+        offset = valid_timestamps - start
+        off_grid = valid_timestamps[(offset % delta) != pd.Timedelta(0)]
+        if len(off_grid):
+            issues.append(
+                _issue(
+                    "OFF_GRID_TIMESTAMP",
+                    DataQualityStatus.ERROR,
+                    "Fixed-cadence timestamps are off grid",
+                    timestamps=off_grid,
+                    count=len(off_grid),
+                )
+            )
         if len(missing_grid):
-            leading = missing_grid[missing_grid < valid.min()]
-            trailing = missing_grid[missing_grid > valid.max()]
-            internal = missing_grid[(missing_grid > valid.min()) & (missing_grid < valid.max())]
-            for code, values, message in (("LEADING_COVERAGE_GAP", leading, "Leading fixed-cadence coverage is missing"),
-                                          ("TRAILING_COVERAGE_GAP", trailing, "Trailing fixed-cadence coverage is missing"),
-                                          ("MISSING_INTERNAL_INTERVAL", internal, "Internal fixed-cadence intervals are missing")):
-                if len(values): issues.append(_issue(code, DataQualityStatus.ERROR, message,
-                                                     timestamps=values, count=len(values)))
-            complete_start = _iso(valid.min()) if len(leading) else _iso(start)
-            complete_end = _iso(valid.max() + delta) if len(trailing) else _iso(end)
-    observed_start = _iso(timestamps.min()) if len(timestamps) else None
-    observed_end = _iso(timestamps.max()) if len(timestamps) else None
-    return DatasetQualityReport(dataset.value, request.symbol, interval, required, _iso(start), _iso(end),
-        observed_start, observed_end, complete_start, complete_end, len(frame), source_identity,
-        _status(required, issues), tuple(issues))
+            leading = missing_grid[missing_grid < valid_timestamps.min()]
+            trailing = missing_grid[missing_grid > valid_timestamps.max()]
+            internal = missing_grid[
+                (missing_grid > valid_timestamps.min())
+                & (missing_grid < valid_timestamps.max())
+            ]
+            for code, values, message in (
+                (
+                    "LEADING_COVERAGE_GAP",
+                    leading,
+                    "Leading fixed-cadence coverage is missing",
+                ),
+                (
+                    "TRAILING_COVERAGE_GAP",
+                    trailing,
+                    "Trailing fixed-cadence coverage is missing",
+                ),
+                (
+                    "MISSING_INTERNAL_INTERVAL",
+                    internal,
+                    "Internal fixed-cadence intervals are missing",
+                ),
+            ):
+                if not len(values):
+                    continue
+                issues.append(
+                    _issue(
+                        code,
+                        DataQualityStatus.ERROR,
+                        message,
+                        timestamps=values,
+                        count=len(values),
+                        details={"ranges": _gap_ranges(values, delta)},
+                    )
+                )
+            if len(leading):
+                complete_start = _iso(valid_timestamps.min())
+            if len(trailing):
+                complete_end = _iso(valid_timestamps.max() + delta)
+
+    # Catalog coverage is especially useful for irregular event streams where
+    # a regular grid would be meaningless. If the catalog itself begins/ends
+    # inside the requested slice, that is a real source-coverage gap.
+    if coverage_start is not None and pd.Timestamp(coverage_start) > start:
+        issues.append(
+            DataQualityIssue(
+                "LEADING_SOURCE_COVERAGE_GAP",
+                DataQualityStatus.ERROR if required else DataQualityStatus.WARN,
+                "Catalog source coverage begins after the requested start",
+                details={"coverage_start": _iso(coverage_start)},
+            )
+        )
+        complete_start = _iso(coverage_start)
+    if coverage_end is not None and pd.Timestamp(coverage_end) < end:
+        issues.append(
+            DataQualityIssue(
+                "TRAILING_SOURCE_COVERAGE_GAP",
+                DataQualityStatus.ERROR if required else DataQualityStatus.WARN,
+                "Catalog source coverage ends before the requested end",
+                details={"coverage_end": _iso(coverage_end)},
+            )
+        )
+        complete_end = _iso(coverage_end)
+
+    observed_start = _iso(valid_timestamps.min()) if len(valid_timestamps) else None
+    if period_end is not None and period_end.notna().any():
+        observed_end = _iso(period_end.max())
+    else:
+        observed_end = _iso(valid_timestamps.max()) if len(valid_timestamps) else None
+
+    return DatasetQualityReport(
+        dataset=dataset.value,
+        symbol=request.symbol,
+        interval=interval,
+        required=required,
+        requested_start=_iso(start),
+        requested_end=_iso(end),
+        observed_start=observed_start,
+        observed_end=observed_end,
+        complete_start=complete_start,
+        complete_end=complete_end,
+        row_count=len(frame),
+        source_identity=source_identity,
+        status=_status(required, issues),
+        issues=tuple(issues),
+    )
 
 
-def classify_archive_overlap(frames: Iterable[pd.DataFrame], logical_key: Iterable[str]) -> tuple[DataQualityIssue, ...]:
-    """Classify immutable archive overlap without applying last-source-wins.
+_PROVENANCE_COLUMNS = {
+    "source_archive",
+    "source_fingerprint",
+    "filename",
+    "raw_root",
+}
 
-    Callers supply pre-resolution archive frames. Identical repeated rows are
-    operational provenance (WARN); differing values for one key are corruption.
+
+def classify_archive_overlap(
+    frames: Iterable[pd.DataFrame],
+    logical_key: Iterable[str],
+) -> tuple[DataQualityIssue, ...]:
+    """Classify raw/canonical partition overlap before last-source-wins resolution.
+
+    Provenance columns are deliberately excluded from value comparison: two
+    immutable archives containing the same market row necessarily have different
+    archive names/fingerprints, but that does not make the market data conflict.
     """
     frames = tuple(frames)
-    if len(frames) < 2: return ()
+    if len(frames) < 2:
+        return ()
     combined = pd.concat(frames, ignore_index=True)
     keys = list(logical_key)
+    if not keys or any(key not in combined.columns for key in keys):
+        raise ValueError("Archive overlap logical key is missing from source frames")
     duplicates = combined.duplicated(keys, keep=False)
-    if not duplicates.any(): return ()
+    if not duplicates.any():
+        return ()
+
     overlap = combined.loc[duplicates]
-    value_columns = [c for c in combined.columns if c not in keys]
+    value_columns = [
+        column
+        for column in combined.columns
+        if column not in keys and column not in _PROVENANCE_COLUMNS
+    ]
     conflicts = 0
-    for _, group in overlap.groupby(keys, dropna=False, sort=False):
-        if any(group[column].nunique(dropna=False) > 1 for column in value_columns): conflicts += 1
-    key_count = int(overlap.groupby(keys, dropna=False).ngroups)
-    result = [DataQualityIssue("ARCHIVE_OVERLAP", DataQualityStatus.WARN,
-                               "Raw archives contain overlapping logical keys", key_count)]
+    grouped = overlap.groupby(keys, dropna=False, sort=False)
+    for _, group in grouped:
+        if any(group[column].nunique(dropna=False) > 1 for column in value_columns):
+            conflicts += 1
+    key_count = int(grouped.ngroups)
+    result = [
+        DataQualityIssue(
+            "ARCHIVE_OVERLAP",
+            DataQualityStatus.WARN,
+            "Raw archives contain overlapping logical keys",
+            key_count,
+        )
+    ]
     if conflicts:
-        result.append(DataQualityIssue("CONFLICTING_ARCHIVE_OVERLAP", DataQualityStatus.ERROR,
-                                       "Overlapping archives disagree for a logical key", conflicts))
+        result.append(
+            DataQualityIssue(
+                "CONFLICTING_ARCHIVE_OVERLAP",
+                DataQualityStatus.ERROR,
+                "Overlapping archives disagree for a logical key",
+                conflicts,
+            )
+        )
     else:
-        result.append(DataQualityIssue("IDENTICAL_ARCHIVE_OVERLAP", DataQualityStatus.WARN,
-                                       "Overlapping source rows are identical", key_count))
+        result.append(
+            DataQualityIssue(
+                "IDENTICAL_ARCHIVE_OVERLAP",
+                DataQualityStatus.WARN,
+                "Overlapping source rows are identical",
+                key_count,
+            )
+        )
     return tuple(result)
 
 
 class DataQualityCache:
-    """Disposable atomic JSON cache, independent of L2/L3 identities."""
-    def __init__(self, cache_root: Path): self.root = Path(cache_root) / "quality"
-    def key(self, request, dataset, interval, required, source_identity):
-        payload = (VALIDATION_CONTRACT_VERSION, dataset.value, interval, required, source_identity,
-                   _iso(request.start), _iso(request.end), request.symbol)
-        return sha256(json.dumps(payload, separators=(",", ":")).encode()).hexdigest()
-    def get_or_validate(self, frame, request, dataset, *, interval=None, required=True):
-        source = frame.attrs.get("canonical_source_identity") if frame is not None else None
-        key = self.key(request, dataset, interval, required, source); path = self.root / f"{key}.json"
+    """Disposable atomic JSON cache independent of L2/L3 identities."""
+
+    def __init__(self, cache_root: Path):
+        self.root = Path(cache_root) / "quality"
+
+    def key(
+        self,
+        request,
+        dataset: DatasetKind,
+        interval: str | None,
+        required: bool,
+        source_identity: str,
+    ) -> str:
+        payload = {
+            "cache_format_version": QUALITY_CACHE_FORMAT_VERSION,
+            "validation_contract_version": VALIDATION_CONTRACT_VERSION,
+            "dataset": dataset.value,
+            "interval": interval,
+            "required": bool(required),
+            "source_identity": source_identity,
+            "request": {
+                "exchange": request.exchange,
+                "market": request.market.value,
+                "symbol": request.symbol,
+                "start": _iso(request.start),
+                "end": _iso(request.end),
+            },
+        }
+        return sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+
+    def get_cached(
+        self,
+        request,
+        dataset: DatasetKind,
+        *,
+        interval: str | None = None,
+        required: bool = True,
+        source_identity: str | None,
+    ) -> DatasetQualityReport | None:
+        # Missing data has no stable canonical identity. Do not persist a
+        # DATASET_MISSING result under a permanent "None" key because newly
+        # downloaded archives must be observed immediately.
+        if not source_identity:
+            return None
+        key = self.key(request, dataset, interval, required, source_identity)
+        path = self.root / f"{key}.json"
         try:
-            report = DatasetQualityReport.from_dict(json.loads(path.read_text(encoding="utf-8")))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                payload.get("cache_format_version") != QUALITY_CACHE_FORMAT_VERSION
+                or payload.get("validation_contract_version") != VALIDATION_CONTRACT_VERSION
+                or payload.get("key") != key
+            ):
+                return None
+            report = DatasetQualityReport.from_dict(payload["report"])
+            if report.source_identity != source_identity:
+                return None
             return replace(report, cache_hit=True)
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, AttributeError):
-            pass
-        report = validate_dataset(frame, request, dataset, interval=interval, required=required)
+            return None
+
+    def store(
+        self,
+        request,
+        dataset: DatasetKind,
+        report: DatasetQualityReport,
+        *,
+        interval: str | None = None,
+        required: bool = True,
+    ) -> None:
+        source_identity = report.source_identity
+        if not source_identity:
+            return
+        key = self.key(request, dataset, interval, required, source_identity)
+        path = self.root / f"{key}.json"
         self.root.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(f".{os.getpid()}.tmp")
-        temp.write_text(json.dumps(report.to_dict(), sort_keys=True, separators=(",", ":")), encoding="utf-8")
-        os.replace(temp, path)
+        temporary = path.with_suffix(f".{os.getpid()}.{uuid4().hex}.tmp")
+        payload = {
+            "cache_format_version": QUALITY_CACHE_FORMAT_VERSION,
+            "validation_contract_version": VALIDATION_CONTRACT_VERSION,
+            "key": key,
+            "report": replace(report, cache_hit=False).to_dict(),
+        }
+        temporary.write_text(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+
+    def get_or_validate(
+        self,
+        frame: pd.DataFrame | None,
+        request,
+        dataset: DatasetKind,
+        *,
+        interval: str | None = None,
+        required: bool = True,
+        source_identity: str | None = None,
+        coverage_start: Any | None = None,
+        coverage_end: Any | None = None,
+        extra_issues: Iterable[DataQualityIssue] = (),
+    ) -> DatasetQualityReport:
+        source_identity = source_identity or (
+            frame.attrs.get("canonical_source_identity") if frame is not None else None
+        )
+        cached = self.get_cached(
+            request,
+            dataset,
+            interval=interval,
+            required=required,
+            source_identity=source_identity,
+        )
+        if cached is not None:
+            return cached
+        report = validate_dataset(
+            frame,
+            request,
+            dataset,
+            interval=interval,
+            required=required,
+            source_identity=source_identity,
+            coverage_start=coverage_start,
+            coverage_end=coverage_end,
+            extra_issues=extra_issues,
+        )
+        self.store(
+            request,
+            dataset,
+            report,
+            interval=interval,
+            required=required,
+        )
         return report
 
 
@@ -351,7 +963,9 @@ def validate_feature_timeline(definition, frame: pd.DataFrame, parameters=None) 
     time_col = "timestamp" if "timestamp" in frame else "date"
     times = pd.to_datetime(frame[time_col], utc=True, errors="coerce")
     available = pd.to_datetime(frame["available_at"], utc=True, errors="coerce")
-    if times.isna().any() or available.isna().any(): raise ValueError("Feature timeline contains invalid timestamps")
+    if times.isna().any() or available.isna().any():
+        raise ValueError("Feature timeline contains invalid timestamps")
     if not times.is_monotonic_increasing or times.duplicated().any():
         raise ValueError("Feature output timestamps must be ordered and unique")
-    if (available < times).any(): raise ValueError("Feature available_at precedes its logical timestamp")
+    if (available < times).any():
+        raise ValueError("Feature available_at precedes its logical timestamp")
