@@ -149,13 +149,17 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     f"{bundle.structural_benchmark_interval} "
                     f"({len(bundle.structural_benchmark):,} rows)"
                 )
+
+            # Keep L3 validation/materialization in this worker's failure path.
+            # If it raises, the GUI must receive failed() so its thread/running
+            # state is cleaned up instead of remaining stuck.
+            self._prepared_inputs = prepare_bundle_with_cache(
+                self.run_spec.cache_root, bundle, self.config
+            )[:2]
         except Exception as exc:
             self.failed.emit(str(exc), traceback.format_exc())
             return
 
-        self._prepared_inputs = prepare_bundle_with_cache(
-            self.run_spec.cache_root, bundle, self.config
-        )[:2]
         super().run()
 
     def _load_runtime_inputs(self):
