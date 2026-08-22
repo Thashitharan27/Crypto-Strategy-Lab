@@ -118,8 +118,7 @@ class FeatureRegistry:
         auxiliary = [
             key
             for key in source_identities
-            if isinstance(key, FeatureDataResource)
-            and (key.role in roles or definition.name == "order_book_context")
+            if isinstance(key, FeatureDataResource) and key.role in roles
         ]
         missing_sources = set(definition.required_datasets) - set(source_identities)
         if missing_sources:
