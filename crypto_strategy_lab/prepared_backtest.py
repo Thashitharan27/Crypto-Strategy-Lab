@@ -1,8 +1,6 @@
 """Native, array-oriented contracts at the simulator preparation boundary.
 
-This module deliberately contains no indicator or loader logic.  The Data Lake
-adapter at the bottom is a temporary composition boundary; the simulator does
-not consume these objects yet.
+This module deliberately contains no indicator or loader logic.
 """
 from __future__ import annotations
 
@@ -220,6 +218,50 @@ class IntrabarExecutionData:
             if self.timestamp[-1] < strategy_start or self.timestamp[0] >= strategy_end:
                 raise ValueError("intrabar data does not overlap the strategy execution period")
 
+    @property
+    def max_timestamp(self) -> pd.Timestamp | None:
+        return pd.Timestamp(self.timestamp[-1]) if len(self.timestamp) else None
+
+    def fast_window(self, start, end):
+        """Return an array-backed execution window without constructing pandas rows."""
+        start64 = np.datetime64(pd.Timestamp(start).tz_localize(None), "ns")
+        end64 = np.datetime64(pd.Timestamp(end).tz_localize(None), "ns")
+        left = int(np.searchsorted(self.timestamp, start64, side="left"))
+        right = int(np.searchsorted(self.timestamp, end64, side="left"))
+        return IntrabarExecutionWindow(self, left, right)
+
+
+@dataclass(frozen=True, slots=True)
+class IntrabarExecutionWindow:
+    """Zero-copy slice coordinates over :class:`IntrabarExecutionData`."""
+
+    data: IntrabarExecutionData
+    start: int
+    stop: int
+
+    @property
+    def empty(self) -> bool:
+        return self.start == self.stop
+
+    @property
+    def first_timestamp(self) -> pd.Timestamp | None:
+        return None if self.empty else pd.Timestamp(self.data.timestamp[self.start])
+
+    def gap_pairs(self, expected: pd.Timedelta) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+        values = self.data.timestamp[self.start:self.stop]
+        gaps = np.flatnonzero(np.diff(values) > expected.to_timedelta64())
+        return [(pd.Timestamp(values[i]), pd.Timestamp(values[i + 1])) for i in gaps]
+
+    def rows(self):
+        for i in range(self.start, self.stop):
+            yield (
+                i,
+                pd.Timestamp(self.data.timestamp[i]),
+                float(self.data.open[i]),
+                float(self.data.high[i]),
+                float(self.data.low[i]),
+            )
+
 
 def from_data_lake_bundle(bundle) -> tuple[PreparedBacktestFrame, IntrabarExecutionData | None]:
     """Bounded adapter from today's Data Lake bundle; no simulator routing."""
@@ -263,7 +305,11 @@ def from_data_lake_bundle(bundle) -> tuple[PreparedBacktestFrame, IntrabarExecut
     )}
 
     research_blocks: list[ResearchContext] = []
-    for name, frame in sorted(bundle.research_features.items()):
+    frames = dict(bundle.research_features)
+    support_resistance = getattr(bundle, "support_resistance_features", None)
+    if support_resistance is not None:
+        frames["support_resistance"] = support_resistance
+    for name, frame in sorted(frames.items()):
         missing = sorted({"timestamp", "available_at"} - set(frame.columns))
         if missing:
             raise ValueError(f"research feature {name} is missing required columns: {missing}")

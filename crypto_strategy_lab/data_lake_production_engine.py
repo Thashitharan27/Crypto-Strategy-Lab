@@ -20,6 +20,9 @@ from crypto_strategy_lab.features.support_resistance import (
 )
 from crypto_strategy_lab.sr_dynamic_tp_engine import SRDynamicTPBacktestEngine
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
+from crypto_strategy_lab.prepared_backtest import PreparedBacktestFrame, IntrabarExecutionData
+from crypto_strategy_lab.indicators import lag
+from zoneinfo import ZoneInfo
 
 
 _REQUIRED_SR_COLUMNS = {
@@ -129,6 +132,103 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
 
         self._configure_support_resistance_feature(support_resistance_features)
         self._configure_research_features(research_features or {})
+
+    @classmethod
+    def from_prepared(
+        cls,
+        prepared: PreparedBacktestFrame,
+        intrabar: IntrabarExecutionData | None,
+        config,
+        *,
+        progress_callback=None,
+        progress_interval: int = 50,
+        market_regime_values=None,
+    ):
+        """Construct the production runtime directly from immutable prepared arrays.
+
+        This deliberately bypasses every legacy engine constructor: no OHLCV
+        DataFrame, feature provider, loader, or indicator shim participates.
+        Values calculated below are mutable execution state or bounded strategy
+        policy state derived from config and already-prepared values.
+        """
+        if int(config.strategy_timeframe_minutes) != int(prepared.strategy_interval.total_seconds() // 60):
+            raise ValueError("prepared strategy interval does not match config")
+        if intrabar is not None:
+            intrabar.validate_compatible(prepared)
+            if int(config.intrabar_timeframe_minutes) != int(intrabar.interval.total_seconds() // 60):
+                raise ValueError("prepared intrabar interval does not match config")
+
+        self = cls.__new__(cls)
+        self.prepared_frame = prepared
+        self.data = None
+        self.intrabar_data = intrabar
+        self.config = config
+        self.progress_callback = progress_callback
+        self.progress_interval = max(1, int(progress_interval))
+        self.times = prepared.timestamp
+        self.open, self.high, self.low, self.close, self.volume = (
+            prepared.open, prepared.high, prepared.low, prepared.close, prepared.volume
+        )
+        self.atr_values, self.atr_pct_values = prepared.atr, prepared.atr_pct
+        self.adx_values, self.plus_di_values, self.minus_di_values = prepared.adx, prepared.plus_di, prepared.minus_di
+        self.bb_width, self.bb_width_pct = prepared.bb_width, prepared.bb_width_pct
+        # These legacy report columns are not decision inputs on the production path.
+        self.bb_middle = self.bb_upper = self.bb_lower = np.full(len(prepared), np.nan)
+        self.bb_width_1, self.bb_width_3, self.bb_width_5 = (lag(self.bb_width, n) for n in (1, 3, 5))
+        self.bb_width_change = self.bb_width - self.bb_width_5
+        self.bb_width_change_pct = np.divide(self.bb_width_change, self.bb_width_5, out=np.full(len(prepared), np.nan), where=np.isfinite(self.bb_width_5) & (self.bb_width_5 != 0))
+        self.di_spread = np.abs(self.plus_di_values - self.minus_di_values)
+        self.di_spread_1, self.di_spread_3, self.di_spread_5 = (lag(self.di_spread, n) for n in (1, 3, 5))
+        self.di_spread_change = self.di_spread - self.di_spread_5
+        mx, mn = np.maximum(self.plus_di_values, self.minus_di_values), np.minimum(self.plus_di_values, self.minus_di_values)
+        self.di_ratio = np.divide(mx, mn, out=np.full(len(prepared), np.nan), where=np.isfinite(mn) & (mn != 0))
+        self.bull_regime_return_values = self._trailing_return_array(config.bull_regime_lookback_days)
+        if market_regime_values is None:
+            if config.market_regime_method != "ASSET_RETURN":
+                raise ValueError("prepared native runtime requires externally prepared structural market regimes")
+            self.market_regime_values = self._market_regime_array()
+        else:
+            self.market_regime_values = np.asarray(market_regime_values, dtype=object)
+            if len(self.market_regime_values) != len(prepared):
+                raise ValueError("market regime policy state is not aligned to prepared rows")
+        self.close_location_values, self.session_vwap = prepared.close_location, prepared.session_vwap
+        self.mean_reversion_mean = prepared.mean_reversion_mean
+        self.mean_reversion_distance_atr = prepared.mean_reversion_distance_atr
+        self.mean_reversion_distance_atr_previous = prepared.mean_reversion_distance_atr_previous
+        self.mean_reversion_sigma, self.mean_reversion_bb_upper, self.mean_reversion_bb_lower = prepared.mean_reversion_sigma, prepared.mean_reversion_bb_upper, prepared.mean_reversion_bb_lower
+        self.mean_reversion_bb_zscore, self.mean_reversion_rsi_values = prepared.mean_reversion_bb_zscore, prepared.mean_reversion_rsi
+        self.mean_reversion_long_reentry, self.mean_reversion_short_reentry = prepared.mean_reversion_long_reentry, prepared.mean_reversion_short_reentry
+        periods = {p.rsi_period for p in config.strategy_profiles.values()}
+        expected_period = int(getattr(config, "mean_reversion_rsi_period", 14))
+        if any(int(period) != expected_period for period in periods):
+            raise ValueError("native runtime requires prepared profile RSI periods")
+        self.profile_rsi_values = {period: prepared.mean_reversion_rsi for period in periods}
+        self.profile_momentum_values = {h: self._trailing_return_hours_array(h) for h in {p.momentum_lookback_hours for p in config.strategy_profiles.values()}}
+        self.risk = self._risk_array()
+        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]
+        self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1
+        self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self.entry_delta=prepared.strategy_interval
+        sr_block = next((block for block in prepared.research if block.name == "support_resistance"), None)
+        if config.enable_support_resistance_analysis and sr_block is None:
+            raise ValueError("native runtime requires prepared support/resistance context")
+        self.sr_detector = PreparedSupportResistanceContextReader(sr_block.values) if sr_block else None
+        self._pending_sr_context=None; self.last_timeout_exit_time=None
+        self.trading_start=pd.Timestamp(config.trading_start_date, tz="UTC") if config.trading_start_date else None
+        self.trading_end=pd.Timestamp(config.trading_end_date, tz="UTC") if config.trading_end_date else None
+        self.first_valid_atr_timestamp=self._first_valid_atr_timestamp()
+        self.warmup_candle_count=int(np.sum(self.times < self.trading_start.to_datetime64())) if self.trading_start is not None else 0
+        self.daily_entry_tz=ZoneInfo(config.daily_entry_timezone)
+        hh, mm=[int(part) for part in str(config.daily_entry_time).split(":", 1)]; self.daily_entry_minutes=hh*60+mm
+        self.sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or config.strategy_timeframe_minutes)
+        self.sr_uses_higher_timeframe=False; self.sr_htf_frame=None; self.sr_htf_end_times=np.array([], dtype="datetime64[ns]")
+        self.prepared_context_features=None; self.support_resistance_features=None
+        self.research_features={block.name: block for block in prepared.research if block.name != "support_resistance"}
+        self.research_output_columns=tuple(column for block in self.research_features.values() for column in block.values)
+        self.research_feature_available_columns=tuple(f"{name}_feature_available_at" for name in self.research_features)
+        self.technical_features=None; self.context_features=None
+        self.technical_feature_source="prepared_backtest_frame"; self.context_feature_source="prepared_backtest_frame"; self.support_resistance_feature_source="runtime_policy" if self.sr_detector else "disabled"
+        return self
 
     @classmethod
     def _validate_production_context(cls, data, config, frame: pd.DataFrame) -> pd.DataFrame:
@@ -271,7 +371,7 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             # instead of the Data Lake searchsorted wrapper.
             return super()._scan_pair_exit(pair, i)
 
-        start = max(pd.Timestamp(pair.strategy_entry_time), pd.Timestamp(self.times[i]))
+        start = max(pd.Timestamp(position.entry_time), pd.Timestamp(self.times[i]))
         end = pd.Timestamp(self.times[i]) + self.entry_delta
         expected = pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
         if start.floor(f"{self.config.intrabar_timeframe_minutes}min") != start:
@@ -332,7 +432,10 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
                 ExitSource.INTRABAR,
             )
 
-        if self.intrabar_data.timestamp.max() < end - expected:
+        intrabar_max = getattr(self.intrabar_data, "max_timestamp", None)
+        if intrabar_max is None:
+            intrabar_max = self.intrabar_data.timestamp.max()
+        if intrabar_max < end - expected:
             if position.is_open:
                 position.missing_intrabar_data = True
             if self.config.intrabar_missing_policy == IntrabarMissingPolicy.ERROR:
@@ -350,7 +453,7 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         minutes = getattr(pair, "profile_timeout_minutes", None)
         if minutes is None:
             return False
-        timeout_at = pd.Timestamp(pair.strategy_entry_time) + pd.Timedelta(minutes=minutes)
+        timeout_at = pd.Timestamp(position.entry_time) + pd.Timedelta(minutes=minutes)
         timestamp = pd.Timestamp(timestamp)
         if timestamp < timeout_at:
             return False
@@ -442,6 +545,11 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             pd.Timestamp(self.times[indicator_index]) + self.entry_delta
         )
         for name, frame in self.research_features.items():
+            if not isinstance(frame, pd.DataFrame):
+                setattr(pair, f"{name}_feature_available_at", pd.Timestamp(frame.available_at[indicator_index]))
+                for column, values in frame.values.items():
+                    setattr(pair, column, values[indicator_index])
+                continue
             row = frame.iloc[indicator_index]
             setattr(pair, f"{name}_feature_available_at", row["available_at"])
             for column in frame.columns:

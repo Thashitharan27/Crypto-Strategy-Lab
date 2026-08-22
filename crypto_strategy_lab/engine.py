@@ -193,7 +193,7 @@ class BacktestEngine:
 
     def _first_valid_atr_timestamp(self):
         idx=np.where(np.isfinite(self.atr_values))[0]
-        return self.data.timestamp.iloc[int(idx[0])] if len(idx) else None
+        return pd.Timestamp(self.times[int(idx[0])]) if len(idx) else None
     def _utc_session_vwap(self):
         """UTC-midnight anchored VWAP, calculated only from each completed candle."""
         timestamps=pd.to_datetime(self.data.timestamp,utc=True)
@@ -204,7 +204,7 @@ class BacktestEngine:
         cumulative_volume=pd.Series(self.volume).groupby(sessions).cumsum().to_numpy(float)
         return np.divide(cumulative_weighted,cumulative_volume,out=np.full(len(self.data),np.nan),where=cumulative_volume>0)
     def run(self)->pd.DataFrame:
-        total=len(self.data)
+        total=len(self.times)
         self._emit_progress(0,total)
         for i in range(total):
             self.current_index=i
@@ -226,12 +226,12 @@ class BacktestEngine:
         if self.progress_callback is not None:
             self.progress_callback(processed_candles, total_candles, len(self.completed_pairs), self.next_pair_id - 1)
     def _risk_array(self):
-        if self.config.risk_mode==RiskMode.FIXED: return np.full(len(self.data), self.config.fixed_r, float)
+        if self.config.risk_mode==RiskMode.FIXED: return np.full(len(self.times), self.config.fixed_r, float)
         if self.config.risk_mode==RiskMode.PERCENT: return self.close*self.config.percent_r
         return self.atr_values*self.config.atr_multiplier
     def _trailing_return_array(self, lookback_days):
         """Trailing close-to-close return using only candles known at each index."""
-        result=np.full(len(self.data),np.nan,float)
+        result=np.full(len(self.times),np.nan,float)
         times=pd.DatetimeIndex(pd.to_datetime(self.times,utc=True))
         targets=times-pd.Timedelta(days=lookback_days)
         prior=np.searchsorted(times.asi8,targets.asi8,side="right")-1
@@ -240,7 +240,7 @@ class BacktestEngine:
         return result
     def _trailing_return_hours_array(self, lookback_hours):
         """Trailing close-to-close return using only candles known at each index."""
-        result=np.full(len(self.data),np.nan,float)
+        result=np.full(len(self.times),np.nan,float)
         times=pd.DatetimeIndex(pd.to_datetime(self.times,utc=True))
         targets=times-pd.Timedelta(hours=lookback_hours)
         prior=np.searchsorted(times.asi8,targets.asi8,side="right")-1
@@ -955,8 +955,9 @@ class BacktestEngine:
 
     def _checkpoint_indicator_index(self, timestamp):
         """Latest fully closed strategy candle at an intrabar checkpoint."""
-        strategy_i=int(self.data.timestamp.searchsorted(pd.Timestamp(timestamp), side="right")-1)
-        strategy_i=max(0,min(strategy_i,len(self.data)-1))
+        needle=np.datetime64(pd.Timestamp(timestamp).tz_localize(None), "ns")
+        strategy_i=int(np.searchsorted(self.times, needle, side="right")-1)
+        strategy_i=max(0,min(strategy_i,len(self.times)-1))
         return max(0,strategy_i-1)
 
     def _apply_atr_checkpoint_extensions(self, pos, high, low, timestamp):
@@ -1279,7 +1280,7 @@ class BacktestEngine:
             raise ValueError(f"Trailing-stop exit timestamp {exit_time} precedes activation timestamp {pos.trailing_activation_time}")
         pos.exit_time=exit_time; pos.exit_index=i; pos.exit_price=exit_price; pos.exit_reason=reason; pos.exit_source=source or (ExitSource.END_OF_DATA if reason==ExitReason.END_OF_DATA else ExitSource.FALLBACK_15M); pos.gross_pnl=gross; pos.exit_fee=exit_fee; pos.fees=pos.entry_fee+exit_fee; pos.net_pnl=gross-pos.fees; pos.gross_r=gross/pos.risk_amount; pos.net_r=pos.net_pnl/pos.risk_amount; move=(exit_price-pos.entry_price) if pos.side==Side.LONG else (pos.entry_price-exit_price); pos.price_r=move/pos.risk
     def _force_close_end(self):
-        last=len(self.data)-1
+        last=len(self.times)-1
         for pair in self.active_pairs:
             for pos in pair.positions():
                 if pos.is_open: self._close_position(pos,last,self.close[last],ExitReason.END_OF_DATA,ExitSource.END_OF_DATA,pd.Timestamp(self.times[last]) + self.entry_delta)

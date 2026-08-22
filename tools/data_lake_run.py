@@ -21,6 +21,8 @@ from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
+from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
+from crypto_strategy_lab.features.market_regime import structural_regime_values
 
 
 def _utc(value: str) -> datetime:
@@ -109,16 +111,11 @@ def main() -> int:
         sr_break_basis=config.sr_break_basis,
         include_agg_trade_flow=bool(args.include_agg_trades),
     )
-    engine = DataLakeProductionBacktestEngine(
-        bundle.strategy,
-        config,
-        bundle.intrabar,
-        structural_benchmark=bundle.structural_benchmark,
-        technical_features=bundle.technical_features,
-        context_features=bundle.context_features,
-        support_resistance_features=bundle.support_resistance_features,
-        research_features=bundle.research_features,
-    )
+    prepared, intrabar = from_data_lake_bundle(bundle)
+    regimes = None
+    if config.market_regime_method != "ASSET_RETURN":
+        regimes = structural_regime_values(prepared.timestamp, bundle.structural_benchmark, sma_days=config.structural_regime_sma_days, slope_lookback_days=config.structural_regime_slope_lookback_days)
+    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config, market_regime_values=regimes)
     trades = engine.run()
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -146,7 +143,7 @@ def main() -> int:
     manifest = {
         "data_source": "binance_data_lake_v2",
         "config_contract": "data_lake_strategy_v2",
-        "production_engine": "DataLakeProductionBacktestEngine",
+        "production_engine": "DataLakeProductionBacktestEngine.from_prepared",
         "raw_root": str(args.raw_root.resolve()),
         "cache_root": str(args.cache_root.resolve()),
         "config_path": str(args.config.resolve()),

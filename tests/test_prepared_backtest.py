@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,8 @@ from crypto_strategy_lab.prepared_backtest import (
     IntrabarExecutionData, PreparedBacktestFrame, ResearchContext,
     from_data_lake_bundle,
 )
+from crypto_strategy_lab.config import BacktestConfig
+from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 
 
 def valid_kwargs(n=3):
@@ -73,6 +76,29 @@ def test_required_fields_are_explicit():
     del kwargs["atr"]
     with pytest.raises(TypeError, match="atr"):
         PreparedBacktestFrame(**kwargs)
+
+
+def test_production_runtime_constructs_natively_from_prepared_arrays(monkeypatch):
+    prepared = PreparedBacktestFrame(**valid_kwargs(30))
+    intrabar_times = pd.date_range("2025-01-01", periods=60, freq="1min", tz="UTC")
+    intrabar = IntrabarExecutionData(
+        intrabar_times, pd.Timedelta(minutes=1),
+        np.ones(60), np.ones(60) * 2, np.ones(60) * .5,
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("legacy constructor was invoked")
+
+    monkeypatch.setattr("crypto_strategy_lab.data_lake_engine.DataLakeBacktestEngine.__init__", forbidden)
+    config = replace(BacktestConfig(), strategy_timeframe_minutes=240, intrabar_timeframe_minutes=1, telemetry_interval_minutes=240)
+    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
+
+    assert engine.prepared_frame is prepared
+    assert engine.intrabar_data is intrabar
+    assert engine.data is None
+    assert engine.open is prepared.open
+    window = engine.intrabar_data.fast_window(intrabar_times[5], intrabar_times[8])
+    assert [row[0] for row in window.rows()] == [5, 6, 7]
 
 
 def test_array_lengths_must_match():
