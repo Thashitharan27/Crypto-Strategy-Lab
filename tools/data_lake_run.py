@@ -21,7 +21,7 @@ from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data.backtest_service import load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
-from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
+from crypto_strategy_lab.prepared_cache import prepare_bundle_with_cache
 
 
 def _utc(value: str) -> datetime:
@@ -111,7 +111,9 @@ def main() -> int:
         sr_break_basis=config.sr_break_basis,
         include_agg_trade_flow=bool(args.include_agg_trades),
     )
-    prepared, intrabar = from_data_lake_bundle(bundle, config)
+    prepared, intrabar, prepared_cache_hit, prepared_cache_key = prepare_bundle_with_cache(
+        args.cache_root, bundle, config
+    )
     engine = DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
     trades = engine.run()
 
@@ -155,6 +157,10 @@ def main() -> int:
         "research_options": {
             "include_agg_trade_flow": bool(args.include_agg_trades),
         },
+        "prepared_cache": {
+            "hit": bool(prepared_cache_hit),
+            "key": prepared_cache_key,
+        },
         "market_regime_method": config.market_regime_method,
         "features": {
             "core_directional": directional_manifest,
@@ -173,7 +179,9 @@ def main() -> int:
         "benchmark_rows": len(bundle.structural_benchmark) if bundle.structural_benchmark is not None else 0,
         "trade_rows": len(trades),
     }
-    (run_dir / "run_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(manifest, indent=2), encoding="utf-8"
+    )
     print(json.dumps({**manifest, "run_dir": str(run_dir.resolve())}, indent=2))
     return 0
 
