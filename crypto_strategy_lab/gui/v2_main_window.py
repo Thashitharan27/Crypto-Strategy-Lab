@@ -27,7 +27,7 @@ from .github_manager import GitHubIntegrationWidget
 from .v2_controller import GuiApplicationService, GuiResearchRequest
 
 
-TIMEFRAME_MINUTES = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+TIMEFRAME_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
 
 
 def timeframe_minutes(value: str) -> int:
