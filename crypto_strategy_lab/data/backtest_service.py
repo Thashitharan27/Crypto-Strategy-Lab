@@ -11,6 +11,10 @@ from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
 from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.features.trade_flow import TradeFlowContextFeatureProvider, trade_flow_resource
 from crypto_strategy_lab.data.trade_aggregates import TradeAggregateStore
+from crypto_strategy_lab.data.order_book import OrderBookSnapshotStore
+from crypto_strategy_lab.features.order_book import (OrderBookContextFeatureProvider,
+                                                       book_depth_resource,
+                                                       book_ticker_resource)
 from crypto_strategy_lab.features.basis import BasisContextFeatureProvider
 from crypto_strategy_lab.features.cache import FeatureFrameCache
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
@@ -273,6 +277,7 @@ def _optional_futures_research_features(
     feature_parameters: Mapping[str, Mapping[str, object]] | None = None,
     positioning_price_usable: bool = False,
     taker_flow_usable: bool = False,
+    order_book_enabled: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """Load compact futures research blocks when validated coverage exists.
 
@@ -286,6 +291,32 @@ def _optional_futures_research_features(
 
     allowed = usable_datasets
     result: dict[str, pd.DataFrame] = {}
+
+    if order_book_enabled:
+        provider = OrderBookContextFeatureProvider()
+        parameters = _research_parameters(feature_parameters, provider.definition.name)
+        snapshots = OrderBookSnapshotStore(store)
+        datasets: dict[object, pd.DataFrame] = {DatasetKind.KLINES: canonical}
+        source_ids: dict[object, str] = {
+            DatasetKind.KLINES: store.source_signature(
+                _dataset_request(request, DatasetKind.KLINES), DatasetKind.KLINES,
+                interval=request.strategy_interval).cache_identity()
+        }
+        for dataset, resource in ((DatasetKind.BOOK_TICKER, book_ticker_resource()),
+                                  (DatasetKind.BOOK_DEPTH, book_depth_resource())):
+            if allowed is not None and dataset not in allowed:
+                continue
+            try:
+                compact = snapshots.load(request, dataset)
+                datasets[resource] = compact.frame
+                source_ids[resource] = compact.source_identity
+            except DataNotAvailableError:
+                pass
+        if len(datasets) == 1:
+            raise DataNotAvailableError("order-book research requested but neither source overlaps")
+        result[provider.definition.name] = _cached_feature_by_identities(
+            store, request, provider, parameters, source_ids, lambda: datasets,
+            registry=registry)
 
     if allowed is None or DatasetKind.FUTURES_METRICS in allowed:
         try:
@@ -603,12 +634,14 @@ def load_backtest_bundle(
             feature_config.enable_support_resistance_analysis
         )
         trade_flow_enabled = bool(feature_config.trade_flow_enabled)
+        order_book_enabled = bool(feature_config.order_book_enabled)
         trade_flow_source = DatasetKind[str(feature_config.trade_flow_source).upper()]
         large_trade_quote_threshold = feature_config.large_trade_quote_threshold
         feature_parameters = feature_config.registry_parameters(
             strategy_timeframe_minutes=strategy_minutes
         )
     else:
+        order_book_enabled = False
         if market_regime_method is None:
             raise ValueError("market_regime_method is required without FeatureConfig")
         effective_sr_minutes = int(sr_timeframe_minutes or strategy_minutes)
@@ -728,6 +761,25 @@ def load_backtest_bundle(
             DataQualityReport((agg_report,)).raise_for_errors()
             usable_research_datasets.add(trade_flow_source)
 
+        if order_book_enabled:
+            available_book_sources = 0
+            for dataset in (DatasetKind.BOOK_TICKER, DatasetKind.BOOK_DEPTH):
+                report = store.data_quality_report(request, dataset, required=False)
+                quality_reports.append(report)
+                if _quality_is_usable_optional(report):
+                    usable_research_datasets.add(dataset)
+                    available_book_sources += 1
+            if not available_book_sources:
+                missing = DatasetQualityReport(
+                    dataset="order_book", symbol=request.symbol, interval="1m", required=True,
+                    requested_start=request.start.isoformat(), requested_end=request.end.isoformat(),
+                    observed_start=None, observed_end=None, complete_start=None, complete_end=None,
+                    row_count=0, source_identity=None, status=DataQualityStatus.ERROR,
+                    issues=(DataQualityIssue("MISSING_ORDER_BOOK_SOURCES", DataQualityStatus.ERROR,
+                                             "Neither BOOK_TICKER nor BOOK_DEPTH overlaps the request"),))
+                quality_reports.append(missing)
+                DataQualityReport((missing,)).raise_for_errors()
+
     registry = (
         feature_registry if feature_registry is not None else production_feature_registry()
     )
@@ -764,6 +816,7 @@ def load_backtest_bundle(
         feature_parameters=feature_parameters,
         positioning_price_usable=positioning_price_usable,
         taker_flow_usable=taker_flow_usable,
+        order_book_enabled=order_book_enabled,
     )
 
     intrabar = None

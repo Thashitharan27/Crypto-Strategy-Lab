@@ -9,7 +9,12 @@ import duckdb
 import pandas as pd
 
 from .binance.discovery import discover_archives
-from .binance.events import FundingRateArchiveAdapter, FuturesMetricsArchiveAdapter
+from .binance.events import (
+    BookDepthArchiveAdapter,
+    BookTickerArchiveAdapter,
+    FundingRateArchiveAdapter,
+    FuturesMetricsArchiveAdapter,
+)
 from .binance.klines import KlineArchiveAdapter, KlineLikeArchiveAdapter
 from .binance.trades import AggTradesArchiveAdapter, TradesArchiveAdapter
 from .cache import CANONICAL_CACHE_FORMAT_VERSION, CacheLayout
@@ -34,13 +39,21 @@ class MarketDataStore:
         self.canonical_cache_events = {"hit": 0, "miss": 0}
         self._adapters = {
             DatasetKind.KLINES: KlineArchiveAdapter(),
-            DatasetKind.MARK_PRICE_KLINES: KlineLikeArchiveAdapter(DatasetKind.MARK_PRICE_KLINES),
-            DatasetKind.INDEX_PRICE_KLINES: KlineLikeArchiveAdapter(DatasetKind.INDEX_PRICE_KLINES),
-            DatasetKind.PREMIUM_INDEX_KLINES: KlineLikeArchiveAdapter(DatasetKind.PREMIUM_INDEX_KLINES),
+            DatasetKind.MARK_PRICE_KLINES: KlineLikeArchiveAdapter(
+                DatasetKind.MARK_PRICE_KLINES
+            ),
+            DatasetKind.INDEX_PRICE_KLINES: KlineLikeArchiveAdapter(
+                DatasetKind.INDEX_PRICE_KLINES
+            ),
+            DatasetKind.PREMIUM_INDEX_KLINES: KlineLikeArchiveAdapter(
+                DatasetKind.PREMIUM_INDEX_KLINES
+            ),
             DatasetKind.FUTURES_METRICS: FuturesMetricsArchiveAdapter(),
             DatasetKind.FUNDING_RATE: FundingRateArchiveAdapter(),
             DatasetKind.AGG_TRADES: AggTradesArchiveAdapter(),
             DatasetKind.TRADES: TradesArchiveAdapter(),
+            DatasetKind.BOOK_TICKER: BookTickerArchiveAdapter(),
+            DatasetKind.BOOK_DEPTH: BookDepthArchiveAdapter(),
         }
 
     def refresh_catalog(self) -> int:
@@ -90,7 +103,9 @@ class MarketDataStore:
         with duckdb.connect() as con:
             con.register("canonical_frame", frame)
             escaped = str(temporary).replace("'", "''")
-            con.execute(f"COPY canonical_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+            con.execute(
+                f"COPY canonical_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
         temporary_manifest.write_text(
             json.dumps(
                 {
@@ -109,10 +124,14 @@ class MarketDataStore:
         temporary_manifest.replace(manifest)
         return target
 
-    def canonical_source_identity(self, request, dataset, *, interval=None) -> SourceSignature:
+    def canonical_source_identity(
+        self, request, dataset, *, interval=None
+    ) -> SourceSignature:
         records = self.catalog.records_for(self.raw_root, request, dataset, interval)
         if not records:
-            raise DataNotAvailableError(f"No catalog coverage for {request.symbol} {dataset.value}")
+            raise DataNotAvailableError(
+                f"No catalog coverage for {request.symbol} {dataset.value}"
+            )
         adapter = self._adapter_for(dataset)
         return SourceSignature.from_canonical_identities(
             dataset,
@@ -153,13 +172,35 @@ class MarketDataStore:
 
         if "agg_trade_id" in frame.columns:
             sort_columns = [sort_column, "agg_trade_id"]
-            subset = [column for column in ("symbol", "agg_trade_id") if column in frame.columns]
+            subset = [
+                column
+                for column in ("symbol", "agg_trade_id")
+                if column in frame.columns
+            ]
         elif "trade_id" in frame.columns:
             sort_columns = [sort_column, "trade_id"]
-            subset = [column for column in ("symbol", "trade_id") if column in frame.columns]
+            subset = [
+                column for column in ("symbol", "trade_id") if column in frame.columns
+            ]
+        elif "update_id" in frame.columns:
+            sort_columns = [sort_column, "update_id"]
+            subset = [
+                column for column in ("symbol", "update_id") if column in frame.columns
+            ]
+        elif "percentage" in frame.columns:
+            sort_columns = [sort_column, "percentage"]
+            subset = [
+                column
+                for column in ("symbol", sort_column, "percentage")
+                if column in frame.columns
+            ]
         else:
             sort_columns = [sort_column]
-            subset = [column for column in ("symbol", "interval", sort_column) if column in frame.columns]
+            subset = [
+                column
+                for column in ("symbol", "interval", sort_column)
+                if column in frame.columns
+            ]
 
         frame = frame.sort_values(sort_columns, kind="stable")
         frame = frame.drop_duplicates(subset=subset, keep="last").reset_index(drop=True)
@@ -191,7 +232,9 @@ class MarketDataStore:
             return True
         if right.period_start is None or right.period_end is None:
             return True
-        return max(left.period_start, right.period_start) < min(left.period_end, right.period_end)
+        return max(left.period_start, right.period_start) < min(
+            left.period_end, right.period_end
+        )
 
     def _archive_overlap_issues(
         self,
@@ -228,7 +271,9 @@ class MarketDataStore:
             frame["period_start"] = starts.loc[mask]
             for column in ("event_time", "period_end", "available_at"):
                 if column in frame.columns:
-                    frame[column] = pd.to_datetime(frame[column], utc=True, errors="coerce")
+                    frame[column] = pd.to_datetime(
+                        frame[column], utc=True, errors="coerce"
+                    )
             frames.append(frame.reset_index(drop=True))
         if len(frames) < 2:
             return ()
@@ -248,7 +293,22 @@ class MarketDataStore:
         Warm validation is metadata-only until the caller independently needs the
         data. On a cache miss we validate canonical rows, coverage, and raw archive
         overlap once and persist a disposable JSON result independent of L2/L3.
+
+        Order-book event streams use the same Task-12 contracts/cache but are
+        validated one immutable partition at a time so a cold quality miss never
+        requires a multi-year raw-event concatenation.
         """
+        if (
+            frame is None
+            and interval is None
+            and dataset in {DatasetKind.BOOK_TICKER, DatasetKind.BOOK_DEPTH}
+        ):
+            from .order_book import OrderBookSnapshotStore
+
+            return OrderBookSnapshotStore(self).quality_report(
+                request, dataset, required=required
+            )
+
         from .quality import DataQualityCache, validate_dataset
 
         quality_cache = DataQualityCache(self.cache.root)
@@ -321,7 +381,11 @@ class MarketDataStore:
         stable and the last matching archive wins.
         """
 
-        effective_interval = interval or request.intrabar_interval or request.strategy_interval
+        effective_interval = (
+            interval
+            or request.intrabar_interval
+            or request.strategy_interval
+        )
         records = self.catalog.records_for(
             self.raw_root,
             request,
@@ -335,8 +399,12 @@ class MarketDataStore:
                 f"to {request.end.isoformat()}"
             )
 
-        parquet_paths = [str(self._ensure_canonical(record).resolve()) for record in records]
-        precedence_rows = [(path, rank) for rank, path in enumerate(parquet_paths)]
+        parquet_paths = [
+            str(self._ensure_canonical(record).resolve()) for record in records
+        ]
+        precedence_rows = [
+            (path, rank) for rank, path in enumerate(parquet_paths)
+        ]
         with duckdb.connect() as con:
             con.execute(
                 "CREATE TEMP TABLE execution_source_precedence "
@@ -378,7 +446,9 @@ class MarketDataStore:
         frame["period_start"] = pd.to_datetime(frame["period_start"], utc=True)
         return frame.reset_index(drop=True)
 
-    def load_klines(self, request: DataRequest, interval: str | None = None) -> pd.DataFrame:
+    def load_klines(
+        self, request: DataRequest, interval: str | None = None
+    ) -> pd.DataFrame:
         """Load canonical completed-candle records for a requested interval."""
 
         return self.load_dataset(

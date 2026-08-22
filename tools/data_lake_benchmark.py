@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include aggregate-cache-backed trade-flow research in preparation timings",
     )
     parser.add_argument(
+        "--include-order-book",
+        action="store_true",
+        help="Include compact-cache-backed order-book research in preparation timings",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Optional JSON output path. The result is always printed to stdout.",
@@ -134,6 +139,37 @@ def _trade_aggregate_cache(metadata: Mapping[str, dict]) -> dict[str, object] | 
     return dict(value) if isinstance(value, dict) else None
 
 
+def _book_snapshot_events(store) -> dict[str, dict[str, int]]:
+    raw = getattr(store, "order_book_snapshot_cache_events", {})
+    return {
+        str(dataset): {
+            "partitions_built": int(values.get("partitions_built", 0) or 0),
+            "partitions_reused": int(values.get("partitions_reused", 0) or 0),
+        }
+        for dataset, values in raw.items()
+    }
+
+
+def _book_snapshot_delta(before, after) -> dict[str, dict[str, object]] | None:
+    result = {}
+    for dataset in sorted(set(before) | set(after)):
+        left = before.get(dataset, {})
+        right = after.get(dataset, {})
+        built = int(right.get("partitions_built", 0)) - int(
+            left.get("partitions_built", 0)
+        )
+        reused = int(right.get("partitions_reused", 0)) - int(
+            left.get("partitions_reused", 0)
+        )
+        if built or reused:
+            result[dataset] = {
+                "hit": built == 0 and reused > 0,
+                "partitions_built": built,
+                "partitions_reused": reused,
+            }
+    return result or None
+
+
 def _median(records: list[dict], key: str) -> float:
     return float(statistics.median(float(record[key]) for record in records))
 
@@ -159,6 +195,11 @@ def main() -> int:
         config = replace(
             config,
             features=replace(config.features, trade_flow_enabled=True),
+        )
+    if args.include_order_book:
+        config = replace(
+            config,
+            features=replace(config.features, order_book_enabled=True),
         )
     request = DataRequest(
         symbol=args.symbol,
@@ -194,6 +235,7 @@ def main() -> int:
     for iteration in range(1, args.iterations + 1):
         total_started = time.perf_counter()
         canonical_before = dict(store.canonical_cache_events)
+        book_before = _book_snapshot_events(store)
         result_run = runner.run(
             request,
             config,
@@ -201,6 +243,7 @@ def main() -> int:
             intrabar_start=intrabar_start,
         )
         canonical_after = dict(store.canonical_cache_events)
+        book_after = _book_snapshot_events(store)
         canonical_delta = {
             name: int(canonical_after.get(name, 0) - canonical_before.get(name, 0))
             for name in sorted(set(canonical_before) | set(canonical_after))
@@ -233,6 +276,7 @@ def main() -> int:
                 "intrabar_iteration_mode": None,
                 "feature_cache_hits": _cache_hits(feature_metadata),
                 "trade_aggregate_cache": _trade_aggregate_cache(feature_metadata),
+                "book_snapshot_cache": _book_snapshot_delta(book_before, book_after),
                 "prepared_cache_hit": result_run.prepared_cache_hit,
                 "prepared_cache_key": result_run.prepared_cache_key,
                 "canonical_cache": canonical_delta,
@@ -265,6 +309,7 @@ def main() -> int:
         "catalog_refresh_seconds": catalog_seconds,
         "catalog_refresh_skipped": bool(args.skip_catalog_refresh),
         "trade_flow_enabled": bool(args.include_trade_flow),
+        "order_book_enabled": bool(args.include_order_book),
         "trade_fingerprints_identical": len(set(fingerprints)) <= 1,
         "warm_median_seconds": {
             "preparation": _median(warm_records, "preparation_seconds"),

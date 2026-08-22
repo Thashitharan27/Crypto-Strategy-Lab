@@ -67,6 +67,10 @@ class FeatureConfig:
     trade_flow_base_interval: str = "1m"
     trade_flow_windows: tuple[str, ...] = ("1m", "5m", "15m", "1h")
     large_trade_quote_threshold: float | None = None
+    order_book_enabled: bool = False
+    order_book_base_interval: str = "1m"
+    book_ticker_max_age_seconds: float = 5.0
+    book_depth_max_age_seconds: float = 90.0
     taker_flow_interval: str = "5m"
     oi_zscore_window_days: float = 7.0
     oi_zscore_min_samples: int = 20
@@ -119,6 +123,15 @@ class FeatureConfig:
             result["trade_flow_context"] = {
                 "trade_flow_source": source,
                 "trade_flow_windows": tuple(self.trade_flow_windows),
+            }
+        if self.order_book_enabled:
+            if self.order_book_base_interval != "1m":
+                raise ValueError("order_book_base_interval must be 1m")
+            if self.book_ticker_max_age_seconds < 0 or self.book_depth_max_age_seconds < 0:
+                raise ValueError("order-book maximum ages must be non-negative")
+            result["order_book_context"] = {
+                "book_ticker_max_age_seconds": float(self.book_ticker_max_age_seconds),
+                "book_depth_max_age_seconds": float(self.book_depth_max_age_seconds),
             }
         if self.enable_support_resistance_analysis:
             if strategy_timeframe_minutes is None:
@@ -315,6 +328,10 @@ class ResearchRunConfig:
             raise ValueError("invalid trade_flow_windows")
         if features.large_trade_quote_threshold is not None and features.large_trade_quote_threshold <= 0:
             raise ValueError("large_trade_quote_threshold must be positive or null")
+        if features.order_book_base_interval != "1m":
+            raise ValueError("order_book_base_interval must be 1m")
+        if features.book_ticker_max_age_seconds < 0 or features.book_depth_max_age_seconds < 0:
+            raise ValueError("order-book maximum ages must be non-negative")
         if features.bull_regime_lookback_days <= 0 or features.bull_regime_return_threshold <= -1:
             raise ValueError("asset-return regime settings are invalid")
         if features.sr_break_basis not in {"CLOSE", "WICK"}:

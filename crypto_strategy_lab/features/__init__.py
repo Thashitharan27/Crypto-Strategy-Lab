@@ -2,6 +2,9 @@
 
 from .trade_flow import (TRADE_FLOW_FEATURE_NAME, TRADE_FLOW_FEATURE_VERSION,
                          TradeFlowContextFeatureProvider, trade_flow_resource)
+from .order_book import (ORDER_BOOK_FEATURE_NAME, ORDER_BOOK_FEATURE_VERSION,
+                         OrderBookContextFeatureProvider, book_depth_resource,
+                         book_ticker_resource)
 from .base import FeatureDataResource, FeatureDefinition, FeatureProvider, OutputField, ParameterDefinition
 from .taker_flow import (TAKER_FLOW_CONTEXT_FEATURE_NAME, TAKER_FLOW_CONTEXT_FEATURE_VERSION,
                          TakerFlowContextFeatureProvider, taker_flow_resource)
@@ -91,6 +94,8 @@ __all__ = [
     "TRADE_FLOW_FEATURE_VERSION",
     "TradeFlowContextFeatureProvider",
     "trade_flow_resource",
+    "ORDER_BOOK_FEATURE_NAME", "ORDER_BOOK_FEATURE_VERSION",
+    "OrderBookContextFeatureProvider", "book_ticker_resource", "book_depth_resource",
     "TAKER_FLOW_CONTEXT_FEATURE_NAME", "TAKER_FLOW_CONTEXT_FEATURE_VERSION",
     "TakerFlowContextFeatureProvider", "taker_flow_resource",
 ]
@@ -111,6 +116,7 @@ def production_feature_registry(*, structural_benchmark=None) -> FeatureRegistry
         BasisContextFeatureProvider(),
         TakerFlowContextFeatureProvider(),
         TradeFlowContextFeatureProvider(),
+        OrderBookContextFeatureProvider(),
     ):
         registry.register(provider)
     return registry
