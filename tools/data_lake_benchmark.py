@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include aggregate-cache-backed trade-flow research in preparation timings",
     )
     parser.add_argument(
+        "--include-order-book",
+        action="store_true",
+        help="Include compact-cache-backed order-book research in preparation timings",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Optional JSON output path. The result is always printed to stdout.",
@@ -159,6 +164,11 @@ def main() -> int:
         config = replace(
             config,
             features=replace(config.features, trade_flow_enabled=True),
+        )
+    if args.include_order_book:
+        config = replace(
+            config,
+            features=replace(config.features, order_book_enabled=True),
         )
     request = DataRequest(
         symbol=args.symbol,
@@ -265,6 +275,7 @@ def main() -> int:
         "catalog_refresh_seconds": catalog_seconds,
         "catalog_refresh_skipped": bool(args.skip_catalog_refresh),
         "trade_flow_enabled": bool(args.include_trade_flow),
+        "order_book_enabled": bool(args.include_order_book),
         "trade_fingerprints_identical": len(set(fingerprints)) <= 1,
         "warm_median_seconds": {
             "preparation": _median(warm_records, "preparation_seconds"),
