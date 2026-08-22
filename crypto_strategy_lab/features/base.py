@@ -91,15 +91,24 @@ class FeatureDefinition:
             def inferred(name: str) -> OutputField:
                 if name in {"timestamp", "available_at", "date"} or name.endswith("_at") or name.endswith("_time"):
                     return OutputField("datetime")
-                if name == "funding_bias" or name.endswith("_confirmation") or any(
-                    token in name
-                    for token in (
-                        "state", "rating", "location", "signal", "regime", "motion",
-                        "strength_label", "basis_state",
+                if (
+                    name in {"funding_bias", "bb_reentry"}
+                    or name.endswith(("_confirmation", "_setup_strength"))
+                    or any(
+                        token in name
+                        for token in (
+                            "state", "rating", "location", "signal", "regime", "motion",
+                            "strength_label", "basis_state",
+                        )
                     )
                 ):
                     return OutputField("string")
-                if name.startswith(("near_", "inside_")) or name.endswith(("_tested", "_held", "_changed", "_reentry")):
+                if (
+                    name.startswith(("near_", "inside_"))
+                    or "_near_" in name
+                    or "_inside_" in name
+                    or name.endswith(("_tested", "_held", "_changed", "_reentry"))
+                ):
                     return OutputField("bool")
                 return OutputField("numeric")
             schema = {**{name: inferred(name) for name in self.output_columns}, **schema}
