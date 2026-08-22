@@ -113,9 +113,12 @@ class FeatureRegistry:
         material_datasets.update(
             kind for kind in definition.optional_datasets if kind in source_identities
         )
-        auxiliary = [key for key in source_identities if isinstance(key, FeatureDataResource)
-                     and key.role == definition.name.removesuffix("_context")
-                     and key.interval == resolved.parameters.get(f"{key.role}_interval")]
+        roles = {definition.name, definition.name.removesuffix("_context")}
+        auxiliary = [
+            key
+            for key in source_identities
+            if isinstance(key, FeatureDataResource) and key.role in roles
+        ]
         missing_sources = set(definition.required_datasets) - set(source_identities)
         if missing_sources:
             raise ValueError(
@@ -134,17 +137,24 @@ class FeatureRegistry:
             },
             "auxiliary_sources": {
                 f"{key.dataset.value}:{key.interval}:{key.role}": source_identities[key]
-                for key in sorted(auxiliary, key=lambda item: (item.dataset.value, item.interval, item.role))
+                for key in sorted(
+                    auxiliary,
+                    key=lambda item: (item.dataset.value, item.interval, item.role),
+                )
             },
             "dependencies": {
                 name: dependency_identities[name]
                 for name in sorted(definition.required_features)
             },
-            "schema": {name: {"kind": field.kind, "nullable": field.nullable}
-                       for name, field in definition.output_schema.items()},
+            "schema": {
+                name: {"kind": field.kind, "nullable": field.nullable}
+                for name, field in definition.output_schema.items()
+            },
         }
         return sha256(
-            json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
+            json.dumps(
+                payload, sort_keys=True, separators=(",", ":"), default=str
+            ).encode()
         ).hexdigest()
 
     def definition_hash(self, feature_names: Sequence[str]) -> str:
@@ -172,7 +182,7 @@ class FeatureRegistry:
         self,
         feature_names: Sequence[str],
         request: DataRequest,
-        datasets: Mapping[DatasetKind, pd.DataFrame],
+        datasets: Mapping[object, pd.DataFrame],
         *,
         parameters=None,
         cache=None,
@@ -180,8 +190,8 @@ class FeatureRegistry:
     ) -> dict[str, pd.DataFrame]:
         frames, identities = {}, {}
         source_ids = source_identities or {
-            kind: frame.attrs.get("canonical_source_identity") or
-                  (cache._source_signature(frame) if cache else "uncached")
+            kind: frame.attrs.get("canonical_source_identity")
+            or (cache._source_signature(frame) if cache else "uncached")
             for kind, frame in datasets.items()
         }
         for resolved in self.resolve(feature_names, parameters):
@@ -201,9 +211,13 @@ class FeatureRegistry:
                     frame = None
             if frame is None:
                 provider = self.get(definition.name)
-                dependencies = {name: frames[name] for name in definition.required_features}
+                dependencies = {
+                    name: frames[name] for name in definition.required_features
+                }
                 if "feature_frames" in inspect.signature(provider.compute).parameters:
-                    frame = provider.compute(request, datasets, resolved.parameters, dependencies)
+                    frame = provider.compute(
+                        request, datasets, resolved.parameters, dependencies
+                    )
                 else:
                     frame = provider.compute(request, datasets, resolved.parameters)
                 definition.validate_output(frame, resolved.parameters)
