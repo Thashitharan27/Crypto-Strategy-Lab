@@ -6,7 +6,10 @@ import pandas.testing as pdt
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
-from crypto_strategy_lab.features.futures_positioning import FuturesPositioningFeatureProvider
+from crypto_strategy_lab.features.futures_positioning import (
+    FuturesPositioningFeatureProvider,
+    futures_positioning_price_resource,
+)
 
 
 def klines(n: int = 6) -> pd.DataFrame:
@@ -60,36 +63,66 @@ def request(frame: pd.DataFrame) -> DataRequest:
     )
 
 
-def prepared(kline_frame=None, metrics_frame=None) -> pd.DataFrame:
+def prepared(kline_frame=None, metrics_frame=None, price_frame=None) -> pd.DataFrame:
     kline_frame = klines() if kline_frame is None else kline_frame
     metrics_frame = metrics() if metrics_frame is None else metrics_frame
+    datasets: dict[object, pd.DataFrame] = {
+        DatasetKind.KLINES: kline_frame,
+        DatasetKind.FUTURES_METRICS: metrics_frame,
+    }
+    if price_frame is not None:
+        datasets[futures_positioning_price_resource()] = price_frame
     return FuturesPositioningFeatureProvider().compute(
-        request(kline_frame),
-        {
-            DatasetKind.KLINES: kline_frame,
-            DatasetKind.FUTURES_METRICS: metrics_frame,
-        },
-        {},
+        request(kline_frame), datasets, {}
     )
 
 
 def test_positioning_uses_latest_snapshot_available_at_candle_close() -> None:
     result = prepared()
 
-    # 04:00 close must use 03:55 OI=100, never the 04:05 future snapshot OI=999.
     assert result.loc[0, "metrics_source_available_at"] == pd.Timestamp("2026-01-01T03:55:00Z")
     assert result.loc[0, "open_interest"] == 100.0
     assert result.loc[0, "metrics_age_seconds"] == 300.0
-
-    # 08:00 close uses the 07:55 snapshot, so the deliberately huge 04:05 value
-    # cannot contaminate the aligned series.
     assert result.loc[1, "metrics_source_available_at"] == pd.Timestamp("2026-01-01T07:55:00Z")
     assert result.loc[1, "open_interest"] == 110.0
     assert np.isclose(result.loc[1, "open_interest_change_1bar_pct"], 0.10)
     assert result.loc[1, "price_oi_state"] == "PRICE_UP_OI_UP"
     assert np.isclose(result.loc[0, "taker_long_short_volume_bias"], 0.2)
-
     assert bool((result["metrics_source_available_at"] <= result["available_at"]).all())
+    # Without a true 1h source the provider refuses to relabel 4h strategy prices.
+    assert result["price_change_pct_1h"].isna().all()
+    assert set(result["oi_vs_price_state_1h"]) == {"UNKNOWN"}
+
+
+def test_oi_horizons_and_price_state_are_source_native_not_strategy_bar_lags() -> None:
+    strategy = klines(1)
+    strategy.loc[:, "close"] = 999.0  # deliberately unrelated to the 1h price source
+    metric_times = pd.to_datetime(
+        ["2026-01-01T03:00:00Z", "2026-01-01T03:55:00Z", "2026-01-01T04:00:00Z"],
+        utc=True,
+    )
+    metric_frame = pd.DataFrame(
+        {
+            "available_at": metric_times,
+            "open_interest": [100.0, 110.0, 120.0],
+            "open_interest_value": [1000.0, 1100.0, 1200.0],
+        }
+    )
+    price_frame = pd.DataFrame(
+        {
+            "available_at": pd.to_datetime(
+                ["2026-01-01T03:00:00Z", "2026-01-01T04:00:00Z"], utc=True
+            ),
+            "close": [100.0, 110.0],
+        }
+    )
+    out = prepared(strategy, metric_frame, price_frame)
+    assert out.loc[0, "oi_change_5m"] == 10.0
+    assert out.loc[0, "oi_change_pct_5m"] == pytest.approx(10.0 / 110.0)
+    assert out.loc[0, "oi_change_1h"] == 20.0
+    assert out.loc[0, "oi_change_pct_1h"] == pytest.approx(0.20)
+    assert out.loc[0, "price_change_pct_1h"] == pytest.approx(0.10)
+    assert out.loc[0, "oi_vs_price_state_1h"] == "PRICE_UP_OI_UP"
 
 
 def test_future_metrics_mutation_cannot_change_past_positioning() -> None:
@@ -114,6 +147,25 @@ def test_future_metrics_mutation_cannot_change_past_positioning() -> None:
     pdt.assert_frame_equal(
         before.loc[past_rows, columns].reset_index(drop=True),
         after.loc[past_rows, columns].reset_index(drop=True),
+        check_dtype=False,
+    )
+
+
+def test_future_one_hour_price_mutation_cannot_change_past_oi_price_state() -> None:
+    strategy = klines(4)
+    price_times = pd.date_range("2025-12-31T23:00:00Z", periods=18, freq="1h")
+    price = pd.DataFrame(
+        {"available_at": price_times, "close": 100.0 + np.arange(len(price_times))}
+    )
+    before = prepared(strategy, metrics(), price)
+    cutoff = pd.Timestamp("2026-01-01T08:00:00Z")
+    changed = price.copy()
+    changed.loc[changed.available_at > cutoff, "close"] *= 10.0
+    after = prepared(strategy, metrics(), changed)
+    mask = before.available_at <= cutoff
+    pdt.assert_frame_equal(
+        before.loc[mask, ["price_change_pct_1h", "oi_vs_price_state_1h"]].reset_index(drop=True),
+        after.loc[mask, ["price_change_pct_1h", "oi_vs_price_state_1h"]].reset_index(drop=True),
         check_dtype=False,
     )
 
