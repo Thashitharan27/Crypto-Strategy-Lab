@@ -61,6 +61,8 @@ class FastIntrabarWindow:
     left: int
     right: int
     timestamps: pd.DatetimeIndex
+    timestamp_values: np.ndarray
+    timestamp_unit: str
     opens: np.ndarray
     highs: np.ndarray
     lows: np.ndarray
@@ -77,8 +79,9 @@ class FastIntrabarWindow:
         """Return adjacent timestamp pairs whose spacing exceeds ``expected``."""
         if self.right - self.left <= 1:
             return ()
-        values = self.timestamps.asi8[self.left : self.right]
-        gap_offsets = np.flatnonzero(np.diff(values) > int(expected.value))
+        values = self.timestamp_values[self.left : self.right]
+        expected_units = int(expected / pd.Timedelta(1, unit=self.timestamp_unit))
+        gap_offsets = np.flatnonzero(np.diff(values) > expected_units)
         if gap_offsets.size == 0:
             return ()
         return tuple(
@@ -94,7 +97,13 @@ class FastIntrabarWindow:
         for index in range(self.left, self.right):
             yield (
                 index,
-                self.timestamps[index],
+                # Construct directly from the UTC integer datetime array. Indexing a
+                # DatetimeIndex boxes through several pandas layers for every
+                # candle; the public Timestamp constructor preserves the exact
+                # tz-aware scalar semantics without that indexing chain.
+                pd.Timestamp(
+                    self.timestamp_values[index], unit=self.timestamp_unit, tz="UTC"
+                ),
                 float(self.opens[index]),
                 float(self.highs[index]),
                 float(self.lows[index]),
@@ -229,7 +238,9 @@ class SearchsortedIntrabarFrame(pd.DataFrame):
         end_ts = _TimestampAccessor._utc(end)
         left = int(index.searchsorted(start_ts, side="left"))
         right = int(index.searchsorted(end_ts, side="left"))
-        return FastIntrabarWindow(left, right, index, opens, highs, lows)
+        return FastIntrabarWindow(
+            left, right, index, index.asi8, index.unit, opens, highs, lows
+        )
 
     def _boolean_mask_for_range(self, bounds: _TimestampRange) -> np.ndarray:
         series = pd.to_datetime(self._timestamp_series(), utc=True)

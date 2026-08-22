@@ -110,6 +110,33 @@ def test_fast_intrabar_window_matches_pandas_rows_and_gap_detection() -> None:
     )
 
 
+def test_fast_intrabar_rows_preserve_utc_without_indexing_datetime_index(monkeypatch) -> None:
+    indexed = as_searchsorted_intrabar(intrabar_frame(10))
+    start = pd.Timestamp("2026-01-01T00:02:00Z")
+    end = pd.Timestamp("2026-01-01T00:05:00Z")
+    window = indexed.fast_window(start, end)
+    assert window is not None
+
+    def fail_on_datetime_index_getitem(_self, _key):
+        raise AssertionError("hot row iteration must not index the DatetimeIndex")
+
+    monkeypatch.setattr(pd.DatetimeIndex, "__getitem__", fail_on_datetime_index_getitem)
+    rows = list(window.rows())
+
+    assert [row[1] for row in rows] == [
+        pd.Timestamp("2026-01-01T00:02:00Z"),
+        pd.Timestamp("2026-01-01T00:03:00Z"),
+        pd.Timestamp("2026-01-01T00:04:00Z"),
+    ]
+    assert all(type(row[1]) is pd.Timestamp for row in rows)
+    assert all(row[1].tzinfo is not None and str(row[1].tzinfo) == "UTC" for row in rows)
+    assert [(row[2], row[3], row[4]) for row in rows] == [
+        (100.0, 100.5, 99.5),
+        (100.0, 100.5, 99.5),
+        (100.0, 100.5, 99.5),
+    ]
+
+
 def test_intrabar_window_tuple_iteration_matches_pandas_iterrows() -> None:
     plain = intrabar_frame(30)
     plain.loc[7, "high"] = 111.25
