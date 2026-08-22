@@ -1,14 +1,9 @@
-"""Profile only the production Data Lake stateful simulation loop.
-
-This complements ``data_lake_benchmark.py``. Market-data/cache preparation and
-native prepared-frame construction happen outside cProfile so the report
-identifies the Python hotspots inside ``DataLakeProductionBacktestEngine.run()``
-itself.
-"""
+"""Profile the authoritative composed Data Lake research run."""
 from __future__ import annotations
 
 import argparse
 import cProfile
+from dataclasses import replace
 from datetime import datetime
 import hashlib
 import json
@@ -24,28 +19,18 @@ if str(PROJECT_ROOT) not in sys.path:
 import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
-from crypto_strategy_lab.data.backtest_service import BacktestDataBundle, load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
-from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
-from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
+from crypto_strategy_lab.features import production_feature_registry
+from crypto_strategy_lab.prepared_cache import PreparedRunCache
+from crypto_strategy_lab.research_adapters import NativeSimulator, NativeStrategyPolicy
+from crypto_strategy_lab.research_runner import ResearchRunner
 
 
 _FINGERPRINT_COLUMNS = (
-    "pair_id",
-    "trade_id",
-    "result_type",
-    "side",
-    "strategy_candle_open_time",
-    "strategy_entry_time",
-    "entry_time",
-    "exit_time",
-    "long_exit_reason",
-    "long_exit_source",
-    "short_exit_reason",
-    "short_exit_source",
-    "pair_net_pnl",
-    "pair_net_r",
-    "equity_after_trade",
+    "pair_id", "trade_id", "result_type", "side", "strategy_candle_open_time",
+    "strategy_entry_time", "entry_time", "exit_time", "long_exit_reason",
+    "long_exit_source", "short_exit_reason", "short_exit_source", "pair_net_pnl",
+    "pair_net_r", "equity_after_trade",
 )
 
 
@@ -71,53 +56,10 @@ def _trade_fingerprint(trades: pd.DataFrame) -> str:
     ).hexdigest()
 
 
-def _load_bundle(store, request, config, *, intrabar_start, include_agg_trades):
-    return load_backtest_bundle(
-        store,
-        request,
-        market_regime_method=config.market_regime_method,
-        structural_regime_sma_days=config.structural_regime_sma_days,
-        structural_regime_slope_lookback_days=config.structural_regime_slope_lookback_days,
-        refresh_catalog=False,
-        intrabar_start=intrabar_start,
-        atr_period=config.atr_period,
-        adx_period=config.adx_period,
-        di_pressure_lookback=config.di_pressure_lookback,
-        bb_period=config.bb_period,
-        bb_stddevs=config.bb_stddevs,
-        mean_reversion_period=config.mean_reversion_period,
-        mean_reversion_mean_type=getattr(config, "mean_reversion_mean_type", "SMA"),
-        mean_reversion_bb_stddevs=getattr(config, "mean_reversion_bb_stddevs", 2.0),
-        mean_reversion_rsi_period=getattr(config, "mean_reversion_rsi_period", 14),
-        mean_reversion_rsi_oversold=getattr(config, "mean_reversion_rsi_oversold", 30.0),
-        mean_reversion_rsi_overbought=getattr(config, "mean_reversion_rsi_overbought", 70.0),
-        mean_reversion_require_reentry=getattr(config, "mean_reversion_require_reentry", True),
-        enable_support_resistance_analysis=config.enable_support_resistance_analysis,
-        sr_timeframe_minutes=int(getattr(config, "sr_timeframe_minutes", 0) or 0),
-        sr_pivot_left=config.sr_pivot_left,
-        sr_pivot_right=config.sr_pivot_right,
-        sr_lookback_bars=config.sr_lookback_bars,
-        sr_zone_width_atr=config.sr_zone_width_atr,
-        sr_near_distance_atr=config.sr_near_distance_atr,
-        enable_sr_hold_confirmation=config.enable_sr_hold_confirmation,
-        sr_hold_confirmation_bars=config.sr_hold_confirmation_bars,
-        sr_hold_confirmation_atr=config.sr_hold_confirmation_atr,
-        sr_break_tolerance_atr=config.sr_break_tolerance_atr,
-        sr_break_basis=config.sr_break_basis,
-        include_agg_trade_flow=bool(include_agg_trades),
-    )
-
-
-def _engine(bundle: BacktestDataBundle, config):
-    prepared, intrabar = from_data_lake_bundle(bundle, config)
-    return DataLakeProductionBacktestEngine.from_prepared(prepared, intrabar, config)
-
-
-def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int) -> list[dict[str, object]]:
-    stats = pstats.Stats(profile)
-    rows: list[dict[str, object]] = []
-    for (filename, line, function), values in stats.stats.items():
-        primitive_calls, total_calls, self_seconds, cumulative_seconds, _callers = values
+def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int):
+    rows = []
+    for (filename, line, function), values in pstats.Stats(profile).stats.items():
+        primitive_calls, total_calls, self_seconds, cumulative_seconds, _ = values
         rows.append(
             {
                 "function": function,
@@ -136,7 +78,7 @@ def _profile_rows(profile: cProfile.Profile, sort_key: str, limit: int) -> list[
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Profile Crypto Strategy Lab Data Lake v2 stateful simulation"
+        description="Profile Crypto Strategy Lab authoritative ResearchRunner stages"
     )
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--raw-root", required=True, type=Path)
@@ -146,8 +88,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--end", required=True)
     parser.add_argument("--intrabar-start")
     parser.add_argument("--include-agg-trades", action="store_true")
-    parser.add_argument("--top", type=int, default=30, help="Functions to show per ranking")
-    parser.add_argument("--output", type=Path, help="Optional JSON output path")
+    parser.add_argument("--top", type=int, default=30)
+    parser.add_argument("--output", type=Path)
     return parser
 
 
@@ -157,41 +99,42 @@ def main() -> int:
         raise SystemExit("--top must be at least 1")
 
     config = load_data_lake_config(args.config)
+    if args.include_agg_trades:
+        config = replace(
+            config,
+            features=replace(config.features, include_agg_trade_flow=True),
+        )
     request = DataRequest(
         symbol=args.symbol,
         start=_utc(args.start),
         end=_utc(args.end),
-        strategy_interval=f"{int(config.strategy_timeframe_minutes)}m",
+        strategy_interval=f"{config.data.strategy_timeframe_minutes}m",
         intrabar_interval=(
-            f"{int(config.intrabar_timeframe_minutes)}m" if config.use_intrabar_data else None
+            f"{config.data.intrabar_timeframe_minutes}m"
+            if config.data.use_intrabar_data
+            else None
         ),
     )
     intrabar_start = _utc(args.intrabar_start) if args.intrabar_start else None
     store = MarketDataStore(args.raw_root, args.cache_root)
-
-    preparation_started = time.perf_counter()
-    bundle = _load_bundle(
+    runner = ResearchRunner(
         store,
-        request,
-        config,
-        intrabar_start=intrabar_start,
-        include_agg_trades=args.include_agg_trades,
+        production_feature_registry(),
+        PreparedRunCache(args.cache_root),
+        NativeStrategyPolicy(),
+        NativeSimulator(),
+        (),
     )
-    preparation_seconds = time.perf_counter() - preparation_started
-
-    engine_init_started = time.perf_counter()
-    engine = _engine(bundle, config)
-    engine_init_seconds = time.perf_counter() - engine_init_started
 
     profile = cProfile.Profile()
-    simulation_started = time.perf_counter()
+    started = time.perf_counter()
     profile.enable()
-    trades = engine.run()
+    run = runner.run(request, config, intrabar_start=intrabar_start)
     profile.disable()
-    simulation_seconds = time.perf_counter() - simulation_started
+    elapsed = time.perf_counter() - started
 
     result = {
-        "profile_contract": "data_lake_simulation_profile_v1",
+        "profile_contract": "research_runner_profile_v2",
         "config_path": str(args.config.resolve()),
         "raw_root": str(args.raw_root.resolve()),
         "cache_root": str(args.cache_root.resolve()),
@@ -203,19 +146,16 @@ def main() -> int:
             "intrabar_interval": request.intrabar_interval,
             "intrabar_start": intrabar_start.isoformat() if intrabar_start else None,
         },
-        "preparation_seconds": preparation_seconds,
-        "engine_init_seconds": engine_init_seconds,
-        "simulation_seconds_profiled": simulation_seconds,
-        "strategy_rows": len(bundle.strategy),
-        "intrabar_rows": len(bundle.intrabar) if bundle.intrabar is not None else 0,
-        "trade_rows": len(trades),
-        "intrabar_index_mode": getattr(bundle.intrabar, "intrabar_index_mode", None),
-        "intrabar_iteration_mode": getattr(bundle.intrabar, "intrabar_iteration_mode", None),
-        "trade_fingerprint": _trade_fingerprint(trades),
+        "stage_timings": dict(run.stage_timings),
+        "profiled_total_seconds": elapsed,
+        "strategy_rows": run.strategy_rows,
+        "intrabar_rows": run.intrabar_rows,
+        "trade_rows": len(run.trades),
+        "prepared_cache_hit": run.prepared_cache_hit,
+        "trade_fingerprint": _trade_fingerprint(run.trades),
         "top_by_cumulative": _profile_rows(profile, "cumulative", args.top),
         "top_by_self": _profile_rows(profile, "self", args.top),
     }
-
     text = json.dumps(result, indent=2, default=str)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
