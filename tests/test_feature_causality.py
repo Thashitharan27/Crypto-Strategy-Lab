@@ -250,11 +250,6 @@ def _cases():
              DatasetKind.INDEX_PRICE_KLINES: _mutate_reference,
              DatasetKind.PREMIUM_INDEX_KLINES: _mutate_reference},
         ),
-        CausalityCase(
-            "agg_trade_flow", _registry, request,
-            {DatasetKind.KLINES: k, DatasetKind.AGG_TRADES: agg}, {},
-            {DatasetKind.KLINES: _mutate_klines, DatasetKind.AGG_TRADES: _mutate_agg},
-        ),
     ]
 
 
@@ -262,7 +257,7 @@ _IDS = [
     "core-directional-di", "market-context-mr", "production-context-mr-v2",
     "policy-regime-asset-return", "policy-regime-structural", "support-resistance",
     "state-transition-daily", "futures-positioning", "funding-context",
-    "basis-context", "agg-trade-flow",
+    "basis-context",
 ]
 
 

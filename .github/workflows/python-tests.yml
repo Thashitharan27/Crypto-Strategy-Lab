@@ -110,7 +110,8 @@ jobs:
           tests/test_funding_context_features.py
           tests/test_taker_flow_context_features.py
           tests/test_basis_context_features.py
-          tests/test_agg_trade_flow_features.py
+          tests/test_trade_flow_aggregates.py
+          tests/test_trade_flow_causality.py
           tests/test_research_feature_trade_rows.py
           tests/test_feature_cache.py
           tests/test_binance_compact_adapters.py

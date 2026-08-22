@@ -18,6 +18,11 @@ _AGG_TRADE_COLUMNS = (
     "is_buyer_maker",
 )
 
+_TRADE_COLUMNS = (
+    "trade_id", "price", "quantity", "quote_quantity", "transact_time",
+    "is_buyer_maker",
+)
+
 
 def _key(value: object) -> str:
     return "".join(character for character in str(value).strip().lower() if character.isalnum())
@@ -100,7 +105,50 @@ class AggTradesArchiveAdapter(BinanceArchiveAdapter):
         )
         if bool(invalid.any()):
             raise ValueError(f"Invalid Binance aggTrades rows found in {record.path}")
-        frame = frame.sort_values(["event_time", "agg_trade_id"], kind="stable")
-        return frame.drop_duplicates(
-            subset=["symbol", "agg_trade_id"], keep="last"
-        ).reset_index(drop=True)
+        if bool(frame["agg_trade_id"].duplicated().any()):
+            raise ValueError(f"Duplicate Binance aggregate trade IDs found in {record.path}")
+        return frame.sort_values(["event_time", "agg_trade_id"], kind="stable").reset_index(drop=True)
+
+
+class TradesArchiveAdapter(BinanceArchiveAdapter):
+    """Normalize Binance USD-M individual trade archives."""
+
+    dataset = DatasetKind.TRADES
+
+    def read(self, record: ArchiveRecord) -> pd.DataFrame:
+        if record.dataset != self.dataset:
+            raise ValueError(f"TradesArchiveAdapter cannot read {record.dataset.value}")
+        with open_csv_stream(record.path) as stream:
+            raw = pd.read_csv(stream, header=None, low_memory=False)
+        if raw.empty:
+            return pd.DataFrame()
+        if _key(raw.iloc[0, 0]) in {"tradeid", "id"}:
+            raw = raw.iloc[1:].reset_index(drop=True)
+        if raw.shape[1] < len(_TRADE_COLUMNS):
+            raise ValueError(f"Unexpected Binance trades schema in {record.path}: {raw.shape[1]} columns")
+        raw = raw.iloc[:, :len(_TRADE_COLUMNS)].copy()
+        raw.columns = _TRADE_COLUMNS
+        event_time = timestamp_series(raw["transact_time"])
+        price = pd.to_numeric(raw["price"], errors="raise")
+        quantity = pd.to_numeric(raw["quantity"], errors="raise")
+        quote = pd.to_numeric(raw["quote_quantity"], errors="raise")
+        maker = _boolean_series(raw["is_buyer_maker"])
+        frame = pd.DataFrame({
+            "exchange": record.exchange, "market": record.market.value,
+            "dataset": record.dataset.value, "symbol": record.symbol, "interval": None,
+            "event_time": event_time, "period_start": event_time, "period_end": event_time,
+            "available_at": event_time,
+            "trade_id": pd.to_numeric(raw["trade_id"], errors="raise").astype("int64"),
+            "price": price, "quantity": quantity, "quote_quantity": quote,
+            "is_buyer_maker": maker,
+            "taker_side": np.where(maker.to_numpy(bool), "SELL", "BUY"),
+            "source_archive": str(record.path), "source_fingerprint": record.fingerprint,
+        })
+        invalid = (~np.isfinite(frame["price"]) | ~np.isfinite(frame["quantity"])
+                   | ~np.isfinite(frame["quote_quantity"]) | (frame["price"] <= 0)
+                   | (frame["quantity"] <= 0) | (frame["quote_quantity"] < 0))
+        if bool(invalid.any()):
+            raise ValueError(f"Invalid Binance trades rows found in {record.path}")
+        if bool(frame["trade_id"].duplicated().any()):
+            raise ValueError(f"Duplicate Binance trade IDs found in {record.path}")
+        return frame.sort_values(["event_time", "trade_id"], kind="stable").reset_index(drop=True)

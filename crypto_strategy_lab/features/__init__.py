@@ -1,10 +1,7 @@
 """Versioned feature-store contracts."""
 
-from .agg_trade_flow import (
-    AGG_TRADE_FLOW_FEATURE_NAME,
-    AGG_TRADE_FLOW_FEATURE_VERSION,
-    AggTradeFlowFeatureProvider,
-)
+from .trade_flow import (TRADE_FLOW_FEATURE_NAME, TRADE_FLOW_FEATURE_VERSION,
+                         TradeFlowContextFeatureProvider, trade_flow_resource)
 from .base import FeatureDataResource, FeatureDefinition, FeatureProvider, OutputField, ParameterDefinition
 from .taker_flow import (TAKER_FLOW_CONTEXT_FEATURE_NAME, TAKER_FLOW_CONTEXT_FEATURE_VERSION,
                          TakerFlowContextFeatureProvider, taker_flow_resource)
@@ -90,9 +87,10 @@ __all__ = [
     "BASIS_CONTEXT_FEATURE_NAME",
     "BASIS_CONTEXT_FEATURE_VERSION",
     "BasisContextFeatureProvider",
-    "AGG_TRADE_FLOW_FEATURE_NAME",
-    "AGG_TRADE_FLOW_FEATURE_VERSION",
-    "AggTradeFlowFeatureProvider",
+    "TRADE_FLOW_FEATURE_NAME",
+    "TRADE_FLOW_FEATURE_VERSION",
+    "TradeFlowContextFeatureProvider",
+    "trade_flow_resource",
     "TAKER_FLOW_CONTEXT_FEATURE_NAME", "TAKER_FLOW_CONTEXT_FEATURE_VERSION",
     "TakerFlowContextFeatureProvider", "taker_flow_resource",
 ]
@@ -112,7 +110,7 @@ def production_feature_registry(*, structural_benchmark=None) -> FeatureRegistry
         FundingContextFeatureProvider(),
         BasisContextFeatureProvider(),
         TakerFlowContextFeatureProvider(),
-        AggTradeFlowFeatureProvider(),
+        TradeFlowContextFeatureProvider(),
     ):
         registry.register(provider)
     return registry

@@ -233,7 +233,7 @@ def test_production_registry_exposes_core_authoritative_metadata() -> None:
     registry = production_feature_registry()
     expected = {"core_directional", "production_market_context", "policy_market_context",
                 "support_resistance", "state_transition_daily", "funding_context",
-                "basis_context", "futures_positioning", "agg_trade_flow"}
+                "basis_context", "futures_positioning", "trade_flow_context"}
     assert expected <= set(registry.names())
     core = registry.get(CORE_DIRECTIONAL_FEATURE_NAME).definition
     assert core.availability_rule == "current_completed_kline_available_at"

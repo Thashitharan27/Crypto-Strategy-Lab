@@ -55,6 +55,22 @@ class ResearchRunResult:
     data_quality: DataQualityReport | None = None
 
 
+def _feature_metadata(frame: pd.DataFrame) -> dict[str, Any]:
+    """Expose cache provenance already attached by authoritative data services."""
+    metadata: dict[str, Any] = {
+        "cache_hit": bool(frame.attrs.get("feature_cache_hit", False)),
+        "cache_key": frame.attrs.get("feature_cache_key"),
+        "rows": len(frame),
+    }
+    if "trade_aggregate_cache_hit" in frame.attrs:
+        metadata["trade_aggregate_cache"] = {
+            "hit": bool(frame.attrs.get("trade_aggregate_cache_hit", False)),
+            "partitions_built": int(frame.attrs.get("partitions_built", 0) or 0),
+            "partitions_reused": int(frame.attrs.get("partitions_reused", 0) or 0),
+        }
+    return metadata
+
+
 class ResearchRunner:
     """Coordinate injected services without owning feature or fill formulas."""
 
@@ -178,14 +194,7 @@ class ResearchRunner:
         if bundle.state_transition_daily_features is not None:
             frames["state_transition_daily"] = bundle.state_transition_daily_features
         frames.update(bundle.research_features)
-        features = {
-            name: {
-                "cache_hit": bool(frame.attrs.get("feature_cache_hit", False)),
-                "cache_key": frame.attrs.get("feature_cache_key"),
-                "rows": len(frame),
-            }
-            for name, frame in frames.items()
-        }
+        features = {name: _feature_metadata(frame) for name, frame in frames.items()}
         after = dict(getattr(self.data_store, "canonical_cache_events", {}))
         canonical = {
             name: int(after.get(name, 0) - before.get(name, 0))

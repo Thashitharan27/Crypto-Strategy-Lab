@@ -100,7 +100,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             sr_hold_confirmation_atr=self.config.sr_hold_confirmation_atr,
             sr_break_tolerance_atr=self.config.sr_break_tolerance_atr,
             sr_break_basis=self.config.sr_break_basis,
-            include_agg_trade_flow=self.run_spec.include_agg_trade_flow,
+            trade_flow_enabled=self.run_spec.include_agg_trade_flow,
         )
 
     @Slot()
@@ -141,7 +141,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 self._log("Futures research: " + ", ".join(labels))
             else:
                 self._log("Futures research: no local compact/reference coverage for this request")
-            if self.run_spec.include_agg_trade_flow and "agg_trade_flow" not in bundle.research_features:
+            if self.run_spec.include_agg_trade_flow and "trade_flow_context" not in bundle.research_features:
                 self._log("AggTrades research requested but no local aggTrades coverage was found")
             if bundle.structural_benchmark is not None:
                 self._log(
