@@ -30,7 +30,11 @@ _FLOAT_FIELDS = (
 _TEXT_FIELDS = (
     "long_di_pressure_state", "short_di_pressure_state",
     "mean_reversion_state", "mean_reversion_motion",
-    "mean_reversion_strength_label",
+    "mean_reversion_strength_label", "mean_reversion_bb_location",
+    "mean_reversion_rsi_state", "mean_reversion_reentry_confirmation",
+    "mean_reversion_signal", "mean_reversion_signal_direction",
+    "mean_reversion_setup_strength", "bb_reentry", "mr_signal",
+    "mr_signal_direction",
 )
 _REQUIRED_FINITE = ("open", "high", "low", "close", "volume")
 
@@ -130,9 +134,18 @@ class PreparedBacktestFrame:
     mean_reversion_bb_upper: np.ndarray
     mean_reversion_bb_lower: np.ndarray
     mean_reversion_bb_zscore: np.ndarray
+    mean_reversion_bb_location: np.ndarray
     mean_reversion_rsi: np.ndarray
+    mean_reversion_rsi_state: np.ndarray
     mean_reversion_long_reentry: np.ndarray
     mean_reversion_short_reentry: np.ndarray
+    mean_reversion_reentry_confirmation: np.ndarray
+    mean_reversion_signal: np.ndarray
+    mean_reversion_signal_direction: np.ndarray
+    mean_reversion_setup_strength: np.ndarray
+    bb_reentry: np.ndarray
+    mr_signal: np.ndarray
+    mr_signal_direction: np.ndarray
     di_spread: np.ndarray
     di_spread_1: np.ndarray
     di_spread_3: np.ndarray
@@ -347,7 +360,11 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
         "close_location", "mean_reversion_mean", "mean_reversion_distance_atr",
         "mean_reversion_distance_atr_previous", "mean_reversion_sigma",
         "mean_reversion_bb_upper", "mean_reversion_bb_lower", "mean_reversion_bb_zscore",
-        "mean_reversion_rsi", "mean_reversion_long_reentry", "mean_reversion_short_reentry",
+        "mean_reversion_bb_location", "mean_reversion_rsi", "mean_reversion_rsi_state",
+        "mean_reversion_long_reentry", "mean_reversion_short_reentry",
+        "mean_reversion_reentry_confirmation", "mean_reversion_signal",
+        "mean_reversion_signal_direction", "mean_reversion_setup_strength",
+        "bb_reentry", "mr_signal", "mr_signal_direction",
         "mean_reversion_distance_change_atr", "mean_reversion_state",
         "mean_reversion_motion", "mean_reversion_strength",
         "mean_reversion_strength_label",
@@ -380,7 +397,11 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
         "mean_reversion_mean", "mean_reversion_distance_atr",
         "mean_reversion_distance_atr_previous", "mean_reversion_sigma",
         "mean_reversion_bb_upper", "mean_reversion_bb_lower", "mean_reversion_bb_zscore",
-        "mean_reversion_rsi", "mean_reversion_long_reentry", "mean_reversion_short_reentry",
+        "mean_reversion_bb_location", "mean_reversion_rsi", "mean_reversion_rsi_state",
+        "mean_reversion_long_reentry", "mean_reversion_short_reentry",
+        "mean_reversion_reentry_confirmation", "mean_reversion_signal",
+        "mean_reversion_signal_direction", "mean_reversion_setup_strength",
+        "bb_reentry", "mr_signal", "mr_signal_direction",
         "mean_reversion_distance_change_atr", "mean_reversion_state",
         "mean_reversion_motion", "mean_reversion_strength", "mean_reversion_strength_label",
     )}
