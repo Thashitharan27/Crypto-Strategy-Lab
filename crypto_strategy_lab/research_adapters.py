@@ -107,6 +107,11 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
     for rejected rows is an exact strategy-candle timestamp lookup into the
     already-bound PreparedBacktestFrame; there is no nearest/asof lookup and no
     strategy re-evaluation.
+
+    PreparedBacktestFrame stores UTC instants as ``datetime64[ns]`` without a
+    timezone tag.  Signal artifacts deliberately use that same UTC-normalized
+    storage representation so DuckDB comparisons are deterministic on hosts
+    whose local timezone is not UTC.
     """
     columns = [
         "signal_id",
@@ -212,8 +217,8 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
             {
                 "signal_id": pd.Series(dtype="string"),
                 "strategy_index": pd.Series(dtype="int64"),
-                "candle_open_time": pd.Series(dtype="datetime64[ns, UTC]"),
-                "decision_available_at": pd.Series(dtype="datetime64[ns, UTC]"),
+                "candle_open_time": pd.Series(dtype="datetime64[ns]"),
+                "decision_available_at": pd.Series(dtype="datetime64[ns]"),
                 "side": pd.Series(dtype="string"),
                 "profile": pd.Series(dtype="string"),
                 "decision": pd.Series(dtype="string"),
@@ -229,10 +234,10 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
     ).astype("int64")
     result["candle_open_time"] = pd.to_datetime(
         result["candle_open_time"], utc=True
-    )
+    ).dt.tz_localize(None)
     result["decision_available_at"] = pd.to_datetime(
         result["decision_available_at"], utc=True
-    )
+    ).dt.tz_localize(None)
     return result.sort_values(
         ["strategy_index", "decision", "signal_id"], kind="stable"
     ).reset_index(drop=True)
