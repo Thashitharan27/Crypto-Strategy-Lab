@@ -41,3 +41,11 @@ def test_validator_cli_has_no_legacy_csv_options() -> None:
     options = {action.dest for action in _tool().build_parser()._actions}
     assert "legacy_strategy_csv" not in options
     assert "timestamp_unit" not in options
+
+
+def test_validator_uses_full_canonical_klines_for_intrabar_validation() -> None:
+    source = (Path(__file__).resolve().parents[1] / "tools/data_lake_validate.py").read_text(
+        encoding="utf-8"
+    )
+    assert "load_execution_klines" not in source
+    assert "store.load_klines(intrabar_request, request.intrabar_interval)" in source
