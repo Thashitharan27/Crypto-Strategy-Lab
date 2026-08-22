@@ -48,15 +48,15 @@ class FeatureFrameCache:
             "format_version": self.format_version,
             "request_scope": request.feature_scope_key(),
             "parameters": dict(parameters),
-            # Keep the primary source field stable so existing single-source
-            # feature cache identities do not change during this migration.
             "source": self._source_signature(canonical_source),
             "additional_sources": [
                 self._source_signature(source) for source in additional_sources
             ],
             "dependencies": list(dependency_keys),
         }
-        raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        raw = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
         return sha256(raw).hexdigest()
 
     def key_from_signatures(
@@ -110,9 +110,16 @@ class FeatureFrameCache:
         if not parquet_path.is_file() or not metadata_path.is_file():
             return None
         try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if (
+                metadata.get("cache_format_version") != self.format_version
+                or metadata.get("feature_name") != definition.name
+                or metadata.get("feature_version") != definition.version
+                or metadata.get("feature_cache_key") != key
+            ):
+                return None
             with duckdb.connect() as con:
                 frame = con.read_parquet(str(parquet_path)).df()
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         except Exception:
             # Cache is disposable. A broken/incomplete entry simply becomes a miss.
             return None
@@ -136,8 +143,7 @@ class FeatureFrameCache:
         temporary_parquet = parquet_path.with_suffix(".tmp.parquet")
         temporary_metadata = metadata_path.with_suffix(".tmp.json")
         for path in (temporary_parquet, temporary_metadata):
-            if path.exists():
-                path.unlink()
+            path.unlink(missing_ok=True)
 
         with duckdb.connect() as con:
             con.register("feature_frame", frame)
