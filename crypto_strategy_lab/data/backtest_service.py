@@ -1,7 +1,7 @@
 """Prepare simulator inputs from the Binance Data Lake."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import pandas as pd
 
@@ -16,7 +16,12 @@ from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
 from .query import DataRequest
 from .store import DataNotAvailableError, MarketDataStore
 from .timing import interval_to_timedelta
-from .quality import DataQualityCache, DataQualityReport, validate_dataset
+from .quality import (
+    DataQualityIssue,
+    DataQualityReport,
+    DataQualityStatus,
+    DatasetQualityReport,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +38,7 @@ class BacktestDataBundle:
     structural_benchmark_interval: str | None
     state_transition_daily_features: pd.DataFrame | None = None
     data_quality: DataQualityReport | None = None
+    intrabar_interval: str | None = None
 
 
 def _cached_multisource_feature(store, request, datasets, provider, parameters=None, *, registry=None):
@@ -106,6 +112,43 @@ def _dataset_request(request: DataRequest, dataset: DatasetKind, *, start=None) 
     )
 
 
+def _quality_is_usable_optional(report: DatasetQualityReport) -> bool:
+    if report.status is DataQualityStatus.MISSING:
+        return False
+    return not any(issue.severity is DataQualityStatus.ERROR for issue in report.issues)
+
+
+def _nonfatal_fallback_report(
+    report: DatasetQualityReport,
+    *,
+    requested_interval: str,
+    actual_interval: str | None,
+    policy: str,
+) -> DatasetQualityReport:
+    downgraded = tuple(
+        replace(issue, severity=DataQualityStatus.WARN)
+        if issue.severity is DataQualityStatus.ERROR
+        else issue
+        for issue in report.issues
+    )
+    fallback = DataQualityIssue(
+        code="EXPLICIT_INTRABAR_FALLBACK",
+        severity=DataQualityStatus.WARN,
+        message="Requested intrabar data was unavailable or invalid; explicit fallback policy was used",
+        details={
+            "requested_interval": requested_interval,
+            "actual_interval": actual_interval,
+            "policy": policy,
+        },
+    )
+    return replace(
+        report,
+        required=False,
+        status=DataQualityStatus.WARN,
+        issues=(*downgraded, fallback),
+    )
+
+
 def _optional_futures_research_features(
     store: MarketDataStore,
     request: DataRequest,
@@ -113,50 +156,57 @@ def _optional_futures_research_features(
     *,
     include_agg_trade_flow: bool = False,
     registry=None,
+    usable_datasets: set[DatasetKind] | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """Load futures research blocks when local coverage exists.
+    """Load futures research blocks when validated local coverage exists.
 
     Compact metrics/funding/reference-price datasets are inexpensive enough to
     attach automatically. Aggregate trades can be very large, so trade-flow
-    aggregation is explicit opt-in.
+    aggregation is explicit opt-in. Optional data with integrity errors is
+    reported by the quality layer and is not fed to a feature provider.
     """
     if request.market != MarketKind.FUTURES_UM:
         return {}
 
+    allowed = usable_datasets
     result: dict[str, pd.DataFrame] = {}
-    try:
-        provider = FuturesPositioningFeatureProvider()
-        positioning = _cached_catalog_feature(
-            store, request, canonical, DatasetKind.FUTURES_METRICS, provider,
-            registry=registry,
-        )
-        if positioning is not None:
-            result[provider.definition.name] = positioning
-    except DataNotAvailableError:
-        pass
-
-    try:
-        funding_request = _dataset_request(
-            request,
-            DatasetKind.FUNDING_RATE,
-            start=request.start - timedelta(hours=24),
-        )
-        funding = store.load_dataset(funding_request, DatasetKind.FUNDING_RATE)
-        if not funding.empty:
-            provider = FundingContextFeatureProvider()
-            result[provider.definition.name] = _cached_multisource_feature(
-                store,
-                request,
-                {DatasetKind.KLINES: canonical, DatasetKind.FUNDING_RATE: funding},
-                provider,
+    if allowed is None or DatasetKind.FUTURES_METRICS in allowed:
+        try:
+            provider = FuturesPositioningFeatureProvider()
+            positioning = _cached_catalog_feature(
+                store, request, canonical, DatasetKind.FUTURES_METRICS, provider,
                 registry=registry,
             )
-    except DataNotAvailableError:
-        pass
+            if positioning is not None:
+                result[provider.definition.name] = positioning
+        except DataNotAvailableError:
+            pass
+
+    if allowed is None or DatasetKind.FUNDING_RATE in allowed:
+        try:
+            funding_request = _dataset_request(
+                request,
+                DatasetKind.FUNDING_RATE,
+                start=request.start - timedelta(hours=24),
+            )
+            funding = store.load_dataset(funding_request, DatasetKind.FUNDING_RATE)
+            if not funding.empty:
+                provider = FundingContextFeatureProvider()
+                result[provider.definition.name] = _cached_multisource_feature(
+                    store,
+                    request,
+                    {DatasetKind.KLINES: canonical, DatasetKind.FUNDING_RATE: funding},
+                    provider,
+                    registry=registry,
+                )
+        except DataNotAvailableError:
+            pass
 
     reference_start = request.start - interval_to_timedelta(request.strategy_interval)
     reference_frames: dict[DatasetKind, pd.DataFrame] = {}
     for dataset in (DatasetKind.MARK_PRICE_KLINES, DatasetKind.INDEX_PRICE_KLINES):
+        if allowed is not None and dataset not in allowed:
+            continue
         try:
             frame = store.load_dataset(
                 _dataset_request(request, dataset, start=reference_start),
@@ -171,20 +221,21 @@ def _optional_futures_research_features(
         DatasetKind.MARK_PRICE_KLINES in reference_frames
         and DatasetKind.INDEX_PRICE_KLINES in reference_frames
     ):
-        try:
-            premium = store.load_dataset(
-                _dataset_request(
-                    request,
+        if allowed is None or DatasetKind.PREMIUM_INDEX_KLINES in allowed:
+            try:
+                premium = store.load_dataset(
+                    _dataset_request(
+                        request,
+                        DatasetKind.PREMIUM_INDEX_KLINES,
+                        start=reference_start,
+                    ),
                     DatasetKind.PREMIUM_INDEX_KLINES,
-                    start=reference_start,
-                ),
-                DatasetKind.PREMIUM_INDEX_KLINES,
-                interval=request.strategy_interval,
-            )
-            if not premium.empty:
-                reference_frames[DatasetKind.PREMIUM_INDEX_KLINES] = premium
-        except DataNotAvailableError:
-            pass
+                    interval=request.strategy_interval,
+                )
+                if not premium.empty:
+                    reference_frames[DatasetKind.PREMIUM_INDEX_KLINES] = premium
+            except DataNotAvailableError:
+                pass
         provider = BasisContextFeatureProvider()
         result[provider.definition.name] = _cached_multisource_feature(
             store,
@@ -195,6 +246,10 @@ def _optional_futures_research_features(
         )
 
     if include_agg_trade_flow:
+        if allowed is not None and DatasetKind.AGG_TRADES not in allowed:
+            raise DataNotAvailableError(
+                "agg_trade_flow was explicitly requested but validated aggTrades are unavailable"
+            )
         try:
             agg_trades = store.load_dataset(
                 _dataset_request(request, DatasetKind.AGG_TRADES),
@@ -253,22 +308,27 @@ def load_backtest_bundle(
     include_agg_trade_flow: bool = False,
     feature_registry=None,
     feature_config=None,
+    data_config=None,
 ) -> BacktestDataBundle:
-    """Load canonical market data and reusable causal feature blocks.
+    """Load validated canonical market data and reusable causal feature blocks.
 
-    The composed path supplies ``feature_config`` and ``feature_registry``. The
-    individual keyword arguments remain temporarily for genuine non-composed
-    callers; they are not the authoritative ResearchRunner contract.
+    The composed path supplies component config objects and an injected registry.
+    Individual feature keyword arguments remain temporarily for genuine
+    non-composed callers; they are not the authoritative ResearchRunner contract.
     """
     if refresh_catalog:
         store.refresh_catalog()
 
     canonical = store.load_klines(request, request.strategy_interval)
-    quality_cache = DataQualityCache(store.cache.root)
-    quality_reports = [quality_cache.get_or_validate(
-        canonical, request, DatasetKind.KLINES,
-        interval=request.strategy_interval, required=True,
-    )]
+    quality_reports = [
+        store.data_quality_report(
+            request,
+            DatasetKind.KLINES,
+            interval=request.strategy_interval,
+            required=True,
+            frame=canonical,
+        )
+    ]
     DataQualityReport(tuple(quality_reports)).raise_for_errors()
     strategy = canonical
     strategy_minutes = int(
@@ -326,6 +386,38 @@ def load_backtest_bundle(
                 "sr_break_basis": str(sr_break_basis).upper(),
             }
 
+    # Validate optional/required futures source families before executing the
+    # corresponding research providers. Missing optional data remains visible;
+    # invalid optional data is not converted into synthetic feature values.
+    usable_research_datasets: set[DatasetKind] | None = None
+    if request.market == MarketKind.FUTURES_UM:
+        usable_research_datasets = set()
+        for dataset, interval in (
+            (DatasetKind.FUTURES_METRICS, None),
+            (DatasetKind.FUNDING_RATE, None),
+            (DatasetKind.MARK_PRICE_KLINES, request.strategy_interval),
+            (DatasetKind.INDEX_PRICE_KLINES, request.strategy_interval),
+            (DatasetKind.PREMIUM_INDEX_KLINES, request.strategy_interval),
+        ):
+            report = store.data_quality_report(
+                request,
+                dataset,
+                interval=interval,
+                required=False,
+            )
+            quality_reports.append(report)
+            if _quality_is_usable_optional(report):
+                usable_research_datasets.add(dataset)
+        if include_agg_trade_flow:
+            agg_report = store.data_quality_report(
+                request,
+                DatasetKind.AGG_TRADES,
+                required=True,
+            )
+            quality_reports.append(agg_report)
+            DataQualityReport((agg_report,)).raise_for_errors()
+            usable_research_datasets.add(DatasetKind.AGG_TRADES)
+
     registry = feature_registry if feature_registry is not None else production_feature_registry()
     requested = ["production_market_context", "state_transition_daily"]
     if enable_support_resistance_analysis:
@@ -348,9 +440,11 @@ def load_backtest_bundle(
         canonical,
         include_agg_trade_flow=include_agg_trade_flow,
         registry=registry,
+        usable_datasets=usable_research_datasets,
     )
 
     intrabar = None
+    actual_intrabar_interval = None
     if request.intrabar_interval:
         effective_start = max(request.start, intrabar_start) if intrabar_start else request.start
         intrabar_request = DataRequest(
@@ -361,13 +455,61 @@ def load_backtest_bundle(
             market=request.market,
             exchange=request.exchange,
         )
-        full_intrabar = store.load_klines(intrabar_request, request.intrabar_interval)
-        quality_reports.append(quality_cache.get_or_validate(
-            full_intrabar, intrabar_request, DatasetKind.KLINES,
-            interval=request.intrabar_interval, required=True,
-        ))
-        DataQualityReport(tuple(quality_reports)).raise_for_errors()
-        intrabar = store.load_execution_klines(intrabar_request, request.intrabar_interval)
+        requested_quality = store.data_quality_report(
+            intrabar_request,
+            DatasetKind.KLINES,
+            interval=request.intrabar_interval,
+            required=True,
+        )
+        if requested_quality.status is DataQualityStatus.ERROR:
+            policy = str(getattr(data_config, "intrabar_missing_policy", "ERROR")).upper()
+            if policy == "ERROR":
+                DataQualityReport((requested_quality,)).raise_for_errors()
+            elif policy == "WARN_AND_USE_15M":
+                fallback_interval = "15m"
+                if interval_to_timedelta(fallback_interval) >= interval_to_timedelta(request.strategy_interval):
+                    raise ValueError("15m intrabar fallback must remain below the strategy timeframe")
+                quality_reports.append(
+                    _nonfatal_fallback_report(
+                        requested_quality,
+                        requested_interval=request.intrabar_interval,
+                        actual_interval=fallback_interval,
+                        policy=policy,
+                    )
+                )
+                fallback_request = DataRequest(
+                    symbol=request.symbol,
+                    start=effective_start,
+                    end=request.end,
+                    strategy_interval=fallback_interval,
+                    market=request.market,
+                    exchange=request.exchange,
+                )
+                fallback_quality = store.data_quality_report(
+                    fallback_request,
+                    DatasetKind.KLINES,
+                    interval=fallback_interval,
+                    required=True,
+                )
+                DataQualityReport((fallback_quality,)).raise_for_errors()
+                quality_reports.append(fallback_quality)
+                intrabar = store.load_execution_klines(fallback_request, fallback_interval)
+                actual_intrabar_interval = fallback_interval
+            elif policy == "WARN_AND_CONTINUE":
+                quality_reports.append(
+                    _nonfatal_fallback_report(
+                        requested_quality,
+                        requested_interval=request.intrabar_interval,
+                        actual_interval=None,
+                        policy=policy,
+                    )
+                )
+            else:
+                raise ValueError(f"Unsupported intrabar missing policy: {policy}")
+        else:
+            quality_reports.append(requested_quality)
+            intrabar = store.load_execution_klines(intrabar_request, request.intrabar_interval)
+            actual_intrabar_interval = request.intrabar_interval
 
     benchmark = None
     benchmark_symbol = None
@@ -393,22 +535,15 @@ def load_backtest_bundle(
         benchmark = store.load_klines(
             benchmark_request, benchmark_request.strategy_interval
         )
-
-    # Auto-attached futures contexts are optional, but absence is provenance,
-    # never an implicit neutral/zero feature frame.
-    if request.market == MarketKind.FUTURES_UM:
-        optional_features = {
-            DatasetKind.FUTURES_METRICS: "futures_positioning",
-            DatasetKind.FUNDING_RATE: "funding_context",
-        }
-        for dataset, feature_name in optional_features.items():
-            if feature_name not in research_features:
-                quality_reports.append(validate_dataset(None, request, dataset, required=False))
-        if "basis_context" not in research_features:
-            for dataset in (DatasetKind.MARK_PRICE_KLINES, DatasetKind.INDEX_PRICE_KLINES):
-                quality_reports.append(validate_dataset(None, request, dataset,
-                                                        interval=request.strategy_interval,
-                                                        required=False))
+        benchmark_quality = store.data_quality_report(
+            benchmark_request,
+            DatasetKind.KLINES,
+            interval=benchmark_request.strategy_interval,
+            required=True,
+            frame=benchmark,
+        )
+        quality_reports.append(benchmark_quality)
+        DataQualityReport((benchmark_quality,)).raise_for_errors()
 
     data_quality = DataQualityReport(tuple(quality_reports))
     data_quality.raise_for_errors()
@@ -425,4 +560,5 @@ def load_backtest_bundle(
         structural_benchmark_interval=benchmark_interval_used,
         state_transition_daily_features=state_transition_daily,
         data_quality=data_quality,
+        intrabar_interval=actual_intrabar_interval,
     )
