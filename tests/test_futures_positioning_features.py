@@ -3,13 +3,17 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pandas.testing as pdt
+import pytest
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.features.futures_positioning import (
+    FUTURES_POSITIONING_FEATURE_NAME,
     FuturesPositioningFeatureProvider,
     futures_positioning_price_resource,
 )
+from feature_causality_harness import CausalityCase, assert_future_mutation_invariant
 
 
 def klines(n: int = 6) -> pd.DataFrame:
@@ -168,6 +172,43 @@ def test_future_one_hour_price_mutation_cannot_change_past_oi_price_state() -> N
         after.loc[mask, ["price_change_pct_1h", "oi_vs_price_state_1h"]].reset_index(drop=True),
         check_dtype=False,
     )
+
+
+def test_positioning_all_sources_participate_in_generic_causality_harness() -> None:
+    strategy = klines(6)
+    metric_frame = metrics()
+    resource = futures_positioning_price_resource()
+    price = pd.DataFrame(
+        {
+            "available_at": pd.date_range("2025-12-31T23:00:00Z", periods=26, freq="1h"),
+            "close": 100.0 + np.arange(26),
+        }
+    )
+
+    def mutate_metrics(frame: pd.DataFrame, cutoff: pd.Timestamp) -> None:
+        mask = pd.to_datetime(frame["available_at"], utc=True) > cutoff
+        frame.loc[mask, "open_interest"] *= 3.0
+
+    def mutate_price(frame: pd.DataFrame, cutoff: pd.Timestamp) -> None:
+        mask = pd.to_datetime(frame["available_at"], utc=True) > cutoff
+        frame.loc[mask, "close"] *= 2.0
+
+    case = CausalityCase(
+        feature_name=FUTURES_POSITIONING_FEATURE_NAME,
+        registry_factory=lambda _: production_feature_registry(),
+        request=request(strategy),
+        datasets={
+            DatasetKind.KLINES: strategy,
+            DatasetKind.FUTURES_METRICS: metric_frame,
+            resource: price,
+        },
+        parameters={FUTURES_POSITIONING_FEATURE_NAME: {}},
+        future_mutators={
+            DatasetKind.FUTURES_METRICS: mutate_metrics,
+            resource: mutate_price,
+        },
+    )
+    assert_future_mutation_invariant(case)
 
 
 def test_missing_optional_metrics_columns_remain_nan_without_breaking_alignment() -> None:
