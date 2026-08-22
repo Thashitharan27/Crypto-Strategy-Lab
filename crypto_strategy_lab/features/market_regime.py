@@ -69,29 +69,68 @@ def causal_trailing_return(strategy_times, close, delta: pd.Timedelta) -> np.nda
 
 
 def prepare_policy_market_features(strategy_times, close, config, benchmark=None):
-    """Legacy-shaped helper retained as the semantic reference for policy features."""
-    bull = causal_trailing_return(
-        strategy_times, close, pd.Timedelta(days=config.bull_regime_lookback_days)
+    """Compatibility-shaped adapter whose implementation is registry authoritative."""
+    from .registry import FeatureRegistry
+
+    times = pd.DatetimeIndex(pd.to_datetime(strategy_times, utc=True, errors="raise"))
+    closes = np.asarray(close, dtype=float)
+    if len(times) != len(closes):
+        raise ValueError("policy market timestamps and close values are not aligned")
+    if not len(times):
+        return np.array([], dtype=float), np.array([], dtype=object), {}
+
+    strategy_minutes = int(getattr(config, "strategy_timeframe_minutes", 0) or 0)
+    if strategy_minutes <= 0:
+        raise ValueError("strategy_timeframe_minutes must be positive for policy features")
+    interval = pd.Timedelta(minutes=strategy_minutes)
+    source = pd.DataFrame(
+        {
+            "period_start": times,
+            "available_at": times + interval,
+            "close": closes,
+        }
     )
-    if config.market_regime_method == "ASSET_RETURN":
-        threshold = abs(float(config.bull_regime_return_threshold))
-        regime = np.array([
-            None if not np.isfinite(value) else
-            ("BULL" if value >= threshold else "BEAR" if value <= -threshold else "SIDEWAYS")
-            for value in bull
-        ], dtype=object)
-    else:
-        regime = structural_regime_values(
-            strategy_times, benchmark,
-            sma_days=int(config.structural_regime_sma_days),
-            slope_lookback_days=int(config.structural_regime_slope_lookback_days),
+    request = DataRequest(
+        symbol=str(getattr(config, "market_symbol", "POLICY")),
+        start=times[0].to_pydatetime(),
+        end=(times[-1] + interval).to_pydatetime(),
+        strategy_interval=f"{strategy_minutes}m",
+    )
+    lookbacks = tuple(
+        sorted(
+            {
+                int(profile.momentum_lookback_hours)
+                for profile in config.strategy_profiles.values()
+            }
         )
-    hours = {int(profile.momentum_lookback_hours) for profile in config.strategy_profiles.values()}
-    momentum = {
-        lookback: causal_trailing_return(strategy_times, close, pd.Timedelta(hours=lookback))
-        for lookback in hours
+    )
+    parameters = {
+        POLICY_MARKET_FEATURE_NAME: {
+            "market_regime_method": config.market_regime_method,
+            "bull_regime_lookback_days": config.bull_regime_lookback_days,
+            "bull_regime_return_threshold": config.bull_regime_return_threshold,
+            "structural_regime_sma_days": config.structural_regime_sma_days,
+            "structural_regime_slope_lookback_days": config.structural_regime_slope_lookback_days,
+            "momentum_lookback_hours": lookbacks,
+        }
     }
-    return bull, regime, momentum
+    registry = FeatureRegistry()
+    registry.register(PolicyMarketFeatureProvider(structural_benchmark=benchmark))
+    frame = registry.execute(
+        [POLICY_MARKET_FEATURE_NAME],
+        request,
+        {DatasetKind.KLINES: source},
+        parameters=parameters,
+    )[POLICY_MARKET_FEATURE_NAME]
+    momentum = {
+        hours: frame[f"momentum_return_{hours}h"].to_numpy(float)
+        for hours in lookbacks
+    }
+    return (
+        frame["bull_regime_return"].to_numpy(float),
+        frame["market_regime"].to_numpy(dtype=object),
+        momentum,
+    )
 
 
 @dataclass(frozen=True, slots=True)
