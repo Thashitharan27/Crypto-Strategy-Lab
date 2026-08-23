@@ -57,7 +57,10 @@ class RunProgressRelay(QObject):
                 progress.setRange(0, 0)
                 progress.setFormat("")
 
-            parts = [f"Built {built}", f"Reused {reused}"]
+            if payload.get("mode") == "validation":
+                parts = [f"Validated {completed} of {total} source partitions"]
+            else:
+                parts = [f"Built {built}", f"Reused {reused}"]
             elapsed = float(payload.get("elapsed_seconds", 0.0) or 0.0)
             remaining = max(0, total - completed)
             # Wait for more than one partition before estimating. This avoids
