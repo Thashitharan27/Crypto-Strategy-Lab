@@ -7,7 +7,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from crypto_strategy_lab.gui.run_progress import install_run_progress
-from crypto_strategy_lab.gui.v2_main_window import MainWindow
+# The rule-based window deliberately reuses the proven v2 shell for data/results.
+# Keep the shell import explicit while selecting the rule authoring window below.
+from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
+from crypto_strategy_lab.gui import rule_main_window
+
+MainWindow = rule_main_window.MainWindow
+assert issubclass(MainWindow, StableGuiShell)
 
 
 def _splash_pixmap() -> QPixmap:
