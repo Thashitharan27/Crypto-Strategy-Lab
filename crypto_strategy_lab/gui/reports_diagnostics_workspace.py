@@ -259,7 +259,7 @@ class ReportsDiagnosticsWorkspace(QWidget):
 
     def _strategy_minutes(self) -> int:
         try:
-            value = self.window.strategy_tf.currentText()
+            value = self.window.strategy_tf.currentData()
         except AttributeError:
             return 15
         mapping = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
