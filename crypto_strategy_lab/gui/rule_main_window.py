@@ -12,8 +12,10 @@ from PySide6.QtWidgets import QGroupBox, QLabel, QVBoxLayout, QWidget
 
 from crypto_strategy_lab.data_lake_config import ExecutionProfileConfig
 from crypto_strategy_lab.strategy_rule_model import (
+    SUPPORT_RESISTANCE_RULE_EVIDENCE,
     common_execution_profile,
     compile_profiles,
+    uses_support_resistance_rules,
 )
 from .rule_strategy_builder import DIRECTION_LABELS, RuleStrategyBuilder
 from .v2_main_window import (
@@ -109,6 +111,14 @@ class MainWindow(LegacyMainWindow):
         )
 
         authored = self.rule_builder.strategy_values()
+        required_rules = authored["required_rules"]
+        veto_rules = authored["veto_rules"]
+        flip_rules = authored["flip_rules"]
+        # Rule dependencies are authoritative. A researcher does not need to
+        # remember a second S/R enable switch just to use S/R evidence.
+        if uses_support_resistance_rules(required_rules, veto_rules, flip_rules):
+            features = replace(features, enable_support_resistance_analysis=True)
+
         base_execution = self.base_execution_form.value(
             common_execution_profile(self.config.execution.profiles)
         )
@@ -193,8 +203,10 @@ class MainWindow(LegacyMainWindow):
         direction = self.rule_builder.direction_mode.currentData()
         required_rules = self.rule_builder.required_rules.rules()
         veto_rules = self.rule_builder.veto_rules.rules()
+        flip_rules = self.rule_builder.flip_rules.rules()
         required = len(required_rules)
         veto = len(veto_rules)
+        all_rules = (*required_rules, *veto_rules, *flip_rules)
         pressure_evidence = {
             "DI_PRESSURE_STATE",
             "DI_SPREAD_CHANGE",
@@ -202,13 +214,23 @@ class MainWindow(LegacyMainWindow):
             "OPPOSING_DI_CHANGE",
         }
         pressure_rule_count = sum(
-            rule["evidence"] in pressure_evidence
-            for rule in (*required_rules, *veto_rules)
+            rule["evidence"] in pressure_evidence for rule in all_rules
         )
         pressure_text = (
             f"Rule Evidence ({pressure_rule_count} rule(s))"
             if pressure_rule_count
             else "Available to Rules"
+        )
+        sr_rule_count = sum(
+            rule["evidence"] in SUPPORT_RESISTANCE_RULE_EVIDENCE
+            for rule in all_rules
+        )
+        sr_text = (
+            f"Rule Evidence ({sr_rule_count} rule(s))"
+            if sr_rule_count
+            else "Analyze Only"
+            if config.features.enable_support_resistance_analysis
+            else "Off"
         )
         intrabar = (
             f"{config.data.intrabar_timeframe_minutes}m exits"
@@ -227,6 +249,7 @@ class MainWindow(LegacyMainWindow):
             f"Markets  {len(permissions)} of 6 allowed\n"
             f"Entry rules  {required}\nVeto rules  {veto}\n"
             f"DI Pressure  {pressure_text}\n"
+            f"S/R  {sr_text}\n"
             f"MR Context  {'ANALYZE' if config.strategy.enable_mean_reversion_analysis else 'OFF'}\n"
             f"Trade Flow  {'ANALYZE' if config.features.trade_flow_enabled else 'OFF'}\n"
             f"Order Book  {'ANALYZE' if config.features.order_book_enabled else 'OFF'}\n\n"
@@ -253,7 +276,7 @@ class MainWindow(LegacyMainWindow):
                 f"Entry rules: {required} required · {veto} veto\n"
                 f"DI pressure: {pressure_text}\n"
                 f"Mean Reversion: {'Analyze Only' if config.strategy.enable_mean_reversion_analysis else 'Off'}\n"
-                f"Support / Resistance: {'Veto / Avoid' if config.strategy.sr_filter_mode == 'APPLY_ENTRY_RULES' else 'Analyze Only'}\n\n"
+                f"Support / Resistance: {sr_text}\n\n"
                 f"Starting Equity: ${config.execution.initial_equity:,.2f}\n"
                 f"Base Risk: {risk}\n"
                 f"Stop: {base_execution.stop_loss_multiple:g} distance units · "
