@@ -227,7 +227,15 @@ def test_full_native_config_and_profiles_survive_gui_roundtrip():
         assert set(window.strategy_form.widgets) == set(config.strategy.__dataclass_fields__) - {"profiles"}
         assert set(window.feature_form.widgets) == set(config.features.__dataclass_fields__)
         assert set(window.execution_form.widgets) == set(config.execution.__dataclass_fields__) - {"profiles"}
-        assert set(window.profile_editor.strategy_form.widgets) == set(StrategyProfileConfig.__dataclass_fields__) - {"entry_rules"}
+        primary_profile_fields = set(StrategyProfileConfig.__dataclass_fields__) - {
+            "enabled", "entry_rules", "rsi_period", "momentum_lookback_hours"
+        }
+        assert set(window.profile_editor.strategy_form.widgets) == primary_profile_fields
+        assert set(window.profile_editor.native_calculation_widgets) == {
+            "rsi_period", "momentum_lookback_hours"
+        }
+        assert set(window.profile_editor.permission_checks) == set(config.strategy.profiles)
+        assert window.profile_editor.permission_checks["bull_long"].isChecked() is False
         assert set(window.profile_editor.execution_form.widgets) == set(ExecutionProfileConfig.__dataclass_fields__)
         assert window.build_config() == config
         assert window.build_config().strategy.profiles["bull_long"].entry_rules == rules

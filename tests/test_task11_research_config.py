@@ -82,3 +82,38 @@ def test_sr_registry_parameters_are_owned_by_feature_config():
     params = features.registry_parameters(strategy_timeframe_minutes=240)
     assert params["support_resistance"]["sr_timeframe_minutes"] == 240
     assert params["support_resistance"]["atr_period"] == features.atr_period
+
+
+def test_inactive_telemetry_interval_does_not_block_higher_timeframe_run():
+    base = ResearchRunConfig()
+    config = replace(
+        base,
+        data=replace(base.data, strategy_timeframe_minutes=240),
+        reporting=replace(
+            base.reporting,
+            enable_trade_telemetry=False,
+            telemetry_interval_minutes=15,
+        ),
+    )
+    config.validate()
+
+
+def test_active_telemetry_interval_must_align_to_strategy_timeframe():
+    base = ResearchRunConfig()
+    invalid = replace(
+        base,
+        data=replace(base.data, strategy_timeframe_minutes=240),
+        reporting=replace(
+            base.reporting,
+            enable_trade_telemetry=True,
+            telemetry_interval_minutes=15,
+        ),
+    )
+    with pytest.raises(ValueError, match="telemetry interval must be a multiple"):
+        invalid.validate()
+
+    valid = replace(
+        invalid,
+        reporting=replace(invalid.reporting, telemetry_interval_minutes=240),
+    )
+    valid.validate()
