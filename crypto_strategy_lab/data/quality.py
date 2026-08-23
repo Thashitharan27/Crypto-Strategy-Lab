@@ -22,7 +22,7 @@ from .schemas import DatasetKind
 from .timing import interval_to_timedelta
 
 
-VALIDATION_CONTRACT_VERSION = "3"
+VALIDATION_CONTRACT_VERSION = "4"
 QUALITY_CACHE_FORMAT_VERSION = 1
 
 
@@ -207,7 +207,6 @@ _KLINE_KINDS = (
     DatasetKind.KLINES,
     DatasetKind.MARK_PRICE_KLINES,
     DatasetKind.INDEX_PRICE_KLINES,
-    DatasetKind.PREMIUM_INDEX_KLINES,
 )
 
 CONTRACTS: dict[DatasetKind, DatasetValidationContract] = {
@@ -231,6 +230,24 @@ CONTRACTS: dict[DatasetKind, DatasetValidationContract] = {
 }
 CONTRACTS.update(
     {
+        # Premium-index klines are signed basis-like values rather than prices.
+        # Their OHLC values may legitimately be negative or zero; they must only
+        # be finite and obey ordinary OHLC bounds. Volume remains non-negative.
+        DatasetKind.PREMIUM_INDEX_KLINES: DatasetValidationContract(
+            dataset=DatasetKind.PREMIUM_INDEX_KLINES,
+            timeline="fixed",
+            timestamp_column="period_start",
+            logical_key=("period_start",),
+            required_columns=_CANDLE,
+            numeric_fields=("open", "high", "low", "close"),
+            non_negative_fields=("volume",),
+            nullable_non_negative_fields=(
+                "quote_volume",
+                "trade_count",
+                "taker_buy_base_volume",
+                "taker_buy_quote_volume",
+            ),
+        ),
         # The current Binance metrics adapter does not preserve a declared row
         # interval, so metrics are validated as timestamped snapshots rather
         # than manufacturing a fixed grid. Compact metric fields are sparse in
