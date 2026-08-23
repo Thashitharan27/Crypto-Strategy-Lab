@@ -22,6 +22,7 @@ from crypto_strategy_lab.data_lake_config import (
     ReportingConfig, ResearchRunConfig, StrategyConfig, StrategyProfileConfig,
 )
 from crypto_strategy_lab.paths import CACHE_DIR, MARKET_DATA_ROOT, OUTPUT_DIR
+from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS
 from .chatgpt_connection import ChatGPTIntegrationWidget
 from .github_manager import GitHubIntegrationWidget
 from .v2_controller import GuiApplicationService, GuiResearchRequest
@@ -143,11 +144,14 @@ class EntryRuleEditor(QTableWidget):
     private storage. Editing a visible cell updates only that key, so advanced
     and future rule properties survive a GUI round trip.
     """
+    changed = Signal()
     COLUMNS = ("action", "indicator", "condition", "minimum", "maximum")
+
     def __init__(self, parent=None):
         super().__init__(0, len(self.COLUMNS), parent)
         self.setHorizontalHeaderLabels(("Action", "Indicator", "Condition", "Minimum", "Maximum"))
         self._payloads = []
+        self.itemChanged.connect(lambda _item: self.changed.emit())
 
     def set_tuple(self, rules: tuple) -> None:
         from copy import deepcopy
@@ -160,13 +164,15 @@ class EntryRuleEditor(QTableWidget):
                     if key in ("action","indicator","condition"):
                         editor = QComboBox()
                         choices = ({"FLIP":"Flip Direction","REJECT":"Reject Entry"} if key == "action" else
-                            {name:name.replace("_"," ").title() for name in ("ADX","RSI","DI_SPREAD","CLOSE_LOCATION","BB_WIDTH")} if key == "indicator" else
+                            {name:name.replace("_"," ").title() for name in RULE_INDICATORS} if key == "indicator" else
                             {"INSIDE":"Inside Range","OUTSIDE":"Outside Range"})
                         if not value: editor.addItem(f"Select {key}…", "")
                         for native,label in choices.items(): editor.addItem(label,native)
                         index = editor.findData(value)
                         if index < 0 and value: editor.addItem(str(value), value); index = editor.count() - 1
-                        editor.setCurrentIndex(max(index, 0)); self.setCellWidget(row, column, editor)
+                        editor.setCurrentIndex(max(index, 0))
+                        editor.currentIndexChanged.connect(lambda _index: self.changed.emit())
+                        self.setCellWidget(row, column, editor)
                     else: self.setItem(row, column, QTableWidgetItem(str(value)))
         finally: self.blockSignals(False)
 
@@ -193,10 +199,12 @@ class EntryRuleEditor(QTableWidget):
     def add_rule(self):
         self._payloads.append({"action": "FLIP", "indicator": "RSI", "condition": "INSIDE", "minimum": 0.0, "maximum": 100.0})
         self.set_tuple(tuple(self._payloads))
+        self.changed.emit()
 
     def remove_selected(self):
         rows = sorted({index.row() for index in self.selectedIndexes()}, reverse=True)
         for row in rows: self.removeRow(row); self._payloads.pop(row)
+        if rows: self.changed.emit()
 
 
 class LosslessDoubleSpinBox(QDoubleSpinBox):
@@ -276,7 +284,7 @@ class DataclassForm(QWidget):
                 self.widgets[controller].toggled.connect(lambda checked,names=dependents: self._set_visible(names,checked))
         for widget in self.widgets.values():
             signal = (widget.toggled if isinstance(widget,QCheckBox) else widget.valueChanged if isinstance(widget,(QSpinBox,QDoubleSpinBox)) else widget.currentIndexChanged if isinstance(widget,QComboBox) else widget.textChanged)
-            signal.connect(self.changed.emit)
+            signal.connect(lambda *_args: self.changed.emit())
         self.set_value(value)
 
     def _set_visible(self, names, visible):
@@ -382,7 +390,7 @@ class NativeProfileEditor(QWidget):
         self.copy_button.clicked.connect(self.copy_profile); self.paste_button.clicked.connect(self.paste_profile)
         self.reset_button.clicked.connect(self.reset_profile); self.apply_all_button.clicked.connect(self.apply_strategy_to_all)
         self.strategy_form.changed.connect(self._notify_changed); self.execution_form.changed.connect(self._notify_changed)
-        self.entry_rules.itemChanged.connect(lambda _item: self._notify_changed())
+        self.entry_rules.changed.connect(self._notify_changed)
 
     def _notify_changed(self):
         if not self._rendering: self.changed.emit()
@@ -673,16 +681,21 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def data_readiness(rows, strategy_interval, intrabar_interval=None):
-        """Classify catalog coverage using execution candles as required data."""
+        """Classify catalog coverage using only canonical execution klines as required data."""
         required={strategy_interval}
         if intrabar_interval: required.add(intrabar_interval)
-        candle_rows=[row for row in rows if "kline" in str(row.get("dataset","")).lower()]
+
+        def dataset_name(row):
+            dataset = row.get("dataset", "")
+            return str(getattr(dataset, "value", dataset)).lower()
+
+        execution_candles=[row for row in rows if dataset_name(row) == "klines"]
         missing=[]
         for interval in required:
-            matches=[row for row in candle_rows if row.get("interval") == interval]
+            matches=[row for row in execution_candles if row.get("interval") == interval]
             if not matches or not any(row.get("state") == "AVAILABLE" for row in matches): missing.append(interval)
         if missing: return "BLOCKED", "Required candle coverage unavailable: " + ", ".join(sorted(missing))
-        optional=[row for row in rows if row not in candle_rows and row.get("state") != "AVAILABLE"]
+        optional=[row for row in rows if row not in execution_candles and row.get("state") != "AVAILABLE"]
         if optional: return "WARN", "Required candles are ready; optional research coverage is partial or unavailable."
         return "READY", "Required execution data is available."
 
