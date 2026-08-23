@@ -90,18 +90,20 @@ def test_regime_settings_show_only_parameters_for_selected_model():
 
         method.setCurrentIndex(method.findData("ASSET_RETURN"))
         panel.refresh_visibility()
-        assert panel.widgets["bull_regime_lookback_days"].isVisible()
-        assert panel.widgets["bull_regime_return_threshold"].isVisible()
-        assert not panel.widgets["structural_regime_sma_days"].isVisible()
-        assert not panel.widgets["structural_regime_slope_lookback_days"].isVisible()
+        # isVisible() also depends on whether the top-level test window was shown;
+        # isHidden() tests the explicit visibility state set by the panel itself.
+        assert not panel.widgets["bull_regime_lookback_days"].isHidden()
+        assert not panel.widgets["bull_regime_return_threshold"].isHidden()
+        assert panel.widgets["structural_regime_sma_days"].isHidden()
+        assert panel.widgets["structural_regime_slope_lookback_days"].isHidden()
         assert "Asset Return" in panel.regime_detail.text()
 
         method.setCurrentIndex(method.findData("BTC_STRUCTURAL"))
         panel.refresh_visibility()
-        assert panel.widgets["structural_regime_sma_days"].isVisible()
-        assert panel.widgets["structural_regime_slope_lookback_days"].isVisible()
-        assert not panel.widgets["bull_regime_lookback_days"].isVisible()
-        assert not panel.widgets["bull_regime_return_threshold"].isVisible()
+        assert not panel.widgets["structural_regime_sma_days"].isHidden()
+        assert not panel.widgets["structural_regime_slope_lookback_days"].isHidden()
+        assert panel.widgets["bull_regime_lookback_days"].isHidden()
+        assert panel.widgets["bull_regime_return_threshold"].isHidden()
         assert "BTCUSDT" in panel.regime_detail.text()
     finally:
         window.close()
