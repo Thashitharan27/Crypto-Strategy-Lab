@@ -32,7 +32,7 @@ class MainWindow(LegacyMainWindow):
 
     def __init__(self, startup_status=None, service=None):
         # LegacyMainWindow supplies the battle-tested setup/data/results/reporting
-        # shell.  During this call our guarded overrides delegate back until the
+        # shell. During this call our guarded overrides delegate back until the
         # rule widgets exist.
         super().__init__(startup_status=startup_status, service=service)
 
@@ -114,11 +114,16 @@ class MainWindow(LegacyMainWindow):
         super().apply_config(config)
         if not hasattr(self, "rule_builder"):
             return
-        self.rule_builder.set_from_strategy(config.strategy)
-        self.rule_builder.set_feature_status(config.features)
-        self.base_execution_form.set_value(
-            common_execution_profile(config.execution.profiles)
-        )
+        self._applying_config = True
+        try:
+            self.rule_builder.set_from_strategy(config.strategy)
+            self.rule_builder.set_feature_status(config.features)
+            self.base_execution_form.set_value(
+                common_execution_profile(config.execution.profiles)
+            )
+        finally:
+            self._applying_config = False
+        self.rule_builder.refresh_summary()
         self._render_research_summary(config)
 
     def _refresh_summary_from_widgets(self):
