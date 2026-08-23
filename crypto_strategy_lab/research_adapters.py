@@ -7,7 +7,7 @@ import time
 
 import pandas as pd
 
-from .data_lake_production_engine import DataLakeProductionBacktestEngine
+from .rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
 from .gui.enhanced_config import enhanced_default_gui_config, build_enhanced_backtest_config
 from .strategy_profiles import StrategyProfile
 
@@ -273,7 +273,7 @@ class NativeSimulator:
         self.last_signals = None
         self.last_telemetry = None
         started = time.perf_counter()
-        engine = DataLakeProductionBacktestEngine.from_prepared(
+        engine = RuleAwareDataLakeProductionBacktestEngine.from_prepared(
             prepared, intrabar, native_config
         )
         self.last_engine_init_seconds = time.perf_counter() - started
