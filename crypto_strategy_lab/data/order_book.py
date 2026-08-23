@@ -533,6 +533,24 @@ class OrderBookSnapshotStore:
         records = self.store.catalog.records_for(
             self.store.raw_root, request, dataset, None
         )
+        progress = getattr(self.store, "progress_callback", None)
+        progress_started = time.perf_counter()
+        progress_label = (
+            "Order Book Quality — Ticker"
+            if dataset is DatasetKind.BOOK_TICKER
+            else "Order Book Quality — Depth"
+        )
+        emit_progress(
+            progress,
+            kind="cache",
+            mode="validation",
+            phase="order_book_quality",
+            label=progress_label,
+            completed=0,
+            total=len(records),
+            elapsed_seconds=0.0,
+            current="Cold quality check; later identical runs reuse this result",
+        )
         coverage = self.store.catalog.coverage(
             self.store.raw_root,
             market=request.market,
@@ -543,7 +561,18 @@ class OrderBookSnapshotStore:
         row_count = 0
         observed_start = None
         observed_end = None
-        for record in records:
+        for index, record in enumerate(records, 1):
+            emit_progress(
+                progress,
+                kind="cache",
+                mode="validation",
+                phase="order_book_quality",
+                label=progress_label,
+                completed=index - 1,
+                total=len(records),
+                elapsed_seconds=time.perf_counter() - progress_started,
+                current=f"Validating source partition {index} of {len(records)}",
+            )
             local_start = max(
                 pd.Timestamp(request.start),
                 pd.Timestamp(record.period_start)
@@ -609,6 +638,17 @@ class OrderBookSnapshotStore:
             )
             issues.extend(partition_report.issues)
 
+        emit_progress(
+            progress,
+            kind="cache",
+            mode="validation",
+            phase="order_book_quality",
+            label=progress_label,
+            completed=len(records),
+            total=len(records),
+            elapsed_seconds=time.perf_counter() - progress_started,
+            current="Quality validation cached",
+        )
         issues.extend(self.store._archive_overlap_issues(request, dataset))
 
         complete_start = pd.Timestamp(request.start)
