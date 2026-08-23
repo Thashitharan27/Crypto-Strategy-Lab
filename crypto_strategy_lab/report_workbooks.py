@@ -83,36 +83,72 @@ def build_indicator_workbook(tables: Mapping[str, pd.DataFrame], run_dir: Path) 
     return _write_tables(run_dir / "indicator_analysis.xlsx", tables)
 
 
+def build_periodic_breakdown(trades: pd.DataFrame, freq: str) -> pd.DataFrame:
+    """Summarize the current single-side trade contract by exit period."""
+    columns = ["period", "pair_count", "net_pnl", "net_r"]
+    if trades.empty:
+        return pd.DataFrame(columns=columns)
+    required = {"exit_time", "pair_net_pnl", "pair_net_r"}
+    missing = sorted(required - set(trades.columns))
+    if missing:
+        raise ValueError(f"Periodic report is missing current trade columns: {missing}")
+
+    exits = pd.to_datetime(trades["exit_time"], errors="coerce", utc=True)
+    if exits.isna().all():
+        raise ValueError("Periodic results require at least one valid trade exit timestamp.")
+    frame = pd.DataFrame(
+        {
+            "exit_time": exits,
+            "pair_net_pnl": pd.to_numeric(trades["pair_net_pnl"], errors="coerce"),
+            "pair_net_r": pd.to_numeric(trades["pair_net_r"], errors="coerce"),
+        }
+    )
+    frame = frame.loc[frame["exit_time"].notna()].set_index("exit_time")
+    periodic = frame.resample(freq).agg(
+        pair_count=("pair_net_pnl", "size"),
+        net_pnl=("pair_net_pnl", "sum"),
+        net_r=("pair_net_r", "sum"),
+    )
+    return periodic.reset_index().rename(columns={"exit_time": "period"})
+
+
 def build_performance_breakdowns(trades: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Arrange existing trade result columns into regime review tables."""
-    if trades.empty or "market_regime" not in trades:
+    """Build regime and regime-by-side tables from the modern trade schema."""
+    if trades.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    def aggregate(frame: pd.DataFrame, groups: list[str], pnl: str, r_value: str) -> pd.DataFrame:
+    required = {"market_regime", "side", "pair_net_pnl", "pair_net_r"}
+    missing = sorted(required - set(trades.columns))
+    if missing:
+        raise ValueError(f"Performance report is missing current trade columns: {missing}")
+
+    def aggregate(frame: pd.DataFrame, groups: list[str]) -> pd.DataFrame:
         rows = []
         for keys, group in frame.groupby(groups, dropna=False, observed=True):
             keys = keys if isinstance(keys, tuple) else (keys,)
-            pnl_values = pd.to_numeric(group[pnl], errors="coerce")
-            r_values = pd.to_numeric(group[r_value], errors="coerce")
+            pnl_values = pd.to_numeric(group["pair_net_pnl"], errors="coerce")
+            r_values = pd.to_numeric(group["pair_net_r"], errors="coerce")
             row = dict(zip(groups, keys))
-            row.update({"trades": len(group), "wins": int((pnl_values > 0).sum()),
-                        "losses": int((pnl_values < 0).sum()), "win_rate": float((pnl_values > 0).mean()),
-                        "net_pnl": float(pnl_values.sum()), "average_r": float(r_values.mean()), "total_r": float(r_values.sum())})
+            row.update(
+                {
+                    "trades": len(group),
+                    "wins": int((pnl_values > 0).sum()),
+                    "losses": int((pnl_values < 0).sum()),
+                    "win_rate": float((pnl_values > 0).mean()),
+                    "net_pnl": float(pnl_values.sum()),
+                    "average_r": float(r_values.mean()),
+                    "total_r": float(r_values.sum()),
+                }
+            )
             rows.append(row)
         return pd.DataFrame(rows)
 
-    market = aggregate(trades, ["market_regime"], "pair_net_pnl", "pair_net_r")
-    directions = []
-    for direction in ("long", "short"):
-        pnl, r_value = f"{direction}_pair_net_pnl", f"{direction}_pair_net_r"
-        if pnl not in trades or r_value not in trades:
-            continue
-        frame = trades.loc[trades[pnl].notna()].copy()
-        if frame.empty:
-            continue
-        frame.insert(0, "direction", direction.upper())
-        directions.append(aggregate(frame, ["market_regime", "direction"], pnl, r_value))
-    return market, pd.concat(directions, ignore_index=True) if directions else pd.DataFrame()
+    market = aggregate(trades, ["market_regime"])
+    directional = trades.loc[trades["side"].notna()].copy()
+    if directional.empty:
+        return market, pd.DataFrame()
+    directional["direction"] = directional["side"].astype("string").str.upper()
+    return market, aggregate(directional, ["market_regime", "direction"])
 
 
 def _dashboard_metrics(summary: Mapping[str, Any], config: Any, run_dir: Path) -> list[tuple[str, Any]]:
