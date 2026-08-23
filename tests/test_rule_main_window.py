@@ -30,10 +30,10 @@ def _window():
     return app, MainWindow(service=Service())
 
 
-def test_active_strategy_page_is_rule_based_and_has_no_profile_editor_surface():
+def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surface():
     _app, window = _window()
     try:
-        from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton
+        from PySide6.QtWidgets import QCheckBox, QGroupBox, QLabel, QPushButton
 
         page = window.pages.widget(1)
         group_titles = {box.title() for box in page.findChildren(QGroupBox)}
@@ -41,16 +41,21 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_editor_surface():
         buttons = "\n".join(
             button.text() for button in page.findChildren(QPushButton)
         )
+        checks = "\n".join(
+            check.text() for check in page.findChildren(QCheckBox)
+        )
 
         assert "Strategy Summary" in group_titles
         assert "1. Direction & Market Eligibility" in group_titles
         assert "2. Entry Rules — all applicable rules must pass" in group_titles
         assert "3. Avoid / Veto Rules — matching conditions reject the trade" in group_titles
         assert "DI Pressure State" not in group_titles
+        assert "Support / Resistance Veto Presets" not in group_titles
         assert "Profile Overrides" not in group_titles
         assert "Copy Overrides" not in buttons
         assert "Paste Overrides" not in buttons
-        assert "DI Pressure is calculated automatically" in labels
+        assert "Show Support / Resistance veto presets" not in checks
+        assert "DI Pressure and S/R are rule evidence" in labels
     finally:
         window.close()
 
@@ -113,6 +118,54 @@ def test_di_pressure_state_is_authored_as_categorical_entry_rule():
         window.close()
 
 
+def test_sr_veto_rule_is_categorical_and_automatically_enables_sr_features():
+    _app, window = _window()
+    try:
+        from PySide6.QtWidgets import QComboBox, QLabel
+
+        feature_toggle = window.feature_form.widgets["enable_support_resistance_analysis"]
+        feature_toggle.setChecked(False)
+        rule = new_rule(kind="VETO", evidence="SR_NEAR_RESISTANCE")
+        rule.update(operator="IS", value="TRUE", side="LONG")
+        table = window.rule_builder.veto_rules
+        table.set_rules((rule,))
+
+        assert isinstance(table.cellWidget(0, 1), QComboBox)
+        assert table.cellWidget(0, 1).currentData() == "IS"
+        assert isinstance(table.cellWidget(0, 2), QComboBox)
+        assert table.cellWidget(0, 2).currentData() == "TRUE"
+        assert isinstance(table.cellWidget(0, 3), QLabel)
+
+        config = window.build_config()
+        assert config.features.enable_support_resistance_analysis is True
+        assert config.strategy.sr_filter_mode == "ANALYSIS_ONLY"
+        assert config.strategy.sr_long_avoid_near_resistance is False
+        native = config.strategy.profiles["bull_long"].entry_rules[0]
+        assert native["indicator"] == "SR_NEAR_RESISTANCE"
+        assert native["condition"] == "INSIDE"
+        assert native["minimum"] == native["maximum"] == 1.0
+        assert not config.strategy.profiles["bull_short"].entry_rules
+    finally:
+        window.close()
+
+
+def test_sr_numeric_room_rule_uses_same_entry_rule_table():
+    _app, window = _window()
+    try:
+        rule = new_rule(kind="REQUIRED", evidence="SR_ROOM_IN_DIRECTION_ATR")
+        rule.update(operator="GTE", value=2.0, side="LONG")
+        window.rule_builder.required_rules.set_rules((rule,))
+        config = window.build_config()
+
+        native = config.strategy.profiles["bear_long"].entry_rules[0]
+        assert native["indicator"] == "SR_ROOM_IN_DIRECTION_ATR"
+        assert native["condition"] == "OUTSIDE"
+        assert native["minimum"] == 2.0
+        assert config.features.enable_support_resistance_analysis is True
+    finally:
+        window.close()
+
+
 def test_pressure_calculation_stays_on_but_global_pressure_filter_is_neutral():
     _app, window = _window()
     try:
@@ -128,9 +181,9 @@ def test_pressure_calculation_stays_on_but_global_pressure_filter_is_neutral():
 def test_rule_builder_roundtrip_recovers_rules_and_one_base_execution_plan():
     _app, window = _window()
     try:
-        required = new_rule(kind="REQUIRED", evidence="DI_PRESSURE_STATE")
+        required = new_rule(kind="REQUIRED", evidence="SR_SUPPORT_STATE")
         required.update(
-            operator="IS", value="EXPANDING", regime="BULL", side="LONG"
+            operator="IS_NOT", value="SUPPORT_BROKEN", regime="BULL", side="LONG"
         )
         veto = new_rule(kind="VETO", evidence="ADX")
         veto.update(operator="LTE", value=18.0, regime="SIDEWAYS", side="ALL")
@@ -145,13 +198,10 @@ def test_rule_builder_roundtrip_recovers_rules_and_one_base_execution_plan():
         config = window.build_config()
         window.apply_config(config)
 
-        assert window.rule_builder.required_rules.rules() == (
-            window.rule_builder.required_rules.rules()[0],
-        )
         recovered = window.rule_builder.required_rules.rules()[0]
-        assert recovered["evidence"] == "DI_PRESSURE_STATE"
-        assert recovered["operator"] == "IS"
-        assert recovered["value"] == "EXPANDING"
+        assert recovered["evidence"] == "SR_SUPPORT_STATE"
+        assert recovered["operator"] == "IS_NOT"
+        assert recovered["value"] == "SUPPORT_BROKEN"
         assert window.rule_builder.veto_rules.rules()[0]["evidence"] == "ADX"
         rebuilt = window.build_config()
         assert rebuilt == config
