@@ -13,7 +13,13 @@ from typing import Callable
 
 import pandas as pd
 
-from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore, MarketKind
+from crypto_strategy_lab.data import (
+    DataQualityReport,
+    DataRequest,
+    DatasetKind,
+    MarketDataStore,
+    MarketKind,
+)
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig, load_data_lake_config
 from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.prepared_cache import PreparedRunCache
@@ -102,6 +108,42 @@ class GuiApplicationService:
     def refresh_catalog(self) -> int:
         """Refresh discovery only at the application-service boundary."""
         return self.store.refresh_catalog()
+
+    def required_data_quality(self, request: GuiResearchRequest) -> DataQualityReport:
+        """Validate the exact required candle slices selected in the GUI.
+
+        Catalog metadata can establish archive-level availability without opening
+        immutable raw files, but it cannot prove that every expected candle exists
+        inside an archive. This explicit preflight uses the normal Task-12 quality
+        cache and canonical adapters, so a cold check performs the validation once
+        and a warm check is metadata-only. It never runs strategy features or the
+        simulator.
+        """
+        callback = getattr(self, "progress_callback", None)
+        intervals = tuple(dict.fromkeys(
+            interval for interval in (
+                request.strategy_timeframe,
+                request.intrabar_timeframe,
+            ) if interval
+        ))
+        emit_progress(
+            callback,
+            kind="stage",
+            phase="required_data_validation",
+            label="VALIDATING SELECTED CANDLE RANGE",
+            detail="Checking actual candle continuity before strategy execution.",
+        )
+        data_request = request.to_data_request()
+        reports = tuple(
+            self.store.data_quality_report(
+                data_request,
+                DatasetKind.KLINES,
+                interval=interval,
+                required=True,
+            )
+            for interval in intervals
+        )
+        return DataQualityReport(reports)
 
     def _runner(self, output_root: Path):
         if self._runner_factory:
