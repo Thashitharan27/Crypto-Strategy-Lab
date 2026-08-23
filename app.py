@@ -10,8 +10,9 @@ from crypto_strategy_lab.gui.run_progress import install_run_progress
 # The active researcher window layers the Setup readiness workspace over the
 # rule-based strategy builder while keeping the proven v2 data/results shell.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
-from crypto_strategy_lab.gui.setup_main_window import MainWindow
+from crypto_strategy_lab.gui import setup_main_window
 
+MainWindow = setup_main_window.MainWindow
 assert issubclass(MainWindow, StableGuiShell)
 
 
