@@ -55,7 +55,8 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
         assert "Copy Overrides" not in buttons
         assert "Paste Overrides" not in buttons
         assert "Show Support / Resistance veto presets" not in checks
-        assert "DI Pressure and S/R are rule evidence" in labels
+        assert "Evidence is grouped and searchable" in labels
+        assert "common S/R choices are shown before advanced S/R details" in labels
     finally:
         window.close()
 
@@ -69,6 +70,35 @@ def test_direction_selector_contains_only_current_di_strategy():
         assert selector.currentText() == "DI Direction"
         assert selector.findData("LONG_ONLY") == -1
         assert selector.findData("SHORT_ONLY") == -1
+    finally:
+        window.close()
+
+
+def test_evidence_picker_groups_every_current_indicator_once_and_preserves_ids():
+    _app, window = _window()
+    try:
+        from crypto_strategy_lab.gui.rule_strategy_builder import (
+            EVIDENCE_GROUPS,
+            EvidenceComboBox,
+        )
+        from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS
+
+        grouped = [
+            evidence
+            for _group, evidence_ids in EVIDENCE_GROUPS
+            for evidence in evidence_ids
+        ]
+        assert len(grouped) == len(set(grouped))
+        assert set(grouped) == set(RULE_INDICATORS)
+
+        rule = new_rule(kind="REQUIRED", evidence="SR_ROOM_IN_DIRECTION_ATR")
+        table = window.rule_builder.required_rules
+        table.set_rules((rule,))
+        picker = table.cellWidget(0, 0)
+        assert isinstance(picker, EvidenceComboBox)
+        assert picker.currentData() == "SR_ROOM_IN_DIRECTION_ATR"
+        assert picker.findData("DI_SPREAD") >= 0
+        assert picker.findData("SR_TRADE_LOCATION_RATING") >= 0
     finally:
         window.close()
 
