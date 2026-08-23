@@ -61,7 +61,7 @@ def test_structured_rules_retain_private_payload_without_json_primary_editor():
     source=GUI.read_text(encoding="utf-8")
     tree=ast.parse(source)
     entry=next(node for node in tree.body if isinstance(node,ast.ClassDef) and node.name=="EntryRuleEditor")
-    assert entry and "_payloads" in source and "Ordered Entry Rules" in source
+    assert entry and "_payloads" in source and "Advanced Entry Rules" in source
     assert "Entry Rules (structured JSON array)" not in source
 
 
@@ -189,4 +189,67 @@ def test_report_presets_change_only_reporting_config_in_window():
         for index in range(window.report_preset.count()):
             window.report_preset.setCurrentIndex(index); window.apply_reporting_preset(); after=window.build_config()
             assert (after.data,after.features,after.strategy,after.execution) == (before.data,before.features,before.strategy,before.execution)
+    finally: window.close()
+
+
+def test_strategy_workspace_uses_authoritative_native_widgets_not_duplicate_state():
+    _app,window=_window()
+    try:
+        workspace=window.strategy_workspace
+        assert workspace.widgets is window.strategy_form.widgets
+        assert workspace.widgets["enable_di_direction_selection"] is window.strategy_form.widgets["enable_di_direction_selection"]
+        assert workspace.widgets["strategy_profile_run_mode"] is window.strategy_form.widgets["strategy_profile_run_mode"]
+        assert window.profile_editor.profile_details.isHidden()
+        assert workspace.advanced_strategy.isHidden()
+        assert workspace.sr_filter_details.isHidden()
+    finally: window.close()
+
+
+def test_market_permission_matrix_edits_native_profile_enabled_flag_only():
+    _app,window=_window()
+    try:
+        base=ResearchRunConfig(); window.apply_config(base)
+        before=window.build_config()
+        box=window.profile_editor.permission_checks["bull_short"]
+        box.setChecked(False)
+        after=window.build_config()
+        assert after.strategy.profiles["bull_short"].enabled is False
+        assert after.execution == before.execution
+        assert after.strategy.profiles["bull_long"] == before.strategy.profiles["bull_long"]
+        box.setChecked(True)
+        assert window.build_config() == before
+    finally: window.close()
+
+
+def test_plain_english_strategy_thesis_tracks_native_strategy_controls():
+    _app,window=_window()
+    try:
+        text=window.strategy_workspace.thesis_summary.text()
+        assert "Trade in:" in text and "DI selects direction" in text
+        assert "Support/Resistance is analysis-only" in text
+        window.strategy_form.widgets["enable_di_pressure_analysis"].setChecked(False)
+        assert "DI pressure logic is off" in window.strategy_workspace.thesis_summary.text()
+        window.strategy_form.widgets["sr_filter_mode"].setCurrentIndex(
+            window.strategy_form.widgets["sr_filter_mode"].findData("APPLY_ENTRY_RULES"))
+        assert "can block entries" in window.strategy_workspace.thesis_summary.text()
+        assert not window.strategy_workspace.sr_filter_details.isHidden()
+    finally: window.close()
+
+
+def test_profile_details_are_optional_but_roundtrip_still_lossless():
+    _app,window=_window()
+    try:
+        base=ResearchRunConfig()
+        profiles=dict(base.strategy.profiles)
+        executions=dict(base.execution.profiles)
+        profiles["bear_long"]=replace(profiles["bear_long"],enabled=False,flip_direction=True,
+            entry_rules=({"action":"REJECT","indicator":"ATR_PCT","condition":"OUTSIDE","minimum":0.1,"maximum":3.2},))
+        executions["bear_long"]=replace(executions["bear_long"],risk_multiplier=.75,reward_risk_ratio=2.5,
+            break_even_enabled=True)
+        config=replace(base,strategy=replace(base.strategy,profiles=profiles),
+            execution=replace(base.execution,profiles=executions))
+        window.apply_config(config)
+        assert window.profile_editor.profile_details.isHidden()
+        assert window.build_config() == config
+        assert "Bear Long" in window.profile_editor.profile_summary.text() or window.profile_editor.selector.currentData() != "bear_long"
     finally: window.close()
