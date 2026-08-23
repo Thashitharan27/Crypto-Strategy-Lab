@@ -148,8 +148,13 @@ def _window():
 def test_setup_cannot_be_ready_when_structural_warmup_is_missing():
     _app, window = _window()
     try:
+        from PySide6.QtCore import QDate
+
+        window.start.setDate(QDate(2020, 1, 1))
+        window.end.setDate(QDate(2020, 12, 1))
         window.strategy_tf.setCurrentText("1 Hour")
         window.intrabar_tf.setCurrentText("1 Minute")
+        window._validation_debounce.stop()
         request = window.request_model()
         requirement = structural_benchmark_requirement(request, window._current_features())
         issue = DataQualityIssue(
