@@ -13,6 +13,9 @@ from crypto_strategy_lab.gui.research_feature_ownership import (
 from crypto_strategy_lab.gui.risk_execution_install import (
     apply_risk_execution_workspace,
 )
+from crypto_strategy_lab.gui.reports_diagnostics_install import (
+    apply_reports_diagnostics_workspace,
+)
 # The active researcher window layers run-faithful readiness over the compact
 # Setup workspace while keeping the proven v2 data/results shell.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
@@ -55,6 +58,7 @@ def main() -> int:
         window = MainWindow(startup_status=status)
         apply_research_feature_ownership(window)
         apply_risk_execution_workspace(window)
+        apply_reports_diagnostics_workspace(window)
         install_run_progress(window)
         status("Ready")
         window.show()
