@@ -12,6 +12,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from ..progress import emit_progress
 from .query import DataRequest
 from .schemas import ArchiveRecord, DatasetKind
 from .store import DataNotAvailableError, MarketDataStore
@@ -447,12 +449,29 @@ class TradeAggregateStore:
                 f"No catalog coverage for {request.symbol} {dataset.value} trade-flow research"
             )
 
+        progress = getattr(self.store, "progress_callback", None)
+        progress_started = time.perf_counter()
+        total = len(records)
+        label = "Trade Flow — Aggregate Trades" if dataset is DatasetKind.AGG_TRADES else "Trade Flow — Trades"
+        emit_progress(
+            progress,
+            kind="cache",
+            phase="trade_flow_cache",
+            label=label,
+            completed=0,
+            total=total,
+            built=0,
+            reused=0,
+            elapsed_seconds=0.0,
+            current="Checking compact 1-minute partitions",
+        )
+
         partition_frames: list[pd.DataFrame] = []
         partition_identities: list[str] = []
         built = 0
         reused = 0
         adapter = self.store._adapter_for(dataset)
-        for record in records:
+        for index, record in enumerate(records, 1):
             identity = self._partition_identity(record, dataset, large_trade_quote_threshold)
             partition_identities.append(identity)
             aggregate = self._read_cached_partition(
@@ -472,9 +491,23 @@ class TradeAggregateStore:
                     large_trade_quote_threshold,
                 )
                 built += 1
+                action = "Built missing partition"
             else:
                 reused += 1
+                action = "Reused cached partition"
             partition_frames.append(aggregate)
+            emit_progress(
+                progress,
+                kind="cache",
+                phase="trade_flow_cache",
+                label=label,
+                completed=index,
+                total=total,
+                built=built,
+                reused=reused,
+                elapsed_seconds=time.perf_counter() - progress_started,
+                current=action,
+            )
 
         combined = pd.concat(partition_frames, ignore_index=True) if partition_frames else pd.DataFrame()
         if combined.empty:
