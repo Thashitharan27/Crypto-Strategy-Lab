@@ -6,6 +6,7 @@ import traceback
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
+from crypto_strategy_lab.gui.run_progress import install_run_progress
 from crypto_strategy_lab.gui.v2_main_window import MainWindow
 
 
@@ -40,6 +41,7 @@ def main() -> int:
 
     try:
         window = MainWindow(startup_status=status)
+        install_run_progress(window)
         status("Ready")
         window.show()
         splash.finish(window)

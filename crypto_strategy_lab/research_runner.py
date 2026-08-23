@@ -13,6 +13,7 @@ from .data.timing import interval_to_timedelta, normalize_binance_interval
 from .data.quality import DataQualityReport
 from .prepared_backtest import from_data_lake_bundle, intrabar_from_data_lake_bundle
 from .prepared_cache import bundle_prepared_identity
+from .progress import emit_progress
 from .research_adapters import prepared_policy_config
 
 
@@ -113,6 +114,14 @@ class ResearchRunner:
 
     def run(self, request, run_config, *, refresh_catalog=True, intrabar_start=None):
         self._validate_request_contract(request, run_config)
+        progress = getattr(self.data_store, "progress_callback", None)
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="starting",
+            label="Starting native research",
+            detail="Validating the request and preparing run provenance.",
+        )
         for reporter in self.reporters:
             begin = getattr(reporter, "begin", None)
             if begin is not None:
@@ -123,6 +132,13 @@ class ResearchRunner:
         timings: dict[str, float] = {}
         before = dict(getattr(self.data_store, "canonical_cache_events", {}))
 
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="data_features",
+            label="Preparing data & research features",
+            detail="Existing caches are reused; only missing cache partitions are built.",
+        )
         started = time.perf_counter()
         bundle = load_backtest_bundle(
             self.data_store,
@@ -137,6 +153,13 @@ class ResearchRunner:
 
         # L3 sees only the config projection that is physically materialized in
         # PreparedBacktestFrame. Execution and reporting never participate.
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="prepared_cache",
+            label="Preparing simulation frame",
+            detail="Checking the prepared-frame cache and assembling causal strategy inputs.",
+        )
         prepared_policy = prepared_policy_config(run_config)
         started = time.perf_counter()
         key, provenance = bundle_prepared_identity(
@@ -177,6 +200,16 @@ class ResearchRunner:
                     use_intrabar_data=True,
                 )
 
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="simulation",
+            label="Running strategy simulation",
+            detail=(
+                f"Prepared frame {'reused from cache' if hit else 'built'}; "
+                f"simulating {len(prepared):,} strategy rows."
+            ),
+        )
         policy = self.strategy.bind(prepared, run_config.strategy)
         simulation_started = time.perf_counter()
         trades = self.simulator.run(
@@ -241,6 +274,13 @@ class ResearchRunner:
             data_quality=getattr(bundle, "data_quality", None),
         )
 
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="reporting",
+            label="Writing reports & artifacts",
+            detail=f"Simulation finished with {len(trades):,} completed trades.",
+        )
         report_started = time.perf_counter()
         # Reporters receive the already-built frame so artifact production can
         # serialize decision context without reopening data or rebuilding it.
@@ -249,4 +289,11 @@ class ResearchRunner:
         for reporter in self.reporters:
             reporter.report(result, context)
         timings["reporting"] = time.perf_counter() - report_started
+        emit_progress(
+            progress,
+            kind="complete",
+            phase="complete",
+            label="COMPLETED",
+            detail="All research stages finished; opening the completed run artifacts.",
+        )
         return result

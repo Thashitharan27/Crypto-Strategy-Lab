@@ -11,12 +11,14 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import time
 from uuid import uuid4
 
 import duckdb
 import numpy as np
 import pandas as pd
 
+from ..progress import emit_progress
 from .query import DataRequest
 from .schemas import ArchiveRecord, DatasetKind
 from .store import DataNotAvailableError, MarketDataStore
@@ -361,10 +363,32 @@ class OrderBookSnapshotStore:
         )
         if not records:
             raise DataNotAvailableError(f"No {dataset.value} coverage")
+
+        progress = getattr(self.store, "progress_callback", None)
+        progress_started = time.perf_counter()
+        total = len(records)
+        label = (
+            "Order Book — Ticker"
+            if dataset is DatasetKind.BOOK_TICKER
+            else "Order Book — Depth"
+        )
+        emit_progress(
+            progress,
+            kind="cache",
+            phase="order_book_cache",
+            label=label,
+            completed=0,
+            total=total,
+            built=0,
+            reused=0,
+            elapsed_seconds=0.0,
+            current="Checking compact 1-minute partitions",
+        )
+
         frames: list[pd.DataFrame] = []
         identities: list[str] = []
         built = reused = event_count = 0
-        for record in records:
+        for index, record in enumerate(records, 1):
             identity = self._identity(record, interval)
             identities.append(identity)
             cached = self._read(record, interval, identity)
@@ -386,12 +410,26 @@ class OrderBookSnapshotStore:
                         source_event_count=source_events,
                     )
                 built += 1
+                action = "Built missing partition"
             else:
                 compact, source_events = cached
                 event_count += source_events
                 reused += 1
+                action = "Reused cached partition"
             if not compact.empty:
                 frames.append(compact)
+            emit_progress(
+                progress,
+                kind="cache",
+                phase="order_book_cache",
+                label=label,
+                completed=index,
+                total=total,
+                built=built,
+                reused=reused,
+                elapsed_seconds=time.perf_counter() - progress_started,
+                current=action,
+            )
         if not frames:
             raise DataNotAvailableError(f"No valid {dataset.value} observations")
 
@@ -495,6 +533,24 @@ class OrderBookSnapshotStore:
         records = self.store.catalog.records_for(
             self.store.raw_root, request, dataset, None
         )
+        progress = getattr(self.store, "progress_callback", None)
+        progress_started = time.perf_counter()
+        progress_label = (
+            "Order Book Quality — Ticker"
+            if dataset is DatasetKind.BOOK_TICKER
+            else "Order Book Quality — Depth"
+        )
+        emit_progress(
+            progress,
+            kind="cache",
+            mode="validation",
+            phase="order_book_quality",
+            label=progress_label,
+            completed=0,
+            total=len(records),
+            elapsed_seconds=0.0,
+            current="Cold quality check; later identical runs reuse this result",
+        )
         coverage = self.store.catalog.coverage(
             self.store.raw_root,
             market=request.market,
@@ -505,7 +561,18 @@ class OrderBookSnapshotStore:
         row_count = 0
         observed_start = None
         observed_end = None
-        for record in records:
+        for index, record in enumerate(records, 1):
+            emit_progress(
+                progress,
+                kind="cache",
+                mode="validation",
+                phase="order_book_quality",
+                label=progress_label,
+                completed=index - 1,
+                total=len(records),
+                elapsed_seconds=time.perf_counter() - progress_started,
+                current=f"Validating source partition {index} of {len(records)}",
+            )
             local_start = max(
                 pd.Timestamp(request.start),
                 pd.Timestamp(record.period_start)
@@ -571,6 +638,17 @@ class OrderBookSnapshotStore:
             )
             issues.extend(partition_report.issues)
 
+        emit_progress(
+            progress,
+            kind="cache",
+            mode="validation",
+            phase="order_book_quality",
+            label=progress_label,
+            completed=len(records),
+            total=len(records),
+            elapsed_seconds=time.perf_counter() - progress_started,
+            current="Quality validation cached",
+        )
         issues.extend(self.store._archive_overlap_issues(request, dataset))
 
         complete_start = pd.Timestamp(request.start)

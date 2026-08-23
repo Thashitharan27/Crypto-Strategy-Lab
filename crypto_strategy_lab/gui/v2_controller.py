@@ -17,6 +17,7 @@ from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore, 
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig, load_data_lake_config
 from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.prepared_cache import PreparedRunCache
+from crypto_strategy_lab.progress import emit_progress
 from crypto_strategy_lab.research_adapters import NativeSimulator, NativeStrategyPolicy
 from crypto_strategy_lab.research_reporting import CsvManifestReporter
 from crypto_strategy_lab.research_runner import ResearchRunner
@@ -96,6 +97,7 @@ class GuiApplicationService:
         self.catalog = CatalogStatusService(self.store)
         self.completed_runs = CompletedRunReader()
         self._runner_factory = runner_factory
+        self.progress_callback = None
 
     def refresh_catalog(self) -> int:
         """Refresh discovery only at the application-service boundary."""
@@ -110,7 +112,26 @@ class GuiApplicationService:
 
     def run(self, request: GuiResearchRequest, config: ResearchRunConfig):
         config.validate()
-        return self._runner(Path(config.reporting.output_dir)).run(request.to_data_request(), config)
+        callback = getattr(self, "progress_callback", None)
+        # The observer is attached only for this run. Data/cache layers can emit
+        # partition-level events without depending on Qt or changing their public
+        # result contracts.
+        self.store.progress_callback = callback
+        try:
+            return self._runner(Path(config.reporting.output_dir)).run(
+                request.to_data_request(), config
+            )
+        except Exception as exc:
+            emit_progress(
+                callback,
+                kind="failed",
+                phase="failed",
+                label="RUN FAILED",
+                detail=str(exc),
+            )
+            raise
+        finally:
+            self.store.progress_callback = None
 
     @staticmethod
     def save_config(path: Path, config: ResearchRunConfig) -> None:
