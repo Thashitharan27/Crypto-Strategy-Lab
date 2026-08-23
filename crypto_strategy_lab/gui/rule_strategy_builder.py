@@ -17,11 +17,14 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QMenu,
     QPushButton,
     QSpinBox,
     QTableWidget,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS
@@ -69,6 +72,47 @@ EVIDENCE_LABELS = {
     "SR_SUPPORT_REJECTION_ATR": "S/R — Support Rejection (ATR)",
     "SR_RESISTANCE_REJECTION_ATR": "S/R — Resistance Rejection (ATR)",
 }
+EVIDENCE_GROUPS = (
+    (
+        "Directional / DI",
+        (
+            "DI_SPREAD",
+            "DI_PRESSURE_STATE",
+            "DI_SPREAD_CHANGE",
+            "DIRECTIONAL_DI_CHANGE",
+            "OPPOSING_DI_CHANGE",
+        ),
+    ),
+    ("Trend & Volatility", ("ADX", "ATR_PCT", "BB_WIDTH")),
+    (
+        "Momentum & Price",
+        ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
+    ),
+    (
+        "Support & Resistance",
+        (
+            "SR_TRADE_LOCATION_RATING",
+            "SR_ROOM_IN_DIRECTION_ATR",
+            "SR_NEAR_SUPPORT",
+            "SR_NEAR_RESISTANCE",
+            "SR_INSIDE_SUPPORT_ZONE",
+            "SR_INSIDE_RESISTANCE_ZONE",
+        ),
+    ),
+    (
+        "Support & Resistance — Advanced",
+        (
+            "SR_SUPPORT_STATE",
+            "SR_RESISTANCE_STATE",
+            "SR_SUPPORT_HELD",
+            "SR_RESISTANCE_HELD",
+            "SR_SUPPORT_DISTANCE_ATR",
+            "SR_RESISTANCE_DISTANCE_ATR",
+            "SR_SUPPORT_REJECTION_ATR",
+            "SR_RESISTANCE_REJECTION_ATR",
+        ),
+    ),
+)
 OPERATOR_LABELS = {
     "GTE": "≥",
     "LTE": "≤",
@@ -82,6 +126,79 @@ DIRECTION_LABELS = {"DI": "DI Direction"}
 
 def _humanize(value: str) -> str:
     return str(value).replace("_", " ").title()
+
+
+class EvidenceComboBox(QComboBox):
+    """Evidence selector with grouped, searchable popup and stable rule IDs."""
+
+    def __init__(self, current: str | None = None, parent=None):
+        super().__init__(parent)
+        for evidence in RULE_INDICATORS:
+            self.addItem(EVIDENCE_LABELS.get(evidence, evidence), evidence)
+        index = self.findData(current)
+        self.setCurrentIndex(max(index, 0))
+        self.setToolTip("Browse evidence by category or search by name")
+
+    def showPopup(self) -> None:
+        menu = QMenu(self)
+        menu.setMinimumWidth(max(self.width(), 340))
+
+        search = QLineEdit(menu)
+        search.setPlaceholderText("Search evidence…")
+        search_action = QWidgetAction(menu)
+        search_action.setDefaultWidget(search)
+        menu.addAction(search_action)
+        menu.addSeparator()
+
+        grouped_actions = []
+        current = self.currentData()
+        grouped_ids = {
+            evidence for _group, evidence_ids in EVIDENCE_GROUPS for evidence in evidence_ids
+        }
+        groups = list(EVIDENCE_GROUPS)
+        uncategorized = tuple(
+            evidence for evidence in RULE_INDICATORS if evidence not in grouped_ids
+        )
+        if uncategorized:
+            groups.append(("Other", uncategorized))
+
+        for group_name, evidence_ids in groups:
+            section = menu.addSection(group_name)
+            actions = []
+            for evidence in evidence_ids:
+                if evidence not in RULE_INDICATORS:
+                    continue
+                label = EVIDENCE_LABELS.get(evidence, evidence)
+                action = menu.addAction(label)
+                action.setCheckable(True)
+                action.setChecked(evidence == current)
+                action.triggered.connect(
+                    lambda _checked=False, value=evidence: self._select_evidence(value)
+                )
+                search_text = (
+                    f"{group_name} {label} {evidence.replace('_', ' ')}".casefold()
+                )
+                actions.append((action, search_text))
+            grouped_actions.append((section, actions))
+
+        def apply_filter(text: str) -> None:
+            needle = text.strip().casefold()
+            for section, actions in grouped_actions:
+                any_visible = False
+                for action, search_text in actions:
+                    visible = not needle or needle in search_text
+                    action.setVisible(visible)
+                    any_visible = any_visible or visible
+                section.setVisible(any_visible)
+
+        search.textChanged.connect(apply_filter)
+        search.setFocus()
+        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
+
+    def _select_evidence(self, evidence: str) -> None:
+        index = self.findData(evidence)
+        if index >= 0:
+            self.setCurrentIndex(index)
 
 
 class RuleTable(QTableWidget):
@@ -180,13 +297,7 @@ class RuleTable(QTableWidget):
             self.setRowCount(len(normalized))
             self._ids = [rule["id"] for rule in normalized]
             for row, rule in enumerate(normalized):
-                evidence = self._combo(
-                    [
-                        (item, EVIDENCE_LABELS.get(item, item))
-                        for item in RULE_INDICATORS
-                    ],
-                    rule["evidence"],
-                )
+                evidence = EvidenceComboBox(rule["evidence"])
                 regime = self._combo(
                     [
                         ("ALL", "All Markets"),
@@ -337,7 +448,7 @@ class RuleStrategyBuilder(QWidget):
         row.addStretch()
         required_layout.addLayout(row)
         evidence_note = QLabel(
-            "DI Pressure and S/R are rule evidence like any other indicator. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
+            "Evidence is grouped and searchable; common S/R choices are shown before advanced S/R details. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
         )
         evidence_note.setWordWrap(True)
         evidence_note.setStyleSheet("color:#52606d")
