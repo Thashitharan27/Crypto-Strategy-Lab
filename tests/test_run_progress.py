@@ -34,10 +34,11 @@ def test_gui_service_attaches_progress_only_for_active_run(tmp_path):
 
     store = Store()
     observed = []
+    callback = observed.append
 
     class Runner:
         def run(self, request, config):
-            assert store.progress_callback is observed.append
+            assert store.progress_callback is callback
             emit_progress(
                 store.progress_callback,
                 kind="stage",
@@ -48,7 +49,7 @@ def test_gui_service_attaches_progress_only_for_active_run(tmp_path):
 
     service = object.__new__(GuiApplicationService)
     service.store = store
-    service.progress_callback = observed.append
+    service.progress_callback = callback
     service._runner_factory = lambda _output: Runner()
 
     request = GuiResearchRequest(
