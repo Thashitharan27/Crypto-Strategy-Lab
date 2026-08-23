@@ -1,6 +1,6 @@
 """Presentation metadata for the native v3 research configuration.
 
-This module deliberately contains no research logic.  Values are converted only
+This module deliberately contains no research logic. Values are converted only
 at the widget boundary; the dataclasses continue to store their canonical units.
 """
 from __future__ import annotations
@@ -38,6 +38,20 @@ FIELDS = {
     "timeout_minutes": FieldPresentation("Maximum Holding Time", unit=" min", decimals=0),
     "strategy_profile_run_mode": FieldPresentation("Profile Test Mode"),
     "tie_policy": FieldPresentation("Same-bar Resolution"),
+    "run_name": FieldPresentation("Run Name", "Optional friendly name stored with this run."),
+    "create_human_workbook": FieldPresentation("Performance Workbook"),
+    "create_standard_charts": FieldPresentation("Standard Charts"),
+    "enable_trade_telemetry": FieldPresentation("Trade Journey Diagnostics"),
+    "save_full_telemetry_csv": FieldPresentation("Save Raw Telemetry CSV"),
+    "save_trade_journey_summary": FieldPresentation("Trade Journey Summary"),
+    "save_trade_journey_charts": FieldPresentation("Trade Journey Charts"),
+    "telemetry_interval_minutes": FieldPresentation("Journey Sampling Interval", unit=" min", decimals=0),
+    "enable_indicator_lifecycle_analysis": FieldPresentation("Indicator Lifecycle Diagnostics"),
+    "lifecycle_phases": FieldPresentation("Lifecycle Phases", decimals=0),
+    "lifecycle_minimum_bucket_sample": FieldPresentation("Minimum Trades Per Bucket", decimals=0),
+    "create_lifecycle_charts": FieldPresentation("Lifecycle Charts"),
+    "lifecycle_flat_pattern_threshold_pct": FieldPresentation("Flat Pattern Threshold", unit="%", decimals=2),
+    "save_indicator_analysis_reports": FieldPresentation("Indicator Analysis Workbook"),
 }
 
 ENUM_LABELS = {
@@ -68,24 +82,100 @@ def parse_percentage(display: str | float) -> float:
     return float(str(display).strip().removesuffix("%").strip()) / 100
 
 
+# Reporting profiles are presentation policy. Canonical machine-readable artifacts
+# are always written by the native reporter; these settings control optional human
+# review and passive diagnostic work only.
+REPORT_PROFILES = {
+    "CORE": dict(
+        analysis_level="QUICK",
+        create_human_workbook=False,
+        create_standard_charts=False,
+        enable_trade_telemetry=False,
+        save_full_telemetry_csv=False,
+        save_trade_journey_summary=False,
+        save_trade_journey_charts=False,
+        telemetry_interval_minutes=15,
+        enable_indicator_lifecycle_analysis=False,
+        lifecycle_phases=4,
+        lifecycle_early_checkpoints=(15, 30, 60),
+        lifecycle_minimum_bucket_sample=20,
+        create_lifecycle_charts=False,
+        lifecycle_flat_pattern_threshold_pct=5.0,
+        save_feature_analysis_reports=False,
+        save_indicator_analysis_reports=False,
+    ),
+    "REVIEW": dict(
+        analysis_level="STANDARD",
+        create_human_workbook=True,
+        create_standard_charts=True,
+        enable_trade_telemetry=False,
+        save_full_telemetry_csv=False,
+        save_trade_journey_summary=False,
+        save_trade_journey_charts=False,
+        telemetry_interval_minutes=15,
+        enable_indicator_lifecycle_analysis=False,
+        lifecycle_phases=4,
+        lifecycle_early_checkpoints=(15, 30, 60),
+        lifecycle_minimum_bucket_sample=20,
+        create_lifecycle_charts=False,
+        lifecycle_flat_pattern_threshold_pct=5.0,
+        save_feature_analysis_reports=False,
+        save_indicator_analysis_reports=False,
+    ),
+    "DEEP_DIAGNOSTICS": dict(
+        analysis_level="DEEP",
+        create_human_workbook=True,
+        create_standard_charts=True,
+        enable_trade_telemetry=True,
+        save_full_telemetry_csv=True,
+        save_trade_journey_summary=True,
+        save_trade_journey_charts=True,
+        telemetry_interval_minutes=15,
+        enable_indicator_lifecycle_analysis=True,
+        lifecycle_phases=4,
+        lifecycle_early_checkpoints=(15, 30, 60),
+        lifecycle_minimum_bucket_sample=20,
+        create_lifecycle_charts=True,
+        lifecycle_flat_pattern_threshold_pct=5.0,
+        save_feature_analysis_reports=False,
+        save_indicator_analysis_reports=True,
+    ),
+}
+
+REPORT_PROFILE_LABELS = {
+    "CORE": "Core — canonical artifacts only",
+    "REVIEW": "Review — recommended",
+    "DEEP_DIAGNOSTICS": "Deep Diagnostics — slower",
+    "CUSTOM": "Custom",
+}
+
+
+def apply_report_profile(reporting, profile: str):
+    """Apply one immediate researcher-facing output profile."""
+    if profile == "CUSTOM":
+        return reporting
+    return replace(reporting, **REPORT_PROFILES[profile])
+
+
+def detect_report_profile(reporting) -> str:
+    """Return the exact matching profile, otherwise CUSTOM."""
+    for profile, values in REPORT_PROFILES.items():
+        if all(getattr(reporting, name) == value for name, value in values.items()):
+            return profile
+    return "CUSTOM"
+
+
+# Keep the old preset helper as a bounded compatibility surface for the hidden
+# generic v2 page. The active Reports & Diagnostics workspace uses REPORT_PROFILES.
 REPORT_PRESETS = {
-    "QUICK": dict(analysis_level="QUICK", enable_trade_telemetry=False, save_full_telemetry_csv=False,
-        save_trade_journey_summary=False, save_trade_journey_charts=False,
-        enable_indicator_lifecycle_analysis=False, create_lifecycle_charts=False,
-        save_feature_analysis_reports=False, save_indicator_analysis_reports=False, create_standard_charts=False),
-    "STANDARD": dict(analysis_level="STANDARD", enable_trade_telemetry=False, save_full_telemetry_csv=False,
-        save_trade_journey_summary=False, save_trade_journey_charts=False,
-        enable_indicator_lifecycle_analysis=False, create_lifecycle_charts=False,
-        save_feature_analysis_reports=False, save_indicator_analysis_reports=True, create_standard_charts=True),
-    "DEEP_RESEARCH": dict(analysis_level="DEEP", enable_trade_telemetry=True, save_full_telemetry_csv=True,
-        save_trade_journey_summary=True, save_trade_journey_charts=True,
-        enable_indicator_lifecycle_analysis=True, create_lifecycle_charts=True,
-        save_feature_analysis_reports=True, save_indicator_analysis_reports=True, create_standard_charts=True),
+    "QUICK": REPORT_PROFILES["CORE"],
+    "STANDARD": REPORT_PROFILES["REVIEW"],
+    "DEEP_RESEARCH": REPORT_PROFILES["DEEP_DIAGNOSTICS"],
 }
 
 
 def apply_report_preset(reporting, preset: str):
-    """Return a new ReportingConfig using an explicit deterministic mapping."""
+    """Return a new ReportingConfig using the bounded legacy preset names."""
     return replace(reporting, **REPORT_PRESETS[preset])
 
 
