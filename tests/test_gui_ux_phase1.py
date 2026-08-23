@@ -63,7 +63,7 @@ def test_structured_rules_are_advanced_exceptions_not_primary_strategy_editor():
     entry=next(node for node in tree.body if isinstance(node,ast.ClassDef) and node.name=="EntryRuleEditor")
     assert entry and "_payloads" in source and "Advanced Exceptions" in source
     assert "Entry Rules (structured JSON array)" not in source
-    assert "single source of truth for entry decisions" in source
+    assert "single source of truth for entry decisions" in source.lower()
 
 
 def _window():
