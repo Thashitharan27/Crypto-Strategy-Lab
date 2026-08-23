@@ -158,9 +158,12 @@ def apply_report_profile(reporting, profile: str):
 
 
 def detect_report_profile(reporting) -> str:
-    """Return the exact matching profile, otherwise CUSTOM."""
+    """Return the matching profile, ignoring timeframe-normalized sample cadence."""
     for profile, values in REPORT_PROFILES.items():
-        if all(getattr(reporting, name) == value for name, value in values.items()):
+        if all(
+            name == "telemetry_interval_minutes" or getattr(reporting, name) == value
+            for name, value in values.items()
+        ):
             return profile
     return "CUSTOM"
 
