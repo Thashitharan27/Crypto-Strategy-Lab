@@ -104,12 +104,22 @@ def build_periodic_breakdown(trades: pd.DataFrame, freq: str) -> pd.DataFrame:
         }
     )
     frame = frame.loc[frame["exit_time"].notna()].set_index("exit_time")
-    periodic = frame.resample(freq).agg(
-        pair_count=("pair_net_pnl", "size"),
-        net_pnl=("pair_net_pnl", "sum"),
-        net_r=("pair_net_r", "sum"),
-    )
-    return periodic.reset_index().rename(columns={"exit_time": "period"})
+    candidates = [freq]
+    fallback = {"ME": "M", "YE": "Y", "M": "ME", "Y": "YE"}.get(freq)
+    if fallback is not None:
+        candidates.append(fallback)
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            periodic = frame.resample(candidate).agg(
+                pair_count=("pair_net_pnl", "size"),
+                net_pnl=("pair_net_pnl", "sum"),
+                net_r=("pair_net_r", "sum"),
+            )
+            return periodic.reset_index().rename(columns={"exit_time": "period"})
+        except ValueError as exc:
+            last_error = exc
+    raise last_error if last_error is not None else ValueError(f"Unsupported resample frequency: {freq}")
 
 
 def build_performance_breakdowns(trades: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
