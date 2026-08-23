@@ -7,12 +7,19 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from crypto_strategy_lab.gui.run_progress import install_run_progress
+from crypto_strategy_lab.gui.dataset_labels import dataset_family_label
 # The rule-based window deliberately reuses the proven v2 shell for data/results.
 # Keep the shell import explicit while selecting the rule authoring window below.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
 from crypto_strategy_lab.gui import rule_main_window
 
-MainWindow = rule_main_window.MainWindow
+
+class MainWindow(rule_main_window.MainWindow):
+    """Active researcher window with presentation-only catalog labeling."""
+
+    _dataset_family = staticmethod(dataset_family_label)
+
+
 assert issubclass(MainWindow, StableGuiShell)
 
 
