@@ -248,6 +248,8 @@ class ReportsDiagnosticsWorkspace(QWidget):
         )
         self.checkpoints.changed.connect(self._checkpoint_changed)
         self.form.changed.connect(self._authoritative_changed)
+        if hasattr(window, "strategy_tf"):
+            window.strategy_tf.currentIndexChanged.connect(self._strategy_timeframe_changed)
         self.refresh_from_config(window.config.reporting)
 
     def _label_checkbox(self, name: str, text: str) -> None:
@@ -275,6 +277,28 @@ class ReportsDiagnosticsWorkspace(QWidget):
             interval = strategy_minutes
         return replace(reporting, telemetry_interval_minutes=interval)
 
+    def _ensure_sampling_compatible(self) -> None:
+        if self._syncing:
+            return
+        try:
+            current = self.form.value(self.window.config.reporting)
+        except (TypeError, ValueError, KeyError):
+            return
+        normalized = self._normalize_sampling_interval(current)
+        if normalized.telemetry_interval_minutes == current.telemetry_interval_minutes:
+            return
+        self._syncing = True
+        try:
+            self.widgets["telemetry_interval_minutes"].setValue(
+                int(normalized.telemetry_interval_minutes)
+            )
+        finally:
+            self._syncing = False
+
+    def _strategy_timeframe_changed(self, _index: int) -> None:
+        self._ensure_sampling_compatible()
+        self._sync_profile_label()
+
     def _profile_selected(self, _index: int) -> None:
         if self._syncing:
             return
@@ -295,6 +319,7 @@ class ReportsDiagnosticsWorkspace(QWidget):
     def _authoritative_changed(self) -> None:
         if self._syncing:
             return
+        self._ensure_sampling_compatible()
         self.refresh_visibility()
         self._sync_profile_label()
 
@@ -311,6 +336,7 @@ class ReportsDiagnosticsWorkspace(QWidget):
                     self.widgets[name].setChecked(False)
             finally:
                 self._syncing = False
+        self._ensure_sampling_compatible()
         self.refresh_visibility()
         self._sync_profile_label()
 
@@ -323,6 +349,7 @@ class ReportsDiagnosticsWorkspace(QWidget):
                 self.widgets["create_lifecycle_charts"].setChecked(False)
             finally:
                 self._syncing = False
+        self._ensure_sampling_compatible()
         self.refresh_visibility()
         self._sync_profile_label()
 
@@ -341,6 +368,7 @@ class ReportsDiagnosticsWorkspace(QWidget):
             self.checkpoints.set_tuple(tuple(reporting.lifecycle_early_checkpoints))
         finally:
             self._syncing = False
+        self._ensure_sampling_compatible()
         self.refresh_visibility()
         self._sync_profile_label()
 
