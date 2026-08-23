@@ -205,34 +205,99 @@ def test_strategy_workspace_uses_authoritative_native_widgets_not_duplicate_stat
     finally: window.close()
 
 
-def test_market_permission_matrix_edits_native_profile_enabled_flag_only():
+def test_market_permission_matrix_edits_only_native_enabled_flag_and_selects_profile():
     _app,window=_window()
     try:
         base=ResearchRunConfig(); window.apply_config(base)
         before=window.build_config()
         box=window.profile_editor.permission_checks["bull_short"]
-        box.setChecked(False)
+        box.click()
         after=window.build_config()
+        assert window.profile_editor.selector.currentData() == "bull_short"
         assert after.strategy.profiles["bull_short"].enabled is False
         assert after.execution == before.execution
         assert after.strategy.profiles["bull_long"] == before.strategy.profiles["bull_long"]
-        box.setChecked(True)
+        box.click()
         assert window.build_config() == before
     finally: window.close()
 
 
-def test_plain_english_strategy_thesis_tracks_native_strategy_controls():
+def test_entry_evidence_framework_maps_current_native_roles_without_inventing_semantics():
+    _app,window=_window()
+    try:
+        workspace=window.strategy_workspace
+        before=window.build_config()
+        roles=workspace.evidence_roles()
+        assert roles["DI Direction"][0] == "Direction"
+        assert roles["DI Pressure"][0] == "Analyze Only"
+        assert roles["Mean Reversion"][0] == "Analyze Only"
+        assert roles["Support / Resistance"][0] == "Off"
+        for source in ("Open Interest","Funding","Positioning / Basis","Taker Flow"):
+            assert roles[source][0] == "Analyze Only"
+        assert roles["Trade Flow"][0] == "Off"
+        assert roles["Order Book"][0] == "Off"
+        assert window.build_config() == before
+    finally: window.close()
+
+
+def test_di_pressure_promotes_from_analyze_only_to_required_using_existing_filter_only():
+    _app,window=_window()
+    try:
+        workspace=window.strategy_workspace
+        before=window.build_config()
+        assert workspace.evidence_roles()["DI Pressure"][0] == "Analyze Only"
+        window.strategy_form.widgets["di_pressure_allow_contracting"].setChecked(False)
+        after=window.build_config()
+        assert workspace.evidence_roles()["DI Pressure"][0] == "Required Condition"
+        assert after.strategy.di_pressure_allow_contracting is False
+        assert replace(after.strategy,di_pressure_allow_contracting=True) == before.strategy
+        window.strategy_form.widgets["enable_di_pressure_analysis"].setChecked(False)
+        assert workspace.evidence_roles()["DI Pressure"][0] == "Off"
+    finally: window.close()
+
+
+def test_sr_trade_flow_and_order_book_roles_follow_existing_native_controls():
+    _app,window=_window()
+    try:
+        workspace=window.strategy_workspace
+        assert workspace.evidence_roles()["Support / Resistance"][0] == "Off"
+        window.feature_form.widgets["enable_support_resistance_analysis"].setChecked(True)
+        assert workspace.evidence_roles()["Support / Resistance"][0] == "Analyze Only"
+        sr=window.strategy_form.widgets["sr_filter_mode"]
+        sr.setCurrentIndex(sr.findData("APPLY_ENTRY_RULES"))
+        assert workspace.evidence_roles()["Support / Resistance"][0] == "Veto / Avoid"
+        assert not workspace.sr_filter_details.isHidden()
+        window.feature_form.widgets["trade_flow_enabled"].setChecked(True)
+        window.feature_form.widgets["order_book_enabled"].setChecked(True)
+        roles=workspace.evidence_roles()
+        assert roles["Trade Flow"][0] == "Analyze Only"
+        assert roles["Order Book"][0] == "Analyze Only"
+    finally: window.close()
+
+
+def test_strategy_thesis_is_structured_around_standard_entry_decision_stages():
     _app,window=_window()
     try:
         text=window.strategy_workspace.thesis_summary.text()
-        assert "Trade in:" in text and "DI selects direction" in text
-        assert "Support/Resistance is analysis-only" in text
-        window.strategy_form.widgets["enable_di_pressure_analysis"].setChecked(False)
-        assert "DI pressure logic is off" in window.strategy_workspace.thesis_summary.text()
-        window.strategy_form.widgets["sr_filter_mode"].setCurrentIndex(
-            window.strategy_form.widgets["sr_filter_mode"].findData("APPLY_ENTRY_RULES"))
-        assert "can block entries" in window.strategy_workspace.thesis_summary.text()
-        assert not window.strategy_workspace.sr_filter_details.isHidden()
+        for heading in ("Markets","Direction","Required Conditions","Confirmations","Avoid / Veto","Ranking","Profile Overrides"):
+            assert f"<b>{heading}</b>" in text
+        assert "DI Direction: Direction" in text
+        assert "DI Pressure: Analyze Only" in text
+        assert "Mean Reversion: Analyze Only" in text
+        assert "No native confidence/ranking role yet" in text
+    finally: window.close()
+
+
+def test_feature_changes_refresh_evidence_map_but_do_not_create_new_strategy_fields():
+    _app,window=_window()
+    try:
+        before=window.build_config()
+        window.feature_form.widgets["trade_flow_enabled"].setChecked(True)
+        after=window.build_config()
+        assert after.strategy == before.strategy
+        assert after.features.trade_flow_enabled is True
+        assert window.strategy_workspace.evidence_role_labels["Trade Flow"].text() == "Analyze Only"
+        assert set(after.strategy.__dataclass_fields__) == set(before.strategy.__dataclass_fields__)
     finally: window.close()
 
 
