@@ -1,10 +1,10 @@
 """Rule-based strategy authoring compiled to the mature simulator contract.
 
-The researcher-facing model is intentionally not profile based.  Market
+The researcher-facing model is intentionally not profile based. Market
 permissions, required filters, vetoes, and optional direction flips are authored
-once with regime/side scopes.  Only at the simulator boundary are those rules
+once with regime/side scopes. Only at the simulator boundary are those rules
 expanded into the six mature regime/direction inputs still consumed by the proven
-engine.  Builder metadata is embedded in rule dictionaries so save/load can round
+engine. Builder metadata is embedded in rule dictionaries so save/load can round
 trip the rule model without exposing profiles in the UI.
 """
 from __future__ import annotations
@@ -19,7 +19,11 @@ from crypto_strategy_lab.data_lake_config import (
 )
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, RULE_INDICATORS
 
-DIRECTION_MODES = ("DI", "LONG_ONLY", "SHORT_ONLY")
+# Direction selection and trade permission are intentionally separate concepts.
+# DI is the only currently researched native direction strategy. Additional
+# direction strategies can be added here later when they have a real native
+# implementation; LONG/SHORT selection belongs to MARKET_PERMISSIONS below.
+DIRECTION_MODES = ("DI",)
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
 SIDES = ("LONG", "SHORT")
 MARKET_PERMISSIONS = tuple(f"{regime}_{side}" for regime in REGIMES for side in SIDES)
@@ -91,14 +95,11 @@ def _profile_scope(profile_key: str) -> tuple[str, str]:
 
 
 def effective_side(source_side: str, direction_mode: str) -> str:
+    """Return the DI-selected side; permissions decide whether it may trade."""
     mode = str(direction_mode).upper()
-    if mode == "DI":
-        return source_side
-    if mode == "LONG_ONLY":
-        return "LONG"
-    if mode == "SHORT_ONLY":
-        return "SHORT"
-    raise ValueError(f"unsupported direction mode: {direction_mode}")
+    if mode != "DI":
+        raise ValueError(f"unsupported direction mode: {direction_mode}")
+    return source_side
 
 
 def _applies(rule: dict, regime: str, side: str) -> bool:
@@ -166,8 +167,6 @@ def compile_profiles(
     required = normalize_rules(required_rules, kind="REQUIRED")
     veto = normalize_rules(veto_rules, kind="VETO")
     flips = normalize_rules(flip_rules, kind="FLIP")
-    if mode != "DI" and flips:
-        raise ValueError("direction flip rules are available only when DI Direction is selected")
     if int(rsi_period) <= 0 or int(momentum_lookback_hours) <= 0:
         raise ValueError("rule calculation periods must be positive")
 
@@ -192,7 +191,7 @@ def compile_profiles(
 
         strategy_profiles[key] = StrategyProfileConfig(
             enabled=enabled,
-            flip_direction=(side != source_side),
+            flip_direction=False,
             entry_rules=tuple(native_rules),
             flip_rule_match_mode="ANY",
             reject_rule_match_mode="ANY",
@@ -235,26 +234,23 @@ def decompile_rules(strategy_profiles) -> dict[str, tuple[dict, ...]]:
 
 
 def infer_direction_mode(strategy_profiles) -> str:
-    """Infer the builder direction mode from compiler-generated flip patterns."""
-    long_flags = []
-    short_flags = []
-    for key, profile in strategy_profiles.items():
-        _regime, source_side = _profile_scope(key)
-        (long_flags if source_side == "LONG" else short_flags).append(bool(profile.flip_direction))
-    if long_flags and short_flags and not any(long_flags) and all(short_flags):
-        return "LONG_ONLY"
-    if long_flags and short_flags and all(long_flags) and not any(short_flags):
-        return "SHORT_ONLY"
+    """Return the only currently supported native direction strategy."""
+    if any(bool(profile.flip_direction) for profile in strategy_profiles.values()):
+        raise ValueError(
+            "Static profile direction overrides are retired; use Direction Flip Rules instead"
+        )
     return "DI"
 
 
 def infer_market_permissions(strategy_profiles, direction_mode: str) -> tuple[str, ...]:
+    # Validate the authored direction strategy even though DI preserves source side.
+    effective_side("LONG", direction_mode)
     permissions = set()
     for key, profile in strategy_profiles.items():
         if not profile.enabled:
             continue
         regime, source_side = _profile_scope(key)
-        permissions.add(f"{regime}_{effective_side(source_side, direction_mode)}")
+        permissions.add(f"{regime}_{source_side}")
     return tuple(item for item in MARKET_PERMISSIONS if item in permissions)
 
 
