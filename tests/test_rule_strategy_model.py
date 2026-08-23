@@ -9,6 +9,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     compile_profiles,
     decompile_rules,
     new_rule,
+    normalize_rule,
 )
 
 
@@ -37,12 +38,79 @@ def test_required_di_spread_rule_compiles_to_reject_when_requirement_fails():
         assert native["condition"] == "OUTSIDE"
         assert native["minimum"] == 30.0
         assert native["maximum"] > 1e300
-        # Extra builder metadata remains harmless to the mature engine contract.
         mature = StrategyProfile(**{
             **asdict(profile),
             **asdict(execution[key]),
         })
         mature.validate(key)
+
+
+def test_required_expanding_pressure_compiles_as_categorical_requirement():
+    rule = new_rule(kind="REQUIRED", evidence="DI_PRESSURE_STATE")
+    rule.update(operator="IS", value="EXPANDING", regime="ALL", side="ALL")
+
+    strategy, execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(rule,),
+    )
+
+    native = strategy["bull_long"].entry_rules[0]
+    assert native["action"] == "REJECT"
+    assert native["indicator"] == "DI_PRESSURE_STATE"
+    assert native["condition"] == "OUTSIDE"
+    assert native["minimum"] == native["maximum"] == 1.0
+    StrategyProfile(**{
+        **asdict(strategy["bull_long"]),
+        **asdict(execution["bull_long"]),
+    }).validate("bull_long")
+
+
+def test_contracting_pressure_veto_rejects_matching_state():
+    rule = new_rule(kind="VETO", evidence="DI_PRESSURE_STATE")
+    rule.update(operator="IS", value="CONTRACTING")
+    strategy, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        veto_rules=(rule,),
+    )
+    native = strategy["bear_short"].entry_rules[0]
+    assert native["indicator"] == "DI_PRESSURE_STATE"
+    assert native["condition"] == "INSIDE"
+    assert native["minimum"] == native["maximum"] == 2.0
+
+
+def test_pressure_state_supports_only_categorical_operators_and_values():
+    with pytest.raises(ValueError, match="unsupported operator"):
+        normalize_rule({
+            "kind": "REQUIRED",
+            "evidence": "DI_PRESSURE_STATE",
+            "operator": "GTE",
+            "value": "EXPANDING",
+        })
+    with pytest.raises(ValueError, match="unsupported value"):
+        normalize_rule({
+            "kind": "REQUIRED",
+            "evidence": "DI_PRESSURE_STATE",
+            "operator": "IS",
+            "value": "UNKNOWN",
+        })
+
+
+def test_numeric_pressure_change_evidence_keeps_numeric_operators():
+    rule = new_rule(kind="REQUIRED", evidence="DIRECTIONAL_DI_CHANGE")
+    rule.update(operator="GTE", value=4.0)
+    normalized = normalize_rule(rule)
+    assert normalized["value"] == 4.0
+    strategy, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(normalized,),
+    )
+    native = strategy["bull_long"].entry_rules[0]
+    assert native["indicator"] == "DIRECTIONAL_DI_CHANGE"
+    assert native["condition"] == "OUTSIDE"
+    assert native["minimum"] == 4.0
 
 
 def test_scoped_veto_only_reaches_matching_regime_and_side():
@@ -72,8 +140,6 @@ def test_long_only_trading_is_expressed_by_permissions_not_direction_override():
         required_rules=(rule,),
     )
 
-    # DI still decides the candidate side. LONG permissions allow DI-LONG
-    # candidates and reject DI-SHORT candidates; nothing is converted to LONG.
     assert strategy["bull_long"].enabled is True
     assert strategy["bull_short"].enabled is False
     assert strategy["bear_long"].enabled is True
@@ -96,9 +162,14 @@ def test_forced_long_and_short_direction_modes_are_retired():
 
 def test_builder_metadata_round_trips_scoped_rules_without_profile_ui():
     required = new_rule(kind="REQUIRED", evidence="RSI")
-    required.update(operator="BETWEEN", value=20.0, value2=45.0, regime="BULL", side="LONG")
-    veto = new_rule(kind="VETO", evidence="VWAP_DISTANCE")
-    veto.update(operator="OUTSIDE", value=0.5, value2=1.5, regime="ALL", side="SHORT")
+    required.update(
+        operator="BETWEEN", value=20.0, value2=45.0,
+        regime="BULL", side="LONG",
+    )
+    veto = new_rule(kind="VETO", evidence="DI_PRESSURE_STATE")
+    veto.update(
+        operator="IS", value="CONTRACTING", regime="ALL", side="SHORT"
+    )
 
     strategy, _execution = compile_profiles(
         direction_mode="DI",
@@ -108,8 +179,8 @@ def test_builder_metadata_round_trips_scoped_rules_without_profile_ui():
     )
     recovered = decompile_rules(strategy)
 
-    assert recovered["REQUIRED"] == (required,)
-    assert recovered["VETO"] == (veto,)
+    assert recovered["REQUIRED"] == (normalize_rule(required),)
+    assert recovered["VETO"] == (normalize_rule(veto),)
     assert recovered["FLIP"] == ()
 
 
