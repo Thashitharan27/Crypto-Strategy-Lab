@@ -62,3 +62,77 @@ def test_structured_rules_retain_private_payload_without_json_primary_editor():
     entry=next(node for node in tree.body if isinstance(node,ast.ClassDef) and node.name=="EntryRuleEditor")
     assert entry and "_payloads" in source and "Ordered Entry Rules" in source
     assert "Entry Rules (structured JSON array)" not in source
+
+
+def _window():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM","offscreen")
+    widgets=pytest.importorskip("PySide6.QtWidgets",exc_type=ImportError)
+    from crypto_strategy_lab.gui.v2_main_window import MainWindow
+    app=widgets.QApplication.instance() or widgets.QApplication([])
+    class Catalog:
+        def symbols(self): return ["BTCUSDT"]
+        def coverage(self,_request): return []
+        def inventory(self,*_args): return []
+    class Service:
+        catalog=Catalog()
+        def refresh_catalog(self): return 0
+    return app,MainWindow(service=Service())
+
+
+def test_arbitrary_native_float_precision_survives_untouched_gui_roundtrip():
+    _app,window=_window()
+    try:
+        base=ResearchRunConfig()
+        config=replace(base,
+            features=replace(base.features,bb_stddevs=2.1234567890123),
+            execution=replace(base.execution,maker_fee=.00123456,risk_per_leg=.0123456789,
+                taker_fee=.000543219876,slippage=.000501234567,percent_r=.00234567891))
+        window.apply_config(config)
+        assert window.build_config() == config
+    finally: window.close()
+
+
+def test_friendly_profile_selector_retains_native_keys():
+    _app,window=_window()
+    try:
+        selector=window.profile_editor.selector
+        assert [selector.itemText(i) for i in range(selector.count())] == list(PROFILE_LABELS.values())
+        selector.setCurrentText("bear_short")
+        assert selector.currentData() == "bear_short" and selector.itemText(selector.currentIndex()) == "Bear Short"
+    finally: window.close()
+
+
+def test_entry_rule_widget_roundtrip_order_unknown_payload_and_one_edit():
+    _app,window=_window()
+    try:
+        editor=window.profile_editor.entry_rules
+        rules=({"action":"FLIP","indicator":"RSI","condition":"INSIDE","minimum":20.25,"maximum":31.75,"future":{"keep":1}},
+               {"action":"REJECT","indicator":"ADX","condition":"OUTSIDE","minimum":10.0,"maximum":40.0,"private":"yes"})
+        editor.set_tuple(rules); assert editor.tuple_value() == rules
+        editor.item(0,3).setText("21.5")
+        edited=editor.tuple_value()
+        assert edited[0]["minimum"] == 21.5 and edited[0]["future"] == {"keep":1}
+        assert edited[1] == rules[1]
+    finally: window.close()
+
+
+def test_readiness_distinguishes_required_candles_from_optional_context():
+    _app,window=_window()
+    try:
+        classify=window.data_readiness
+        assert classify([],"4h","1m")[0] == "BLOCKED"
+        candles=[{"dataset":"klines","interval":"4h","state":"AVAILABLE"},{"dataset":"klines","interval":"1m","state":"AVAILABLE"}]
+        assert classify(candles,"4h","1m")[0] == "READY"
+        assert classify(candles+[{"dataset":"funding","interval":None,"state":"UNAVAILABLE"}],"4h","1m")[0] == "WARN"
+    finally: window.close()
+
+
+def test_report_presets_change_only_reporting_config_in_window():
+    _app,window=_window()
+    try:
+        before=window.build_config()
+        for index in range(window.report_preset.count()):
+            window.report_preset.setCurrentIndex(index); window.apply_reporting_preset(); after=window.build_config()
+            assert (after.data,after.features,after.strategy,after.execution) == (before.data,before.features,before.strategy,before.execution)
+    finally: window.close()

@@ -32,6 +32,8 @@ from .ux_presentation import (ENUM_LABELS, PROFILE_LABELS, REPORT_PRESETS,
 STRATEGY_TIMEFRAMES = ("15m", "1h", "4h", "1d")
 INTRABAR_TIMEFRAMES = ("1m", "5m", "15m")
 TIMEFRAME_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+TIMEFRAME_LABELS = {"1m": "1 Minute", "5m": "5 Minutes", "15m": "15 Minutes",
+                    "1h": "1 Hour", "4h": "4 Hours", "1d": "1 Day"}
 
 STRATEGY_GROUPS = (
     ("Profiles", ("strategy_profile_run_mode",), None),
@@ -141,7 +143,7 @@ class EntryRuleEditor(QTableWidget):
     private storage. Editing a visible cell updates only that key, so advanced
     and future rule properties survive a GUI round trip.
     """
-    COLUMNS = ("action", "indicator", "operator", "minimum", "maximum")
+    COLUMNS = ("action", "indicator", "condition", "minimum", "maximum")
     def __init__(self, parent=None):
         super().__init__(0, len(self.COLUMNS), parent)
         self.setHorizontalHeaderLabels(("Action", "Indicator", "Condition", "Minimum", "Maximum"))
@@ -149,11 +151,24 @@ class EntryRuleEditor(QTableWidget):
 
     def set_tuple(self, rules: tuple) -> None:
         from copy import deepcopy
-        self._payloads = deepcopy(list(rules)); self.setRowCount(len(rules))
-        for row, rule in enumerate(rules):
-            for column, key in enumerate(self.COLUMNS):
-                value = rule.get(key, "") if isinstance(rule, dict) else ""
-                self.setItem(row, column, QTableWidgetItem(str(value)))
+        self.blockSignals(True)
+        try:
+            self._payloads = deepcopy(list(rules)); self.setRowCount(len(rules))
+            for row, rule in enumerate(rules):
+                for column, key in enumerate(self.COLUMNS):
+                    value = rule.get(key, "") if isinstance(rule, dict) else ""
+                    if key in ("action","indicator","condition"):
+                        editor = QComboBox()
+                        choices = ({"FLIP":"Flip Direction","REJECT":"Reject Entry"} if key == "action" else
+                            {name:name.replace("_"," ").title() for name in ("ADX","RSI","DI_SPREAD","CLOSE_LOCATION","BB_WIDTH")} if key == "indicator" else
+                            {"INSIDE":"Inside Range","OUTSIDE":"Outside Range"})
+                        if not value: editor.addItem(f"Select {key}…", "")
+                        for native,label in choices.items(): editor.addItem(label,native)
+                        index = editor.findData(value)
+                        if index < 0 and value: editor.addItem(str(value), value); index = editor.count() - 1
+                        editor.setCurrentIndex(max(index, 0)); self.setCellWidget(row, column, editor)
+                    else: self.setItem(row, column, QTableWidgetItem(str(value)))
+        finally: self.blockSignals(False)
 
     def tuple_value(self) -> tuple:
         from copy import deepcopy
@@ -161,10 +176,14 @@ class EntryRuleEditor(QTableWidget):
         for row, rule in enumerate(result):
             if not isinstance(rule, dict): continue
             for column, key in enumerate(self.COLUMNS):
-                text = self.item(row, column).text() if self.item(row, column) else ""
-                if text or key in rule:
+                cell = self.cellWidget(row, column)
+                text = cell.currentData() if isinstance(cell, QComboBox) else (self.item(row, column).text() if self.item(row, column) else "")
+                original = rule.get(key, "")
+                if str(text) != str(original):
                     old = rule.get(key)
                     if isinstance(old, bool): value = text.lower() in ("true", "1", "yes")
+                    elif key in ("minimum", "maximum") and text != "":
+                        numeric=float(text); value=int(numeric) if isinstance(old,int) and numeric.is_integer() else numeric
                     elif isinstance(old, int): value = int(text)
                     elif isinstance(old, float): value = float(text)
                     else: value = text
@@ -172,16 +191,34 @@ class EntryRuleEditor(QTableWidget):
         return tuple(result)
 
     def add_rule(self):
-        self._payloads.append({}); row = self.rowCount(); self.insertRow(row)
-        for column in range(self.columnCount()): self.setItem(row, column, QTableWidgetItem(""))
+        self._payloads.append({"action": "FLIP", "indicator": "RSI", "condition": "INSIDE", "minimum": 0.0, "maximum": 100.0})
+        self.set_tuple(tuple(self._payloads))
 
     def remove_selected(self):
         rows = sorted({index.row() for index in self.selectedIndexes()}, reverse=True)
         for row in rows: self.removeRow(row); self._payloads.pop(row)
 
 
+class LosslessDoubleSpinBox(QDoubleSpinBox):
+    """Friendly numeric display that retains an untouched native float exactly."""
+    def __init__(self, parent=None):
+        super().__init__(parent); self._native_value = 0.0; self._edited = False
+        self.valueChanged.connect(self._mark_edited)
+
+    def _mark_edited(self, _value): self._edited = True
+
+    def set_native_value(self, native: float, scale: float) -> None:
+        self.blockSignals(True)
+        try: self._native_value = native; self._edited = False; self.setValue(native * scale)
+        finally: self.blockSignals(False)
+
+    def native_value(self, scale: float) -> float:
+        return self.value() / scale if self._edited else self._native_value
+
+
 class DataclassForm(QWidget):
     """Lossless editor for every scalar/tuple field of one native dataclass."""
+    changed = Signal()
 
     CHOICES = {
         "strategy_profile_run_mode": ("COMBINED_SHARED_CAPITAL", "ISOLATED_PROFILES", "BOTH"),
@@ -210,7 +247,7 @@ class DataclassForm(QWidget):
         assigned = [name for _title, names, _note in groups for name in names]
         if len(assigned) != len(set(assigned)) or set(assigned) != set(available):
             raise ValueError(f"Grouped form fields must represent {self.cls.__name__} exactly once")
-        self.section_titles = tuple(title for title, _names, _note in groups)
+        self.section_titles = tuple(title for title, _names, _note in groups); self._forms = {}
         self._dependents = {
             "trade_flow_enabled": ("trade_flow_source","trade_flow_base_interval","trade_flow_windows","large_trade_quote_threshold"),
             "order_book_enabled": ("order_book_base_interval","book_ticker_max_age_seconds","book_depth_max_age_seconds"),
@@ -230,18 +267,24 @@ class DataclassForm(QWidget):
                 status = QLabel(note); status.setObjectName("availabilityStatus"); form.addRow(status)
             for name in names:
                 widget = self._widget(name, getattr(value, name)); self.widgets[name] = widget
-                info = metadata(name); widget.setToolTip(info.help)
+                info = metadata(name); widget.setToolTip(info.help); self._forms[name] = form
                 form.addRow(info.label, widget)
             outer.addWidget(group)
         outer.addStretch()
         for controller, dependents in self._dependents.items():
             if controller in self.widgets:
                 self.widgets[controller].toggled.connect(lambda checked,names=dependents: self._set_visible(names,checked))
+        for widget in self.widgets.values():
+            signal = (widget.toggled if isinstance(widget,QCheckBox) else widget.valueChanged if isinstance(widget,(QSpinBox,QDoubleSpinBox)) else widget.currentIndexChanged if isinstance(widget,QComboBox) else widget.textChanged)
+            signal.connect(self.changed.emit)
         self.set_value(value)
 
     def _set_visible(self, names, visible):
         for name in names:
-            if name in self.widgets: self.widgets[name].setVisible(visible)
+            if name in self.widgets:
+                widget=self.widgets[name]; form=self._forms[name]; label=form.labelForField(widget)
+                widget.setVisible(visible)
+                if label: label.setVisible(visible)
 
     def _widget(self, name: str, value: Any) -> QWidget:
         if name in self.CHOICES:
@@ -252,7 +295,7 @@ class DataclassForm(QWidget):
         if isinstance(value, int):
             widget = QSpinBox(); widget.setRange(-2_000_000_000, 2_000_000_000); return widget
         if isinstance(value, float):
-            info = metadata(name); widget = QDoubleSpinBox(); widget.setRange(-1e12, 1e12)
+            info = metadata(name); widget = LosslessDoubleSpinBox(); widget.setRange(-1e12, 1e12)
             widget.setDecimals(info.decimals); widget.setSuffix(info.unit if info.unit != "$" else "")
             widget.setPrefix("$" if info.unit == "$" else ""); return widget
         if isinstance(value, tuple): return TupleEditor()
@@ -262,7 +305,7 @@ class DataclassForm(QWidget):
         for name, widget in self.widgets.items():
             raw = getattr(value, name)
             if isinstance(widget, QCheckBox): widget.setChecked(raw)
-            elif isinstance(widget, QDoubleSpinBox): widget.setValue(metadata(name).display(raw))
+            elif isinstance(widget, LosslessDoubleSpinBox): widget.set_native_value(raw, metadata(name).scale)
             elif isinstance(widget, QSpinBox): widget.setValue(raw)
             elif isinstance(widget, QComboBox):
                 index = widget.findData(raw)
@@ -278,7 +321,7 @@ class DataclassForm(QWidget):
         for name, widget in self.widgets.items():
             old = getattr(base, name)
             if isinstance(widget, QCheckBox): raw = widget.isChecked()
-            elif isinstance(widget, QDoubleSpinBox): raw = metadata(name).native(widget.value())
+            elif isinstance(widget, LosslessDoubleSpinBox): raw = widget.native_value(metadata(name).scale)
             elif isinstance(widget, QSpinBox): raw = widget.value()
             elif isinstance(widget, QComboBox): raw = widget.currentData()
             elif isinstance(widget, TupleEditor): raw = widget.tuple_value()
@@ -292,12 +335,28 @@ class DataclassForm(QWidget):
         return replace(base, **values)
 
 
+class ProfileSelector(QComboBox):
+    """Shows friendly names while accepting native keys programmatically."""
+    def setCurrentText(self, text):
+        index = self.findData(text)
+        super().setCurrentIndex(index if index >= 0 else self.findText(text))
+
+
+class TimeframeCombo(QComboBox):
+    """Friendly visible timeframes with the native interval as user data."""
+    def currentText(self): return self.currentData()
+    def setCurrentText(self, text):
+        index=self.findData(text); super().setCurrentIndex(index if index >= 0 else self.findText(text))
+
+
 class NativeProfileEditor(QWidget):
     """Losslessly edits all native strategy and execution profile fields."""
+    changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent); layout = QVBoxLayout(self)
-        self.selector = QComboBox(); self.selector.addItems(PROFILE_KEYS)
+        self.selector = ProfileSelector()
+        for key in PROFILE_KEYS: self.selector.addItem(PROFILE_LABELS[key], key)
         layout.addWidget(self.selector)
         self.overview = QGridLayout(); layout.addLayout(self.overview); self.profile_cards = {}
         for index, key in enumerate(PROFILE_KEYS):
@@ -318,10 +377,15 @@ class NativeProfileEditor(QWidget):
         rule_actions.addWidget(add_rule); rule_actions.addWidget(remove_rule); strategy_layout.addLayout(rule_actions)
         self.execution_form = DataclassForm(ExecutionProfileConfig(), groups=EXECUTION_PROFILE_GROUPS)
         tabs.addTab(strategy_page, "Strategy Profile"); tabs.addTab(self.execution_form, "Execution Profile")
-        self._strategy = {}; self._execution = {}; self._current = PROFILE_KEYS[0]
-        self._clipboard = None; self.selector.currentTextChanged.connect(self._select)
+        self._strategy = {}; self._execution = {}; self._current = PROFILE_KEYS[0]; self._rendering = False
+        self._clipboard = None; self.selector.currentIndexChanged.connect(lambda: self._select(self.selector.currentData()))
         self.copy_button.clicked.connect(self.copy_profile); self.paste_button.clicked.connect(self.paste_profile)
         self.reset_button.clicked.connect(self.reset_profile); self.apply_all_button.clicked.connect(self.apply_strategy_to_all)
+        self.strategy_form.changed.connect(self._notify_changed); self.execution_form.changed.connect(self._notify_changed)
+        self.entry_rules.itemChanged.connect(lambda _item: self._notify_changed())
+
+    def _notify_changed(self):
+        if not self._rendering: self.changed.emit()
 
     def _store(self) -> None:
         if not self._strategy: return
@@ -331,10 +395,12 @@ class NativeProfileEditor(QWidget):
         self._execution[key] = self.execution_form.value(self._execution[key])
 
     def _render(self, key: str) -> None:
-        self._current = key; self.strategy_form.set_value(self._strategy[key])
-        self.entry_rules.set_tuple(tuple(self._strategy[key].entry_rules))
-        self.execution_form.set_value(self._execution[key])
-        self._render_cards()
+        self._rendering=True
+        try:
+            self._current = key; self.strategy_form.set_value(self._strategy[key])
+            self.entry_rules.set_tuple(tuple(self._strategy[key].entry_rules))
+            self.execution_form.set_value(self._execution[key]); self._render_cards()
+        finally: self._rendering=False
 
     def _render_cards(self):
         for key in PROFILE_KEYS:
@@ -351,7 +417,7 @@ class NativeProfileEditor(QWidget):
         self.selector.blockSignals(True)
         try:
             self._strategy, self._execution = dict(strategy), dict(execution)
-            self._render(self.selector.currentText() or PROFILE_KEYS[0])
+            self._render(self.selector.currentData() or PROFILE_KEYS[0])
         finally:
             self.selector.blockSignals(False)
 
@@ -363,15 +429,15 @@ class NativeProfileEditor(QWidget):
 
     def paste_profile(self):
         if self._clipboard:
-            self._strategy[self._current], self._execution[self._current] = clone_profile_pair(*self._clipboard); self._render(self._current)
+            self._strategy[self._current], self._execution[self._current] = clone_profile_pair(*self._clipboard); self._render(self._current); self.changed.emit()
 
     def reset_profile(self):
-        self._strategy[self._current] = StrategyProfileConfig(); self._execution[self._current] = ExecutionProfileConfig(); self._render(self._current)
+        self._strategy[self._current] = StrategyProfileConfig(); self._execution[self._current] = ExecutionProfileConfig(); self._render(self._current); self.changed.emit()
 
     def apply_strategy_to_all(self):
         self._store(); source = self._strategy[self._current]
         for key in PROFILE_KEYS: self._strategy[key] = clone_profile_pair(source, self._execution[key])[0]
-        self._render(self._current)
+        self._render(self._current); self.changed.emit()
 
 
 class RunWorker(QObject):
@@ -390,14 +456,14 @@ class MainWindow(QMainWindow):
     def __init__(self, startup_status=None, service=None):
         super().__init__(); self.setWindowTitle("Crypto Strategy Lab — Research Workstation"); self.resize(1500, 920)
         self.service = service or GuiApplicationService(MARKET_DATA_ROOT, CACHE_DIR)
-        self.config = ResearchRunConfig(); self._manifest = None; self._run_dir = None; self._thread = None
+        self.config = ResearchRunConfig(); self._manifest = None; self._run_dir = None; self._thread = None; self._applying_config = False
         root = QWidget(); shell = QHBoxLayout(root); self.setCentralWidget(root)
         nav = QVBoxLayout(); shell.addLayout(nav); self.pages = QStackedWidget(); shell.addWidget(self.pages, 1)
         self.profile_editor = NativeProfileEditor()
         self.strategy_form = DataclassForm(StrategyConfig(), excluded={"profiles"}, groups=STRATEGY_GROUPS)
         self.feature_form = DataclassForm(FeatureConfig(), groups=FEATURE_GROUPS)
         self.execution_form = DataclassForm(ExecutionConfig(), excluded={"profiles"}, groups=EXECUTION_GROUPS)
-        self.reporting_form = DataclassForm(ReportingConfig())
+        self.reporting_form = DataclassForm(ReportingConfig(), excluded={"output_dir"})
         setup = self._page("Setup", self._data_panel(), self._status_panel())
         strategy = self._page("Strategy & Profiles", self._scroll(self.profile_editor), self._scroll(self.strategy_form))
         features = self._page("Research Features", self._scroll(self.feature_form))
@@ -405,7 +471,7 @@ class MainWindow(QMainWindow):
         reports = self._page("Reports & Diagnostics", self._report_presets(), self._scroll(self.reporting_form))
         review = self._page("Review & Run", self._review_panel(), self._run_panel())
         results = self._page("Results Dashboard", self._results_panel())
-        library = self._page("Data Library", QLabel("Catalog-driven coverage by dataset family"), self._status_panel_clone())
+        library = self._page("Data Library", self._data_library_panel())
         chat = ChatGPTIntegrationWidget(QSettings("CryptoStrategyLab", "CryptoStrategyLab"), lambda: self.output_root.text())
         github = GitHubIntegrationWidget()
         groups = (("NEW RESEARCH",(("Setup",setup),("Strategy & Profiles",strategy),("Research Features",features),("Risk & Execution",risk),("Reports",reports),("Review & Run",review))),
@@ -419,7 +485,7 @@ class MainWindow(QMainWindow):
         nav.addStretch(); self.current_research = QLabel(); self.current_research.setMinimumWidth(245)
         self.current_research.setStyleSheet("background:#f4f7fa; padding:12px; border:1px solid #d9e2ec")
         nav.addWidget(self.current_research); quick_run=QPushButton("RUN BACKTEST"); quick_run.clicked.connect(self.start_run); nav.addWidget(quick_run)
-        self._connect_request_refresh(); self.service.refresh_catalog(); self._load_catalog(); self.apply_config(self.config)
+        self._connect_request_refresh(); self._connect_live_summary(); self.service.refresh_catalog(); self._load_catalog(); self.apply_config(self.config)
         if startup_status: startup_status("Native v2 research GUI ready")
 
     @staticmethod
@@ -433,6 +499,33 @@ class MainWindow(QMainWindow):
         box=QGroupBox("Technical Catalog Detail"); layout=QVBoxLayout(box)
         note=QLabel("Availability, friendly coverage dates, interval and partition counts are supplied by the catalog service. Raw archive paths are never displayed.")
         note.setWordWrap(True); layout.addWidget(note); return box
+
+    def _data_library_panel(self):
+        box=QGroupBox("Catalog Coverage"); layout=QVBoxLayout(box)
+        refresh=QPushButton("Refresh Catalog View"); refresh.clicked.connect(self.refresh_data_library); layout.addWidget(refresh)
+        self.library_table=QTableWidget(0,7); self.library_table.setHorizontalHeaderLabels(
+            ["Symbol","Dataset Family","Interval","First Available UTC","Last Available UTC","Partitions","State"])
+        layout.addWidget(self.library_table); return box
+
+    def refresh_data_library(self):
+        if not hasattr(self.service.catalog,"inventory"): return
+        rows=self.service.catalog.inventory(self.market.currentData()); self.library_table.setRowCount(len(rows))
+        for row_number,row in enumerate(rows):
+            count=row.get("archive_count",0); first=row.get("first_period"); last=row.get("last_period")
+            state="UNAVAILABLE" if not count else "AVAILABLE" if first is not None and last is not None else "PARTIAL"
+            values=(row.get("symbol","—"),self._dataset_family(row.get("dataset","")),row.get("interval") or "Event data",
+                    first or "—",last or "—",count,row.get("state",state))
+            for column,value in enumerate(values): self.library_table.setItem(row_number,column,QTableWidgetItem(str(value)))
+
+    @staticmethod
+    def _dataset_family(dataset):
+        value=str(dataset).lower()
+        if "kline" in value: return "Candles"
+        if "fund" in value: return "Funding"
+        if "metric" in value or "interest" in value or "ratio" in value: return "Futures Positioning"
+        if "agg" in value or value == "trades": return "Trades"
+        if "book" in value or "depth" in value: return "Order Book"
+        return str(dataset).replace("_"," ").title()
 
     def _risk_explanation(self):
         box=QGroupBox("Effective Risk"); layout=QVBoxLayout(box); self.risk_explanation=QLabel(); self.risk_explanation.setWordWrap(True); layout.addWidget(self.risk_explanation); return box
@@ -461,12 +554,15 @@ class MainWindow(QMainWindow):
         self.symbol = QComboBox(); self.symbol.setEditable(True)
         self.start = QDateEdit(QDate(2024, 1, 1)); self.start.setCalendarPopup(True)
         self.end = QDateEdit(QDate.currentDate()); self.end.setCalendarPopup(True)
-        self.strategy_tf = QComboBox(); self.strategy_tf.addItems(STRATEGY_TIMEFRAMES)
-        self.intrabar_tf = QComboBox(); self.intrabar_tf.addItems(["None", *INTRABAR_TIMEFRAMES])
-        self.datasets = QLabel("Catalog not loaded")
+        self.strategy_tf = TimeframeCombo()
+        for value in STRATEGY_TIMEFRAMES: self.strategy_tf.addItem(TIMEFRAME_LABELS[value],value)
+        self.intrabar_tf = TimeframeCombo(); self.intrabar_tf.addItem("None — Strategy Bars Only",None)
+        for value in INTRABAR_TIMEFRAMES: self.intrabar_tf.addItem(TIMEFRAME_LABELS[value],value)
+        self.datasets = QLabel("Catalog not loaded"); self.datasets.setWordWrap(True)
+        date_note=QLabel("Research includes data from the start date up to, but not including, the selected end boundary."); date_note.setWordWrap(True)
         for label, widget in (("Exchange", self.exchange), ("Market", self.market), ("Symbol", self.symbol),
-            ("Period Start", self.start), ("Period End (exclusive)", self.end), ("Strategy TF", self.strategy_tf),
-            ("Intrabar TF", self.intrabar_tf), ("Available Datasets", self.datasets)): form.addRow(label, widget)
+            ("Start Date", self.start), ("End Date", self.end), ("Date Range",date_note), ("Strategy Timeframe", self.strategy_tf),
+            ("Intrabar / Exit Detail", self.intrabar_tf), ("Research Data Availability", self.datasets)): form.addRow(label, widget)
         return box
 
     def _config_tabs(self):
@@ -519,9 +615,19 @@ class MainWindow(QMainWindow):
         self.start.dateChanged.connect(self.refresh_coverage); self.end.dateChanged.connect(self.refresh_coverage)
         self.strategy_tf.currentTextChanged.connect(self.refresh_coverage); self.intrabar_tf.currentTextChanged.connect(self.refresh_coverage)
 
+    def _connect_live_summary(self):
+        for form in (self.strategy_form,self.feature_form,self.execution_form,self.reporting_form): form.changed.connect(self._refresh_summary_from_widgets)
+        self.profile_editor.changed.connect(self._refresh_summary_from_widgets)
+        self.output_root.textChanged.connect(self._refresh_summary_from_widgets)
+
+    def _refresh_summary_from_widgets(self):
+        if self._applying_config: return
+        try: self._render_research_summary(self.build_config())
+        except (ValueError,TypeError,KeyError): pass
+
     def request_model(self):
         def utc(widget): return pd.Timestamp(widget.date().toPython(), tz="UTC").to_pydatetime()
-        intrabar = None if self.intrabar_tf.currentText() == "None" else self.intrabar_tf.currentText()
+        intrabar = self.intrabar_tf.currentData()
         return GuiResearchRequest(self.exchange.currentData(), self.market.currentData(), self.symbol.currentText(),
                                   utc(self.start), utc(self.end), self.strategy_tf.currentText(), intrabar)
 
@@ -536,16 +642,20 @@ class MainWindow(QMainWindow):
         result = replace(self.config, data=data, features=self.feature_form.value(self.config.features),
                        strategy=strategy, execution=execution,
                        reporting=replace(self.reporting_form.value(self.config.reporting), output_dir=self.output_root.text()))
-        self._render_research_summary(result); return result
+        return result
 
     def apply_config(self, config):
-        self.config = config; data = config.data
-        self.strategy_tf.setCurrentText(timeframe_label(data.strategy_timeframe_minutes))
-        self.intrabar_tf.setCurrentText(timeframe_label(data.intrabar_timeframe_minutes) if data.use_intrabar_data else "None")
-        self.profile_editor.set_profiles(config.strategy.profiles, config.execution.profiles)
-        self.strategy_form.set_value(config.strategy); self.feature_form.set_value(config.features)
-        self.execution_form.set_value(config.execution); self.output_root.setText(config.reporting.output_dir)
-        self.reporting_form.set_value(config.reporting); self._render_research_summary(config)
+        self._applying_config=True
+        try:
+            self.config = config; data = config.data
+            self.strategy_tf.setCurrentText(timeframe_label(data.strategy_timeframe_minutes))
+            self.intrabar_tf.setCurrentText(timeframe_label(data.intrabar_timeframe_minutes) if data.use_intrabar_data else None)
+            self.profile_editor.set_profiles(config.strategy.profiles, config.execution.profiles)
+            self.strategy_form.set_value(config.strategy); self.feature_form.set_value(config.features)
+            self.execution_form.set_value(config.execution); self.output_root.setText(config.reporting.output_dir)
+            self.reporting_form.set_value(config.reporting)
+        finally: self._applying_config=False
+        self._render_research_summary(config)
 
     def _render_research_summary(self, config):
         enabled=sum(profile.enabled for profile in config.strategy.profiles.values())
@@ -559,8 +669,26 @@ class MainWindow(QMainWindow):
             self.review_summary.setText(f"{self.symbol.currentText() or 'BTCUSDT'} — {timeframe_label(config.data.strategy_timeframe_minutes)} Research\n\nProfile Test: {mode}\nProfiles: {enabled} of 6 enabled\nStarting Equity: ${config.execution.initial_equity:,.2f}\nBase Risk: {risk}\nMaximum Active Trades: {config.execution.max_active_pairs}\nReports: {config.reporting.analysis_level}\n\nDATA STATUS: {self._data_state()}")
 
     def _data_state(self):
-        states=[self.coverage.item(row,5).text() for row in range(self.coverage.rowCount()) if self.coverage.item(row,5)] if hasattr(self,"coverage") else []
-        return "BLOCKED" if states and all(x == "UNAVAILABLE" for x in states) else "WARN" if any(x != "AVAILABLE" for x in states) else "READY"
+        return self.data_readiness(self._coverage_rows_from_table(), self.strategy_tf.currentData(), self.intrabar_tf.currentData())[0]
+
+    @staticmethod
+    def data_readiness(rows, strategy_interval, intrabar_interval=None):
+        """Classify catalog coverage using execution candles as required data."""
+        required={strategy_interval}
+        if intrabar_interval: required.add(intrabar_interval)
+        candle_rows=[row for row in rows if "kline" in str(row.get("dataset","")).lower()]
+        missing=[]
+        for interval in required:
+            matches=[row for row in candle_rows if row.get("interval") == interval]
+            if not matches or not any(row.get("state") == "AVAILABLE" for row in matches): missing.append(interval)
+        if missing: return "BLOCKED", "Required candle coverage unavailable: " + ", ".join(sorted(missing))
+        optional=[row for row in rows if row not in candle_rows and row.get("state") != "AVAILABLE"]
+        if optional: return "WARN", "Required candles are ready; optional research coverage is partial or unavailable."
+        return "READY", "Required execution data is available."
+
+    def _coverage_rows_from_table(self):
+        return [{"dataset":self.coverage.item(row,0).text(),"interval":None if self.coverage.item(row,1).text()=="—" else self.coverage.item(row,1).text(),"state":self.coverage.item(row,5).text()}
+                for row in range(self.coverage.rowCount()) if all(self.coverage.item(row,column) for column in (0,1,5))]
 
     def _load_catalog(self):
         current = self.symbol.currentText(); symbols = self.service.catalog.symbols()
@@ -571,12 +699,15 @@ class MainWindow(QMainWindow):
     def refresh_coverage(self):
         if not self.symbol.currentText() or self.start.date() >= self.end.date(): return
         rows = self.service.catalog.coverage(self.request_model()); self.coverage.setRowCount(len(rows))
-        self.datasets.setText(", ".join(sorted({row["dataset"] for row in rows})) or "UNAVAILABLE")
+        grouped={}
+        for row in rows: grouped.setdefault(self._dataset_family(row["dataset"]),[]).append(row["state"])
+        self.datasets.setText("\n".join(f"{family}: {('AVAILABLE' if all(x == 'AVAILABLE' for x in states) else 'PARTIAL' if any(x == 'AVAILABLE' for x in states) else 'UNAVAILABLE')}" for family,states in sorted(grouped.items())) or "Required candle data: UNAVAILABLE")
         for row_number, row in enumerate(rows):
             values = (row["dataset"], row["interval"] or "—", row["first_period"] or "—",
                       row["last_period"] or "—", row["archive_count"], row["state"])
             for column, value in enumerate(values): self.coverage.setItem(row_number, column, QTableWidgetItem(str(value)))
-        if hasattr(self,"current_research"): self._render_research_summary(self.build_config())
+        self.refresh_data_library()
+        if hasattr(self,"current_research"): self._refresh_summary_from_widgets()
 
     def start_run(self):
         try: request, config = self.request_model(), self.build_config(); config.validate()
