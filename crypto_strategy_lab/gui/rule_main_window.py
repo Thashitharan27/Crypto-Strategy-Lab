@@ -1,6 +1,6 @@
 """Rule-based researcher GUI built on the stable v2 application shell.
 
-The shell/data/results plumbing stays unchanged.  Strategy authoring and trade
+The shell/data/results plumbing stays unchanged. Strategy authoring and trade
 management are replaced with a single rule-based thesis and one base execution
 configuration; mature six-way engine inputs are generated only when building the
 run config.
@@ -24,6 +24,7 @@ from .v2_main_window import (
     TIMEFRAME_LABELS,
     display_percentage,
     timeframe_label,
+    timeframe_minutes,
 )
 
 
@@ -71,6 +72,8 @@ class MainWindow(LegacyMainWindow):
         management_layout = QVBoxLayout(management)
         management_layout.addWidget(self.base_execution_form)
 
+        # execution_form is a live shared widget, so setWidget reparents it out of
+        # the old page before that page is deleted.
         page = self._page(
             "Risk & Execution",
             note,
@@ -84,10 +87,26 @@ class MainWindow(LegacyMainWindow):
         if not hasattr(self, "rule_builder"):
             return super().build_config()
 
-        base = super().build_config()
+        intrabar = self.request_model().intrabar_timeframe
+        data = replace(
+            self.config.data,
+            strategy_timeframe_minutes=timeframe_minutes(self.strategy_tf.currentText()),
+            use_intrabar_data=intrabar is not None,
+            intrabar_timeframe_minutes=(
+                timeframe_minutes(intrabar)
+                if intrabar else self.config.data.intrabar_timeframe_minutes
+            ),
+        )
+        features = self.feature_form.value(self.config.features)
+        execution_base = self.execution_form.value(self.config.execution)
+        reporting = replace(
+            self.reporting_form.value(self.config.reporting),
+            output_dir=self.output_root.text(),
+        )
+
         authored = self.rule_builder.strategy_values()
         base_execution = self.base_execution_form.value(
-            common_execution_profile(base.execution.profiles)
+            common_execution_profile(self.config.execution.profiles)
         )
         strategy_profiles, execution_profiles = compile_profiles(
             direction_mode=authored.pop("direction_mode"),
@@ -95,27 +114,45 @@ class MainWindow(LegacyMainWindow):
             required_rules=authored.pop("required_rules"),
             veto_rules=authored.pop("veto_rules"),
             flip_rules=authored.pop("flip_rules"),
-            rsi_period=base.features.mean_reversion_rsi_period,
+            rsi_period=features.mean_reversion_rsi_period,
             momentum_lookback_hours=authored.pop("momentum_lookback_hours"),
             base_execution=base_execution,
         )
         strategy = replace(
-            base.strategy,
+            self.config.strategy,
             profiles=strategy_profiles,
             strategy_profile_run_mode="COMBINED_SHARED_CAPITAL",
             **authored,
         )
-        execution = replace(base.execution, profiles=execution_profiles)
-        result = replace(base, strategy=strategy, execution=execution)
+        execution = replace(execution_base, profiles=execution_profiles)
+        result = replace(
+            self.config,
+            data=data,
+            features=features,
+            strategy=strategy,
+            execution=execution,
+            reporting=reporting,
+        )
         result.validate()
         return result
 
     def apply_config(self, config):
-        super().apply_config(config)
         if not hasattr(self, "rule_builder"):
-            return
+            return super().apply_config(config)
+
         self._applying_config = True
         try:
+            self.config = config
+            data = config.data
+            self.strategy_tf.setCurrentText(timeframe_label(data.strategy_timeframe_minutes))
+            self.intrabar_tf.setCurrentText(
+                timeframe_label(data.intrabar_timeframe_minutes)
+                if data.use_intrabar_data else None
+            )
+            self.feature_form.set_value(config.features)
+            self.execution_form.set_value(config.execution)
+            self.output_root.setText(config.reporting.output_dir)
+            self.reporting_form.set_value(config.reporting)
             self.rule_builder.set_from_strategy(config.strategy)
             self.rule_builder.set_feature_status(config.features)
             self.base_execution_form.set_value(
