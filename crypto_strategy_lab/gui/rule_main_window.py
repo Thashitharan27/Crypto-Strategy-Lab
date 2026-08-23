@@ -1,9 +1,8 @@
 """Rule-based researcher GUI built on the stable v2 application shell.
 
 The shell/data/results plumbing stays unchanged. Strategy authoring and trade
-management are replaced with a single rule-based thesis and one base execution
-configuration; mature six-way engine inputs are generated only when building the
-run config.
+management use a single rule-based thesis and one base execution configuration;
+mature six-way engine inputs are generated only when building the run config.
 """
 from __future__ import annotations
 
@@ -66,7 +65,9 @@ class MainWindow(LegacyMainWindow):
             "for the strategy; it is no longer duplicated across Bull/Bear/Sideways profiles."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("background:#eef5fb; padding:8px; border:1px solid #c8d9e8")
+        note.setStyleSheet(
+            "background:#eef5fb; padding:8px; border:1px solid #c8d9e8"
+        )
 
         management = QGroupBox("Base Trade Management")
         management_layout = QVBoxLayout(management)
@@ -90,11 +91,14 @@ class MainWindow(LegacyMainWindow):
         intrabar = self.request_model().intrabar_timeframe
         data = replace(
             self.config.data,
-            strategy_timeframe_minutes=timeframe_minutes(self.strategy_tf.currentText()),
+            strategy_timeframe_minutes=timeframe_minutes(
+                self.strategy_tf.currentText()
+            ),
             use_intrabar_data=intrabar is not None,
             intrabar_timeframe_minutes=(
                 timeframe_minutes(intrabar)
-                if intrabar else self.config.data.intrabar_timeframe_minutes
+                if intrabar
+                else self.config.data.intrabar_timeframe_minutes
             ),
         )
         features = self.feature_form.value(self.config.features)
@@ -144,10 +148,13 @@ class MainWindow(LegacyMainWindow):
         try:
             self.config = config
             data = config.data
-            self.strategy_tf.setCurrentText(timeframe_label(data.strategy_timeframe_minutes))
+            self.strategy_tf.setCurrentText(
+                timeframe_label(data.strategy_timeframe_minutes)
+            )
             self.intrabar_tf.setCurrentText(
                 timeframe_label(data.intrabar_timeframe_minutes)
-                if data.use_intrabar_data else None
+                if data.use_intrabar_data
+                else None
             )
             self.feature_form.set_value(config.features)
             self.execution_form.set_value(config.execution)
@@ -184,17 +191,29 @@ class MainWindow(LegacyMainWindow):
 
         permissions = self.rule_builder.market_permissions()
         direction = self.rule_builder.direction_mode.currentData()
-        required = len(self.rule_builder.required_rules.rules())
-        veto = len(self.rule_builder.veto_rules.rules())
-        pressure = self.rule_builder.pressure_states()
+        required_rules = self.rule_builder.required_rules.rules()
+        veto_rules = self.rule_builder.veto_rules.rules()
+        required = len(required_rules)
+        veto = len(veto_rules)
+        pressure_evidence = {
+            "DI_PRESSURE_STATE",
+            "DI_SPREAD_CHANGE",
+            "DIRECTIONAL_DI_CHANGE",
+            "OPPOSING_DI_CHANGE",
+        }
+        pressure_rule_count = sum(
+            rule["evidence"] in pressure_evidence
+            for rule in (*required_rules, *veto_rules)
+        )
         pressure_text = (
-            "Off" if not pressure
-            else "Analyze Only" if len(pressure) == 3
-            else ", ".join(item.title() for item in pressure)
+            f"Rule Evidence ({pressure_rule_count} rule(s))"
+            if pressure_rule_count
+            else "Available to Rules"
         )
         intrabar = (
             f"{config.data.intrabar_timeframe_minutes}m exits"
-            if config.data.use_intrabar_data else "bar-close exits"
+            if config.data.use_intrabar_data
+            else "bar-close exits"
         )
         risk = display_percentage(config.execution.risk_per_leg)
         base_execution = self.base_execution_form.value(
@@ -222,7 +241,10 @@ class MainWindow(LegacyMainWindow):
         )
 
         if hasattr(self, "review_summary"):
-            allowed = ", ".join(item.replace("_", " ").title() for item in permissions) or "None"
+            allowed = (
+                ", ".join(item.replace("_", " ").title() for item in permissions)
+                or "None"
+            )
             self.review_summary.setText(
                 f"{self.symbol.currentText() or 'BTCUSDT'} — "
                 f"{TIMEFRAME_LABELS[timeframe_label(config.data.strategy_timeframe_minutes)]} Research\n\n"
