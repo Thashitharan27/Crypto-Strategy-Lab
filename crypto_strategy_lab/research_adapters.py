@@ -56,12 +56,19 @@ def prepared_policy_config(run_config) -> PreparedPolicyConfig:
     )
 
 
-def native_simulator_config(data_config, feature_config, strategy_config, execution_config):
+def native_simulator_config(
+    data_config,
+    feature_config,
+    strategy_config,
+    execution_config,
+    reporting_config=None,
+):
     """Translate composition only at the mature simulator boundary.
 
-    ReportingConfig is intentionally absent: report/output changes cannot alter
-    simulation configuration or L3 identity. The returned EnhancedBacktestConfig
-    is an implementation adapter, not the authoritative serialized contract.
+    Reporting choices never participate in strategy/cache identity. The only
+    reporting setting allowed into the mature engine is passive telemetry capture,
+    which observes an already-running trade without changing any strategy, sizing,
+    fill or exit decision.
     """
 
     values = enhanced_default_gui_config()
@@ -80,16 +87,29 @@ def native_simulator_config(data_config, feature_config, strategy_config, execut
         )
         for key in strategy_config.profiles
     }
-    # Inert compatibility fields required by the mature config constructor.
-    # Telemetry/reporting is owned outside the simulator in the composed path;
-    # using the strategy interval here only satisfies the legacy validation rule.
+
+    telemetry_enabled = bool(
+        reporting_config is not None
+        and (
+            getattr(reporting_config, "enable_trade_telemetry", False)
+            or getattr(reporting_config, "enable_indicator_lifecycle_analysis", False)
+        )
+    )
+    telemetry_interval = (
+        int(reporting_config.telemetry_interval_minutes)
+        if telemetry_enabled
+        else int(data_config.strategy_timeframe_minutes)
+    )
+
+    # Output generation itself stays downstream in CsvManifestReporter. These
+    # mature-config fields only enable passive telemetry collection when requested.
     values.update(
         input_csv="",
         intrabar_csv=None,
         output_dir="output",
         structural_regime_benchmark_csv=None,
-        telemetry_interval_minutes=int(data_config.strategy_timeframe_minutes),
-        enable_trade_telemetry=False,
+        telemetry_interval_minutes=telemetry_interval,
+        enable_trade_telemetry=telemetry_enabled,
         save_full_telemetry_csv=False,
         save_trade_journey_summary=False,
         save_trade_journey_charts=False,
@@ -103,13 +123,13 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
     """Serialize decisions already made by the same simulator run.
 
     Rejections come from ``engine.skipped_signals``, which is populated at the
-    decision point. Entries come from completed trade rows.  The only join used
+    decision point. Entries come from completed trade rows. The only join used
     for rejected rows is an exact strategy-candle timestamp lookup into the
     already-bound PreparedBacktestFrame; there is no nearest/asof lookup and no
     strategy re-evaluation.
 
     PreparedBacktestFrame stores UTC instants as ``datetime64[ns]`` without a
-    timezone tag.  Signal artifacts deliberately use that same UTC-normalized
+    timezone tag. Signal artifacts deliberately use that same UTC-normalized
     storage representation so DuckDB comparisons are deterministic on hosts
     whose local timezone is not UTC.
     """
@@ -251,6 +271,11 @@ class NativeSimulator:
         self.last_simulation_seconds = 0.0
         self.last_signals: pd.DataFrame | None = None
         self.last_telemetry: pd.DataFrame | None = None
+        self._reporting_config = None
+
+    def configure_observation(self, reporting_config) -> None:
+        """Configure passive diagnostics without participating in strategy identity."""
+        self._reporting_config = reporting_config
 
     def run(
         self,
@@ -269,6 +294,7 @@ class NativeSimulator:
             feature_config,
             strategy.config,
             execution_config,
+            self._reporting_config,
         )
         self.last_signals = None
         self.last_telemetry = None
