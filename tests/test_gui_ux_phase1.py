@@ -51,18 +51,19 @@ def test_copy_profile_pair_does_not_alias_rule_payloads():
 
 def test_active_gui_has_workflow_and_no_unsafe_or_parallel_execution_path():
     source=GUI.read_text(encoding="utf-8")
-    for page in ("Setup","Strategy & Profiles","Research Features","Risk & Execution","Reports & Diagnostics","Review & Run","Results Dashboard","Data Library","ChatGPT / MCP","GitHub"):
+    for page in ("Setup","Strategy Builder","Research Features","Risk & Execution","Reports & Diagnostics","Review & Run","Results Dashboard","Data Library","ChatGPT / MCP","GitHub"):
         assert page in source
     assert "QThread.terminate" not in source and "run_manifest.json\").write" not in source
     assert "ResearchRunner" not in source and "BacktestWorker" not in source
 
 
-def test_structured_rules_retain_private_payload_without_json_primary_editor():
+def test_structured_rules_are_advanced_exceptions_not_primary_strategy_editor():
     source=GUI.read_text(encoding="utf-8")
     tree=ast.parse(source)
     entry=next(node for node in tree.body if isinstance(node,ast.ClassDef) and node.name=="EntryRuleEditor")
-    assert entry and "_payloads" in source and "Advanced Entry Rules" in source
+    assert entry and "_payloads" in source and "Advanced Exceptions" in source
     assert "Entry Rules (structured JSON array)" not in source
+    assert "single source of truth for entry decisions" in source
 
 
 def _window():
@@ -133,6 +134,19 @@ def test_entry_rule_editor_exposes_every_native_indicator_without_mutation():
     finally: window.close()
 
 
+def test_advanced_exception_indicator_labels_are_grouped_by_evidence_family():
+    _app,window=_window()
+    try:
+        editor=window.profile_editor.entry_rules
+        editor.set_tuple(({"action":"FLIP","indicator":"DI_SPREAD","condition":"INSIDE","minimum":0.0,"maximum":1.0},))
+        combo=editor.cellWidget(0,1)
+        labels=[combo.itemText(index) for index in range(combo.count())]
+        assert any(label.startswith("Trend ·") for label in labels)
+        assert any(label.startswith("Price / Volatility ·") for label in labels)
+        assert any(label.startswith("Mean Reversion ·") for label in labels)
+    finally: window.close()
+
+
 def test_entry_rule_combo_edits_emit_live_change_signal():
     _app,window=_window()
     try:
@@ -192,16 +206,20 @@ def test_report_presets_change_only_reporting_config_in_window():
     finally: window.close()
 
 
-def test_strategy_workspace_uses_authoritative_native_widgets_not_duplicate_state():
+def test_strategy_builder_reuses_authoritative_native_widgets_not_duplicate_filter_state():
     _app,window=_window()
     try:
         workspace=window.strategy_workspace
         assert workspace.widgets is window.strategy_form.widgets
-        assert workspace.widgets["enable_di_direction_selection"] is window.strategy_form.widgets["enable_di_direction_selection"]
-        assert workspace.widgets["strategy_profile_run_mode"] is window.strategy_form.widgets["strategy_profile_run_mode"]
+        for name in (
+            "enable_di_direction_selection","enable_di_pressure_analysis",
+            "enable_mean_reversion_analysis","sr_filter_mode",
+        ):
+            assert workspace.widgets[name] is window.strategy_form.widgets[name]
         assert window.profile_editor.profile_details.isHidden()
         assert workspace.advanced_strategy.isHidden()
         assert workspace.sr_filter_details.isHidden()
+        assert set(workspace.evidence_setting_widgets) == set(workspace.EVIDENCE_SOURCES)
     finally: window.close()
 
 
@@ -219,6 +237,34 @@ def test_market_permission_matrix_edits_only_native_enabled_flag_and_selects_pro
         assert after.strategy.profiles["bull_long"] == before.strategy.profiles["bull_long"]
         box.click()
         assert window.build_config() == before
+    finally: window.close()
+
+
+def test_resetting_profile_overrides_does_not_change_market_permission():
+    _app,window=_window()
+    try:
+        base=ResearchRunConfig(); window.apply_config(base)
+        box=window.profile_editor.permission_checks["bear_short"]
+        box.click()
+        assert window.build_config().strategy.profiles["bear_short"].enabled is False
+        window.profile_editor.reset_profile()
+        assert window.build_config().strategy.profiles["bear_short"].enabled is False
+    finally: window.close()
+
+
+def test_apply_strategy_exceptions_to_all_preserves_each_environment_permission():
+    _app,window=_window()
+    try:
+        base=ResearchRunConfig(); window.apply_config(base)
+        window.profile_editor.permission_checks["bull_short"].click()
+        window.profile_editor.permission_checks["bear_short"].click()
+        before={key: profile.enabled for key,profile in window.build_config().strategy.profiles.items()}
+        window.profile_editor.selector.setCurrentText("bull_long")
+        window.profile_editor.strategy_form.widgets["flip_direction"].setChecked(True)
+        window.profile_editor.apply_strategy_to_all()
+        after=window.build_config().strategy.profiles
+        assert {key: profile.enabled for key,profile in after.items()} == before
+        assert all(profile.flip_direction for profile in after.values())
     finally: window.close()
 
 
@@ -248,7 +294,7 @@ def test_di_pressure_promotes_from_analyze_only_to_required_using_existing_filte
         assert workspace.evidence_roles()["DI Pressure"][0] == "Analyze Only"
         window.strategy_form.widgets["di_pressure_allow_contracting"].setChecked(False)
         after=window.build_config()
-        assert workspace.evidence_roles()["DI Pressure"][0] == "Required Condition"
+        assert workspace.evidence_roles()["DI Pressure"][0] == "Required"
         assert after.strategy.di_pressure_allow_contracting is False
         assert replace(after.strategy,di_pressure_allow_contracting=True) == before.strategy
         window.strategy_form.widgets["enable_di_pressure_analysis"].setChecked(False)
@@ -275,11 +321,11 @@ def test_sr_trade_flow_and_order_book_roles_follow_existing_native_controls():
     finally: window.close()
 
 
-def test_strategy_thesis_is_structured_around_standard_entry_decision_stages():
+def test_strategy_summary_is_structured_around_standard_entry_decision_stages():
     _app,window=_window()
     try:
         text=window.strategy_workspace.thesis_summary.text()
-        for heading in ("Markets","Direction","Required Conditions","Confirmations","Avoid / Veto","Ranking","Profile Overrides"):
+        for heading in ("Markets","Direction","Required","Supporting Evidence","Avoid / Veto","Ranking","Profile Overrides"):
             assert f"<b>{heading}</b>" in text
         assert "DI Direction: Direction" in text
         assert "DI Pressure: Analyze Only" in text
@@ -301,6 +347,16 @@ def test_feature_changes_refresh_evidence_map_but_do_not_create_new_strategy_fie
     finally: window.close()
 
 
+def test_profile_summary_exposes_only_exception_counts_not_duplicate_base_filters():
+    _app,window=_window()
+    try:
+        window.profile_editor.selector.setCurrentText("bull_long")
+        assert "no strategy exceptions" in window.profile_editor.profile_summary.text().lower()
+        window.profile_editor.strategy_form.widgets["flip_direction"].setChecked(True)
+        assert "1 strategy exception" in window.profile_editor.profile_summary.text().lower()
+    finally: window.close()
+
+
 def test_profile_details_are_optional_but_roundtrip_still_lossless():
     _app,window=_window()
     try:
@@ -316,5 +372,7 @@ def test_profile_details_are_optional_but_roundtrip_still_lossless():
         window.apply_config(config)
         assert window.profile_editor.profile_details.isHidden()
         assert window.build_config() == config
-        assert "Bear Long" in window.profile_editor.profile_summary.text() or window.profile_editor.selector.currentData() != "bear_long"
+        window.profile_editor.selector.setCurrentText("bear_long")
+        summary=window.profile_editor.profile_summary.text()
+        assert "Bear Long" in summary and "strategy exception" in summary and "execution override" in summary
     finally: window.close()
