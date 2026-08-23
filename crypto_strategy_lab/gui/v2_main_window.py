@@ -532,7 +532,12 @@ class NativeProfileEditor(QWidget):
             for column, direction in enumerate(("long", "short"), 1):
                 key = f"{native}_{direction}"
                 check = QCheckBox(f"Trade {direction.title()}")
-                check.toggled.connect(lambda checked, profile_key=key: self._toggle_permission(profile_key, checked))
+                check.toggled.connect(
+                    lambda checked, profile_key=key: self._toggle_permission(profile_key, checked)
+                )
+                check.clicked.connect(
+                    lambda _checked, profile_key=key: self.selector.setCurrentText(profile_key)
+                )
                 self.permission_checks[key] = check
                 permission.addWidget(check, row, column)
         layout.addWidget(permission_box)
@@ -548,7 +553,9 @@ class NativeProfileEditor(QWidget):
         selected_layout.addLayout(selector_row)
         self.profile_summary = QLabel()
         self.profile_summary.setWordWrap(True)
-        self.profile_summary.setStyleSheet("background:#f7f9fb; padding:10px; border:1px solid #d9e2ec")
+        self.profile_summary.setStyleSheet(
+            "background:#f7f9fb; padding:10px; border:1px solid #d9e2ec"
+        )
         selected_layout.addWidget(self.profile_summary)
 
         actions = QHBoxLayout()
@@ -556,11 +563,15 @@ class NativeProfileEditor(QWidget):
         self.paste_button = QPushButton("Paste Profile")
         self.reset_button = QPushButton("Reset Profile")
         self.apply_all_button = QPushButton("Apply Strategy Rules to All Profiles")
-        for button in (self.copy_button, self.paste_button, self.reset_button, self.apply_all_button):
+        for button in (
+            self.copy_button, self.paste_button, self.reset_button, self.apply_all_button
+        ):
             actions.addWidget(button)
         selected_layout.addLayout(actions)
 
-        self.show_profile_details = QCheckBox("Show detailed profile settings and advanced entry rules")
+        self.show_profile_details = QCheckBox(
+            "Show detailed profile settings and advanced entry rules"
+        )
         selected_layout.addWidget(self.show_profile_details)
         self.profile_details = QWidget()
         detail_layout = QVBoxLayout(self.profile_details)
@@ -592,7 +603,9 @@ class NativeProfileEditor(QWidget):
         rule_actions.addWidget(remove_rule)
         strategy_layout.addLayout(rule_actions)
 
-        self.execution_form = DataclassForm(ExecutionProfileConfig(), groups=EXECUTION_PROFILE_GROUPS)
+        self.execution_form = DataclassForm(
+            ExecutionProfileConfig(), groups=EXECUTION_PROFILE_GROUPS
+        )
         tabs.addTab(strategy_page, "Strategy Overrides")
         tabs.addTab(self.execution_form, "Execution Overrides")
         detail_layout.addWidget(tabs)
@@ -608,7 +621,9 @@ class NativeProfileEditor(QWidget):
         self._rendering = False
         self._clipboard = None
 
-        self.selector.currentIndexChanged.connect(lambda: self._select(self.selector.currentData()))
+        self.selector.currentIndexChanged.connect(
+            lambda: self._select(self.selector.currentData())
+        )
         self.copy_button.clicked.connect(self.copy_profile)
         self.paste_button.clicked.connect(self.paste_profile)
         self.reset_button.clicked.connect(self.reset_profile)
@@ -641,7 +656,9 @@ class NativeProfileEditor(QWidget):
             return
         key = self._current
         strategy = self.strategy_form.value(self._strategy[key])
-        self._strategy[key] = replace(strategy, entry_rules=self.entry_rules.tuple_value())
+        self._strategy[key] = replace(
+            strategy, entry_rules=self.entry_rules.tuple_value()
+        )
         self._execution[key] = self.execution_form.value(self._execution[key])
 
     def _render(self, key: str) -> None:
@@ -687,7 +704,7 @@ class NativeProfileEditor(QWidget):
             f"{'flip direction' if strategy.flip_direction else 'normal direction'}\n"
             f"{len(strategy.entry_rules)} advanced entry rule(s) · "
             f"risk {execution.risk_multiplier:.2f}x · "
-            f"stop {execution.stop_loss_multiple:g} distance units · "
+            f"stop {execution.stop_loss_multiple:g} × base distance · "
             f"target {execution.reward_risk_ratio:g}R · {protection_text}."
         )
 
@@ -716,7 +733,9 @@ class NativeProfileEditor(QWidget):
 
     def paste_profile(self):
         if self._clipboard:
-            self._strategy[self._current], self._execution[self._current] = clone_profile_pair(*self._clipboard)
+            self._strategy[self._current], self._execution[self._current] = clone_profile_pair(
+                *self._clipboard
+            )
             self._render(self._current)
             self.changed.emit()
 
@@ -736,9 +755,24 @@ class NativeProfileEditor(QWidget):
 
 
 class StrategyWorkspace(QWidget):
-    """Researcher-facing strategy thesis built from the authoritative native widgets."""
+    """Researcher-facing entry evidence workflow over authoritative native widgets.
 
-    def __init__(self, profile_editor: NativeProfileEditor, strategy_form: DataclassForm, parent=None):
+    This presentation deliberately does not invent a generic strategy engine. New
+    evidence starts as Analyze Only and can be promoted to Direction, Required,
+    Confirmation, Veto/Avoid, or Ranking only when the native strategy contract
+    explicitly supports that role.
+    """
+
+    EVIDENCE_SOURCES = (
+        "DI Direction", "DI Pressure", "Mean Reversion", "Support / Resistance",
+        "Open Interest", "Funding", "Positioning / Basis", "Taker Flow",
+        "Trade Flow", "Order Book",
+    )
+
+    def __init__(
+        self, profile_editor: NativeProfileEditor, strategy_form: DataclassForm,
+        parent=None,
+    ):
         super().__init__(parent)
         self.profile_editor = profile_editor
         self.strategy_form = strategy_form
@@ -755,26 +789,76 @@ class StrategyWorkspace(QWidget):
         thesis_layout.addWidget(self.thesis_summary)
         layout.addWidget(thesis_box)
 
+        mode_box = QGroupBox("Strategy Test Mode")
+        mode_layout = QVBoxLayout(mode_box)
+        mode_form = QFormLayout()
+        mode_form.addRow("How enabled profiles are tested", self.widgets["strategy_profile_run_mode"])
+        mode_layout.addLayout(mode_form)
+        mode_note = QLabel(
+            "This changes how enabled regime/direction profiles share capital during the backtest; "
+            "it is not an entry condition."
+        )
+        mode_note.setWordWrap(True)
+        mode_note.setStyleSheet("color:#52606d")
+        mode_layout.addWidget(mode_note)
+        layout.addWidget(mode_box)
+
         layout.addWidget(profile_editor)
 
-        entry_box = QGroupBox("3. Entry Thesis — What must be true before we trade?")
+        entry_box = QGroupBox(
+            "3. Entry Evidence Framework — How can evidence affect a trade?"
+        )
         entry = QVBoxLayout(entry_box)
+        framework_note = QLabel(
+            "Standard decision path: Direction → Required Conditions → Confirmations → "
+            "Avoid / Veto → Ranking. New Binance data starts as Analyze Only. It must first "
+            "be studied causally against trade outcomes before we add a native strategy role."
+        )
+        framework_note.setWordWrap(True)
+        framework_note.setStyleSheet(
+            "background:#eef5fb; padding:10px; border:1px solid #c8d9e8"
+        )
+        entry.addWidget(framework_note)
 
-        mode_form = QFormLayout()
-        mode_form.addRow("How profiles are tested", self.widgets["strategy_profile_run_mode"])
-        entry.addLayout(mode_form)
+        map_box = QGroupBox("Evidence Map — current role of every research source")
+        evidence_grid = QGridLayout(map_box)
+        evidence_grid.addWidget(QLabel("Evidence source"), 0, 0)
+        evidence_grid.addWidget(QLabel("Current role"), 0, 1)
+        evidence_grid.addWidget(QLabel("What it does now"), 0, 2)
+        self.evidence_role_labels: dict[str, QLabel] = {}
+        self.evidence_note_labels: dict[str, QLabel] = {}
+        for row, source in enumerate(self.EVIDENCE_SOURCES, 1):
+            source_label = QLabel(source)
+            source_label.setStyleSheet("font-weight:bold")
+            role = QLabel("—")
+            role.setMinimumWidth(135)
+            note = QLabel("—")
+            note.setWordWrap(True)
+            self.evidence_role_labels[source] = role
+            self.evidence_note_labels[source] = note
+            evidence_grid.addWidget(source_label, row, 0)
+            evidence_grid.addWidget(role, row, 1)
+            evidence_grid.addWidget(note, row, 2)
+        evidence_grid.setColumnStretch(2, 1)
+        entry.addWidget(map_box)
 
-        direction_group = QGroupBox("Direction & DI")
+        direction_group = QGroupBox("Direction — Which side are we considering?")
         direction = QVBoxLayout(direction_group)
         direction.addWidget(self._labeled_check(
             self.widgets["enable_di_direction_selection"],
-            "Use DI direction to choose the trade direction",
-            "When enabled, the existing native DI direction-selection logic remains authoritative.",
+            "DI Direction",
+            "The current native engine can use DI as its first-class direction source. "
+            "Turning this off leaves direction to the profile/native baseline behavior.",
         ))
-        direction.addWidget(self._labeled_check(
+        entry.addWidget(direction_group)
+
+        required_group = QGroupBox("Required Conditions — What must be true?")
+        required = QVBoxLayout(required_group)
+        required.addWidget(self._labeled_check(
             self.widgets["enable_di_pressure_analysis"],
-            "Use DI pressure context",
-            "Choose which native pressure states are allowed below.",
+            "DI Pressure",
+            "With every pressure state allowed this is Analyze Only. Excluding one or more "
+            "states promotes DI Pressure to a Required Condition using the existing native filter.",
         ))
         self.pressure_states = QWidget()
         pressure_layout = QHBoxLayout(self.pressure_states)
@@ -787,16 +871,40 @@ class StrategyWorkspace(QWidget):
             pressure_layout.addWidget(QLabel(label))
             pressure_layout.addWidget(self.widgets[name])
         pressure_layout.addStretch()
-        direction.addWidget(self.pressure_states)
-        entry.addWidget(direction_group)
+        required.addWidget(self.pressure_states)
+        entry.addWidget(required_group)
 
-        confirmation_group = QGroupBox("Confirmation & Location")
-        confirmation = QFormLayout(confirmation_group)
-        confirmation.addRow("Mean Reversion context", self.widgets["enable_mean_reversion_analysis"])
-        confirmation.addRow("Support / Resistance role", self.widgets["sr_filter_mode"])
+        confirmation_group = QGroupBox("Confirmations — What supports the trade?")
+        confirmation = QVBoxLayout(confirmation_group)
+        confirmation_status = QLabel(
+            "No first-class confirmation gate is implemented in the native strategy yet. "
+            "Research evidence can be promoted here later only after validation."
+        )
+        confirmation_status.setWordWrap(True)
+        confirmation_status.setStyleSheet("color:#52606d")
+        confirmation.addWidget(confirmation_status)
+        confirmation.addWidget(self._labeled_check(
+            self.widgets["enable_mean_reversion_analysis"],
+            "Calculate Mean Reversion context — Analyze Only",
+            "Mean Reversion is currently record/research context only. It does not choose "
+            "direction or block entries unless a profile-specific advanced rule explicitly does so.",
+        ))
         entry.addWidget(confirmation_group)
 
-        self.sr_filter_details = QGroupBox("Support / Resistance entry filters")
+        veto_group = QGroupBox("Avoid / Veto — What can reject an otherwise valid trade?")
+        veto = QVBoxLayout(veto_group)
+        sr_role = QFormLayout()
+        sr_role.addRow("Support / Resistance role", self.widgets["sr_filter_mode"])
+        veto.addLayout(sr_role)
+        sr_note = QLabel(
+            "Analysis Only records location context without blocking trades. Apply Entry Rules "
+            "uses the existing native S/R location filters as a veto/avoid role."
+        )
+        sr_note.setWordWrap(True)
+        sr_note.setStyleSheet("color:#52606d")
+        veto.addWidget(sr_note)
+
+        self.sr_filter_details = QGroupBox("Support / Resistance veto settings")
         sr_form = QFormLayout(self.sr_filter_details)
         for name in (
             "sr_long_avoid_near_resistance", "sr_long_require_near_support",
@@ -805,10 +913,27 @@ class StrategyWorkspace(QWidget):
             "sr_short_block_broken_resistance", "sr_short_min_room_to_support_atr",
         ):
             sr_form.addRow(metadata(name).label, self.widgets[name])
-        entry.addWidget(self.sr_filter_details)
+        veto.addWidget(self.sr_filter_details)
+        entry.addWidget(veto_group)
+
+        ranking_group = QGroupBox("Ranking / Confidence — Which valid trade is strongest?")
+        ranking = QVBoxLayout(ranking_group)
+        ranking_note = QLabel(
+            "No native ranking/confidence score changes trade selection today. Open Interest, "
+            "Funding, Positioning, Taker Flow, Trade Flow and Order Book remain research evidence. "
+            "After outcome studies show stable value, a future strategy change can explicitly "
+            "promote a source to Ranking without changing its feature calculation."
+        )
+        ranking_note.setWordWrap(True)
+        ranking_note.setStyleSheet("color:#52606d")
+        ranking.addWidget(ranking_note)
+        entry.addWidget(ranking_group)
+
         layout.addWidget(entry_box)
 
-        self.show_advanced_strategy = QCheckBox("Show advanced entry timing and schedule settings")
+        self.show_advanced_strategy = QCheckBox(
+            "Show advanced entry timing and schedule settings"
+        )
         layout.addWidget(self.show_advanced_strategy)
         self.advanced_strategy = QGroupBox("Advanced Strategy Timing")
         advanced = QFormLayout(self.advanced_strategy)
@@ -822,8 +947,12 @@ class StrategyWorkspace(QWidget):
         layout.addWidget(self.advanced_strategy)
         layout.addStretch()
 
-        self.widgets["enable_di_pressure_analysis"].toggled.connect(self._refresh_visibility)
-        self.widgets["sr_filter_mode"].currentIndexChanged.connect(lambda _index: self._refresh_visibility())
+        self.widgets["enable_di_pressure_analysis"].toggled.connect(
+            self._refresh_visibility
+        )
+        self.widgets["sr_filter_mode"].currentIndexChanged.connect(
+            lambda _index: self._refresh_visibility()
+        )
         strategy_form.changed.connect(self.refresh_from_widgets)
         profile_editor.changed.connect(self.refresh_from_widgets)
         self._refresh_visibility()
@@ -832,60 +961,153 @@ class StrategyWorkspace(QWidget):
     @staticmethod
     def _labeled_check(widget: QCheckBox, title: str, help_text: str) -> QWidget:
         row = QWidget()
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        text = QLabel(f"<b>{title}</b><br><span style='color:#52606d'>{help_text}</span>")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        text = QLabel(
+            f"<b>{title}</b><br><span style='color:#52606d'>{help_text}</span>"
+        )
         text.setWordWrap(True)
-        layout.addWidget(widget)
-        layout.addWidget(text, 1)
+        row_layout.addWidget(widget)
+        row_layout.addWidget(text, 1)
         return row
 
+    def _feature_config(self) -> FeatureConfig:
+        """Read the native FeatureConfig from the owning window without duplicating state."""
+        root = self.window()
+        form = getattr(root, "feature_form", None)
+        base_config = getattr(root, "config", None)
+        base = getattr(base_config, "features", FeatureConfig())
+        if form is None:
+            return base
+        try:
+            return form.value(base)
+        except (ValueError, TypeError, KeyError):
+            return base
+
+    def evidence_roles(self) -> dict[str, tuple[str, str]]:
+        """Describe current native entry roles; this method never changes config."""
+        strategy = self.strategy_form.value(StrategyConfig())
+        features = self._feature_config()
+
+        roles: dict[str, tuple[str, str]] = {}
+        roles["DI Direction"] = (
+            ("Direction", "Chooses the candidate side using native DI direction selection.")
+            if strategy.enable_di_direction_selection
+            else ("Not Used", "DI does not choose direction; profile/native direction remains in control.")
+        )
+
+        if not strategy.enable_di_pressure_analysis:
+            roles["DI Pressure"] = ("Off", "DI pressure context and its entry filter are disabled.")
+        else:
+            allowed = (
+                strategy.di_pressure_allow_expanding,
+                strategy.di_pressure_allow_contracting,
+                strategy.di_pressure_allow_mixed,
+            )
+            roles["DI Pressure"] = (
+                ("Analyze Only", "All pressure states are allowed, so pressure is recorded without rejecting entries.")
+                if all(allowed)
+                else ("Required Condition", "Disallowed pressure states are rejected by the existing native entry filter.")
+            )
+
+        roles["Mean Reversion"] = (
+            ("Analyze Only", "Recorded for research; it does not change DI direction or block entries by itself.")
+            if strategy.enable_mean_reversion_analysis
+            else ("Off", "Mean Reversion research context is disabled.")
+        )
+
+        if strategy.sr_filter_mode == "APPLY_ENTRY_RULES":
+            sr_note = "Existing S/R location rules may reject entries."
+            if not features.enable_support_resistance_analysis:
+                sr_note += " Enable S/R research features so location context is available."
+            roles["Support / Resistance"] = ("Veto / Avoid", sr_note)
+        elif features.enable_support_resistance_analysis:
+            roles["Support / Resistance"] = (
+                "Analyze Only", "S/R location context is calculated but does not block entries."
+            )
+        else:
+            roles["Support / Resistance"] = (
+                "Off", "S/R feature calculation is disabled; no location role is active."
+            )
+
+        for source in ("Open Interest", "Funding", "Positioning / Basis", "Taker Flow"):
+            roles[source] = (
+                "Analyze Only",
+                "Attached automatically when source coverage exists; it cannot change entries yet.",
+            )
+        roles["Trade Flow"] = (
+            ("Analyze Only", "Enabled on Research Features; collected for outcome research only.")
+            if features.trade_flow_enabled
+            else ("Off", "Enable Trade Flow on Research Features to collect it for research.")
+        )
+        roles["Order Book"] = (
+            ("Analyze Only", "Enabled on Research Features; collected for outcome research only.")
+            if features.order_book_enabled
+            else ("Off", "Enable Order Book on Research Features to collect it for research.")
+        )
+        return roles
+
+    @staticmethod
+    def _market_permission_summary(profiles) -> str:
+        parts = []
+        for regime, prefix in (("Bull", "bull"), ("Bear", "bear"), ("Sideways", "sideways")):
+            sides = []
+            if profiles[f"{prefix}_long"].enabled:
+                sides.append("Long")
+            if profiles[f"{prefix}_short"].enabled:
+                sides.append("Short")
+            parts.append(f"{regime}: {' + '.join(sides) if sides else 'Off'}")
+        return "; ".join(parts)
+
     def _refresh_visibility(self):
-        self.pressure_states.setVisible(self.widgets["enable_di_pressure_analysis"].isChecked())
-        self.sr_filter_details.setVisible(self.widgets["sr_filter_mode"].currentData() == "APPLY_ENTRY_RULES")
+        self.pressure_states.setVisible(
+            self.widgets["enable_di_pressure_analysis"].isChecked()
+        )
+        self.sr_filter_details.setVisible(
+            self.widgets["sr_filter_mode"].currentData() == "APPLY_ENTRY_RULES"
+        )
 
     def refresh_from_widgets(self):
         self._refresh_visibility()
         if not self.profile_editor._strategy:
-            self.thesis_summary.setText("Configure the strategy to see a plain-English thesis here.")
+            self.thesis_summary.setText(
+                "Configure the strategy to see a plain-English thesis here."
+            )
             return
         try:
             strategy = self.strategy_form.value(StrategyConfig())
             profiles, _execution = self.profile_editor.profiles()
+            roles = self.evidence_roles()
         except (ValueError, TypeError, KeyError):
             return
-        enabled = [PROFILE_LABELS[key] for key in PROFILE_KEYS if profiles[key].enabled]
-        environments = ", ".join(enabled) if enabled else "no market/regime profiles"
-        direction = (
-            "DI selects direction"
-            if strategy.enable_di_direction_selection
-            else "profile direction only (DI direction selection is off)"
+
+        for source, (role, note) in roles.items():
+            self.evidence_role_labels[source].setText(role)
+            self.evidence_note_labels[source].setText(note)
+
+        market_text = self._market_permission_summary(profiles)
+        direction_text = roles["DI Direction"][0]
+        pressure_text = roles["DI Pressure"][0]
+        sr_text = roles["Support / Resistance"][0]
+        mean_reversion_text = roles["Mean Reversion"][0]
+        profile_overrides = sum(
+            bool(profile.entry_rules) or profile.flip_direction
+            for profile in profiles.values()
         )
-        if strategy.enable_di_pressure_analysis:
-            states = [
-                label for allowed, label in (
-                    (strategy.di_pressure_allow_expanding, "Expanding"),
-                    (strategy.di_pressure_allow_contracting, "Contracting"),
-                    (strategy.di_pressure_allow_mixed, "Mixed"),
-                ) if allowed
-            ]
-            pressure = "DI pressure accepts " + (", ".join(states) if states else "no states")
-        else:
-            pressure = "DI pressure logic is off"
-        mean_reversion = (
-            "Mean Reversion context is enabled"
-            if strategy.enable_mean_reversion_analysis
-            else "Mean Reversion context is off"
-        )
-        sr = (
-            "Support/Resistance can block entries using the configured location filters"
-            if strategy.sr_filter_mode == "APPLY_ENTRY_RULES"
-            else "Support/Resistance is analysis-only and does not block entries"
+        override_text = (
+            f"{profile_overrides} profile(s) have strategy-specific exceptions."
+            if profile_overrides
+            else "No profile-specific strategy exceptions."
         )
         self.thesis_summary.setText(
-            f"Trade in: {environments}.\n"
-            f"Entry thesis: {direction}; {pressure}; {mean_reversion}; {sr}.\n"
-            "Profile-specific exceptions and execution overrides stay underneath and are optional."
+            f"<b>Markets</b><br>{market_text}<br><br>"
+            f"<b>Direction</b><br>DI Direction: {direction_text}<br><br>"
+            f"<b>Required Conditions</b><br>DI Pressure: {pressure_text}<br><br>"
+            f"<b>Confirmations</b><br>No native confirmation gate. "
+            f"Mean Reversion: {mean_reversion_text}.<br><br>"
+            f"<b>Avoid / Veto</b><br>Support / Resistance: {sr_text}<br><br>"
+            f"<b>Ranking</b><br>No native confidence/ranking role yet.<br><br>"
+            f"<b>Profile Overrides</b><br>{override_text}"
         )
 
 
@@ -930,42 +1152,71 @@ class MainWindow(QMainWindow):
         shell.addWidget(self.pages, 1)
 
         self.profile_editor = NativeProfileEditor()
-        self.strategy_form = DataclassForm(StrategyConfig(), excluded={"profiles"}, groups=STRATEGY_GROUPS)
+        self.strategy_form = DataclassForm(
+            StrategyConfig(), excluded={"profiles"}, groups=STRATEGY_GROUPS
+        )
         self.feature_form = DataclassForm(FeatureConfig(), groups=FEATURE_GROUPS)
-        self.execution_form = DataclassForm(ExecutionConfig(), excluded={"profiles"}, groups=EXECUTION_GROUPS)
-        self.reporting_form = DataclassForm(ReportingConfig(), excluded={"output_dir"})
-        self.strategy_workspace = StrategyWorkspace(self.profile_editor, self.strategy_form)
+        self.execution_form = DataclassForm(
+            ExecutionConfig(), excluded={"profiles"}, groups=EXECUTION_GROUPS
+        )
+        self.reporting_form = DataclassForm(
+            ReportingConfig(), excluded={"output_dir"}
+        )
+        self.strategy_workspace = StrategyWorkspace(
+            self.profile_editor, self.strategy_form
+        )
 
         setup = self._page("Setup", self._data_panel(), self._status_panel())
-        strategy = self._page("Strategy & Profiles", self._scroll(self.strategy_workspace))
+        strategy = self._page(
+            "Strategy & Profiles", self._scroll(self.strategy_workspace)
+        )
         features = self._page("Research Features", self._scroll(self.feature_form))
-        risk = self._page("Risk & Execution", self._scroll(self.execution_form), self._risk_explanation())
-        reports = self._page("Reports & Diagnostics", self._report_presets(), self._scroll(self.reporting_form))
+        risk = self._page(
+            "Risk & Execution", self._scroll(self.execution_form),
+            self._risk_explanation(),
+        )
+        reports = self._page(
+            "Reports & Diagnostics", self._report_presets(),
+            self._scroll(self.reporting_form),
+        )
         review = self._page("Review & Run", self._review_panel(), self._run_panel())
         results = self._page("Results Dashboard", self._results_panel())
         library = self._page("Data Library", self._data_library_panel())
-        chat = ChatGPTIntegrationWidget(QSettings("CryptoStrategyLab", "CryptoStrategyLab"), lambda: self.output_root.text())
+        chat = ChatGPTIntegrationWidget(
+            QSettings("CryptoStrategyLab", "CryptoStrategyLab"),
+            lambda: self.output_root.text(),
+        )
         github = GitHubIntegrationWidget()
         groups = (
-            ("NEW RESEARCH", (("Setup", setup), ("Strategy & Profiles", strategy), ("Research Features", features), ("Risk & Execution", risk), ("Reports", reports), ("Review & Run", review))),
+            ("NEW RESEARCH", (
+                ("Setup", setup), ("Strategy & Profiles", strategy),
+                ("Research Features", features), ("Risk & Execution", risk),
+                ("Reports", reports), ("Review & Run", review),
+            )),
             ("RESULTS", (("Results Dashboard", results),)),
             ("DATA", (("Data Library", library),)),
             ("TOOLS", (("ChatGPT / MCP", chat), ("GitHub", github))),
         )
         for heading, entries in groups:
             title = QLabel(heading)
-            title.setStyleSheet("font-weight:bold; color:#52606d; margin-top:10px")
+            title.setStyleSheet(
+                "font-weight:bold; color:#52606d; margin-top:10px"
+            )
             nav.addWidget(title)
             for label, page in entries:
                 index = self.pages.addWidget(page)
                 button = QPushButton(label)
                 button.setFlat(True)
-                button.clicked.connect(lambda _=False, i=index: self.pages.setCurrentIndex(i))
+                button.clicked.connect(
+                    lambda _=False, i=index: self.pages.setCurrentIndex(i)
+                )
                 nav.addWidget(button)
         nav.addStretch()
         self.current_research = QLabel()
         self.current_research.setMinimumWidth(245)
-        self.current_research.setStyleSheet("background:#f4f7fa; padding:12px; border:1px solid #d9e2ec")
+        self.current_research.setStyleSheet(
+            "background:#f4f7fa; padding:12px; border:1px solid #d9e2ec"
+        )
         nav.addWidget(self.current_research)
         quick_run = QPushButton("RUN BACKTEST")
         quick_run.clicked.connect(self.start_run)
@@ -992,7 +1243,10 @@ class MainWindow(QMainWindow):
     def _status_panel_clone(self):
         box = QGroupBox("Technical Catalog Detail")
         layout = QVBoxLayout(box)
-        note = QLabel("Availability, friendly coverage dates, interval and partition counts are supplied by the catalog service. Raw archive paths are never displayed.")
+        note = QLabel(
+            "Availability, friendly coverage dates, interval and partition counts are supplied "
+            "by the catalog service. Raw archive paths are never displayed."
+        )
         note.setWordWrap(True)
         layout.addWidget(note)
         return box
@@ -1004,7 +1258,10 @@ class MainWindow(QMainWindow):
         refresh.clicked.connect(self.refresh_data_library)
         layout.addWidget(refresh)
         self.library_table = QTableWidget(0, 7)
-        self.library_table.setHorizontalHeaderLabels(["Symbol", "Dataset Family", "Interval", "First Available UTC", "Last Available UTC", "Partitions", "State"])
+        self.library_table.setHorizontalHeaderLabels([
+            "Symbol", "Dataset Family", "Interval", "First Available UTC",
+            "Last Available UTC", "Partitions", "State",
+        ])
         layout.addWidget(self.library_table)
         return box
 
@@ -1017,10 +1274,20 @@ class MainWindow(QMainWindow):
             count = row.get("archive_count", 0)
             first = row.get("first_period")
             last = row.get("last_period")
-            state = "UNAVAILABLE" if not count else "AVAILABLE" if first is not None and last is not None else "PARTIAL"
-            values = (row.get("symbol", "—"), self._dataset_family(row.get("dataset", "")), row.get("interval") or "Event data", first or "—", last or "—", count, row.get("state", state))
+            state = (
+                "UNAVAILABLE" if not count
+                else "AVAILABLE" if first is not None and last is not None
+                else "PARTIAL"
+            )
+            values = (
+                row.get("symbol", "—"), self._dataset_family(row.get("dataset", "")),
+                row.get("interval") or "Event data", first or "—", last or "—",
+                count, row.get("state", state),
+            )
             for column, value in enumerate(values):
-                self.library_table.setItem(row_number, column, QTableWidgetItem(str(value)))
+                self.library_table.setItem(
+                    row_number, column, QTableWidgetItem(str(value))
+                )
 
     @staticmethod
     def _dataset_family(dataset):
@@ -1051,7 +1318,9 @@ class MainWindow(QMainWindow):
         self.report_preset = QComboBox()
         self.report_preset.addItem("Quick — core artifacts", "QUICK")
         self.report_preset.addItem("Standard — Recommended", "STANDARD")
-        self.report_preset.addItem("Deep Research — full diagnostics", "DEEP_RESEARCH")
+        self.report_preset.addItem(
+            "Deep Research — full diagnostics", "DEEP_RESEARCH"
+        )
         apply_button = QPushButton("Apply Preset")
         apply_button.clicked.connect(self.apply_reporting_preset)
         layout.addWidget(self.report_preset)
@@ -1100,9 +1369,19 @@ class MainWindow(QMainWindow):
             self.intrabar_tf.addItem(TIMEFRAME_LABELS[value], value)
         self.datasets = QLabel("Catalog not loaded")
         self.datasets.setWordWrap(True)
-        date_note = QLabel("Research includes data from the start date up to, but not including, the selected end boundary.")
+        date_note = QLabel(
+            "Research includes data from the start date up to, but not including, "
+            "the selected end boundary."
+        )
         date_note.setWordWrap(True)
-        for label, widget in (("Exchange", self.exchange), ("Market", self.market), ("Symbol", self.symbol), ("Start Date", self.start), ("End Date", self.end), ("Date Range", date_note), ("Strategy Timeframe", self.strategy_tf), ("Intrabar / Exit Detail", self.intrabar_tf), ("Research Data Availability", self.datasets)):
+        for label, widget in (
+            ("Exchange", self.exchange), ("Market", self.market),
+            ("Symbol", self.symbol), ("Start Date", self.start),
+            ("End Date", self.end), ("Date Range", date_note),
+            ("Strategy Timeframe", self.strategy_tf),
+            ("Intrabar / Exit Detail", self.intrabar_tf),
+            ("Research Data Availability", self.datasets),
+        ):
             form.addRow(label, widget)
         return box
 
@@ -1128,7 +1407,10 @@ class MainWindow(QMainWindow):
         self.save.clicked.connect(self.save_config)
         self.load.clicked.connect(self.load_config)
         self.run_button.clicked.connect(self.start_run)
-        for widget in (QLabel("Output root"), self.output_root, browse, self.save, self.load, self.run_button, self.progress, self.stage):
+        for widget in (
+            QLabel("Output root"), self.output_root, browse, self.save, self.load,
+            self.run_button, self.progress, self.stage,
+        ):
             layout.addWidget(widget)
         return box
 
@@ -1137,11 +1419,17 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(box)
         self.resolution = QLabel("Requested/effective resolution: not run")
         self.coverage = QTableWidget(0, 6)
-        self.coverage.setHorizontalHeaderLabels(["Dataset", "Interval", "First UTC", "Last UTC", "Partitions", "State"])
+        self.coverage.setHorizontalHeaderLabels([
+            "Dataset", "Interval", "First UTC", "Last UTC", "Partitions", "State"
+        ])
         self.quality = QLabel("Data quality: not run")
         self.quality_table = QTableWidget(0, 6)
-        self.quality_table.setHorizontalHeaderLabels(["Dataset", "Interval", "Required", "Rows", "Status", "Issues"])
-        for widget in (self.resolution, self.coverage, self.quality, self.quality_table):
+        self.quality_table.setHorizontalHeaderLabels([
+            "Dataset", "Interval", "Required", "Rows", "Status", "Issues"
+        ])
+        for widget in (
+            self.resolution, self.coverage, self.quality, self.quality_table
+        ):
             layout.addWidget(widget)
         return box
 
@@ -1151,7 +1439,10 @@ class MainWindow(QMainWindow):
         cards = QGridLayout()
         layout.addLayout(cards)
         self.kpi_cards = {}
-        labels = ("Trades", "Wins", "Losses", "Win Rate", "Net R", "Average R", "Net PnL", "Ending Equity", "Profit Factor", "Maximum Drawdown", "Fees")
+        labels = (
+            "Trades", "Wins", "Losses", "Win Rate", "Net R", "Average R",
+            "Net PnL", "Ending Equity", "Profit Factor", "Maximum Drawdown", "Fees",
+        )
         for index, label in enumerate(labels):
             card = QLabel(f"{label}\n—")
             card.setFrameShape(QLabel.Box)
@@ -1163,15 +1454,24 @@ class MainWindow(QMainWindow):
         self.timings = QLabel("Run timings: —")
         layout.addWidget(self.timings)
         self.artifact_buttons = {}
-        for key in ("workbook", "trade_csv", "summary", "trades", "signals", "feature_context", "telemetry", "data_quality"):
+        for key in (
+            "workbook", "trade_csv", "summary", "trades", "signals",
+            "feature_context", "telemetry", "data_quality",
+        ):
             button = QPushButton(key.replace("_", " ").title())
             button.setEnabled(False)
-            button.clicked.connect(lambda _=False, name=key: self.open_artifact(name))
+            button.clicked.connect(
+                lambda _=False, name=key: self.open_artifact(name)
+            )
             self.artifact_buttons[key] = button
             layout.addWidget(button)
         self.open_folder = QPushButton("Output Folder")
         self.open_folder.setEnabled(False)
-        self.open_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._run_dir))))
+        self.open_folder.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(self._run_dir))
+            )
+        )
         layout.addWidget(self.open_folder)
         return box
 
@@ -1185,7 +1485,10 @@ class MainWindow(QMainWindow):
         self.intrabar_tf.currentTextChanged.connect(self.refresh_coverage)
 
     def _connect_live_summary(self):
-        for form in (self.strategy_form, self.feature_form, self.execution_form, self.reporting_form):
+        for form in (
+            self.strategy_form, self.feature_form, self.execution_form,
+            self.reporting_form,
+        ):
             form.changed.connect(self._refresh_summary_from_widgets)
         self.profile_editor.changed.connect(self._refresh_summary_from_widgets)
         self.output_root.textChanged.connect(self._refresh_summary_from_widgets)
@@ -1203,25 +1506,63 @@ class MainWindow(QMainWindow):
     def request_model(self):
         def utc(widget):
             return pd.Timestamp(widget.date().toPython(), tz="UTC").to_pydatetime()
+
         intrabar = self.intrabar_tf.currentData()
-        return GuiResearchRequest(self.exchange.currentData(), self.market.currentData(), self.symbol.currentText(), utc(self.start), utc(self.end), self.strategy_tf.currentText(), intrabar)
+        return GuiResearchRequest(
+            self.exchange.currentData(), self.market.currentData(),
+            self.symbol.currentText(), utc(self.start), utc(self.end),
+            self.strategy_tf.currentText(), intrabar,
+        )
 
     def build_config(self):
         strategy_profiles, execution_profiles = self.profile_editor.profiles()
         intrabar = self.request_model().intrabar_timeframe
-        data = replace(self.config.data, strategy_timeframe_minutes=timeframe_minutes(self.strategy_tf.currentText()), use_intrabar_data=intrabar is not None, intrabar_timeframe_minutes=timeframe_minutes(intrabar) if intrabar else self.config.data.intrabar_timeframe_minutes)
-        strategy = replace(self.strategy_form.value(self.config.strategy), profiles=strategy_profiles)
-        execution = replace(self.execution_form.value(self.config.execution), profiles=execution_profiles)
-        return replace(self.config, data=data, features=self.feature_form.value(self.config.features), strategy=strategy, execution=execution, reporting=replace(self.reporting_form.value(self.config.reporting), output_dir=self.output_root.text()))
+        data = replace(
+            self.config.data,
+            strategy_timeframe_minutes=timeframe_minutes(
+                self.strategy_tf.currentText()
+            ),
+            use_intrabar_data=intrabar is not None,
+            intrabar_timeframe_minutes=(
+                timeframe_minutes(intrabar)
+                if intrabar else self.config.data.intrabar_timeframe_minutes
+            ),
+        )
+        strategy = replace(
+            self.strategy_form.value(self.config.strategy),
+            profiles=strategy_profiles,
+        )
+        execution = replace(
+            self.execution_form.value(self.config.execution),
+            profiles=execution_profiles,
+        )
+        return replace(
+            self.config,
+            data=data,
+            features=self.feature_form.value(self.config.features),
+            strategy=strategy,
+            execution=execution,
+            reporting=replace(
+                self.reporting_form.value(self.config.reporting),
+                output_dir=self.output_root.text(),
+            ),
+        )
 
     def apply_config(self, config):
         self._applying_config = True
         try:
             self.config = config
             data = config.data
-            self.strategy_tf.setCurrentText(timeframe_label(data.strategy_timeframe_minutes))
-            self.intrabar_tf.setCurrentText(timeframe_label(data.intrabar_timeframe_minutes) if data.use_intrabar_data else None)
-            self.profile_editor.set_profiles(config.strategy.profiles, config.execution.profiles)
+            self.strategy_tf.setCurrentText(
+                timeframe_label(data.strategy_timeframe_minutes)
+            )
+            self.intrabar_tf.setCurrentText(
+                timeframe_label(data.intrabar_timeframe_minutes)
+                if data.use_intrabar_data else None
+            )
+            self.profile_editor.set_profiles(
+                config.strategy.profiles, config.execution.profiles
+            )
             self.strategy_form.set_value(config.strategy)
             self.feature_form.set_value(config.features)
             self.execution_form.set_value(config.execution)
@@ -1233,21 +1574,77 @@ class MainWindow(QMainWindow):
         self._render_research_summary(config)
 
     def _render_research_summary(self, config):
-        enabled = sum(profile.enabled for profile in config.strategy.profiles.values())
-        intrabar = f"{config.data.intrabar_timeframe_minutes}m exits" if config.data.use_intrabar_data else "bar-close exits"
+        enabled = sum(
+            profile.enabled for profile in config.strategy.profiles.values()
+        )
+        intrabar = (
+            f"{config.data.intrabar_timeframe_minutes}m exits"
+            if config.data.use_intrabar_data else "bar-close exits"
+        )
         risk = display_percentage(config.execution.risk_per_leg)
-        text = (f"CURRENT RESEARCH\n\n{self.symbol.currentText() or 'BTCUSDT'}\n{timeframe_label(config.data.strategy_timeframe_minutes)} strategy / {intrabar}\n\nProfiles  {enabled} of 6 ON\nDI  {'ON' if config.strategy.enable_di_direction_selection else 'OFF'}\nMean Reversion  {'ON' if config.strategy.enable_mean_reversion_analysis else 'OFF'}\nTrade Flow  {'ON' if config.features.trade_flow_enabled else 'OFF'}\nOrder Book  {'ON' if config.features.order_book_enabled else 'OFF'}\n\nBase risk  {risk}\nMax trades  {config.execution.max_active_pairs}\n\nData  {self._data_state()}")
+        text = (
+            f"CURRENT RESEARCH\n\n{self.symbol.currentText() or 'BTCUSDT'}\n"
+            f"{timeframe_label(config.data.strategy_timeframe_minutes)} strategy / {intrabar}\n\n"
+            f"Profiles  {enabled} of 6 ON\n"
+            f"DI  {'ON' if config.strategy.enable_di_direction_selection else 'OFF'}\n"
+            f"Mean Reversion  {'ON' if config.strategy.enable_mean_reversion_analysis else 'OFF'}\n"
+            f"Trade Flow  {'ON' if config.features.trade_flow_enabled else 'OFF'}\n"
+            f"Order Book  {'ON' if config.features.order_book_enabled else 'OFF'}\n\n"
+            f"Base risk  {risk}\nMax trades  {config.execution.max_active_pairs}\n\n"
+            f"Data  {self._data_state()}"
+        )
         self.current_research.setText(text)
-        self.risk_explanation.setText(f"Base Risk: {risk}\nAt ${config.execution.initial_equity:,.2f}, planned base full-stop loss is ${config.execution.initial_equity * config.execution.risk_per_leg:,.2f}. Profile multipliers use the existing execution configuration.")
+        self.risk_explanation.setText(
+            f"Base Risk: {risk}\nAt ${config.execution.initial_equity:,.2f}, planned "
+            f"base full-stop loss is "
+            f"${config.execution.initial_equity * config.execution.risk_per_leg:,.2f}. "
+            "Profile multipliers use the existing execution configuration."
+        )
         if hasattr(self, "review_summary"):
-            mode = ENUM_LABELS["strategy_profile_run_mode"].get(config.strategy.strategy_profile_run_mode, config.strategy.strategy_profile_run_mode)
-            enabled_names = [PROFILE_LABELS[key] for key, profile in config.strategy.profiles.items() if profile.enabled]
-            pressure_states = [label for allowed, label in ((config.strategy.di_pressure_allow_expanding, "Expanding"), (config.strategy.di_pressure_allow_contracting, "Contracting"), (config.strategy.di_pressure_allow_mixed, "Mixed")) if allowed] if config.strategy.enable_di_pressure_analysis else []
-            sr_text = "Entry Filters" if config.strategy.sr_filter_mode == "APPLY_ENTRY_RULES" else "Analysis Only"
-            self.review_summary.setText(f"{self.symbol.currentText() or 'BTCUSDT'} — {TIMEFRAME_LABELS[timeframe_label(config.data.strategy_timeframe_minutes)]} Research\n\nAllowed environments: {', '.join(enabled_names) if enabled_names else 'None'}\nDirection: {'DI selection' if config.strategy.enable_di_direction_selection else 'Profile direction'}\nDI pressure: {', '.join(pressure_states) if pressure_states else 'Off'}\nMean Reversion: {'Enabled' if config.strategy.enable_mean_reversion_analysis else 'Off'}\nSupport / Resistance: {sr_text}\n\nProfile Test: {mode}\nStarting Equity: ${config.execution.initial_equity:,.2f}\nBase Risk: {risk}\nMaximum Active Trades: {config.execution.max_active_pairs}\nReports: {config.reporting.analysis_level}\n\nDATA STATUS: {self._data_state()}")
+            mode = ENUM_LABELS["strategy_profile_run_mode"].get(
+                config.strategy.strategy_profile_run_mode,
+                config.strategy.strategy_profile_run_mode,
+            )
+            enabled_names = [
+                PROFILE_LABELS[key] for key, profile in config.strategy.profiles.items()
+                if profile.enabled
+            ]
+            pressure_states = (
+                [
+                    label for allowed, label in (
+                        (config.strategy.di_pressure_allow_expanding, "Expanding"),
+                        (config.strategy.di_pressure_allow_contracting, "Contracting"),
+                        (config.strategy.di_pressure_allow_mixed, "Mixed"),
+                    ) if allowed
+                ]
+                if config.strategy.enable_di_pressure_analysis else []
+            )
+            sr_text = (
+                "Entry Filters"
+                if config.strategy.sr_filter_mode == "APPLY_ENTRY_RULES"
+                else "Analysis Only"
+            )
+            self.review_summary.setText(
+                f"{self.symbol.currentText() or 'BTCUSDT'} — "
+                f"{TIMEFRAME_LABELS[timeframe_label(config.data.strategy_timeframe_minutes)]} Research\n\n"
+                f"Allowed environments: {', '.join(enabled_names) if enabled_names else 'None'}\n"
+                f"Direction: {'DI selection' if config.strategy.enable_di_direction_selection else 'Profile direction'}\n"
+                f"DI pressure: {', '.join(pressure_states) if pressure_states else 'Off'}\n"
+                f"Mean Reversion: {'Enabled' if config.strategy.enable_mean_reversion_analysis else 'Off'}\n"
+                f"Support / Resistance: {sr_text}\n\n"
+                f"Profile Test: {mode}\n"
+                f"Starting Equity: ${config.execution.initial_equity:,.2f}\n"
+                f"Base Risk: {risk}\n"
+                f"Maximum Active Trades: {config.execution.max_active_pairs}\n"
+                f"Reports: {config.reporting.analysis_level}\n\n"
+                f"DATA STATUS: {self._data_state()}"
+            )
 
     def _data_state(self):
-        return self.data_readiness(self._coverage_rows_from_table(), self.strategy_tf.currentData(), self.intrabar_tf.currentData())[0]
+        return self.data_readiness(
+            self._coverage_rows_from_table(), self.strategy_tf.currentData(),
+            self.intrabar_tf.currentData(),
+        )[0]
 
     @staticmethod
     def data_readiness(rows, strategy_interval, intrabar_interval=None):
@@ -1255,24 +1652,54 @@ class MainWindow(QMainWindow):
         required = {strategy_interval}
         if intrabar_interval:
             required.add(intrabar_interval)
+
         def dataset_name(row):
             dataset = row.get("dataset", "")
             return str(getattr(dataset, "value", dataset)).lower()
-        execution_candles = [row for row in rows if dataset_name(row) == "klines"]
+
+        execution_candles = [
+            row for row in rows if dataset_name(row) == "klines"
+        ]
         missing = []
         for interval in required:
-            matches = [row for row in execution_candles if row.get("interval") == interval]
-            if not matches or not any(row.get("state") == "AVAILABLE" for row in matches):
+            matches = [
+                row for row in execution_candles
+                if row.get("interval") == interval
+            ]
+            if not matches or not any(
+                row.get("state") == "AVAILABLE" for row in matches
+            ):
                 missing.append(interval)
         if missing:
-            return "BLOCKED", "Required candle coverage unavailable: " + ", ".join(sorted(missing))
-        optional = [row for row in rows if row not in execution_candles and row.get("state") != "AVAILABLE"]
+            return (
+                "BLOCKED",
+                "Required candle coverage unavailable: "
+                + ", ".join(sorted(missing)),
+            )
+        optional = [
+            row for row in rows
+            if row not in execution_candles and row.get("state") != "AVAILABLE"
+        ]
         if optional:
-            return "WARN", "Required candles are ready; optional research coverage is partial or unavailable."
+            return (
+                "WARN",
+                "Required candles are ready; optional research coverage is partial or unavailable.",
+            )
         return "READY", "Required execution data is available."
 
     def _coverage_rows_from_table(self):
-        return [{"dataset": self.coverage.item(row, 0).text(), "interval": None if self.coverage.item(row, 1).text() == "—" else self.coverage.item(row, 1).text(), "state": self.coverage.item(row, 5).text()} for row in range(self.coverage.rowCount()) if all(self.coverage.item(row, column) for column in (0, 1, 5))]
+        return [
+            {
+                "dataset": self.coverage.item(row, 0).text(),
+                "interval": (
+                    None if self.coverage.item(row, 1).text() == "—"
+                    else self.coverage.item(row, 1).text()
+                ),
+                "state": self.coverage.item(row, 5).text(),
+            }
+            for row in range(self.coverage.rowCount())
+            if all(self.coverage.item(row, column) for column in (0, 1, 5))
+        ]
 
     def _load_catalog(self):
         current = self.symbol.currentText()
@@ -1292,12 +1719,26 @@ class MainWindow(QMainWindow):
         self.coverage.setRowCount(len(rows))
         grouped = {}
         for row in rows:
-            grouped.setdefault(self._dataset_family(row["dataset"]), []).append(row["state"])
-        self.datasets.setText("\n".join(f"{family}: {('AVAILABLE' if all(x == 'AVAILABLE' for x in states) else 'PARTIAL' if any(x == 'AVAILABLE' for x in states) else 'UNAVAILABLE')}" for family, states in sorted(grouped.items())) or "Required candle data: UNAVAILABLE")
+            grouped.setdefault(
+                self._dataset_family(row["dataset"]), []
+            ).append(row["state"])
+        self.datasets.setText(
+            "\n".join(
+                f"{family}: "
+                f"{('AVAILABLE' if all(x == 'AVAILABLE' for x in states) else 'PARTIAL' if any(x == 'AVAILABLE' for x in states) else 'UNAVAILABLE')}"
+                for family, states in sorted(grouped.items())
+            ) or "Required candle data: UNAVAILABLE"
+        )
         for row_number, row in enumerate(rows):
-            values = (row["dataset"], row["interval"] or "—", row["first_period"] or "—", row["last_period"] or "—", row["archive_count"], row["state"])
+            values = (
+                row["dataset"], row["interval"] or "—",
+                row["first_period"] or "—", row["last_period"] or "—",
+                row["archive_count"], row["state"],
+            )
             for column, value in enumerate(values):
-                self.coverage.setItem(row_number, column, QTableWidgetItem(str(value)))
+                self.coverage.setItem(
+                    row_number, column, QTableWidgetItem(str(value))
+                )
         self.refresh_data_library()
         if hasattr(self, "current_research"):
             self._refresh_summary_from_widgets()
@@ -1307,7 +1748,9 @@ class MainWindow(QMainWindow):
             request, config = self.request_model(), self.build_config()
             config.validate()
         except Exception as exc:
-            QMessageBox.warning(self, "Invalid research request", str(exc))
+            QMessageBox.warning(
+                self, "Invalid research request", str(exc)
+            )
             return
         self.run_button.setEnabled(False)
         self.progress.setRange(0, 0)
@@ -1329,12 +1772,34 @@ class MainWindow(QMainWindow):
         self.stage.setText("COMPLETED")
         self._run_dir = Path(result.output_dir)
         self._manifest, summary = self.service.completed_runs.read(self._run_dir)
-        self.summary.setText("\n".join(f"{key}: {summary.get(key, '—')}" for key in ("ending_equity", "net_pnl", "total_return_percentage", "total_trades", "wins", "losses", "win_rate", "total_net_r", "average_net_r", "profit_factor", "maximum_drawdown_percentage", "total_fees")))
-        keys = ("total_trades", "wins", "losses", "win_rate", "total_net_r", "average_net_r", "net_pnl", "ending_equity", "profit_factor", "maximum_drawdown_percentage", "total_fees")
+        self.summary.setText(
+            "\n".join(
+                f"{key}: {summary.get(key, '—')}" for key in (
+                    "ending_equity", "net_pnl", "total_return_percentage",
+                    "total_trades", "wins", "losses", "win_rate",
+                    "total_net_r", "average_net_r", "profit_factor",
+                    "maximum_drawdown_percentage", "total_fees",
+                )
+            )
+        )
+        keys = (
+            "total_trades", "wins", "losses", "win_rate", "total_net_r",
+            "average_net_r", "net_pnl", "ending_equity", "profit_factor",
+            "maximum_drawdown_percentage", "total_fees",
+        )
         for (label, card), key in zip(self.kpi_cards.items(), keys):
             card.setText(f"{label}\n{summary.get(key, '—')}")
-        stage_timings = self._manifest.get("execution_result", {}).get("stage_timings", {})
-        self.timings.setText("Run timings: " + (" · ".join(f"{name.replace('_', ' ').title()} {value}s" for name, value in stage_timings.items()) or "not recorded"))
+        stage_timings = self._manifest.get(
+            "execution_result", {}
+        ).get("stage_timings", {})
+        self.timings.setText(
+            "Run timings: " + (
+                " · ".join(
+                    f"{name.replace('_', ' ').title()} {value}s"
+                    for name, value in stage_timings.items()
+                ) or "not recorded"
+            )
+        )
         self.render_resolution(self._manifest)
         self.render_data_quality(result.data_quality)
         self.open_folder.setEnabled(True)
@@ -1349,16 +1814,24 @@ class MainWindow(QMainWindow):
         self.quality.setText("Data quality: " + report.overall_status.value)
         self.quality_table.setRowCount(len(report.datasets))
         for row, dataset in enumerate(report.datasets):
-            values = (dataset.dataset, dataset.interval or "event", dataset.required, dataset.row_count, dataset.status.value, "; ".join(issue.code for issue in dataset.issues) or "—")
+            values = (
+                dataset.dataset, dataset.interval or "event", dataset.required,
+                dataset.row_count, dataset.status.value,
+                "; ".join(issue.code for issue in dataset.issues) or "—",
+            )
             for column, value in enumerate(values):
-                self.quality_table.setItem(row, column, QTableWidgetItem(str(value)))
+                self.quality_table.setItem(
+                    row, column, QTableWidgetItem(str(value))
+                )
 
     def render_resolution(self, manifest):
         request = manifest["request"]
         requested = request.get("requested_intrabar_interval") or "none"
         effective = request.get("effective_intrabar_interval") or "none"
         fallback = "FALLBACK" if requested != effective else "AS REQUESTED"
-        self.resolution.setText(f"Requested: {requested} | Effective: {effective} | {fallback}")
+        self.resolution.setText(
+            f"Requested: {requested} | Effective: {effective} | {fallback}"
+        )
 
     def _failed(self, message):
         self.run_button.setEnabled(True)
@@ -1366,20 +1839,32 @@ class MainWindow(QMainWindow):
         self.stage.setText("FAILED: " + message)
 
     def open_artifact(self, key):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.service.completed_runs.artifact_path(self._run_dir, self._manifest, key))))
+        QDesktopServices.openUrl(
+            QUrl.fromLocalFile(
+                str(self.service.completed_runs.artifact_path(
+                    self._run_dir, self._manifest, key
+                ))
+            )
+        )
 
     def _browse_output(self):
-        path = QFileDialog.getExistingDirectory(self, "Output root", self.output_root.text())
+        path = QFileDialog.getExistingDirectory(
+            self, "Output root", self.output_root.text()
+        )
         if path:
             self.output_root.setText(path)
 
     def save_config(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Save native v3 config", "research-v3.json", "JSON (*.json)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save native v3 config", "research-v3.json", "JSON (*.json)"
+        )
         if path:
             self.service.save_config(Path(path), self.build_config())
 
     def load_config(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load native v3 config", "", "JSON (*.json)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load native v3 config", "", "JSON (*.json)"
+        )
         if path:
             self.apply_config(self.service.load_config(Path(path)))
 
