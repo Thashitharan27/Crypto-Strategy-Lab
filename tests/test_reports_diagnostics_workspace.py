@@ -78,6 +78,7 @@ def _window():
 def test_reports_page_is_profile_driven_and_reuses_authoritative_native_widgets():
     _app, window = _window()
     try:
+        qt_widgets = pytest.importorskip("PySide6.QtWidgets")
         workspace = window.reports_diagnostics_workspace
         widgets = window.reporting_form.widgets
         assert workspace.run_name is widgets["run_name"]
@@ -97,15 +98,14 @@ def test_reports_page_is_profile_driven_and_reuses_authoritative_native_widgets(
         ]
 
         page = window.pages.widget(4)
-        buttons = [button.text() for button in page.findChildren(type(workspace.profile_selector).mro()[1])]
-        # QComboBox ancestry is not useful for button discovery; verify directly
-        # through the page text instead that the retired action does not survive.
-        visible_text = "\n".join(
-            child.text() for child in page.findChildren(
-                pytest.importorskip("PySide6.QtWidgets").QPushButton
-            )
+        button_text = "\n".join(
+            child.text() for child in page.findChildren(qt_widgets.QPushButton)
         )
-        assert "Apply Preset" not in visible_text
+        label_text = "\n".join(
+            child.text() for child in page.findChildren(qt_widgets.QLabel)
+        )
+        assert "Apply Preset" not in button_text
+        assert "Analysis Level" not in label_text
     finally:
         window.close()
 
@@ -208,6 +208,7 @@ def test_checkpoint_controls_replace_json_editor_and_roundtrip_as_native_tuple()
 def test_advanced_controls_and_always_saved_contract_are_presented_as_requested():
     _app, window = _window()
     try:
+        qt_widgets = pytest.importorskip("PySide6.QtWidgets")
         workspace = window.reports_diagnostics_workspace
         assert workspace.journey_advanced.isHidden()
         assert workspace.lifecycle_advanced.isHidden()
@@ -217,10 +218,7 @@ def test_advanced_controls_and_always_saved_contract_are_presented_as_requested(
         assert not workspace.lifecycle_advanced.isHidden()
 
         text = "\n".join(
-            label.text()
-            for label in workspace.findChildren(
-                pytest.importorskip("PySide6.QtWidgets").QLabel
-            )
+            label.text() for label in workspace.findChildren(qt_widgets.QLabel)
         )
         assert "run_manifest.json" in text
         assert "backtest_report.xlsx" in text
