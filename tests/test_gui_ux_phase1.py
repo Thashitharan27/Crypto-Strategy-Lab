@@ -11,6 +11,7 @@ from crypto_strategy_lab.data_lake_config import ReportingConfig, ResearchRunCon
 from crypto_strategy_lab.gui.ux_presentation import (ENUM_LABELS, PROFILE_LABELS,
     REPORT_PRESETS, apply_report_preset, clone_profile_pair, display_percentage,
     parse_percentage)
+from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS
 
 ROOT = Path(__file__).resolve().parents[1]
 GUI = ROOT / "crypto_strategy_lab/gui/v2_main_window.py"
@@ -117,6 +118,36 @@ def test_entry_rule_widget_roundtrip_order_unknown_payload_and_one_edit():
     finally: window.close()
 
 
+def test_entry_rule_editor_exposes_every_native_indicator_without_mutation():
+    _app,window=_window()
+    try:
+        editor=window.profile_editor.entry_rules
+        rules=tuple({"action":"FLIP","indicator":name,"condition":"INSIDE","minimum":0.0,"maximum":1.0}
+                    for name in RULE_INDICATORS)
+        editor.set_tuple(rules)
+        for row,name in enumerate(RULE_INDICATORS):
+            combo=editor.cellWidget(row,1)
+            assert [combo.itemData(index) for index in range(combo.count())] == list(RULE_INDICATORS)
+            assert combo.currentData() == name
+        assert editor.tuple_value() == rules
+    finally: window.close()
+
+
+def test_entry_rule_combo_edits_emit_live_change_signal():
+    _app,window=_window()
+    try:
+        editor=window.profile_editor.entry_rules
+        rule=({"action":"FLIP","indicator":"RSI","condition":"INSIDE","minimum":20.0,"maximum":30.0},)
+        editor.set_tuple(rule)
+        events=[]
+        editor.changed.connect(lambda: events.append(editor.tuple_value()[0]["indicator"]))
+        combo=editor.cellWidget(0,1)
+        combo.setCurrentIndex(combo.findData("ADX"))
+        assert events and events[-1] == "ADX"
+        assert editor.tuple_value()[0]["indicator"] == "ADX"
+    finally: window.close()
+
+
 def test_readiness_distinguishes_required_candles_from_optional_context():
     _app,window=_window()
     try:
@@ -125,6 +156,29 @@ def test_readiness_distinguishes_required_candles_from_optional_context():
         candles=[{"dataset":"klines","interval":"4h","state":"AVAILABLE"},{"dataset":"klines","interval":"1m","state":"AVAILABLE"}]
         assert classify(candles,"4h","1m")[0] == "READY"
         assert classify(candles+[{"dataset":"funding","interval":None,"state":"UNAVAILABLE"}],"4h","1m")[0] == "WARN"
+    finally: window.close()
+
+
+def test_optional_price_context_cannot_satisfy_required_execution_candles():
+    _app,window=_window()
+    try:
+        substitutes=[
+            {"dataset":"mark_price_klines","interval":"4h","state":"AVAILABLE"},
+            {"dataset":"index_price_klines","interval":"1m","state":"AVAILABLE"},
+            {"dataset":"premium_index_klines","interval":"4h","state":"AVAILABLE"},
+        ]
+        assert window.data_readiness(substitutes,"4h","1m")[0] == "BLOCKED"
+    finally: window.close()
+
+
+def test_value_carrying_qt_signals_bridge_to_zero_argument_form_signal():
+    _app,window=_window()
+    try:
+        events=[]
+        window.feature_form.changed.connect(lambda: events.append(True))
+        spin=window.feature_form.widgets["atr_period"]
+        spin.setValue(spin.value()+1)
+        assert events
     finally: window.close()
 
 
