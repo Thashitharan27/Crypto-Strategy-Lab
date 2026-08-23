@@ -6,10 +6,12 @@ from crypto_strategy_lab.data_lake_config import ExecutionProfileConfig
 from crypto_strategy_lab.strategy_profiles import StrategyProfile
 from crypto_strategy_lab.strategy_rule_model import (
     MARKET_PERMISSIONS,
+    SUPPORT_RESISTANCE_RULE_EVIDENCE,
     compile_profiles,
     decompile_rules,
     new_rule,
     normalize_rule,
+    uses_support_resistance_rules,
 )
 
 
@@ -113,6 +115,56 @@ def test_numeric_pressure_change_evidence_keeps_numeric_operators():
     assert native["minimum"] == 4.0
 
 
+def test_required_near_support_compiles_as_categorical_sr_requirement():
+    rule = new_rule(kind="REQUIRED", evidence="SR_NEAR_SUPPORT")
+    rule.update(operator="IS", value="TRUE", side="LONG")
+    strategy, execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(rule,),
+    )
+
+    native = strategy["bull_long"].entry_rules[0]
+    assert native["indicator"] == "SR_NEAR_SUPPORT"
+    assert native["condition"] == "OUTSIDE"
+    assert native["minimum"] == native["maximum"] == 1.0
+    assert not strategy["bull_short"].entry_rules
+    StrategyProfile(**{
+        **asdict(strategy["bull_long"]),
+        **asdict(execution["bull_long"]),
+    }).validate("bull_long")
+
+
+def test_broken_support_veto_and_room_requirement_compile_through_generic_rules():
+    broken = new_rule(kind="VETO", evidence="SR_SUPPORT_STATE")
+    broken.update(operator="IS", value="SUPPORT_BROKEN", side="LONG")
+    room = new_rule(kind="REQUIRED", evidence="SR_ROOM_IN_DIRECTION_ATR")
+    room.update(operator="GTE", value=2.0, side="LONG")
+    strategy, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(room,),
+        veto_rules=(broken,),
+    )
+
+    native = strategy["bear_long"].entry_rules
+    assert [rule["indicator"] for rule in native] == [
+        "SR_ROOM_IN_DIRECTION_ATR", "SR_SUPPORT_STATE"
+    ]
+    assert native[0]["condition"] == "OUTSIDE"
+    assert native[0]["minimum"] == 2.0
+    assert native[1]["condition"] == "INSIDE"
+    assert native[1]["minimum"] == native[1]["maximum"] == 5.0
+
+
+def test_support_resistance_rule_dependency_is_detected_from_any_rule_group():
+    ordinary = new_rule(kind="REQUIRED", evidence="DI_SPREAD")
+    sr = new_rule(kind="VETO", evidence="SR_NEAR_RESISTANCE")
+    assert not uses_support_resistance_rules((ordinary,))
+    assert uses_support_resistance_rules((ordinary,), (sr,))
+    assert "SR_ROOM_IN_DIRECTION_ATR" in SUPPORT_RESISTANCE_RULE_EVIDENCE
+
+
 def test_scoped_veto_only_reaches_matching_regime_and_side():
     rule = new_rule(kind="VETO", evidence="ADX")
     rule.update(operator="LTE", value=20.0, regime="BULL", side="LONG")
@@ -166,9 +218,9 @@ def test_builder_metadata_round_trips_scoped_rules_without_profile_ui():
         operator="BETWEEN", value=20.0, value2=45.0,
         regime="BULL", side="LONG",
     )
-    veto = new_rule(kind="VETO", evidence="DI_PRESSURE_STATE")
+    veto = new_rule(kind="VETO", evidence="SR_TRADE_LOCATION_RATING")
     veto.update(
-        operator="IS", value="CONTRACTING", regime="ALL", side="SHORT"
+        operator="IS", value="BAD_LOCATION", regime="ALL", side="SHORT"
     )
 
     strategy, _execution = compile_profiles(
