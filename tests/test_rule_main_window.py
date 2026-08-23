@@ -33,17 +33,21 @@ def _window():
 def test_active_strategy_page_is_rule_based_and_has_no_profile_editor_surface():
     _app, window = _window()
     try:
+        from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton
+
         page = window.pages.widget(1)
-        labels = "\n".join(
-            label.text() for label in page.findChildren(type(window.rule_builder.summary))
-        )
-        assert "Direction & Market Eligibility" in labels or window.rule_builder is not None
-        assert "Profile Overrides" not in labels
-        assert "Copy Overrides" not in labels
-        assert "Paste Overrides" not in labels
-        assert "Strategy Summary" in window.pages.widget(1).findChild(
-            type(window.rule_builder.summary)
-        ).parentWidget().parentWidget().title() if False else True
+        group_titles = {box.title() for box in page.findChildren(QGroupBox)}
+        labels = "\n".join(label.text() for label in page.findChildren(QLabel))
+        buttons = "\n".join(button.text() for button in page.findChildren(QPushButton))
+
+        assert "Strategy Summary" in group_titles
+        assert "1. Direction & Market Eligibility" in group_titles
+        assert "2. Entry Rules — all applicable rules must pass" in group_titles
+        assert "3. Avoid / Veto Rules — matching conditions reject the trade" in group_titles
+        assert "Profile Overrides" not in group_titles
+        assert "Copy Overrides" not in buttons
+        assert "Paste Overrides" not in buttons
+        assert "six separate strategies" in labels
     finally:
         window.close()
 
