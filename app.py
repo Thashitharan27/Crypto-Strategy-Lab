@@ -7,6 +7,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from crypto_strategy_lab.gui.run_progress import install_run_progress
+from crypto_strategy_lab.gui.research_feature_ownership import (
+    apply_research_feature_ownership,
+)
 # The active researcher window layers run-faithful readiness over the compact
 # Setup workspace while keeping the proven v2 data/results shell.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
@@ -47,6 +50,7 @@ def main() -> int:
 
     try:
         window = MainWindow(startup_status=status)
+        apply_research_feature_ownership(window)
         install_run_progress(window)
         status("Ready")
         window.show()
