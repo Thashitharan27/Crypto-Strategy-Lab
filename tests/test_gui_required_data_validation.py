@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from types import SimpleNamespace
 import os
 
 import pytest
@@ -71,6 +70,11 @@ def _window():
     return app, MainWindow(service=Service())
 
 
+def _strategy_bars_only(window):
+    window.intrabar_tf.setCurrentText(None)
+    window.strategy_tf.setCurrentText("1h")
+
+
 def test_required_data_quality_validates_exact_strategy_and_intrabar_intervals_once_each():
     calls = []
     report = _dataset_report()
@@ -103,7 +107,7 @@ def test_required_data_quality_validates_exact_strategy_and_intrabar_intervals_o
 def test_setup_distinguishes_archive_catalog_availability_from_validated_continuity():
     _app, window = _window()
     try:
-        window.strategy_tf.setCurrentText("1h")
+        _strategy_bars_only(window)
         window.refresh_coverage()
         text = window.datasets.text()
         assert "Strategy candles (1h): CATALOG AVAILABLE" in text
@@ -117,9 +121,11 @@ def test_setup_distinguishes_archive_catalog_availability_from_validated_continu
 def test_leading_gap_is_shown_with_exact_boundary_and_safe_date_adjustment():
     _app, window = _window()
     try:
-        window.strategy_tf.setCurrentText("1h")
-        window.start.setDate(window.start.date().fromString("2020-01-01", "yyyy-MM-dd"))
-        window.end.setDate(window.end.date().fromString("2020-12-31", "yyyy-MM-dd"))
+        from PySide6.QtCore import QDate
+
+        _strategy_bars_only(window)
+        window.start.setDate(QDate(2020, 1, 1))
+        window.end.setDate(QDate(2020, 12, 31))
         window.refresh_coverage()
         issues = (
             DataQualityIssue(
@@ -163,7 +169,7 @@ def test_leading_gap_is_shown_with_exact_boundary_and_safe_date_adjustment():
 def test_internal_gap_does_not_offer_misleading_boundary_date_fix():
     _app, window = _window()
     try:
-        window.strategy_tf.setCurrentText("1h")
+        _strategy_bars_only(window)
         issue = DataQualityIssue(
             "MISSING_INTERNAL_INTERVAL",
             DataQualityStatus.ERROR,
