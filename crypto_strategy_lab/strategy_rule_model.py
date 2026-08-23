@@ -31,14 +31,67 @@ NUMERIC_RULE_OPERATORS = ("GTE", "LTE", "BETWEEN", "OUTSIDE")
 CATEGORICAL_RULE_OPERATORS = ("IS", "IS_NOT")
 RULE_OPERATORS = (*NUMERIC_RULE_OPERATORS, *CATEGORICAL_RULE_OPERATORS)
 RULE_KINDS = ("REQUIRED", "VETO", "FLIP")
+
+_BOOL_VALUES = ("TRUE", "FALSE")
 CATEGORICAL_RULE_VALUES = {
     "DI_PRESSURE_STATE": ("EXPANDING", "CONTRACTING", "MIXED"),
+    "SR_NEAR_SUPPORT": _BOOL_VALUES,
+    "SR_NEAR_RESISTANCE": _BOOL_VALUES,
+    "SR_INSIDE_SUPPORT_ZONE": _BOOL_VALUES,
+    "SR_INSIDE_RESISTANCE_ZONE": _BOOL_VALUES,
+    "SR_SUPPORT_HELD": _BOOL_VALUES,
+    "SR_RESISTANCE_HELD": _BOOL_VALUES,
+    "SR_SUPPORT_STATE": (
+        "NO_SUPPORT_NEARBY",
+        "APPROACHING_SUPPORT",
+        "SUPPORT_TESTING",
+        "SUPPORT_HELD",
+        "SUPPORT_BROKEN",
+    ),
+    "SR_RESISTANCE_STATE": (
+        "NO_RESISTANCE_NEARBY",
+        "APPROACHING_RESISTANCE",
+        "RESISTANCE_TESTING",
+        "RESISTANCE_HELD",
+        "RESISTANCE_BROKEN",
+    ),
+    "SR_TRADE_LOCATION_RATING": (
+        "GOOD_LOCATION",
+        "NEUTRAL_LOCATION",
+        "BAD_LOCATION",
+    ),
 }
-DI_PRESSURE_STATE_CODES = {
-    "EXPANDING": 1.0,
-    "CONTRACTING": 2.0,
-    "MIXED": 3.0,
+CATEGORICAL_VALUE_CODES = {
+    "DI_PRESSURE_STATE": {"EXPANDING": 1.0, "CONTRACTING": 2.0, "MIXED": 3.0},
+    "SR_NEAR_SUPPORT": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_NEAR_RESISTANCE": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_INSIDE_SUPPORT_ZONE": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_INSIDE_RESISTANCE_ZONE": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_SUPPORT_HELD": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_RESISTANCE_HELD": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_SUPPORT_STATE": {
+        "NO_SUPPORT_NEARBY": 1.0,
+        "APPROACHING_SUPPORT": 2.0,
+        "SUPPORT_TESTING": 3.0,
+        "SUPPORT_HELD": 4.0,
+        "SUPPORT_BROKEN": 5.0,
+    },
+    "SR_RESISTANCE_STATE": {
+        "NO_RESISTANCE_NEARBY": 1.0,
+        "APPROACHING_RESISTANCE": 2.0,
+        "RESISTANCE_TESTING": 3.0,
+        "RESISTANCE_HELD": 4.0,
+        "RESISTANCE_BROKEN": 5.0,
+    },
+    "SR_TRADE_LOCATION_RATING": {
+        "GOOD_LOCATION": 1.0,
+        "NEUTRAL_LOCATION": 2.0,
+        "BAD_LOCATION": 3.0,
+    },
 }
+SUPPORT_RESISTANCE_RULE_EVIDENCE = frozenset(
+    indicator for indicator in RULE_INDICATORS if indicator.startswith("SR_")
+)
 LOW = -1e308
 HIGH = 1e308
 
@@ -47,6 +100,18 @@ _META_PREFIX = "_builder_"
 
 def is_categorical_evidence(evidence: str) -> bool:
     return str(evidence).upper() in CATEGORICAL_RULE_VALUES
+
+
+def is_support_resistance_evidence(evidence: str) -> bool:
+    return str(evidence).upper() in SUPPORT_RESISTANCE_RULE_EVIDENCE
+
+
+def uses_support_resistance_rules(*rule_groups) -> bool:
+    return any(
+        is_support_resistance_evidence(rule.get("evidence", ""))
+        for group in rule_groups
+        for rule in (group or ())
+    )
 
 
 def rule_operator_options(evidence: str) -> tuple[str, ...]:
@@ -152,8 +217,9 @@ def _applies(rule: dict, regime: str, side: str) -> bool:
 
 def _range(rule: dict) -> tuple[float, float, str]:
     operator = rule["operator"]
-    if is_categorical_evidence(rule["evidence"]):
-        code = DI_PRESSURE_STATE_CODES[rule["value"]]
+    evidence = rule["evidence"]
+    if is_categorical_evidence(evidence):
+        code = CATEGORICAL_VALUE_CODES[evidence][rule["value"]]
         return code, code, "INSIDE" if operator == "IS" else "OUTSIDE"
 
     first, second = float(rule["value"]), float(rule["value2"])

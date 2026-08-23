@@ -1,8 +1,8 @@
 """Researcher-facing rule-based strategy builder.
 
 Users choose where the strategy may trade and then express every entry-affecting
-condition through scoped Entry/Veto rules.  DI pressure is calculated as causal
-research evidence and is not a separate hidden/global filter.
+condition through scoped Entry/Veto rules. DI pressure and support/resistance are
+causal research evidence, not separate hidden/global filters.
 """
 from __future__ import annotations
 
@@ -54,6 +54,20 @@ EVIDENCE_LABELS = {
     "CLOSE_LOCATION": "Close Location",
     "MOMENTUM": "Momentum Return",
     "VWAP_DISTANCE": "VWAP Distance (ATR)",
+    "SR_NEAR_SUPPORT": "S/R — Near Support",
+    "SR_NEAR_RESISTANCE": "S/R — Near Resistance",
+    "SR_INSIDE_SUPPORT_ZONE": "S/R — Inside Support Zone",
+    "SR_INSIDE_RESISTANCE_ZONE": "S/R — Inside Resistance Zone",
+    "SR_SUPPORT_STATE": "S/R — Support State",
+    "SR_RESISTANCE_STATE": "S/R — Resistance State",
+    "SR_SUPPORT_HELD": "S/R — Support Held",
+    "SR_RESISTANCE_HELD": "S/R — Resistance Held",
+    "SR_TRADE_LOCATION_RATING": "S/R — Trade Location Rating",
+    "SR_ROOM_IN_DIRECTION_ATR": "S/R — Room In Direction (ATR)",
+    "SR_SUPPORT_DISTANCE_ATR": "S/R — Support Distance (ATR)",
+    "SR_RESISTANCE_DISTANCE_ATR": "S/R — Resistance Distance (ATR)",
+    "SR_SUPPORT_REJECTION_ATR": "S/R — Support Rejection (ATR)",
+    "SR_RESISTANCE_REJECTION_ATR": "S/R — Resistance Rejection (ATR)",
 }
 OPERATOR_LABELS = {
     "GTE": "≥",
@@ -64,6 +78,10 @@ OPERATOR_LABELS = {
     "IS_NOT": "Is Not",
 }
 DIRECTION_LABELS = {"DI": "DI Direction"}
+
+
+def _humanize(value: str) -> str:
+    return str(value).replace("_", " ").title()
 
 
 class RuleTable(QTableWidget):
@@ -111,7 +129,7 @@ class RuleTable(QTableWidget):
         if is_categorical_evidence(evidence):
             values = rule_value_options(evidence)
             selected = str(current).upper() if current is not None else values[0]
-            return self._combo([(item, item.title()) for item in values], selected)
+            return self._combo([(item, _humanize(item)) for item in values], selected)
         return self._number(float(current))
 
     def _upper(self, evidence: str, current):
@@ -318,12 +336,12 @@ class RuleStrategyBuilder(QWidget):
         row.addWidget(remove)
         row.addStretch()
         required_layout.addLayout(row)
-        pressure_note = QLabel(
-            "DI Pressure is calculated automatically. Use DI Pressure State, DI Spread Change, Directional DI Change, or Opposing DI Change here when pressure should affect entry."
+        evidence_note = QLabel(
+            "DI Pressure and S/R are rule evidence like any other indicator. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
         )
-        pressure_note.setWordWrap(True)
-        pressure_note.setStyleSheet("color:#52606d")
-        required_layout.addWidget(pressure_note)
+        evidence_note.setWordWrap(True)
+        evidence_note.setStyleSheet("color:#52606d")
+        required_layout.addWidget(evidence_note)
         layout.addWidget(required_box)
 
         veto_box = QGroupBox("3. Avoid / Veto Rules — matching conditions reject the trade")
@@ -339,40 +357,6 @@ class RuleStrategyBuilder(QWidget):
         row.addWidget(remove)
         row.addStretch()
         veto_layout.addLayout(row)
-
-        self.show_sr = QCheckBox("Show Support / Resistance veto presets")
-        veto_layout.addWidget(self.show_sr)
-        self.sr_box = QGroupBox("Support / Resistance Veto Presets")
-        sr = QGridLayout(self.sr_box)
-        self.sr_apply = QCheckBox("Apply S/R entry vetoes")
-        sr.addWidget(self.sr_apply, 0, 0, 1, 4)
-        self.sr_long_avoid_near_resistance = QCheckBox("Long: avoid near resistance")
-        self.sr_long_require_near_support = QCheckBox("Long: require near support")
-        self.sr_long_block_broken_support = QCheckBox("Long: block broken support")
-        self.sr_short_avoid_near_support = QCheckBox("Short: avoid near support")
-        self.sr_short_require_near_resistance = QCheckBox("Short: require near resistance")
-        self.sr_short_block_broken_resistance = QCheckBox("Short: block broken resistance")
-        self.sr_long_room = QDoubleSpinBox()
-        self.sr_long_room.setRange(0, 1000)
-        self.sr_long_room.setDecimals(3)
-        self.sr_long_room.setSuffix(" ATR")
-        self.sr_short_room = QDoubleSpinBox()
-        self.sr_short_room.setRange(0, 1000)
-        self.sr_short_room.setDecimals(3)
-        self.sr_short_room.setSuffix(" ATR")
-        sr.addWidget(self.sr_long_avoid_near_resistance, 1, 0)
-        sr.addWidget(self.sr_long_require_near_support, 1, 1)
-        sr.addWidget(self.sr_long_block_broken_support, 1, 2)
-        sr.addWidget(QLabel("Long minimum room"), 1, 3)
-        sr.addWidget(self.sr_long_room, 1, 4)
-        sr.addWidget(self.sr_short_avoid_near_support, 2, 0)
-        sr.addWidget(self.sr_short_require_near_resistance, 2, 1)
-        sr.addWidget(self.sr_short_block_broken_resistance, 2, 2)
-        sr.addWidget(QLabel("Short minimum room"), 2, 3)
-        sr.addWidget(self.sr_short_room, 2, 4)
-        self.sr_box.setVisible(False)
-        self.show_sr.toggled.connect(self.sr_box.setVisible)
-        veto_layout.addWidget(self.sr_box)
         layout.addWidget(veto_box)
 
         research_box = QGroupBox("4. Research-only Evidence")
@@ -381,7 +365,7 @@ class RuleStrategyBuilder(QWidget):
         self.enable_mr.setChecked(True)
         research_layout.addWidget(self.enable_mr)
         self.research_status = QLabel(
-            "OI · Funding · Positioning/Basis · Taker Flow · Trade Flow · Order Book remain Analyze Only until promoted by research."
+            "S/R · OI · Funding · Positioning/Basis · Taker Flow · Trade Flow · Order Book remain Analyze Only until used by an explicit rule."
         )
         self.research_status.setWordWrap(True)
         self.research_status.setStyleSheet("color:#52606d")
@@ -446,7 +430,6 @@ class RuleStrategyBuilder(QWidget):
 
         for widget in (
             self.direction_mode,
-            self.sr_apply,
             self.enable_mr,
             self.entry_mode,
             self.entry_interval,
@@ -455,14 +438,6 @@ class RuleStrategyBuilder(QWidget):
             self.daily_entry_timezone,
             self.daily_missed_policy,
             self.momentum_lookback_hours,
-            self.sr_long_room,
-            self.sr_short_room,
-            self.sr_long_avoid_near_resistance,
-            self.sr_long_require_near_support,
-            self.sr_long_block_broken_support,
-            self.sr_short_avoid_near_support,
-            self.sr_short_require_near_resistance,
-            self.sr_short_block_broken_resistance,
         ):
             signal = (
                 widget.toggled
@@ -519,27 +494,6 @@ class RuleStrategyBuilder(QWidget):
         self.flip_rules.set_rules(recovered["FLIP"])
 
         self.enable_mr.setChecked(bool(strategy.enable_mean_reversion_analysis))
-        self.sr_apply.setChecked(strategy.sr_filter_mode == "APPLY_ENTRY_RULES")
-        self.sr_long_avoid_near_resistance.setChecked(
-            strategy.sr_long_avoid_near_resistance
-        )
-        self.sr_long_require_near_support.setChecked(
-            strategy.sr_long_require_near_support
-        )
-        self.sr_long_block_broken_support.setChecked(
-            strategy.sr_long_block_broken_support
-        )
-        self.sr_long_room.setValue(strategy.sr_long_min_room_to_resistance_atr)
-        self.sr_short_avoid_near_support.setChecked(
-            strategy.sr_short_avoid_near_support
-        )
-        self.sr_short_require_near_resistance.setChecked(
-            strategy.sr_short_require_near_resistance
-        )
-        self.sr_short_block_broken_resistance.setChecked(
-            strategy.sr_short_block_broken_resistance
-        )
-        self.sr_short_room.setValue(strategy.sr_short_min_room_to_support_atr)
         self.entry_mode.setCurrentIndex(
             max(0, self.entry_mode.findData(strategy.entry_mode))
         )
@@ -593,17 +547,17 @@ class RuleStrategyBuilder(QWidget):
             "di_pressure_allow_contracting": True,
             "di_pressure_allow_mixed": True,
             "enable_mean_reversion_analysis": self.enable_mr.isChecked(),
-            "sr_filter_mode": (
-                "APPLY_ENTRY_RULES" if self.sr_apply.isChecked() else "ANALYSIS_ONLY"
-            ),
-            "sr_long_avoid_near_resistance": self.sr_long_avoid_near_resistance.isChecked(),
-            "sr_long_require_near_support": self.sr_long_require_near_support.isChecked(),
-            "sr_long_block_broken_support": self.sr_long_block_broken_support.isChecked(),
-            "sr_long_min_room_to_resistance_atr": self.sr_long_room.value(),
-            "sr_short_avoid_near_support": self.sr_short_avoid_near_support.isChecked(),
-            "sr_short_require_near_resistance": self.sr_short_require_near_resistance.isChecked(),
-            "sr_short_block_broken_resistance": self.sr_short_block_broken_resistance.isChecked(),
-            "sr_short_min_room_to_support_atr": self.sr_short_room.value(),
+            # S/R presets are retired from the rule-based runtime. S/R can still
+            # be calculated for research, but entry effects belong only to rules.
+            "sr_filter_mode": "ANALYSIS_ONLY",
+            "sr_long_avoid_near_resistance": False,
+            "sr_long_require_near_support": False,
+            "sr_long_block_broken_support": False,
+            "sr_long_min_room_to_resistance_atr": 0.0,
+            "sr_short_avoid_near_support": False,
+            "sr_short_require_near_resistance": False,
+            "sr_short_block_broken_resistance": False,
+            "sr_short_min_room_to_support_atr": 0.0,
             "entry_mode": self.entry_mode.currentData(),
             "entry_interval": self.entry_interval.value(),
             "enable_daily_entry_schedule": self.enable_daily_schedule.isChecked(),
@@ -616,7 +570,13 @@ class RuleStrategyBuilder(QWidget):
         }
 
     def set_feature_status(self, features) -> None:
-        items = ["OI", "Funding", "Positioning/Basis", "Taker Flow"]
+        items = [
+            "S/R ON" if features.enable_support_resistance_analysis else "S/R Off",
+            "OI",
+            "Funding",
+            "Positioning/Basis",
+            "Taker Flow",
+        ]
         items.append(
             "Trade Flow ON" if features.trade_flow_enabled else "Trade Flow Off"
         )
