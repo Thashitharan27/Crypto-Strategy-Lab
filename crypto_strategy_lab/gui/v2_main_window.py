@@ -119,11 +119,10 @@ EXECUTION_GROUPS = (
 )
 
 STRATEGY_PROFILE_GROUPS = (
-    ("Profile Direction Exception", ("enabled", "flip_direction"), None),
-    ("Advanced Rule Settings", (
-        "flip_rule_match_mode", "reject_rule_match_mode", "rsi_period",
-        "momentum_lookback_hours",
-    ), "These settings belong to the native advanced rule contract. Indicator calculation settings normally live on Research Features."),
+    ("Profile Direction Exception", ("flip_direction",), None),
+    ("Advanced Rule Matching", (
+        "flip_rule_match_mode", "reject_rule_match_mode",
+    ), "These settings control how native FLIP/REJECT exception rules are combined."),
 )
 
 EXECUTION_PROFILE_GROUPS = (
@@ -589,11 +588,44 @@ class NativeProfileEditor(QWidget):
 
         tabs = QTabWidget()
         self.strategy_form = DataclassForm(
-            StrategyProfileConfig(), excluded={"entry_rules"}, groups=STRATEGY_PROFILE_GROUPS
+            StrategyProfileConfig(),
+            excluded={"enabled", "entry_rules", "rsi_period", "momentum_lookback_hours"},
+            groups=STRATEGY_PROFILE_GROUPS,
         )
         strategy_page = QWidget()
         strategy_layout = QVBoxLayout(strategy_page)
         strategy_layout.addWidget(self.strategy_form)
+
+        self.show_native_calculation_overrides = QCheckBox(
+            "Show native calculation overrides (legacy / profile-specific)"
+        )
+        strategy_layout.addWidget(self.show_native_calculation_overrides)
+        self.native_calculation_overrides = QGroupBox("Native Calculation Overrides")
+        native_calc_layout = QVBoxLayout(self.native_calculation_overrides)
+        native_calc_note = QLabel(
+            "Normal indicator calculation belongs on Research Features. These profile-scoped fields "
+            "remain here only because they are part of the native v3 advanced-rule contract. Change "
+            "them only when intentionally reproducing a profile-specific or legacy rule setup."
+        )
+        native_calc_note.setWordWrap(True)
+        native_calc_note.setStyleSheet("color:#52606d")
+        native_calc_layout.addWidget(native_calc_note)
+        native_calc_form = QFormLayout()
+        self.native_calculation_widgets: dict[str, QSpinBox] = {}
+        for name in ("rsi_period", "momentum_lookback_hours"):
+            widget = QSpinBox()
+            widget.setRange(-2_000_000_000, 2_000_000_000)
+            widget.setToolTip(metadata(name).help)
+            widget.valueChanged.connect(lambda _value: self._notify_changed())
+            self.native_calculation_widgets[name] = widget
+            native_calc_form.addRow(metadata(name).label, widget)
+        native_calc_layout.addLayout(native_calc_form)
+        self.native_calculation_overrides.setVisible(False)
+        self.show_native_calculation_overrides.toggled.connect(
+            self.native_calculation_overrides.setVisible
+        )
+        strategy_layout.addWidget(self.native_calculation_overrides)
+
         rule_title = QLabel("Advanced Exceptions — Native Profile Rule Builder")
         rule_title.setStyleSheet("font-weight:bold; margin-top:8px")
         strategy_layout.addWidget(rule_title)
@@ -652,6 +684,12 @@ class NativeProfileEditor(QWidget):
             bool(profile.entry_rules),
             profile.flip_rule_match_mode != default.flip_rule_match_mode,
             profile.reject_rule_match_mode != default.reject_rule_match_mode,
+        ))
+
+    @staticmethod
+    def _native_calculation_override_count(profile: StrategyProfileConfig) -> int:
+        default = StrategyProfileConfig()
+        return sum((
             profile.rsi_period != default.rsi_period,
             profile.momentum_lookback_hours != default.momentum_lookback_hours,
         ))
@@ -669,8 +707,6 @@ class NativeProfileEditor(QWidget):
             return
         self._store()
         self._strategy[key] = replace(self._strategy[key], enabled=checked)
-        if key == self._current:
-            self.strategy_form.widgets["enabled"].setChecked(checked)
         self._render_permission_matrix()
         self._render_profile_summary()
         self.changed.emit()
@@ -689,7 +725,10 @@ class NativeProfileEditor(QWidget):
         key = self._current
         strategy = self.strategy_form.value(self._strategy[key])
         self._strategy[key] = replace(
-            strategy, entry_rules=self.entry_rules.tuple_value()
+            strategy,
+            entry_rules=self.entry_rules.tuple_value(),
+            rsi_period=self.native_calculation_widgets["rsi_period"].value(),
+            momentum_lookback_hours=self.native_calculation_widgets["momentum_lookback_hours"].value(),
         )
         self._execution[key] = self.execution_form.value(self._execution[key])
 
@@ -698,6 +737,10 @@ class NativeProfileEditor(QWidget):
         try:
             self._current = key
             self.strategy_form.set_value(self._strategy[key])
+            for name, widget in self.native_calculation_widgets.items():
+                widget.blockSignals(True)
+                widget.setValue(getattr(self._strategy[key], name))
+                widget.blockSignals(False)
             self.entry_rules.set_tuple(tuple(self._strategy[key].entry_rules))
             self.execution_form.set_value(self._execution[key])
             self._render_permission_matrix()
@@ -719,18 +762,21 @@ class NativeProfileEditor(QWidget):
         strategy = self._strategy[self._current]
         execution = self._execution[self._current]
         strategy_count = self._strategy_exception_count(strategy)
+        native_calc_count = self._native_calculation_override_count(strategy)
         execution_count = self._execution_override_count(execution)
-        strategy_text = (
+        parts = [
             "Uses base entry thesis — no strategy exceptions"
             if not strategy_count else f"{strategy_count} strategy exception(s) from the base thesis"
-        )
-        execution_text = (
+        ]
+        if native_calc_count:
+            parts.append(f"{native_calc_count} native calculation override(s)")
+        parts.append(
             "Standard native execution"
             if not execution_count else f"{execution_count} execution override(s) from native defaults"
         )
         self.profile_summary.setText(
             f"{PROFILE_LABELS[self._current]} — {'TRADE' if strategy.enabled else 'OFF'}\n"
-            f"{strategy_text} · {execution_text}."
+            + " · ".join(parts) + "."
         )
 
     def _select(self, key: str) -> None:
@@ -758,9 +804,10 @@ class NativeProfileEditor(QWidget):
 
     def paste_profile(self):
         if self._clipboard:
-            self._strategy[self._current], self._execution[self._current] = clone_profile_pair(
-                *self._clipboard
-            )
+            current_enabled = self._strategy[self._current].enabled
+            copied_strategy, copied_execution = clone_profile_pair(*self._clipboard)
+            self._strategy[self._current] = replace(copied_strategy, enabled=current_enabled)
+            self._execution[self._current] = copied_execution
             self._render(self._current)
             self.changed.emit()
 
