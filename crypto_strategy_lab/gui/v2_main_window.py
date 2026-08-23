@@ -119,11 +119,11 @@ EXECUTION_GROUPS = (
 )
 
 STRATEGY_PROFILE_GROUPS = (
-    ("Direction", ("enabled", "flip_direction"), None),
-    ("Entry Filters", (
+    ("Profile Direction Exception", ("enabled", "flip_direction"), None),
+    ("Advanced Rule Settings", (
         "flip_rule_match_mode", "reject_rule_match_mode", "rsi_period",
         "momentum_lookback_hours",
-    ), None),
+    ), "These settings belong to the native advanced rule contract. Indicator calculation settings normally live on Research Features."),
 )
 
 EXECUTION_PROFILE_GROUPS = (
@@ -180,14 +180,24 @@ class TupleEditor(QPlainTextEdit):
 
 
 class EntryRuleEditor(QTableWidget):
-    """Ordered, lossless advanced entry-rule editor."""
+    """Ordered, lossless native advanced-exception editor."""
 
     changed = Signal()
     COLUMNS = ("action", "indicator", "condition", "minimum", "maximum")
+    INDICATOR_LABELS = {
+        "DI_SPREAD": "Trend · DI Spread",
+        "ADX": "Trend · ADX",
+        "MOMENTUM": "Trend · Momentum",
+        "ATR_PCT": "Price / Volatility · ATR %",
+        "BB_WIDTH": "Price / Volatility · BB Width",
+        "VWAP_DISTANCE": "Price / Volatility · VWAP Distance",
+        "CLOSE_LOCATION": "Price / Volatility · Close Location",
+        "RSI": "Mean Reversion · RSI",
+    }
 
     def __init__(self, parent=None):
         super().__init__(0, len(self.COLUMNS), parent)
-        self.setHorizontalHeaderLabels(("Action", "Indicator", "Condition", "Minimum", "Maximum"))
+        self.setHorizontalHeaderLabels(("Action", "Evidence", "Condition", "Minimum", "Maximum"))
         self._payloads = []
         self.itemChanged.connect(lambda _item: self.changed.emit())
 
@@ -206,7 +216,7 @@ class EntryRuleEditor(QTableWidget):
                         choices = (
                             {"FLIP": "Flip Direction", "REJECT": "Reject Entry"}
                             if key == "action"
-                            else {name: name.replace("_", " ").title() for name in RULE_INDICATORS}
+                            else {name: self.INDICATOR_LABELS.get(name, name.replace("_", " ").title()) for name in RULE_INDICATORS}
                             if key == "indicator"
                             else {"INSIDE": "Inside Range", "OUTSIDE": "Outside Range"}
                         )
@@ -375,6 +385,7 @@ class DataclassForm(QWidget):
             if note:
                 status = QLabel(note)
                 status.setObjectName("availabilityStatus")
+                status.setWordWrap(True)
                 form.addRow(status)
             for name in names:
                 widget = self._widget(name, getattr(value, name))
@@ -506,7 +517,7 @@ class TimeframeCombo(QComboBox):
 
 
 class NativeProfileEditor(QWidget):
-    """Regime/direction permission matrix with lossless native profile overrides."""
+    """Market permission plus explicit profile-specific exceptions over one base strategy."""
 
     changed = Signal()
 
@@ -514,13 +525,13 @@ class NativeProfileEditor(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "Choose where the strategy is allowed to trade. Most profiles can use the same core "
-            "strategy; open profile details only when a regime/direction needs an override."
+            "The base entry thesis is shared. Market environments only decide where it may trade; "
+            "profile overrides are for genuine regime/direction exceptions, not duplicate filters."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        permission_box = QGroupBox("1. Market Permission — Where can this strategy trade?")
+        permission_box = QGroupBox("1. Market Environments — Where can this strategy trade?")
         permission = QGridLayout(permission_box)
         permission.addWidget(QLabel("Market state"), 0, 0)
         permission.addWidget(QLabel("LONG"), 0, 1)
@@ -542,10 +553,10 @@ class NativeProfileEditor(QWidget):
                 permission.addWidget(check, row, column)
         layout.addWidget(permission_box)
 
-        selected = QGroupBox("2. Profile Overrides — Only change what is different")
+        selected = QGroupBox("2. Profile Overrides — Only exceptions from the base strategy")
         selected_layout = QVBoxLayout(selected)
         selector_row = QHBoxLayout()
-        selector_row.addWidget(QLabel("Selected profile"))
+        selector_row.addWidget(QLabel("Environment"))
         self.selector = ProfileSelector()
         for key in PROFILE_KEYS:
             self.selector.addItem(PROFILE_LABELS[key], key)
@@ -559,10 +570,10 @@ class NativeProfileEditor(QWidget):
         selected_layout.addWidget(self.profile_summary)
 
         actions = QHBoxLayout()
-        self.copy_button = QPushButton("Copy Profile")
-        self.paste_button = QPushButton("Paste Profile")
-        self.reset_button = QPushButton("Reset Profile")
-        self.apply_all_button = QPushButton("Apply Strategy Rules to All Profiles")
+        self.copy_button = QPushButton("Copy Overrides")
+        self.paste_button = QPushButton("Paste Overrides")
+        self.reset_button = QPushButton("Reset to Native Defaults")
+        self.apply_all_button = QPushButton("Apply Strategy Exceptions to All")
         for button in (
             self.copy_button, self.paste_button, self.reset_button, self.apply_all_button
         ):
@@ -570,7 +581,7 @@ class NativeProfileEditor(QWidget):
         selected_layout.addLayout(actions)
 
         self.show_profile_details = QCheckBox(
-            "Show detailed profile settings and advanced entry rules"
+            "Show advanced profile exceptions and execution overrides"
         )
         selected_layout.addWidget(self.show_profile_details)
         self.profile_details = QWidget()
@@ -583,19 +594,20 @@ class NativeProfileEditor(QWidget):
         strategy_page = QWidget()
         strategy_layout = QVBoxLayout(strategy_page)
         strategy_layout.addWidget(self.strategy_form)
-        rule_title = QLabel("Advanced Entry Rules")
+        rule_title = QLabel("Advanced Exceptions — Native Profile Rule Builder")
         rule_title.setStyleSheet("font-weight:bold; margin-top:8px")
         strategy_layout.addWidget(rule_title)
         rule_note = QLabel(
-            "Use these only for profile-specific exceptions. Rules are evaluated by the existing "
-            "native engine; the GUI does not create a second rule system."
+            "Use this only when the centralized Entry Evidence section cannot express a real native "
+            "profile exception. These rules retain the existing FLIP/REJECT engine semantics."
         )
         rule_note.setWordWrap(True)
+        rule_note.setStyleSheet("color:#52606d")
         strategy_layout.addWidget(rule_note)
         self.entry_rules = EntryRuleEditor()
         strategy_layout.addWidget(self.entry_rules)
         rule_actions = QHBoxLayout()
-        add_rule = QPushButton("+ Add Rule")
+        add_rule = QPushButton("+ Add Exception")
         remove_rule = QPushButton("Remove Selected")
         add_rule.clicked.connect(self.entry_rules.add_rule)
         remove_rule.clicked.connect(self.entry_rules.remove_selected)
@@ -606,8 +618,8 @@ class NativeProfileEditor(QWidget):
         self.execution_form = DataclassForm(
             ExecutionProfileConfig(), groups=EXECUTION_PROFILE_GROUPS
         )
-        tabs.addTab(strategy_page, "Strategy Overrides")
-        tabs.addTab(self.execution_form, "Execution Overrides")
+        tabs.addTab(strategy_page, "Advanced Strategy Exceptions")
+        tabs.addTab(self.execution_form, "Execution Override")
         detail_layout.addWidget(tabs)
         selected_layout.addWidget(self.profile_details)
         self.profile_details.setVisible(False)
@@ -631,6 +643,26 @@ class NativeProfileEditor(QWidget):
         self.strategy_form.changed.connect(self._notify_changed)
         self.execution_form.changed.connect(self._notify_changed)
         self.entry_rules.changed.connect(self._notify_changed)
+
+    @staticmethod
+    def _strategy_exception_count(profile: StrategyProfileConfig) -> int:
+        default = StrategyProfileConfig()
+        return sum((
+            profile.flip_direction != default.flip_direction,
+            bool(profile.entry_rules),
+            profile.flip_rule_match_mode != default.flip_rule_match_mode,
+            profile.reject_rule_match_mode != default.reject_rule_match_mode,
+            profile.rsi_period != default.rsi_period,
+            profile.momentum_lookback_hours != default.momentum_lookback_hours,
+        ))
+
+    @staticmethod
+    def _execution_override_count(profile: ExecutionProfileConfig) -> int:
+        default = ExecutionProfileConfig()
+        return sum(
+            getattr(profile, item.name) != getattr(default, item.name)
+            for item in fields(ExecutionProfileConfig)
+        )
 
     def _toggle_permission(self, key: str, checked: bool) -> None:
         if self._rendering or not self._strategy:
@@ -686,26 +718,19 @@ class NativeProfileEditor(QWidget):
             return
         strategy = self._strategy[self._current]
         execution = self._execution[self._current]
-        protections = [
-            name for enabled, name in (
-                (execution.break_even_enabled, "break-even"),
-                (execution.trailing_enabled, "trailing"),
-                (execution.partial_profit_enabled, "partial TP"),
-                (execution.partial_stop_enabled, "partial SL"),
-                (execution.timeout_enabled, "timeout"),
-                (execution.r_step_trailing_enabled, "R-step trailing"),
-                (execution.atr_checkpoint_tp_extension_enabled, "ATR checkpoint extension"),
-            ) if enabled
-        ]
-        protection_text = ", ".join(protections) if protections else "base exits only"
+        strategy_count = self._strategy_exception_count(strategy)
+        execution_count = self._execution_override_count(execution)
+        strategy_text = (
+            "Uses base entry thesis — no strategy exceptions"
+            if not strategy_count else f"{strategy_count} strategy exception(s) from the base thesis"
+        )
+        execution_text = (
+            "Standard native execution"
+            if not execution_count else f"{execution_count} execution override(s) from native defaults"
+        )
         self.profile_summary.setText(
-            f"{PROFILE_LABELS[self._current]} — "
-            f"{'TRADE' if strategy.enabled else 'OFF'} · "
-            f"{'flip direction' if strategy.flip_direction else 'normal direction'}\n"
-            f"{len(strategy.entry_rules)} advanced entry rule(s) · "
-            f"risk {execution.risk_multiplier:.2f}x · "
-            f"stop {execution.stop_loss_multiple:g} × base distance · "
-            f"target {execution.reward_risk_ratio:g}R · {protection_text}."
+            f"{PROFILE_LABELS[self._current]} — {'TRADE' if strategy.enabled else 'OFF'}\n"
+            f"{strategy_text} · {execution_text}."
         )
 
     def _select(self, key: str) -> None:
@@ -740,7 +765,8 @@ class NativeProfileEditor(QWidget):
             self.changed.emit()
 
     def reset_profile(self):
-        self._strategy[self._current] = StrategyProfileConfig()
+        enabled = self._strategy[self._current].enabled
+        self._strategy[self._current] = replace(StrategyProfileConfig(), enabled=enabled)
         self._execution[self._current] = ExecutionProfileConfig()
         self._render(self._current)
         self.changed.emit()
@@ -749,18 +775,19 @@ class NativeProfileEditor(QWidget):
         self._store()
         source = self._strategy[self._current]
         for key in PROFILE_KEYS:
-            self._strategy[key] = clone_profile_pair(source, self._execution[key])[0]
+            current_enabled = self._strategy[key].enabled
+            copied = clone_profile_pair(source, self._execution[key])[0]
+            self._strategy[key] = replace(copied, enabled=current_enabled)
         self._render(self._current)
         self.changed.emit()
 
 
 class StrategyWorkspace(QWidget):
-    """Researcher-facing entry evidence workflow over authoritative native widgets.
+    """Single researcher-facing strategy builder over authoritative native widgets.
 
-    This presentation deliberately does not invent a generic strategy engine. New
-    evidence starts as Analyze Only and can be promoted to Direction, Required,
-    Confirmation, Veto/Avoid, or Ranking only when the native strategy contract
-    explicitly supports that role.
+    Research Features owns how evidence is calculated. This workspace is the only
+    normal UI surface that decides how already-calculated evidence affects entries.
+    It never invents unsupported Direction/Confirmation/Veto/Ranking semantics.
     """
 
     EVIDENCE_SOURCES = (
@@ -779,7 +806,7 @@ class StrategyWorkspace(QWidget):
         self.widgets = strategy_form.widgets
         layout = QVBoxLayout(self)
 
-        thesis_box = QGroupBox("Strategy Thesis")
+        thesis_box = QGroupBox("Strategy Summary")
         thesis_layout = QVBoxLayout(thesis_box)
         self.thesis_summary = QLabel()
         self.thesis_summary.setWordWrap(True)
@@ -792,11 +819,10 @@ class StrategyWorkspace(QWidget):
         mode_box = QGroupBox("Strategy Test Mode")
         mode_layout = QVBoxLayout(mode_box)
         mode_form = QFormLayout()
-        mode_form.addRow("How enabled profiles are tested", self.widgets["strategy_profile_run_mode"])
+        mode_form.addRow("How enabled environments are tested", self.widgets["strategy_profile_run_mode"])
         mode_layout.addLayout(mode_form)
         mode_note = QLabel(
-            "This changes how enabled regime/direction profiles share capital during the backtest; "
-            "it is not an entry condition."
+            "This controls shared-capital versus isolated testing. It is not an entry condition."
         )
         mode_note.setWordWrap(True)
         mode_note.setStyleSheet("color:#52606d")
@@ -805,14 +831,13 @@ class StrategyWorkspace(QWidget):
 
         layout.addWidget(profile_editor)
 
-        entry_box = QGroupBox(
-            "3. Entry Evidence Framework — How can evidence affect a trade?"
-        )
+        entry_box = QGroupBox("3. Base Entry Evidence — Single source of truth for entry decisions")
         entry = QVBoxLayout(entry_box)
         framework_note = QLabel(
-            "Standard decision path: Direction → Required Conditions → Confirmations → "
-            "Avoid / Veto → Ranking. New Binance data starts as Analyze Only. It must first "
-            "be studied causally against trade outcomes before we add a native strategy role."
+            "Research Features controls how evidence is calculated. Strategy Builder controls how "
+            "that evidence is used. New Binance evidence starts as Analyze Only and is promoted to "
+            "Direction, Required, Confirmation, Veto/Avoid or Ranking only after causal outcome research "
+            "and an explicit native strategy implementation."
         )
         framework_note.setWordWrap(True)
         framework_note.setStyleSheet(
@@ -820,91 +845,65 @@ class StrategyWorkspace(QWidget):
         )
         entry.addWidget(framework_note)
 
-        map_box = QGroupBox("Evidence Map — current role of every research source")
+        map_box = QGroupBox("Entry Evidence")
         evidence_grid = QGridLayout(map_box)
-        evidence_grid.addWidget(QLabel("Evidence source"), 0, 0)
+        evidence_grid.addWidget(QLabel("Evidence"), 0, 0)
         evidence_grid.addWidget(QLabel("Current role"), 0, 1)
-        evidence_grid.addWidget(QLabel("What it does now"), 0, 2)
+        evidence_grid.addWidget(QLabel("Condition / usage"), 0, 2)
+        evidence_grid.addWidget(QLabel("Notes"), 0, 3)
         self.evidence_role_labels: dict[str, QLabel] = {}
         self.evidence_note_labels: dict[str, QLabel] = {}
+        self.evidence_setting_widgets: dict[str, QWidget] = {}
+
         for row, source in enumerate(self.EVIDENCE_SOURCES, 1):
             source_label = QLabel(source)
             source_label.setStyleSheet("font-weight:bold")
             role = QLabel("—")
-            role.setMinimumWidth(135)
+            role.setMinimumWidth(125)
             note = QLabel("—")
             note.setWordWrap(True)
             self.evidence_role_labels[source] = role
             self.evidence_note_labels[source] = note
             evidence_grid.addWidget(source_label, row, 0)
             evidence_grid.addWidget(role, row, 1)
-            evidence_grid.addWidget(note, row, 2)
+
+            if source == "DI Direction":
+                setting = self._toggle_setting(
+                    self.widgets["enable_di_direction_selection"], "Use DI to choose trade direction"
+                )
+            elif source == "DI Pressure":
+                setting = QWidget()
+                row_layout = QHBoxLayout(setting)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.addWidget(self.widgets["enable_di_pressure_analysis"])
+                row_layout.addWidget(QLabel("Use pressure"))
+                for name, label in (
+                    ("di_pressure_allow_expanding", "Expanding"),
+                    ("di_pressure_allow_contracting", "Contracting"),
+                    ("di_pressure_allow_mixed", "Mixed"),
+                ):
+                    row_layout.addWidget(QLabel(label))
+                    row_layout.addWidget(self.widgets[name])
+                row_layout.addStretch()
+                self.pressure_states = setting
+            elif source == "Mean Reversion":
+                setting = self._toggle_setting(
+                    self.widgets["enable_mean_reversion_analysis"], "Calculate / attach MR context"
+                )
+            elif source == "Support / Resistance":
+                setting = self.widgets["sr_filter_mode"]
+            else:
+                setting = QLabel("Managed on Research Features")
+                setting.setStyleSheet("color:#52606d")
+            self.evidence_setting_widgets[source] = setting
+            evidence_grid.addWidget(setting, row, 2)
+            evidence_grid.addWidget(note, row, 3)
+
         evidence_grid.setColumnStretch(2, 1)
+        evidence_grid.setColumnStretch(3, 2)
         entry.addWidget(map_box)
 
-        direction_group = QGroupBox("Direction — Which side are we considering?")
-        direction = QVBoxLayout(direction_group)
-        direction.addWidget(self._labeled_check(
-            self.widgets["enable_di_direction_selection"],
-            "DI Direction",
-            "The current native engine can use DI as its first-class direction source. "
-            "Turning this off leaves direction to the profile/native baseline behavior.",
-        ))
-        entry.addWidget(direction_group)
-
-        required_group = QGroupBox("Required Conditions — What must be true?")
-        required = QVBoxLayout(required_group)
-        required.addWidget(self._labeled_check(
-            self.widgets["enable_di_pressure_analysis"],
-            "DI Pressure",
-            "With every pressure state allowed this is Analyze Only. Excluding one or more "
-            "states promotes DI Pressure to a Required Condition using the existing native filter.",
-        ))
-        self.pressure_states = QWidget()
-        pressure_layout = QHBoxLayout(self.pressure_states)
-        pressure_layout.setContentsMargins(24, 0, 0, 0)
-        for name, label in (
-            ("di_pressure_allow_expanding", "Expanding"),
-            ("di_pressure_allow_contracting", "Contracting"),
-            ("di_pressure_allow_mixed", "Mixed"),
-        ):
-            pressure_layout.addWidget(QLabel(label))
-            pressure_layout.addWidget(self.widgets[name])
-        pressure_layout.addStretch()
-        required.addWidget(self.pressure_states)
-        entry.addWidget(required_group)
-
-        confirmation_group = QGroupBox("Confirmations — What supports the trade?")
-        confirmation = QVBoxLayout(confirmation_group)
-        confirmation_status = QLabel(
-            "No first-class confirmation gate is implemented in the native strategy yet. "
-            "Research evidence can be promoted here later only after validation."
-        )
-        confirmation_status.setWordWrap(True)
-        confirmation_status.setStyleSheet("color:#52606d")
-        confirmation.addWidget(confirmation_status)
-        confirmation.addWidget(self._labeled_check(
-            self.widgets["enable_mean_reversion_analysis"],
-            "Calculate Mean Reversion context — Analyze Only",
-            "Mean Reversion is currently record/research context only. It does not choose "
-            "direction or block entries unless a profile-specific advanced rule explicitly does so.",
-        ))
-        entry.addWidget(confirmation_group)
-
-        veto_group = QGroupBox("Avoid / Veto — What can reject an otherwise valid trade?")
-        veto = QVBoxLayout(veto_group)
-        sr_role = QFormLayout()
-        sr_role.addRow("Support / Resistance role", self.widgets["sr_filter_mode"])
-        veto.addLayout(sr_role)
-        sr_note = QLabel(
-            "Analysis Only records location context without blocking trades. Apply Entry Rules "
-            "uses the existing native S/R location filters as a veto/avoid role."
-        )
-        sr_note.setWordWrap(True)
-        sr_note.setStyleSheet("color:#52606d")
-        veto.addWidget(sr_note)
-
-        self.sr_filter_details = QGroupBox("Support / Resistance veto settings")
+        self.sr_filter_details = QGroupBox("Support / Resistance Veto / Avoid Conditions")
         sr_form = QFormLayout(self.sr_filter_details)
         for name in (
             "sr_long_avoid_near_resistance", "sr_long_require_near_support",
@@ -913,29 +912,23 @@ class StrategyWorkspace(QWidget):
             "sr_short_block_broken_resistance", "sr_short_min_room_to_support_atr",
         ):
             sr_form.addRow(metadata(name).label, self.widgets[name])
-        veto.addWidget(self.sr_filter_details)
-        entry.addWidget(veto_group)
+        entry.addWidget(self.sr_filter_details)
 
-        ranking_group = QGroupBox("Ranking / Confidence — Which valid trade is strongest?")
-        ranking = QVBoxLayout(ranking_group)
-        ranking_note = QLabel(
-            "No native ranking/confidence score changes trade selection today. Open Interest, "
-            "Funding, Positioning, Taker Flow, Trade Flow and Order Book remain research evidence. "
-            "After outcome studies show stable value, a future strategy change can explicitly "
-            "promote a source to Ranking without changing its feature calculation."
+        legend = QLabel(
+            "Role model: Analyze Only records evidence without changing trades. Required can reject "
+            "an entry when a native condition fails. Veto / Avoid rejects otherwise valid entries. "
+            "Confirmation and Ranking are reserved until the native engine explicitly supports them."
         )
-        ranking_note.setWordWrap(True)
-        ranking_note.setStyleSheet("color:#52606d")
-        ranking.addWidget(ranking_note)
-        entry.addWidget(ranking_group)
-
+        legend.setWordWrap(True)
+        legend.setStyleSheet("color:#52606d; padding:6px")
+        entry.addWidget(legend)
         layout.addWidget(entry_box)
 
         self.show_advanced_strategy = QCheckBox(
             "Show advanced entry timing and schedule settings"
         )
         layout.addWidget(self.show_advanced_strategy)
-        self.advanced_strategy = QGroupBox("Advanced Strategy Timing")
+        self.advanced_strategy = QGroupBox("4. Advanced Entry Timing")
         advanced = QFormLayout(self.advanced_strategy)
         for name in (
             "entry_mode", "entry_interval", "enable_daily_entry_schedule",
@@ -959,20 +952,16 @@ class StrategyWorkspace(QWidget):
         self.refresh_from_widgets()
 
     @staticmethod
-    def _labeled_check(widget: QCheckBox, title: str, help_text: str) -> QWidget:
+    def _toggle_setting(widget: QCheckBox, text: str) -> QWidget:
         row = QWidget()
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        text = QLabel(
-            f"<b>{title}</b><br><span style='color:#52606d'>{help_text}</span>"
-        )
-        text.setWordWrap(True)
         row_layout.addWidget(widget)
-        row_layout.addWidget(text, 1)
+        row_layout.addWidget(QLabel(text))
+        row_layout.addStretch()
         return row
 
     def _feature_config(self) -> FeatureConfig:
-        """Read the native FeatureConfig from the owning window without duplicating state."""
         root = self.window()
         form = getattr(root, "feature_form", None)
         base_config = getattr(root, "config", None)
@@ -993,7 +982,7 @@ class StrategyWorkspace(QWidget):
         roles["DI Direction"] = (
             ("Direction", "Chooses the candidate side using native DI direction selection.")
             if strategy.enable_di_direction_selection
-            else ("Not Used", "DI does not choose direction; profile/native direction remains in control.")
+            else ("Not Used", "Profile/native direction remains in control.")
         )
 
         if not strategy.enable_di_pressure_analysis:
@@ -1005,13 +994,13 @@ class StrategyWorkspace(QWidget):
                 strategy.di_pressure_allow_mixed,
             )
             roles["DI Pressure"] = (
-                ("Analyze Only", "All pressure states are allowed, so pressure is recorded without rejecting entries.")
+                ("Analyze Only", "All pressure states are allowed, so pressure cannot reject entries.")
                 if all(allowed)
-                else ("Required Condition", "Disallowed pressure states are rejected by the existing native entry filter.")
+                else ("Required", "Disallowed pressure states are rejected by the existing native filter.")
             )
 
         roles["Mean Reversion"] = (
-            ("Analyze Only", "Recorded for research; it does not change DI direction or block entries by itself.")
+            ("Analyze Only", "Recorded for research; it does not confirm, choose direction or block entries by itself.")
             if strategy.enable_mean_reversion_analysis
             else ("Off", "Mean Reversion research context is disabled.")
         )
@@ -1019,7 +1008,7 @@ class StrategyWorkspace(QWidget):
         if strategy.sr_filter_mode == "APPLY_ENTRY_RULES":
             sr_note = "Existing S/R location rules may reject entries."
             if not features.enable_support_resistance_analysis:
-                sr_note += " Enable S/R research features so location context is available."
+                sr_note += " Enable S/R calculation on Research Features so location context is available."
             roles["Support / Resistance"] = ("Veto / Avoid", sr_note)
         elif features.enable_support_resistance_analysis:
             roles["Support / Resistance"] = (
@@ -1027,7 +1016,7 @@ class StrategyWorkspace(QWidget):
             )
         else:
             roles["Support / Resistance"] = (
-                "Off", "S/R feature calculation is disabled; no location role is active."
+                "Off", "S/R calculation is disabled on Research Features."
             )
 
         for source in ("Open Interest", "Funding", "Positioning / Basis", "Taker Flow"):
@@ -1036,12 +1025,12 @@ class StrategyWorkspace(QWidget):
                 "Attached automatically when source coverage exists; it cannot change entries yet.",
             )
         roles["Trade Flow"] = (
-            ("Analyze Only", "Enabled on Research Features; collected for outcome research only.")
+            ("Analyze Only", "Enabled on Research Features; collected for causal outcome research only.")
             if features.trade_flow_enabled
             else ("Off", "Enable Trade Flow on Research Features to collect it for research.")
         )
         roles["Order Book"] = (
-            ("Analyze Only", "Enabled on Research Features; collected for outcome research only.")
+            ("Analyze Only", "Enabled on Research Features; collected for causal outcome research only.")
             if features.order_book_enabled
             else ("Off", "Enable Order Book on Research Features to collect it for research.")
         )
@@ -1060,9 +1049,12 @@ class StrategyWorkspace(QWidget):
         return "; ".join(parts)
 
     def _refresh_visibility(self):
-        self.pressure_states.setVisible(
-            self.widgets["enable_di_pressure_analysis"].isChecked()
-        )
+        enabled = self.widgets["enable_di_pressure_analysis"].isChecked()
+        for name in (
+            "di_pressure_allow_expanding", "di_pressure_allow_contracting",
+            "di_pressure_allow_mixed",
+        ):
+            self.widgets[name].setVisible(enabled)
         self.sr_filter_details.setVisible(
             self.widgets["sr_filter_mode"].currentData() == "APPLY_ENTRY_RULES"
         )
@@ -1071,11 +1063,10 @@ class StrategyWorkspace(QWidget):
         self._refresh_visibility()
         if not self.profile_editor._strategy:
             self.thesis_summary.setText(
-                "Configure the strategy to see a plain-English thesis here."
+                "Configure the strategy to see a plain-English summary here."
             )
             return
         try:
-            strategy = self.strategy_form.value(StrategyConfig())
             profiles, _execution = self.profile_editor.profiles()
             roles = self.evidence_roles()
         except (ValueError, TypeError, KeyError):
@@ -1086,26 +1077,22 @@ class StrategyWorkspace(QWidget):
             self.evidence_note_labels[source].setText(note)
 
         market_text = self._market_permission_summary(profiles)
-        direction_text = roles["DI Direction"][0]
-        pressure_text = roles["DI Pressure"][0]
-        sr_text = roles["Support / Resistance"][0]
-        mean_reversion_text = roles["Mean Reversion"][0]
         profile_overrides = sum(
-            bool(profile.entry_rules) or profile.flip_direction
+            self.profile_editor._strategy_exception_count(profile)
             for profile in profiles.values()
         )
         override_text = (
-            f"{profile_overrides} profile(s) have strategy-specific exceptions."
+            f"{profile_overrides} strategy exception(s) across enabled environments."
             if profile_overrides
             else "No profile-specific strategy exceptions."
         )
         self.thesis_summary.setText(
             f"<b>Markets</b><br>{market_text}<br><br>"
-            f"<b>Direction</b><br>DI Direction: {direction_text}<br><br>"
-            f"<b>Required Conditions</b><br>DI Pressure: {pressure_text}<br><br>"
-            f"<b>Confirmations</b><br>No native confirmation gate. "
-            f"Mean Reversion: {mean_reversion_text}.<br><br>"
-            f"<b>Avoid / Veto</b><br>Support / Resistance: {sr_text}<br><br>"
+            f"<b>Direction</b><br>DI Direction: {roles['DI Direction'][0]}<br><br>"
+            f"<b>Required</b><br>DI Pressure: {roles['DI Pressure'][0]}<br><br>"
+            f"<b>Supporting Evidence</b><br>Mean Reversion: {roles['Mean Reversion'][0]}; "
+            f"OI, Funding, Positioning and Taker Flow remain Analyze Only.<br><br>"
+            f"<b>Avoid / Veto</b><br>Support / Resistance: {roles['Support / Resistance'][0]}<br><br>"
             f"<b>Ranking</b><br>No native confidence/ranking role yet.<br><br>"
             f"<b>Profile Overrides</b><br>{override_text}"
         )
@@ -1168,7 +1155,7 @@ class MainWindow(QMainWindow):
 
         setup = self._page("Setup", self._data_panel(), self._status_panel())
         strategy = self._page(
-            "Strategy & Profiles", self._scroll(self.strategy_workspace)
+            "Strategy Builder", self._scroll(self.strategy_workspace)
         )
         features = self._page("Research Features", self._scroll(self.feature_form))
         risk = self._page(
@@ -1189,7 +1176,7 @@ class MainWindow(QMainWindow):
         github = GitHubIntegrationWidget()
         groups = (
             ("NEW RESEARCH", (
-                ("Setup", setup), ("Strategy & Profiles", strategy),
+                ("Setup", setup), ("Strategy Builder", strategy),
                 ("Research Features", features), ("Risk & Execution", risk),
                 ("Reports", reports), ("Review & Run", review),
             )),
@@ -1585,11 +1572,11 @@ class MainWindow(QMainWindow):
         text = (
             f"CURRENT RESEARCH\n\n{self.symbol.currentText() or 'BTCUSDT'}\n"
             f"{timeframe_label(config.data.strategy_timeframe_minutes)} strategy / {intrabar}\n\n"
-            f"Profiles  {enabled} of 6 ON\n"
-            f"DI  {'ON' if config.strategy.enable_di_direction_selection else 'OFF'}\n"
-            f"Mean Reversion  {'ON' if config.strategy.enable_mean_reversion_analysis else 'OFF'}\n"
-            f"Trade Flow  {'ON' if config.features.trade_flow_enabled else 'OFF'}\n"
-            f"Order Book  {'ON' if config.features.order_book_enabled else 'OFF'}\n\n"
+            f"Environments  {enabled} of 6 ON\n"
+            f"DI Direction  {'ON' if config.strategy.enable_di_direction_selection else 'OFF'}\n"
+            f"MR Context  {'ANALYZE' if config.strategy.enable_mean_reversion_analysis else 'OFF'}\n"
+            f"Trade Flow  {'ANALYZE' if config.features.trade_flow_enabled else 'OFF'}\n"
+            f"Order Book  {'ANALYZE' if config.features.order_book_enabled else 'OFF'}\n\n"
             f"Base risk  {risk}\nMax trades  {config.execution.max_active_pairs}\n\n"
             f"Data  {self._data_state()}"
         )
@@ -1620,17 +1607,17 @@ class MainWindow(QMainWindow):
                 if config.strategy.enable_di_pressure_analysis else []
             )
             sr_text = (
-                "Entry Filters"
+                "Veto / Avoid"
                 if config.strategy.sr_filter_mode == "APPLY_ENTRY_RULES"
-                else "Analysis Only"
+                else "Analyze Only"
             )
             self.review_summary.setText(
                 f"{self.symbol.currentText() or 'BTCUSDT'} — "
                 f"{TIMEFRAME_LABELS[timeframe_label(config.data.strategy_timeframe_minutes)]} Research\n\n"
                 f"Allowed environments: {', '.join(enabled_names) if enabled_names else 'None'}\n"
-                f"Direction: {'DI selection' if config.strategy.enable_di_direction_selection else 'Profile direction'}\n"
+                f"Direction: {'DI selection' if config.strategy.enable_di_direction_selection else 'Profile/native direction'}\n"
                 f"DI pressure: {', '.join(pressure_states) if pressure_states else 'Off'}\n"
-                f"Mean Reversion: {'Enabled' if config.strategy.enable_mean_reversion_analysis else 'Off'}\n"
+                f"Mean Reversion: {'Analyze Only' if config.strategy.enable_mean_reversion_analysis else 'Off'}\n"
                 f"Support / Resistance: {sr_text}\n\n"
                 f"Profile Test: {mode}\n"
                 f"Starting Equity: ${config.execution.initial_equity:,.2f}\n"
