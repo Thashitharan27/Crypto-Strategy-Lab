@@ -5,7 +5,20 @@ from dataclasses import asdict, dataclass, fields
 from typing import Any
 
 PROFILE_KEYS = ("bull_long", "bull_short", "bear_long", "bear_short", "sideways_long", "sideways_short")
-RULE_INDICATORS = ("DI_SPREAD", "ADX", "ATR_PCT", "RSI", "BB_WIDTH", "CLOSE_LOCATION", "MOMENTUM", "VWAP_DISTANCE")
+RULE_INDICATORS = (
+    "DI_SPREAD",
+    "DI_PRESSURE_STATE",
+    "DI_SPREAD_CHANGE",
+    "DIRECTIONAL_DI_CHANGE",
+    "OPPOSING_DI_CHANGE",
+    "ADX",
+    "ATR_PCT",
+    "RSI",
+    "BB_WIDTH",
+    "CLOSE_LOCATION",
+    "MOMENTUM",
+    "VWAP_DISTANCE",
+)
 
 
 @dataclass(frozen=True)

@@ -27,23 +27,54 @@ DIRECTION_MODES = ("DI",)
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
 SIDES = ("LONG", "SHORT")
 MARKET_PERMISSIONS = tuple(f"{regime}_{side}" for regime in REGIMES for side in SIDES)
-RULE_OPERATORS = ("GTE", "LTE", "BETWEEN", "OUTSIDE")
+NUMERIC_RULE_OPERATORS = ("GTE", "LTE", "BETWEEN", "OUTSIDE")
+CATEGORICAL_RULE_OPERATORS = ("IS", "IS_NOT")
+RULE_OPERATORS = (*NUMERIC_RULE_OPERATORS, *CATEGORICAL_RULE_OPERATORS)
 RULE_KINDS = ("REQUIRED", "VETO", "FLIP")
+CATEGORICAL_RULE_VALUES = {
+    "DI_PRESSURE_STATE": ("EXPANDING", "CONTRACTING", "MIXED"),
+}
+DI_PRESSURE_STATE_CODES = {
+    "EXPANDING": 1.0,
+    "CONTRACTING": 2.0,
+    "MIXED": 3.0,
+}
 LOW = -1e308
 HIGH = 1e308
 
 _META_PREFIX = "_builder_"
 
 
+def is_categorical_evidence(evidence: str) -> bool:
+    return str(evidence).upper() in CATEGORICAL_RULE_VALUES
+
+
+def rule_operator_options(evidence: str) -> tuple[str, ...]:
+    return CATEGORICAL_RULE_OPERATORS if is_categorical_evidence(evidence) else NUMERIC_RULE_OPERATORS
+
+
+def rule_value_options(evidence: str) -> tuple[str, ...]:
+    return CATEGORICAL_RULE_VALUES.get(str(evidence).upper(), ())
+
+
 def new_rule(*, kind: str = "REQUIRED", evidence: str = "DI_SPREAD") -> dict:
     """Return one researcher-facing rule row with stable round-trip identity."""
+    evidence = str(evidence).upper()
+    if is_categorical_evidence(evidence):
+        operator = "IS"
+        value = rule_value_options(evidence)[0]
+        value2 = None
+    else:
+        operator = "GTE"
+        value = 30.0 if evidence == "DI_SPREAD" else 0.0
+        value2 = 0.0
     return {
         "id": uuid4().hex,
         "kind": kind,
         "evidence": evidence,
-        "operator": "GTE",
-        "value": 30.0 if evidence == "DI_SPREAD" else 0.0,
-        "value2": 0.0,
+        "operator": operator,
+        "value": value,
+        "value2": value2,
         "regime": "ALL",
         "side": "ALL",
     }
@@ -56,32 +87,45 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
     value.setdefault("id", uuid4().hex)
     value.setdefault("kind", expected_kind or "REQUIRED")
     value.setdefault("evidence", "DI_SPREAD")
-    value.setdefault("operator", "GTE")
-    value.setdefault("value", 0.0)
-    value.setdefault("value2", 0.0)
+    value["kind"] = str(value["kind"]).upper()
+    value["evidence"] = str(value["evidence"]).upper()
+    categorical = is_categorical_evidence(value["evidence"])
+    value.setdefault("operator", "IS" if categorical else "GTE")
+    value.setdefault("value", rule_value_options(value["evidence"])[0] if categorical else 0.0)
+    value.setdefault("value2", None if categorical else 0.0)
     value.setdefault("regime", "ALL")
     value.setdefault("side", "ALL")
     if expected_kind is not None:
         value["kind"] = expected_kind
-    value["kind"] = str(value["kind"]).upper()
-    value["evidence"] = str(value["evidence"]).upper()
     value["operator"] = str(value["operator"]).upper()
     value["regime"] = str(value["regime"]).upper()
     value["side"] = str(value["side"]).upper()
-    value["value"] = float(value["value"])
-    value["value2"] = float(value["value2"])
+
     if value["kind"] not in RULE_KINDS:
         raise ValueError(f"unsupported strategy rule kind: {value['kind']}")
     if value["evidence"] not in RULE_INDICATORS:
         raise ValueError(f"unsupported strategy rule evidence: {value['evidence']}")
-    if value["operator"] not in RULE_OPERATORS:
-        raise ValueError(f"unsupported strategy rule operator: {value['operator']}")
+    if value["operator"] not in rule_operator_options(value["evidence"]):
+        raise ValueError(
+            f"unsupported operator {value['operator']} for {value['evidence']}"
+        )
     if value["regime"] not in ("ALL", *REGIMES):
         raise ValueError(f"unsupported strategy rule regime scope: {value['regime']}")
     if value["side"] not in ("ALL", *SIDES):
         raise ValueError(f"unsupported strategy rule side scope: {value['side']}")
-    if value["operator"] in {"BETWEEN", "OUTSIDE"} and value["value"] > value["value2"]:
-        raise ValueError("strategy rule lower value cannot exceed upper value")
+
+    if categorical:
+        value["value"] = str(value["value"]).upper()
+        value["value2"] = None
+        if value["value"] not in rule_value_options(value["evidence"]):
+            raise ValueError(
+                f"unsupported value {value['value']} for {value['evidence']}"
+            )
+    else:
+        value["value"] = float(value["value"])
+        value["value2"] = float(value["value2"])
+        if value["operator"] in {"BETWEEN", "OUTSIDE"} and value["value"] > value["value2"]:
+            raise ValueError("strategy rule lower value cannot exceed upper value")
     return value
 
 
@@ -108,6 +152,10 @@ def _applies(rule: dict, regime: str, side: str) -> bool:
 
 def _range(rule: dict) -> tuple[float, float, str]:
     operator = rule["operator"]
+    if is_categorical_evidence(rule["evidence"]):
+        code = DI_PRESSURE_STATE_CODES[rule["value"]]
+        return code, code, "INSIDE" if operator == "IS" else "OUTSIDE"
+
     first, second = float(rule["value"]), float(rule["value2"])
     if operator == "GTE":
         return first, HIGH, "INSIDE"
@@ -128,7 +176,7 @@ def _native_rule(rule: dict, *, required: bool) -> dict:
         "OUTSIDE" if matching_condition == "INSIDE" else "INSIDE"
     ) if required else matching_condition
     action = "FLIP" if rule["kind"] == "FLIP" else "REJECT"
-    native = {
+    return {
         "action": action,
         "indicator": rule["evidence"],
         "condition": condition,
@@ -142,7 +190,6 @@ def _native_rule(rule: dict, *, required: bool) -> dict:
         f"{_META_PREFIX}regime": rule["regime"],
         f"{_META_PREFIX}side": rule["side"],
     }
-    return native
 
 
 def compile_profiles(
