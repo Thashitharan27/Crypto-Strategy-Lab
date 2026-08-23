@@ -372,10 +372,11 @@ class ResearchRunConfig:
             raise ValueError("max active pairs must be positive")
         if min(execution.maker_fee, execution.taker_fee, execution.slippage) < 0:
             raise ValueError("fees/slippage must be non-negative")
-        if reporting.telemetry_interval_minutes <= 0:
-            raise ValueError("telemetry interval must be positive")
-        if reporting.telemetry_interval_minutes % data.strategy_timeframe_minutes:
-            raise ValueError("telemetry interval must be a multiple of strategy timeframe")
+        if reporting.enable_trade_telemetry:
+            if reporting.telemetry_interval_minutes <= 0:
+                raise ValueError("telemetry interval must be positive")
+            if reporting.telemetry_interval_minutes % data.strategy_timeframe_minutes:
+                raise ValueError("telemetry interval must be a multiple of strategy timeframe")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
