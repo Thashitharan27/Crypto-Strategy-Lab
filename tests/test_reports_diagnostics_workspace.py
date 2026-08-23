@@ -164,7 +164,6 @@ def test_disabling_journey_clears_dependent_outputs_and_loaded_config_refreshes(
         assert reporting.save_full_telemetry_csv is False
         assert reporting.save_trade_journey_summary is False
         assert reporting.save_trade_journey_charts is False
-        reporting.validate if False else None
 
         loaded = replace(
             window.config,
