@@ -1,5 +1,7 @@
 from dataclasses import asdict
 
+import pytest
+
 from crypto_strategy_lab.data_lake_config import ExecutionProfileConfig
 from crypto_strategy_lab.strategy_profiles import StrategyProfile
 from crypto_strategy_lab.strategy_rule_model import (
@@ -60,24 +62,36 @@ def test_scoped_veto_only_reaches_matching_regime_and_side():
     assert not strategy["bear_long"].entry_rules
 
 
-def test_long_only_is_permission_not_six_separate_strategies():
+def test_long_only_trading_is_expressed_by_permissions_not_direction_override():
     long_permissions = ("BULL_LONG", "BEAR_LONG", "SIDEWAYS_LONG")
     rule = new_rule(kind="REQUIRED", evidence="DI_SPREAD")
     rule.update(operator="GTE", value=30.0, side="LONG")
     strategy, _execution = compile_profiles(
-        direction_mode="LONG_ONLY",
+        direction_mode="DI",
         market_permissions=long_permissions,
         required_rules=(rule,),
     )
 
-    # The engine can classify either original DI side, but both routes become one
-    # actual LONG thesis. There is still only one candidate per strategy candle.
+    # DI still decides the candidate side. LONG permissions allow DI-LONG
+    # candidates and reject DI-SHORT candidates; nothing is converted to LONG.
     assert strategy["bull_long"].enabled is True
-    assert strategy["bull_short"].enabled is True
-    assert strategy["bull_long"].flip_direction is False
-    assert strategy["bull_short"].flip_direction is True
+    assert strategy["bull_short"].enabled is False
+    assert strategy["bear_long"].enabled is True
+    assert strategy["bear_short"].enabled is False
+    assert strategy["sideways_long"].enabled is True
+    assert strategy["sideways_short"].enabled is False
+    assert all(profile.flip_direction is False for profile in strategy.values())
     assert len(strategy["bull_long"].entry_rules) == 1
-    assert len(strategy["bull_short"].entry_rules) == 1
+    assert not strategy["bull_short"].entry_rules
+
+
+def test_forced_long_and_short_direction_modes_are_retired():
+    for retired in ("LONG_ONLY", "SHORT_ONLY"):
+        with pytest.raises(ValueError, match="unsupported direction mode"):
+            compile_profiles(
+                direction_mode=retired,
+                market_permissions=MARKET_PERMISSIONS,
+            )
 
 
 def test_builder_metadata_round_trips_scoped_rules_without_profile_ui():

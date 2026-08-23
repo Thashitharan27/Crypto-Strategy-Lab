@@ -52,6 +52,19 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_editor_surface():
         window.close()
 
 
+def test_direction_selector_contains_only_current_di_strategy():
+    _app, window = _window()
+    try:
+        selector = window.rule_builder.direction_mode
+        assert selector.count() == 1
+        assert selector.currentData() == "DI"
+        assert selector.currentText() == "DI Direction"
+        assert selector.findData("LONG_ONLY") == -1
+        assert selector.findData("SHORT_ONLY") == -1
+    finally:
+        window.close()
+
+
 def test_di_spread_30_rule_builds_one_rule_thesis_across_allowed_markets():
     _app, window = _window()
     try:
@@ -100,22 +113,26 @@ def test_rule_builder_roundtrip_recovers_rules_and_one_base_execution_plan():
         window.close()
 
 
-def test_market_permissions_are_not_strategy_profiles_in_the_visible_model():
+def test_long_only_trading_uses_permissions_without_forcing_direction():
     _app, window = _window()
     try:
         for key, check in window.rule_builder.permission_checks.items():
             check.setChecked(key in {"BULL_LONG", "BEAR_LONG", "SIDEWAYS_LONG"})
-        index = window.rule_builder.direction_mode.findData("LONG_ONLY")
-        window.rule_builder.direction_mode.setCurrentIndex(index)
         config = window.build_config()
 
+        assert window.rule_builder.direction_mode.currentData() == "DI"
         assert window.rule_builder.market_permissions() == (
             "BULL_LONG", "BEAR_LONG", "SIDEWAYS_LONG"
         )
-        # Both source-DI branches are internally enabled because either may occur
-        # on a candle, but both compile to the same actual LONG thesis.
         assert config.strategy.profiles["bull_long"].enabled
-        assert config.strategy.profiles["bull_short"].enabled
-        assert config.strategy.profiles["bull_short"].flip_direction
+        assert not config.strategy.profiles["bull_short"].enabled
+        assert config.strategy.profiles["bear_long"].enabled
+        assert not config.strategy.profiles["bear_short"].enabled
+        assert config.strategy.profiles["sideways_long"].enabled
+        assert not config.strategy.profiles["sideways_short"].enabled
+        assert all(
+            not profile.flip_direction
+            for profile in config.strategy.profiles.values()
+        )
     finally:
         window.close()
