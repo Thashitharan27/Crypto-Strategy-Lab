@@ -17,7 +17,11 @@ from .feature_research import (
     _write_parquet_atomic,
     write_research_artifacts,
 )
-from .report_workbooks import build_backtest_workbook
+from .report_workbooks import (
+    build_backtest_workbook,
+    build_performance_breakdowns,
+    build_periodic_breakdown,
+)
 from .run_manifest import (
     CATALOG_SNAPSHOT_CONTRACT,
     PREPARED_CACHE_CONTRACT,
@@ -214,6 +218,27 @@ def _validate_signal_artifact(
             raise ValueError("entered signal count does not match completed trades")
 
 
+def _build_human_workbook(
+    summary: dict[str, Any],
+    report_config: Any,
+    run_dir: Path,
+    trades: pd.DataFrame,
+) -> Path:
+    """Build all human-facing tables directly from the completed modern trades."""
+    monthly = build_periodic_breakdown(trades, "ME")
+    yearly = build_periodic_breakdown(trades, "YE")
+    market_regime, direction_regime = build_performance_breakdowns(trades)
+    return build_backtest_workbook(
+        summary,
+        report_config,
+        run_dir,
+        monthly,
+        yearly,
+        market_regime,
+        direction_regime,
+    )
+
+
 class CsvManifestReporter:
     """Publish all artifacts, validate them, then atomically publish the manifest."""
 
@@ -350,12 +375,11 @@ class CsvManifestReporter:
             use_intrabar_data=context.config.data.use_intrabar_data,
             initial_equity=initial_equity,
         )
-        workbook = build_backtest_workbook(
+        workbook = _build_human_workbook(
             summary,
             report_config,
             run_dir,
-            pd.DataFrame(),
-            pd.DataFrame(),
+            result.trades,
         )
 
         with duckdb.connect() as con:
