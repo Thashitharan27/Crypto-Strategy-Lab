@@ -20,7 +20,7 @@ def test_v3_is_strict_and_flat_aliases_are_rejected():
         )
 
 
-def test_v3_defaults_preserve_pre_split_data_lake_semantics():
+def test_v3_defaults_preserve_current_data_lake_semantics():
     config = ResearchRunConfig()
     assert config.data.strategy_timeframe_minutes == 15
     assert config.data.intrabar_timeframe_minutes == 1
@@ -35,7 +35,8 @@ def test_v3_defaults_preserve_pre_split_data_lake_semantics():
     assert config.execution.risk_per_leg == pytest.approx(0.01)
     assert config.execution.slippage == pytest.approx(0.0005)
     assert config.reporting.telemetry_interval_minutes == 15
-    assert config.reporting.save_indicator_analysis_reports is True
+    assert config.reporting.create_human_workbook is True
+    assert config.reporting.save_indicator_analysis_reports is False
     assert config.reporting.create_standard_charts is True
 
 
@@ -109,7 +110,7 @@ def test_active_telemetry_interval_must_align_to_strategy_timeframe():
             telemetry_interval_minutes=15,
         ),
     )
-    with pytest.raises(ValueError, match="telemetry interval must be a multiple"):
+    with pytest.raises(ValueError, match="diagnostic sampling interval must be a multiple"):
         invalid.validate()
 
     valid = replace(
