@@ -17,8 +17,11 @@ from .feature_research import (
     _write_parquet_atomic,
     write_research_artifacts,
 )
+from .lifecycle import export_lifecycle_reports
+from .plots import save_plots
 from .report_workbooks import (
     build_backtest_workbook,
+    build_indicator_workbook,
     build_performance_breakdowns,
     build_periodic_breakdown,
 )
@@ -37,7 +40,22 @@ from .run_manifest import (
     runtime_provenance,
     selected_source_snapshot,
 )
-from .statistics import summarize
+from .statistics import (
+    adx_analysis,
+    bb_width_analysis,
+    di_pressure_analysis,
+    di_spread_analysis,
+    equity_curve,
+    mean_reversion_analysis,
+    summarize,
+)
+from .telemetry import (
+    add_journey_columns,
+    save_journey_charts,
+    stop_loss_journey_analysis,
+    trade_journey_analysis,
+    winner_loser_journey_analysis,
+)
 
 
 def _catalog_entry(
@@ -239,8 +257,116 @@ def _build_human_workbook(
     )
 
 
+def _write_optional_diagnostics(
+    run_dir: Path,
+    trades: pd.DataFrame,
+    telemetry: pd.DataFrame,
+    reporting,
+    initial_equity: float,
+) -> Path | None:
+    """Generate only explicitly requested human/diagnostic outputs.
+
+    The canonical trade/context artifacts are already complete before this runs.
+    Diagnostics operate on copies or on passive telemetry and never mutate the
+    authoritative trades used for fingerprinting or strategy outcomes.
+    """
+    requested = any(
+        (
+            reporting.create_standard_charts,
+            reporting.save_indicator_analysis_reports,
+            reporting.save_full_telemetry_csv,
+            reporting.save_trade_journey_summary,
+            reporting.save_trade_journey_charts,
+            reporting.enable_indicator_lifecycle_analysis,
+        )
+    )
+    if not requested:
+        return None
+
+    diagnostics = run_dir / "diagnostics"
+    diagnostics.mkdir(parents=True, exist_ok=True)
+
+    if reporting.create_standard_charts:
+        equity = equity_curve(trades, initial_equity)
+        save_plots(trades, equity, diagnostics / "standard_charts")
+
+    if reporting.save_indicator_analysis_reports:
+        indicator_dir = diagnostics / "indicator_analysis"
+        indicator_dir.mkdir(parents=True, exist_ok=True)
+        mr = mean_reversion_analysis(trades)
+        build_indicator_workbook(
+            {
+                "ADX": adx_analysis(trades),
+                "BB Width": bb_width_analysis(trades),
+                "DI Spread": di_spread_analysis(trades),
+                "DI Pressure": di_pressure_analysis(trades),
+                "Mean Reversion": mr,
+            },
+            indicator_dir,
+        )
+        mr.to_csv(indicator_dir / "di_mean_reversion_analysis.csv", index=False)
+
+    needs_telemetry = bool(
+        reporting.enable_trade_telemetry
+        or reporting.enable_indicator_lifecycle_analysis
+    )
+    if needs_telemetry and not trades.empty and telemetry.empty:
+        raise ValueError("requested diagnostics did not receive passive trade telemetry")
+
+    journey_trades = None
+    if reporting.enable_trade_telemetry:
+        journey_trades = add_journey_columns(trades, telemetry)
+        journey_dir = diagnostics / "trade_journey"
+        journey_dir.mkdir(parents=True, exist_ok=True)
+        if reporting.save_full_telemetry_csv:
+            telemetry.to_csv(journey_dir / "trade_telemetry.csv", index=False)
+        if reporting.save_trade_journey_summary:
+            trade_journey_analysis(journey_trades).to_csv(
+                journey_dir / "trade_journey_analysis.csv", index=False
+            )
+            winner_loser_journey_analysis(journey_trades).to_csv(
+                journey_dir / "winner_loser_journey_analysis.csv", index=False
+            )
+            stop_loss_journey_analysis(journey_trades, telemetry).to_csv(
+                journey_dir / "stop_loss_journey_analysis.csv", index=False
+            )
+        if reporting.save_trade_journey_charts:
+            save_journey_charts(
+                journey_trades,
+                telemetry,
+                journey_dir / "charts",
+            )
+
+    if reporting.enable_indicator_lifecycle_analysis:
+        lifecycle_dir = diagnostics / "indicator_lifecycle"
+        lifecycle_dir.mkdir(parents=True, exist_ok=True)
+        export_lifecycle_reports(
+            trades,
+            telemetry,
+            lifecycle_dir,
+            phases=reporting.lifecycle_phases,
+            checkpoints=reporting.lifecycle_early_checkpoints,
+            minimum_sample=reporting.lifecycle_minimum_bucket_sample,
+            charts=reporting.create_lifecycle_charts,
+            flat_threshold_pct=reporting.lifecycle_flat_pattern_threshold_pct,
+        )
+    return diagnostics
+
+
+def _catalog_diagnostics(root: Path | None, run_dir: Path) -> dict[str, dict[str, Any]]:
+    if root is None or not root.exists():
+        return {}
+    result = {}
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        relative = path.relative_to(root).as_posix()
+        key = "diagnostic_" + "_".join(Path(relative).with_suffix("").parts)
+        fmt = path.suffix.lower().lstrip(".") or "binary"
+        result[key] = _catalog_entry(path, run_dir, fmt, None, optional=True)
+    return result
+
+
 class CsvManifestReporter:
-    """Publish all artifacts, validate them, then atomically publish the manifest."""
+    """Publish mandatory artifacts, optional diagnostics, then the manifest."""
 
     def __init__(self, output_root: Path):
         self.output_root = Path(output_root)
@@ -269,7 +395,8 @@ class CsvManifestReporter:
         provenance_dir = run_dir / "provenance"
         provenance_dir.mkdir()
 
-        # Task 16 owns the one authoritative trade/context Parquets.
+        # Task 16 owns the one authoritative trade/context Parquets. These are
+        # never optional because completed runs must remain reproducible/queryable.
         research = write_research_artifacts(
             run_dir, result, context, authoritative_layout=True
         )
@@ -375,11 +502,21 @@ class CsvManifestReporter:
             use_intrabar_data=context.config.data.use_intrabar_data,
             initial_equity=initial_equity,
         )
-        workbook = _build_human_workbook(
-            summary,
-            report_config,
+        workbook = None
+        if context.config.reporting.create_human_workbook:
+            workbook = _build_human_workbook(
+                summary,
+                report_config,
+                run_dir,
+                result.trades,
+            )
+
+        diagnostics_root = _write_optional_diagnostics(
             run_dir,
             result.trades,
+            telemetry,
+            context.config.reporting,
+            initial_equity,
         )
 
         with duckdb.connect() as con:
@@ -430,11 +567,13 @@ class CsvManifestReporter:
                 trade_csv, run_dir, "csv", expected_count
             ),
             "summary": _catalog_entry(summary_path, run_dir, "json", None),
-            "workbook": _catalog_entry(workbook, run_dir, "xlsx", None),
             "data_quality": _catalog_entry(
                 quality_path, run_dir, "json", None
             ),
         }
+        if workbook is not None:
+            artifacts["workbook"] = _catalog_entry(workbook, run_dir, "xlsx", None)
+        artifacts.update(_catalog_diagnostics(diagnostics_root, run_dir))
 
         grouped: dict[tuple[str, Any], list[dict[str, Any]]] = {}
         for row in source_rows:
