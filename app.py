@@ -7,12 +7,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 from crypto_strategy_lab.gui.run_progress import install_run_progress
-# The active researcher window layers the Setup readiness workspace over the
-# rule-based strategy builder while keeping the proven v2 data/results shell.
+# The active researcher window layers run-faithful readiness over the compact
+# Setup workspace while keeping the proven v2 data/results shell.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
-from crypto_strategy_lab.gui import setup_main_window
+from crypto_strategy_lab.gui import run_readiness
 
-MainWindow = setup_main_window.MainWindow
+MainWindow = run_readiness.MainWindow
 assert issubclass(MainWindow, StableGuiShell)
 
 
