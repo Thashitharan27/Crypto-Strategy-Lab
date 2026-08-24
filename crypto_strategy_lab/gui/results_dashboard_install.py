@@ -1,6 +1,7 @@
 """Final GUI composition for the human-focused Results Dashboard."""
 from __future__ import annotations
 
+from .completed_run_research import install_completed_run_research_actions
 from .results_dashboard_workspace import ResultsDashboardWorkspace
 
 
@@ -50,4 +51,5 @@ def apply_results_dashboard_workspace(window) -> None:
         workspace.refresh_completed_run()
 
     window._finished = finished_and_refresh
+    install_completed_run_research_actions(window, workspace)
     workspace.refresh_completed_run()
