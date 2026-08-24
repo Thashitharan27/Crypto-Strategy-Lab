@@ -56,12 +56,19 @@ def prepared_policy_config(run_config) -> PreparedPolicyConfig:
     )
 
 
-def native_simulator_config(data_config, feature_config, strategy_config, execution_config):
+def native_simulator_config(
+    data_config,
+    feature_config,
+    strategy_config,
+    execution_config,
+    reporting_config=None,
+):
     """Translate composition only at the mature simulator boundary.
 
-    ReportingConfig is intentionally absent: report/output changes cannot alter
-    simulation configuration or L3 identity. The returned EnhancedBacktestConfig
-    is an implementation adapter, not the authoritative serialized contract.
+    Reporting choices never participate in strategy or prepared-cache identity.
+    The only reporting setting allowed into the mature engine is passive telemetry
+    capture, which observes already-open trades without changing entries, exits,
+    sizing, fills, or any other trading decision.
     """
 
     values = enhanced_default_gui_config()
@@ -80,16 +87,29 @@ def native_simulator_config(data_config, feature_config, strategy_config, execut
         )
         for key in strategy_config.profiles
     }
-    # Inert compatibility fields required by the mature config constructor.
-    # Telemetry/reporting is owned outside the simulator in the composed path;
-    # using the strategy interval here only satisfies the legacy validation rule.
+
+    telemetry_enabled = bool(
+        reporting_config is not None
+        and (
+            getattr(reporting_config, "enable_trade_telemetry", False)
+            or getattr(reporting_config, "enable_indicator_lifecycle_analysis", False)
+        )
+    )
+    telemetry_interval = (
+        int(reporting_config.telemetry_interval_minutes)
+        if telemetry_enabled
+        else int(data_config.strategy_timeframe_minutes)
+    )
+
+    # Output generation stays downstream in CsvManifestReporter.  These mature
+    # compatibility fields only switch on passive observation when requested.
     values.update(
         input_csv="",
         intrabar_csv=None,
         output_dir="output",
         structural_regime_benchmark_csv=None,
-        telemetry_interval_minutes=int(data_config.strategy_timeframe_minutes),
-        enable_trade_telemetry=False,
+        telemetry_interval_minutes=telemetry_interval,
+        enable_trade_telemetry=telemetry_enabled,
         save_full_telemetry_csv=False,
         save_trade_journey_summary=False,
         save_trade_journey_charts=False,
@@ -267,6 +287,11 @@ class NativeSimulator:
         self.last_simulation_seconds = 0.0
         self.last_signals: pd.DataFrame | None = None
         self.last_telemetry: pd.DataFrame | None = None
+        self._reporting_config = None
+
+    def configure_observation(self, reporting_config) -> None:
+        """Configure passive diagnostics without participating in strategy identity."""
+        self._reporting_config = reporting_config
 
     def run(
         self,
@@ -285,6 +310,7 @@ class NativeSimulator:
             feature_config,
             strategy.config,
             execution_config,
+            self._reporting_config,
         )
         self.last_signals = None
         self.last_telemetry = None
