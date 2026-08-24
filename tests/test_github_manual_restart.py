@@ -1,7 +1,5 @@
-from pathlib import Path
 from types import SimpleNamespace
 
-from crypto_strategy_lab.gui import app_restart
 from crypto_strategy_lab.gui import github_sync_install
 from crypto_strategy_lab.gui.github_sync_install import (
     GitUpdateResult,
@@ -83,20 +81,16 @@ def test_dependency_file_detection_covers_current_and_common_python_metadata():
     assert not is_dependency_file("crypto_strategy_lab/gui/github_manager.py")
 
 
-def test_normal_update_requests_clean_restart_immediately(monkeypatch):
+def test_normal_update_stays_open_and_requires_manual_restart(monkeypatch):
     manager = _Manager(("app.py", "crypto_strategy_lab/gui/example.py"))
     widget = _Widget(manager)
     window = _Window(widget)
-    app = SimpleNamespace(quit_calls=0)
+    messages = []
 
-    def quit_app():
-        app.quit_calls += 1
-
-    app.quit = quit_app
     monkeypatch.setattr(
-        github_sync_install,
-        "QApplication",
-        SimpleNamespace(instance=lambda: app),
+        github_sync_install.QMessageBox,
+        "information",
+        lambda *_args: messages.append(_args[-1]),
     )
 
     apply_github_sync_safety(window)
@@ -107,30 +101,23 @@ def test_normal_update_requests_clean_restart_immediately(monkeypatch):
 
     widget._pulled(result)
 
-    assert window._restart_after_exit is True
-    assert app.quit_calls == 1
-    assert widget.state.text == "● Update installed"
-    assert "Restarting Crypto Strategy Lab" in widget.status_detail.text
+    assert widget.state.text == "● Update installed — restart required"
+    assert "Close and reopen Crypto Strategy Lab" in widget.status_detail.text
     assert not widget.pull_btn.enabled
     assert not widget.refresh.enabled
+    assert not widget.review.enabled
+    assert not widget.commit_btn.enabled
+    assert messages
+    assert "Close and reopen Crypto Strategy Lab" in messages[0]
+    assert not hasattr(window, "_restart_after_exit")
 
 
-def test_dependency_update_closes_without_restart(monkeypatch):
+def test_dependency_update_stays_open_and_requires_environment_refresh(monkeypatch):
     manager = _Manager(("requirements.txt", "app.py"))
     widget = _Widget(manager)
     window = _Window(widget)
-    app = SimpleNamespace(quit_calls=0)
     messages = []
 
-    def quit_app():
-        app.quit_calls += 1
-
-    app.quit = quit_app
-    monkeypatch.setattr(
-        github_sync_install,
-        "QApplication",
-        SimpleNamespace(instance=lambda: app),
-    )
     monkeypatch.setattr(
         github_sync_install.QMessageBox,
         "information",
@@ -143,23 +130,23 @@ def test_dependency_update_closes_without_restart(monkeypatch):
 
     widget._pulled(result)
 
-    assert window._restart_after_exit is False
-    assert app.quit_calls == 1
+    assert widget.state.text == "● Update installed — restart required"
+    assert "Dependency files changed" in widget.status_detail.text
     assert messages
-    assert "will close now" in messages[0]
+    assert "Close Crypto Strategy Lab" in messages[0]
     assert "pip install -r requirements.txt" in messages[0]
+    assert not hasattr(window, "_restart_after_exit")
 
 
-def test_no_actual_update_refreshes_without_restarting(monkeypatch):
+def test_no_actual_update_refreshes_normally(monkeypatch):
     manager = _Manager(updated=False)
     widget = _Widget(manager)
     window = _Window(widget)
-    app = SimpleNamespace(quit_calls=0, quit=lambda: None)
 
     monkeypatch.setattr(
-        github_sync_install,
-        "QApplication",
-        SimpleNamespace(instance=lambda: app),
+        github_sync_install.QMessageBox,
+        "information",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("unexpected message")),
     )
 
     apply_github_sync_safety(window)
@@ -168,24 +155,11 @@ def test_no_actual_update_refreshes_without_restarting(monkeypatch):
 
     widget._pulled(result)
 
-    assert window._restart_after_exit is False
     assert widget.refresh_calls == [False]
+    assert not hasattr(window, "_restart_after_exit")
 
 
-def test_replacement_process_uses_same_python_without_shell(monkeypatch, tmp_path):
-    calls = []
-    app_path = tmp_path / "app.py"
-    app_path.write_text("print('ok')\n")
-
-    monkeypatch.setattr(
-        app_restart.subprocess,
-        "Popen",
-        lambda command, **kwargs: calls.append((command, kwargs)) or object(),
-    )
-
-    app_restart.launch_replacement("/opt/project/python", app_path)
-
-    command, kwargs = calls[0]
-    assert command == [str(Path("/opt/project/python").resolve()), str(app_path.resolve())]
-    assert kwargs["cwd"] == str(tmp_path.resolve())
-    assert kwargs["shell"] is False
+def test_app_entrypoint_has_no_relaunch_hook():
+    source = open("app.py", encoding="utf-8").read()
+    assert "launch_replacement" not in source
+    assert "_restart_after_exit" not in source

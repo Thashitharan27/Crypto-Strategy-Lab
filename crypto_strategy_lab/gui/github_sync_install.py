@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 from .github_manager import GitHubIntegrationWidget
 
@@ -62,8 +62,20 @@ def _pull_with_metadata(manager, pull_fn) -> GitUpdateResult:
     return GitUpdateResult(output, before, after, changed_files)
 
 
+def _mark_restart_required(widget: GitHubIntegrationWidget, detail: str) -> None:
+    """Leave the current process running but make its stale-code state explicit."""
+    widget.state.setText("● Update installed — restart required")
+    widget.status_detail.setText(detail)
+    # The repository changed underneath this running Python process. Avoid more
+    # Git mutations from the stale process; the user can close and reopen the app.
+    widget.pull_btn.setEnabled(False)
+    widget.refresh.setEnabled(False)
+    widget.review.setEnabled(False)
+    widget.commit_btn.setEnabled(False)
+
+
 def apply_github_sync_safety(window) -> None:
-    """Bind Git actions to run safety and controlled application restart."""
+    """Bind Git actions to run safety and a deliberate manual restart workflow."""
     if getattr(window, "_github_sync_safety_installed", False):
         return
 
@@ -77,7 +89,6 @@ def apply_github_sync_safety(window) -> None:
 
     widget.active_work = active_work
     window.github_sync = widget
-    window._restart_after_exit = False
 
     original_pull = widget.manager.pull
 
@@ -85,21 +96,6 @@ def apply_github_sync_safety(window) -> None:
         return _pull_with_metadata(widget.manager, original_pull)
 
     widget.manager.pull = pull_with_metadata
-
-    def request_restart() -> None:
-        if active_work():
-            widget._error("Restart is disabled while a backtest or portfolio run is active.")
-            return
-        window._restart_after_exit = True
-        app = QApplication.instance()
-        if app is not None:
-            app.quit()
-
-    def close_without_restart() -> None:
-        window._restart_after_exit = False
-        app = QApplication.instance()
-        if app is not None:
-            app.quit()
 
     def update_completed(result: GitUpdateResult) -> None:
         widget._log("Update completed")
@@ -110,30 +106,31 @@ def apply_github_sync_safety(window) -> None:
         dependency_files = result.dependency_files
         if dependency_files:
             changed = "\n".join(f"• {path}" for path in dependency_files)
+            _mark_restart_required(
+                widget,
+                "Dependency files changed. Close Crypto Strategy Lab, refresh the Python environment, then reopen it.",
+            )
             QMessageBox.information(
                 widget,
-                "Update downloaded — dependency refresh required",
-                "The GitHub update was downloaded, but Python dependency files changed:\n\n"
+                "Update installed — dependency refresh required",
+                "The GitHub update was installed, but Python dependency files changed:\n\n"
                 f"{changed}\n\n"
-                "Crypto Strategy Lab will close now instead of reopening with stale packages.\n\n"
-                "For the current Windows setup, run:\n"
+                "Close Crypto Strategy Lab. For the current Windows setup, run:\n"
                 ".venv\\Scripts\\python.exe -m pip install -r requirements.txt\n\n"
                 "Then reopen Crypto Strategy Lab.",
             )
-            close_without_restart()
             return
 
-        widget.state.setText("● Update installed")
-        widget.status_detail.setText("Restarting Crypto Strategy Lab with the new version…")
-        widget.pull_btn.setEnabled(False)
-        widget.refresh.setEnabled(False)
-        widget.review.setEnabled(False)
-        widget.commit_btn.setEnabled(False)
-        # Pull completion is already delivered on the GUI thread. Restart
-        # immediately instead of depending on a delayed timer callback surviving
-        # the async Git task handoff.
-        request_restart()
+        _mark_restart_required(
+            widget,
+            "Close and reopen Crypto Strategy Lab to use the updated version.",
+        )
+        QMessageBox.information(
+            widget,
+            "Update installed",
+            "The GitHub update was installed successfully.\n\n"
+            "Close and reopen Crypto Strategy Lab to use the new version.",
+        )
 
     widget._pulled = update_completed
-    window.request_application_restart = request_restart
     window._github_sync_safety_installed = True
