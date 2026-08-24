@@ -43,6 +43,7 @@ def test_autostart_becomes_default_once_then_preserves_opt_out(qapp, tmp_path):
 
 def test_post_show_hook_schedules_current_chat_widget(qapp, tmp_path, monkeypatch):
     window, widget, _settings = _window_with_chat(tmp_path)
+    original = window.start_post_show_tasks
     callback = Mock()
     try:
         apply_chatgpt_autostart(window)
@@ -50,7 +51,6 @@ def test_post_show_hook_schedules_current_chat_widget(qapp, tmp_path, monkeypatc
             "crypto_strategy_lab.gui.chatgpt_autostart_install._auto_start_if_ready",
             callback,
         )
-        original = window.start_post_show_tasks.__closure__[0].cell_contents
         window.start_post_show_tasks()
         qapp.processEvents()
 
