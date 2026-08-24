@@ -41,6 +41,9 @@ class RunProgressRelay(QObject):
         progress = self.window.progress
         stage = self.window.stage
         detail = self.window.run_progress_detail
+        status = getattr(self.window, "run_progress_status", None)
+        if status is not None:
+            status.show()
 
         if kind == "cache":
             completed = max(0, int(payload.get("completed", 0) or 0))
@@ -130,6 +133,10 @@ def install_run_progress(window) -> None:
     status_layout.addWidget(window.progress)
     status_layout.addWidget(window.run_progress_detail)
     layout.addWidget(status, 1)
+    window.run_progress_status = status
+    # Idle Review & Run should emphasize readiness, not an inactive progress bar.
+    # Validation or runner events reveal this same status widget when activity starts.
+    status.hide()
 
     relay = RunProgressRelay(window)
     window._run_progress_relay = relay
