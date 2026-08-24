@@ -96,6 +96,12 @@ def apply_github_sync_safety(window) -> None:
         if app is not None:
             app.quit()
 
+    def close_without_restart() -> None:
+        window._restart_after_exit = False
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     def update_completed(result: GitUpdateResult) -> None:
         widget._log("Update completed")
         if not result.updated:
@@ -104,18 +110,18 @@ def apply_github_sync_safety(window) -> None:
 
         dependency_files = result.dependency_files
         if dependency_files:
-            widget.refresh_status(False)
             changed = "\n".join(f"• {path}" for path in dependency_files)
             QMessageBox.information(
                 widget,
                 "Update downloaded — dependency refresh required",
                 "The GitHub update was downloaded, but Python dependency files changed:\n\n"
                 f"{changed}\n\n"
-                "Crypto Strategy Lab will not restart automatically with stale packages.\n\n"
+                "Crypto Strategy Lab will close now instead of reopening with stale packages.\n\n"
                 "For the current Windows setup, run:\n"
                 ".venv\\Scripts\\python.exe -m pip install -r requirements.txt\n\n"
                 "Then reopen Crypto Strategy Lab.",
             )
+            close_without_restart()
             return
 
         widget.state.setText("● Update installed")
