@@ -130,7 +130,10 @@ def apply_github_sync_safety(window) -> None:
         widget.refresh.setEnabled(False)
         widget.review.setEnabled(False)
         widget.commit_btn.setEnabled(False)
-        QTimer.singleShot(200, request_restart)
+        # Pull completion is already delivered on the GUI thread. Restart
+        # immediately instead of depending on a delayed timer callback surviving
+        # the async Git task handoff.
+        request_restart()
 
     widget._pulled = update_completed
     window.request_application_restart = request_restart
