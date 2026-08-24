@@ -21,6 +21,7 @@ CATALOG_SNAPSHOT_CONTRACT = "selected_source_catalog_v1"
 PREPARED_CACHE_CONTRACT = "prepared_backtest_frame_v1"
 FEATURE_RESEARCH_ARTIFACT_CONTRACT = "feature_research_v1"
 FEATURE_RESEARCH_ARTIFACT_VERSION = 1
+_CREATE_NO_WINDOW = 0x08000000
 
 
 class RunArtifactError(ValueError):
@@ -69,9 +70,16 @@ def new_run_identity() -> tuple[str, str]:
     return uuid.uuid4().hex, datetime.now(timezone.utc).isoformat()
 
 
+def _git_subprocess_kwargs(platform_name: str | None = None) -> dict[str, int]:
+    """Hide internal Git helper consoles when provenance runs inside the Windows GUI."""
+    name = os.name if platform_name is None else platform_name
+    return {"creationflags": _CREATE_NO_WINDOW} if name == "nt" else {}
+
+
 def capture_code_provenance(repo: Path | None = None) -> dict[str, Any]:
     """Capture code identity without treating generated outputs as code changes."""
     repo = Path(repo or Path(__file__).resolve().parents[1])
+    process_kwargs = _git_subprocess_kwargs()
     try:
         commit = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -79,6 +87,7 @@ def capture_code_provenance(repo: Path | None = None) -> dict[str, Any]:
             check=True,
             capture_output=True,
             text=True,
+            **process_kwargs,
         ).stdout.strip()
         status = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=all"],
@@ -86,6 +95,7 @@ def capture_code_provenance(repo: Path | None = None) -> dict[str, Any]:
             check=True,
             capture_output=True,
             text=True,
+            **process_kwargs,
         ).stdout
         lines = [line for line in status.splitlines() if line.strip()]
         tracked_changes = [line for line in lines if not line.startswith("?? ")]
@@ -111,6 +121,7 @@ def capture_code_provenance(repo: Path | None = None) -> dict[str, Any]:
                 cwd=repo,
                 check=True,
                 capture_output=True,
+                **process_kwargs,
             ).stdout
             result["tracked_diff_sha256"] = hashlib.sha256(diff).hexdigest()
             result["untracked_source_paths"] = untracked_source_paths
