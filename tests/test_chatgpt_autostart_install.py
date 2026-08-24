@@ -18,6 +18,10 @@ def _window_with_chat(tmp_path):
     return window, widget, settings
 
 
+def _fresh_settings(tmp_path):
+    return QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
+
+
 def test_autostart_becomes_default_once_then_preserves_opt_out(qapp, tmp_path):
     window, widget, settings = _window_with_chat(tmp_path)
     try:
@@ -28,8 +32,8 @@ def test_autostart_becomes_default_once_then_preserves_opt_out(qapp, tmp_path):
         assert settings.value("chatgpt_auto_start_default_v1", type=bool) is True
 
         widget.auto_start.setChecked(False)
-        settings.sync()
-        assert settings.value("auto_start_chatgpt_connection", type=bool) is False
+        probe = _fresh_settings(tmp_path)
+        assert probe.value("auto_start_chatgpt_connection", type=bool) is False
     finally:
         window.close()
 
@@ -37,6 +41,31 @@ def test_autostart_becomes_default_once_then_preserves_opt_out(qapp, tmp_path):
     try:
         apply_chatgpt_autostart(second_window)
         assert second_widget.auto_start.isChecked() is False
+    finally:
+        second_window.close()
+
+
+def test_user_enabled_autostart_survives_widget_recreation_without_manual_sync(qapp, tmp_path):
+    window, widget, settings = _window_with_chat(tmp_path)
+    try:
+        # Mark the one-time default migration complete, then exercise the same
+        # manual checkbox action a researcher performs in the real GUI.
+        settings.setValue("chatgpt_auto_start_default_v1", True)
+        settings.setValue("auto_start_chatgpt_connection", False)
+        settings.sync()
+        widget.auto_start.setChecked(False)
+        apply_chatgpt_autostart(window)
+
+        widget.auto_start.setChecked(True)
+        probe = _fresh_settings(tmp_path)
+        assert probe.value("auto_start_chatgpt_connection", type=bool) is True
+    finally:
+        window.close()
+
+    second_window, second_widget, _settings = _window_with_chat(tmp_path)
+    try:
+        apply_chatgpt_autostart(second_window)
+        assert second_widget.auto_start.isChecked() is True
     finally:
         second_window.close()
 
