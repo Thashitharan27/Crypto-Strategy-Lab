@@ -40,6 +40,15 @@ TIMING_LABELS = (
     ("reporting", "Reporting"),
 )
 
+INTERVAL_LABELS = {
+    "1m": "1 Minute",
+    "5m": "5 Minutes",
+    "15m": "15 Minutes",
+    "1h": "1 Hour",
+    "4h": "4 Hours",
+    "1d": "1 Day",
+}
+
 
 def _number(value, default=0.0) -> float:
     try:
@@ -67,6 +76,18 @@ def _duration(seconds) -> str:
         return f"{minutes}m {secs:02d}s"
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h {minutes:02d}m"
+
+
+def _profit_factor(value) -> str:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    if math.isinf(result) and result > 0:
+        return "∞"
+    if not math.isfinite(result):
+        return "—"
+    return f"{result:.2f}"
 
 
 def _quality_label(raw: object) -> tuple[str, str]:
@@ -241,7 +262,7 @@ class ResultsDashboardWorkspace(QWidget):
         request = manifest.get("request", {})
         symbol = str(request.get("symbol") or run_dir.name.split("_", 1)[0] or "Run")
         interval = str(request.get("requested_strategy_interval") or "").strip()
-        interval_text = interval or "Strategy timeframe"
+        interval_text = INTERVAL_LABELS.get(interval, interval or "Strategy timeframe")
         self.run_title.setText(f"{symbol} · {interval_text}")
         start = str(request.get("start") or "").split("T", 1)[0]
         end = str(request.get("end") or "").split("T", 1)[0]
@@ -266,7 +287,6 @@ class ResultsDashboardWorkspace(QWidget):
         net_pnl = _number(summary.get("net_pnl"))
         total_return = _number(summary.get("total_return_percentage"))
         ending_equity = _number(summary.get("ending_equity"))
-        profit_factor = _number(summary.get("profit_factor"))
         drawdown = _number(summary.get("maximum_drawdown_percentage"))
         fees = _number(summary.get("total_fees"))
 
@@ -277,7 +297,7 @@ class ResultsDashboardWorkspace(QWidget):
         self.metric_values["net_pnl"].setText(_money(net_pnl, signed=True))
         self.metric_values["return"].setText(_signed(total_return, "%", 1))
         self.metric_values["ending_equity"].setText(_money(ending_equity))
-        self.metric_values["profit_factor"].setText(f"{profit_factor:.2f}")
+        self.metric_values["profit_factor"].setText(_profit_factor(summary.get("profit_factor")))
         self.drawdown_value.setText(_signed(drawdown, "%", 1))
         self.fees_value.setText(_money(fees))
 
