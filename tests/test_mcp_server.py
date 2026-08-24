@@ -60,15 +60,10 @@ def _make_run(
             "decision": ["ENTER", "REJECT"],
         }
     )
-    telemetry = pd.DataFrame(
-        {"event_time": pd.to_datetime(["2026-01-01T00:00:00Z"]), "event_type": ["TEST"]}
-    )
     trades_path = artifacts / "trades.parquet"
     signals_path = artifacts / "signals.parquet"
-    telemetry_path = artifacts / "telemetry.parquet"
     _write_parquet(trades_path, trades)
     _write_parquet(signals_path, signals)
-    _write_parquet(telemetry_path, telemetry)
 
     trade_csv = run / "trade_list.csv"
     trades.to_csv(trade_csv, index=False)
@@ -117,7 +112,6 @@ def _make_run(
         "artifacts": {
             "trades": _artifact(trades_path, run, "parquet", 2),
             "signals": _artifact(signals_path, run, "parquet", 2),
-            "telemetry": _artifact(telemetry_path, run, "parquet", 1),
             "trade_csv": _artifact(trade_csv, run, "csv", 2),
             "summary": _artifact(summary_path, run, "json"),
         },
@@ -171,7 +165,7 @@ def test_manifest_backed_listing_latest_and_reads(reports: BacktestReports):
     assert reports.get_run_manifest("run-one")["run_id"] == "run-one"
 
 
-def test_parquet_trade_signal_and_telemetry_queries_are_read_only(reports: BacktestReports):
+def test_parquet_trade_and_signal_queries_are_read_only(reports: BacktestReports):
     selected = reports.query_trades(
         "run-one", "SELECT side, pnl FROM trades ORDER BY pnl DESC"
     )
@@ -179,9 +173,7 @@ def test_parquet_trade_signal_and_telemetry_queries_are_read_only(reports: Backt
     assert reports.query_signals(
         "run-one", "SELECT count(*) FROM signals WHERE decision='ENTER'"
     )["rows"] == [[1]]
-    assert reports.query_telemetry(
-        "run-one", "SELECT count(*) FROM telemetry"
-    )["rows"] == [[1]]
+    assert not hasattr(reports, "query_telemetry")
 
     forbidden = [
         "DELETE FROM trades",
@@ -230,7 +222,6 @@ def test_create_server_registers_modern_read_only_tools(reports: BacktestReports
         "read_report",
         "query_trades",
         "query_signals",
-        "query_telemetry",
         "research_aggregate",
         "compare_runs",
     }
