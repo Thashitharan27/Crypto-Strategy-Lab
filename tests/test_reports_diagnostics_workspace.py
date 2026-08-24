@@ -1,4 +1,4 @@
-"""Acceptance tests for the active Reports & Diagnostics redesign."""
+"""Acceptance tests for the active artifact-oriented Reports & Diagnostics UI."""
 from __future__ import annotations
 
 from dataclasses import replace
@@ -29,13 +29,18 @@ def test_reporting_profiles_are_deterministic_and_preserve_run_details():
         assert first.run_name == "named-run"
         assert first.output_dir == "custom/output"
         assert matching_reporting_profile(first) == profile
+        assert first.enable_trade_telemetry is False
+        assert first.enable_indicator_lifecycle_analysis is False
 
     assert apply_reporting_profile(base, "CORE").create_standard_charts is False
-    assert apply_reporting_profile(base, "REVIEW").create_standard_charts is True
+    review = apply_reporting_profile(base, "REVIEW")
+    assert review.create_standard_charts is True
+    assert review.save_indicator_analysis_reports is True
+    assert review.save_feature_analysis_reports is False
     deep = apply_reporting_profile(base, "DEEP_DIAGNOSTICS")
-    assert deep.enable_trade_telemetry is True
-    assert deep.save_full_telemetry_csv is True
-    assert deep.enable_indicator_lifecycle_analysis is True
+    assert deep.create_standard_charts is True
+    assert deep.save_indicator_analysis_reports is True
+    assert deep.save_feature_analysis_reports is True
 
 
 def test_active_app_installs_reports_diagnostics_composition():
@@ -75,17 +80,13 @@ def _window():
     return app, window
 
 
-def test_reports_page_is_profile_driven_and_reuses_authoritative_native_widgets():
+def test_reports_page_is_profile_driven_and_legacy_telemetry_modules_are_absent():
     _app, window = _window()
     try:
         qt_widgets = pytest.importorskip("PySide6.QtWidgets")
         workspace = window.reports_diagnostics_workspace
         widgets = window.reporting_form.widgets
         assert workspace.run_name is widgets["run_name"]
-        assert workspace.telemetry_enabled is widgets["enable_trade_telemetry"]
-        assert workspace.lifecycle_enabled is widgets["enable_indicator_lifecycle_analysis"]
-        assert widgets["analysis_level"].isHidden()
-        assert widgets["lifecycle_early_checkpoints"].isHidden()
         assert workspace.profile_selector.currentData() == "REVIEW"
         assert [
             workspace.profile_selector.itemText(index)
@@ -98,14 +99,15 @@ def test_reports_page_is_profile_driven_and_reuses_authoritative_native_widgets(
         ]
 
         page = window.pages.widget(4)
-        button_text = "\n".join(
-            child.text() for child in page.findChildren(qt_widgets.QPushButton)
+        visible_text = "\n".join(
+            [child.text() for child in page.findChildren(qt_widgets.QLabel)]
+            + [child.title() for child in page.findChildren(qt_widgets.QGroupBox)]
         )
-        label_text = "\n".join(
-            child.text() for child in page.findChildren(qt_widgets.QLabel)
-        )
-        assert "Apply Preset" not in button_text
-        assert "Analysis Level" not in label_text
+        assert "Trade Journey Diagnostics" not in visible_text
+        assert "Indicator Lifecycle Diagnostics" not in visible_text
+        assert "Telemetry Interval" not in visible_text
+        assert "Early Checkpoints" not in visible_text
+        assert "Optional Artifact-Derived Analysis" in visible_text
     finally:
         window.close()
 
@@ -134,33 +136,24 @@ def test_profile_selection_applies_immediately_and_changes_only_reporting_config
         )
         deep = window.build_config()
         assert deep.reporting == apply_reporting_profile(core.reporting, "DEEP_DIAGNOSTICS")
-        assert deep.reporting.save_trade_journey_summary is True
-        assert deep.reporting.save_trade_journey_charts is True
-        assert deep.reporting.save_full_telemetry_csv is True
-        assert deep.reporting.create_lifecycle_charts is True
-        assert "Slower" in workspace.cost_label.text()
+        assert deep.reporting.save_feature_analysis_reports is True
+        assert deep.reporting.enable_trade_telemetry is False
+        assert deep.reporting.enable_indicator_lifecycle_analysis is False
+        assert "without simulator telemetry" in workspace.cost_label.text()
     finally:
         window.close()
 
 
-def test_manual_diagnostic_changes_switch_to_custom_and_dependencies_are_automatic():
+def test_manual_artifact_report_change_switches_to_custom():
     _app, window = _window()
     try:
         workspace = window.reports_diagnostics_workspace
         assert workspace.profile_selector.currentData() == "REVIEW"
 
-        workspace.journey_summary.setChecked(True)
-        assert workspace.telemetry_enabled.isChecked() is True
+        widget = window.reporting_form.widgets["save_feature_analysis_reports"]
+        widget.setChecked(True)
         assert workspace.profile_selector.currentData() == "CUSTOM"
-
-        workspace.telemetry_enabled.setChecked(False)
-        assert workspace.journey_summary.isChecked() is False
-        assert workspace.journey_charts.isChecked() is False
-        assert workspace.raw_telemetry.isChecked() is False
-
-        workspace.lifecycle_charts.setChecked(True)
-        assert workspace.lifecycle_enabled.isChecked() is True
-        assert workspace.profile_selector.currentData() == "CUSTOM"
+        assert window.build_config().reporting.save_feature_analysis_reports is True
     finally:
         window.close()
 
@@ -183,78 +176,48 @@ def test_run_details_do_not_change_profile_and_output_folder_uses_native_sink():
         window.close()
 
 
-def test_checkpoint_controls_replace_json_editor_and_roundtrip_as_native_tuple():
-    _app, window = _window()
-    try:
-        workspace = window.reports_diagnostics_workspace
-        workspace.profile_selector.setCurrentIndex(
-            workspace.profile_selector.findData("DEEP_DIAGNOSTICS")
-        )
-        assert workspace.checkpoint_editor.values() == (15, 30, 60)
-        assert [spin.suffix() for spin in workspace.checkpoint_editor.spin_boxes] == [
-            " min", " min", " min"
-        ]
-
-        workspace.checkpoint_editor.spin_boxes[0].setValue(20)
-        assert workspace.profile_selector.currentData() == "CUSTOM"
-        assert window.build_config().reporting.lifecycle_early_checkpoints == (20, 30, 60)
-
-        workspace.checkpoint_editor.add_button.click()
-        assert window.build_config().reporting.lifecycle_early_checkpoints == (20, 30, 60, 75)
-    finally:
-        window.close()
-
-
-def test_advanced_controls_and_always_saved_contract_are_presented_as_requested():
+def test_always_saved_contract_and_artifact_derived_analysis_are_presented():
     _app, window = _window()
     try:
         qt_widgets = pytest.importorskip("PySide6.QtWidgets")
         workspace = window.reports_diagnostics_workspace
-        assert workspace.journey_advanced.isHidden()
-        assert workspace.lifecycle_advanced.isHidden()
-        workspace.show_journey_advanced.setChecked(True)
-        workspace.show_lifecycle_advanced.setChecked(True)
-        assert not workspace.journey_advanced.isHidden()
-        assert not workspace.lifecycle_advanced.isHidden()
-
         text = "\n".join(
-            label.text() for label in workspace.findChildren(qt_widgets.QLabel)
+            [label.text() for label in workspace.findChildren(qt_widgets.QLabel)]
+            + [box.title() for box in workspace.findChildren(qt_widgets.QGroupBox)]
         )
         assert "run_manifest.json" in text
         assert "backtest_report.xlsx" in text
         assert "provenance/source_archives.parquet" in text
-        assert "Minimum Bucket Sample" in text
-        assert "Flat-pattern Threshold" in text
-        assert "raw telemetry" in text.lower()
+        assert "feature-context" in text
+        assert "Optional Artifact-Derived Analysis" in text
+        assert "after the simulation" in text
     finally:
         window.close()
 
 
-def test_custom_reporting_config_survives_active_gui_roundtrip_losslessly():
+def test_loaded_legacy_diagnostic_settings_are_retired_to_inert_values():
     _app, window = _window()
     try:
         base = ResearchRunConfig()
         reporting = replace(
             base.reporting,
-            run_name="custom-diagnostics",
-            output_dir="output/custom-diagnostics",
             enable_trade_telemetry=True,
+            save_full_telemetry_csv=True,
             save_trade_journey_summary=True,
-            telemetry_interval_minutes=30,
+            save_trade_journey_charts=True,
             enable_indicator_lifecycle_analysis=True,
-            lifecycle_phases=6,
-            lifecycle_early_checkpoints=(10, 25, 90),
-            lifecycle_minimum_bucket_sample=12,
-            lifecycle_flat_pattern_threshold_pct=7.5,
+            create_lifecycle_charts=True,
             save_feature_analysis_reports=True,
         )
-        config = replace(base, reporting=reporting)
-        window.apply_config(config)
+        window.apply_config(replace(base, reporting=reporting))
 
-        workspace = window.reports_diagnostics_workspace
-        assert workspace.profile_selector.currentData() == "CUSTOM"
-        assert workspace.checkpoint_editor.values() == (10, 25, 90)
-        assert workspace.output_dir.text() == "output/custom-diagnostics"
-        assert window.build_config().reporting == reporting
+        current = window.build_config().reporting
+        assert current.enable_trade_telemetry is False
+        assert current.save_full_telemetry_csv is False
+        assert current.save_trade_journey_summary is False
+        assert current.save_trade_journey_charts is False
+        assert current.enable_indicator_lifecycle_analysis is False
+        assert current.create_lifecycle_charts is False
+        assert current.save_feature_analysis_reports is True
     finally:
         window.close()
