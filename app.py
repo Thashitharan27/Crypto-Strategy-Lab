@@ -17,6 +17,9 @@ from crypto_strategy_lab.gui.reports_diagnostics_install import (
     apply_reports_diagnostics_workspace,
 )
 from crypto_strategy_lab.gui.review_run_install import apply_review_run_workspace
+from crypto_strategy_lab.gui.results_dashboard_install import (
+    apply_results_dashboard_workspace,
+)
 # The active researcher window layers run-faithful readiness over the compact
 # Setup workspace while keeping the proven v2 data/results shell.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
@@ -62,6 +65,7 @@ def main() -> int:
         apply_reports_diagnostics_workspace(window)
         install_run_progress(window)
         apply_review_run_workspace(window)
+        apply_results_dashboard_workspace(window)
         status("Ready")
         window.show()
         splash.finish(window)
