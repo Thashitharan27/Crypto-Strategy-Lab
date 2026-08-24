@@ -40,7 +40,7 @@ def apply_reports_diagnostics_workspace(window) -> None:
     workspace = ReportsDiagnosticsWorkspace(window)
     note = QLabel(
         "Choose the output depth for this research run. Canonical completed-run and provenance artifacts "
-        "are always saved; diagnostics below only add optional analysis and telemetry output."
+        "are always saved; optional reports below are derived after the simulation from those artifacts."
     )
     note.setWordWrap(True)
     note.setStyleSheet("background:#eef5fb; padding:8px; border:1px solid #c8d9e8")
@@ -62,8 +62,7 @@ def apply_reports_diagnostics_workspace(window) -> None:
     window._render_research_summary = render_summary_with_profile
 
     # Config loads use blocked widget updates in parts of the stable shell.
-    # Refresh the friendly checkpoint controls/profile match once the canonical
-    # config has been applied, without creating a second config state.
+    # Refresh the visible profile after the canonical config has been applied.
     original_apply_config = window.apply_config
 
     def apply_config_and_refresh(config):
