@@ -8,7 +8,7 @@ before the data loader runs. Artifacts are written and semantically validated
 first; the `COMPLETED` `run_manifest.json` is atomically renamed into place last.
 A partial directory is therefore not a completed run and is ignored by MCP.
 
-The layout is:
+The current v3 layout is intentionally small:
 
 ```text
 <symbol>_<strategy interval>_<run id>/
@@ -21,14 +21,16 @@ The layout is:
     trades.parquet
     feature_context.parquet
     signals.parquet
-    telemetry.parquet
   provenance/
     source_archives.parquet
 ```
 
 There is one authoritative trade Parquet. The Task-16 query service resolves
 both trade and feature-context Parquets from the canonical artifact catalog; no
-duplicated research manifest is written for modern runs.
+duplicated research manifest is written for modern runs. Fixed indicator,
+S/R, journey, lifecycle, and other question-specific reports are not part of the
+completed-run contract. Those questions are answered on demand from canonical
+artifacts so the stored output does not grow with historical research workflows.
 
 ## Reproducibility and configuration identities
 
@@ -76,8 +78,15 @@ bytes, and SHA-256. Publication validates Task-16 strategy-index/timestamp/value
 parity and the semantic completed-trade fingerprint before the completion
 manifest can exist. It also checks CSV, Parquet, and summary trade counts.
 `summary.json` uses the existing statistics helper and adds an explicit `net_pnl`
-derived from ending minus initial equity. The workbook uses the existing
-table-only writer. Machine queries do not use either human format.
+derived from ending minus initial equity. `backtest_report.xlsx` is the compact
+human review surface: Dashboard, Monthly, Yearly, Market Regime, and Direction ×
+Regime. Machine research uses the canonical Parquets rather than the human
+formats.
+
+`feature_context.parquet` stores the causal prepared feature/research state for
+every strategy row, including decision-availability timestamps. This is the
+primary surface for on-demand DI, ADX, volatility, funding, open-interest,
+positioning, taker-flow, S/R, and similar research.
 
 `signals.parquet` contains observations produced by the **same simulation run**.
 Accepted decisions come from completed trade rows and therefore retain the exact
@@ -89,10 +98,10 @@ an error. There is no nearest/asof match and no strategy re-evaluation. Signal
 publication verifies its causal timestamps against `feature_context.parquet` and
 requires one `ENTER` signal for every completed trade.
 
-Telemetry similarly serializes telemetry emitted by the original simulation
-only. The native composed path currently keeps execution telemetry disabled, so
-that case is represented by a typed empty artifact marked `NOT_ENABLED`; it is
-not presented as an observed zero-event stream.
+Execution telemetry is not part of the current native v3 completed-run contract.
+Legacy telemetry/journey/lifecycle implementations may remain outside this
+contract while retired code is cleaned separately, but standard runs neither
+publish an empty telemetry artifact nor expose a telemetry MCP query.
 
 Readers verify the catalog hash before opening immutable artifacts. Missing,
 changed, symlinked, escaping, or uncataloged artifacts produce an integrity
@@ -103,8 +112,8 @@ error; they are never regenerated from market data.
 MCP discovers direct-child runs solely from valid completed manifests and orders
 them by manifest start time. It exposes `list_runs`, `latest_run`,
 `get_run_manifest`, `list_run_files`, `read_report`, `query_trades`,
-`query_signals`, `query_telemetry`, `research_aggregate`, and `compare_runs`.
-Research aggregation delegates to the Task-16 `ResearchQueryService`.
+`query_signals`, `research_aggregate`, and `compare_runs`. Research aggregation
+delegates to the Task-16 `ResearchQueryService`.
 
 Parquet relations are registered internally in DuckDB. User SQL remains one
 read-only statement, returns at most 5,000 rows, and rejects mutation/DDL,
@@ -118,6 +127,3 @@ plus explicit equality flags against the first run. Dirty-code equality includes
 the tracked diff and untracked source-path identity, not only the Git commit.
 Incomplete and legacy directories are ignored; corrupt completed runs fail rather
 than falling back to filename/config/mtime heuristics.
-
-Task 17 changes only downstream reporting and artifact queries. Task 18 owns GUI
-redesign; no Task 18 work is included here.

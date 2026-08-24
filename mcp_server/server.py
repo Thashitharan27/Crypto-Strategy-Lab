@@ -300,9 +300,6 @@ class BacktestReports:
     def query_signals(self, run: str, sql: str) -> dict[str, Any]:
         return self._query_parquet(run, "signals", "signals", sql)
 
-    def query_telemetry(self, run: str, sql: str) -> dict[str, Any]:
-        return self._query_parquet(run, "telemetry", "telemetry", sql)
-
     def research_aggregate(
         self, run: str, spec: dict[str, Any]
     ) -> dict[str, Any]:
@@ -442,11 +439,6 @@ def create_server(reports: BacktestReports):
         return reports.query_signals(run, sql)
 
     @server.tool()
-    def query_telemetry(run: str, sql: str) -> dict[str, Any]:
-        LOGGER.info("MCP tool called: query_telemetry run=%s", run)
-        return reports.query_telemetry(run, sql)
-
-    @server.tool()
     def research_aggregate(run: str, spec: dict[str, Any]) -> dict[str, Any]:
         LOGGER.info("MCP tool called: research_aggregate run=%s", run)
         return reports.research_aggregate(run, spec)
@@ -481,7 +473,7 @@ def main() -> None:
     LOGGER.info(
         "Available tools: list_runs, latest_run, get_run_manifest, "
         "list_run_files, read_report, query_trades, query_signals, "
-        "query_telemetry, research_aggregate, compare_runs"
+        "research_aggregate, compare_runs"
     )
     create_server(BacktestReports(root)).run(
         transport="streamable-http",
