@@ -31,6 +31,7 @@ from crypto_strategy_lab.gui.desktop_style import (
     apply_application_style,
     apply_shell_style,
 )
+from crypto_strategy_lab.gui.app_restart import launch_replacement
 # The active researcher window layers run-faithful readiness over the compact
 # Setup workspace while keeping the proven v2 data/results shell.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
@@ -93,7 +94,15 @@ def main() -> int:
         QMessageBox.critical(None, "Crypto Strategy Lab - Startup Error",
                              f"Crypto Strategy Lab could not start.\n\n{exc}")
         return 1
-    return app.exec()
+
+    exit_code = app.exec()
+    if getattr(window, "_restart_after_exit", False):
+        try:
+            launch_replacement()
+        except Exception:
+            traceback.print_exc()
+            return 1
+    return exit_code
 
 
 if __name__ == "__main__":
