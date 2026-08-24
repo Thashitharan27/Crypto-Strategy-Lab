@@ -12,8 +12,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from crypto_strategy_lab.strategy_rule_model import (
+    SUPPORT_RESISTANCE_RULE_EVIDENCE,
+    common_execution_profile,
+)
 from .rule_strategy_builder import DIRECTION_LABELS
-from .strategy_rule_model import SUPPORT_RESISTANCE_RULE_EVIDENCE, common_execution_profile
 from .v2_main_window import TIMEFRAME_LABELS, display_percentage, timeframe_label
 
 
