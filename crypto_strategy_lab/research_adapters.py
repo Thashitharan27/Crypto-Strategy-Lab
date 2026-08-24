@@ -298,13 +298,16 @@ class NativeSimulator:
         self.last_simulation_seconds = time.perf_counter() - started
 
         # Passive observation only: use records produced by this exact run.
-        self.last_signals = _signal_frame(
-            prepared, trades, getattr(engine, "skipped_signals", ())
-        )
+        skipped_signals = getattr(engine, "skipped_signals", ())
+        self.last_signals = _signal_frame(prepared, trades, skipped_signals)
         # The canonical signals frame now owns rejected-decision provenance.
         # Do not carry the same potentially huge list into pandas/DuckDB report
-        # serialization through legacy DataFrame metadata.
+        # serialization through legacy DataFrame metadata, and release the wide
+        # engine records before the reporting stage starts.
         _release_canonicalized_rejection_metadata(trades)
+        clear_rejections = getattr(skipped_signals, "clear", None)
+        if clear_rejections is not None:
+            clear_rejections()
         telemetry_rows = getattr(engine, "telemetry_rows", ())
         if telemetry_rows:
             self.last_telemetry = pd.DataFrame(telemetry_rows)
