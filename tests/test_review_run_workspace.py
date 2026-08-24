@@ -70,6 +70,8 @@ def test_active_app_installs_review_workspace_after_progress():
 def test_review_workspace_reuses_authoritative_actions_and_is_compact():
     _app, window = _window()
     try:
+        from PySide6.QtWidgets import QPushButton
+
         workspace = window.review_run_workspace
         assert window.pages.widget(5).findChild(type(workspace)) is workspace
         assert window.save.parent() is workspace
@@ -79,6 +81,15 @@ def test_review_workspace_reuses_authoritative_actions_and_is_compact():
         assert window.output_root.isHidden()
         assert workspace.progress_status is window.run_progress_status
         assert workspace.progress_status.isHidden()
+
+        legacy_run_actions = [
+            button
+            for button in window.findChildren(QPushButton)
+            if button is not window.run_button
+            and button.text().strip().upper() == "RUN BACKTEST"
+        ]
+        assert legacy_run_actions
+        assert all(button.isHidden() and not button.isEnabled() for button in legacy_run_actions)
     finally:
         window.close()
 
@@ -135,6 +146,33 @@ def test_readiness_drives_primary_action_without_changing_run_path():
         # The same native button remains wired; the workspace did not create a
         # second execution control or a parallel start path.
         assert window.run_button is workspace.window.run_button
+    finally:
+        window.close()
+
+
+def test_completed_thread_lifecycle_restores_idle_run_action():
+    _app, window = _window()
+    try:
+        from PySide6.QtCore import QThread
+        from crypto_strategy_lab.gui.review_run_install import (
+            _complete_run_thread_lifecycle,
+        )
+
+        workspace = window.review_run_workspace
+        thread = QThread(window)
+        window._thread = thread
+        window._set_readiness(
+            "READY TO RUN",
+            "All required run data is validated.",
+            state="ready",
+        )
+        assert window.run_button.text() == "Running…"
+        assert not window.run_button.isEnabled()
+
+        _complete_run_thread_lifecycle(window, workspace, thread)
+        assert window._thread is None
+        assert window.run_button.text() == "Run Backtest"
+        assert window.run_button.isEnabled()
     finally:
         window.close()
 
