@@ -26,6 +26,7 @@ from crypto_strategy_lab.gui.data_library_install import (
 from crypto_strategy_lab.gui.chatgpt_autostart_install import (
     apply_chatgpt_autostart,
 )
+from crypto_strategy_lab.gui.github_sync_install import apply_github_sync_safety
 # The active researcher window layers run-faithful readiness over the compact
 # Setup workspace while keeping the proven v2 data/results shell.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
@@ -74,6 +75,7 @@ def main() -> int:
         apply_results_dashboard_workspace(window)
         apply_data_library_workspace(window)
         apply_chatgpt_autostart(window)
+        apply_github_sync_safety(window)
         status("Ready")
         window.show()
         splash.finish(window)
