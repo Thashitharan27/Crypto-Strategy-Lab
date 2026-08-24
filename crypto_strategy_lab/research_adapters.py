@@ -243,6 +243,22 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
     ).reset_index(drop=True)
 
 
+def _release_canonicalized_rejection_metadata(trades: pd.DataFrame) -> None:
+    """Drop the legacy duplicate after rejected decisions have canonical storage.
+
+    ``BacktestEngine.results_frame`` attaches the complete ``skipped_signals``
+    list to ``DataFrame.attrs`` for legacy callers.  In the composed v3 path the
+    same decisions are already materialized in ``signals.parquet`` via
+    ``_signal_frame``.  Keeping the high-cardinality list on the trades frame
+    makes pandas copy/deepcopy that payload again during artifact publication,
+    which can make heavily filtered Entry Rule runs spend minutes in reporting.
+
+    Trade columns, signal rows, daily schedule summary metadata and trading
+    semantics are intentionally untouched.
+    """
+    trades.attrs.pop("skipped_signals", None)
+
+
 class NativeSimulator:
     """Composition adapter; deliberately not an engine subclass."""
 
@@ -285,6 +301,10 @@ class NativeSimulator:
         self.last_signals = _signal_frame(
             prepared, trades, getattr(engine, "skipped_signals", ())
         )
+        # The canonical signals frame now owns rejected-decision provenance.
+        # Do not carry the same potentially huge list into pandas/DuckDB report
+        # serialization through legacy DataFrame metadata.
+        _release_canonicalized_rejection_metadata(trades)
         telemetry_rows = getattr(engine, "telemetry_rows", ())
         if telemetry_rows:
             self.last_telemetry = pd.DataFrame(telemetry_rows)
