@@ -27,6 +27,10 @@ from crypto_strategy_lab.gui.chatgpt_autostart_install import (
     apply_chatgpt_autostart,
 )
 from crypto_strategy_lab.gui.github_sync_install import apply_github_sync_safety
+from crypto_strategy_lab.gui.desktop_style import (
+    apply_application_style,
+    apply_shell_style,
+)
 # The active researcher window layers run-faithful readiness over the compact
 # Setup workspace while keeping the proven v2 data/results shell.
 from crypto_strategy_lab.gui.v2_main_window import MainWindow as StableGuiShell
@@ -55,6 +59,7 @@ def main() -> int:
     os.environ["HEALTH_LISTEN_ADDR"] = "127.0.0.1:0"
 
     app = QApplication(sys.argv)
+    apply_application_style(app)
     splash = QSplashScreen(_splash_pixmap(), Qt.WindowStaysOnTopHint)
     splash.showMessage("Loading settings...", Qt.AlignBottom | Qt.AlignHCenter,
                        QColor("#d8dfeb"))
@@ -76,6 +81,7 @@ def main() -> int:
         apply_data_library_workspace(window)
         apply_chatgpt_autostart(window)
         apply_github_sync_safety(window)
+        apply_shell_style(window)
         status("Ready")
         window.show()
         splash.finish(window)
