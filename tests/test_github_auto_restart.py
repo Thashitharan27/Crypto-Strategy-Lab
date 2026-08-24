@@ -83,7 +83,7 @@ def test_dependency_file_detection_covers_current_and_common_python_metadata():
     assert not is_dependency_file("crypto_strategy_lab/gui/github_manager.py")
 
 
-def test_normal_update_requests_clean_restart(monkeypatch):
+def test_normal_update_requests_clean_restart_immediately(monkeypatch):
     manager = _Manager(("app.py", "crypto_strategy_lab/gui/example.py"))
     widget = _Widget(manager)
     window = _Window(widget)
@@ -97,11 +97,6 @@ def test_normal_update_requests_clean_restart(monkeypatch):
         github_sync_install,
         "QApplication",
         SimpleNamespace(instance=lambda: app),
-    )
-    monkeypatch.setattr(
-        github_sync_install,
-        "QTimer",
-        SimpleNamespace(singleShot=lambda _delay, callback: callback()),
     )
 
     apply_github_sync_safety(window)
