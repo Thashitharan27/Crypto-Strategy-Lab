@@ -38,12 +38,14 @@ On Windows, double-click the normal no-console launcher:
 Crypto Strategy Lab.vbs
 ```
 
-It starts `.venv\Scripts\pythonw.exe` from the project directory, including when
-the directory path contains spaces. Startup errors are displayed in a GUI dialog.
-`Debug Launcher.bat` is available for troubleshooting only; it intentionally opens
-a console so Python diagnostics remain visible.
+It starts `.venv\Scripts\python.exe app.py` from the project directory and asks
+Windows Script Host to keep the process window hidden. This uses the same Python
+runtime as the terminal launch, including when the directory path contains spaces.
+Startup errors are displayed in a GUI dialog. `Debug Launcher.bat` is available
+for troubleshooting only; it intentionally opens a console so Python diagnostics
+remain visible.
 
-Or launch it from a terminal:
+Or launch the same runtime from a terminal:
 
 ```powershell
 .\.venv\Scripts\python.exe app.py

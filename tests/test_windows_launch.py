@@ -10,14 +10,20 @@ from crypto_strategy_lab.gui.github_manager import CREATE_NO_WINDOW, GitManager
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_no_console_launcher_quotes_paths_and_uses_project_venv():
+def test_no_console_launcher_quotes_paths_and_uses_project_venv_python():
     launcher = (ROOT / "Crypto Strategy Lab.vbs").read_text()
-    assert 'files.BuildPath(root, ".venv\\Scripts\\pythonw.exe")' in launcher
+    assert 'files.BuildPath(root, ".venv\\Scripts\\python.exe")' in launcher
     assert 'files.BuildPath(root, "app.py")' in launcher
     assert 'shell.CurrentDirectory = root' in launcher
-    assert 'shell.Run """" & pythonw & """ """ & appPath & """", 0, False' in launcher
+    assert 'shell.Run """" & pythonExe & """ """ & appPath & """", 0, False' in launcher
+    assert "pythonw.exe" not in launcher.lower()
     assert "cmd.exe" not in launcher.lower()
     assert "powershell.exe" not in launcher.lower()
+
+
+def test_qt_runtime_is_pinned_for_consistent_desktop_rendering():
+    requirements = (ROOT / "requirements.txt").read_text().splitlines()
+    assert "PySide6==6.11.2" in requirements
 
 
 def test_qprocess_create_modifier_adds_no_window_only_on_windows(monkeypatch):
