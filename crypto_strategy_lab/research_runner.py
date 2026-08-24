@@ -211,6 +211,9 @@ class ResearchRunner:
             ),
         )
         policy = self.strategy.bind(prepared, run_config.strategy)
+        configure_observation = getattr(self.simulator, "configure_observation", None)
+        if configure_observation is not None:
+            configure_observation(run_config.reporting)
         simulation_started = time.perf_counter()
         trades = self.simulator.run(
             prepared,
