@@ -17,6 +17,13 @@ def _setting_is_true(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _persist_autostart(widget: ChatGPTIntegrationWidget, checked: bool | None = None) -> None:
+    """Persist the user's auto-start choice immediately and durably."""
+    value = widget.auto_start.isChecked() if checked is None else bool(checked)
+    widget.settings.setValue(_AUTOSTART_SETTING_KEY, value)
+    widget.settings.sync()
+
+
 def _apply_default_once(widget: ChatGPTIntegrationWidget) -> None:
     """Adopt auto-start as the default once, then preserve the user's choice."""
     settings = widget.settings
@@ -57,6 +64,9 @@ def apply_chatgpt_autostart(window) -> None:
         raise RuntimeError("Active GUI does not contain the ChatGPT integration widget")
 
     _apply_default_once(widget)
+    widget.auto_start.toggled.connect(
+        lambda checked: _persist_autostart(widget, checked)
+    )
 
     original_post_show = window.start_post_show_tasks
 
@@ -64,11 +74,16 @@ def apply_chatgpt_autostart(window) -> None:
         original_post_show()
         QTimer.singleShot(0, lambda: _auto_start_if_ready(widget))
 
+    def shutdown() -> None:
+        # Force the final checkbox value to disk before child-process cleanup.
+        _persist_autostart(widget)
+        widget.shutdown()
+
     window.start_post_show_tasks = start_post_show_tasks
     window.chatgpt_integration = widget
 
     app = QApplication.instance()
     if app is not None:
-        app.aboutToQuit.connect(widget.shutdown)
+        app.aboutToQuit.connect(shutdown)
 
     window._chatgpt_autostart_installed = True
