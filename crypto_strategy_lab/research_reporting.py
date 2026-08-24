@@ -224,7 +224,7 @@ def _build_human_workbook(
     run_dir: Path,
     trades: pd.DataFrame,
 ) -> Path:
-    """Build all human-facing tables directly from the completed modern trades."""
+    """Build the compact human report from completed modern trades only."""
     monthly = build_periodic_breakdown(trades, "ME")
     yearly = build_periodic_breakdown(trades, "YE")
     market_regime, direction_regime = build_performance_breakdowns(trades)
@@ -240,7 +240,7 @@ def _build_human_workbook(
 
 
 class CsvManifestReporter:
-    """Publish all artifacts, validate them, then atomically publish the manifest."""
+    """Publish the minimal canonical run set, validate it, then publish the manifest."""
 
     def __init__(self, output_root: Path):
         self.output_root = Path(output_root)
@@ -286,26 +286,9 @@ class CsvManifestReporter:
                 "native run did not expose original-run signal provenance"
             )
         signals = pd.DataFrame(signals)
-        signal_status = "COLLECTED"
         signals_path = artifacts_dir / "signals.parquet"
         _write_parquet_atomic(signals, signals_path)
         _validate_signal_artifact(signals_path, context_path, len(result.trades))
-
-        telemetry = getattr(result, "telemetry", None)
-        if telemetry is None:
-            telemetry = pd.DataFrame(
-                {
-                    "event_time": pd.Series(dtype="datetime64[ns, UTC]"),
-                    "event_type": pd.Series(dtype="string"),
-                    "strategy_index": pd.Series(dtype="int64"),
-                }
-            )
-            telemetry_status = "NOT_ENABLED"
-        else:
-            telemetry = pd.DataFrame(telemetry)
-            telemetry_status = "COLLECTED"
-        telemetry_path = artifacts_dir / "telemetry.parquet"
-        _write_parquet_atomic(telemetry, telemetry_path)
 
         source_rows, source_digest = selected_source_snapshot(
             context.selected_source_records
@@ -355,7 +338,9 @@ class CsvManifestReporter:
                 "average_net_r": float(r.mean()) if len(r) else 0.0,
                 "ending_equity": initial_equity + float(pnl.sum()),
             }
-        summary["net_pnl"] = float(summary.get("ending_equity", initial_equity)) - initial_equity
+        summary["net_pnl"] = (
+            float(summary.get("ending_equity", initial_equity)) - initial_equity
+        )
         summary_path = run_dir / "summary.json"
         atomic_json(summary_path, summary)
         quality_path = run_dir / "data_quality.json"
@@ -414,14 +399,7 @@ class CsvManifestReporter:
                 run_dir,
                 "parquet",
                 len(signals),
-                collection_status=signal_status,
-            ),
-            "telemetry": _catalog_entry(
-                telemetry_path,
-                run_dir,
-                "parquet",
-                len(telemetry),
-                collection_status=telemetry_status,
+                collection_status="COLLECTED",
             ),
             "source_archives": _catalog_entry(
                 source_path, run_dir, "parquet", len(source_frame)
