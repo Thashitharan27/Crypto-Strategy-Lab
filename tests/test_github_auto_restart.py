@@ -23,17 +23,18 @@ class _Field:
 
 
 class _Manager:
-    def __init__(self, changed_files=()):
+    def __init__(self, changed_files=(), updated=True):
         self.changed_files = tuple(changed_files)
         self.pull_calls = 0
+        self.updated = updated
 
     def pull(self):
         self.pull_calls += 1
-        return "Fast-forward"
+        return "Fast-forward" if self.updated else "Already up to date."
 
     def _run(self, *args, **_kwargs):
         if args == ("rev-parse", "HEAD"):
-            head = "old" if self.pull_calls == 0 else "new"
+            head = "old" if self.pull_calls == 0 or not self.updated else "new"
             return SimpleNamespace(stdout=head + "\n")
         if args[:2] == ("diff", "--name-only"):
             return SimpleNamespace(stdout="\n".join(self.changed_files) + "\n")
@@ -119,7 +120,7 @@ def test_normal_update_requests_clean_restart(monkeypatch):
     assert not widget.refresh.enabled
 
 
-def test_dependency_update_does_not_restart(monkeypatch):
+def test_dependency_update_closes_without_restart(monkeypatch):
     manager = _Manager(("requirements.txt", "app.py"))
     widget = _Widget(manager)
     window = _Window(widget)
@@ -148,10 +149,32 @@ def test_dependency_update_does_not_restart(monkeypatch):
     widget._pulled(result)
 
     assert window._restart_after_exit is False
-    assert app.quit_calls == 0
-    assert widget.refresh_calls == [False]
+    assert app.quit_calls == 1
     assert messages
+    assert "will close now" in messages[0]
     assert "pip install -r requirements.txt" in messages[0]
+
+
+def test_no_actual_update_refreshes_without_restarting(monkeypatch):
+    manager = _Manager(updated=False)
+    widget = _Widget(manager)
+    window = _Window(widget)
+    app = SimpleNamespace(quit_calls=0, quit=lambda: None)
+
+    monkeypatch.setattr(
+        github_sync_install,
+        "QApplication",
+        SimpleNamespace(instance=lambda: app),
+    )
+
+    apply_github_sync_safety(window)
+    result = widget.manager.pull()
+    assert not result.updated
+
+    widget._pulled(result)
+
+    assert window._restart_after_exit is False
+    assert widget.refresh_calls == [False]
 
 
 def test_replacement_process_uses_same_python_without_shell(monkeypatch, tmp_path):
