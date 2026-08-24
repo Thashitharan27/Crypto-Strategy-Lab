@@ -372,11 +372,33 @@ class ResearchRunConfig:
             raise ValueError("max active pairs must be positive")
         if min(execution.maker_fee, execution.taker_fee, execution.slippage) < 0:
             raise ValueError("fees/slippage must be non-negative")
-        if reporting.enable_trade_telemetry:
+
+        journey_outputs = (
+            reporting.save_full_telemetry_csv,
+            reporting.save_trade_journey_summary,
+            reporting.save_trade_journey_charts,
+        )
+        if any(journey_outputs) and not reporting.enable_trade_telemetry:
+            raise ValueError("trade journey outputs require Trade Journey Diagnostics")
+        if reporting.create_lifecycle_charts and not reporting.enable_indicator_lifecycle_analysis:
+            raise ValueError("lifecycle charts require Indicator Lifecycle Diagnostics")
+        if reporting.enable_trade_telemetry or reporting.enable_indicator_lifecycle_analysis:
             if reporting.telemetry_interval_minutes <= 0:
-                raise ValueError("telemetry interval must be positive")
+                raise ValueError("diagnostic sampling interval must be positive")
             if reporting.telemetry_interval_minutes % data.strategy_timeframe_minutes:
-                raise ValueError("telemetry interval must be a multiple of strategy timeframe")
+                raise ValueError("diagnostic sampling interval must be a multiple of strategy timeframe")
+        if reporting.enable_indicator_lifecycle_analysis:
+            if reporting.lifecycle_phases < 2:
+                raise ValueError("lifecycle phases must be at least 2")
+            if reporting.lifecycle_minimum_bucket_sample <= 0:
+                raise ValueError("lifecycle minimum bucket sample must be positive")
+            checkpoints = tuple(int(value) for value in reporting.lifecycle_early_checkpoints)
+            if not checkpoints or any(value <= 0 for value in checkpoints):
+                raise ValueError("lifecycle checkpoints must contain positive minutes")
+            if tuple(sorted(set(checkpoints))) != checkpoints:
+                raise ValueError("lifecycle checkpoints must be unique and increasing")
+            if reporting.lifecycle_flat_pattern_threshold_pct < 0:
+                raise ValueError("lifecycle flat-pattern threshold must be non-negative")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
