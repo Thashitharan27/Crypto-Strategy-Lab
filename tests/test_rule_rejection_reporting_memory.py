@@ -85,6 +85,7 @@ def test_native_simulator_releases_duplicate_rule_rejections_after_signal_captur
     assert result is trades
     assert "skipped_signals" not in result.attrs
     assert result.attrs["daily_schedule_stats"]["trades_opened_on_schedule"] == 1
+    assert fake_engine.skipped_signals == []
 
     signals = simulator.last_signals
     assert signals is not None
