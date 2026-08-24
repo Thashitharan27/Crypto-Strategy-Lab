@@ -9,6 +9,7 @@ from crypto_strategy_lab.gui.chatgpt_connection import ChatGPTIntegrationWidget
 
 _AUTOSTART_MIGRATION_KEY = "chatgpt_auto_start_default_v1"
 _AUTOSTART_SETTING_KEY = "auto_start_chatgpt_connection"
+_AUTOSTART_PREFERENCE_KEY = "chatgpt_auto_start_preference_v2"
 
 
 def _setting_is_true(value) -> bool:
@@ -20,22 +21,33 @@ def _setting_is_true(value) -> bool:
 def _persist_autostart(widget: ChatGPTIntegrationWidget, checked: bool | None = None) -> None:
     """Persist the user's auto-start choice immediately and durably."""
     value = widget.auto_start.isChecked() if checked is None else bool(checked)
-    widget.settings.setValue(_AUTOSTART_SETTING_KEY, value)
-    widget.settings.sync()
-
-
-def _apply_default_once(widget: ChatGPTIntegrationWidget) -> None:
-    """Adopt auto-start as the default once, then preserve the user's choice."""
     settings = widget.settings
-    if _setting_is_true(settings.value(_AUTOSTART_MIGRATION_KEY, False)):
-        return
+    # Keep the legacy key coherent for the reusable widget, but use the v2 key
+    # as the authoritative preference because the legacy widget can overwrite
+    # its own key while restoring other controls during construction.
+    settings.setValue(_AUTOSTART_SETTING_KEY, value)
+    settings.setValue(_AUTOSTART_PREFERENCE_KEY, value)
+    settings.sync()
+
+
+def _restore_preference(widget: ChatGPTIntegrationWidget) -> None:
+    """Restore the durable preference after the legacy widget finishes loading."""
+    settings = widget.settings
+    if settings.contains(_AUTOSTART_PREFERENCE_KEY):
+        desired = _setting_is_true(settings.value(_AUTOSTART_PREFERENCE_KEY, True))
+    else:
+        # v2 migration: auto-start is the product default. Once the user changes
+        # it, the v2 key preserves that explicit choice on subsequent launches.
+        desired = True
+        settings.setValue(_AUTOSTART_PREFERENCE_KEY, desired)
 
     widget.auto_start.blockSignals(True)
     try:
-        widget.auto_start.setChecked(True)
+        widget.auto_start.setChecked(desired)
     finally:
         widget.auto_start.blockSignals(False)
-    settings.setValue(_AUTOSTART_SETTING_KEY, True)
+
+    settings.setValue(_AUTOSTART_SETTING_KEY, desired)
     settings.setValue(_AUTOSTART_MIGRATION_KEY, True)
     settings.sync()
 
@@ -63,7 +75,7 @@ def apply_chatgpt_autostart(window) -> None:
     if widget is None:
         raise RuntimeError("Active GUI does not contain the ChatGPT integration widget")
 
-    _apply_default_once(widget)
+    _restore_preference(widget)
     widget.auto_start.toggled.connect(
         lambda checked: _persist_autostart(widget, checked)
     )
