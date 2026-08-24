@@ -109,7 +109,7 @@ def test_active_telemetry_interval_must_align_to_strategy_timeframe():
             telemetry_interval_minutes=15,
         ),
     )
-    with pytest.raises(ValueError, match="telemetry interval must be a multiple"):
+    with pytest.raises(ValueError, match="sampling interval must be a multiple"):
         invalid.validate()
 
     valid = replace(
