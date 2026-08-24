@@ -16,6 +16,13 @@ def _retire_sidebar_run_shortcut(window) -> None:
             button.hide()
 
 
+def _complete_run_thread_lifecycle(window, workspace, thread) -> None:
+    """Clear the completed worker-thread handle before rendering idle actions."""
+    if getattr(window, "_thread", None) is thread:
+        window._thread = None
+    workspace.refresh_readiness()
+
+
 def apply_review_run_workspace(window) -> None:
     """Replace the legacy review/run strip without changing run semantics."""
     if getattr(window, "review_run_workspace", None) is not None:
@@ -68,8 +75,9 @@ def apply_review_run_workspace(window) -> None:
         window._set_readiness = set_readiness_and_review
 
     # Native completion enables the button but historically never restored its
-    # presentation text. Refresh after the worker thread actually stops so the
-    # Review workspace owns the final idle state deterministically.
+    # presentation text or cleared the completed thread handle. Finish that UI
+    # lifecycle only after QThread emits finished, while keeping execution itself
+    # on the existing native _finished/_failed path.
     original_finished = window._finished
 
     def finished_and_review(result):
@@ -79,9 +87,11 @@ def apply_review_run_workspace(window) -> None:
         window.run_button.setEnabled(True)
         if thread is not None:
             try:
-                thread.finished.connect(workspace.refresh_readiness)
+                thread.finished.connect(
+                    lambda t=thread: _complete_run_thread_lifecycle(window, workspace, t)
+                )
             except RuntimeError:
-                workspace.refresh_readiness()
+                _complete_run_thread_lifecycle(window, workspace, thread)
         else:
             workspace.refresh_readiness()
         return value
@@ -96,9 +106,11 @@ def apply_review_run_workspace(window) -> None:
         window.run_button.setText("Run Backtest")
         if thread is not None:
             try:
-                thread.finished.connect(workspace.refresh_readiness)
+                thread.finished.connect(
+                    lambda t=thread: _complete_run_thread_lifecycle(window, workspace, t)
+                )
             except RuntimeError:
-                workspace.refresh_readiness()
+                _complete_run_thread_lifecycle(window, workspace, thread)
         else:
             workspace.refresh_readiness()
         return value
