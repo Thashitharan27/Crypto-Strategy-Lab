@@ -20,6 +20,11 @@ def test_no_console_launcher_quotes_paths_and_uses_project_venv():
     assert "powershell.exe" not in launcher.lower()
 
 
+def test_qt_runtime_is_pinned_to_verified_desktop_version():
+    requirements = (ROOT / "requirements.txt").read_text().splitlines()
+    assert "PySide6==6.10.0" in requirements
+
+
 def test_qprocess_create_modifier_adds_no_window_only_on_windows(monkeypatch):
     process = SimpleNamespace(setCreateProcessArgumentsModifier=Mock())
     monkeypatch.setattr(chatgpt_connection.sys, "platform", "win32")
