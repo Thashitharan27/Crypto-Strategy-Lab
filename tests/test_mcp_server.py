@@ -12,6 +12,7 @@ from mcp_server.server import BacktestReports, create_server
 
 
 def _write_parquet(path: Path, frame: pd.DataFrame) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with duckdb.connect() as con:
         con.register("frame", frame)
         escaped = str(path).replace("'", "''")
@@ -45,8 +46,12 @@ def _make_run(
 ) -> Path:
     run = root / name
     artifacts = run / "artifacts"
+    provenance = run / "provenance"
+    notes = run / "notes"
     run.mkdir()
     artifacts.mkdir()
+    provenance.mkdir()
+    notes.mkdir()
 
     trades = pd.DataFrame(
         {
@@ -60,10 +65,29 @@ def _make_run(
             "decision": ["ENTER", "REJECT"],
         }
     )
+    feature_context = pd.DataFrame(
+        {
+            "strategy_index": [0, 1],
+            "plus_di": [31.0, 18.0],
+            "minus_di": [12.0, 27.0],
+            "adx": [24.0, 35.0],
+        }
+    )
+    source_archives = pd.DataFrame(
+        {
+            "dataset": ["klines", "metrics"],
+            "interval": ["1h", None],
+            "archive_count": [31, 1],
+        }
+    )
     trades_path = artifacts / "trades.parquet"
     signals_path = artifacts / "signals.parquet"
+    context_path = artifacts / "feature_context.parquet"
+    source_path = provenance / "source_archives.parquet"
     _write_parquet(trades_path, trades)
     _write_parquet(signals_path, signals)
+    _write_parquet(context_path, feature_context)
+    _write_parquet(source_path, source_archives)
 
     trade_csv = run / "trade_list.csv"
     trades.to_csv(trade_csv, index=False)
@@ -80,6 +104,7 @@ def _make_run(
             "average_net_r": 0.25,
         },
     )
+    (notes / "diagnostic.txt").write_text("completed run note\n", encoding="utf-8")
 
     manifest = {
         "run_manifest_contract": "crypto_strategy_lab_run_v1",
@@ -112,6 +137,8 @@ def _make_run(
         "artifacts": {
             "trades": _artifact(trades_path, run, "parquet", 2),
             "signals": _artifact(signals_path, run, "parquet", 2),
+            "feature_context": _artifact(context_path, run, "parquet", 2),
+            "source_archives": _artifact(source_path, run, "parquet", 2),
             "trade_csv": _artifact(trade_csv, run, "csv", 2),
             "summary": _artifact(summary_path, run, "json"),
         },
@@ -139,7 +166,6 @@ def reports(tmp_path: Path) -> BacktestReports:
         execution_hash="execution-b",
         ending_equity=1025.0,
     )
-    # Legacy/incomplete directories are deliberately not modern runs.
     legacy = tmp_path / "legacy"
     legacy.mkdir()
     (legacy / "summary.json").write_text("{}", encoding="utf-8")
@@ -154,18 +180,35 @@ def test_paths_are_confined(reports: BacktestReports, tmp_path: Path):
     assert reports.resolve_run("run-one").name == "run-one"
 
 
-def test_manifest_backed_listing_latest_and_reads(reports: BacktestReports):
+def test_completed_run_listing_latest_and_reads(reports: BacktestReports):
     runs = reports.list_runs()
     assert [item["folder_name"] for item in runs] == ["run-two", "run-one"]
     assert reports.latest_run()["folder_name"] == "run-two"
+
+    listed = reports.list_run_files("run-one")
+    by_name = {item["filename"]: item for item in listed}
+    assert "run_manifest.json" in by_name
+    assert "artifacts/feature_context.parquet" in by_name
+    assert "provenance/source_archives.parquet" in by_name
+    assert "notes/diagnostic.txt" in by_name
+    assert by_name["artifacts/feature_context.parquet"]["registered_artifact"] is True
+    assert by_name["notes/diagnostic.txt"]["registered_artifact"] is False
+
     csv_report = reports.read_report("run-one", "trade_list.csv", limit=1)
     assert csv_report["columns"] == ["side", "pnl"]
     assert csv_report["truncated"] and csv_report["row_count"] == 2
     assert reports.read_report("run-one", "summary.json")["data"]["wins"] == 1
+    assert reports.read_run_file("run-one", "run_manifest.json")["data"]["run_id"] == "run-one"
+    assert "completed run note" in reports.read_run_file("run-one", "notes/diagnostic.txt")["text"]
     assert reports.get_run_manifest("run-one")["run_id"] == "run-one"
 
 
-def test_parquet_trade_and_signal_queries_are_read_only(reports: BacktestReports):
+def test_parquet_preview_and_queries_cover_all_current_run_parquets(reports: BacktestReports):
+    preview = reports.read_run_file("run-one", "artifacts/feature_context.parquet", limit=1)
+    assert preview["format"] == "parquet"
+    assert "plus_di" in preview["columns"]
+    assert preview["row_count"] == 2
+
     selected = reports.query_trades(
         "run-one", "SELECT side, pnl FROM trades ORDER BY pnl DESC"
     )
@@ -173,13 +216,32 @@ def test_parquet_trade_and_signal_queries_are_read_only(reports: BacktestReports
     assert reports.query_signals(
         "run-one", "SELECT count(*) FROM signals WHERE decision='ENTER'"
     )["rows"] == [[1]]
+    assert reports.query_feature_context(
+        "run-one",
+        "SELECT strategy_index, plus_di, minus_di, adx FROM feature_context ORDER BY strategy_index",
+    )["rows"][0] == [0, 31.0, 12.0, 24.0]
+    assert reports.query_parquet(
+        "run-one",
+        "provenance/source_archives.parquet",
+        "SELECT dataset, archive_count FROM data ORDER BY dataset",
+    )["row_count"] == 2
     assert not hasattr(reports, "query_telemetry")
+
+
+def test_run_file_and_sql_safety(reports: BacktestReports, tmp_path: Path):
+    with pytest.raises(ValueError, match="traversal"):
+        reports.read_run_file("run-one", "../run-two/summary.json")
+    with pytest.raises(ValueError, match="Absolute"):
+        reports.query_parquet("run-one", str(tmp_path / "outside.parquet"), "SELECT * FROM data")
+    with pytest.raises(ValueError, match=".parquet"):
+        reports.query_parquet("run-one", "summary.json", "SELECT * FROM data")
 
     forbidden = [
         "DELETE FROM trades",
         "SELECT * FROM trades; SELECT 1",
         "SELECT * FROM read_csv('/etc/passwd')",
         "SELECT * FROM read_parquet('/tmp/x.parquet')",
+        "SELECT * FROM read_blob('/etc/passwd')",
         "ATTACH 'x.db' AS x",
         "COPY trades TO '/tmp/x.csv'",
         "PRAGMA version",
@@ -189,6 +251,19 @@ def test_parquet_trade_and_signal_queries_are_read_only(reports: BacktestReports
     for sql in forbidden:
         with pytest.raises(ValueError):
             reports.query_trades("run-one", sql)
+
+
+def test_symlinked_run_file_is_rejected(reports: BacktestReports, tmp_path: Path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    link = reports.resolve_run("run-one") / "notes" / "link.txt"
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available on this platform")
+    with pytest.raises(ValueError, match="Symlinked"):
+        reports.read_run_file("run-one", "notes/link.txt")
+    assert "notes/link.txt" not in {item["filename"] for item in reports.list_run_files("run-one")}
 
 
 def test_compare_uses_manifest_provenance_and_derives_net_pnl(reports: BacktestReports):
@@ -209,7 +284,7 @@ def test_dirty_code_comparison_includes_diff_identity(tmp_path: Path):
     assert compared[1]["provenance_vs_first"]["same_code"] is False
 
 
-def test_create_server_registers_modern_read_only_tools(reports: BacktestReports):
+def test_create_server_registers_complete_read_only_tools(reports: BacktestReports):
     from mcp.server import MCPServer
 
     server = create_server(reports)
@@ -220,18 +295,23 @@ def test_create_server_registers_modern_read_only_tools(reports: BacktestReports
         "get_run_manifest",
         "list_run_files",
         "read_report",
+        "read_run_file",
         "query_trades",
         "query_signals",
+        "query_feature_context",
+        "query_parquet",
         "research_aggregate",
         "compare_runs",
     }
 
 
-def test_tampered_parquet_is_rejected(reports: BacktestReports):
+def test_tampered_registered_parquet_is_rejected(reports: BacktestReports):
     path = reports.resolve_run("run-one") / "artifacts" / "trades.parquet"
     path.write_bytes(path.read_bytes() + b"tamper")
     with pytest.raises(Exception, match="integrity"):
         reports.query_trades("run-one", "SELECT count(*) FROM trades")
+    with pytest.raises(Exception, match="integrity"):
+        reports.read_run_file("run-one", "artifacts/trades.parquet")
 
 
 def test_package_does_not_eagerly_import_server_module():
