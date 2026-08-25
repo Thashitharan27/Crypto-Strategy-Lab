@@ -7,6 +7,7 @@ from typing import Any
 PROFILE_KEYS = ("bull_long", "bull_short", "bear_long", "bear_short", "sideways_long", "sideways_short")
 RULE_INDICATORS = (
     "DI_SPREAD",
+    "DIRECTIONAL_DI",
     "DI_PRESSURE_STATE",
     "DI_SPREAD_CHANGE",
     "DIRECTIONAL_DI_CHANGE",
