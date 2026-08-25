@@ -110,6 +110,7 @@ jobs:
           crypto_strategy_lab/research_reporting.py
           crypto_strategy_lab/run_manifest.py
           crypto_strategy_lab/feature_research.py
+          crypto_strategy_lab/bayesian_research.py
           mcp_server/server.py
           tools/data_lake_validate.py
           tools/data_lake_run.py
@@ -171,6 +172,7 @@ jobs:
           tests/test_task11_research_config.py
           tests/test_research_runner.py
           tests/test_feature_research.py
+          tests/test_bayesian_research.py
           tests/test_task17_reporting.py
           tests/test_mcp_server.py
           tests/test_rewrite_config_current.py
