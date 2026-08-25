@@ -7,6 +7,7 @@ import time
 
 import pandas as pd
 
+from .bayesian_research import enrich_bayesian_trade_probabilities
 from .rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
 from .gui.enhanced_config import enhanced_default_gui_config, build_enhanced_backtest_config
 from .strategy_profiles import StrategyProfile
@@ -259,6 +260,19 @@ def _release_canonicalized_rejection_metadata(trades: pd.DataFrame) -> None:
     trades.attrs.pop("skipped_signals", None)
 
 
+def _is_completed_trade_result(trades: pd.DataFrame) -> bool:
+    """Distinguish real completed-result frames from narrow provenance test doubles.
+
+    Native production results always publish PnL and an exit timestamp.  Some
+    adapter tests deliberately use a smaller frame containing only signal
+    provenance because they are exercising rejection-memory behavior.  Empty
+    frames are still enriched so normal no-trade runs receive the stable Bayesian
+    output schema.  Once a frame has the two production sentinels, the Bayesian
+    module remains strict about every other required column.
+    """
+    return trades.empty or {"pair_net_pnl", "exit_time"}.issubset(trades.columns)
+
+
 class NativeSimulator:
     """Composition adapter; deliberately not an engine subclass."""
 
@@ -305,6 +319,12 @@ class NativeSimulator:
         # serialization through legacy DataFrame metadata, and release the wide
         # engine records before the reporting stage starts.
         _release_canonicalized_rejection_metadata(trades)
+        # Bayesian scoring is downstream-only. It uses only completed outcomes
+        # available before each entry and therefore cannot alter this run's fills.
+        # Narrow provenance-only test doubles intentionally do not masquerade as
+        # completed results, while real production frames stay schema-strict.
+        if _is_completed_trade_result(trades):
+            trades = enrich_bayesian_trade_probabilities(trades)
         clear_rejections = getattr(skipped_signals, "clear", None)
         if clear_rejections is not None:
             clear_rejections()
