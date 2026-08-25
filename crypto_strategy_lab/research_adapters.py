@@ -7,6 +7,7 @@ import time
 
 import pandas as pd
 
+from .bayesian_research import enrich_bayesian_trade_probabilities
 from .rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
 from .gui.enhanced_config import enhanced_default_gui_config, build_enhanced_backtest_config
 from .strategy_profiles import StrategyProfile
@@ -305,6 +306,9 @@ class NativeSimulator:
         # serialization through legacy DataFrame metadata, and release the wide
         # engine records before the reporting stage starts.
         _release_canonicalized_rejection_metadata(trades)
+        # Bayesian scoring is downstream-only. It uses only completed outcomes
+        # available before each entry and therefore cannot alter this run's fills.
+        trades = enrich_bayesian_trade_probabilities(trades)
         clear_rejections = getattr(skipped_signals, "clear", None)
         if clear_rejections is not None:
             clear_rejections()
