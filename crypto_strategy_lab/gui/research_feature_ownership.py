@@ -5,7 +5,8 @@ module reorganizes those existing controls around how researchers think about
 features:
 
 * core strategy dependencies are automatic/required rather than user toggles;
-* lightweight futures context stays automatic when local source coverage exists;
+* lightweight futures context stays automatic when local source coverage exists
+  and becomes trade-affecting only through explicit Entry/Veto rules;
 * optional or expensive research blocks have explicit controls;
 * settings are collapsed until they are useful;
 * Strategy Builder remains focused on entry/veto semantics.
@@ -298,8 +299,7 @@ class ResearchFeaturesPanel(QWidget):
 
         self._section(layout, "Futures Market Research — automatic when data is available")
         futures_note = QLabel(
-            "These source-native blocks are relatively lightweight and remain Analyze Only. "
-            "Missing or partial optional coverage does not change the trading rules."
+            "These source-native blocks attach automatically when local data exists. They are research-only by default, but explicit Entry/Veto rules can make them trade-affecting. REQUIRED rules reject when their selected futures evidence is missing; missing VETO evidence does not reject."
         )
         futures_note.setWordWrap(True)
         futures_note.setStyleSheet("color:#52606d; margin:0 4px 4px 4px")
@@ -307,7 +307,7 @@ class ResearchFeaturesPanel(QWidget):
 
         self.oi_card = FeatureCard(
             "Open Interest & Positioning",
-            status="AUTO WHEN AVAILABLE",
+            status="AUTO · RULE-READY",
             note="Binance futures metrics: OI changes/z-score plus trader and account positioning ratios.",
             expandable=True,
             expanded=False,
@@ -317,7 +317,7 @@ class ResearchFeaturesPanel(QWidget):
 
         self.funding_card = FeatureCard(
             "Funding Rate",
-            status="AUTO WHEN AVAILABLE",
+            status="AUTO · RULE-READY",
             note="Funding event context and extremes, aligned causally to the strategy decision time.",
             expandable=True,
             expanded=False,
@@ -334,7 +334,7 @@ class ResearchFeaturesPanel(QWidget):
 
         self.basis_card = FeatureCard(
             "Basis / Premium",
-            status="AUTO WHEN AVAILABLE",
+            status="AUTO · RULE-READY",
             note="Mark-price versus index-price basis/premium research; kept separate from positioning.",
             expandable=True,
             expanded=False,
@@ -344,7 +344,7 @@ class ResearchFeaturesPanel(QWidget):
 
         self.taker_card = FeatureCard(
             "Taker Buy / Sell Flow",
-            status="AUTO WHEN AVAILABLE",
+            status="AUTO · RULE-READY",
             note="Uses candle taker-buy information; this is lightweight and distinct from raw detailed Trade Flow.",
             expandable=True,
             expanded=False,
