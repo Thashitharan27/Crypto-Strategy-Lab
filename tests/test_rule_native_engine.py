@@ -9,6 +9,8 @@ from crypto_strategy_lab.rule_native_engine import (
 
 def _engine():
     engine = object.__new__(RuleAwareDataLakeProductionBacktestEngine)
+    engine.plus_di_values = np.array([32.0, 18.0])
+    engine.minus_di_values = np.array([11.0, 27.0])
     engine.di_pressure_spread_change = np.array([5.0, -3.0])
     engine.long_directional_di_change = np.array([6.0, -4.0])
     engine.long_opposing_di_change = np.array([-2.0, 3.0])
@@ -38,6 +40,20 @@ def _sr_context():
         support_rejection_atr=0.8,
         resistance_rejection_atr=0.1,
     )
+
+
+def test_directional_di_rule_value_uses_absolute_candidate_side_di():
+    engine = _engine()
+    profile = SimpleNamespace()
+    assert engine._strategy_profile_rule_value(
+        0, "LONG", profile, "DIRECTIONAL_DI"
+    ) == 32.0
+    assert engine._strategy_profile_rule_value(
+        0, "SHORT", profile, "DIRECTIONAL_DI"
+    ) == 11.0
+    assert engine._strategy_profile_rule_value(
+        1, "SHORT", profile, "DIRECTIONAL_DI"
+    ) == 27.0
 
 
 def test_pressure_state_rule_value_uses_direction_specific_prepared_state():
