@@ -761,3 +761,22 @@ class RuleStrategyBuilder(QWidget):
             ),
             "daily_entry_missed_policy": self.daily_missed_policy.currentData(),
         }
+
+    def set_feature_status(self, features) -> None:
+        items = [
+            "S/R ON" if features.enable_support_resistance_analysis else "S/R Off",
+            "OI",
+            "Funding",
+            "Positioning/Basis",
+            "Taker Flow",
+        ]
+        items.append(
+            "Trade Flow ON" if features.trade_flow_enabled else "Trade Flow Off"
+        )
+        items.append(
+            "Order Book ON" if features.order_book_enabled else "Order Book Off"
+        )
+        self.research_status.setText(
+            " · ".join(items)
+            + " — S/R and lightweight futures context are rule-ready; detailed Trade Flow and Order Book remain research-only."
+        )
