@@ -71,6 +71,35 @@ EVIDENCE_LABELS = {
     "SR_RESISTANCE_DISTANCE_ATR": "S/R — Resistance Distance (ATR)",
     "SR_SUPPORT_REJECTION_ATR": "S/R — Support Rejection (ATR)",
     "SR_RESISTANCE_REJECTION_ATR": "S/R — Resistance Rejection (ATR)",
+    "OI_CHANGE_PCT_5M": "OI Change 5m (decimal)",
+    "OI_CHANGE_PCT_1H": "OI Change 1h (decimal)",
+    "OI_CHANGE_PCT_24H": "OI Change 24h (decimal)",
+    "OI_ZSCORE_7D": "OI Z-Score (7d)",
+    "PRICE_CHANGE_PCT_1H": "Price Change 1h (decimal)",
+    "OI_VS_PRICE_STATE_1H": "Price / OI State (1h)",
+    "TOP_TRADER_ACCOUNT_BIAS": "Top Trader Account Bias (ratio − 1)",
+    "TOP_TRADER_POSITION_BIAS": "Top Trader Position Bias (ratio − 1)",
+    "GLOBAL_LONG_SHORT_ACCOUNT_BIAS": "Global Long/Short Account Bias (ratio − 1)",
+    "TAKER_LONG_SHORT_VOLUME_BIAS": "Taker Long/Short Volume Bias (ratio − 1)",
+    "FUNDING_RATE_BPS": "Funding Rate (bps)",
+    "FUNDING_BIAS": "Funding Bias",
+    "FUNDING_24H_SUM_BPS": "Funding 24h Sum (bps)",
+    "FUNDING_CHANGE_BPS": "Funding Change (bps)",
+    "FUNDING_3_EVENT_MEAN_BPS": "Funding 3-Event Mean (bps)",
+    "FUNDING_ZSCORE_7D": "Funding Z-Score (7d)",
+    "FUNDING_EXTREME_POSITIVE": "Funding Extreme Positive",
+    "FUNDING_EXTREME_NEGATIVE": "Funding Extreme Negative",
+    "MARK_INDEX_BASIS_BPS": "Mark − Index Basis (bps)",
+    "MARK_INDEX_BASIS_STATE": "Mark / Index Basis State",
+    "MARK_INDEX_BASIS_ZSCORE_7D": "Mark / Index Basis Z-Score (7d)",
+    "TRADE_MARK_BASIS_BPS": "Trade − Mark Basis (bps)",
+    "TRADE_INDEX_BASIS_BPS": "Trade − Index Basis (bps)",
+    "PREMIUM_INDEX_ZSCORE_7D": "Premium Index Z-Score (7d)",
+    "TAKER_BUY_SELL_RATIO": "Taker Buy / Sell Ratio",
+    "TAKER_DELTA_PCT": "Taker Delta (source interval, decimal)",
+    "TAKER_DELTA_PCT_15M": "Taker Delta 15m (decimal)",
+    "TAKER_DELTA_PCT_1H": "Taker Delta 1h (decimal)",
+    "TAKER_FLOW_PERSISTENCE": "Taker Flow Persistence (0–1)",
 }
 EVIDENCE_GROUPS = (
     (
@@ -87,6 +116,55 @@ EVIDENCE_GROUPS = (
     (
         "Momentum & Price",
         ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
+    ),
+    (
+        "Futures — Open Interest & Positioning",
+        (
+            "OI_VS_PRICE_STATE_1H",
+            "OI_CHANGE_PCT_5M",
+            "OI_CHANGE_PCT_1H",
+            "OI_CHANGE_PCT_24H",
+            "OI_ZSCORE_7D",
+            "PRICE_CHANGE_PCT_1H",
+            "TOP_TRADER_ACCOUNT_BIAS",
+            "TOP_TRADER_POSITION_BIAS",
+            "GLOBAL_LONG_SHORT_ACCOUNT_BIAS",
+            "TAKER_LONG_SHORT_VOLUME_BIAS",
+        ),
+    ),
+    (
+        "Futures — Funding",
+        (
+            "FUNDING_BIAS",
+            "FUNDING_RATE_BPS",
+            "FUNDING_24H_SUM_BPS",
+            "FUNDING_CHANGE_BPS",
+            "FUNDING_3_EVENT_MEAN_BPS",
+            "FUNDING_ZSCORE_7D",
+            "FUNDING_EXTREME_POSITIVE",
+            "FUNDING_EXTREME_NEGATIVE",
+        ),
+    ),
+    (
+        "Futures — Basis / Premium",
+        (
+            "MARK_INDEX_BASIS_STATE",
+            "MARK_INDEX_BASIS_BPS",
+            "MARK_INDEX_BASIS_ZSCORE_7D",
+            "TRADE_MARK_BASIS_BPS",
+            "TRADE_INDEX_BASIS_BPS",
+            "PREMIUM_INDEX_ZSCORE_7D",
+        ),
+    ),
+    (
+        "Futures — Taker Flow",
+        (
+            "TAKER_BUY_SELL_RATIO",
+            "TAKER_DELTA_PCT",
+            "TAKER_DELTA_PCT_15M",
+            "TAKER_DELTA_PCT_1H",
+            "TAKER_FLOW_PERSISTENCE",
+        ),
     ),
     (
         "Support & Resistance",
@@ -141,7 +219,7 @@ class EvidenceComboBox(QComboBox):
 
     def showPopup(self) -> None:
         menu = QMenu(self)
-        menu.setMinimumWidth(max(self.width(), 340))
+        menu.setMinimumWidth(max(self.width(), 430))
 
         search = QLineEdit(menu)
         search.setPlaceholderText("Search evidence…")
@@ -448,7 +526,7 @@ class RuleStrategyBuilder(QWidget):
         row.addStretch()
         required_layout.addLayout(row)
         evidence_note = QLabel(
-            "Evidence is grouped and searchable; common S/R choices are shown before advanced S/R details. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
+            "Evidence is grouped and searchable; common S/R choices are shown before advanced S/R details. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. A REQUIRED rule rejects a trade when its evidence is missing; missing VETO evidence does not create a rejection. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
         )
         evidence_note.setWordWrap(True)
         evidence_note.setStyleSheet("color:#52606d")
@@ -476,7 +554,7 @@ class RuleStrategyBuilder(QWidget):
         self.enable_mr.setChecked(True)
         research_layout.addWidget(self.enable_mr)
         self.research_status = QLabel(
-            "S/R · OI · Funding · Positioning/Basis · Taker Flow · Trade Flow · Order Book remain Analyze Only until used by an explicit rule."
+            "S/R · OI · Funding · Positioning/Basis · Taker Flow are rule-ready. Detailed Trade Flow · Order Book remain Analyze Only until dedicated rule dependencies are added."
         )
         self.research_status.setWordWrap(True)
         self.research_status.setStyleSheet("color:#52606d")
@@ -696,5 +774,5 @@ class RuleStrategyBuilder(QWidget):
         )
         self.research_status.setText(
             " · ".join(items)
-            + " — Analyze Only unless represented by an explicit Entry/Veto rule."
+            + " — S/R and lightweight futures context are rule-ready; detailed Trade Flow and Order Book remain research-only."
         )

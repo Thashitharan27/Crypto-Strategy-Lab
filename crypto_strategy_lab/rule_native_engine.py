@@ -1,12 +1,14 @@
 """Rule-aware native Data Lake simulator extensions.
 
-DI pressure and support/resistance remain causal prepared features. This layer
-only exposes those already-prepared values to the generic Entry/Veto rule
-contract and neutralizes retired independent filtering paths.
+DI pressure, support/resistance, and lightweight futures research remain causal
+prepared features. This layer only exposes those already-prepared values to the
+generic Entry/Veto rule contract and neutralizes retired independent filtering
+paths.
 """
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 from crypto_strategy_lab.data_lake_production_engine import (
     DataLakeProductionBacktestEngine,
@@ -35,6 +37,91 @@ _SR_NUMERIC_FIELDS = {
     "SR_RESISTANCE_REJECTION_ATR": "resistance_rejection_atr",
 }
 _SR_RULE_INDICATORS = frozenset((*_SR_CATEGORICAL_FIELDS, *_SR_NUMERIC_FIELDS))
+
+# These are lightweight source-native research blocks already prepared by the
+# Data Lake service whenever validated local coverage exists. Values remain in
+# their report/trade-list units so a rule threshold means exactly what the
+# corresponding research column means.
+_RESEARCH_NUMERIC_FIELDS = {
+    "OI_CHANGE_PCT_5M": ("futures_positioning", "oi_change_pct_5m", 1.0),
+    "OI_CHANGE_PCT_1H": ("futures_positioning", "oi_change_pct_1h", 1.0),
+    "OI_CHANGE_PCT_24H": ("futures_positioning", "oi_change_pct_24h", 1.0),
+    "OI_ZSCORE_7D": ("futures_positioning", "oi_zscore_7d", 1.0),
+    "PRICE_CHANGE_PCT_1H": ("futures_positioning", "price_change_pct_1h", 1.0),
+    "TOP_TRADER_ACCOUNT_BIAS": (
+        "futures_positioning",
+        "top_trader_account_bias",
+        1.0,
+    ),
+    "TOP_TRADER_POSITION_BIAS": (
+        "futures_positioning",
+        "top_trader_position_bias",
+        1.0,
+    ),
+    "GLOBAL_LONG_SHORT_ACCOUNT_BIAS": (
+        "futures_positioning",
+        "global_long_short_account_bias",
+        1.0,
+    ),
+    "TAKER_LONG_SHORT_VOLUME_BIAS": (
+        "futures_positioning",
+        "taker_long_short_volume_bias",
+        1.0,
+    ),
+    "FUNDING_RATE_BPS": ("funding_context", "funding_rate_bps", 1.0),
+    "FUNDING_24H_SUM_BPS": ("funding_context", "funding_24h_sum_bps", 1.0),
+    "FUNDING_CHANGE_BPS": ("funding_context", "funding_change", 10000.0),
+    "FUNDING_3_EVENT_MEAN_BPS": (
+        "funding_context",
+        "funding_3_event_mean",
+        10000.0,
+    ),
+    "FUNDING_ZSCORE_7D": ("funding_context", "funding_7d_zscore", 1.0),
+    "MARK_INDEX_BASIS_BPS": ("basis_context", "mark_index_basis_bps", 1.0),
+    "MARK_INDEX_BASIS_ZSCORE_7D": (
+        "basis_context",
+        "mark_index_basis_zscore_7d",
+        1.0,
+    ),
+    "TRADE_MARK_BASIS_BPS": ("basis_context", "trade_mark_basis_bps", 1.0),
+    "TRADE_INDEX_BASIS_BPS": ("basis_context", "trade_index_basis_bps", 1.0),
+    "PREMIUM_INDEX_ZSCORE_7D": (
+        "basis_context",
+        "premium_index_zscore_7d",
+        1.0,
+    ),
+    "TAKER_BUY_SELL_RATIO": (
+        "taker_flow_context",
+        "taker_buy_sell_ratio",
+        1.0,
+    ),
+    "TAKER_DELTA_PCT": ("taker_flow_context", "taker_delta_pct", 1.0),
+    "TAKER_DELTA_PCT_15M": (
+        "taker_flow_context",
+        "taker_delta_pct_15m",
+        1.0,
+    ),
+    "TAKER_DELTA_PCT_1H": (
+        "taker_flow_context",
+        "taker_delta_pct_1h",
+        1.0,
+    ),
+    "TAKER_FLOW_PERSISTENCE": (
+        "taker_flow_context",
+        "flow_persistence",
+        1.0,
+    ),
+}
+_RESEARCH_CATEGORICAL_FIELDS = {
+    "OI_VS_PRICE_STATE_1H": ("futures_positioning", "oi_vs_price_state_1h"),
+    "FUNDING_BIAS": ("funding_context", "funding_bias"),
+    "FUNDING_EXTREME_POSITIVE": ("funding_context", "funding_extreme_positive"),
+    "FUNDING_EXTREME_NEGATIVE": ("funding_context", "funding_extreme_negative"),
+    "MARK_INDEX_BASIS_STATE": ("basis_context", "mark_index_basis_state"),
+}
+_RESEARCH_RULE_INDICATORS = frozenset(
+    (*_RESEARCH_NUMERIC_FIELDS, *_RESEARCH_CATEGORICAL_FIELDS)
+)
 
 
 class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine):
@@ -116,6 +203,52 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
             return value if np.isfinite(value) else np.nan
         raise KeyError(indicator)
 
+    def _prepared_research_raw_value(self, i, feature_name, column):
+        """Read one aligned research fact from DataFrame or native prepared block."""
+        block = getattr(self, "research_features", {}).get(feature_name)
+        if block is None or i < 0:
+            return None
+        if isinstance(block, pd.DataFrame):
+            if i >= len(block) or column not in block.columns:
+                return None
+            return block.iloc[i][column]
+        values = getattr(block, "values", None)
+        if values is None or column not in values:
+            return None
+        series = values[column]
+        if i >= len(series):
+            return None
+        return series[i]
+
+    def _prepared_research_value(self, i, indicator):
+        if indicator in _RESEARCH_NUMERIC_FIELDS:
+            feature_name, column, scale = _RESEARCH_NUMERIC_FIELDS[indicator]
+            raw = self._prepared_research_raw_value(i, feature_name, column)
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                return np.nan
+            value *= scale
+            return value if np.isfinite(value) else np.nan
+        if indicator in _RESEARCH_CATEGORICAL_FIELDS:
+            feature_name, column = _RESEARCH_CATEGORICAL_FIELDS[indicator]
+            raw = self._prepared_research_raw_value(i, feature_name, column)
+            if raw is None or raw is pd.NA:
+                return np.nan
+            if hasattr(raw, "value"):
+                raw = raw.value
+            if isinstance(raw, (bool, np.bool_)):
+                key = "TRUE" if bool(raw) else "FALSE"
+            else:
+                try:
+                    if bool(pd.isna(raw)):
+                        return np.nan
+                except (TypeError, ValueError):
+                    return np.nan
+                key = str(raw).upper()
+            return CATEGORICAL_VALUE_CODES[indicator].get(key, np.nan)
+        raise KeyError(indicator)
+
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
         if indicator in {
             "DI_PRESSURE_STATE",
@@ -126,4 +259,22 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
             return self._prepared_pressure_value(i, direction, indicator)
         if indicator in _SR_RULE_INDICATORS:
             return self._prepared_sr_value(i, direction, indicator)
+        if indicator in _RESEARCH_RULE_INDICATORS:
+            return self._prepared_research_value(i, indicator)
         return super()._strategy_profile_rule_value(i, direction, profile, indicator)
+
+    def _strategy_profile_entry_rule_matches(self, i, direction, profile, rule):
+        """Treat missing required research as a failed requirement, never a pass.
+
+        Builder REQUIRED rules are compiled into REJECT rules that match the
+        inverse of the desired condition. Returning ``True`` for missing evidence
+        therefore rejects the candidate. VETO/FLIP rules keep fail-open matching:
+        absent optional evidence cannot manufacture a veto or direction flip.
+        """
+        value = self._strategy_profile_rule_value(
+            i, direction, profile, rule["indicator"]
+        )
+        if not np.isfinite(value):
+            return str(rule.get("_builder_kind", "")).upper() == "REQUIRED"
+        inside = float(rule["minimum"]) <= value <= float(rule["maximum"])
+        return inside if rule.get("condition", "INSIDE") == "INSIDE" else not inside
