@@ -127,6 +127,55 @@ _RESEARCH_RULE_INDICATORS = frozenset(
 class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine):
     """Current native runtime with prepared research evidence available to rules."""
 
+    @classmethod
+    def from_prepared(cls, *args, **kwargs):
+        """Keep the full prepared S/R snapshot available to Bayesian reporting.
+
+        The production engine consumes the support/resistance block through its
+        dedicated O(1) context reader and historically excluded it from generic
+        research output attachment. Bayesian direction research benefits from
+        having both LONG and SHORT causal S/R snapshots on the completed row, so
+        expose the same already-prepared block for reporting without changing the
+        S/R reader or any entry/exit decision.
+        """
+        engine = super().from_prepared(*args, **kwargs)
+        prepared = args[0] if args else kwargs.get("prepared")
+        if prepared is None:
+            return engine
+        sr_block = next(
+            (block for block in prepared.research if block.name == "support_resistance"),
+            None,
+        )
+        if sr_block is None:
+            return engine
+        engine.research_features["support_resistance"] = sr_block
+        existing = set(engine.research_output_columns)
+        sr_columns = tuple(column for column in sr_block.values if column not in existing)
+        engine.research_output_columns = (*engine.research_output_columns, *sr_columns)
+        available_name = "support_resistance_feature_available_at"
+        if available_name not in engine.research_feature_available_columns:
+            engine.research_feature_available_columns = (
+                *engine.research_feature_available_columns,
+                available_name,
+            )
+        return engine
+
+    def _build_result_row(self, p, row_kind, positions):
+        """Publish stable aliases for entry-time fields consumed by research."""
+        row = super()._build_result_row(p, row_kind, positions)
+        aliases = {
+            "atr_pct": "entry_atr_pct",
+            "rsi": "entry_rsi",
+            "momentum": "directional_momentum_return_at_entry",
+            "bb_width_change": "bb_width_entry_5bar_change",
+            "bb_width_change_pct": "bb_width_entry_5bar_change_pct",
+            "mean_reversion_distance_atr": "mean_distance_atr",
+        }
+        for alias, source in aliases.items():
+            if alias not in row and source in row:
+                row[alias] = row[source]
+        return row
+
     def _di_pressure_filter_result(self, i):
         """Retired global pressure filter: Entry/Veto rules are authoritative."""
         del i
