@@ -174,6 +174,13 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
         for alias, source in aliases.items():
             if alias not in row and source in row:
                 row[alias] = row[source]
+        if "funding_change_bps" not in row:
+            try:
+                funding_change = float(row.get("funding_change"))
+            except (TypeError, ValueError):
+                funding_change = np.nan
+            if np.isfinite(funding_change):
+                row["funding_change_bps"] = funding_change * 10000.0
         return row
 
     def _di_pressure_filter_result(self, i):
