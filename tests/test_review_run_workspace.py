@@ -153,14 +153,16 @@ def test_readiness_drives_primary_action_without_changing_run_path():
 def test_completed_thread_lifecycle_restores_idle_run_action():
     _app, window = _window()
     try:
-        from PySide6.QtCore import QThread
+        from PySide6.QtCore import QObject, QThread
         from crypto_strategy_lab.gui.review_run_install import (
             _complete_run_thread_lifecycle,
         )
 
         workspace = window.review_run_workspace
         thread = QThread(window)
+        worker = QObject()
         window._thread = thread
+        window._worker = worker
         window._set_readiness(
             "READY TO RUN",
             "All required run data is validated.",
@@ -169,10 +171,36 @@ def test_completed_thread_lifecycle_restores_idle_run_action():
         assert window.run_button.text() == "Running…"
         assert not window.run_button.isEnabled()
 
-        _complete_run_thread_lifecycle(window, workspace, thread)
+        _complete_run_thread_lifecycle(window, workspace, thread, worker)
         assert window._thread is None
+        assert window._worker is None
         assert window.run_button.text() == "Run Backtest"
         assert window.run_button.isEnabled()
+    finally:
+        window.close()
+
+
+def test_completion_wrappers_remain_qobject_bound_after_full_app_composition():
+    app, window = _window()
+    try:
+        from PySide6.QtCore import QObject
+        from crypto_strategy_lab.gui.results_dashboard_install import (
+            apply_results_dashboard_workspace,
+        )
+
+        review_bridge = window._review_run_completion_bridge
+        assert isinstance(review_bridge, QObject)
+        assert getattr(window._finished, "__self__", None) is review_bridge
+        assert review_bridge.thread() is app.thread()
+        assert getattr(window._failed, "__self__", None) is review_bridge
+
+        apply_results_dashboard_workspace(window)
+        results_bridge = window._results_completion_bridge
+        assert isinstance(results_bridge, QObject)
+        assert getattr(window._finished, "__self__", None) is results_bridge
+        assert results_bridge.thread() is app.thread()
+        # Results chains into the Review bridge, which is also GUI-thread bound.
+        assert getattr(results_bridge.original_finished, "__self__", None) is review_bridge
     finally:
         window.close()
 
