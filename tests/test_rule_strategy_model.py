@@ -11,6 +11,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     decompile_rules,
     new_rule,
     normalize_rule,
+    rule_operator_options,
     uses_support_resistance_rules,
 )
 
@@ -113,6 +114,26 @@ def test_numeric_pressure_change_evidence_keeps_numeric_operators():
     assert native["indicator"] == "DIRECTIONAL_DI_CHANGE"
     assert native["condition"] == "OUTSIDE"
     assert native["minimum"] == 4.0
+
+
+def test_directional_di_is_separate_numeric_evidence_with_strict_and_range_operators():
+    assert rule_operator_options("DIRECTIONAL_DI") == (
+        "GT", "GTE", "LT", "LTE", "BETWEEN", "OUTSIDE"
+    )
+    rule = new_rule(kind="REQUIRED", evidence="DIRECTIONAL_DI")
+    rule.update(operator="GT", value=30.0)
+    normalized = normalize_rule(rule)
+    strategy, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(normalized,),
+    )
+    native = strategy["bull_long"].entry_rules[0]
+    assert native["indicator"] == "DIRECTIONAL_DI"
+    # Required Directional DI > 30 rejects the inclusive complement (<= 30).
+    assert native["condition"] == "INSIDE"
+    assert native["minimum"] < -1e300
+    assert native["maximum"] == 30.0
 
 
 def test_required_near_support_compiles_as_categorical_sr_requirement():
