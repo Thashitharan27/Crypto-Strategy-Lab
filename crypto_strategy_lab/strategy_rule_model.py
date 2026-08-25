@@ -27,7 +27,7 @@ DIRECTION_MODES = ("DI",)
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
 SIDES = ("LONG", "SHORT")
 MARKET_PERMISSIONS = tuple(f"{regime}_{side}" for regime in REGIMES for side in SIDES)
-NUMERIC_RULE_OPERATORS = ("GTE", "LTE", "BETWEEN", "OUTSIDE")
+NUMERIC_RULE_OPERATORS = ("GT", "GTE", "LT", "LTE", "BETWEEN", "OUTSIDE")
 CATEGORICAL_RULE_OPERATORS = ("IS", "IS_NOT")
 RULE_OPERATORS = (*NUMERIC_RULE_OPERATORS, *CATEGORICAL_RULE_OPERATORS)
 RULE_KINDS = ("REQUIRED", "VETO", "FLIP")
@@ -245,8 +245,12 @@ def _range(rule: dict) -> tuple[float, float, str]:
         return code, code, "INSIDE" if operator == "IS" else "OUTSIDE"
 
     first, second = float(rule["value"]), float(rule["value2"])
+    if operator == "GT":
+        return LOW, first, "OUTSIDE"
     if operator == "GTE":
         return first, HIGH, "INSIDE"
+    if operator == "LT":
+        return first, HIGH, "OUTSIDE"
     if operator == "LTE":
         return LOW, first, "INSIDE"
     if operator == "BETWEEN":
