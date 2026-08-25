@@ -526,7 +526,7 @@ class RuleStrategyBuilder(QWidget):
         row.addStretch()
         required_layout.addLayout(row)
         evidence_note = QLabel(
-            "Evidence is grouped and searchable. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. A REQUIRED rule rejects a trade when its evidence is missing; missing VETO evidence does not create a rejection. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
+            "Evidence is grouped and searchable; common S/R choices are shown before advanced S/R details. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. A REQUIRED rule rejects a trade when its evidence is missing; missing VETO evidence does not create a rejection. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
         )
         evidence_note.setWordWrap(True)
         evidence_note.setStyleSheet("color:#52606d")
