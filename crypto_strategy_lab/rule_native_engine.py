@@ -138,7 +138,16 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
         return False, None
 
     def _prepared_pressure_value(self, i, direction, indicator):
-        """Read pressure rule evidence directly from the already-prepared arrays."""
+        """Read directional/pressure rule evidence from already-prepared arrays."""
+        if indicator == "DIRECTIONAL_DI":
+            if direction == "LONG":
+                value = float(self.plus_di_values[i])
+            elif direction == "SHORT":
+                value = float(self.minus_di_values[i])
+            else:
+                return np.nan
+            return value if np.isfinite(value) else np.nan
+
         if indicator == "DI_SPREAD_CHANGE":
             value = float(self.di_pressure_spread_change[i])
             return value if np.isfinite(value) else np.nan
@@ -250,6 +259,8 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
         raise KeyError(indicator)
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
+        if indicator == "DIRECTIONAL_DI":
+            return self._prepared_pressure_value(i, direction, indicator)
         if indicator in {
             "DI_PRESSURE_STATE",
             "DI_SPREAD_CHANGE",
