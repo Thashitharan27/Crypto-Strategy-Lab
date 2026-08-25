@@ -106,12 +106,12 @@ EVIDENCE_GROUPS = (
     (
         "Directional / DI",
         (
-            "DI_SPREAD",
             "DIRECTIONAL_DI",
+            "DI_SPREAD",
             "DI_PRESSURE_STATE",
-            "DI_SPREAD_CHANGE",
             "DIRECTIONAL_DI_CHANGE",
             "OPPOSING_DI_CHANGE",
+            "DI_SPREAD_CHANGE",
         ),
     ),
     ("Trend & Volatility", ("ADX", "ATR_PCT", "BB_WIDTH")),
@@ -193,6 +193,107 @@ EVIDENCE_GROUPS = (
         ),
     ),
 )
+
+# Category-first menu structure. Leaves are evidence IDs; nested tuples are
+# (submenu label, children). Keeping EVIDENCE_GROUPS above preserves the flat
+# research grouping used elsewhere while the popup remains compact.
+EVIDENCE_MENU_TREE = (
+    (
+        "Directional / DI",
+        (
+            "DIRECTIONAL_DI",
+            "DI_SPREAD",
+            "DI_PRESSURE_STATE",
+            "DIRECTIONAL_DI_CHANGE",
+            "OPPOSING_DI_CHANGE",
+            "DI_SPREAD_CHANGE",
+        ),
+    ),
+    ("Trend & Volatility", ("ADX", "ATR_PCT", "BB_WIDTH")),
+    (
+        "Momentum & Price",
+        ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
+    ),
+    (
+        "Futures",
+        (
+            (
+                "Open Interest & Positioning",
+                (
+                    "OI_VS_PRICE_STATE_1H",
+                    "OI_CHANGE_PCT_5M",
+                    "OI_CHANGE_PCT_1H",
+                    "OI_CHANGE_PCT_24H",
+                    "OI_ZSCORE_7D",
+                    "PRICE_CHANGE_PCT_1H",
+                    "TOP_TRADER_ACCOUNT_BIAS",
+                    "TOP_TRADER_POSITION_BIAS",
+                    "GLOBAL_LONG_SHORT_ACCOUNT_BIAS",
+                    "TAKER_LONG_SHORT_VOLUME_BIAS",
+                ),
+            ),
+            (
+                "Funding",
+                (
+                    "FUNDING_BIAS",
+                    "FUNDING_RATE_BPS",
+                    "FUNDING_24H_SUM_BPS",
+                    "FUNDING_CHANGE_BPS",
+                    "FUNDING_3_EVENT_MEAN_BPS",
+                    "FUNDING_ZSCORE_7D",
+                    "FUNDING_EXTREME_POSITIVE",
+                    "FUNDING_EXTREME_NEGATIVE",
+                ),
+            ),
+            (
+                "Basis / Premium",
+                (
+                    "MARK_INDEX_BASIS_STATE",
+                    "MARK_INDEX_BASIS_BPS",
+                    "MARK_INDEX_BASIS_ZSCORE_7D",
+                    "TRADE_MARK_BASIS_BPS",
+                    "TRADE_INDEX_BASIS_BPS",
+                    "PREMIUM_INDEX_ZSCORE_7D",
+                ),
+            ),
+            (
+                "Taker Flow",
+                (
+                    "TAKER_BUY_SELL_RATIO",
+                    "TAKER_DELTA_PCT",
+                    "TAKER_DELTA_PCT_15M",
+                    "TAKER_DELTA_PCT_1H",
+                    "TAKER_FLOW_PERSISTENCE",
+                ),
+            ),
+        ),
+    ),
+    (
+        "Support & Resistance",
+        (
+            "SR_TRADE_LOCATION_RATING",
+            "SR_ROOM_IN_DIRECTION_ATR",
+            "SR_NEAR_SUPPORT",
+            "SR_NEAR_RESISTANCE",
+            "SR_INSIDE_SUPPORT_ZONE",
+            "SR_INSIDE_RESISTANCE_ZONE",
+            (
+                "Advanced S/R",
+                (
+                    "SR_SUPPORT_STATE",
+                    "SR_RESISTANCE_STATE",
+                    "SR_SUPPORT_HELD",
+                    "SR_RESISTANCE_HELD",
+                    "SR_SUPPORT_DISTANCE_ATR",
+                    "SR_RESISTANCE_DISTANCE_ATR",
+                    "SR_SUPPORT_REJECTION_ATR",
+                    "SR_RESISTANCE_REJECTION_ATR",
+                ),
+            ),
+        ),
+    ),
+)
+
 OPERATOR_LABELS = {
     "GT": ">",
     "GTE": "≥",
@@ -210,8 +311,25 @@ def _humanize(value: str) -> str:
     return str(value).replace("_", " ").title()
 
 
+def _evidence_menu_paths() -> dict[str, tuple[str, ...]]:
+    """Return searchable category paths for every evidence leaf in the menu tree."""
+    result: dict[str, tuple[str, ...]] = {}
+
+    def visit(items, path):
+        for item in items:
+            if isinstance(item, str):
+                result[item] = path
+            else:
+                label, children = item
+                visit(children, (*path, label))
+
+    for label, children in EVIDENCE_MENU_TREE:
+        visit(children, (label,))
+    return result
+
+
 class EvidenceComboBox(QComboBox):
-    """Evidence selector with grouped, searchable popup and stable rule IDs."""
+    """Evidence selector with compact categories plus global search."""
 
     def __init__(self, current: str | None = None, parent=None):
         super().__init__(parent)
@@ -223,55 +341,86 @@ class EvidenceComboBox(QComboBox):
 
     def showPopup(self) -> None:
         menu = QMenu(self)
-        menu.setMinimumWidth(max(self.width(), 430))
+        menu.setMinimumWidth(max(self.width(), 360))
 
         search = QLineEdit(menu)
         search.setPlaceholderText("Search evidence…")
         search_action = QWidgetAction(menu)
         search_action.setDefaultWidget(search)
         menu.addAction(search_action)
-        menu.addSeparator()
 
-        grouped_actions = []
         current = self.currentData()
-        grouped_ids = {
-            evidence for _group, evidence_ids in EVIDENCE_GROUPS for evidence in evidence_ids
-        }
-        groups = list(EVIDENCE_GROUPS)
+        paths = _evidence_menu_paths()
+
+        search_section = menu.addSection("Search Results")
+        search_section.setVisible(False)
+        search_actions = []
+        for evidence in RULE_INDICATORS:
+            label = EVIDENCE_LABELS.get(evidence, evidence)
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(evidence == current)
+            action.setVisible(False)
+            action.triggered.connect(
+                lambda _checked=False, value=evidence: self._select_evidence(value)
+            )
+            path = paths.get(evidence, ("Other",))
+            search_text = (
+                f"{' '.join(path)} {label} {evidence.replace('_', ' ')}".casefold()
+            )
+            search_actions.append((action, search_text))
+
+        no_matches = menu.addAction("No matching evidence")
+        no_matches.setEnabled(False)
+        no_matches.setVisible(False)
+
+        category_separator = menu.addSeparator()
+        category_actions = []
+        tree_ids = set(paths)
+
+        def add_items(parent_menu, items):
+            for item in items:
+                if isinstance(item, str):
+                    if item not in RULE_INDICATORS:
+                        continue
+                    label = EVIDENCE_LABELS.get(item, item)
+                    action = parent_menu.addAction(label)
+                    action.setCheckable(True)
+                    action.setChecked(item == current)
+                    action.triggered.connect(
+                        lambda _checked=False, value=item: self._select_evidence(value)
+                    )
+                else:
+                    label, children = item
+                    submenu = parent_menu.addMenu(label)
+                    add_items(submenu, children)
+
+        for label, children in EVIDENCE_MENU_TREE:
+            submenu = menu.addMenu(label)
+            add_items(submenu, children)
+            category_actions.append(submenu.menuAction())
+
         uncategorized = tuple(
-            evidence for evidence in RULE_INDICATORS if evidence not in grouped_ids
+            evidence for evidence in RULE_INDICATORS if evidence not in tree_ids
         )
         if uncategorized:
-            groups.append(("Other", uncategorized))
-
-        for group_name, evidence_ids in groups:
-            section = menu.addSection(group_name)
-            actions = []
-            for evidence in evidence_ids:
-                if evidence not in RULE_INDICATORS:
-                    continue
-                label = EVIDENCE_LABELS.get(evidence, evidence)
-                action = menu.addAction(label)
-                action.setCheckable(True)
-                action.setChecked(evidence == current)
-                action.triggered.connect(
-                    lambda _checked=False, value=evidence: self._select_evidence(value)
-                )
-                search_text = (
-                    f"{group_name} {label} {evidence.replace('_', ' ')}".casefold()
-                )
-                actions.append((action, search_text))
-            grouped_actions.append((section, actions))
+            submenu = menu.addMenu("Other")
+            add_items(submenu, uncategorized)
+            category_actions.append(submenu.menuAction())
 
         def apply_filter(text: str) -> None:
             needle = text.strip().casefold()
-            for section, actions in grouped_actions:
-                any_visible = False
-                for action, search_text in actions:
-                    visible = not needle or needle in search_text
-                    action.setVisible(visible)
-                    any_visible = any_visible or visible
-                section.setVisible(any_visible)
+            searching = bool(needle)
+            any_match = False
+            for action, search_text in search_actions:
+                visible = searching and needle in search_text
+                action.setVisible(visible)
+                any_match = any_match or visible
+            search_section.setVisible(searching and any_match)
+            no_matches.setVisible(searching and not any_match)
+            category_separator.setVisible(not searching)
+            for action in category_actions:
+                action.setVisible(not searching)
 
         search.textChanged.connect(apply_filter)
         search.setFocus()
