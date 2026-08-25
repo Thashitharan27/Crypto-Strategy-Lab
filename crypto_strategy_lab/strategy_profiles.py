@@ -32,6 +32,38 @@ RULE_INDICATORS = (
     "SR_RESISTANCE_DISTANCE_ATR",
     "SR_SUPPORT_REJECTION_ATR",
     "SR_RESISTANCE_REJECTION_ATR",
+    # Lightweight causal futures research. These blocks are prepared automatically
+    # when validated local Binance coverage exists, so they can safely participate
+    # in explicit Entry/Veto rules without introducing a second filtering path.
+    "OI_CHANGE_PCT_5M",
+    "OI_CHANGE_PCT_1H",
+    "OI_CHANGE_PCT_24H",
+    "OI_ZSCORE_7D",
+    "PRICE_CHANGE_PCT_1H",
+    "OI_VS_PRICE_STATE_1H",
+    "TOP_TRADER_ACCOUNT_BIAS",
+    "TOP_TRADER_POSITION_BIAS",
+    "GLOBAL_LONG_SHORT_ACCOUNT_BIAS",
+    "TAKER_LONG_SHORT_VOLUME_BIAS",
+    "FUNDING_RATE_BPS",
+    "FUNDING_BIAS",
+    "FUNDING_24H_SUM_BPS",
+    "FUNDING_CHANGE_BPS",
+    "FUNDING_3_EVENT_MEAN_BPS",
+    "FUNDING_ZSCORE_7D",
+    "FUNDING_EXTREME_POSITIVE",
+    "FUNDING_EXTREME_NEGATIVE",
+    "MARK_INDEX_BASIS_BPS",
+    "MARK_INDEX_BASIS_STATE",
+    "MARK_INDEX_BASIS_ZSCORE_7D",
+    "TRADE_MARK_BASIS_BPS",
+    "TRADE_INDEX_BASIS_BPS",
+    "PREMIUM_INDEX_ZSCORE_7D",
+    "TAKER_BUY_SELL_RATIO",
+    "TAKER_DELTA_PCT",
+    "TAKER_DELTA_PCT_15M",
+    "TAKER_DELTA_PCT_1H",
+    "TAKER_FLOW_PERSISTENCE",
 )
 
 
