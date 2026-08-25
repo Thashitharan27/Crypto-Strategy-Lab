@@ -1,6 +1,8 @@
 """Final GUI composition for the human-focused Results Dashboard."""
 from __future__ import annotations
 
+from PySide6.QtCore import QObject, Slot
+
 from .completed_run_research import install_completed_run_research_actions
 from .results_dashboard_workspace import ResultsDashboardWorkspace
 
@@ -18,6 +20,21 @@ def _preserve_legacy_result_widgets(window, workspace) -> None:
             continue
         widget.setParent(workspace)
         widget.hide()
+
+
+class _ResultsCompletionBridge(QObject):
+    """Refresh the dashboard from the GUI thread after native completion."""
+
+    def __init__(self, workspace, original_finished):
+        super().__init__(workspace)
+        self.workspace = workspace
+        self.original_finished = original_finished
+
+    @Slot(object)
+    def finished(self, result):
+        value = self.original_finished(result)
+        self.workspace.refresh_completed_run()
+        return value
 
 
 def apply_results_dashboard_workspace(window) -> None:
@@ -44,12 +61,12 @@ def apply_results_dashboard_workspace(window) -> None:
     window._replace_page(6, page)
     window.results_dashboard_workspace = workspace
 
-    original_finished = window._finished
+    # Keep the final completion callback QObject-bound. RunWorker emits from its
+    # worker thread, so replacing _finished with a plain nested function would
+    # allow dashboard/QWidget updates to execute off the GUI thread.
+    completion_bridge = _ResultsCompletionBridge(workspace, window._finished)
+    window._results_completion_bridge = completion_bridge
+    window._finished = completion_bridge.finished
 
-    def finished_and_refresh(result):
-        original_finished(result)
-        workspace.refresh_completed_run()
-
-    window._finished = finished_and_refresh
     install_completed_run_research_actions(window, workspace)
     workspace.refresh_completed_run()
