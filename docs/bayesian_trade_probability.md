@@ -12,8 +12,9 @@ For every historical entry the research layer estimates:
 - probability that a SHORT trade is profitable;
 - probability assigned to the side the strategy actually traded;
 - shrunk expected net R for LONG and SHORT;
-- the amount of historical context supporting each estimate;
+- the amount and breadth of historical evidence supporting each estimate;
 - a 90% diagnostic interval and LOW / MEDIUM / HIGH confidence label;
+- the strongest positive and negative evidence families;
 - optional probability-gate simulations at 55%, 60%, 65% and 70%.
 
 The columns are written into the normal trade artifacts, including `trade_list.csv` and the authoritative trade Parquet, so they are also available through the existing run/MCP analysis path.
@@ -26,27 +27,60 @@ For an entry at time `T`, the model may use a historical trade only when that hi
 
 This matters when trades overlap or hold for many candles. Sorting rows only by entry time is not enough; the implementation keeps outcomes pending until their exit event is causally available.
 
-## Model v1
+## Model v2
 
-Model identifier: `BETA_CONTEXT_V1`.
+Model identifier: `BAYES_EVIDENCE_V2`.
 
-The model deliberately uses a small, auditable context rather than multiplying every available indicator as if all evidence were independent. The v1 context is:
+V1 required one exact coarse context match. That protected against naive indicator multiplication, but it left many trades without enough context and could create unstable high-probability tails when an exact bucket had only a small number of examples.
 
-- market regime;
-- whether the requested LONG/SHORT side agrees with the dominant DI direction;
-- directional-DI bucket;
-- ADX bucket;
-- side-specific DI pressure state derived from +DI/-DI changes.
+V2 keeps the causal Beta-Bernoulli shrinkage but factorizes evidence into **bounded evidence families**. Each family learns its own historical lift relative to the side baseline, and correlated observations inside the same family are averaged and capped before families are combined.
 
-This avoids immediately double-counting many highly correlated fields such as DI spread, directional DI, DI changes and ADX-derived information.
+The current evidence families are:
 
-### Small-sample shrinkage
+1. **Core direction** — market regime, DI direction agreement/counter state, directional-DI bucket, DI spread, DI pressure, DI spread change, plus higher-timeframe DI direction labels when those columns are present.
+2. **Trend & volatility** — ADX, ATR %, Bollinger width and Bollinger-width change.
+3. **Momentum & mean reversion** — MR state/motion/direction, MR Bollinger location/z-score, MR RSI, distance from mean, RSI, momentum and VWAP distance when present.
+4. **Support & resistance** — side-specific trade-location rating, room in direction, near/inside support/resistance, hold/state information and side-specific distance to support/resistance.
+5. **Open interest & positioning** — Price/OI state, OI changes, OI z-score, 1h price change and long/short positioning biases.
+6. **Funding & basis** — funding bias/rate/24h/change/z-score/extremes, mark-index basis state/rate/z-score and premium z-score.
+7. **Taker flow** — buy/sell ratio, 15m/1h taker delta, flow persistence and taker positioning bias.
+8. **Microstructure** — optional detailed trade-flow and order-book evidence such as trade delta, intensity, CVD, large-trade shares, spread, L1 imbalance, microprice offset and depth imbalance.
 
-For each side, a Beta(1,1) prior starts unseen LONG and SHORT estimates at 50%.
+Optional families contribute only when their fields exist on the trade row. Stale or unobserved order-book snapshots and uncovered trade-flow data are ignored rather than converted into artificial zero evidence.
 
-A matching context is then shrunk toward the side's historical baseline with a default prior strength of 20 trades. This means a tiny bucket such as 3 wins / 1 loss does **not** get treated as a trustworthy 75% setup. As more matching completed trades accumulate, the posterior can move closer to the observed rate.
+### Why evidence is grouped
+
+Many research fields are correlated. For example, directional DI, DI spread and DI pressure all describe related parts of the same directional state. Funding rate, funding bias and funding z-score are also related.
+
+V2 therefore does **not** multiply their probabilities as if they were independent. Instead:
+
+- each evidence token is shrunk toward the side prior;
+- tiny samples receive an additional reliability taper;
+- correlated tokens are averaged inside their family;
+- each family's log-odds contribution is capped;
+- the total combined contribution is capped;
+- diagnostic sample size uses median family support, not the sum of correlated observations.
+
+This is intentionally conservative. More indicators should improve information coverage, not manufacture false confidence.
+
+### Hierarchical side prior
+
+LONG and SHORT remain separately scored, but each side baseline is now shrunk toward the all-trade baseline before contextual evidence is added. This prevents a short early streak on one side from becoming an unjustified 80–90% prior.
+
+## Confidence and readiness
+
+`bayes_context_ready` requires both:
+
+- at least 20 historical supporting samples by default; and
+- at least 3 evidence families with historical support.
+
+The confidence label also considers evidence breadth and total side history. HIGH confidence therefore requires substantially more support than merely crossing a probability threshold.
+
+The 90% interval is deliberately conservative: its effective sample size is based on median family support rather than adding sample counts across correlated evidence families.
 
 ## Main trade columns
+
+Core probability fields:
 
 - `bayes_long_probability`
 - `bayes_short_probability`
@@ -64,25 +98,44 @@ A matching context is then shrunk toward the side's historical baseline with a d
 - `bayes_context_ready`
 - `bayes_recommended_direction`
 - `bayes_recommendation_matches_actual`
+
+Evidence diagnostics:
+
+- `bayes_long_evidence_families`
+- `bayes_short_evidence_families`
+- `bayes_actual_evidence_families`
+- `bayes_actual_evidence_items`
+- `bayes_top_positive_evidence`
+- `bayes_top_negative_evidence`
+- `bayes_actual_core_direction_log_odds_lift`
+- `bayes_actual_trend_volatility_log_odds_lift`
+- `bayes_actual_momentum_mean_reversion_log_odds_lift`
+- `bayes_actual_support_resistance_log_odds_lift`
+- `bayes_actual_oi_positioning_log_odds_lift`
+- `bayes_actual_funding_basis_log_odds_lift`
+- `bayes_actual_taker_flow_log_odds_lift`
+- `bayes_actual_microstructure_log_odds_lift`
+
+Probability-gate research simulations:
+
 - `bayes_take_55_min20`
 - `bayes_take_60_min20`
 - `bayes_take_65_min20`
 - `bayes_take_70_min20`
 
-`bayes_context_ready` becomes true when the actual-side matching context has at least 20 completed historical samples.
-
-The `bayes_take_*` fields are **research simulations**, not entry rules. For example, `bayes_take_60_min20=true` means the actual trade would have passed a 60% posterior threshold after at least 20 matching historical context samples were causally available.
+The `bayes_take_*` fields are **research simulations**, not entry rules. For example, `bayes_take_60_min20=true` means the actual trade would have passed a 60% posterior threshold with the required causal historical sample support and evidence breadth.
 
 ## Interpreting LONG vs SHORT
 
-The model estimates LONG and SHORT independently from trades that were actually observed on those sides in comparable historical contexts. A SHORT probability shown beside a LONG trade is therefore useful comparative research evidence, but it is not proof of what would have happened if that exact historical trade had been reversed.
+The model estimates LONG and SHORT independently from trades that were actually observed on those sides. A SHORT probability shown beside a LONG trade is useful comparative research evidence, but it is not proof of what would have happened if that exact historical trade had been reversed.
 
-A later experiment can run a dedicated direction-selection simulation after the probability model proves that it separates strong and weak trades out of sample. The initial implementation intentionally keeps probability research separate from strategy execution.
+A later experiment can run a dedicated direction-selection simulation after the probability model proves that it separates strong and weak trades out of sample. Probability research remains separate from strategy execution for now.
 
 ## Recommended validation workflow
 
-1. Run normal strategy baselines over long periods and multiple assets.
+1. Run minimally filtered BTC/ETH baselines over long periods so the model sees broad market states.
 2. Compare raw performance with the 55/60/65/70 probability-gated subsets.
-3. Check sample sizes and confidence, not only win rate.
-4. Compare Net R / average R as well as probability of profit.
-5. Validate the useful threshold on a later out-of-sample period before allowing Bayes to influence actual direction or entry rules.
+3. Review `bayes_actual_evidence_families`, confidence and the 90% interval, not only the point probability.
+4. Break results down by `bayes_top_positive_evidence`, `bayes_top_negative_evidence` and the per-family lift columns to see which data actually adds value.
+5. Compare Net R / average R as well as probability of profit.
+6. Validate the useful threshold on a later out-of-sample period before allowing Bayes to influence actual direction or entry rules.
