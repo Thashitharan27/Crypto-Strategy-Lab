@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from crypto_strategy_lab.config import EntryMode
+from crypto_strategy_lab.research_sampling_fast import ResearchSamplingFastExitMixin
 from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
 
 
@@ -26,7 +27,10 @@ RESEARCH_SAMPLING_MODES = {
 }
 
 
-class StrategyResearchSamplingEngine(RuleAwareDataLakeProductionBacktestEngine):
+class StrategyResearchSamplingEngine(
+    ResearchSamplingFastExitMixin,
+    RuleAwareDataLakeProductionBacktestEngine,
+):
     """Native engine variant that ignores portfolio overlap suppression only."""
 
     def _should_enter(self, i):
@@ -179,6 +183,7 @@ def generate_strategy_research_samples(
     config = research_native_config(native_config, len(prepared))
     engine = StrategyResearchSamplingEngine.from_prepared(prepared, intrabar, config)
     raw = engine.run()
+    exit_optimization = engine.research_exit_optimization_stats()
     raw = _annotate_episodes(raw)
     viable_episode_count = int(raw["research_episode_id"].nunique()) if not raw.empty else 0
     resolved = _resolved_samples(raw)
@@ -210,6 +215,7 @@ def generate_strategy_research_samples(
         "portfolio_exposure_ignored": True,
         "combined_leverage_cap_ignored": True,
         "per_trade_execution_semantics_preserved": True,
+        **exit_optimization,
         "viable_entries": int(len(raw)),
         "resolved_viable_entries": int(len(resolved)),
         "selected_entries": int(len(selected)),
