@@ -20,12 +20,12 @@ from crypto_strategy_lab.data import (
     MarketDataStore,
     MarketKind,
 )
+from crypto_strategy_lab.bayesian_sampling_reporting import BayesianSamplingCsvManifestReporter
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig, load_data_lake_config
 from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.prepared_cache import PreparedRunCache
 from crypto_strategy_lab.progress import emit_progress
 from crypto_strategy_lab.research_adapters import NativeSimulator, NativeStrategyPolicy
-from crypto_strategy_lab.research_reporting import CsvManifestReporter
 from crypto_strategy_lab.research_runner import ResearchRunner
 from crypto_strategy_lab.run_manifest import artifact_path, load_completed_manifest
 
@@ -150,7 +150,7 @@ class GuiApplicationService:
             return self._runner_factory(output_root)
         return ResearchRunner(self.store, production_feature_registry(),
                               PreparedRunCache(self.cache_root), NativeStrategyPolicy(),
-                              NativeSimulator(), (CsvManifestReporter(output_root),))
+                              NativeSimulator(), (BayesianSamplingCsvManifestReporter(output_root),))
 
     def run(self, request: GuiResearchRequest, config: ResearchRunConfig):
         config.validate()

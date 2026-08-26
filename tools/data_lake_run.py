@@ -12,12 +12,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from crypto_strategy_lab.bayesian_sampling_reporting import BayesianSamplingCsvManifestReporter
 from crypto_strategy_lab.data import DataRequest, MarketDataStore
 from crypto_strategy_lab.data_lake_config import load_data_lake_config
 from crypto_strategy_lab.features import production_feature_registry
 from crypto_strategy_lab.prepared_cache import PreparedRunCache
 from crypto_strategy_lab.research_adapters import NativeSimulator, NativeStrategyPolicy
-from crypto_strategy_lab.research_reporting import CsvManifestReporter
 from crypto_strategy_lab.research_runner import ResearchRunner
 
 
@@ -69,7 +69,7 @@ def main():
         PreparedRunCache(args.cache_root),
         NativeStrategyPolicy(),
         NativeSimulator(),
-        (CsvManifestReporter(output_root),),
+        (BayesianSamplingCsvManifestReporter(output_root),),
     )
     result = runner.run(request, config)
     print(
