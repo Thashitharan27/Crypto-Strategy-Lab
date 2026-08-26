@@ -52,6 +52,7 @@ EVIDENCE_LABELS = {
     "DIRECTIONAL_DI_CHANGE": "Directional DI Change",
     "OPPOSING_DI_CHANGE": "Opposing DI Change",
     "ADX": "ADX",
+    "ADX_CHANGE": "ADX Change (1 bar)",
     "ATR_PCT": "ATR % (decimal)",
     "RSI": "RSI",
     "BB_WIDTH": "BB Width (decimal)",
@@ -114,7 +115,7 @@ EVIDENCE_GROUPS = (
             "DI_SPREAD_CHANGE",
         ),
     ),
-    ("Trend & Volatility", ("ADX", "ATR_PCT", "BB_WIDTH")),
+    ("Trend & Volatility", ("ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH")),
     (
         "Momentum & Price",
         ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
@@ -209,7 +210,7 @@ EVIDENCE_MENU_TREE = (
             "DI_SPREAD_CHANGE",
         ),
     ),
-    ("Trend & Volatility", ("ADX", "ATR_PCT", "BB_WIDTH")),
+    ("Trend & Volatility", ("ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH")),
     (
         "Momentum & Price",
         ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
@@ -304,7 +305,7 @@ OPERATOR_LABELS = {
     "IS": "Is",
     "IS_NOT": "Is Not",
 }
-DIRECTION_LABELS = {"DI": "DI Direction"}
+DIRECTION_LABELS = {"DI": "DI Direction", "DMI_TREND": "DMI Trend — Baseline"}
 
 
 def _humanize(value: str) -> str:
@@ -658,7 +659,10 @@ class RuleStrategyBuilder(QWidget):
                 check.toggled.connect(lambda _checked: self._notify())
         direction_layout.addLayout(permission)
         note = QLabel(
-            "These are permissions only. DI chooses the candidate side; this grid decides whether that side may trade in each market state."
+            "These are permissions only. DI Direction uses raw +DI/-DI side selection. "
+            "DMI Trend keeps that side selection and adds built-in ADX ≥ 20, non-falling ADX, "
+            "and expanding DI pressure. The grid still decides where that side may trade; for the "
+            "first clean trend test, enable Bull/Bear and leave Sideways off."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#52606d")

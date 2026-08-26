@@ -13,6 +13,7 @@ RULE_INDICATORS = (
     "DIRECTIONAL_DI_CHANGE",
     "OPPOSING_DI_CHANGE",
     "ADX",
+    "ADX_CHANGE",
     "ATR_PCT",
     "RSI",
     "BB_WIDTH",
