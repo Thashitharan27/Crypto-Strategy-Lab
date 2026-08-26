@@ -8,19 +8,21 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 
 class ReportsDiagnosticsWorkspace(QWidget):
-    """Run details plus an informational description of the canonical outputs."""
+    """Run details plus research-only sampling and canonical output guidance."""
 
     def __init__(self, window, parent=None):
         super().__init__(parent)
@@ -29,14 +31,16 @@ class ReportsDiagnosticsWorkspace(QWidget):
         self.widgets = self.form.widgets
         self._syncing_output = False
         self._syncing_bayes = False
+        self._syncing_research_sampling = False
 
         # Keep the stable shell's ReportingConfig form alive as the one native
-        # config boundary, but do not expose retired reporting/telemetry fields.
+        # config boundary, but expose only the researcher-facing controls below.
         self.form.setParent(window)
         self.form.hide()
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._run_details_box())
+        layout.addWidget(self._research_sampling_box())
         layout.addWidget(self._bayes_sampling_box())
         layout.addWidget(self._saved_outputs_box())
         layout.addWidget(self._research_model_box())
@@ -68,37 +72,68 @@ class ReportsDiagnosticsWorkspace(QWidget):
         form.addRow("Output Folder", output_row)
         return box
 
-    def _bayes_sampling_box(self) -> QGroupBox:
-        box = QGroupBox("Bayesian Research Sampling")
-        layout = QVBoxLayout(box)
-        self.bayes_sampling = QCheckBox(
-            "Generate market-grid LONG + SHORT research observations"
+    def _research_sampling_box(self) -> QGroupBox:
+        box = QGroupBox("Research Sampling Mode")
+        form = QFormLayout(box)
+
+        self.research_sampling_mode = QComboBox()
+        self.research_sampling_mode.addItem(
+            "Portfolio — realistic backtest", "PORTFOLIO"
         )
-        self.bayes_sampling.setToolTip(
-            "At every completed candle of the selected strategy timeframe, evaluate "
-            "independent hypothetical LONG and SHORT trades with the native execution engine."
+        self.research_sampling_mode.addItem(
+            "Every Viable Entry — resilience", "EVERY_VIABLE_ENTRY"
         )
-        self.bayes_sampling.toggled.connect(self._bayes_sampling_changed)
-        layout.addWidget(self.bayes_sampling)
+        self.research_sampling_mode.addItem(
+            "Fixed Interval — every N viable candles", "FIXED_INTERVAL"
+        )
+        self.research_sampling_mode.addItem(
+            "Episode First — first viable entry only", "EPISODE_FIRST"
+        )
+        self.research_sampling_mode.setToolTip(
+            "Portfolio keeps normal capital/open-trade constraints. Research modes run a "
+            "separate strategy-valid sample population with overlapping independent trades."
+        )
+        self.research_sampling_mode.currentIndexChanged.connect(
+            self._research_sampling_mode_changed
+        )
+
+        self.research_sampling_interval = self.widgets[
+            "research_sampling_interval_candles"
+        ]
+        if isinstance(self.research_sampling_interval, QSpinBox):
+            self.research_sampling_interval.setRange(1, 10000)
+            self.research_sampling_interval.setSuffix(" candles")
+        self.research_sampling_interval.setToolTip(
+            "Used only by Fixed Interval. Sampling restarts at the first viable entry "
+            "of each uninterrupted strategy episode."
+        )
+        value_changed = getattr(self.research_sampling_interval, "valueChanged", None)
+        if value_changed is not None:
+            value_changed.connect(lambda _value: self.refresh_review_summary())
+
+        form.addRow("Mode", self.research_sampling_mode)
+        form.addRow("Fixed Interval", self.research_sampling_interval)
+
         note = QLabel(
-            "Research-only. The cadence automatically follows the selected strategy timeframe: "
-            "15m samples every 15m candle, 1h every hourly candle, 4h every four-hour candle, "
-            "and 1D every daily candle. LONG and SHORT observations may overlap and each uses "
-            "fixed independent research equity, so they never change normal strategy entries, "
-            "portfolio limits or trade sizing. The resolved observations are saved separately as "
-            "artifacts/bayes_research_samples.parquet."
+            "Research modes do not replace the normal portfolio result. They open a separate "
+            "synthetic trade whenever the configured strategy is viable, preserve the same "
+            "Entry/Veto rules and SL/TP/timeout/intrabar execution, and ignore only portfolio "
+            "overlap, combined exposure and compounding. Samples are grouped into uninterrupted "
+            "episodes so repeated entries from one market move are not presented as independent "
+            "confirmations. Equity curve, drawdown, exposure and compounded return are explicitly "
+            "invalid for this research population."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
-            "background:#eef5fb; padding:10px; border:1px solid #c8d9e8"
+            "background:#fff8e6; padding:10px; border:1px solid #ead9a3"
         )
-        layout.addWidget(note)
+        form.addRow(note)
         return box
 
-    def _analysis_level_value(self) -> str:
-        widget = self.widgets.get("analysis_level")
+    def _reporting_text_value(self, name: str, default: str) -> str:
+        widget = self.widgets.get(name)
         if widget is None:
-            return "STANDARD"
+            return default
         current_data = getattr(widget, "currentData", None)
         if callable(current_data):
             value = current_data()
@@ -110,10 +145,10 @@ class ReportsDiagnosticsWorkspace(QWidget):
         current_text = getattr(widget, "currentText", None)
         if callable(current_text):
             return str(current_text())
-        return "STANDARD"
+        return default
 
-    def _set_analysis_level(self, value: str) -> None:
-        widget = self.widgets.get("analysis_level")
+    def _set_reporting_text(self, name: str, value: str) -> None:
+        widget = self.widgets.get(name)
         if widget is None:
             return
         set_text = getattr(widget, "setText", None)
@@ -133,6 +168,49 @@ class ReportsDiagnosticsWorkspace(QWidget):
             if index >= 0:
                 set_index(index)
 
+    def _research_sampling_mode_changed(self, _index: int) -> None:
+        if self._syncing_research_sampling:
+            return
+        self._syncing_research_sampling = True
+        try:
+            mode = str(self.research_sampling_mode.currentData())
+            self._set_reporting_text("research_sampling_mode", mode)
+            self.research_sampling_interval.setEnabled(mode == "FIXED_INTERVAL")
+        finally:
+            self._syncing_research_sampling = False
+        self.refresh_review_summary()
+
+    def _bayes_sampling_box(self) -> QGroupBox:
+        box = QGroupBox("Bayesian Market-Grid Sampling")
+        layout = QVBoxLayout(box)
+        self.bayes_sampling = QCheckBox(
+            "Generate direction-neutral market-grid LONG + SHORT observations"
+        )
+        self.bayes_sampling.setToolTip(
+            "At every completed candle of the selected strategy timeframe, evaluate "
+            "independent hypothetical LONG and SHORT trades with the native execution engine."
+        )
+        self.bayes_sampling.toggled.connect(self._bayes_sampling_changed)
+        layout.addWidget(self.bayes_sampling)
+        note = QLabel(
+            "Separate from Research Sampling Mode. This existing Bayesian dataset deliberately "
+            "ignores strategy Entry/Veto selection and labels both LONG and SHORT market-grid "
+            "outcomes. Strategy-valid research samples instead carry research_episode_id as the "
+            "cluster key for correlation-aware downstream analysis."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "background:#eef5fb; padding:10px; border:1px solid #c8d9e8"
+        )
+        layout.addWidget(note)
+        return box
+
+    def _analysis_level_value(self) -> str:
+        return self._reporting_text_value("analysis_level", "STANDARD")
+
+    def _set_analysis_level(self, value: str) -> None:
+        self._set_reporting_text("analysis_level", value)
+
     def _bayes_sampling_changed(self, checked: bool) -> None:
         if self._syncing_bayes:
             return
@@ -148,18 +226,22 @@ class ReportsDiagnosticsWorkspace(QWidget):
         box = QGroupBox("Completed Run Output")
         layout = QVBoxLayout(box)
         note = QLabel(
-            "Every completed run saves one clean output set — there are no report "
-            "profiles, telemetry modes, or question-specific report toggles.\n\n"
+            "Every completed run saves one clean output set; optional research populations are "
+            "published separately and never replace the authoritative strategy trades.\n\n"
             "Human review\n"
             "• backtest_report.xlsx — dashboard, monthly/yearly performance, market regime and direction × regime\n"
-            "• trade_list.csv — easy-to-open completed trade list\n"
-            "• summary.json — compact run statistics\n"
+            "• trade_list.csv — easy-to-open completed portfolio trade list\n"
+            "• summary.json — compact portfolio run statistics\n"
             "• data_quality.json — required input-data quality\n\n"
             "Research & reproducibility\n"
-            "• artifacts/trades.parquet — authoritative completed strategy trades\n"
+            "• artifacts/trades.parquet — authoritative completed portfolio strategy trades\n"
             "• artifacts/feature_context.parquet — causal feature/research state for every strategy row\n"
-            "• artifacts/signals.parquet — entered and rejected decisions with exact causal attachment\n"
-            "• artifacts/bayes_research_samples.parquet — optional independent market-grid LONG/SHORT observations\n"
+            "• artifacts/signals.parquet — entered and rejected portfolio decisions\n"
+            "• artifacts/research_sampling_trades.parquet — optional strategy-valid overlapping samples\n"
+            "• artifacts/research_sampling_episodes.parquet — correlation-cluster/episode outcomes\n"
+            "• research_sampling_context.csv — DI/ADX/regime/MR/funding/OI sample breakdowns\n"
+            "• research_sampling_summary.json — entry-level + episode-level resilience metrics\n"
+            "• artifacts/bayes_research_samples.parquet — optional direction-neutral market grid\n"
             "• provenance/source_archives.parquet — exact selected Binance archive provenance\n"
             "• run_manifest.json — hashes, config, provenance, artifact catalog and completion marker"
         )
@@ -177,9 +259,9 @@ class ReportsDiagnosticsWorkspace(QWidget):
         note = QLabel(
             "DI, ADX, volatility, funding, open interest, positioning, taker flow, "
             "support/resistance and state-transition questions should be analysed "
-            "from the canonical completed-run artifacts when needed. This avoids "
-            "keeping fixed reports that duplicate the same data or become stale as "
-            "the research questions change."
+            "from the canonical completed-run artifacts when needed. Research sampling "
+            "adds a denser opportunity population while episode IDs retain the correlation "
+            "structure needed to avoid treating repeated entries as independent experiments."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#52606d")
@@ -207,6 +289,18 @@ class ReportsDiagnosticsWorkspace(QWidget):
 
     def refresh_from_form(self) -> None:
         self._source_output_changed(self.window.output_root.text())
+
+        self._syncing_research_sampling = True
+        try:
+            mode = self._reporting_text_value("research_sampling_mode", "PORTFOLIO").upper()
+            index = self.research_sampling_mode.findData(mode)
+            self.research_sampling_mode.blockSignals(True)
+            self.research_sampling_mode.setCurrentIndex(max(index, 0))
+            self.research_sampling_mode.blockSignals(False)
+            self.research_sampling_interval.setEnabled(mode == "FIXED_INTERVAL")
+        finally:
+            self._syncing_research_sampling = False
+
         self._syncing_bayes = True
         try:
             self.bayes_sampling.blockSignals(True)
@@ -226,13 +320,23 @@ class ReportsDiagnosticsWorkspace(QWidget):
         if not text:
             return
         lines = text.splitlines()
-        sampling = (
-            "Bayes sampling: ON — every selected strategy candle, LONG + SHORT"
+        mode = (
+            str(self.research_sampling_mode.currentData())
+            if getattr(self, "research_sampling_mode", None) is not None
+            else "PORTFOLIO"
+        )
+        if mode == "FIXED_INTERVAL":
+            value = getattr(self.research_sampling_interval, "value", lambda: 1)()
+            resilience = f"Research sampling: FIXED INTERVAL · every {value} viable candles"
+        else:
+            resilience = f"Research sampling: {mode.replace('_', ' ')}"
+        bayes = (
+            "Bayes grid: ON"
             if getattr(self, "bayes_sampling", None) is not None and self.bayes_sampling.isChecked()
-            else "Bayes sampling: OFF"
+            else "Bayes grid: OFF"
         )
         for index, line in enumerate(lines):
             if line.startswith("Reports:") or line.startswith("Output:"):
-                lines[index] = f"Output: Canonical completed-run set · {sampling}"
+                lines[index] = f"Output: Canonical completed-run set · {resilience} · {bayes}"
                 summary.setText("\n".join(lines))
                 return
