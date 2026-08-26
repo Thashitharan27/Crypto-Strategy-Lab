@@ -13,6 +13,7 @@ from crypto_strategy_lab.feature_research import _write_parquet_atomic
 from crypto_strategy_lab.prepared_backtest import intrabar_from_data_lake_bundle
 from crypto_strategy_lab.research_adapters import native_simulator_config
 from crypto_strategy_lab.research_reporting import CsvManifestReporter, _catalog_entry
+from crypto_strategy_lab.research_sampling_reporting import append_research_sampling_artifacts
 from crypto_strategy_lab.run_manifest import atomic_json
 
 
@@ -79,17 +80,18 @@ def _validate_sampling_artifact(samples: pd.DataFrame) -> None:
 
 
 class BayesianSamplingCsvManifestReporter(CsvManifestReporter):
-    """Canonical reporter plus an opt-in, separate market-grid Bayes artifact.
+    """Canonical reporter plus optional downstream research-sampling artifacts.
 
-    Normal strategy trades are published exactly as before.  When Deep Research
-    is selected, the reporter runs the downstream market-grid sampler after normal
-    strategy simulation and catalogs the resulting hypothetical observations as
-    ``artifacts/bayes_research_samples.parquet``.
+    Normal strategy trades are published exactly as before. Deep Research may add
+    the direction-neutral market grid, while ReportingConfig.research_sampling_mode
+    independently adds strategy-valid resilience samples with episode labels.
     """
 
     def report(self, result, context):
         if not bayesian_sampling_enabled(context.config.reporting):
-            return super().report(result, context)
+            super().report(result, context)
+            append_research_sampling_artifacts(result, context)
+            return
 
         sampling_started = time.perf_counter()
         native_config = native_simulator_config(
@@ -112,8 +114,8 @@ class BayesianSamplingCsvManifestReporter(CsvManifestReporter):
         _validate_sampling_artifact(samples)
 
         # Let the mature reporter publish and validate the normal strategy run
-        # first.  The final atomic manifest rewrite below becomes the true final
-        # completion marker and includes the optional research sample artifact.
+        # first. The atomic rewrites below add optional research artifacts without
+        # changing the simulator result or the canonical strategy-trade artifact.
         super().report(result, context)
         run_dir = Path(result.output_dir)
         sample_path = run_dir / "artifacts" / "bayes_research_samples.parquet"
@@ -155,3 +157,4 @@ class BayesianSamplingCsvManifestReporter(CsvManifestReporter):
         }
         manifest["run_completed_at"] = datetime.now(timezone.utc).isoformat()
         atomic_json(manifest_path, manifest)
+        append_research_sampling_artifacts(result, context)

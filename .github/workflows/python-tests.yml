@@ -108,6 +108,8 @@ jobs:
           crypto_strategy_lab/research_runner.py
           crypto_strategy_lab/research_adapters.py
           crypto_strategy_lab/research_reporting.py
+          crypto_strategy_lab/research_sampling.py
+          crypto_strategy_lab/research_sampling_reporting.py
           crypto_strategy_lab/run_manifest.py
           crypto_strategy_lab/feature_research.py
           crypto_strategy_lab/bayesian_research.py
@@ -176,6 +178,7 @@ jobs:
           tests/test_feature_research.py
           tests/test_bayesian_research.py
           tests/test_bayesian_sampling.py
+          tests/test_research_sampling.py
           tests/test_task17_reporting.py
           tests/test_mcp_server.py
           tests/test_rewrite_config_current.py
