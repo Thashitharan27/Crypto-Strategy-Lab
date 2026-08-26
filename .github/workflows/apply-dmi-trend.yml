@@ -1,0 +1,151 @@
+name: Apply DMI Trend strategy patch
+
+on:
+  push:
+    branches:
+      - feature/dmi-trend-strategy
+    paths:
+      - .github/workflows/apply-dmi-trend.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/dmi-trend-strategy
+          fetch-depth: 0
+
+      - name: Apply focused DMI Trend changes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          # 1) Direction-mode compiler: keep raw DI as control and add a native
+          # DMI Trend baseline composed from mature causal rule evidence.
+          path = Path("crypto_strategy_lab/strategy_rule_model.py")
+          text = path.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              '''# Direction selection and trade permission are intentionally separate concepts.\n# DI is the only currently researched native direction strategy. Additional\n# direction strategies can be added here later when they have a real native\n# implementation; LONG/SHORT selection belongs to MARKET_PERMISSIONS below.\nDIRECTION_MODES = ("DI",)''',
+              '''# Direction selection and trade permission are intentionally separate concepts.\n# DI remains the raw directional control. DMI_TREND keeps the same +DI/-DI side\n# selection but adds a deliberately simple, non-optimized trend confirmation\n# baseline at compile time. LONG/SHORT eligibility still belongs to the market\n# permission grid below.\nDIRECTION_MODES = ("DI", "DMI_TREND")''',
+              "direction modes",
+          )
+          text = replace_once(
+              text,
+              '''def effective_side(source_side: str, direction_mode: str) -> str:\n    """Return the DI-selected side; permissions decide whether it may trade."""\n    mode = str(direction_mode).upper()\n    if mode != "DI":\n        raise ValueError(f"unsupported direction mode: {direction_mode}")\n    return source_side''',
+              '''def effective_side(source_side: str, direction_mode: str) -> str:\n    """Return the DI-selected side; the chosen mode may add confirmations."""\n    mode = str(direction_mode).upper()\n    if mode not in DIRECTION_MODES:\n        raise ValueError(f"unsupported direction mode: {direction_mode}")\n    return source_side''',
+              "effective_side",
+          )
+
+          helper = '''\n\n_DMI_TREND_MODE_MARKER = "_strategy_direction_mode"\n_DMI_TREND_RULE_MARKER = "_strategy_builtin_rule"\n\n\ndef _dmi_trend_native_rules() -> tuple[dict, ...]:\n    """Return the fixed v1 DMI Trend confirmations.\n\n    This is intentionally a conservative research baseline rather than an\n    optimized parameter set: raw DI chooses the side, ADX must be at least 20,\n    ADX must be non-falling versus the previous completed strategy candle, and\n    directional DI pressure must be expanding over the configured pressure\n    lookback. The rules are hidden from researcher-authored Entry Rules but carry\n    REQUIRED metadata so missing causal evidence rejects the candidate.\n    """\n    required = {\n        "action": "REJECT",\n        "condition": "OUTSIDE",\n        f"{_META_PREFIX}kind": "REQUIRED",\n        _DMI_TREND_MODE_MARKER: "DMI_TREND",\n    }\n    expanding = CATEGORICAL_VALUE_CODES["DI_PRESSURE_STATE"]["EXPANDING"]\n    return (\n        {\n            **required,\n            "indicator": "ADX",\n            "minimum": 20.0,\n            "maximum": HIGH,\n            _DMI_TREND_RULE_MARKER: "ADX_MIN_20",\n        },\n        {\n            **required,\n            "indicator": "ADX_CHANGE",\n            "minimum": 0.0,\n            "maximum": HIGH,\n            _DMI_TREND_RULE_MARKER: "ADX_NON_FALLING",\n        },\n        {\n            **required,\n            "indicator": "DI_PRESSURE_STATE",\n            "minimum": expanding,\n            "maximum": expanding,\n            _DMI_TREND_RULE_MARKER: "DI_PRESSURE_EXPANDING",\n        },\n    )\n'''
+          text = replace_once(
+              text,
+              '\n\ndef compile_profiles(\n',
+              helper + '\n\ndef compile_profiles(\n',
+              "DMI helper insertion",
+          )
+          text = replace_once(
+              text,
+              '''        native_rules = []\n        for rule in required:''',
+              '''        native_rules = list(_dmi_trend_native_rules()) if mode == "DMI_TREND" else []\n        for rule in required:''',
+              "DMI baseline injection",
+          )
+          text = replace_once(
+              text,
+              '''def infer_direction_mode(strategy_profiles) -> str:\n    """Return the only currently supported native direction strategy."""\n    if any(bool(profile.flip_direction) for profile in strategy_profiles.values()):\n        raise ValueError(\n            "Static profile direction overrides are retired; use Direction Flip Rules instead"\n        )\n    return "DI"''',
+              '''def infer_direction_mode(strategy_profiles) -> str:\n    """Recover the authored direction strategy from compiled native metadata."""\n    if any(bool(profile.flip_direction) for profile in strategy_profiles.values()):\n        raise ValueError(\n            "Static profile direction overrides are retired; use Direction Flip Rules instead"\n        )\n    for profile in strategy_profiles.values():\n        for rule in getattr(profile, "entry_rules", ()):\n            if str(rule.get(_DMI_TREND_MODE_MARKER, "")).upper() == "DMI_TREND":\n                return "DMI_TREND"\n    return "DI"''',
+              "infer_direction_mode",
+          )
+          path.write_text(text, encoding="utf-8")
+
+          # 2) Expose one-bar ADX change as ordinary causal rule evidence. The
+          # runtime derives it from already-prepared ADX, so no duplicate feature
+          # calculation or look-ahead path is introduced.
+          path = Path("crypto_strategy_lab/strategy_profiles.py")
+          text = path.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              '    "ADX",\n    "ATR_PCT",',
+              '    "ADX",\n    "ADX_CHANGE",\n    "ATR_PCT",',
+              "ADX_CHANGE rule indicator",
+          )
+          path.write_text(text, encoding="utf-8")
+
+          # 3) GUI: offer DMI Trend beside raw DI and explain exactly what the
+          # built-in baseline does. Regime/side permissions remain independent.
+          path = Path("crypto_strategy_lab/gui/rule_strategy_builder.py")
+          text = path.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              '    "ADX": "ADX",\n    "ATR_PCT": "ATR % (decimal)",',
+              '    "ADX": "ADX",\n    "ADX_CHANGE": "ADX Change (1 bar)",\n    "ATR_PCT": "ATR % (decimal)",',
+              "ADX_CHANGE GUI label",
+          )
+          count = text.count('(\"ADX\", \"ATR_PCT\", \"BB_WIDTH\")')
+          if count != 2:
+              raise SystemExit(f"trend evidence groups: expected 2 matches, found {count}")
+          text = text.replace(
+              '("ADX", "ATR_PCT", "BB_WIDTH")',
+              '("ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH")',
+          )
+          text = replace_once(
+              text,
+              'DIRECTION_LABELS = {"DI": "DI Direction"}',
+              'DIRECTION_LABELS = {"DI": "DI Direction", "DMI_TREND": "DMI Trend — Baseline"}',
+              "direction labels",
+          )
+          text = replace_once(
+              text,
+              '''        note = QLabel(\n            "These are permissions only. DI chooses the candidate side; this grid decides whether that side may trade in each market state."\n        )''',
+              '''        note = QLabel(\n            "These are permissions only. DI Direction uses raw +DI/-DI side selection. "\n            "DMI Trend keeps that side selection and adds built-in ADX ≥ 20, non-falling ADX, "\n            "and expanding DI pressure. The grid still decides where that side may trade; for the "\n            "first clean trend test, enable Bull/Bear and leave Sideways off."\n        )''',
+              "direction help note",
+          )
+          path.write_text(text, encoding="utf-8")
+
+          # 4) Rule-aware runtime: derive ADX change from current and previous
+          # completed strategy candles.
+          path = Path("crypto_strategy_lab/rule_native_engine.py")
+          text = path.read_text(encoding="utf-8")
+          text = replace_once(
+              text,
+              '''    def _strategy_profile_rule_value(self, i, direction, profile, indicator):\n        if indicator == "DIRECTIONAL_DI":''',
+              '''    def _strategy_profile_rule_value(self, i, direction, profile, indicator):\n        if indicator == "ADX_CHANGE":\n            if i <= 0 or not hasattr(self, "adx_values"):\n                return np.nan\n            current = float(self.adx_values[i])\n            previous = float(self.adx_values[i - 1])\n            if not np.isfinite(current) or not np.isfinite(previous):\n                return np.nan\n            return current - previous\n        if indicator == "DIRECTIONAL_DI":''',
+              "ADX_CHANGE runtime",
+          )
+          path.write_text(text, encoding="utf-8")
+
+          # 5) Focused acceptance tests. Keep DMI baseline system rules out of the
+          # researcher-authored rule round trip and prove raw DI remains unchanged.
+          Path("tests/test_dmi_trend_strategy.py").write_text('''import numpy as np\n\nfrom crypto_strategy_lab.rule_native_engine import (\n    RuleAwareDataLakeProductionBacktestEngine,\n)\nfrom crypto_strategy_lab.strategy_rule_model import (\n    MARKET_PERMISSIONS,\n    compile_profiles,\n    decompile_rules,\n    infer_direction_mode,\n    new_rule,\n    normalize_rule,\n)\n\n\ndef test_dmi_trend_adds_fixed_baseline_confirmations_without_changing_permissions():\n    strategy, _execution = compile_profiles(\n        direction_mode="DMI_TREND",\n        market_permissions=MARKET_PERMISSIONS,\n    )\n\n    for profile in strategy.values():\n        assert profile.enabled is True\n        assert [rule["indicator"] for rule in profile.entry_rules] == [\n            "ADX",\n            "ADX_CHANGE",\n            "DI_PRESSURE_STATE",\n        ]\n        adx, adx_change, pressure = profile.entry_rules\n        assert adx["condition"] == "OUTSIDE"\n        assert adx["minimum"] == 20.0\n        assert adx_change["condition"] == "OUTSIDE"\n        assert adx_change["minimum"] == 0.0\n        assert pressure["condition"] == "OUTSIDE"\n        assert pressure["minimum"] == pressure["maximum"] == 1.0\n        assert all(rule["_builder_kind"] == "REQUIRED" for rule in profile.entry_rules)\n\n    assert infer_direction_mode(strategy) == "DMI_TREND"\n    assert decompile_rules(strategy) == {\n        "REQUIRED": (),\n        "VETO": (),\n        "FLIP": (),\n    }\n\n\ndef test_dmi_trend_keeps_user_rules_separate_and_appends_them_after_baseline():\n    user_rule = new_rule(kind="REQUIRED", evidence="DI_SPREAD")\n    user_rule.update(operator="GTE", value=25.0, regime="BULL", side="LONG")\n\n    strategy, _execution = compile_profiles(\n        direction_mode="DMI_TREND",\n        market_permissions=MARKET_PERMISSIONS,\n        required_rules=(user_rule,),\n    )\n\n    bull_long = strategy["bull_long"].entry_rules\n    assert [rule["indicator"] for rule in bull_long] == [\n        "ADX",\n        "ADX_CHANGE",\n        "DI_PRESSURE_STATE",\n        "DI_SPREAD",\n    ]\n    assert [rule["indicator"] for rule in strategy["bull_short"].entry_rules] == [\n        "ADX",\n        "ADX_CHANGE",\n        "DI_PRESSURE_STATE",\n    ]\n    recovered = decompile_rules(strategy)\n    assert recovered["REQUIRED"] == (normalize_rule(user_rule),)\n\n\ndef test_raw_di_direction_remains_the_unfiltered_control_group():\n    strategy, _execution = compile_profiles(\n        direction_mode="DI",\n        market_permissions=MARKET_PERMISSIONS,\n    )\n    assert all(profile.entry_rules == () for profile in strategy.values())\n    assert infer_direction_mode(strategy) == "DI"\n\n\ndef test_adx_change_rule_value_is_one_completed_bar_difference():\n    engine = object.__new__(RuleAwareDataLakeProductionBacktestEngine)\n    engine.adx_values = np.array([19.5, 20.0, 21.25], dtype=float)\n\n    assert np.isnan(\n        engine._strategy_profile_rule_value(0, "LONG", None, "ADX_CHANGE")\n    )\n    assert engine._strategy_profile_rule_value(1, "LONG", None, "ADX_CHANGE") == 0.5\n    assert engine._strategy_profile_rule_value(2, "SHORT", None, "ADX_CHANGE") == 1.25\n''', encoding="utf-8")
+
+          # The workflow is a one-shot patch carrier. Remove it from the final
+          # feature diff before committing the implementation.
+          Path(".github/workflows/apply-dmi-trend.yml").unlink()
+          PY
+
+      - name: Validate patch structure
+        run: |
+          python -m compileall -q crypto_strategy_lab tests/test_dmi_trend_strategy.py
+          git diff --check
+          git status --short
+
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add DMI trend baseline strategy"
+          git push origin HEAD:feature/dmi-trend-strategy
