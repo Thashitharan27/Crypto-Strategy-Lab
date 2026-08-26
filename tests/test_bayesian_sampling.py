@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -9,11 +10,19 @@ import pytest
 from crypto_strategy_lab.bayesian_sampling import (
     _BayesResearchSamplingEngine,
     _normalize_directions,
+    _research_native_config,
     _resolved_samples,
     _validate_sample_causality,
     is_sampling_timestamp,
     resolve_sampling_interval,
 )
+from crypto_strategy_lab.bayesian_sampling_reporting import (
+    _stable_empty_samples,
+    bayesian_sampling_enabled,
+)
+from crypto_strategy_lab.config import EntryMode
+from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+from crypto_strategy_lab.research_adapters import native_simulator_config
 
 
 def test_default_sampling_uses_whatever_strategy_timeframe_is_selected():
@@ -48,6 +57,49 @@ def test_directions_are_independent_and_validated():
         _normalize_directions(())
     with pytest.raises(ValueError, match="unsupported"):
         _normalize_directions(("FLAT",))
+
+
+def test_market_grid_removes_strategy_selection_rules_but_keeps_native_execution_config():
+    run = ResearchRunConfig()
+    strategy = replace(
+        run.strategy,
+        enable_daily_entry_schedule=True,
+        profiles={
+            key: replace(
+                profile,
+                enabled=False,
+                flip_direction=True,
+                entry_rules=(
+                    {
+                        "action": "REJECT",
+                        "indicator": "ADX",
+                        "condition": "INSIDE",
+                        "minimum": 0.0,
+                        "maximum": 10.0,
+                    },
+                ),
+            )
+            for key, profile in run.strategy.profiles.items()
+        },
+    )
+    native = native_simulator_config(
+        run.data,
+        run.features,
+        strategy,
+        run.execution,
+    )
+
+    research = _research_native_config(native, 100)
+
+    assert research.entry_mode == EntryMode.EVERY_N_CANDLES
+    assert research.entry_interval == 1
+    assert research.enable_daily_entry_schedule is False
+    assert research.max_active_pairs == 202
+    assert research.risk_per_leg == native.risk_per_leg
+    assert research.tie_policy == native.tie_policy
+    assert all(profile.enabled for profile in research.strategy_profiles.values())
+    assert all(not profile.flip_direction for profile in research.strategy_profiles.values())
+    assert all(not profile.entry_rules for profile in research.strategy_profiles.values())
 
 
 def test_end_of_data_samples_are_treated_as_censored_not_losses():
@@ -98,10 +150,11 @@ def test_research_entry_cannot_precede_prepared_evidence_availability():
         ),
         __len__=lambda self: 2,
     )
-    # SimpleNamespace does not expose special methods from instance attributes.
+
     class Prepared:
         timestamp = prepared.timestamp
         decision_available_at = prepared.decision_available_at
+
         def __len__(self):
             return 2
 
@@ -147,3 +200,24 @@ def test_engine_entry_cadence_is_timeframe_agnostic_and_ignores_open_overlap():
     assert not engine._should_enter(2)
     assert not engine._should_enter(3)
     assert engine._should_enter(4)
+
+
+def test_deep_research_is_the_explicit_sampling_opt_in():
+    assert not bayesian_sampling_enabled(SimpleNamespace(analysis_level="STANDARD"))
+    assert bayesian_sampling_enabled(SimpleNamespace(analysis_level="DEEP"))
+    assert bayesian_sampling_enabled(SimpleNamespace(analysis_level="deep_research"))
+
+
+def test_empty_deep_run_still_has_a_publishable_sampling_schema():
+    empty = _stable_empty_samples(pd.DataFrame())
+    assert empty.empty
+    for required in (
+        "bayes_sample_id",
+        "side",
+        "entry_time",
+        "exit_time",
+        "pair_net_r",
+        "bayes_long_probability",
+        "bayes_short_probability",
+    ):
+        assert required in empty.columns
