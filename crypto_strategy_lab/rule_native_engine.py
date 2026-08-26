@@ -315,6 +315,14 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
         raise KeyError(indicator)
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
+        if indicator == "ADX_CHANGE":
+            if i <= 0 or not hasattr(self, "adx_values"):
+                return np.nan
+            current = float(self.adx_values[i])
+            previous = float(self.adx_values[i - 1])
+            if not np.isfinite(current) or not np.isfinite(previous):
+                return np.nan
+            return current - previous
         if indicator == "DIRECTIONAL_DI":
             return self._prepared_pressure_value(i, direction, indicator)
         if indicator in {

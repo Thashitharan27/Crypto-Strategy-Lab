@@ -20,10 +20,11 @@ from crypto_strategy_lab.data_lake_config import (
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, RULE_INDICATORS
 
 # Direction selection and trade permission are intentionally separate concepts.
-# DI is the only currently researched native direction strategy. Additional
-# direction strategies can be added here later when they have a real native
-# implementation; LONG/SHORT selection belongs to MARKET_PERMISSIONS below.
-DIRECTION_MODES = ("DI",)
+# DI remains the raw directional control. DMI_TREND keeps the same +DI/-DI side
+# selection but adds a deliberately simple, non-optimized trend confirmation
+# baseline at compile time. LONG/SHORT eligibility still belongs to the market
+# permission grid below.
+DIRECTION_MODES = ("DI", "DMI_TREND")
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
 SIDES = ("LONG", "SHORT")
 MARKET_PERMISSIONS = tuple(f"{regime}_{side}" for regime in REGIMES for side in SIDES)
@@ -226,9 +227,9 @@ def _profile_scope(profile_key: str) -> tuple[str, str]:
 
 
 def effective_side(source_side: str, direction_mode: str) -> str:
-    """Return the DI-selected side; permissions decide whether it may trade."""
+    """Return the DI-selected side; the chosen mode may add confirmations."""
     mode = str(direction_mode).upper()
-    if mode != "DI":
+    if mode not in DIRECTION_MODES:
         raise ValueError(f"unsupported direction mode: {direction_mode}")
     return source_side
 
@@ -284,6 +285,52 @@ def _native_rule(rule: dict, *, required: bool) -> dict:
     }
 
 
+_DMI_TREND_MODE_MARKER = "_strategy_direction_mode"
+_DMI_TREND_RULE_MARKER = "_strategy_builtin_rule"
+
+
+def _dmi_trend_native_rules() -> tuple[dict, ...]:
+    """Return the fixed v1 DMI Trend confirmations.
+
+    This is intentionally a conservative research baseline rather than an
+    optimized parameter set: raw DI chooses the side, ADX must be at least 20,
+    ADX must be non-falling versus the previous completed strategy candle, and
+    directional DI pressure must be expanding over the configured pressure
+    lookback. The rules are hidden from researcher-authored Entry Rules but carry
+    REQUIRED metadata so missing causal evidence rejects the candidate.
+    """
+    required = {
+        "action": "REJECT",
+        "condition": "OUTSIDE",
+        f"{_META_PREFIX}kind": "REQUIRED",
+        _DMI_TREND_MODE_MARKER: "DMI_TREND",
+    }
+    expanding = CATEGORICAL_VALUE_CODES["DI_PRESSURE_STATE"]["EXPANDING"]
+    return (
+        {
+            **required,
+            "indicator": "ADX",
+            "minimum": 20.0,
+            "maximum": HIGH,
+            _DMI_TREND_RULE_MARKER: "ADX_MIN_20",
+        },
+        {
+            **required,
+            "indicator": "ADX_CHANGE",
+            "minimum": 0.0,
+            "maximum": HIGH,
+            _DMI_TREND_RULE_MARKER: "ADX_NON_FALLING",
+        },
+        {
+            **required,
+            "indicator": "DI_PRESSURE_STATE",
+            "minimum": expanding,
+            "maximum": expanding,
+            _DMI_TREND_RULE_MARKER: "DI_PRESSURE_EXPANDING",
+        },
+    )
+
+
 def compile_profiles(
     *,
     direction_mode: str,
@@ -317,7 +364,7 @@ def compile_profiles(
         regime, source_side = _profile_scope(key)
         side = effective_side(source_side, mode)
         enabled = f"{regime}_{side}" in permissions
-        native_rules = []
+        native_rules = list(_dmi_trend_native_rules()) if mode == "DMI_TREND" else []
         for rule in required:
             if _applies(rule, regime, side):
                 native_rules.append(_native_rule(rule, required=True))
@@ -373,11 +420,15 @@ def decompile_rules(strategy_profiles) -> dict[str, tuple[dict, ...]]:
 
 
 def infer_direction_mode(strategy_profiles) -> str:
-    """Return the only currently supported native direction strategy."""
+    """Recover the authored direction strategy from compiled native metadata."""
     if any(bool(profile.flip_direction) for profile in strategy_profiles.values()):
         raise ValueError(
             "Static profile direction overrides are retired; use Direction Flip Rules instead"
         )
+    for profile in strategy_profiles.values():
+        for rule in getattr(profile, "entry_rules", ()):
+            if str(rule.get(_DMI_TREND_MODE_MARKER, "")).upper() == "DMI_TREND":
+                return "DMI_TREND"
     return "DI"
 
 

@@ -61,13 +61,15 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
         window.close()
 
 
-def test_direction_selector_contains_only_current_di_strategy():
+def test_direction_selector_contains_di_control_and_dmi_trend_strategy():
     _app, window = _window()
     try:
         selector = window.rule_builder.direction_mode
-        assert selector.count() == 1
+        assert selector.count() == 2
         assert selector.currentData() == "DI"
         assert selector.currentText() == "DI Direction"
+        assert selector.findData("DMI_TREND") >= 0
+        assert selector.itemText(selector.findData("DMI_TREND")) == "DMI Trend — Baseline"
         assert selector.findData("LONG_ONLY") == -1
         assert selector.findData("SHORT_ONLY") == -1
     finally:
