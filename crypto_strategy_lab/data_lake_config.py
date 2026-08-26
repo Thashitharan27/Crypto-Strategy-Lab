@@ -265,6 +265,8 @@ class ReportingConfig:
     run_name: str = ""
     output_dir: str = "output/data_lake_v2"
     analysis_level: str = "STANDARD"
+    research_sampling_mode: str = "PORTFOLIO"
+    research_sampling_interval_candles: int = 1
     enable_trade_telemetry: bool = False
     save_full_telemetry_csv: bool = False
     save_trade_journey_summary: bool = False
@@ -372,6 +374,12 @@ class ResearchRunConfig:
             raise ValueError("max active pairs must be positive")
         if min(execution.maker_fee, execution.taker_fee, execution.slippage) < 0:
             raise ValueError("fees/slippage must be non-negative")
+        if reporting.research_sampling_mode not in {
+            "PORTFOLIO", "EVERY_VIABLE_ENTRY", "FIXED_INTERVAL", "EPISODE_FIRST"
+        }:
+            raise ValueError("invalid research sampling mode")
+        if reporting.research_sampling_interval_candles <= 0:
+            raise ValueError("research sampling interval must be positive")
         if reporting.enable_trade_telemetry:
             if reporting.telemetry_interval_minutes <= 0:
                 raise ValueError("telemetry interval must be positive")
