@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -19,7 +18,10 @@ from crypto_strategy_lab.research_sampling import (
     build_sampling_summary,
     research_native_config,
 )
-from crypto_strategy_lab.research_sampling_reporting import research_sampling_enabled
+from crypto_strategy_lab.research_sampling_reporting import (
+    _episode_reporting_context,
+    research_sampling_enabled,
+)
 
 
 def _viable_rows():
@@ -134,13 +136,21 @@ def test_cluster_aware_summary_reports_entries_and_episodes_separately():
     samples["research_sample_id"] = [f"sample-{i}" for i in range(len(samples))]
     samples["research_sampling_mode"] = "EVERY_VIABLE_ENTRY"
     episodes = build_episode_table(samples)
+    episodes, episode_reporting = _episode_reporting_context(episodes, samples)
     summary = build_sampling_summary(samples, {"mode": "EVERY_VIABLE_ENTRY"})
+    summary.update(episode_reporting)
     context = build_context_breakdown(samples)
 
     assert len(episodes) == 3
+    assert episodes["episode_start_year"].tolist() == [2024, 2024, 2024]
+    assert episodes["market_regime"].tolist() == ["BEAR", "SIDEWAYS", "SIDEWAYS"]
     assert summary["synthetic_entries"] == 5
     assert summary["unique_episodes"] == 3
     assert summary["entry_win_rate"] == pytest.approx(3 / 5)
     assert summary["episode_success_rate"] == pytest.approx(2 / 3)
     assert summary["average_sampled_entries_per_episode"] == pytest.approx(5 / 3)
+    assert summary["average_viable_entries_per_episode"] == pytest.approx(5 / 3)
+    assert summary["episodes_by_year"] == {"2024": 3}
+    assert summary["episodes_by_regime"] == {"BEAR": 1, "SIDEWAYS": 2}
+    assert summary["bayesian_effective_cluster_units"] == 3
     assert {"research_di_bucket", "research_adx_bucket", "market_regime"} <= set(context["dimension"])
