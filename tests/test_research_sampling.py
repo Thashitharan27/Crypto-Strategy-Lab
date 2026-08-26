@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from crypto_strategy_lab.config import IntrabarMissingPolicy, TiePolicy
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
+from crypto_strategy_lab.prepared_backtest import IntrabarExecutionData
 from crypto_strategy_lab.research_adapters import native_simulator_config
 from crypto_strategy_lab.research_sampling import (
     StrategyResearchSamplingEngine,
@@ -22,6 +26,7 @@ from crypto_strategy_lab.research_sampling_reporting import (
     _episode_reporting_context,
     research_sampling_enabled,
 )
+from crypto_strategy_lab.trade import ExitReason, Position, Side, TradePair
 
 
 def _viable_rows():
@@ -34,6 +39,99 @@ def _viable_rows():
             {"research_signal_index": 15, "side": "LONG", "strategy_profile_key": "sideways_long", "pair_net_r": -1.0, "entry_time": "2024-01-06", "exit_time": "2024-01-07", "long_exit_reason": "SL", "plus_di": 24.0, "minus_di": 17.0, "adx": 19.0, "market_regime": "SIDEWAYS"},
         ]
     )
+
+
+def _intrabar_for_exit_tests(*, event_high=100.2, event_low=99.8, event_minute=20):
+    timestamps = pd.date_range(
+        "2026-01-01T00:00:00Z", periods=45, freq="1min"
+    ).to_numpy(dtype="datetime64[ns]")
+    opens = np.full(len(timestamps), 100.0)
+    highs = np.full(len(timestamps), 100.2)
+    lows = np.full(len(timestamps), 99.8)
+    highs[event_minute] = event_high
+    lows[event_minute] = event_low
+    return IntrabarExecutionData(
+        timestamps,
+        pd.Timedelta(minutes=1),
+        opens,
+        highs,
+        lows,
+    )
+
+
+def _research_exit_engine(pairs, intrabar, *, tie_policy=TiePolicy.PESSIMISTIC):
+    engine = object.__new__(StrategyResearchSamplingEngine)
+    engine.config = SimpleNamespace(
+        use_intrabar_data=True,
+        intrabar_timeframe_minutes=1,
+        intrabar_missing_policy=IntrabarMissingPolicy.ERROR,
+        slippage=0.0,
+        tie_policy=tie_policy,
+        maker_fee=0.0,
+        taker_fee=0.0,
+        use_maker_exit=False,
+    )
+    engine.times = pd.date_range(
+        "2026-01-01T00:00:00Z", periods=3, freq="15min"
+    ).to_numpy(dtype="datetime64[ns]")
+    engine.entry_delta = pd.Timedelta(minutes=15)
+    engine.intrabar_data = intrabar
+    engine.active_pairs = list(pairs)
+    engine.missing_intrabar_intervals = []
+    engine.fallback_reasons = []
+    engine.last_timeout_exit_time = None
+    return engine
+
+
+def _research_pair(
+    pair_id: int,
+    side: Side,
+    *,
+    timeout_minutes: int | None = None,
+):
+    position = Position(
+        side=side,
+        entry_time=pd.Timestamp("2026-01-01T00:15:00"),
+        entry_index=0,
+        entry_price=100.0,
+        risk=1.0,
+        sl=99.0 if side == Side.LONG else 101.0,
+        tp=101.0 if side == Side.LONG else 99.0,
+        quantity=1.0,
+        risk_amount=1.0,
+        entry_notional=100.0,
+        atr_at_entry=1.0,
+        original_sl=99.0 if side == Side.LONG else 101.0,
+    )
+    pair = TradePair(
+        pair_id=pair_id,
+        long=position if side == Side.LONG else None,
+        short=position if side == Side.SHORT else None,
+        equity_before_trade=1000.0,
+        strategy_candle_open_time=pd.Timestamp("2026-01-01T00:00:00Z"),
+        strategy_entry_time=pd.Timestamp("2026-01-01T00:15:00Z"),
+        strategy_entry_price=100.0,
+    )
+    pair.profile_timeout_enabled = timeout_minutes is not None
+    pair.profile_timeout_minutes = timeout_minutes
+    return pair
+
+
+def _assert_exit_parity(actual_pair, expected_pair):
+    actual = actual_pair.position
+    expected = expected_pair.position
+    assert actual.exit_reason == expected.exit_reason
+    assert actual.exit_source == expected.exit_source
+    assert actual.exit_time == expected.exit_time
+    assert actual.exit_price == pytest.approx(expected.exit_price)
+    assert actual.gross_pnl == pytest.approx(expected.gross_pnl)
+    assert actual.net_pnl == pytest.approx(expected.net_pnl)
+    assert actual.gross_r == pytest.approx(expected.gross_r)
+    assert actual.net_r == pytest.approx(expected.net_r)
+    assert actual.price_r == pytest.approx(expected.price_r)
+    assert actual.ambiguous == expected.ambiguous
+    assert actual_pair.profile_timeout_triggered == expected_pair.profile_timeout_triggered
+    assert actual_pair.timeout_exit_time == expected_pair.timeout_exit_time
 
 
 def test_reporting_config_defaults_to_realistic_portfolio_mode():
@@ -99,6 +197,80 @@ def test_research_engine_ignores_open_overlap_but_still_requires_strategy_contex
     assert engine._should_enter(0)
     assert not engine._should_enter(1)
     assert engine._should_enter(2)
+
+
+def test_batched_simple_exit_matches_native_for_overlapping_long_and_short():
+    intrabar = _intrabar_for_exit_tests(event_high=101.2, event_low=99.5)
+    expected_pairs = [_research_pair(1, Side.LONG), _research_pair(2, Side.SHORT)]
+    actual_pairs = [_research_pair(1, Side.LONG), _research_pair(2, Side.SHORT)]
+    expected = _research_exit_engine(expected_pairs, intrabar)
+    actual = _research_exit_engine(actual_pairs, intrabar)
+
+    DataLakeProductionBacktestEngine._update_positions_to_strategy_index(expected, 1)
+    actual._update_positions_to_strategy_index(1)
+
+    for actual_pair, expected_pair in zip(actual_pairs, expected_pairs):
+        _assert_exit_parity(actual_pair, expected_pair)
+    assert actual_pairs[0].position.exit_reason == ExitReason.TP
+    assert actual_pairs[1].position.exit_reason == ExitReason.SL
+    stats = actual.research_exit_optimization_stats()
+    assert stats["research_batched_simple_position_intervals"] == 2
+    assert stats["research_dynamic_exit_position_intervals"] == 0
+    assert stats["research_batch_fallback_position_intervals"] == 0
+
+
+@pytest.mark.parametrize(
+    ("tie_policy", "expected_reason"),
+    [
+        (TiePolicy.PESSIMISTIC, ExitReason.SL),
+        (TiePolicy.OPTIMISTIC, ExitReason.TP),
+    ],
+)
+def test_batched_simple_exit_preserves_same_bar_tie_policy(tie_policy, expected_reason):
+    intrabar = _intrabar_for_exit_tests(event_high=101.5, event_low=98.5)
+    expected_pair = _research_pair(1, Side.LONG)
+    actual_pair = _research_pair(1, Side.LONG)
+    expected = _research_exit_engine([expected_pair], intrabar, tie_policy=tie_policy)
+    actual = _research_exit_engine([actual_pair], intrabar, tie_policy=tie_policy)
+
+    DataLakeProductionBacktestEngine._update_positions_to_strategy_index(expected, 1)
+    actual._update_positions_to_strategy_index(1)
+
+    _assert_exit_parity(actual_pair, expected_pair)
+    assert actual_pair.position.exit_reason == expected_reason
+    assert actual_pair.position.ambiguous
+
+
+def test_batched_simple_exit_preserves_timeout_priority_over_same_minute_target():
+    intrabar = _intrabar_for_exit_tests(event_high=101.5, event_low=99.8)
+    expected_pair = _research_pair(1, Side.LONG, timeout_minutes=5)
+    actual_pair = _research_pair(1, Side.LONG, timeout_minutes=5)
+    expected = _research_exit_engine([expected_pair], intrabar)
+    actual = _research_exit_engine([actual_pair], intrabar)
+
+    DataLakeProductionBacktestEngine._update_positions_to_strategy_index(expected, 1)
+    actual._update_positions_to_strategy_index(1)
+
+    _assert_exit_parity(actual_pair, expected_pair)
+    assert actual_pair.position.exit_reason == ExitReason.PROFILE_TIMEOUT
+    assert actual_pair.profile_timeout_triggered
+
+
+def test_stateful_research_exit_uses_mature_scanner_instead_of_batch_kernel():
+    intrabar = _intrabar_for_exit_tests(event_high=100.2, event_low=99.8)
+    pair = _research_pair(1, Side.LONG)
+    pair.position.trailing_enabled = True
+    pair.position.trailing_activation_price = 105.0
+    pair.position.trailing_distance_r = 1.0
+    pair.position.favourable_price = 100.0
+    engine = _research_exit_engine([pair], intrabar)
+
+    engine._update_positions_to_strategy_index(1)
+
+    stats = engine.research_exit_optimization_stats()
+    assert stats["research_batched_simple_position_intervals"] == 0
+    assert stats["research_dynamic_exit_position_intervals"] == 1
+    assert pair.position.is_open
 
 
 def test_episode_ids_break_on_gap_direction_or_profile_change():
