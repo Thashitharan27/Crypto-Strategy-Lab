@@ -67,6 +67,58 @@ def _validate_samples(samples: pd.DataFrame) -> None:
         raise ValueError("research sampling artifact contains an unsupported direction")
 
 
+def _episode_reporting_context(
+    episodes: pd.DataFrame,
+    samples: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict]:
+    """Add explicit calendar/regime cluster context and summary distributions."""
+    result = episodes.copy()
+    if result.empty:
+        result["episode_start_year"] = pd.Series(dtype="Int64")
+        result["market_regime"] = pd.Series(dtype="string")
+        return result, {
+            "episodes_by_year": {},
+            "episodes_by_regime": {},
+            "average_viable_entries_per_episode": None,
+            "median_viable_entries_per_episode": None,
+            "entry_to_episode_ratio": None,
+            "bayesian_effective_cluster_units": 0,
+        }
+
+    starts = pd.to_datetime(result["episode_start_time"], utc=True, errors="coerce")
+    result["episode_start_year"] = starts.dt.year.astype("Int64")
+
+    if "market_regime" in samples.columns:
+        regime_by_episode = (
+            samples[["research_episode_id", "market_regime"]]
+            .dropna(subset=["market_regime"])
+            .drop_duplicates("research_episode_id", keep="first")
+            .set_index("research_episode_id")["market_regime"]
+        )
+        result["market_regime"] = (
+            result["research_episode_id"].map(regime_by_episode).astype("string")
+        )
+    else:
+        result["market_regime"] = pd.Series(pd.NA, index=result.index, dtype="string")
+
+    year_counts = result["episode_start_year"].dropna().value_counts().sort_index()
+    regime_counts = result["market_regime"].dropna().value_counts().sort_index()
+    episode_count = len(result)
+    selected_entry_count = len(samples)
+    return result, {
+        "episodes_by_year": {
+            str(int(year)): int(count) for year, count in year_counts.items()
+        },
+        "episodes_by_regime": {
+            str(regime): int(count) for regime, count in regime_counts.items()
+        },
+        "average_viable_entries_per_episode": float(result["viable_entries"].mean()),
+        "median_viable_entries_per_episode": float(result["viable_entries"].median()),
+        "entry_to_episode_ratio": selected_entry_count / episode_count,
+        "bayesian_effective_cluster_units": int(episode_count),
+    }
+
+
 def append_research_sampling_artifacts(result, context) -> None:
     """Append optional strategy-resilience artifacts to an already-completed run."""
     reporting = context.config.reporting
@@ -99,8 +151,10 @@ def append_research_sampling_artifacts(result, context) -> None:
     samples = _stable_samples(samples)
     _validate_samples(samples)
     episodes = build_episode_table(samples)
+    episodes, episode_reporting = _episode_reporting_context(episodes, samples)
     context_breakdown = build_context_breakdown(samples)
     summary = build_sampling_summary(samples, metadata)
+    summary.update(episode_reporting)
     elapsed = time.perf_counter() - started
 
     run_dir = Path(result.output_dir)
@@ -166,6 +220,9 @@ def append_research_sampling_artifacts(result, context) -> None:
         "drawdown_valid": False,
         "compounded_return_valid": False,
         "bayesian_cluster_key": "research_episode_id",
+        "bayesian_effective_cluster_units": episode_reporting[
+            "bayesian_effective_cluster_units"
+        ],
     }
     manifest["run_completed_at"] = datetime.now(timezone.utc).isoformat()
     atomic_json(manifest_path, manifest)
