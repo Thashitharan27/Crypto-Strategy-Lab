@@ -97,7 +97,10 @@ class ResearchSamplingFastExitMixin:
         opens = getattr(window, "opens", None)
         highs = getattr(window, "highs", None)
         lows = getattr(window, "lows", None)
-        if None in (left, right, values, unit, opens, highs, lows):
+        if any(
+            value is None
+            for value in (left, right, values, unit, opens, highs, lows)
+        ):
             return None
         left = int(left)
         right = int(right)
