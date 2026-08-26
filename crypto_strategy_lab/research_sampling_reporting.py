@@ -27,7 +27,7 @@ def research_sampling_enabled(reporting_config) -> bool:
 
 
 def _stable_samples(samples: pd.DataFrame) -> pd.DataFrame:
-    if not samples.empty or len(samples.columns):
+    if not samples.empty:
         return samples
     return pd.DataFrame({
         "research_sample_id": pd.Series(dtype="string"),
