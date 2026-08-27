@@ -31,6 +31,7 @@ def test_microsecond_backing_dtype_keeps_funding_math_in_nanoseconds() -> None:
                 "2026-01-02T00:00:00Z",
                 "2026-01-02T08:00:00Z",
                 "2026-01-02T16:00:00Z",
+                "2026-01-03T00:00:00Z",
             ],
             dtype="datetime64[us, UTC]",
         )
@@ -38,7 +39,7 @@ def test_microsecond_backing_dtype_keeps_funding_math_in_nanoseconds() -> None:
     funding = pd.DataFrame(
         {
             "available_at": event_times,
-            "funding_rate": [0.0001, 0.0002, -0.0001, 0.0003, 0.0004, 0.0005],
+            "funding_rate": [0.0001, 0.0002, -0.0001, 0.0003, 0.0004, 0.0005, 0.0006],
             "funding_interval_hours": 8.0,
         }
     )
