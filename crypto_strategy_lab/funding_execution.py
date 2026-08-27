@@ -12,6 +12,7 @@ import json
 import numpy as np
 import pandas as pd
 
+import crypto_strategy_lab.rule_native_engine as rule_native_engine_module
 from crypto_strategy_lab.rule_native_engine import (
     RuleAwareDataLakeProductionBacktestEngine,
 )
@@ -62,17 +63,15 @@ class FundingAwareRuleBacktestEngine(RuleAwareDataLakeProductionBacktestEngine):
                 rates = np.asarray(event_rates, dtype=float)
                 order = np.argsort(times, kind="stable")
                 times, rates = times[order], rates[order]
-                # Settlement batches are non-overlapping by construction, but keep
-                # the runtime defensive against malformed duplicate cache rows.
                 keep = np.ones(len(times), dtype=bool)
                 if len(times) > 1:
                     keep[:-1] = times[:-1] != times[1:]
                 engine._funding_event_times = times[keep]
                 engine._funding_event_rates = rates[keep]
 
-        # Exact settlement payloads are an internal execution transport. The
-        # normal entry-time funding research fields remain published, but the JSON
-        # batch itself should not widen every completed-trade row/report.
+        # Exact settlement payloads are internal execution transport. Keep the
+        # normal entry-time funding research fields, but do not publish the JSON
+        # batch on every completed-trade row/report.
         engine.research_output_columns = tuple(
             column
             for column in getattr(engine, "research_output_columns", ())
@@ -200,6 +199,14 @@ class FundingAwareRuleBacktestEngine(RuleAwareDataLakeProductionBacktestEngine):
         return cols
 
     def _build_result_row(self, p, row_kind, positions):
+        # Research sampling deliberately overrides _collect_closed_pairs to keep
+        # independent fixed equity. Applying here as well guarantees Every Viable
+        # Entry receives the same funding-adjusted outcome without changing its
+        # portfolio-independent sizing semantics. The funding_applied guard makes
+        # this idempotent for ordinary portfolio runs.
+        for pos in positions:
+            if not pos.is_open:
+                self._apply_funding_cashflow(pos)
         row = super()._build_result_row(p, row_kind, positions)
         paid = sum(float(getattr(pos, "funding_paid", 0.0) or 0.0) for pos in positions)
         received = sum(float(getattr(pos, "funding_received", 0.0) or 0.0) for pos in positions)
@@ -211,3 +218,10 @@ class FundingAwareRuleBacktestEngine(RuleAwareDataLakeProductionBacktestEngine):
             pair_funding_net_pnl=received - paid,
         )
         return row
+
+
+# Compatibility route for modules that still import the historical engine symbol
+# directly (notably the resilience/every-viable-entry engine). New production
+# construction imports FundingAwareRuleBacktestEngine explicitly; this alias keeps
+# the older import boundary funding-aware without duplicating the simulator.
+rule_native_engine_module.RuleAwareDataLakeProductionBacktestEngine = FundingAwareRuleBacktestEngine
