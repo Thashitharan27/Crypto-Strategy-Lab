@@ -8,7 +8,7 @@ import time
 import pandas as pd
 
 from .bayesian_research import enrich_bayesian_trade_probabilities
-from .rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
+from .funding_execution import FundingAwareRuleBacktestEngine as RuleAwareDataLakeProductionBacktestEngine
 from .gui.enhanced_config import enhanced_default_gui_config, build_enhanced_backtest_config
 from .strategy_profiles import StrategyProfile
 
