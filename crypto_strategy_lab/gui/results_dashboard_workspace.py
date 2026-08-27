@@ -1,6 +1,7 @@
 """Human-focused completed-run dashboard for the active native v3 GUI."""
 from __future__ import annotations
 
+import csv
 import json
 import math
 from pathlib import Path
@@ -63,8 +64,13 @@ def _signed(value: float, suffix: str = "", decimals: int = 1) -> str:
 
 
 def _money(value: float, *, signed: bool = False) -> str:
-    sign = "+" if signed and value > 0 else ""
-    return f"{sign}${value:,.2f}"
+    if value < 0:
+        prefix = "-"
+    elif signed and value > 0:
+        prefix = "+"
+    else:
+        prefix = ""
+    return f"{prefix}${abs(value):,.2f}"
 
 
 def _duration(seconds) -> str:
@@ -160,8 +166,16 @@ class ResultsDashboardWorkspace(QWidget):
         risk_grid = QGridLayout(risk)
         self.drawdown_value = QLabel("—")
         self.fees_value = QLabel("—")
+        self.funding_value = QLabel("—")
+        self.funding_value.setToolTip(
+            "Net perpetual funding cashflow (received minus paid). Already included in Net P&L."
+        )
         for column, (title, value) in enumerate(
-            (("Maximum Drawdown", self.drawdown_value), ("Fees", self.fees_value))
+            (
+                ("Maximum Drawdown", self.drawdown_value),
+                ("Fees", self.fees_value),
+                ("Funding P&L", self.funding_value),
+            )
         ):
             title_label = QLabel(title)
             title_label.setStyleSheet("color:#52606d")
@@ -246,6 +260,51 @@ class ResultsDashboardWorkspace(QWidget):
             return "NOT_AVAILABLE"
         return payload.get("status", "NOT_AVAILABLE") if isinstance(payload, dict) else "NOT_AVAILABLE"
 
+    def _read_funding_net_pnl(
+        self,
+        manifest: dict,
+        run_dir: Path | None,
+        summary: dict,
+    ) -> float | None:
+        """Read funding from summary when available, otherwise from the completed trade CSV.
+
+        The CSV fallback makes the dashboard useful for runs created immediately
+        after funding accounting was introduced, before summary.json gained any
+        dedicated funding aggregate. Older pre-funding runs remain explicitly
+        unavailable rather than being displayed as a misleading $0.00.
+        """
+        if "total_funding_net_pnl" in summary:
+            try:
+                value = float(summary["total_funding_net_pnl"])
+            except (TypeError, ValueError):
+                value = math.nan
+            if math.isfinite(value):
+                return value
+
+        if run_dir is None:
+            return None
+        entry = manifest.get("artifacts", {}).get("trade_csv", {})
+        relative = entry.get("path")
+        if not relative:
+            return None
+        path = run_dir / relative
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                if not reader.fieldnames or "pair_funding_net_pnl" not in reader.fieldnames:
+                    return None
+                total = 0.0
+                for row in reader:
+                    try:
+                        value = float(row.get("pair_funding_net_pnl", ""))
+                    except (TypeError, ValueError):
+                        continue
+                    if math.isfinite(value):
+                        total += value
+                return total
+        except (OSError, csv.Error):
+            return None
+
     def refresh_completed_run(self) -> None:
         manifest = dict(getattr(self.window, "_manifest", {}) or {})
         run_dir_value = getattr(self.window, "_run_dir", None)
@@ -289,6 +348,7 @@ class ResultsDashboardWorkspace(QWidget):
         ending_equity = _number(summary.get("ending_equity"))
         drawdown = _number(summary.get("maximum_drawdown_percentage"))
         fees = _number(summary.get("total_fees"))
+        funding_net = self._read_funding_net_pnl(manifest, run_dir, summary)
 
         self.metric_values["trades"].setText(f"{trades:,}\n{wins:,} W · {losses:,} L")
         self.metric_values["win_rate"].setText(f"{win_rate:.1f}%")
@@ -300,6 +360,9 @@ class ResultsDashboardWorkspace(QWidget):
         self.metric_values["profit_factor"].setText(_profit_factor(summary.get("profit_factor")))
         self.drawdown_value.setText(_signed(drawdown, "%", 1))
         self.fees_value.setText(_money(fees))
+        self.funding_value.setText(
+            _money(funding_net, signed=True) if funding_net is not None else "—"
+        )
 
         artifacts = manifest.get("artifacts", {})
         for key, button in self.artifact_buttons.items():
@@ -319,6 +382,7 @@ class ResultsDashboardWorkspace(QWidget):
             value.setText("—")
         self.drawdown_value.setText("—")
         self.fees_value.setText("—")
+        self.funding_value.setText("—")
         for value in self.timing_values.values():
             value.setText("—")
         for button in self.artifact_buttons.values():
