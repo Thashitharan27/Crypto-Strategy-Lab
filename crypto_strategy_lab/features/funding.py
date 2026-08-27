@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Mapping
 
 import numpy as np
@@ -15,7 +16,7 @@ from .base import FeatureDefinition, OutputField, ParameterDefinition
 
 
 FUNDING_CONTEXT_FEATURE_NAME = "funding_context"
-FUNDING_CONTEXT_FEATURE_VERSION = "3"
+FUNDING_CONTEXT_FEATURE_VERSION = "4"
 
 
 def _funding_bias(rate: np.ndarray) -> np.ndarray:
@@ -47,6 +48,37 @@ def _trailing_window_sums(
     sums = prefix_sum[right] - prefix_sum[left]
     counts = prefix_count[right] - prefix_count[left]
     return sums.astype(float), counts.astype(int)
+
+
+def _settlement_batches(
+    period_starts: pd.Series,
+    decision_times: pd.Series,
+    event_times: pd.Series,
+    rates: np.ndarray,
+) -> np.ndarray:
+    """Serialize every settlement inside each strategy candle as compact JSON.
+
+    Funding is an execution cashflow, not merely a decision-time feature. Keeping
+    the exact event timestamps here lets the native simulator account for all
+    settlements even when one strategy candle spans multiple funding events (for
+    example a 1D candle with three 8-hour settlements). Each event is assigned to
+    exactly one causal candle window ``(period_start, decision_time]``; events at
+    the lower boundary belong to the preceding candle and are never duplicated.
+    """
+    starts_ns = pd.DatetimeIndex(pd.to_datetime(period_starts, utc=True)).asi8
+    decisions_ns = pd.DatetimeIndex(pd.to_datetime(decision_times, utc=True)).asi8
+    events_ns = pd.DatetimeIndex(pd.to_datetime(event_times, utc=True)).asi8
+    left = np.searchsorted(events_ns, starts_ns, side="right")
+    right = np.searchsorted(events_ns, decisions_ns, side="right")
+    batches = np.empty(len(decisions_ns), dtype=object)
+    for i, (lo, hi) in enumerate(zip(left, right)):
+        values = [
+            [int(events_ns[j]), float(rates[j])]
+            for j in range(int(lo), int(hi))
+            if np.isfinite(rates[j])
+        ]
+        batches[i] = json.dumps(values, separators=(",", ":"))
+    return batches
 
 
 def _time_to_next_known_funding(
@@ -109,10 +141,12 @@ class FundingContextFeatureProvider:
             "funding_extreme_positive",
             "funding_extreme_negative",
             "time_to_next_funding",
+            "funding_settlements_json",
         ),
         output_schema={
             "funding_extreme_positive": OutputField("bool"),
             "funding_extreme_negative": OutputField("bool"),
+            "funding_settlements_json": OutputField("string", nullable=False),
         },
         warmup_bars=0,
         availability_rule="funding_events_available_at_or_before_strategy_candle_close",
@@ -260,6 +294,12 @@ class FundingContextFeatureProvider:
         output["funding_24h_sum"] = trailing_sum
         output["funding_24h_sum_bps"] = trailing_sum * 10000.0
         output["funding_24h_count"] = trailing_count
+        output["funding_settlements_json"] = _settlement_batches(
+            output["timestamp"],
+            output["available_at"],
+            right["available_at"],
+            event_rates,
+        )
 
         source_available = output["funding_source_available_at"]
         leak = source_available.notna() & (source_available > output["available_at"])
