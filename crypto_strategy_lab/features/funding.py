@@ -16,7 +16,7 @@ from .base import FeatureDefinition, OutputField, ParameterDefinition
 
 
 FUNDING_CONTEXT_FEATURE_NAME = "funding_context"
-FUNDING_CONTEXT_FEATURE_VERSION = "4"
+FUNDING_CONTEXT_FEATURE_VERSION = "5"
 
 
 def _funding_bias(rate: np.ndarray) -> np.ndarray:
@@ -28,14 +28,26 @@ def _funding_bias(rate: np.ndarray) -> np.ndarray:
     return state
 
 
+def _datetime_ns(values) -> np.ndarray:
+    """Return UTC timestamps as integer nanoseconds independent of pandas dtype unit.
+
+    Parquet/DuckDB paths can preserve timezone-aware datetimes at microsecond
+    resolution. ``DatetimeIndex.asi8`` then returns microseconds, while
+    ``Timedelta.value`` and settlement transport use nanoseconds. Normalize
+    explicitly so cache/input representation cannot change funding arithmetic.
+    """
+    index = pd.DatetimeIndex(pd.to_datetime(values, utc=True))
+    return index.to_numpy(dtype="datetime64[ns]").astype(np.int64, copy=False)
+
+
 def _trailing_window_sums(
     decision_times: pd.Series,
     event_times: pd.Series,
     rates: np.ndarray,
     window: pd.Timedelta,
 ) -> tuple[np.ndarray, np.ndarray]:
-    decisions_ns = pd.DatetimeIndex(pd.to_datetime(decision_times, utc=True)).asi8
-    events_ns = pd.DatetimeIndex(pd.to_datetime(event_times, utc=True)).asi8
+    decisions_ns = _datetime_ns(decision_times)
+    events_ns = _datetime_ns(event_times)
     finite = np.isfinite(rates)
     safe_rates = np.where(finite, rates, 0.0)
     prefix_sum = np.concatenate(([0.0], np.cumsum(safe_rates)))
@@ -65,9 +77,9 @@ def _settlement_batches(
     exactly one causal candle window ``(period_start, decision_time]``; events at
     the lower boundary belong to the preceding candle and are never duplicated.
     """
-    starts_ns = pd.DatetimeIndex(pd.to_datetime(period_starts, utc=True)).asi8
-    decisions_ns = pd.DatetimeIndex(pd.to_datetime(decision_times, utc=True)).asi8
-    events_ns = pd.DatetimeIndex(pd.to_datetime(event_times, utc=True)).asi8
+    starts_ns = _datetime_ns(period_starts)
+    decisions_ns = _datetime_ns(decision_times)
+    events_ns = _datetime_ns(event_times)
     left = np.searchsorted(events_ns, starts_ns, side="right")
     right = np.searchsorted(events_ns, decisions_ns, side="right")
     batches = np.empty(len(decisions_ns), dtype=object)
@@ -87,8 +99,8 @@ def _time_to_next_known_funding(
     interval_hours: pd.Series,
 ) -> np.ndarray:
     """Return seconds to the next known schedule without reading a future event."""
-    decision = pd.DatetimeIndex(pd.to_datetime(decision_time, utc=True)).asi8
-    source = pd.DatetimeIndex(pd.to_datetime(source_time, utc=True)).asi8
+    decision = _datetime_ns(decision_time)
+    source = _datetime_ns(source_time)
     intervals = pd.to_numeric(interval_hours, errors="coerce").to_numpy(float) * 3600.0
     elapsed = (decision - source).astype(float) / 1_000_000_000.0
     result = np.full(len(decision), np.nan)
