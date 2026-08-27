@@ -66,5 +66,5 @@ def test_microsecond_backing_dtype_keeps_funding_math_in_nanoseconds() -> None:
         pd.Timestamp("2026-01-02T00:00:00Z"),
     ]
 
-    # At a settlement boundary the next known funding event is due now.
-    assert result.loc[0, "time_to_next_funding"] == 0.0
+    # At the source settlement itself, the next known schedule is one full 8h interval away.
+    assert result.loc[0, "time_to_next_funding"] == 28800.0
