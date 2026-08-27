@@ -32,6 +32,10 @@ def _window(tmp_path: Path):
     (run_dir / "data_quality.json").write_text(
         json.dumps({"status": "OK"}), encoding="utf-8"
     )
+    (run_dir / "trade_list.csv").write_text(
+        "pair_id,pair_funding_net_pnl\n1,-3.25\n2,1.00\n",
+        encoding="utf-8",
+    )
     artifacts = {
         "workbook": {"path": "backtest_report.xlsx"},
         "trade_csv": {"path": "trade_list.csv"},
@@ -113,6 +117,34 @@ def test_dashboard_formats_completed_run_for_humans(tmp_path):
     assert dashboard.metric_values["profit_factor"].text() == "1.28"
     assert dashboard.drawdown_value.text() == "-11.9%"
     assert dashboard.fees_value.text() == "$336.27"
+    assert dashboard.funding_value.text() == "-$2.25"
+
+
+def test_dashboard_prefers_summary_funding_total_when_present(tmp_path):
+    _qt, _widgets = _app()
+    from crypto_strategy_lab.gui.results_dashboard_workspace import ResultsDashboardWorkspace
+
+    window = _window(tmp_path)
+    window.service.completed_runs.summary["total_funding_net_pnl"] = 4.5
+    dashboard = ResultsDashboardWorkspace(window)
+    dashboard.refresh_completed_run()
+
+    assert dashboard.funding_value.text() == "+$4.50"
+
+
+def test_dashboard_marks_pre_funding_runs_as_unavailable(tmp_path):
+    _qt, _widgets = _app()
+    from crypto_strategy_lab.gui.results_dashboard_workspace import ResultsDashboardWorkspace
+
+    window = _window(tmp_path)
+    (window._run_dir / "trade_list.csv").write_text(
+        "pair_id,pair_net_pnl\n1,2.00\n",
+        encoding="utf-8",
+    )
+    dashboard = ResultsDashboardWorkspace(window)
+    dashboard.refresh_completed_run()
+
+    assert dashboard.funding_value.text() == "—"
 
 
 def test_dashboard_has_clean_artifact_surface_and_compact_timings(tmp_path):
