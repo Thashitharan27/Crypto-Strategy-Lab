@@ -29,45 +29,126 @@ def _utc_ns(value) -> np.datetime64:
     return np.datetime64(timestamp.to_datetime64(), "ns")
 
 
+def _funding_block(prepared, engine):
+    """Read execution transport from the immutable prepared contract first.
+
+    Funding settlement batches are execution inputs, not ordinary reporting
+    fields. Looking them up through ``engine.research_features`` made funding
+    accounting depend on a later reporting map and allowed a valid funding
+    context to degrade silently to zero settlements. The prepared contract is
+    the authoritative source; the engine map remains only a compatibility
+    fallback for older construction paths.
+    """
+    if prepared is not None:
+        for block in getattr(prepared, "research", ()):
+            if getattr(block, "name", None) == "funding_context":
+                return block
+    return getattr(engine, "research_features", {}).get("funding_context")
+
+
+def _block_values(block):
+    if block is None:
+        return None
+    if isinstance(block, pd.DataFrame):
+        return {
+            column: block[column].to_numpy()
+            for column in block.columns
+            if column not in {"timestamp", "available_at"}
+        }
+    return getattr(block, "values", None)
+
+
+def _has_in_run_funding_observation(prepared, values) -> bool:
+    """Detect known settlements so missing transport cannot masquerade as $0."""
+    if prepared is None or values is None or len(getattr(prepared, "timestamp", ())) == 0:
+        return False
+    source = values.get("funding_source_available_at")
+    rates = values.get("funding_rate")
+    if source is None or rates is None:
+        return False
+
+    source_times = pd.to_datetime(pd.Series(source), utc=True, errors="coerce")
+    numeric_rates = pd.to_numeric(pd.Series(rates), errors="coerce")
+    start = pd.Timestamp(prepared.timestamp[0])
+    end = pd.Timestamp(prepared.decision_available_at[-1])
+    start = start.tz_localize("UTC") if start.tzinfo is None else start.tz_convert("UTC")
+    end = end.tz_localize("UTC") if end.tzinfo is None else end.tz_convert("UTC")
+    mask = source_times.notna() & numeric_rates.notna() & source_times.gt(start) & source_times.le(end)
+    return bool(mask.any())
+
+
+def _extract_prepared_funding_events(prepared, block) -> tuple[np.ndarray, np.ndarray]:
+    """Decode the exact funding event timeline carried by the prepared frame.
+
+    A funding-aware futures run must never quietly report zero funding when the
+    prepared context proves that funding settlements occurred during the run. If
+    an old/stale prepared cache has funding research fields but lacks the exact
+    settlement transport, fail clearly so the cache can be rebuilt instead of
+    publishing financially incorrect P&L.
+    """
+    empty_times = np.array([], dtype="datetime64[ns]")
+    empty_rates = np.array([], dtype=float)
+    values = _block_values(block)
+    if values is None:
+        return empty_times, empty_rates
+
+    batches = values.get(_FUNDING_SETTLEMENTS_COLUMN)
+    if batches is None:
+        if _has_in_run_funding_observation(prepared, values):
+            raise ValueError(
+                "Funding settlements occurred during the run but the prepared funding "
+                "context has no funding_settlements_json transport. Rebuild the funding "
+                "feature/prepared cache before backtesting."
+            )
+        return empty_times, empty_rates
+
+    event_times: list[np.datetime64] = []
+    event_rates: list[float] = []
+    for raw in batches:
+        if raw is None:
+            continue
+        try:
+            parsed = json.loads(str(raw))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError("Invalid prepared funding settlement payload") from exc
+        for timestamp_ns, rate in parsed:
+            numeric_rate = float(rate)
+            if not np.isfinite(numeric_rate):
+                continue
+            event_times.append(np.datetime64(int(timestamp_ns), "ns"))
+            event_rates.append(numeric_rate)
+
+    if not event_times:
+        if _has_in_run_funding_observation(prepared, values):
+            raise ValueError(
+                "Funding settlements occurred during the run but the prepared settlement "
+                "timeline is empty. Rebuild the funding feature/prepared cache before "
+                "backtesting."
+            )
+        return empty_times, empty_rates
+
+    times = np.asarray(event_times, dtype="datetime64[ns]")
+    rates = np.asarray(event_rates, dtype=float)
+    order = np.argsort(times, kind="stable")
+    times, rates = times[order], rates[order]
+    keep = np.ones(len(times), dtype=bool)
+    if len(times) > 1:
+        keep[:-1] = times[:-1] != times[1:]
+    return times[keep], rates[keep]
+
+
 class FundingAwareRuleBacktestEngine(RuleAwareDataLakeProductionBacktestEngine):
     """Rule-aware simulator whose net results include perpetual funding cashflows."""
 
     @classmethod
     def from_prepared(cls, *args, **kwargs):
+        prepared = args[0] if args else kwargs.get("prepared")
         engine = super().from_prepared(*args, **kwargs)
-        engine._funding_event_times = np.array([], dtype="datetime64[ns]")
-        engine._funding_event_rates = np.array([], dtype=float)
-
-        block = getattr(engine, "research_features", {}).get("funding_context")
-        values = getattr(block, "values", None) if block is not None else None
-        batches = None if values is None else values.get(_FUNDING_SETTLEMENTS_COLUMN)
-        if batches is not None:
-            event_times: list[np.datetime64] = []
-            event_rates: list[float] = []
-            for raw in batches:
-                if raw is None:
-                    continue
-                try:
-                    parsed = json.loads(str(raw))
-                except (TypeError, ValueError, json.JSONDecodeError) as exc:
-                    raise ValueError("Invalid prepared funding settlement payload") from exc
-                for timestamp_ns, rate in parsed:
-                    numeric_rate = float(rate)
-                    if not np.isfinite(numeric_rate):
-                        continue
-                    event_times.append(np.datetime64(int(timestamp_ns), "ns"))
-                    event_rates.append(numeric_rate)
-
-            if event_times:
-                times = np.asarray(event_times, dtype="datetime64[ns]")
-                rates = np.asarray(event_rates, dtype=float)
-                order = np.argsort(times, kind="stable")
-                times, rates = times[order], rates[order]
-                keep = np.ones(len(times), dtype=bool)
-                if len(times) > 1:
-                    keep[:-1] = times[:-1] != times[1:]
-                engine._funding_event_times = times[keep]
-                engine._funding_event_rates = rates[keep]
+        block = _funding_block(prepared, engine)
+        (
+            engine._funding_event_times,
+            engine._funding_event_rates,
+        ) = _extract_prepared_funding_events(prepared, block)
 
         # Exact settlement payloads are internal execution transport. Keep the
         # normal entry-time funding research fields, but do not publish the JSON

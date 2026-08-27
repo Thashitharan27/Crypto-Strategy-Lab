@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -9,7 +10,11 @@ import pytest
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.features.funding import FundingContextFeatureProvider
-from crypto_strategy_lab.funding_execution import FundingAwareRuleBacktestEngine
+from crypto_strategy_lab.funding_execution import (
+    FundingAwareRuleBacktestEngine,
+    _extract_prepared_funding_events,
+    _funding_block,
+)
 from crypto_strategy_lab.trade import Position, Side
 
 
@@ -49,6 +54,22 @@ def _daily_funding_frame() -> pd.DataFrame:
         request,
         {DatasetKind.KLINES: klines, DatasetKind.FUNDING_RATE: funding},
         {},
+    )
+
+
+def _prepared_from_funding_frame(frame: pd.DataFrame):
+    values = {
+        column: frame[column].to_numpy()
+        for column in frame.columns
+        if column not in {"timestamp", "available_at"}
+    }
+    block = SimpleNamespace(name="funding_context", values=values)
+    return SimpleNamespace(
+        timestamp=pd.to_datetime(frame["timestamp"], utc=True).to_numpy(dtype="datetime64[ns]"),
+        decision_available_at=pd.to_datetime(frame["available_at"], utc=True).to_numpy(
+            dtype="datetime64[ns]"
+        ),
+        research=(block,),
     )
 
 
@@ -102,6 +123,51 @@ def test_daily_context_preserves_every_settlement_inside_candle() -> None:
         pd.Timestamp("2026-01-02T08:00:00Z"),
         pd.Timestamp("2026-01-02T16:00:00Z"),
     ]
+
+
+def test_prepared_contract_is_authoritative_settlement_transport() -> None:
+    frame = _daily_funding_frame()
+    prepared = _prepared_from_funding_frame(frame)
+    engine = SimpleNamespace(research_features={})
+
+    block = _funding_block(prepared, engine)
+    times, rates = _extract_prepared_funding_events(prepared, block)
+
+    assert block is prepared.research[0]
+    assert len(times) == 5
+    assert len(rates) == 5
+    assert pd.Timestamp(times[0], tz="UTC") == pd.Timestamp("2026-01-01T08:00:00Z")
+    assert pd.Timestamp(times[-1], tz="UTC") == pd.Timestamp("2026-01-02T16:00:00Z")
+
+
+def test_missing_settlement_transport_cannot_silently_become_zero_funding() -> None:
+    frame = _daily_funding_frame().drop(columns=["funding_settlements_json"])
+    prepared = _prepared_from_funding_frame(frame)
+
+    with pytest.raises(ValueError, match="no funding_settlements_json transport"):
+        _extract_prepared_funding_events(prepared, prepared.research[0])
+
+
+def test_empty_settlement_transport_cannot_silently_become_zero_funding() -> None:
+    frame = _daily_funding_frame()
+    frame["funding_settlements_json"] = "[]"
+    prepared = _prepared_from_funding_frame(frame)
+
+    with pytest.raises(ValueError, match="prepared settlement timeline is empty"):
+        _extract_prepared_funding_events(prepared, prepared.research[0])
+
+
+def test_absent_funding_context_is_allowed_to_have_no_settlements() -> None:
+    prepared = SimpleNamespace(
+        timestamp=np.asarray(["2026-01-01T00:00:00"], dtype="datetime64[ns]"),
+        decision_available_at=np.asarray(["2026-01-02T00:00:00"], dtype="datetime64[ns]"),
+        research=(),
+    )
+
+    times, rates = _extract_prepared_funding_events(prepared, None)
+
+    assert len(times) == 0
+    assert len(rates) == 0
 
 
 def test_positive_funding_is_paid_by_long_and_received_by_short() -> None:
