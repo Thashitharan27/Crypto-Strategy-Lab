@@ -23,6 +23,9 @@ from crypto_strategy_lab.gui.results_dashboard_install import (
 from crypto_strategy_lab.gui.data_library_install import (
     apply_data_library_workspace,
 )
+from crypto_strategy_lab.gui.portfolio_replay_install import (
+    apply_portfolio_replay_workspace,
+)
 from crypto_strategy_lab.gui.chatgpt_autostart_install import (
     apply_chatgpt_autostart,
 )
@@ -79,6 +82,7 @@ def main() -> int:
         apply_review_run_workspace(window)
         apply_results_dashboard_workspace(window)
         apply_data_library_workspace(window)
+        apply_portfolio_replay_workspace(window)
         apply_chatgpt_autostart(window)
         apply_github_sync_safety(window)
         apply_shell_style(window)
