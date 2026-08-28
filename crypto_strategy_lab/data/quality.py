@@ -22,7 +22,7 @@ from .schemas import DatasetKind
 from .timing import interval_to_timedelta
 
 
-VALIDATION_CONTRACT_VERSION = "4"
+VALIDATION_CONTRACT_VERSION = "5"
 QUALITY_CACHE_FORMAT_VERSION = 1
 
 
@@ -836,6 +836,129 @@ _PROVENANCE_COLUMNS = {
 }
 
 
+def _overlap_contract(frame: pd.DataFrame) -> DatasetValidationContract | None:
+    if "dataset" not in frame.columns:
+        return None
+    values = tuple(frame["dataset"].dropna().astype(str).unique())
+    if len(values) != 1:
+        return None
+    try:
+        return CONTRACTS[DatasetKind(values[0])]
+    except (KeyError, ValueError):
+        return None
+
+
+def _overlap_rows_equal(left: pd.Series, right: pd.Series, columns: Iterable[str]) -> bool:
+    for column in columns:
+        left_value = left[column]
+        right_value = right[column]
+        if pd.isna(left_value) and pd.isna(right_value):
+            continue
+        if left_value != right_value:
+            return False
+    return True
+
+
+def _kline_overlap_row_is_valid(
+    row: pd.Series,
+    contract: DatasetValidationContract,
+) -> bool:
+    """Validate only row-value invariants needed to classify a repair override."""
+    if contract.timeline != "fixed":
+        return False
+    required_values = {"open", "high", "low", "close", "volume"}
+    if not required_values.issubset(row.index):
+        return False
+
+    nullable_fields = {
+        *contract.nullable_numeric_fields,
+        *contract.nullable_positive_fields,
+        *contract.nullable_non_negative_fields,
+    }
+    checked = set()
+    for column in (
+        *contract.numeric_fields,
+        *contract.positive_fields,
+        *contract.non_negative_fields,
+        *contract.nullable_numeric_fields,
+        *contract.nullable_positive_fields,
+        *contract.nullable_non_negative_fields,
+    ):
+        if column not in row.index or column in checked:
+            continue
+        checked.add(column)
+        raw = row[column]
+        if column in nullable_fields and pd.isna(raw):
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return False
+        if not np.isfinite(value):
+            return False
+        if column in contract.positive_fields or column in contract.nullable_positive_fields:
+            if value <= 0:
+                return False
+        elif (
+            column in contract.non_negative_fields
+            or column in contract.nullable_non_negative_fields
+        ) and value < 0:
+            return False
+
+    try:
+        open_ = float(row["open"])
+        high = float(row["high"])
+        low = float(row["low"])
+        close = float(row["close"])
+    except (TypeError, ValueError):
+        return False
+    if low > high or open_ < low or open_ > high or close < low or close > high:
+        return False
+
+    for taker, total in (
+        ("taker_buy_base_volume", "volume"),
+        ("taker_buy_quote_volume", "quote_volume"),
+    ):
+        if taker not in row.index or total not in row.index:
+            continue
+        if pd.isna(row[taker]) or pd.isna(row[total]):
+            continue
+        try:
+            taker_value = float(row[taker])
+            total_value = float(row[total])
+        except (TypeError, ValueError):
+            return False
+        if not np.isfinite(taker_value) or not np.isfinite(total_value):
+            return False
+        tolerance = max(abs(total_value) * 1e-12, 1e-12)
+        if taker_value > total_value + tolerance:
+            return False
+    return True
+
+
+def _is_valid_repair_override(
+    group: pd.DataFrame,
+    value_columns: Iterable[str],
+    contract: DatasetValidationContract | None,
+) -> bool:
+    """Return true only when the winning row is valid and every differing loser is invalid."""
+    if contract is None or len(group) < 2:
+        return False
+    winner = group.iloc[-1]
+    if not _kline_overlap_row_is_valid(winner, contract):
+        return False
+
+    replaced_invalid = False
+    for index in range(len(group) - 1):
+        previous = group.iloc[index]
+        if _overlap_rows_equal(previous, winner, value_columns):
+            continue
+        if _kline_overlap_row_is_valid(previous, contract):
+            return False
+        replaced_invalid = True
+    return replaced_invalid
+
+
 def classify_archive_overlap(
     frames: Iterable[pd.DataFrame],
     logical_key: Iterable[str],
@@ -845,6 +968,12 @@ def classify_archive_overlap(
     Provenance columns are deliberately excluded from value comparison: two
     immutable archives containing the same market row necessarily have different
     archive names/fingerprints, but that does not make the market data conflict.
+
+    A conflicting overlap remains an ERROR unless the last-precedence row is
+    value-valid and every earlier row that differs from it is itself invalid under
+    the dataset's fixed-kline contract. That narrow case represents an explicit
+    repair overlay: a valid daily source can replace a bad monthly row without
+    weakening conflict detection for two otherwise-valid but disagreeing sources.
     """
     frames = tuple(frames)
     if len(frames) < 2:
@@ -863,10 +992,19 @@ def classify_archive_overlap(
         for column in combined.columns
         if column not in keys and column not in _PROVENANCE_COLUMNS
     ]
+    contract = _overlap_contract(combined)
     conflicts = 0
+    repaired_overrides = 0
     grouped = overlap.groupby(keys, dropna=False, sort=False)
     for _, group in grouped:
-        if any(group[column].nunique(dropna=False) > 1 for column in value_columns):
+        differs = any(
+            group[column].nunique(dropna=False) > 1 for column in value_columns
+        )
+        if not differs:
+            continue
+        if _is_valid_repair_override(group, value_columns, contract):
+            repaired_overrides += 1
+        else:
             conflicts += 1
     key_count = int(grouped.ngroups)
     result = [
@@ -877,6 +1015,15 @@ def classify_archive_overlap(
             key_count,
         )
     ]
+    if repaired_overrides:
+        result.append(
+            DataQualityIssue(
+                "INVALID_SOURCE_ROW_OVERRIDDEN",
+                DataQualityStatus.WARN,
+                "A later overlapping archive replaces an invalid source row with a valid row",
+                repaired_overrides,
+            )
+        )
     if conflicts:
         result.append(
             DataQualityIssue(
@@ -886,7 +1033,7 @@ def classify_archive_overlap(
                 conflicts,
             )
         )
-    else:
+    elif not repaired_overrides:
         result.append(
             DataQualityIssue(
                 "IDENTICAL_ARCHIVE_OVERLAP",
