@@ -210,6 +210,33 @@ class MainWindow(SetupMainWindow):
         self.run_data_table.resizeColumnsToContents()
         self.run_data_table.horizontalHeader().setStretchLastSection(True)
 
+    def validate_selected_range(self):
+        """Rescan raw archive metadata before an explicit researcher revalidation."""
+        if self._validation_thread is not None:
+            return
+
+        refresh_catalog = getattr(self.service, "refresh_catalog", None)
+        try:
+            if callable(refresh_catalog):
+                self._set_readiness(
+                    "CHECKING DATA…",
+                    "Refreshing the market-data catalog before revalidating repaired/downloaded files.",
+                )
+                refresh_catalog()
+                self._invalidate_range_validation()
+                self._load_catalog()
+                if hasattr(self, "_validation_debounce"):
+                    self._validation_debounce.stop()
+        except Exception as exc:
+            self._set_readiness(
+                "VALIDATION FAILED",
+                f"Could not refresh the market-data catalog before revalidation: {exc}",
+                state="blocked",
+            )
+            return
+
+        self._begin_required_data_validation(auto_run=False)
+
     def _begin_required_data_validation(self, *, auto_run: bool) -> None:
         if self._validation_thread is not None:
             if auto_run:
@@ -459,27 +486,51 @@ class MainWindow(SetupMainWindow):
             else:
                 lines.append("   Required candle data is unavailable for the selected range.")
             return
-        if issue.code not in {
+
+        gap_codes = {
             "LEADING_COVERAGE_GAP",
             "LEADING_SOURCE_COVERAGE_GAP",
             "TRAILING_COVERAGE_GAP",
             "TRAILING_SOURCE_COVERAGE_GAP",
             "MISSING_INTERNAL_INTERVAL",
-        }:
+        }
+        if issue.code in gap_codes:
+            if issue.first_timestamp or issue.last_timestamp:
+                span = (
+                    f"{self._time_text(issue.first_timestamp)} → "
+                    f"{self._time_text(issue.last_timestamp)}"
+                )
+            elif issue.details.get("coverage_start"):
+                span = self._time_text(issue.details["coverage_start"])
+            elif issue.details.get("coverage_end"):
+                span = self._time_text(issue.details["coverage_end"])
+            else:
+                span = "see Data Library technical detail"
+            lines.append(
+                f"   {self._issue_text(issue).capitalize()}: {issue.count:,} · {span}"
+            )
             return
+
+        # A required dataset can be blocked for reasons other than missing-grid
+        # coverage (for example malformed/off-grid timestamps, conflicting
+        # archives, invalid OHLC, or a schema problem). Never hide those errors
+        # behind the generic "candles are incomplete" line.
+        if issue.severity is not DataQualityStatus.ERROR:
+            return
+
+        message = str(getattr(issue, "message", "") or self._issue_text(issue)).strip()
+        timestamp_span = None
         if issue.first_timestamp or issue.last_timestamp:
-            span = (
+            timestamp_span = (
                 f"{self._time_text(issue.first_timestamp)} → "
                 f"{self._time_text(issue.last_timestamp)}"
             )
-        elif issue.details.get("coverage_start"):
-            span = self._time_text(issue.details["coverage_start"])
-        elif issue.details.get("coverage_end"):
-            span = self._time_text(issue.details["coverage_end"])
-        else:
-            span = "see Data Library technical detail"
+
+        count = int(getattr(issue, "count", 0) or 0)
+        count_text = f" · {count:,} affected" if count else ""
+        span_text = f" · {timestamp_span}" if timestamp_span else ""
         lines.append(
-            f"   {self._issue_text(issue).capitalize()}: {issue.count:,} · {span}"
+            f"   {message} [{issue.code}]{count_text}{span_text}"
         )
 
     @staticmethod
