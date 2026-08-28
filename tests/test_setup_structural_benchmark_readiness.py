@@ -204,3 +204,58 @@ def test_setup_cannot_be_ready_when_structural_warmup_is_missing():
         )
     finally:
         window.close()
+
+
+def test_setup_shows_catalog_coverage_when_required_interval_has_no_overlap():
+    _app, window = _window()
+    try:
+        from PySide6.QtCore import QDate
+
+        window.start.setDate(QDate(2019, 1, 1))
+        window.end.setDate(QDate(2019, 12, 1))
+        window.strategy_tf.setCurrentText("1 Hour")
+        window.intrabar_tf.setCurrentText("1 Minute")
+        window._validation_debounce.stop()
+
+        missing_issue = DataQualityIssue(
+            "DATASET_MISSING",
+            DataQualityStatus.ERROR,
+            "No canonical rows are available for the requested range",
+            count=0,
+        )
+        missing_intrabar = DatasetQualityReport(
+            dataset="klines",
+            symbol="BTCUSDT",
+            interval="1m",
+            required=True,
+            requested_start="2019-01-01T00:00:00+00:00",
+            requested_end="2019-12-01T00:00:00+00:00",
+            observed_start=None,
+            observed_end=None,
+            complete_start=None,
+            complete_end=None,
+            row_count=0,
+            source_identity=None,
+            status=DataQualityStatus.ERROR,
+            issues=(missing_issue,),
+        )
+        report = DataQualityReport((
+            _report("1h", start="2019-01-01T00:00:00+00:00"),
+            missing_intrabar,
+        ))
+
+        window._render_range_validation(report)
+        text = window.range_validation.text()
+
+        assert window.readiness_state.text() == "NOT READY"
+        assert (
+            "No 1m candles overlap the requested range "
+            "2019-01-01 00:00 UTC → 2019-12-01 00:00 UTC."
+        ) in text
+        assert (
+            "Available catalog coverage: "
+            "2020-01-01 00:00 UTC → 2026-08-21 00:00 UTC."
+        ) in text
+        assert window.use_strategy_bars_button.isEnabled()
+    finally:
+        window.close()
