@@ -320,7 +320,7 @@ class MainWindow(SetupMainWindow):
                     f"{requirement.warmup_days}-day warm-up before the selected start date."
                 )
                 for issue in dataset.issues:
-                    self._append_issue_line(lines, issue)
+                    self._append_issue_line(lines, issue, dataset)
                 earliest = self._benchmark_earliest_research_start(dataset, requirement)
                 if earliest is not None:
                     lines.append(
@@ -343,7 +343,7 @@ class MainWindow(SetupMainWindow):
                 continue
             lines.append(f"✗ {role} {dataset.interval} candles are incomplete.")
             for issue in dataset.issues:
-                self._append_issue_line(lines, issue)
+                self._append_issue_line(lines, issue, dataset)
 
         blocked = self._quality_has_errors(report)
         if benchmark_error:
@@ -387,7 +387,78 @@ class MainWindow(SetupMainWindow):
                 "No boundary-only date adjustment can make all required run data valid."
             )
 
-    def _append_issue_line(self, lines: list[str], issue) -> None:
+    def _catalog_coverage_for_report(self, report):
+        """Return archive-level coverage for a missing required dataset, if known."""
+        catalog = getattr(self.service, "catalog", None)
+        coverage = getattr(catalog, "coverage", None)
+        if not callable(coverage):
+            return None
+        try:
+            request = self.request_model()
+            report_symbol = str(report.symbol).upper()
+            if str(request.symbol).upper() != report_symbol:
+                request = replace(request, symbol=report_symbol)
+            rows = coverage(request)
+        except Exception:
+            return None
+
+        dataset_key = self._dataset_key(report.dataset)
+        for row in rows:
+            if self._dataset_key(row.get("dataset")) != dataset_key:
+                continue
+            if row.get("interval") != report.interval:
+                continue
+            row_symbol = row.get("symbol")
+            if row_symbol and str(row_symbol).upper() != report_symbol:
+                continue
+            if int(row.get("archive_count") or 0) <= 0:
+                continue
+            return row
+        return None
+
+    def _missing_dataset_line(self, report) -> str:
+        interval = report.interval or "event"
+        requested = (
+            f"{self._time_text(report.requested_start)} → "
+            f"{self._time_text(report.requested_end)}"
+        )
+        coverage = self._catalog_coverage_for_report(report)
+        if coverage is None:
+            return (
+                f"   No {interval} candle archives are available for {report.symbol}. "
+                f"Requested range: {requested}."
+            )
+
+        first = coverage.get("first_period")
+        last = coverage.get("last_period")
+        if first not in (None, "") and last not in (None, ""):
+            available = f"{self._time_text(first)} → {self._time_text(last)}"
+            return (
+                f"   No {interval} candles overlap the requested range {requested}. "
+                f"Available catalog coverage: {available}."
+            )
+        if first not in (None, ""):
+            return (
+                f"   No {interval} candles overlap the requested range {requested}. "
+                f"Available catalog coverage starts at {self._time_text(first)}."
+            )
+        if last not in (None, ""):
+            return (
+                f"   No {interval} candles overlap the requested range {requested}. "
+                f"Available catalog coverage ends at {self._time_text(last)}."
+            )
+        return (
+            f"   No {interval} candles overlap the requested range {requested}. "
+            "Matching archives exist, but their time boundaries are unknown; see Data Library."
+        )
+
+    def _append_issue_line(self, lines: list[str], issue, report=None) -> None:
+        if issue.code == "DATASET_MISSING":
+            if report is not None:
+                lines.append(self._missing_dataset_line(report))
+            else:
+                lines.append("   Required candle data is unavailable for the selected range.")
+            return
         if issue.code not in {
             "LEADING_COVERAGE_GAP",
             "LEADING_SOURCE_COVERAGE_GAP",
