@@ -3,6 +3,15 @@ import os
 import sys
 import traceback
 
+from crypto_strategy_lab.strategy_bar_price_oi_evidence import (
+    install_strategy_bar_price_oi_evidence,
+)
+
+# Install this first because several GUI/native modules snapshot rule evidence
+# constants during import. The installer is idempotent and only exposes an
+# already-prepared causal futures-positioning field.
+install_strategy_bar_price_oi_evidence()
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
