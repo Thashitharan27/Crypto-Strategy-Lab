@@ -459,27 +459,51 @@ class MainWindow(SetupMainWindow):
             else:
                 lines.append("   Required candle data is unavailable for the selected range.")
             return
-        if issue.code not in {
+
+        gap_codes = {
             "LEADING_COVERAGE_GAP",
             "LEADING_SOURCE_COVERAGE_GAP",
             "TRAILING_COVERAGE_GAP",
             "TRAILING_SOURCE_COVERAGE_GAP",
             "MISSING_INTERNAL_INTERVAL",
-        }:
+        }
+        if issue.code in gap_codes:
+            if issue.first_timestamp or issue.last_timestamp:
+                span = (
+                    f"{self._time_text(issue.first_timestamp)} → "
+                    f"{self._time_text(issue.last_timestamp)}"
+                )
+            elif issue.details.get("coverage_start"):
+                span = self._time_text(issue.details["coverage_start"])
+            elif issue.details.get("coverage_end"):
+                span = self._time_text(issue.details["coverage_end"])
+            else:
+                span = "see Data Library technical detail"
+            lines.append(
+                f"   {self._issue_text(issue).capitalize()}: {issue.count:,} · {span}"
+            )
             return
+
+        # A required dataset can be blocked for reasons other than missing-grid
+        # coverage (for example malformed/off-grid timestamps, conflicting
+        # archives, invalid OHLC, or a schema problem). Never hide those errors
+        # behind the generic "candles are incomplete" line.
+        if issue.severity is not DataQualityStatus.ERROR:
+            return
+
+        message = str(getattr(issue, "message", "") or self._issue_text(issue)).strip()
+        timestamp_span = None
         if issue.first_timestamp or issue.last_timestamp:
-            span = (
+            timestamp_span = (
                 f"{self._time_text(issue.first_timestamp)} → "
                 f"{self._time_text(issue.last_timestamp)}"
             )
-        elif issue.details.get("coverage_start"):
-            span = self._time_text(issue.details["coverage_start"])
-        elif issue.details.get("coverage_end"):
-            span = self._time_text(issue.details["coverage_end"])
-        else:
-            span = "see Data Library technical detail"
+
+        count = int(getattr(issue, "count", 0) or 0)
+        count_text = f" · {count:,} affected" if count else ""
+        span_text = f" · {timestamp_span}" if timestamp_span else ""
         lines.append(
-            f"   {self._issue_text(issue).capitalize()}: {issue.count:,} · {span}"
+            f"   {message} [{issue.code}]{count_text}{span_text}"
         )
 
     @staticmethod
