@@ -71,6 +71,34 @@ def metrics():
     return frame
 
 
+def _overlap_kline_row(*, volume=200_000.0, taker_base=132_462.5, close=0.6036, source="monthly"):
+    start = pd.Timestamp("2023-11-30T12:35:00Z")
+    return pd.DataFrame(
+        {
+            "period_start": [start],
+            "period_end": [start + pd.Timedelta(minutes=1)],
+            "event_time": [start],
+            "available_at": [start + pd.Timedelta(minutes=1)],
+            "open": [0.6038],
+            "high": [0.6040],
+            "low": [0.6034],
+            "close": [close],
+            "volume": [volume],
+            "quote_volume": [200_298.79368],
+            "trade_count": [470],
+            "taker_buy_base_volume": [taker_base],
+            "taker_buy_quote_volume": [79_957.28937],
+            "symbol": ["XRPUSDT"],
+            "exchange": ["binance"],
+            "market": ["futures_um"],
+            "dataset": ["klines"],
+            "interval": ["1m"],
+            "source_archive": [f"{source}.zip"],
+            "source_fingerprint": [source],
+        }
+    )
+
+
 def test_complete_fixed_cadence_is_ok_and_internal_gap_is_summarized():
     frame = candles()
     assert validate_dataset(
@@ -255,6 +283,40 @@ def test_archive_overlap_ignores_provenance_but_detects_market_conflicts():
     issues = classify_archive_overlap([first, conflicting], ["period_start"])
     assert issues[-1].code == "CONFLICTING_ARCHIVE_OVERLAP"
     assert issues[-1].severity is DataQualityStatus.ERROR
+
+
+def test_archive_overlap_allows_valid_last_source_to_override_invalid_kline_row():
+    bad_monthly = _overlap_kline_row(
+        volume=91_695.7,
+        taker_base=132_462.5,
+        source="monthly",
+    )
+    good_daily = _overlap_kline_row(
+        volume=200_000.0,
+        taker_base=132_462.5,
+        source="daily",
+    )
+
+    issues = classify_archive_overlap([bad_monthly, good_daily], ["period_start"])
+    codes = {issue.code for issue in issues}
+
+    assert "INVALID_SOURCE_ROW_OVERRIDDEN" in codes
+    assert "CONFLICTING_ARCHIVE_OVERLAP" not in codes
+    repaired = next(issue for issue in issues if issue.code == "INVALID_SOURCE_ROW_OVERRIDDEN")
+    assert repaired.severity is DataQualityStatus.WARN
+    assert repaired.count == 1
+
+
+def test_archive_overlap_still_blocks_two_valid_sources_that_disagree():
+    monthly = _overlap_kline_row(close=0.6036, source="monthly")
+    daily = _overlap_kline_row(close=0.6037, source="daily")
+
+    issues = classify_archive_overlap([monthly, daily], ["period_start"])
+    conflict = next(issue for issue in issues if issue.code == "CONFLICTING_ARCHIVE_OVERLAP")
+
+    assert conflict.severity is DataQualityStatus.ERROR
+    assert conflict.count == 1
+    assert not any(issue.code == "INVALID_SOURCE_ROW_OVERRIDDEN" for issue in issues)
 
 
 def test_quality_cache_is_keyed_by_source_identity_and_does_not_cache_missing(tmp_path):
