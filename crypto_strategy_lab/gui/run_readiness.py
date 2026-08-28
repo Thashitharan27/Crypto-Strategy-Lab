@@ -210,6 +210,33 @@ class MainWindow(SetupMainWindow):
         self.run_data_table.resizeColumnsToContents()
         self.run_data_table.horizontalHeader().setStretchLastSection(True)
 
+    def validate_selected_range(self):
+        """Rescan raw archive metadata before an explicit researcher revalidation."""
+        if self._validation_thread is not None:
+            return
+
+        refresh_catalog = getattr(self.service, "refresh_catalog", None)
+        try:
+            if callable(refresh_catalog):
+                self._set_readiness(
+                    "CHECKING DATA…",
+                    "Refreshing the market-data catalog before revalidating repaired/downloaded files.",
+                )
+                refresh_catalog()
+                self._invalidate_range_validation()
+                self._load_catalog()
+                if hasattr(self, "_validation_debounce"):
+                    self._validation_debounce.stop()
+        except Exception as exc:
+            self._set_readiness(
+                "VALIDATION FAILED",
+                f"Could not refresh the market-data catalog before revalidation: {exc}",
+                state="blocked",
+            )
+            return
+
+        self._begin_required_data_validation(auto_run=False)
+
     def _begin_required_data_validation(self, *, auto_run: bool) -> None:
         if self._validation_thread is not None:
             if auto_run:
