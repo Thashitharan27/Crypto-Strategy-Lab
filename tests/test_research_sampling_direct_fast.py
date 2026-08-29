@@ -39,7 +39,7 @@ def _intrabar(*, event_minute: int | None = None, remove_minute: int | None = No
 def _pair(pair_id: int = 1, *, timeout_minutes: int | None = None):
     position = Position(
         side=Side.LONG,
-        entry_time=pd.Timestamp("2026-01-01T00:15:00Z"),
+        entry_time=pd.Timestamp("2026-01-01T00:15:00"),
         entry_index=0,
         entry_price=100.0,
         risk=1.0,
@@ -56,8 +56,8 @@ def _pair(pair_id: int = 1, *, timeout_minutes: int | None = None):
         long=position,
         short=None,
         equity_before_trade=1000.0,
-        strategy_candle_open_time=pd.Timestamp("2026-01-01T00:00:00Z"),
-        strategy_entry_time=pd.Timestamp("2026-01-01T00:15:00Z"),
+        strategy_candle_open_time=pd.Timestamp("2026-01-01T00:00:00"),
+        strategy_entry_time=pd.Timestamp("2026-01-01T00:15:00"),
         strategy_entry_price=100.0,
     )
     pair.profile_timeout_enabled = timeout_minutes is not None
