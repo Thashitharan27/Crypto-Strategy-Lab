@@ -9,12 +9,14 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
+import time
 from typing import Callable
 
 import pandas as pd
 
 from crypto_strategy_lab.data import (
     DataQualityReport,
+    DataQualityStatus,
     DataRequest,
     DatasetKind,
     MarketDataStore,
@@ -28,6 +30,9 @@ from crypto_strategy_lab.progress import emit_progress
 from crypto_strategy_lab.research_adapters import NativeSimulator, NativeStrategyPolicy
 from crypto_strategy_lab.research_runner import ResearchRunner
 from crypto_strategy_lab.run_manifest import artifact_path, load_completed_manifest
+
+
+VALIDATED_CATALOG_REUSE_SECONDS = 120.0
 
 
 def _utc(value):
@@ -104,10 +109,59 @@ class GuiApplicationService:
         self.completed_runs = CompletedRunReader()
         self._runner_factory = runner_factory
         self.progress_callback = None
+        self._catalog_generation = 0
+        self._validated_catalog_snapshot: tuple[int, tuple, float] | None = None
+
+    @staticmethod
+    def _request_identity(request: GuiResearchRequest) -> tuple:
+        return (
+            str(request.exchange).lower(),
+            _market_kind(request.market).value,
+            str(request.symbol).upper(),
+            pd.Timestamp(request.period_start).value,
+            pd.Timestamp(request.period_end).value,
+            str(request.strategy_timeframe),
+            request.intrabar_timeframe,
+        )
+
+    def _record_validated_catalog_snapshot(
+        self,
+        request: GuiResearchRequest,
+        report: DataQualityReport,
+    ) -> None:
+        if any(
+            dataset.status is DataQualityStatus.ERROR
+            for dataset in report.datasets
+        ):
+            self._validated_catalog_snapshot = None
+            return
+        self._validated_catalog_snapshot = (
+            int(self._catalog_generation),
+            self._request_identity(request),
+            time.monotonic(),
+        )
+
+    def _consume_validated_catalog_snapshot(self, request: GuiResearchRequest) -> bool:
+        snapshot = self._validated_catalog_snapshot
+        self._validated_catalog_snapshot = None
+        if snapshot is None:
+            return False
+        generation, request_identity, validated_at = snapshot
+        age = time.monotonic() - float(validated_at)
+        return bool(
+            generation == self._catalog_generation
+            and request_identity == self._request_identity(request)
+            and 0.0 <= age <= VALIDATED_CATALOG_REUSE_SECONDS
+        )
 
     def refresh_catalog(self) -> int:
         """Refresh discovery only at the application-service boundary."""
-        return self.store.refresh_catalog()
+        # A researcher-requested refresh intentionally invalidates any prior
+        # one-shot validation snapshot before touching the raw archive tree.
+        self._validated_catalog_snapshot = None
+        count = self.store.refresh_catalog()
+        self._catalog_generation += 1
+        return count
 
     def required_data_quality(self, request: GuiResearchRequest) -> DataQualityReport:
         """Validate the exact required candle slices selected in the GUI.
@@ -118,6 +172,12 @@ class GuiApplicationService:
         cache and canonical adapters, so a cold check performs the validation once
         and a warm check is metadata-only. It never runs strategy features or the
         simulator.
+
+        A successful validation also records a short-lived, one-shot catalog
+        snapshot token. The immediately following run may reuse that exact catalog
+        generation instead of recursively rediscovering the same raw archive tree.
+        The run still performs normal data-quality checks and source-identity/cache
+        validation; only duplicate discovery is skipped.
         """
         callback = getattr(self, "progress_callback", None)
         intervals = tuple(dict.fromkeys(
@@ -143,7 +203,9 @@ class GuiApplicationService:
             )
             for interval in intervals
         )
-        return DataQualityReport(reports)
+        report = DataQualityReport(reports)
+        self._record_validated_catalog_snapshot(request, report)
+        return report
 
     def _runner(self, output_root: Path):
         if self._runner_factory:
@@ -155,13 +217,16 @@ class GuiApplicationService:
     def run(self, request: GuiResearchRequest, config: ResearchRunConfig):
         config.validate()
         callback = getattr(self, "progress_callback", None)
+        reuse_validated_catalog = self._consume_validated_catalog_snapshot(request)
         # The observer is attached only for this run. Data/cache layers can emit
         # partition-level events without depending on Qt or changing their public
         # result contracts.
         self.store.progress_callback = callback
         try:
             return self._runner(Path(config.reporting.output_dir)).run(
-                request.to_data_request(), config
+                request.to_data_request(),
+                config,
+                refresh_catalog=not reuse_validated_catalog,
             )
         except Exception as exc:
             emit_progress(

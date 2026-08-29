@@ -76,6 +76,53 @@ def _feature_metadata(frame: pd.DataFrame) -> dict[str, Any]:
     return metadata
 
 
+def _simulator_stage_timings(simulator, simulation_total: float) -> dict[str, float]:
+    """Split the composed simulator call into non-overlapping measured stages.
+
+    The mature engine timer covers only ``engine.run()``. The composition adapter
+    also performs config translation, signal provenance materialization, causal
+    Bayesian enrichment and cleanup. Keeping those timers separate makes a slow
+    run actionable without instrumenting the candle/exit hot path.
+    """
+
+    def measured(name: str) -> float:
+        try:
+            return max(0.0, float(getattr(simulator, name, 0.0) or 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    total = max(0.0, float(simulation_total))
+    setup = measured("last_adapter_setup_seconds")
+    engine_init = measured("last_engine_init_seconds")
+    raw_engine_run = getattr(simulator, "last_simulation_seconds", None)
+    engine_run = measured("last_simulation_seconds")
+    signal_capture = measured("last_signal_capture_seconds")
+    bayesian = measured("last_bayesian_seconds")
+    cleanup = measured("last_adapter_cleanup_seconds")
+
+    # Compatibility simulators may not publish an engine-only timer. Preserve
+    # the historical meaning of ``simulation`` as the remaining simulator call
+    # time in that case, without double-counting it as unattributed overhead.
+    if raw_engine_run is None:
+        engine_run = max(
+            0.0,
+            total - setup - engine_init - signal_capture - bayesian - cleanup,
+        )
+
+    accounted = setup + engine_init + engine_run + signal_capture + bayesian + cleanup
+    unattributed = max(0.0, total - accounted)
+    return {
+        "simulator_setup": setup,
+        "engine_init": engine_init,
+        "simulation": engine_run,
+        "signal_capture": signal_capture,
+        "bayesian_enrichment": bayesian,
+        "simulator_cleanup": cleanup,
+        "simulator_unattributed": unattributed,
+        "strategy_simulation_total": total,
+    }
+
+
 class ResearchRunner:
     """Coordinate injected services without owning feature or fill formulas."""
 
@@ -221,13 +268,7 @@ class ResearchRunner:
             feature_config=run_config.features,
         )
         simulation_total = time.perf_counter() - simulation_started
-        engine_init = float(getattr(self.simulator, "last_engine_init_seconds", 0.0) or 0.0)
-        simulator_run = getattr(self.simulator, "last_simulation_seconds", None)
-        timings["engine_init"] = engine_init
-        timings["simulation"] = (
-            float(simulator_run) if simulator_run is not None else simulation_total
-        )
-        timings["strategy_simulation_total"] = simulation_total
+        timings.update(_simulator_stage_timings(self.simulator, simulation_total))
 
         frames = {
             "core_directional": bundle.technical_features,

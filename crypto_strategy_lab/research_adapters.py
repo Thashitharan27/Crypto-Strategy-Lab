@@ -245,14 +245,14 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
 
 
 def _release_canonicalized_rejection_metadata(trades: pd.DataFrame) -> None:
-    """Drop the legacy duplicate after rejected decisions have canonical storage.
+    """Drop the legacy duplicate once engine-owned rejection records are retained.
 
     ``BacktestEngine.results_frame`` attaches the complete ``skipped_signals``
-    list to ``DataFrame.attrs`` for legacy callers.  In the composed v3 path the
-    same decisions are already materialized in ``signals.parquet`` via
-    ``_signal_frame``.  Keeping the high-cardinality list on the trades frame
-    makes pandas copy/deepcopy that payload again during artifact publication,
-    which can make heavily filtered Entry Rule runs spend minutes in reporting.
+    list to ``DataFrame.attrs`` for legacy callers. In the composed v3 path the
+    engine list itself is retained locally and is the authoritative input to
+    ``_signal_frame``. Detaching the duplicate DataFrame metadata before signal
+    construction prevents pandas row/copy operations from deep-copying a
+    high-cardinality rejection payload while preserving every rejection record.
 
     Trade columns, signal rows, daily schedule summary metadata and trading
     semantics are intentionally untouched.
@@ -277,8 +277,12 @@ class NativeSimulator:
     """Composition adapter; deliberately not an engine subclass."""
 
     def __init__(self):
+        self.last_adapter_setup_seconds = 0.0
         self.last_engine_init_seconds = 0.0
         self.last_simulation_seconds = 0.0
+        self.last_signal_capture_seconds = 0.0
+        self.last_bayesian_seconds = 0.0
+        self.last_adapter_cleanup_seconds = 0.0
         self.last_signals: pd.DataFrame | None = None
         self.last_telemetry: pd.DataFrame | None = None
 
@@ -294,43 +298,62 @@ class NativeSimulator:
     ):
         if not isinstance(strategy, BoundNativeStrategyPolicy):
             raise TypeError("NativeSimulator requires a bound strategy policy")
+
+        self.last_adapter_setup_seconds = 0.0
+        self.last_engine_init_seconds = 0.0
+        self.last_simulation_seconds = 0.0
+        self.last_signal_capture_seconds = 0.0
+        self.last_bayesian_seconds = 0.0
+        self.last_adapter_cleanup_seconds = 0.0
+        self.last_signals = None
+        self.last_telemetry = None
+
+        started = time.perf_counter()
         native_config = native_simulator_config(
             data_config,
             feature_config,
             strategy.config,
             execution_config,
         )
-        self.last_signals = None
-        self.last_telemetry = None
+        self.last_adapter_setup_seconds = time.perf_counter() - started
+
         started = time.perf_counter()
         engine = RuleAwareDataLakeProductionBacktestEngine.from_prepared(
             prepared, intrabar, native_config
         )
         self.last_engine_init_seconds = time.perf_counter() - started
+
         started = time.perf_counter()
         trades = engine.run()
         self.last_simulation_seconds = time.perf_counter() - started
 
         # Passive observation only: use records produced by this exact run.
+        # Keep the engine-owned list locally, then detach only the redundant
+        # DataFrame.attrs copy before any pandas signal-frame iteration/copying.
         skipped_signals = getattr(engine, "skipped_signals", ())
-        self.last_signals = _signal_frame(prepared, trades, skipped_signals)
-        # The canonical signals frame now owns rejected-decision provenance.
-        # Do not carry the same potentially huge list into pandas/DuckDB report
-        # serialization through legacy DataFrame metadata, and release the wide
-        # engine records before the reporting stage starts.
         _release_canonicalized_rejection_metadata(trades)
+
+        started = time.perf_counter()
+        self.last_signals = _signal_frame(prepared, trades, skipped_signals)
+        self.last_signal_capture_seconds = time.perf_counter() - started
+
         # Bayesian scoring is downstream-only. It uses only completed outcomes
         # available before each entry and therefore cannot alter this run's fills.
         # Narrow provenance-only test doubles intentionally do not masquerade as
         # completed results, while real production frames stay schema-strict.
+        started = time.perf_counter()
         if _is_completed_trade_result(trades):
             trades = enrich_bayesian_trade_probabilities(trades)
+        self.last_bayesian_seconds = time.perf_counter() - started
+
+        started = time.perf_counter()
         clear_rejections = getattr(skipped_signals, "clear", None)
         if clear_rejections is not None:
             clear_rejections()
         telemetry_rows = getattr(engine, "telemetry_rows", ())
         if telemetry_rows:
             self.last_telemetry = pd.DataFrame(telemetry_rows)
+        self.last_adapter_cleanup_seconds = time.perf_counter() - started
         return trades
 
 
