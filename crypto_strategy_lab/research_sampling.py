@@ -9,6 +9,7 @@ for stops, targets, timeout, fees, slippage and intrabar resolution.
 from __future__ import annotations
 
 from dataclasses import replace
+import time
 
 import numpy as np
 import pandas as pd
@@ -75,6 +76,22 @@ def _exit_reason(row: pd.Series) -> str:
     return str(row.get(f"{side}_exit_reason", "")).upper()
 
 
+def _release_research_rejection_metadata(frame: pd.DataFrame) -> None:
+    """Detach the legacy high-cardinality rejection payload before pandas copies.
+
+    ``BacktestEngine.results_frame`` stores the engine's ``skipped_signals`` list
+    in ``DataFrame.attrs`` for legacy callers. Strategy-resilience publication
+    does not consume those per-rejection rows; the engine has already used them
+    to produce its aggregate result counters. Pandas copies/deepcopies attrs, so
+    carrying thousands of rejection dictionaries through episode/censor/selection
+    transforms is pure overhead.
+
+    Only the redundant attrs entry is removed. Trade rows, rejection counts,
+    strategy decisions and every execution result remain unchanged.
+    """
+    frame.attrs.pop("skipped_signals", None)
+
+
 def _annotate_episodes(frame: pd.DataFrame) -> pd.DataFrame:
     """Label uninterrupted stretches of the same viable configured setup."""
     if frame.empty:
@@ -92,26 +109,38 @@ def _annotate_episodes(frame: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"research sampling rows are missing episode fields: {missing}")
 
-    result = frame.copy()
-    result["research_signal_index"] = pd.to_numeric(
-        result["research_signal_index"], errors="raise"
-    ).astype("int64")
-    profile = result.get(
-        "strategy_profile_key", pd.Series("", index=result.index, dtype="string")
-    ).fillna("").astype(str)
-    side = result["side"].fillna("").astype(str).str.upper()
-    result = result.assign(_profile_sort=profile, _side_sort=side).sort_values(
+    # Sort only narrow helper columns first. The previous implementation attached
+    # helper columns to the full research frame and repeatedly copied a very wide
+    # DataFrame. The stable sort keys and resulting row order are identical.
+    signal_index = pd.to_numeric(
+        frame["research_signal_index"], errors="raise"
+    ).astype("int64").reset_index(drop=True)
+    profile = frame.get(
+        "strategy_profile_key", pd.Series("", index=frame.index, dtype="string")
+    ).fillna("").astype(str).reset_index(drop=True)
+    side = frame["side"].fillna("").astype(str).str.upper().reset_index(drop=True)
+    keys = pd.DataFrame(
+        {
+            "research_signal_index": signal_index,
+            "_profile_sort": profile,
+            "_side_sort": side,
+        }
+    )
+    order = keys.sort_values(
         ["research_signal_index", "_profile_sort", "_side_sort"], kind="stable"
-    ).reset_index(drop=True)
+    ).index.to_numpy()
+    keys = keys.iloc[order].reset_index(drop=True)
+    result = frame.iloc[order].copy().reset_index(drop=True)
+    result["research_signal_index"] = keys["research_signal_index"].to_numpy()
 
-    previous_index = result["research_signal_index"].shift(1)
-    previous_profile = result["_profile_sort"].shift(1)
-    previous_side = result["_side_sort"].shift(1)
+    previous_index = keys["research_signal_index"].shift(1)
+    previous_profile = keys["_profile_sort"].shift(1)
+    previous_side = keys["_side_sort"].shift(1)
     new_episode = (
         previous_index.isna()
-        | result["research_signal_index"].ne(previous_index + 1)
-        | result["_profile_sort"].ne(previous_profile)
-        | result["_side_sort"].ne(previous_side)
+        | keys["research_signal_index"].ne(previous_index + 1)
+        | keys["_profile_sort"].ne(previous_profile)
+        | keys["_side_sort"].ne(previous_side)
     )
     episode_number = new_episode.cumsum().astype("int64")
     result["research_episode_id"] = episode_number.map(
@@ -123,14 +152,33 @@ def _annotate_episodes(frame: pd.DataFrame) -> pd.DataFrame:
     result["research_episode_viable_entries"] = result.groupby(
         "research_episode_id", sort=False
     )["research_episode_id"].transform("size").astype("int64")
-    return result.drop(columns=["_profile_sort", "_side_sort"])
+    return result
 
 
 def _resolved_samples(frame: pd.DataFrame) -> pd.DataFrame:
     """Treat right-censored end-of-data observations as unknown, not losses."""
     if frame.empty:
         return frame.copy()
-    mask = frame.apply(_exit_reason, axis=1).ne("END_OF_DATA")
+
+    # Preserve _exit_reason's exact side-aware behavior without Python row apply.
+    side = frame["side"].fillna("").astype(str).str.upper()
+    empty = pd.Series("", index=frame.index, dtype="string")
+    long_reason = (
+        frame["long_exit_reason"].fillna("").astype(str).str.upper()
+        if "long_exit_reason" in frame.columns
+        else empty
+    )
+    short_reason = (
+        frame["short_exit_reason"].fillna("").astype(str).str.upper()
+        if "short_exit_reason" in frame.columns
+        else empty
+    )
+    reason = empty.copy()
+    long_mask = side.eq("LONG")
+    short_mask = side.eq("SHORT")
+    reason.loc[long_mask] = long_reason.loc[long_mask].to_numpy()
+    reason.loc[short_mask] = short_reason.loc[short_mask].to_numpy()
+    mask = reason.ne("END_OF_DATA")
     return frame.loc[mask].copy().reset_index(drop=True)
 
 
@@ -184,10 +232,23 @@ def generate_strategy_research_samples(
     engine = StrategyResearchSamplingEngine.from_prepared(prepared, intrabar, config)
     raw = engine.run()
     exit_optimization = engine.research_exit_optimization_stats()
+
+    started = time.perf_counter()
+    _release_research_rejection_metadata(raw)
+    rejection_release_seconds = time.perf_counter() - started
+
+    started = time.perf_counter()
     raw = _annotate_episodes(raw)
+    episode_annotation_seconds = time.perf_counter() - started
     viable_episode_count = int(raw["research_episode_id"].nunique()) if not raw.empty else 0
+
+    started = time.perf_counter()
     resolved = _resolved_samples(raw)
+    censoring_seconds = time.perf_counter() - started
+
+    started = time.perf_counter()
     selected = _select_sampling_mode(resolved, normalized_mode, interval)
+    selection_seconds = time.perf_counter() - started
 
     if not selected.empty:
         selected["research_sampling_version"] = RESEARCH_SAMPLING_VERSION
@@ -216,6 +277,11 @@ def generate_strategy_research_samples(
         "combined_leverage_cap_ignored": True,
         "per_trade_execution_semantics_preserved": True,
         **exit_optimization,
+        "research_postprocess_kernel": "VECTORIZED_V2",
+        "research_rejection_metadata_release_seconds": rejection_release_seconds,
+        "research_episode_annotation_seconds": episode_annotation_seconds,
+        "research_censoring_seconds": censoring_seconds,
+        "research_sampling_selection_seconds": selection_seconds,
         "viable_entries": int(len(raw)),
         "resolved_viable_entries": int(len(resolved)),
         "selected_entries": int(len(selected)),
@@ -237,39 +303,66 @@ def build_episode_table(samples: pd.DataFrame) -> pd.DataFrame:
     if samples.empty:
         return pd.DataFrame(columns=columns)
 
-    frame = samples.copy()
-    frame["pair_net_r"] = pd.to_numeric(frame.get("pair_net_r"), errors="coerce")
-    frame["_win"] = frame["pair_net_r"].gt(0)
-    entry_times = pd.to_datetime(frame.get("entry_time"), utc=True, errors="coerce")
-    frame["_entry_time"] = entry_times
-    rows = []
-    for episode_id, group in frame.groupby("research_episode_id", sort=False):
-        net_r = float(group["pair_net_r"].sum(min_count=1))
-        finite = group["pair_net_r"].dropna()
-        wins = int(group["_win"].sum())
-        entries = int(len(group))
-        rows.append({
-            "research_episode_id": episode_id,
-            "episode_start_time": group["_entry_time"].min(),
-            "episode_end_time": group["_entry_time"].max(),
-            "strategy_profile_key": group.get("strategy_profile_key", pd.Series([None])).iloc[0],
-            "side": str(group["side"].iloc[0]).upper(),
-            "sampled_entries": entries,
-            "viable_entries": int(group["research_episode_viable_entries"].max()),
-            "wins": wins,
-            "losses": entries - wins,
-            "entry_win_rate": (wins / entries) if entries else np.nan,
-            "episode_net_r": net_r,
-            "episode_avg_r": float(finite.mean()) if not finite.empty else np.nan,
-            "episode_positive": bool(np.isfinite(net_r) and net_r > 0),
-        })
-    return pd.DataFrame(rows, columns=columns)
+    # Aggregate only the narrow columns used by the episode artifact instead of
+    # copying the full research feature matrix once per group.
+    pair_net_r = pd.to_numeric(samples["pair_net_r"], errors="coerce")
+    entry_time = pd.to_datetime(samples["entry_time"], utc=True, errors="coerce")
+    profile = (
+        samples["strategy_profile_key"]
+        if "strategy_profile_key" in samples.columns
+        else pd.Series(None, index=samples.index, dtype="object")
+    )
+    viable_entries = pd.to_numeric(
+        samples["research_episode_viable_entries"], errors="raise"
+    ).astype("int64")
+    frame = pd.DataFrame(
+        {
+            "research_episode_id": samples["research_episode_id"],
+            "_entry_time": entry_time,
+            "strategy_profile_key": profile,
+            "side": samples["side"],
+            "_viable_entries": viable_entries,
+            "_pair_net_r": pair_net_r,
+            "_win": pair_net_r.gt(0),
+        },
+        index=samples.index,
+    )
+    grouped = frame.groupby("research_episode_id", sort=False)
+    sampled_entries = grouped.size().astype("int64")
+    result = pd.DataFrame(index=sampled_entries.index)
+    result["episode_start_time"] = grouped["_entry_time"].min()
+    result["episode_end_time"] = grouped["_entry_time"].max()
+
+    first = frame.drop_duplicates("research_episode_id", keep="first").set_index(
+        "research_episode_id"
+    )
+    result["strategy_profile_key"] = first["strategy_profile_key"].reindex(result.index)
+    result["side"] = first["side"].reindex(result.index).map(
+        lambda value: str(value).upper()
+    )
+    result["sampled_entries"] = sampled_entries
+    result["viable_entries"] = grouped["_viable_entries"].max().astype("int64")
+    result["wins"] = grouped["_win"].sum().astype("int64")
+    result["losses"] = result["sampled_entries"] - result["wins"]
+    result["entry_win_rate"] = result["wins"] / result["sampled_entries"]
+    result["episode_net_r"] = grouped["_pair_net_r"].sum(min_count=1)
+    result["episode_avg_r"] = grouped["_pair_net_r"].mean()
+    net_r_values = result["episode_net_r"].to_numpy(dtype=float)
+    result["episode_positive"] = np.isfinite(net_r_values) & (net_r_values > 0)
+    result = result.reset_index()
+    return result[columns]
 
 
-def build_sampling_summary(samples: pd.DataFrame, metadata: dict | None = None) -> dict:
+def build_sampling_summary(
+    samples: pd.DataFrame,
+    metadata: dict | None = None,
+    *,
+    episodes: pd.DataFrame | None = None,
+) -> dict:
     """Return entry-level and episode-level resilience statistics."""
     metadata = dict(metadata or samples.attrs.get("research_sampling", {}))
-    episodes = build_episode_table(samples)
+    if episodes is None:
+        episodes = build_episode_table(samples)
     r = pd.to_numeric(samples.get("pair_net_r", pd.Series(dtype=float)), errors="coerce")
     wins = int(r.gt(0).sum())
     entries = int(len(samples))
@@ -324,51 +417,85 @@ def build_context_breakdown(samples: pd.DataFrame) -> pd.DataFrame:
     if samples.empty:
         return pd.DataFrame(columns=columns)
 
-    frame = samples.copy()
-    frame["pair_net_r"] = pd.to_numeric(frame["pair_net_r"], errors="coerce")
-    frame["_win"] = frame["pair_net_r"].gt(0)
-    side = frame["side"].astype(str).str.upper()
-    plus_di = pd.to_numeric(frame.get("plus_di"), errors="coerce")
-    minus_di = pd.to_numeric(frame.get("minus_di"), errors="coerce")
+    pair_net_r = pd.to_numeric(samples["pair_net_r"], errors="coerce")
+    wins = pair_net_r.gt(0)
+    side = samples["side"].fillna("").astype(str).str.upper()
+    plus_di = (
+        pd.to_numeric(samples["plus_di"], errors="coerce")
+        if "plus_di" in samples.columns
+        else pd.Series(np.nan, index=samples.index, dtype=float)
+    )
+    minus_di = (
+        pd.to_numeric(samples["minus_di"], errors="coerce")
+        if "minus_di" in samples.columns
+        else pd.Series(np.nan, index=samples.index, dtype=float)
+    )
     directional_di = plus_di.where(side.eq("LONG"), minus_di)
-    frame["research_di_bucket"] = pd.cut(
+    research_di_bucket = pd.cut(
         directional_di,
         [-np.inf, 10, 20, 30, 40, np.inf],
         labels=["<10", "10-20", "20-30", "30-40", "40+"],
         right=False,
     ).astype("string")
-    adx = pd.to_numeric(frame.get("adx"), errors="coerce")
-    frame["research_adx_bucket"] = pd.cut(
+    adx = (
+        pd.to_numeric(samples["adx"], errors="coerce")
+        if "adx" in samples.columns
+        else pd.Series(np.nan, index=samples.index, dtype=float)
+    )
+    research_adx_bucket = pd.cut(
         adx,
         [-np.inf, 20, 30, 40, np.inf],
         labels=["<20", "20-30", "30-40", "40+"],
         right=False,
     ).astype("string")
 
-    dimensions = [
-        "strategy_profile_key", "market_regime", "research_di_bucket",
-        "research_adx_bucket", "di_pressure_state", "mean_reversion_state",
-        "funding_bias", "oi_vs_price_state_1h",
-    ]
-    rows = []
-    for dimension in dimensions:
-        if dimension not in frame.columns:
+    dimensions: list[tuple[str, pd.Series]] = []
+    for name in ("strategy_profile_key", "market_regime"):
+        if name in samples.columns:
+            dimensions.append((name, samples[name]))
+    dimensions.extend(
+        [
+            ("research_di_bucket", research_di_bucket),
+            ("research_adx_bucket", research_adx_bucket),
+        ]
+    )
+    for name in (
+        "di_pressure_state",
+        "mean_reversion_state",
+        "funding_bias",
+        "oi_vs_price_state_1h",
+    ):
+        if name in samples.columns:
+            dimensions.append((name, samples[name]))
+
+    chunks: list[pd.DataFrame] = []
+    episode_ids = samples["research_episode_id"]
+    for dimension, values in dimensions:
+        available = values.notna()
+        if not bool(available.any()):
             continue
-        available = frame.loc[frame[dimension].notna()].copy()
-        if available.empty:
-            continue
-        for value, group in available.groupby(dimension, dropna=False, sort=True):
-            entries = int(len(group))
-            wins = int(group["_win"].sum())
-            r = group["pair_net_r"]
-            rows.append({
-                "dimension": dimension,
-                "value": str(value),
-                "entries": entries,
-                "episodes": int(group["research_episode_id"].nunique()),
-                "wins": wins,
-                "win_rate": wins / entries if entries else np.nan,
-                "avg_r": float(r.mean()) if r.notna().any() else np.nan,
-                "net_r": float(r.sum(min_count=1)) if r.notna().any() else np.nan,
-            })
-    return pd.DataFrame(rows, columns=columns)
+        narrow = pd.DataFrame(
+            {
+                "_value": values.loc[available],
+                "_episode": episode_ids.loc[available],
+                "_win": wins.loc[available],
+                "_r": pair_net_r.loc[available],
+            }
+        )
+        grouped = narrow.groupby("_value", dropna=False, sort=True)
+        entries = grouped.size().astype("int64")
+        aggregate = pd.DataFrame(index=entries.index)
+        aggregate["entries"] = entries
+        aggregate["episodes"] = grouped["_episode"].nunique().astype("int64")
+        aggregate["wins"] = grouped["_win"].sum().astype("int64")
+        aggregate["win_rate"] = aggregate["wins"] / aggregate["entries"]
+        aggregate["avg_r"] = grouped["_r"].mean()
+        aggregate["net_r"] = grouped["_r"].sum(min_count=1)
+        aggregate = aggregate.reset_index().rename(columns={"_value": "value"})
+        aggregate.insert(0, "dimension", dimension)
+        aggregate["value"] = aggregate["value"].map(str)
+        chunks.append(aggregate[columns])
+
+    if not chunks:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(chunks, ignore_index=True)

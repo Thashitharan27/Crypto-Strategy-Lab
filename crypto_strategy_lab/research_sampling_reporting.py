@@ -133,6 +133,8 @@ def append_research_sampling_artifacts(result, context) -> None:
         raise ValueError("research sampling interval must be positive")
 
     started = time.perf_counter()
+
+    stage_started = time.perf_counter()
     native_config = native_simulator_config(
         context.config.data,
         context.config.features,
@@ -140,6 +142,9 @@ def append_research_sampling_artifacts(result, context) -> None:
         context.config.execution,
     )
     intrabar = intrabar_from_data_lake_bundle(context.bundle)
+    setup_seconds = time.perf_counter() - stage_started
+
+    stage_started = time.perf_counter()
     samples = generate_strategy_research_samples(
         context.prepared,
         intrabar,
@@ -147,13 +152,44 @@ def append_research_sampling_artifacts(result, context) -> None:
         mode=mode,
         interval_candles=interval,
     )
+    generate_seconds = time.perf_counter() - stage_started
     metadata = dict(samples.attrs.get("research_sampling", {}))
+
+    stage_started = time.perf_counter()
     samples = _stable_samples(samples)
     _validate_samples(samples)
+    validation_seconds = time.perf_counter() - stage_started
+
+    stage_started = time.perf_counter()
     episodes = build_episode_table(samples)
+    episode_table_seconds = time.perf_counter() - stage_started
+
+    stage_started = time.perf_counter()
     episodes, episode_reporting = _episode_reporting_context(episodes, samples)
+    episode_context_seconds = time.perf_counter() - stage_started
+
+    stage_started = time.perf_counter()
     context_breakdown = build_context_breakdown(samples)
-    summary = build_sampling_summary(samples, metadata)
+    context_breakdown_seconds = time.perf_counter() - stage_started
+
+    metadata.update(
+        {
+            "research_reporting_setup_seconds": setup_seconds,
+            "research_generate_samples_seconds": generate_seconds,
+            "research_validation_seconds": validation_seconds,
+            "research_episode_table_seconds": episode_table_seconds,
+            "research_episode_context_seconds": episode_context_seconds,
+            "research_context_breakdown_seconds": context_breakdown_seconds,
+        }
+    )
+
+    stage_started = time.perf_counter()
+    # Reuse the already-built episode table. Re-aggregating it inside the summary
+    # was duplicate work and could dominate wide Every Viable Entry reports.
+    summary = build_sampling_summary(samples, metadata, episodes=episodes)
+    summary_seconds = time.perf_counter() - stage_started
+    metadata["research_summary_seconds"] = summary_seconds
+    summary["research_summary_seconds"] = summary_seconds
     summary.update(episode_reporting)
     elapsed = time.perf_counter() - started
 
@@ -164,10 +200,13 @@ def append_research_sampling_artifacts(result, context) -> None:
     context_path = run_dir / "research_sampling_context.csv"
     summary_path = run_dir / "research_sampling_summary.json"
 
+    artifact_started = time.perf_counter()
     _write_parquet_atomic(samples, samples_path)
     _write_parquet_atomic(episodes, episodes_path)
     context_breakdown.to_csv(context_path, index=False)
     summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    artifact_write_seconds = time.perf_counter() - artifact_started
+    metadata["research_artifact_write_seconds"] = artifact_write_seconds
 
     manifest_path = run_dir / "run_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

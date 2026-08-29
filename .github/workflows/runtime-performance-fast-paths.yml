@@ -32,9 +32,12 @@ jobs:
           crypto_strategy_lab/gui/v2_controller.py
           crypto_strategy_lab/research_adapters.py
           crypto_strategy_lab/research_runner.py
+          crypto_strategy_lab/research_sampling.py
           crypto_strategy_lab/research_sampling_fast.py
+          crypto_strategy_lab/research_sampling_reporting.py
           tests/test_runtime_performance_fast_paths.py
           tests/test_research_sampling_direct_fast.py
+          tests/test_research_sampling_postprocess_fast.py
       - name: Run runtime fast-path regression tests
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -42,3 +45,4 @@ jobs:
           python -m pytest -q
           tests/test_runtime_performance_fast_paths.py
           tests/test_research_sampling_direct_fast.py
+          tests/test_research_sampling_postprocess_fast.py
