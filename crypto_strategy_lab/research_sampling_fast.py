@@ -120,10 +120,16 @@ class ResearchSamplingFastExitMixin:
         }
 
     @staticmethod
-    def _research_naive_ns(value) -> np.datetime64:
+    def _research_naive_timestamp(value) -> pd.Timestamp:
+        """Normalize UTC-compatible values to the engine's naive UTC timeline."""
         timestamp = pd.Timestamp(value)
         if timestamp.tzinfo is not None:
             timestamp = timestamp.tz_convert("UTC").tz_localize(None)
+        return timestamp
+
+    @classmethod
+    def _research_naive_ns(cls, value) -> np.datetime64:
+        timestamp = cls._research_naive_timestamp(value)
         return np.datetime64(timestamp.to_datetime64(), "ns")
 
     @staticmethod
@@ -241,6 +247,7 @@ class ResearchSamplingFastExitMixin:
         """Use V2 only where resolving a future exit cannot change observability."""
         return bool(
             self.research_enable_direct_simple_exits
+            and getattr(self, "prepared_frame", None) is not None
             and self.config.use_intrabar_data
             and self.intrabar_data is not None
             and not bool(getattr(self.config, "enable_trade_telemetry", False))
@@ -260,7 +267,7 @@ class ResearchSamplingFastExitMixin:
         if len(timestamps) == 0:
             return False
 
-        start = pd.Timestamp(position.entry_time)
+        start = self._research_naive_timestamp(position.entry_time)
         minutes = int(self.config.intrabar_timeframe_minutes)
         if start.floor(f"{minutes}min") != start:
             return False
@@ -268,7 +275,9 @@ class ResearchSamplingFastExitMixin:
         final_strategy_index = len(self.times) - 1
         if final_strategy_index < 0:
             return False
-        end = pd.Timestamp(self.times[final_strategy_index]) + self.entry_delta
+        end = self._research_naive_timestamp(
+            self.times[final_strategy_index]
+        ) + self.entry_delta
         start64 = self._research_naive_ns(start)
         end64 = self._research_naive_ns(end)
         left = int(np.searchsorted(timestamps, start64, side="left"))
@@ -297,9 +306,9 @@ class ResearchSamplingFastExitMixin:
         if getattr(pair, "profile_timeout_enabled", False):
             timeout_minutes = getattr(pair, "profile_timeout_minutes", None)
             if timeout_minutes is not None:
-                timeout_at = pd.Timestamp(position.entry_time) + pd.Timedelta(
-                    minutes=int(timeout_minutes)
-                )
+                timeout_at = self._research_naive_timestamp(
+                    position.entry_time
+                ) + pd.Timedelta(minutes=int(timeout_minutes))
                 candidate = int(
                     np.searchsorted(
                         timestamps,
