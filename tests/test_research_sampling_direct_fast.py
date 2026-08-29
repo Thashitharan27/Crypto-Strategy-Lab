@@ -82,6 +82,9 @@ def _engine(pairs, intrabar, *, telemetry: bool = False):
         "2026-01-01T00:00:00Z", periods=4, freq="15min"
     ).to_numpy(dtype="datetime64[ns]")
     engine.entry_delta = pd.Timedelta(minutes=15)
+    # The V2 shortcut is intentionally bound to engines constructed from the
+    # immutable PreparedBacktestFrame contract.
+    engine.prepared_frame = object()
     engine.intrabar_data = intrabar
     engine.active_pairs = list(pairs)
     engine.completed_pairs = []
