@@ -1,31 +1,63 @@
 """Research-only batching for independent fixed-exit observations.
 
-The portfolio simulator remains the semantic authority.  This mixin accelerates
+The portfolio simulator remains the semantic authority. This mixin accelerates
 only the strategy-research population when an active Position has no stateful
-exit management.  For those simple fixed SL/TP observations, every overlapping
-trade scans the same intrabar interval, so the interval can be sliced once and
-first-hit candidates can be found in NumPy batches.  The actual winning event is
-still executed by the mature timeout/exit helpers.
+exit management.
 
-Anything stateful or unusual falls back to the normal Data Lake execution path:
-break-even, trailing, partial exits, R-step trailing, ATR checkpoint extension,
-missing/incomplete intrabars, alignment anomalies, and non-array windows.
+V2 resolves a stateless fixed SL/TP research position across its full remaining
+execution horizon once, rather than revisiting that same independent position on
+every later strategy candle. The first executable TP/SL/timeout event is still
+passed through the mature exit helpers, preserving tie policy, slippage, fees and
+funding-aware result construction. End-of-data closes use the same mature close
+helper and exact canonical end timestamp.
+
+If the full-horizon path cannot prove identical execution semantics (telemetry is
+enabled, alignment is unsafe, a gap exists before the candidate event, coverage
+is incomplete, or a position is stateful), it falls back to the existing V1
+per-strategy-interval batching or the mature Data Lake scanner.
 """
 from __future__ import annotations
 
 from collections import defaultdict
+import time
 
 import numpy as np
 import pandas as pd
 
-from crypto_strategy_lab.trade import ExitSource, Side
+from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
 
 
 class ResearchSamplingFastExitMixin:
-    """Semantics-preserving batching used only by research sampling."""
+    """Semantics-preserving acceleration used only by research sampling."""
 
+    research_enable_direct_simple_exits = True
     research_enable_batched_simple_exits = True
     research_simple_exit_batch_size = 2048
+
+    def run(self):
+        """Time only the research engine so reporting overhead stays measurable."""
+        started = time.perf_counter()
+        try:
+            return super().run()
+        finally:
+            self.research_engine_run_seconds = time.perf_counter() - started
+
+    def _record_skipped_signal(self, i, reason):
+        """Retain rejection counts/reasons without building unused rich snapshots.
+
+        Strategy-resilience artifacts publish only viable entries. The normal
+        engine's full skipped-signal rows are therefore redundant in this second,
+        research-only simulation. ``results_frame`` still receives the exact
+        number of rejected candidates and the same reason strings, so its aggregate
+        skip counters remain unchanged.
+        """
+        del i
+        self.skipped_signals.append(
+            {
+                "entry_filter_reason": reason,
+                "adx_filter_reason": reason,
+            }
+        )
 
     @staticmethod
     def _research_simple_exit_eligible(position) -> bool:
@@ -45,10 +77,31 @@ class ResearchSamplingFastExitMixin:
     def _research_bump_exit_stat(self, name: str, amount: int = 1) -> None:
         setattr(self, name, int(getattr(self, name, 0)) + int(amount))
 
-    def research_exit_optimization_stats(self) -> dict[str, int | str | bool]:
-        """Expose lightweight counters so long research runs are auditable."""
+    def research_exit_optimization_stats(self) -> dict[str, int | float | str | bool]:
+        """Expose counters/timing so long research runs remain auditable."""
         return {
-            "research_exit_kernel": "BATCHED_SIMPLE_INTRABAR_V1",
+            "research_exit_kernel": "DIRECT_SIMPLE_INTRABAR_V2_WITH_V1_FALLBACK",
+            "research_engine_run_seconds": float(
+                getattr(self, "research_engine_run_seconds", 0.0)
+            ),
+            "research_direct_simple_exit_enabled": bool(
+                self.research_enable_direct_simple_exits
+            ),
+            "research_direct_simple_positions": int(
+                getattr(self, "research_direct_simple_positions", 0)
+            ),
+            "research_direct_simple_tp_sl": int(
+                getattr(self, "research_direct_simple_tp_sl", 0)
+            ),
+            "research_direct_simple_timeouts": int(
+                getattr(self, "research_direct_simple_timeouts", 0)
+            ),
+            "research_direct_simple_end_of_data": int(
+                getattr(self, "research_direct_simple_end_of_data", 0)
+            ),
+            "research_direct_simple_fallback_positions": int(
+                getattr(self, "research_direct_simple_fallback_positions", 0)
+            ),
             "research_batched_simple_exit_enabled": bool(
                 self.research_enable_batched_simple_exits
             ),
@@ -67,10 +120,16 @@ class ResearchSamplingFastExitMixin:
         }
 
     @staticmethod
-    def _research_naive_ns(value) -> np.datetime64:
+    def _research_naive_timestamp(value) -> pd.Timestamp:
+        """Normalize UTC-compatible values to the engine's naive UTC timeline."""
         timestamp = pd.Timestamp(value)
         if timestamp.tzinfo is not None:
             timestamp = timestamp.tz_convert("UTC").tz_localize(None)
+        return timestamp
+
+    @classmethod
+    def _research_naive_ns(cls, value) -> np.datetime64:
+        timestamp = cls._research_naive_timestamp(value)
         return np.datetime64(timestamp.to_datetime64(), "ns")
 
     @staticmethod
@@ -153,8 +212,171 @@ class ResearchSamplingFastExitMixin:
             return None
         return self._research_window_arrays(window)
 
+    def _research_direct_runtime_arrays(self):
+        """Cache immutable intrabar arrays and gap boundaries for V2 resolution."""
+        cached = getattr(self, "_research_direct_intrabar_cache", None)
+        if cached is not None:
+            return cached
+        data = getattr(self, "intrabar_data", None)
+        required = ("timestamp", "open", "high", "low")
+        if data is None or any(getattr(data, name, None) is None for name in required):
+            return None
+        timestamps = np.asarray(data.timestamp, dtype="datetime64[ns]")
+        opens = np.asarray(data.open, dtype=float)
+        highs = np.asarray(data.high, dtype=float)
+        lows = np.asarray(data.low, dtype=float)
+        if not (len(timestamps) == len(opens) == len(highs) == len(lows)):
+            return None
+        expected = pd.Timedelta(
+            minutes=int(self.config.intrabar_timeframe_minutes)
+        ).to_timedelta64()
+        gap_after = np.flatnonzero(np.diff(timestamps) > expected)
+        cached = (timestamps, opens, highs, lows, gap_after, expected)
+        self._research_direct_intrabar_cache = cached
+        return cached
+
+    @staticmethod
+    def _research_gap_before(gap_after, left: int, event_index: int) -> bool:
+        """Whether a missing intrabar interval lies before an executable event."""
+        if event_index <= left or len(gap_after) == 0:
+            return False
+        offset = int(np.searchsorted(gap_after, left, side="left"))
+        return bool(offset < len(gap_after) and int(gap_after[offset]) < event_index)
+
+    def _research_direct_simple_supported(self) -> bool:
+        """Use V2 only where resolving a future exit cannot change observability."""
+        return bool(
+            self.research_enable_direct_simple_exits
+            and getattr(self, "prepared_frame", None) is not None
+            and self.config.use_intrabar_data
+            and self.intrabar_data is not None
+            and not bool(getattr(self.config, "enable_trade_telemetry", False))
+            and self._research_direct_runtime_arrays() is not None
+        )
+
+    def _research_resolve_simple_position(self, pair, position) -> bool:
+        """Resolve one independent fixed-exit position across its full horizon.
+
+        Returns True when the position was resolved with semantics proven safe.
+        Returns False when V1/the mature scanner must remain authoritative.
+        """
+        arrays = self._research_direct_runtime_arrays()
+        if arrays is None:
+            return False
+        timestamps, opens, highs, lows, gap_after, expected_delta = arrays
+        if len(timestamps) == 0:
+            return False
+
+        start = self._research_naive_timestamp(position.entry_time)
+        minutes = int(self.config.intrabar_timeframe_minutes)
+        if start.floor(f"{minutes}min") != start:
+            return False
+
+        final_strategy_index = len(self.times) - 1
+        if final_strategy_index < 0:
+            return False
+        end = self._research_naive_timestamp(
+            self.times[final_strategy_index]
+        ) + self.entry_delta
+        start64 = self._research_naive_ns(start)
+        end64 = self._research_naive_ns(end)
+        left = int(np.searchsorted(timestamps, start64, side="left"))
+        right = int(np.searchsorted(timestamps, end64, side="left"))
+        if left >= right:
+            return False
+
+        expected = pd.Timedelta(expected_delta)
+        first_timestamp = pd.Timestamp(timestamps[left])
+        if first_timestamp > start + expected:
+            return False
+
+        long_side = position.side == Side.LONG
+        target = float(position.tp)
+        stop = float(position.sl)
+        window_highs = highs[left:right]
+        window_lows = lows[left:right]
+        if long_side:
+            hits = (window_highs >= target) | (window_lows <= stop)
+        else:
+            hits = (window_lows <= target) | (window_highs >= stop)
+        local_hits = np.flatnonzero(hits)
+        first_hit = right if len(local_hits) == 0 else left + int(local_hits[0])
+
+        timeout_index = right
+        if getattr(pair, "profile_timeout_enabled", False):
+            timeout_minutes = getattr(pair, "profile_timeout_minutes", None)
+            if timeout_minutes is not None:
+                timeout_at = self._research_naive_timestamp(
+                    position.entry_time
+                ) + pd.Timedelta(minutes=int(timeout_minutes))
+                candidate = int(
+                    np.searchsorted(
+                        timestamps,
+                        self._research_naive_ns(timeout_at),
+                        side="left",
+                    )
+                )
+                if left <= candidate < right:
+                    timeout_index = candidate
+
+        event_index = min(first_hit, timeout_index)
+        if event_index < right:
+            # A gap after the event is irrelevant because the mature engine would
+            # already have closed the observation. A gap before the event forces
+            # the exact existing fallback path instead of inventing a price path.
+            if self._research_gap_before(gap_after, left, event_index):
+                return False
+            timestamp = pd.Timestamp(timestamps[event_index])
+            if timeout_index <= first_hit:
+                self._maybe_timeout_position_at(
+                    pair,
+                    position,
+                    event_index,
+                    timestamp,
+                    float(opens[event_index]),
+                    ExitSource.INTRABAR,
+                )
+                self._research_bump_exit_stat("research_direct_simple_timeouts")
+            else:
+                self._maybe_exit_bar(
+                    position,
+                    event_index,
+                    float(highs[event_index]),
+                    float(lows[event_index]),
+                    timestamp,
+                    ExitSource.INTRABAR,
+                )
+                if position.is_open:
+                    # Defensive parity guard: a supposedly fixed TP/SL hit must
+                    # be executable by the mature helper. If not, leave V1 in
+                    # control rather than publishing a guessed outcome.
+                    return False
+                self._research_bump_exit_stat("research_direct_simple_tp_sl")
+            self._research_bump_exit_stat("research_direct_simple_positions")
+            return True
+
+        # No TP/SL/timeout candidate exists. Early end-of-data closure is safe
+        # only when the whole remaining execution horizon is gap-free and fully
+        # covered. Otherwise keep V1/mature missing-data handling authoritative.
+        if self._research_gap_before(gap_after, left, right - 1):
+            return False
+        intrabar_max = pd.Timestamp(timestamps[-1])
+        if intrabar_max < end - expected:
+            return False
+        self._close_position(
+            position,
+            final_strategy_index,
+            float(self.close[final_strategy_index]),
+            ExitReason.END_OF_DATA,
+            ExitSource.END_OF_DATA,
+            end,
+        )
+        self._research_bump_exit_stat("research_direct_simple_end_of_data")
+        self._research_bump_exit_stat("research_direct_simple_positions")
+        return True
+
     def _research_scan_simple_group(self, pairs, i: int, start: pd.Timestamp) -> bool:
-        """Batch one shared strategy interval and execute only each first event."""
+        """V1 fallback: batch one shared strategy interval and execute first event."""
         end = pd.Timestamp(self.times[i]) + self.entry_delta
         if start >= end:
             return False
@@ -207,11 +429,11 @@ class ResearchSamplingFastExitMixin:
             for local_index, (pair, position) in enumerate(batch):
                 if not getattr(pair, "profile_timeout_enabled", False):
                     continue
-                minutes = getattr(pair, "profile_timeout_minutes", None)
-                if minutes is None:
+                timeout_minutes = getattr(pair, "profile_timeout_minutes", None)
+                if timeout_minutes is None:
                     continue
                 timeout_at = pd.Timestamp(position.entry_time) + pd.Timedelta(
-                    minutes=int(minutes)
+                    minutes=int(timeout_minutes)
                 )
                 timeout_index[local_index] = int(
                     np.searchsorted(
@@ -252,7 +474,7 @@ class ResearchSamplingFastExitMixin:
         return True
 
     def _update_positions_to_strategy_index(self, i):
-        """Batch stateless research exits; delegate every other case unchanged."""
+        """Resolve fixed research exits once; delegate every unsafe case unchanged."""
         if not self.research_enable_batched_simple_exits:
             return super()._update_positions_to_strategy_index(i)
         if not self.config.use_intrabar_data or self.intrabar_data is None:
@@ -263,11 +485,23 @@ class ResearchSamplingFastExitMixin:
         strategy_time = pd.Timestamp(self.times[i])
         simple_groups = defaultdict(list)
         dynamic = []
+        direct_supported = self._research_direct_simple_supported()
+
         for pair in self.active_pairs:
             position = pair.position
             if i <= position.entry_index:
                 continue
             if self._research_simple_exit_eligible(position):
+                direct_disabled = bool(
+                    getattr(position, "_research_direct_simple_disabled", False)
+                )
+                if direct_supported and not direct_disabled:
+                    if self._research_resolve_simple_position(pair, position):
+                        continue
+                    position._research_direct_simple_disabled = True
+                    self._research_bump_exit_stat(
+                        "research_direct_simple_fallback_positions"
+                    )
                 start = max(pd.Timestamp(position.entry_time), strategy_time)
                 simple_groups[start].append((pair, position))
             else:
