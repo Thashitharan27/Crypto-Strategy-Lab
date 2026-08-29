@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import inspect
 import json
 from pathlib import Path
 import time
@@ -136,20 +137,20 @@ class GuiApplicationService:
             self._validated_catalog_snapshot = None
             return
         self._validated_catalog_snapshot = (
-            int(self._catalog_generation),
+            int(getattr(self, "_catalog_generation", 0)),
             self._request_identity(request),
             time.monotonic(),
         )
 
     def _consume_validated_catalog_snapshot(self, request: GuiResearchRequest) -> bool:
-        snapshot = self._validated_catalog_snapshot
+        snapshot = getattr(self, "_validated_catalog_snapshot", None)
         self._validated_catalog_snapshot = None
         if snapshot is None:
             return False
         generation, request_identity, validated_at = snapshot
         age = time.monotonic() - float(validated_at)
         return bool(
-            generation == self._catalog_generation
+            generation == int(getattr(self, "_catalog_generation", 0))
             and request_identity == self._request_identity(request)
             and 0.0 <= age <= VALIDATED_CATALOG_REUSE_SECONDS
         )
@@ -160,7 +161,7 @@ class GuiApplicationService:
         # one-shot validation snapshot before touching the raw archive tree.
         self._validated_catalog_snapshot = None
         count = self.store.refresh_catalog()
-        self._catalog_generation += 1
+        self._catalog_generation = int(getattr(self, "_catalog_generation", 0)) + 1
         return count
 
     def required_data_quality(self, request: GuiResearchRequest) -> DataQualityReport:
@@ -214,6 +215,19 @@ class GuiApplicationService:
                               PreparedRunCache(self.cache_root), NativeStrategyPolicy(),
                               NativeSimulator(), (BayesianSamplingCsvManifestReporter(output_root),))
 
+    @staticmethod
+    def _runner_accepts_refresh_catalog(runner) -> bool:
+        """Keep legacy/injected GUI runners compatible with the new fast-path hint."""
+        try:
+            parameters = inspect.signature(runner.run).parameters.values()
+        except (TypeError, ValueError):
+            return isinstance(runner, ResearchRunner)
+        return any(
+            parameter.name == "refresh_catalog"
+            or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+
     def run(self, request: GuiResearchRequest, config: ResearchRunConfig):
         config.validate()
         callback = getattr(self, "progress_callback", None)
@@ -223,11 +237,11 @@ class GuiApplicationService:
         # result contracts.
         self.store.progress_callback = callback
         try:
-            return self._runner(Path(config.reporting.output_dir)).run(
-                request.to_data_request(),
-                config,
-                refresh_catalog=not reuse_validated_catalog,
-            )
+            runner = self._runner(Path(config.reporting.output_dir))
+            kwargs = {}
+            if self._runner_accepts_refresh_catalog(runner):
+                kwargs["refresh_catalog"] = not reuse_validated_catalog
+            return runner.run(request.to_data_request(), config, **kwargs)
         except Exception as exc:
             emit_progress(
                 callback,
