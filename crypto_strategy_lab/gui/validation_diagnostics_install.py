@@ -1,16 +1,21 @@
 """Install richer current-request data-quality diagnostics in the active GUI.
 
-The validator already records exact missing-candle counts/timestamps/ranges.  The
+The validator already records exact missing-candle counts/timestamps/ranges. The
 legacy six-column quality table only surfaced issue codes, which made an internal
-coverage failure hard to repair.  This presentation layer exposes the existing
-validator facts without changing validation or run semantics.
+coverage failure hard to repair. This presentation layer exposes the existing
+validator facts and keeps them tied to the active request.
+
+A fast catalog pre-check may know that required candles are unavailable before the
+exact validator runs. That must still block strategy execution, but it must not
+prevent the exact validator from producing the missing-candle diagnostics needed
+to repair the archive.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import MethodType
 
-from PySide6.QtWidgets import QTableWidgetItem
+from PySide6.QtWidgets import QMessageBox, QTableWidgetItem
 
 
 QUALITY_HEADERS = (
@@ -95,8 +100,16 @@ def _issue_ranges(issue) -> list[dict]:
 def _gap_summary(dataset) -> tuple[str, str, str, str]:
     """Return exact missing count, first/last gap and a detailed tooltip."""
     issues = tuple(getattr(dataset, "issues", ()) or ())
-    exact = [issue for issue in issues if str(getattr(issue, "code", "")) in _EXACT_CANDLE_GAP_CODES]
-    coverage = [issue for issue in issues if str(getattr(issue, "code", "")) in _COVERAGE_GAP_CODES]
+    exact = [
+        issue
+        for issue in issues
+        if str(getattr(issue, "code", "")) in _EXACT_CANDLE_GAP_CODES
+    ]
+    coverage = [
+        issue
+        for issue in issues
+        if str(getattr(issue, "code", "")) in _COVERAGE_GAP_CODES
+    ]
 
     missing_count = sum(max(0, int(getattr(issue, "count", 0) or 0)) for issue in exact)
     missing_text = f"{missing_count:,}" if exact else "—"
@@ -187,7 +200,11 @@ def _render_data_quality(self, report) -> None:
 
     for row, dataset in enumerate(datasets):
         missing, first_gap, last_gap, gap_detail = _gap_summary(dataset)
-        dataset_status = getattr(getattr(dataset, "status", None), "value", getattr(dataset, "status", "—"))
+        dataset_status = getattr(
+            getattr(dataset, "status", None),
+            "value",
+            getattr(dataset, "status", "—"),
+        )
         values = (
             _role_for_dataset(self, dataset),
             getattr(dataset, "symbol", "—") or "—",
@@ -212,8 +229,184 @@ def _render_data_quality(self, report) -> None:
     table.horizontalHeader().setStretchLastSection(True)
 
 
+def _current_request_label(window) -> str:
+    try:
+        request = window.request_model()
+    except Exception:
+        return "current request"
+    symbol = str(getattr(request, "symbol", "") or "").upper()
+    strategy = str(getattr(request, "strategy_timeframe", "") or "")
+    intrabar = str(getattr(request, "intrabar_timeframe", "") or "")
+    parts = [part for part in (symbol, strategy, intrabar) if part]
+    return " · ".join(parts) or "current request"
+
+
+def _clear_current_request_diagnostics(window) -> None:
+    """Never leave a previous request's quality rows visible after a request edit."""
+    if not hasattr(window, "quality_table") or not hasattr(window, "quality"):
+        return
+    _configure_table(window.quality_table)
+    window.quality_table.setRowCount(0)
+    window.quality.setText(
+        f"Data quality: PENDING — {_current_request_label(window)} has not been validated yet"
+    )
+
+
+def _catalog_precheck(window) -> tuple[str | None, str | None]:
+    """Return the fast Setup catalog gate result without changing readiness state."""
+    try:
+        request = window.request_model()
+        state, detail = window.data_readiness(
+            window._coverage_rows_from_table(),
+            request.strategy_timeframe,
+            request.intrabar_timeframe,
+        )
+    except Exception:
+        return None, None
+    return str(state).upper(), str(detail or "")
+
+
+def _set_auto_run_blocked_ui(window, detail: str) -> None:
+    if hasattr(window, "stage"):
+        window.stage.setText("BLOCKED — REQUIRED CANDLE COVERAGE")
+    if hasattr(window, "progress"):
+        window.progress.setRange(0, 100)
+        window.progress.setValue(0)
+        window.progress.setFormat("Blocked")
+    if hasattr(window, "run_progress_detail"):
+        window.run_progress_detail.setText(
+            "The strategy was not started. Exact missing-candle diagnostics are available in Data Library."
+        )
+    QMessageBox.warning(
+        window,
+        "Required candle range is incomplete",
+        f"The strategy was not started.\n\n{detail}\n\n"
+        "Exact missing-candle diagnostics are now shown in Data Library.",
+    )
+
+
+def _begin_required_data_validation_with_diagnostics(self, *, auto_run: bool) -> None:
+    """Run exact diagnostics even when the fast catalog gate is already blocked."""
+    original = self._validation_gap_original_begin_required_data_validation
+
+    active = getattr(self, "_validation_gap_catalog_block", None)
+    if getattr(self, "_validation_thread", None) is not None:
+        if active is not None:
+            if auto_run:
+                active["auto_run"] = True
+                if hasattr(self, "run_button"):
+                    self.run_button.setEnabled(False)
+            return
+        return original(auto_run=auto_run)
+
+    state, detail = _catalog_precheck(self)
+    if state != "BLOCKED":
+        return original(auto_run=auto_run)
+
+    _clear_current_request_diagnostics(self)
+    try:
+        request_key = self._request_key(self.request_model())
+    except Exception:
+        request_key = None
+    self._validation_gap_catalog_block = {
+        "detail": detail or "Required candle coverage is unavailable.",
+        "request_key": request_key,
+        "auto_run": bool(auto_run),
+    }
+
+    if auto_run:
+        if hasattr(self, "run_button"):
+            self.run_button.setEnabled(False)
+        if hasattr(self, "stage"):
+            self.stage.setText("VALIDATING BLOCKED CANDLE COVERAGE")
+        if hasattr(self, "progress"):
+            self.progress.setRange(0, 0)
+        if hasattr(self, "run_progress_detail"):
+            self.run_progress_detail.setText(
+                "The catalog pre-check is blocked; running the exact validator to locate the missing candles before stopping."
+            )
+
+    instance_dict = getattr(self, "__dict__", {})
+    had_instance_override = "data_readiness" in instance_dict
+    previous_instance_value = instance_dict.get("data_readiness")
+
+    def diagnostic_gate(_self, *_args, **_kwargs):
+        return "READY", "Exact validator diagnostic pass"
+
+    self.data_readiness = MethodType(diagnostic_gate, self)
+    try:
+        # Never let this diagnostic bypass auto-start the simulator. The original
+        # catalog block remains authoritative for this invocation.
+        original(auto_run=False)
+    except Exception:
+        self._validation_gap_catalog_block = None
+        raise
+    finally:
+        if had_instance_override:
+            self.data_readiness = previous_instance_value
+        else:
+            try:
+                delattr(self, "data_readiness")
+            except AttributeError:
+                pass
+
+
+def _validation_finished_with_diagnostics(self, report) -> None:
+    context = getattr(self, "_validation_gap_catalog_block", None)
+    original = self._validation_gap_original_validation_finished
+    if context is None:
+        return original(report)
+
+    try:
+        original(report)
+        # A request may have changed while the worker was running. The native
+        # stale-request guard rejects that report; do not re-label it as current.
+        if getattr(self, "_validated_report", None) is not report:
+            return
+
+        has_errors = bool(self._quality_has_errors(report))
+        if not has_errors:
+            self._set_readiness(
+                "NOT READY",
+                context["detail"]
+                + "\nExact candle validation found no continuity error, so refresh the Data Library inventory and revalidate before running.",
+                state="blocked",
+            )
+
+        if context.get("auto_run"):
+            _set_auto_run_blocked_ui(self, context["detail"])
+    finally:
+        self._validation_gap_catalog_block = None
+
+
+def _connect_request_change_clearers(window) -> None:
+    """Clear visible quality rows whenever inputs can invalidate the report."""
+
+    def connect(widget_name: str, signal_name: str) -> None:
+        widget = getattr(window, widget_name, None)
+        signal = getattr(widget, signal_name, None)
+        if signal is not None and hasattr(signal, "connect"):
+            signal.connect(lambda *_args: _clear_current_request_diagnostics(window))
+
+    for widget_name, signal_name in (
+        ("exchange", "currentIndexChanged"),
+        ("market", "currentIndexChanged"),
+        ("symbol", "currentTextChanged"),
+        ("start", "dateChanged"),
+        ("end", "dateChanged"),
+        ("strategy_tf", "currentIndexChanged"),
+        ("intrabar_tf", "currentIndexChanged"),
+    ):
+        connect(widget_name, signal_name)
+
+    feature_form = getattr(window, "feature_form", None)
+    changed = getattr(feature_form, "changed", None)
+    if changed is not None and hasattr(changed, "connect"):
+        changed.connect(lambda *_args: _clear_current_request_diagnostics(window))
+
+
 def apply_validation_gap_diagnostics(window) -> None:
-    """Expose validator gap facts in the active Data Library quality table."""
+    """Expose exact gap facts for the active request without changing run safety."""
     if getattr(window, "_validation_gap_diagnostics_installed", False):
         return
     if not hasattr(window, "quality_table") or not hasattr(window, "quality"):
@@ -222,7 +415,23 @@ def apply_validation_gap_diagnostics(window) -> None:
     window._validation_gap_diagnostics_installed = True
     _configure_table(window.quality_table)
     window.render_data_quality = MethodType(_render_data_quality, window)
+    _connect_request_change_clearers(window)
+
+    begin = getattr(window, "_begin_required_data_validation", None)
+    finished = getattr(window, "_validation_finished", None)
+    if callable(begin) and callable(finished):
+        window._validation_gap_original_begin_required_data_validation = begin
+        window._validation_gap_original_validation_finished = finished
+        window._validation_gap_catalog_block = None
+        window._begin_required_data_validation = MethodType(
+            _begin_required_data_validation_with_diagnostics, window
+        )
+        window._validation_finished = MethodType(
+            _validation_finished_with_diagnostics, window
+        )
 
     report = getattr(window, "_validated_report", None)
     if report is not None:
         window.render_data_quality(report)
+    else:
+        _clear_current_request_diagnostics(window)

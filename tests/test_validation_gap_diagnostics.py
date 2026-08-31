@@ -135,3 +135,107 @@ def test_installed_renderer_labels_roles_and_distinguishes_benchmark():
     assert window.quality_table.item(0, 9).text() == "2022-05-11 05:10:00 UTC"
     assert "MISSING_INTERNAL_INTERVAL (117)" == window.quality_table.item(0, 10).text()
     assert window.quality_table.item(2, 7).text() == "—"
+
+
+def test_request_change_clears_previous_symbol_validation_rows():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    from crypto_strategy_lab.gui.validation_diagnostics_install import (
+        apply_validation_gap_diagnostics,
+    )
+
+    app = widgets.QApplication.instance() or widgets.QApplication([])
+    del app
+
+    class Selector:
+        def __init__(self, value):
+            self.value = value
+
+        def currentData(self):
+            return self.value
+
+    class Window:
+        def __init__(self):
+            self.quality = widgets.QLabel()
+            self.quality_table = widgets.QTableWidget(0, 6)
+            self.symbol = widgets.QComboBox()
+            self.symbol.addItems(["LINKUSDT", "SHIBUSDT"])
+            self.strategy_tf = Selector("1d")
+            self.intrabar_tf = Selector("1m")
+            self._validated_report = None
+
+        def request_model(self):
+            return SimpleNamespace(
+                symbol=self.symbol.currentText(),
+                strategy_timeframe="1d",
+                intrabar_timeframe="1m",
+            )
+
+    window = Window()
+    apply_validation_gap_diagnostics(window)
+    window.render_data_quality(DataQualityReport((_dataset("1d", symbol="LINKUSDT"),)))
+    assert window.quality_table.rowCount() == 1
+    assert window.quality_table.item(0, 1).text() == "LINKUSDT"
+
+    window.symbol.setCurrentText("SHIBUSDT")
+
+    assert window.quality_table.rowCount() == 0
+    assert "SHIBUSDT" in window.quality.text()
+    assert "PENDING" in window.quality.text()
+
+
+def test_catalog_block_still_invokes_exact_validation_path():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    widgets = pytest.importorskip("PySide6.QtWidgets", exc_type=ImportError)
+    from crypto_strategy_lab.gui.validation_diagnostics_install import (
+        apply_validation_gap_diagnostics,
+    )
+
+    app = widgets.QApplication.instance() or widgets.QApplication([])
+    del app
+
+    class Window:
+        def __init__(self):
+            self.quality = widgets.QLabel()
+            self.quality_table = widgets.QTableWidget(0, 6)
+            self._validated_report = None
+            self._validation_thread = None
+            self.begin_auto_run = None
+            self.gate_seen_by_original = None
+
+        def request_model(self):
+            return SimpleNamespace(
+                symbol="SHIBUSDT",
+                strategy_timeframe="1d",
+                intrabar_timeframe="1m",
+            )
+
+        def _request_key(self, request):
+            return (request.symbol, request.strategy_timeframe, request.intrabar_timeframe)
+
+        def _coverage_rows_from_table(self):
+            return []
+
+        def data_readiness(self, *_args, **_kwargs):
+            return "BLOCKED", "Required candle coverage unavailable: 1d, 1m"
+
+        def _begin_required_data_validation(self, *, auto_run: bool):
+            self.begin_auto_run = auto_run
+            self.gate_seen_by_original = self.data_readiness([], "1d", "1m")
+
+        def _validation_finished(self, report):
+            self._validated_report = report
+
+        def _quality_has_errors(self, report):
+            return False
+
+    window = Window()
+    apply_validation_gap_diagnostics(window)
+    window._begin_required_data_validation(auto_run=False)
+
+    assert window.begin_auto_run is False
+    assert window.gate_seen_by_original[0] == "READY"
+    assert window.data_readiness([], "1d", "1m")[0] == "BLOCKED"
+    assert window._validation_gap_catalog_block["detail"] == (
+        "Required candle coverage unavailable: 1d, 1m"
+    )
