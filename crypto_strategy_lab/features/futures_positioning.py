@@ -228,33 +228,15 @@ class FuturesPositioningFeatureProvider:
         ):
             out[column] = shared[column]
 
-        if price_source is None or price_source.empty:
+        if price is None:
             out["price_source_available_at"] = pd.Series(
                 pd.NaT, index=out.index, dtype="datetime64[ns, UTC]"
             )
             out["price_age_seconds"] = np.nan
-            out["price_change_pct_1h"] = np.nan
         else:
-            price = price_source.copy()
-            required_price = {"available_at", "close"}
-            missing_price = sorted(required_price - set(price.columns))
-            if missing_price:
-                raise ValueError(
-                    f"Canonical 1h positioning price source is missing {missing_price}"
-                )
-            price["available_at"] = pd.to_datetime(price["available_at"], utc=True)
-            price = (
-                price.sort_values("available_at", kind="stable")
-                .drop_duplicates("available_at", keep="last")
-                .reset_index(drop=True)
-            )
-            price["close"] = pd.to_numeric(price["close"], errors="coerce")
-            _, price["price_change_pct_1h"] = _elapsed_change(
-                price, "close", pd.Timedelta(hours=1)
-            )
             price_joined = causal_asof_join(
                 decisions,
-                price[["available_at", "price_change_pct_1h"]],
+                price[["available_at"]],
             )
             out["price_source_available_at"] = pd.to_datetime(
                 price_joined["available_at"], utc=True
@@ -262,31 +244,23 @@ class FuturesPositioningFeatureProvider:
             out["price_age_seconds"] = (
                 out["available_at"] - out["price_source_available_at"]
             ).dt.total_seconds()
-            out["price_change_pct_1h"] = pd.to_numeric(
-                price_joined["price_change_pct_1h"], errors="coerce"
-            )
-
-        out["oi_vs_price_state_1h"] = _state(
-            out["price_change_pct_1h"].to_numpy(float),
-            out["oi_change_pct_1h"].to_numpy(float),
-        )
+        out["price_change_pct_1h"] = shared["price_change_pct_1h"]
+        out["oi_vs_price_state_1h"] = shared["oi_vs_price_state_1h"]
 
         # Retained research fields with explicit strategy-bar semantics.
-        oi = out["open_interest"]
+        oi = pd.Series(shared["open_interest"], dtype="float64")
         oi_value = out["open_interest_value"]
-        strategy_close = decisions["close"].to_numpy(float)
-        out["open_interest_change_1bar_pct"] = oi.pct_change(fill_method=None)
-        out["open_interest_change_3bar_pct"] = oi.pct_change(3, fill_method=None)
+        out["open_interest_change_1bar_pct"] = shared[
+            "open_interest_change_1bar_pct"
+        ]
+        out["open_interest_change_3bar_pct"] = oi.pct_change(
+            3, fill_method=None
+        )
         out["open_interest_value_change_1bar_pct"] = oi_value.pct_change(
             fill_method=None
         )
-        out["price_return_1bar"] = pd.Series(strategy_close).pct_change(
-            fill_method=None
-        )
-        out["price_oi_state"] = _state(
-            out["price_return_1bar"].to_numpy(float),
-            out["open_interest_change_1bar_pct"].to_numpy(float),
-        )
+        out["price_return_1bar"] = shared["price_return_1bar"]
+        out["price_oi_state"] = shared["price_oi_state"]
         for ratio, bias in zip(
             RATIOS,
             (
