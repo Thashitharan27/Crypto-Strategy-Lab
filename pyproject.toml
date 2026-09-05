@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "crypto-strategy-core"
 version = "0.1.0"
 description = "Deterministic strategy and feature primitives shared by Crypto Strategy Lab and live runtimes"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
   "pandas>=2,<3",
 ]
