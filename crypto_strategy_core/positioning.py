@@ -198,3 +198,22 @@ def positioning_evidence_series(
         "price_return_1bar": strategy_price_return.tolist(),
         "price_oi_state": _state(strategy_price_return, strategy_oi_change),
     }
+
+
+
+def ratio_bias_evidence_series(
+    decision_times: Sequence[object],
+    source_times: Sequence[object],
+    ratios: Sequence[float],
+) -> dict[str, list[float]]:
+    """As-of align a source-native long/short ratio and expose CSL bias=ratio-1."""
+    decisions = pd.DatetimeIndex(pd.to_datetime(list(decision_times), utc=True))
+    if len(decisions) and not decisions.is_monotonic_increasing:
+        raise ValueError("ratio decision timestamps must be chronological")
+    source_index, values = _canonical_series(source_times, ratios)
+    aligned = _asof(decisions, source_index, values)
+    bias = np.where(np.isfinite(aligned), aligned - 1.0, np.nan)
+    return {
+        "ratio": aligned.tolist(),
+        "bias": bias.tolist(),
+    }
