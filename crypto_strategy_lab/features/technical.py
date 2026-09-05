@@ -13,6 +13,8 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_core.candles import directional_pressure_features
+
 from crypto_strategy_lab.adx import adx
 from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.data.query import DataRequest
@@ -127,16 +129,34 @@ class CoreDirectionalFeatureProvider:
             where=np.isfinite(atr_values) & (close != 0),
         )
 
-        old_plus = lag(plus_di, pressure_lookback)
-        old_minus = lag(minus_di, pressure_lookback)
-        plus_change = plus_di - old_plus
-        minus_change = minus_di - old_minus
-        pressure_spread_change = spread - lag(spread, pressure_lookback)
-
-        long_directional_change = plus_change
-        long_opposing_change = minus_change
-        short_directional_change = minus_change
-        short_opposing_change = plus_change
+        pressure = directional_pressure_features(
+            plus_di,
+            minus_di,
+            pressure_lookback,
+        )
+        plus_change = np.asarray(pressure["plus_di_change"], dtype=float)
+        minus_change = np.asarray(pressure["minus_di_change"], dtype=float)
+        pressure_spread_change = np.asarray(
+            pressure["di_pressure_spread_change"], dtype=float
+        )
+        long_directional_change = np.asarray(
+            pressure["long_directional_di_change"], dtype=float
+        )
+        long_opposing_change = np.asarray(
+            pressure["long_opposing_di_change"], dtype=float
+        )
+        short_directional_change = np.asarray(
+            pressure["short_directional_di_change"], dtype=float
+        )
+        short_opposing_change = np.asarray(
+            pressure["short_opposing_di_change"], dtype=float
+        )
+        long_pressure_state = np.asarray(
+            pressure["long_di_pressure_state"], dtype=object
+        )
+        short_pressure_state = np.asarray(
+            pressure["short_di_pressure_state"], dtype=object
+        )
 
         output = pd.DataFrame(
             {
@@ -158,14 +178,10 @@ class CoreDirectionalFeatureProvider:
                 "di_pressure_spread_change": pressure_spread_change,
                 "long_directional_di_change": long_directional_change,
                 "long_opposing_di_change": long_opposing_change,
-                "long_di_pressure_state": _pressure_state(
-                    long_directional_change, long_opposing_change
-                ),
+                "long_di_pressure_state": long_pressure_state,
                 "short_directional_di_change": short_directional_change,
                 "short_opposing_di_change": short_opposing_change,
-                "short_di_pressure_state": _pressure_state(
-                    short_directional_change, short_opposing_change
-                ),
+                "short_di_pressure_state": short_pressure_state,
             }
         )
 
