@@ -5,7 +5,7 @@ import math
 import pandas as pd
 import pytest
 
-from crypto_strategy_core.positioning import positioning_evidence_series
+from crypto_strategy_core.positioning import positioning_evidence_series, ratio_bias_evidence_series
 
 
 def test_shared_positioning_matches_source_native_oi_horizons_and_1h_price_state() -> None:
@@ -150,3 +150,65 @@ def test_shared_positioning_requires_chronological_strategy_rows() -> None:
             pd.to_datetime(["2026-01-01T03:55:00Z"], utc=True),
             [100.0],
         )
+
+
+
+def test_shared_ratio_bias_is_causal_and_last_write_wins() -> None:
+    source_times = pd.to_datetime(
+        [
+            "2026-01-01T03:55:00Z",
+            "2026-01-01T07:55:00Z",
+            "2026-01-01T07:55:00Z",
+            "2026-01-01T11:55:00Z",
+        ],
+        utc=True,
+    )
+    decisions = pd.to_datetime(
+        ["2026-01-01T04:00:00Z", "2026-01-01T08:00:00Z"],
+        utc=True,
+    )
+    out = ratio_bias_evidence_series(
+        decisions,
+        source_times,
+        [1.10, 9.0, 1.25, 0.80],
+    )
+    assert out["ratio"] == pytest.approx([1.10, 1.25])
+    assert out["bias"] == pytest.approx([0.10, 0.25])
+
+
+def test_shared_ratio_bias_preserves_nanosecond_asof_order() -> None:
+    source_times = pd.to_datetime(
+        [
+            "2026-01-01T00:00:00.000000100Z",
+            "2026-01-01T00:00:00.000000900Z",
+        ],
+        utc=True,
+    )
+    decision = pd.to_datetime(
+        ["2026-01-01T00:00:00.000000500Z"],
+        utc=True,
+    )
+    out = ratio_bias_evidence_series(
+        decision,
+        source_times,
+        [1.20, 9.00],
+    )
+    assert out["ratio"][0] == pytest.approx(1.20)
+    assert out["bias"][0] == pytest.approx(0.20)
+
+
+def test_shared_ratio_future_mutation_cannot_change_past_bias() -> None:
+    source_times = pd.date_range("2026-01-01T00:00:00Z", periods=8, freq="5min")
+    decisions = pd.to_datetime(
+        ["2026-01-01T00:10:00Z", "2026-01-01T00:20:00Z"],
+        utc=True,
+    )
+    baseline = ratio_bias_evidence_series(
+        decisions,
+        source_times,
+        [1.0 + index * 0.01 for index in range(8)],
+    )
+    changed = [1.0 + index * 0.01 for index in range(8)]
+    changed[5:] = [99.0, 99.0, 99.0]
+    mutated = ratio_bias_evidence_series(decisions, source_times, changed)
+    assert mutated == baseline

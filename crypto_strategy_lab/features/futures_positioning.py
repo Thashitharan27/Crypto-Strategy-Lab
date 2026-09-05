@@ -7,7 +7,7 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
-from crypto_strategy_core.positioning import positioning_evidence_series
+from crypto_strategy_core.positioning import positioning_evidence_series, ratio_bias_evidence_series
 
 from crypto_strategy_lab.data.alignment import causal_asof_join
 from crypto_strategy_lab.data.query import DataRequest
@@ -218,7 +218,13 @@ class FuturesPositioningFeatureProvider:
                 "taker_long_short_volume_bias",
             ),
         ):
-            out[bias] = out[ratio] - 1.0
+            ratio_evidence = ratio_bias_evidence_series(
+                out["available_at"].tolist(),
+                metrics["available_at"].tolist(),
+                metrics[ratio].tolist(),
+            )
+            out[ratio] = ratio_evidence["ratio"]
+            out[bias] = ratio_evidence["bias"]
 
         metrics_source = out["metrics_source_available_at"]
         if bool((metrics_source.notna() & (metrics_source > out["available_at"])).any()):
