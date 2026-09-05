@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Deterministic strategy and feature primitives shared by Crypto Strategy Lab and live runtimes"
 requires-python = ">=3.10"
 dependencies = [
+  "numpy>=1.26,<3",
   "pandas>=2,<3",
 ]
 
