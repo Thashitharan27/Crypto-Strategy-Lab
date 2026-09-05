@@ -443,6 +443,11 @@ class BacktestEngine:
         if indicator=="BB_WIDTH": return float(self.bb_width[i])
         if indicator=="CLOSE_LOCATION": return float(self.close_location_values[i])
         if indicator=="MOMENTUM": return float(self.profile_momentum_values[profile.momentum_lookback_hours][i])
+        if indicator!="VWAP_DISTANCE":
+            raise ValueError(
+                f"BacktestEngine does not implement strategy rule indicator {indicator!r}; "
+                "use the prepared rule-aware Data Lake runtime for research evidence"
+            )
         atr_value=float(self.atr_values[i]); vwap=float(self.session_vwap[i])
         if not np.isfinite(atr_value) or atr_value <= 0 or not np.isfinite(vwap): return np.nan
         return ((float(self.close[i])-vwap) if direction=="LONG" else (vwap-float(self.close[i])))/atr_value
