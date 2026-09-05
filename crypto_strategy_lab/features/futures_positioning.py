@@ -7,7 +7,7 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
-from crypto_strategy_core.timeseries import rolling_time_zscore
+from crypto_strategy_core.positioning import positioning_evidence_series
 
 from crypto_strategy_lab.data.alignment import causal_asof_join
 from crypto_strategy_lab.data.query import DataRequest
@@ -167,20 +167,38 @@ class FuturesPositioningFeatureProvider:
             if column not in metrics:
                 metrics[column] = np.nan
             metrics[column] = pd.to_numeric(metrics[column], errors="coerce")
-        for label, delta in (
-            ("5m", pd.Timedelta(minutes=5)),
-            ("1h", pd.Timedelta(hours=1)),
-            ("24h", pd.Timedelta(hours=24)),
-        ):
-            (
-                metrics[f"oi_change_{label}"],
-                metrics[f"oi_change_pct_{label}"],
-            ) = _elapsed_change(metrics, "open_interest", delta)
-        metrics["oi_zscore_7d"] = _time_zscore(
-            metrics,
-            "open_interest",
-            float(params["oi_zscore_window_days"]),
-            int(params["oi_zscore_min_samples"]),
+        price_resource = futures_positioning_price_resource()
+        price_source = datasets.get(price_resource)
+        price = None
+        if price_source is not None and not price_source.empty:
+            price = price_source.copy()
+            required_price = {"available_at", "close"}
+            missing_price = sorted(required_price - set(price.columns))
+            if missing_price:
+                raise ValueError(
+                    f"Canonical 1h positioning price source is missing {missing_price}"
+                )
+            price["available_at"] = pd.to_datetime(price["available_at"], utc=True)
+            price = (
+                price.sort_values("available_at", kind="stable")
+                .drop_duplicates("available_at", keep="last")
+                .reset_index(drop=True)
+            )
+            price["close"] = pd.to_numeric(price["close"], errors="coerce")
+
+        shared = positioning_evidence_series(
+            decisions["decision_time"].tolist(),
+            decisions["close"].tolist(),
+            metrics["available_at"].tolist(),
+            metrics["open_interest"].tolist(),
+            price_times_1h=(
+                price["available_at"].tolist() if price is not None else None
+            ),
+            price_closes_1h=(
+                price["close"].tolist() if price is not None else None
+            ),
+            oi_zscore_window_days=float(params["oi_zscore_window_days"]),
+            oi_zscore_min_samples=int(params["oi_zscore_min_samples"]),
         )
 
         joined = causal_asof_join(decisions, metrics)
@@ -196,10 +214,10 @@ class FuturesPositioningFeatureProvider:
         out["metrics_age_seconds"] = (
             out["available_at"] - out["metrics_source_available_at"]
         ).dt.total_seconds()
+        out["open_interest"] = shared["open_interest"]
+        for column in ("open_interest_value", *RATIOS):
+            out[column] = pd.to_numeric(joined[column], errors="coerce")
         for column in (
-            "open_interest",
-            "open_interest_value",
-            *RATIOS,
             "oi_change_5m",
             "oi_change_pct_5m",
             "oi_change_1h",
@@ -208,10 +226,8 @@ class FuturesPositioningFeatureProvider:
             "oi_change_pct_24h",
             "oi_zscore_7d",
         ):
-            out[column] = pd.to_numeric(joined[column], errors="coerce")
+            out[column] = shared[column]
 
-        price_resource = futures_positioning_price_resource()
-        price_source = datasets.get(price_resource)
         if price_source is None or price_source.empty:
             out["price_source_available_at"] = pd.Series(
                 pd.NaT, index=out.index, dtype="datetime64[ns, UTC]"
