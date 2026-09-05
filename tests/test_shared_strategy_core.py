@@ -133,3 +133,28 @@ def test_shared_rolling_time_zscore_sorts_newest_first_without_future_leakage() 
         atol=0.0,
         equal_nan=True,
     )
+
+
+
+def test_support_resistance_legacy_imports_are_shared_core() -> None:
+    from crypto_strategy_core.higher_timeframe_sr import (
+        HigherTimeframeSRDetector as CoreHigherTimeframeSRDetector,
+        resample_ohlc_for_sr as core_resample_ohlc_for_sr,
+    )
+    from crypto_strategy_core.support_resistance import (
+        SRContext as CoreSRContext,
+        SupportResistanceDetector as CoreSupportResistanceDetector,
+    )
+    from crypto_strategy_lab.higher_timeframe_sr import (
+        HigherTimeframeSRDetector,
+        resample_ohlc_for_sr,
+    )
+    from crypto_strategy_lab.support_resistance import (
+        SRContext,
+        SupportResistanceDetector,
+    )
+
+    assert SupportResistanceDetector is CoreSupportResistanceDetector
+    assert SRContext is CoreSRContext
+    assert HigherTimeframeSRDetector is CoreHigherTimeframeSRDetector
+    assert resample_ohlc_for_sr is core_resample_ohlc_for_sr
