@@ -71,9 +71,17 @@ def asof_oi_zscore(
         return float("nan")
     target = pd.Timestamp(available_at)
     target = target.tz_convert("UTC") if target.tzinfo else target.tz_localize("UTC")
-    times = [
-        (pd.Timestamp(timestamp).tz_convert("UTC") if pd.Timestamp(timestamp).tzinfo else pd.Timestamp(timestamp, tz="UTC")).to_pydatetime()
-        for timestamp, _ in observations
-    ]
+    normalized = sorted(
+        (
+            (
+                pd.Timestamp(timestamp).tz_convert("UTC")
+                if pd.Timestamp(timestamp).tzinfo
+                else pd.Timestamp(timestamp, tz="UTC")
+            ).to_pydatetime(),
+            float(value),
+        )
+        for timestamp, value in observations
+    )
+    times = [timestamp for timestamp, _ in normalized]
     index = bisect_right(times, target.to_pydatetime()) - 1
-    return observations[index][1] if index >= 0 else float("nan")
+    return normalized[index][1] if index >= 0 else float("nan")
