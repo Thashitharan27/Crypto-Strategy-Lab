@@ -29,14 +29,25 @@ def rolling_time_zscore(
     if len(values) != len(available_at):
         raise ValueError("values and available_at must have equal length")
 
-    index = pd.DatetimeIndex(pd.to_datetime(list(available_at), utc=True))
+    timestamps = pd.DatetimeIndex(pd.to_datetime(list(available_at), utc=True))
+    numeric = pd.to_numeric(pd.Series(list(values)), errors="coerce").to_numpy(float)
+    ordered = sorted(
+        range(len(numeric)),
+        key=lambda position: (timestamps[position], position),
+    )
+    ordered_index = pd.DatetimeIndex([timestamps[position] for position in ordered])
     series = pd.Series(
-        pd.to_numeric(pd.Series(list(values)), errors="coerce").to_numpy(float),
-        index=index,
+        [numeric[position] for position in ordered],
+        index=ordered_index,
+        dtype="float64",
     )
     rolling = series.rolling(f"{window_days}D", min_periods=minimum)
     std = rolling.std(ddof=0)
-    return ((series - rolling.mean()) / std.where(std > 0)).to_numpy(float).tolist()
+    ordered_scores = ((series - rolling.mean()) / std.where(std > 0)).to_numpy(float)
+    scores = [float("nan")] * len(ordered_scores)
+    for position, score in zip(ordered, ordered_scores):
+        scores[position] = float(score)
+    return scores
 
 
 def oi_zscore_observations(
