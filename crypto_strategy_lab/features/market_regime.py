@@ -8,6 +8,8 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_core.candles import causal_trailing_return as _shared_causal_trailing_return
+
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 
@@ -58,14 +60,12 @@ STRUCTURAL_REGIME_DEFINITION = FeatureDefinition(
 
 
 def causal_trailing_return(strategy_times, close, delta: pd.Timedelta) -> np.ndarray:
-    """Close return against the latest candle at or before ``time - delta``."""
-    times = pd.DatetimeIndex(pd.to_datetime(strategy_times, utc=True))
-    values = np.asarray(close, dtype=float)
-    result = np.full(len(times), np.nan)
-    prior = np.searchsorted(times.asi8, (times - delta).asi8, side="right") - 1
-    valid = prior >= 0
-    result[valid] = values[valid] / values[prior[valid]] - 1.0
-    return result
+    """Compatibility wrapper around the shared causal momentum primitive."""
+    hours = float(delta / pd.Timedelta(hours=1))
+    return np.asarray(
+        _shared_causal_trailing_return(strategy_times, close, hours=hours),
+        dtype=float,
+    )
 
 
 def prepare_policy_market_features(strategy_times, close, config, benchmark=None):
