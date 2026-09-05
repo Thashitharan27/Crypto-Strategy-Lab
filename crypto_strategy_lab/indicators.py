@@ -4,6 +4,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_core.indicators import wilder_rsi
+
 
 def bollinger_bands(close: np.ndarray, period: int = 20, stddevs: float = 2.0):
     s = pd.Series(close, dtype="float64")
@@ -24,10 +26,5 @@ def lag(values: np.ndarray, bars: int) -> np.ndarray:
 
 
 def rsi(close: np.ndarray, period: int = 14) -> np.ndarray:
-    """Wilder RSI calculated from completed strategy candles."""
-    s = pd.Series(close, dtype="float64")
-    delta = s.diff()
-    gain = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    loss = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    rs = gain / loss
-    return (100.0 - (100.0 / (1.0 + rs))).to_numpy(float)
+    """Wilder RSI calculated by the shared research/live strategy core."""
+    return np.asarray(wilder_rsi(close, period), dtype=float)

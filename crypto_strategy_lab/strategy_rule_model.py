@@ -61,6 +61,13 @@ CATEGORICAL_RULE_VALUES = {
         "NEUTRAL_LOCATION",
         "BAD_LOCATION",
     ),
+    "PRICE_OI_STATE": (
+        "PRICE_UP_OI_UP",
+        "PRICE_UP_OI_DOWN",
+        "PRICE_DOWN_OI_UP",
+        "PRICE_DOWN_OI_DOWN",
+        "UNKNOWN",
+    ),
     "OI_VS_PRICE_STATE_1H": (
         "PRICE_UP_OI_UP",
         "PRICE_UP_OI_DOWN",
@@ -99,6 +106,14 @@ CATEGORICAL_VALUE_CODES = {
         "GOOD_LOCATION": 1.0,
         "NEUTRAL_LOCATION": 2.0,
         "BAD_LOCATION": 3.0,
+    },
+    "PRICE_OI_STATE": {
+        "PRICE_UP_OI_UP": 1.0,
+        "PRICE_UP_OI_DOWN": 2.0,
+        "PRICE_DOWN_OI_UP": 3.0,
+        "PRICE_DOWN_OI_DOWN": 4.0,
+        "UNKNOWN": 5.0,
+        "FLAT_OR_MIXED": 6.0,
     },
     "OI_VS_PRICE_STATE_1H": {
         "PRICE_UP_OI_UP": 1.0,

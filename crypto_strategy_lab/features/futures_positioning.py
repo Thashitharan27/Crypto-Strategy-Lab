@@ -7,6 +7,8 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_core.timeseries import rolling_time_zscore
+
 from crypto_strategy_lab.data.alignment import causal_asof_join
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
@@ -60,13 +62,15 @@ def _time_zscore(
     days: float,
     minimum: int,
 ) -> np.ndarray:
-    series = pd.Series(
-        pd.to_numeric(frame[column], errors="coerce").to_numpy(float),
-        index=pd.DatetimeIndex(pd.to_datetime(frame["available_at"], utc=True)),
+    return np.asarray(
+        rolling_time_zscore(
+            pd.to_numeric(frame[column], errors="coerce").to_numpy(float),
+            pd.to_datetime(frame["available_at"], utc=True).dt.to_pydatetime(),
+            days=days,
+            minimum=minimum,
+        ),
+        dtype=float,
     )
-    rolling = series.rolling(f"{days}D", min_periods=minimum)
-    std = rolling.std(ddof=0)
-    return ((series - rolling.mean()) / std.where(std > 0)).to_numpy(float)
 
 
 def _state(price: np.ndarray, oi: np.ndarray) -> np.ndarray:
