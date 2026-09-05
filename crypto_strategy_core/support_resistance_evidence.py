@@ -40,7 +40,8 @@ def _flatten(prefix: str, context: SRContext) -> dict[str, object]:
 
 
 def support_resistance_evidence_series(
-    timestamps: Sequence[object],
+    candle_times: Sequence[object],
+    decision_times: Sequence[object],
     opens: Sequence[float],
     highs: Sequence[float],
     lows: Sequence[float],
@@ -63,21 +64,32 @@ def support_resistance_evidence_series(
 ) -> list[dict[str, object]]:
     """Return CSL-compatible LONG/SHORT S/R context for each strategy candle.
 
-    For higher-timeframe S/R, only complete resampled candles whose end time is
-    at or before the current strategy decision timestamp are exposed.
+    ``candle_times`` are strategy-candle open timestamps used for exact resampling.
+    ``decision_times`` are the causal availability timestamps used to decide which
+    completed higher-timeframe candle is visible at each strategy decision.
     """
-    times = pd.DatetimeIndex(pd.to_datetime(list(timestamps), utc=True))
-    arrays = [np.asarray(values, dtype=float) for values in (opens, highs, lows, closes, atr_values)]
-    size = len(times)
-    if any(len(values) != size for values in arrays):
-        raise ValueError("S/R timestamps, OHLC and ATR inputs must have equal lengths")
-    if size and not times.is_monotonic_increasing:
-        raise ValueError("S/R timestamps must be chronological")
+    candles = pd.DatetimeIndex(pd.to_datetime(list(candle_times), utc=True))
+    decisions = pd.DatetimeIndex(pd.to_datetime(list(decision_times), utc=True))
+    arrays = [
+        np.asarray(values, dtype=float)
+        for values in (opens, highs, lows, closes, atr_values)
+    ]
+    size = len(candles)
+    if len(decisions) != size or any(len(values) != size for values in arrays):
+        raise ValueError(
+            "S/R candle times, decision times, OHLC and ATR inputs must have equal lengths"
+        )
+    if size and (not candles.is_monotonic_increasing or not decisions.is_monotonic_increasing):
+        raise ValueError("S/R candle and decision timestamps must be chronological")
+    if bool(np.any(decisions.asi8 < candles.asi8)):
+        raise ValueError("S/R decision time cannot precede its strategy candle")
     if strategy_minutes <= 0 or atr_period <= 0:
         raise ValueError("S/R strategy timeframe and ATR period must be positive")
     effective_minutes = int(sr_timeframe_minutes or strategy_minutes)
     if effective_minutes < strategy_minutes or effective_minutes % strategy_minutes:
-        raise ValueError("S/R timeframe must be the strategy timeframe or an integer multiple")
+        raise ValueError(
+            "S/R timeframe must be the strategy timeframe or an integer multiple"
+        )
 
     open_, high, low, close, atr_source = arrays
     config = dict(
@@ -103,7 +115,9 @@ def support_resistance_evidence_series(
             short_context = detector.analyze_price_location(
                 index, open_, high, low, close, atr_source, "SHORT"
             )
-            row: dict[str, object] = {"sr_completed_candle_time": times[index]}
+            row: dict[str, object] = {
+                "sr_completed_candle_time": decisions[index]
+            }
             row.update(_flatten("long", long_context))
             row.update(_flatten("short", short_context))
             rows.append(row)
@@ -111,7 +125,7 @@ def support_resistance_evidence_series(
 
     strategy_frame = pd.DataFrame(
         {
-            "timestamp": times,
+            "timestamp": candles,
             "open": open_,
             "high": high,
             "low": low,
@@ -123,13 +137,17 @@ def support_resistance_evidence_series(
     htf_high = htf["high"].to_numpy(float)
     htf_low = htf["low"].to_numpy(float)
     htf_close = htf["close"].to_numpy(float)
-    htf_atr = np.asarray(shared_atr(htf_high, htf_low, htf_close, atr_period), dtype=float)
+    htf_atr = np.asarray(
+        shared_atr(htf_high, htf_low, htf_close, atr_period), dtype=float
+    )
     htf_end = pd.DatetimeIndex(pd.to_datetime(htf["end_time"], utc=True))
     htf_end_ns = htf_end.asi8
     detector = HigherTimeframeSRDetector(**config)
 
-    for index, decision_time in enumerate(times):
-        htf_index = int(np.searchsorted(htf_end_ns, decision_time.value, side="right") - 1)
+    for index, decision_time in enumerate(decisions):
+        htf_index = int(
+            np.searchsorted(htf_end_ns, decision_time.value, side="right") - 1
+        )
         if htf_index < 0:
             long_context = detector._default_context()
             short_context = detector._default_context()
