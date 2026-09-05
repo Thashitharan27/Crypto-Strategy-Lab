@@ -157,6 +157,7 @@ jobs:
           tests/test_futures_positioning_features.py
           tests/test_funding_context_features.py
           tests/test_taker_flow_context_features.py
+          tests/test_shared_basis_evidence.py
           tests/test_basis_context_features.py
           tests/test_trade_flow_aggregates.py
           tests/test_trade_flow_causality.py
