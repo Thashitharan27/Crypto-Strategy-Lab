@@ -140,9 +140,15 @@ def positioning_evidence_series(
         raise ValueError("OI z-score minimum samples must be a positive integer")
 
     metric_index, oi = _canonical_series(metric_times, open_interest)
-    _, oi_pct_5m = _elapsed_change(metric_index, oi, pd.Timedelta(minutes=5))
-    _, oi_pct_1h = _elapsed_change(metric_index, oi, pd.Timedelta(hours=1))
-    _, oi_pct_24h = _elapsed_change(metric_index, oi, pd.Timedelta(hours=24))
+    oi_change_5m, oi_pct_5m = _elapsed_change(
+        metric_index, oi, pd.Timedelta(minutes=5)
+    )
+    oi_change_1h, oi_pct_1h = _elapsed_change(
+        metric_index, oi, pd.Timedelta(hours=1)
+    )
+    oi_change_24h, oi_pct_24h = _elapsed_change(
+        metric_index, oi, pd.Timedelta(hours=24)
+    )
     oi_zscore = np.asarray(
         rolling_time_zscore(
             oi,
@@ -154,8 +160,11 @@ def positioning_evidence_series(
     )
 
     aligned_oi = _asof(decisions, metric_index, oi)
+    aligned_oi_change_5m = _asof(decisions, metric_index, oi_change_5m)
     aligned_oi_5m = _asof(decisions, metric_index, oi_pct_5m)
+    aligned_oi_change_1h = _asof(decisions, metric_index, oi_change_1h)
     aligned_oi_1h = _asof(decisions, metric_index, oi_pct_1h)
+    aligned_oi_change_24h = _asof(decisions, metric_index, oi_change_24h)
     aligned_oi_24h = _asof(decisions, metric_index, oi_pct_24h)
     aligned_oi_z = _asof(decisions, metric_index, oi_zscore)
 
@@ -176,8 +185,11 @@ def positioning_evidence_series(
 
     return {
         "open_interest": aligned_oi.tolist(),
+        "oi_change_5m": aligned_oi_change_5m.tolist(),
         "oi_change_pct_5m": aligned_oi_5m.tolist(),
+        "oi_change_1h": aligned_oi_change_1h.tolist(),
         "oi_change_pct_1h": aligned_oi_1h.tolist(),
+        "oi_change_24h": aligned_oi_change_24h.tolist(),
         "oi_change_pct_24h": aligned_oi_24h.tolist(),
         "oi_zscore_7d": aligned_oi_z.tolist(),
         "price_change_pct_1h": price_change_1h.tolist(),
