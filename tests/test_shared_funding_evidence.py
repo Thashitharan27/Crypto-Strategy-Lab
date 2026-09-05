@@ -101,3 +101,25 @@ def test_shared_funding_future_mutation_cannot_change_past_decisions() -> None:
                 assert isinstance(b, float) and math.isnan(b)
             else:
                 assert a == b
+
+
+def test_shared_funding_preserves_nanosecond_event_ordering() -> None:
+    events = pd.to_datetime(
+        [
+            "2026-01-01T00:00:00.000000100Z",
+            "2026-01-01T00:00:00.000000900Z",
+        ],
+        utc=True,
+    )
+    decision = pd.to_datetime(
+        ["2026-01-01T00:00:00.000000500Z"],
+        utc=True,
+    )
+    out = funding_rule_evidence_series(
+        decision,
+        events,
+        [0.0001, 0.0009],
+        zscore_min_samples=1,
+    )
+    assert out["funding_source_available_at"][0] == events[0]
+    assert out["funding_rate"][0] == pytest.approx(0.0001)
