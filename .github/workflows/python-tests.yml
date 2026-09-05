@@ -64,7 +64,7 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
       - name: Compile source
-        run: python -m compileall -q crypto_strategy_lab mcp_server tools app.py
+        run: python -m compileall -q crypto_strategy_core crypto_strategy_lab mcp_server tools app.py
       - name: Run strategy-profile safety tests
         env:
           QT_QPA_PLATFORM: offscreen
@@ -75,6 +75,9 @@ jobs:
           tests/test_stage2_regime_permissions_removed.py
           tests/test_di_pressure.py
           tests/test_strategy_profiles.py
+          tests/test_shared_strategy_core.py
+          tests/test_strategy_bar_price_oi_evidence.py
+          tests/test_directional_di_rule_builder.py
           tests/test_worker_profile_modes.py
           tests/test_gui_config_logic.py
           tests/test_data_lake_gui.py
