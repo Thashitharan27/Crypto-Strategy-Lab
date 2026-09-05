@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import timedelta
 import math
 
 import pandas as pd
@@ -11,13 +11,12 @@ import pandas as pd
 from .timeseries import rolling_time_zscore
 
 
-def _utc(value: object) -> datetime:
+def _utc(value: object) -> pd.Timestamp:
+    """Normalize to UTC without discarding nanosecond precision."""
     parsed = pd.Timestamp(value)
     if parsed.tzinfo is None:
-        parsed = parsed.tz_localize("UTC")
-    else:
-        parsed = parsed.tz_convert("UTC")
-    return parsed.to_pydatetime()
+        return parsed.tz_localize("UTC")
+    return parsed.tz_convert("UTC")
 
 
 def funding_bias(rate: float) -> str:
@@ -61,7 +60,7 @@ def funding_rule_evidence_series(
     if not math.isfinite(threshold) or threshold < 0:
         raise ValueError("funding extreme z-score must be finite and non-negative")
 
-    unique: dict[datetime, float] = {}
+    unique: dict[pd.Timestamp, float] = {}
     for timestamp, rate in zip(event_times, rates):
         unique[_utc(timestamp)] = float(rate)
     ordered = sorted(unique.items(), key=lambda item: item[0])
