@@ -21,15 +21,6 @@ FUNDING_CONTEXT_FEATURE_NAME = "funding_context"
 FUNDING_CONTEXT_FEATURE_VERSION = "5"
 
 
-def _funding_bias(rate: np.ndarray) -> np.ndarray:
-    state = np.full(len(rate), "UNKNOWN", dtype=object)
-    finite = np.isfinite(rate)
-    state[finite] = "NEUTRAL"
-    state[finite & (rate > 0)] = "POSITIVE"
-    state[finite & (rate < 0)] = "NEGATIVE"
-    return state
-
-
 def _datetime_ns(values) -> np.ndarray:
     """Return UTC timestamps as integer nanoseconds independent of pandas dtype unit.
 
@@ -40,28 +31,6 @@ def _datetime_ns(values) -> np.ndarray:
     """
     index = pd.DatetimeIndex(pd.to_datetime(values, utc=True))
     return index.to_numpy(dtype="datetime64[ns]").astype(np.int64, copy=False)
-
-
-def _trailing_window_sums(
-    decision_times: pd.Series,
-    event_times: pd.Series,
-    rates: np.ndarray,
-    window: pd.Timedelta,
-) -> tuple[np.ndarray, np.ndarray]:
-    decisions_ns = _datetime_ns(decision_times)
-    events_ns = _datetime_ns(event_times)
-    finite = np.isfinite(rates)
-    safe_rates = np.where(finite, rates, 0.0)
-    prefix_sum = np.concatenate(([0.0], np.cumsum(safe_rates)))
-    prefix_count = np.concatenate(([0], np.cumsum(finite.astype(int))))
-    window_ns = int(window.value)
-
-    right = np.searchsorted(events_ns, decisions_ns, side="right")
-    # A trailing H window is (T-H, T], avoiding double counting the boundary event.
-    left = np.searchsorted(events_ns, decisions_ns - window_ns, side="right")
-    sums = prefix_sum[right] - prefix_sum[left]
-    counts = prefix_count[right] - prefix_count[left]
-    return sums.astype(float), counts.astype(int)
 
 
 def _settlement_batches(
