@@ -101,3 +101,35 @@ def test_shared_asof_oi_zscore_keeps_last_duplicate_timestamp_value() -> None:
     ]
     query = timestamp + pd.Timedelta(hours=1)
     assert asof_oi_zscore(observations, query.to_pydatetime()) == 2.0
+
+
+def test_shared_rolling_time_zscore_sorts_newest_first_without_future_leakage() -> None:
+    times = pd.date_range("2026-01-01", periods=28, freq="6h", tz="UTC")
+    values = np.array([1000.0 + i * 5.0 for i in range(len(times))], dtype=float)
+    expected = np.asarray(
+        rolling_time_zscore(
+            values,
+            times.to_pydatetime(),
+            days=7.0,
+            minimum=20,
+        ),
+        dtype=float,
+    )
+
+    reversed_scores = np.asarray(
+        rolling_time_zscore(
+            values[::-1],
+            times[::-1].to_pydatetime(),
+            days=7.0,
+            minimum=20,
+        ),
+        dtype=float,
+    )
+
+    np.testing.assert_allclose(
+        reversed_scores[::-1],
+        expected,
+        rtol=0.0,
+        atol=0.0,
+        equal_nan=True,
+    )
