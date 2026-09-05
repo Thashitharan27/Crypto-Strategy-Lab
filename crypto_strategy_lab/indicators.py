@@ -2,20 +2,14 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 
+from crypto_strategy_core.candles import bollinger_bands as _shared_bollinger_bands
 from crypto_strategy_core.indicators import wilder_rsi
 
 
 def bollinger_bands(close: np.ndarray, period: int = 20, stddevs: float = 2.0):
-    s = pd.Series(close, dtype="float64")
-    middle = s.rolling(period, min_periods=period).mean().to_numpy(float)
-    # TradingView's Bollinger Bands use population standard deviation.
-    std = s.rolling(period, min_periods=period).std(ddof=0).to_numpy(float)
-    upper = middle + stddevs * std
-    lower = middle - stddevs * std
-    width = np.divide(upper - lower, middle, out=np.full_like(middle, np.nan), where=np.isfinite(middle) & (middle != 0))
-    return middle, upper, lower, width, width * 100.0
+    values = _shared_bollinger_bands(close, period, stddevs)
+    return tuple(np.asarray(value, dtype=float) for value in values)
 
 
 def lag(values: np.ndarray, bars: int) -> np.ndarray:

@@ -1,32 +1,23 @@
-"""TradingView-style ATR using Wilder's RMA smoothing."""
-
+"""TradingView-style ATR using shared strategy-core semantics."""
 from __future__ import annotations
 
 import numpy as np
 
+from crypto_strategy_core.candles import (
+    atr as _shared_atr,
+    true_range as _shared_true_range,
+    wilder_rma as _shared_wilder_rma,
+)
+
 
 def true_range(high: np.ndarray, low: np.ndarray, close: np.ndarray) -> np.ndarray:
-    prev_close = np.empty_like(close, dtype=float)
-    prev_close[0] = close[0]
-    prev_close[1:] = close[:-1]
-    return np.maximum.reduce((high - low, np.abs(high - prev_close), np.abs(low - prev_close)))
+    return np.asarray(_shared_true_range(high, low, close), dtype=float)
 
 
 def rma(values: np.ndarray, period: int) -> np.ndarray:
     """Wilder RMA seeded with the first full-period SMA, matching TradingView."""
-    if period <= 0:
-        raise ValueError("period must be positive")
-    out = np.full(values.shape, np.nan, dtype=float)
-    if len(values) < period:
-        return out
-    seed_values = values[:period]
-    seed = float(np.mean(seed_values[~np.isnan(seed_values)])) if np.isfinite(seed_values).any() else np.nan
-    out[period - 1] = seed
-    alpha = 1.0 / period
-    for i in range(period, len(values)):
-        out[i] = out[i - 1] + alpha * (values[i] - out[i - 1])
-    return out
+    return np.asarray(_shared_wilder_rma(values, period), dtype=float)
 
 
 def atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
-    return rma(true_range(high.astype(float), low.astype(float), close.astype(float)), period)
+    return np.asarray(_shared_atr(high, low, close, period), dtype=float)
