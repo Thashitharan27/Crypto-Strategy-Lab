@@ -78,6 +78,7 @@ EVIDENCE_LABELS = {
     "OI_CHANGE_PCT_24H": "OI Change 24h (decimal)",
     "OI_ZSCORE_7D": "OI Z-Score (7d)",
     "PRICE_CHANGE_PCT_1H": "Price Change 1h (decimal)",
+    "PRICE_OI_STATE": "Price / OI State (Strategy Bar)",
     "OI_VS_PRICE_STATE_1H": "Price / OI State (1h)",
     "TOP_TRADER_ACCOUNT_BIAS": "Top Trader Account Bias (ratio − 1)",
     "TOP_TRADER_POSITION_BIAS": "Top Trader Position Bias (ratio − 1)",
@@ -123,6 +124,7 @@ EVIDENCE_GROUPS = (
     (
         "Futures — Open Interest & Positioning",
         (
+            "PRICE_OI_STATE",
             "OI_VS_PRICE_STATE_1H",
             "OI_CHANGE_PCT_5M",
             "OI_CHANGE_PCT_1H",
@@ -221,6 +223,7 @@ EVIDENCE_MENU_TREE = (
             (
                 "Open Interest & Positioning",
                 (
+                    "PRICE_OI_STATE",
                     "OI_VS_PRICE_STATE_1H",
                     "OI_CHANGE_PCT_5M",
                     "OI_CHANGE_PCT_1H",
