@@ -5,7 +5,7 @@ import pandas as pd
 
 from crypto_strategy_core.indicators import wilder_rsi
 from crypto_strategy_core.rules import RULE_INDICATORS
-from crypto_strategy_core.timeseries import rolling_time_zscore
+from crypto_strategy_core.timeseries import asof_oi_zscore, rolling_time_zscore
 from crypto_strategy_lab.indicators import rsi
 from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS as CSL_RULE_INDICATORS
 
@@ -79,3 +79,14 @@ def test_shared_elapsed_zscore_matches_previous_csl_pandas_semantics() -> None:
         atol=0.0,
         equal_nan=True,
     )
+
+
+def test_shared_asof_oi_zscore_accepts_unsorted_observations() -> None:
+    times = pd.date_range("2026-01-01", periods=3, freq="1D", tz="UTC")
+    observations = [
+        (times[2].to_pydatetime(), 3.0),
+        (times[0].to_pydatetime(), 1.0),
+        (times[1].to_pydatetime(), 2.0),
+    ]
+    query = times[1] + pd.Timedelta(hours=12)
+    assert asof_oi_zscore(observations, query.to_pydatetime()) == 2.0
