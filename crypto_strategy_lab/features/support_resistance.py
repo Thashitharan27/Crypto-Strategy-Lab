@@ -132,6 +132,7 @@ class SupportResistanceFeatureProvider:
         available = pd.concat([source_available, dependency_available], axis=1).max(axis=1)
 
         rows = support_resistance_evidence_series(
+            source_times.tolist(),
             available.tolist(),
             open_,
             high,
