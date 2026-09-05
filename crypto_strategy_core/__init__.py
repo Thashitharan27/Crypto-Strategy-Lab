@@ -16,6 +16,22 @@ from .candles import (
     wilder_rma,
 )
 from .timeseries import asof_oi_zscore, oi_zscore_observations, rolling_time_zscore
+from .support_resistance import (
+    LocationClassification,
+    SRContext,
+    SRInteractionState,
+    SRLevel,
+    SRLevelType,
+    SRZoneMerger,
+    SwingDetector,
+    SupportResistanceDetector,
+    TradeLocationRating,
+)
+from .higher_timeframe_sr import HigherTimeframeSRDetector, resample_ohlc_for_sr
+from .support_resistance_evidence import (
+    SR_CONTEXT_FIELDS,
+    support_resistance_evidence_series,
+)
 
 __all__ = [
     "CORE_CONTRACT_VERSION",
@@ -39,19 +55,8 @@ __all__ = [
     "rolling_time_zscore",
     "oi_zscore_observations",
     "asof_oi_zscore",
+    "SR_CONTEXT_FIELDS",
+    "support_resistance_evidence_series",
 ]
 
 __version__ = "0.1.0"
-
-from .support_resistance import (
-    LocationClassification,
-    SRContext,
-    SRInteractionState,
-    SRLevel,
-    SRLevelType,
-    SRZoneMerger,
-    SwingDetector,
-    SupportResistanceDetector,
-    TradeLocationRating,
-)
-from .higher_timeframe_sr import HigherTimeframeSRDetector, resample_ohlc_for_sr
