@@ -133,6 +133,8 @@ def utc_session_vwap(
     close_values = np.asarray(close, dtype=float)
     volume_values = np.asarray(volume, dtype=float)
     size = len(times)
+    if size and not times.is_monotonic_increasing:
+        raise ValueError("VWAP timestamps must be chronological")
     if not (
         size
         == len(high_values)
