@@ -7,6 +7,11 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_core.candles import (
+    close_location as _shared_close_location,
+    utc_session_vwap as _shared_utc_session_vwap,
+)
+
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
@@ -218,22 +223,15 @@ class ProductionContextFeatureProvider:
         )
         confirmed_signal = np.where(reentry_direction != "NONE", "CONFIRMED", "NO_SIGNAL").astype(object)
 
-        typical = (high + low + close) / 3.0
-        sessions = source_times.dt.floor("D")
-        cumulative_weighted = pd.Series(typical * volume).groupby(sessions).cumsum().to_numpy(float)
-        cumulative_volume = pd.Series(volume).groupby(sessions).cumsum().to_numpy(float)
-        session_vwap = np.divide(
-            cumulative_weighted,
-            cumulative_volume,
-            out=np.full(len(close), np.nan, dtype=float),
-            where=cumulative_volume > 0,
+        session_vwap = np.asarray(
+            _shared_utc_session_vwap(
+                source_times.tolist(), high, low, close, volume
+            ),
+            dtype=float,
         )
-        candle_range = high - low
-        close_location = np.divide(
-            close - low,
-            candle_range,
-            out=np.full(len(close), np.nan, dtype=float),
-            where=np.isfinite(candle_range) & (candle_range != 0),
+        close_location = np.asarray(
+            _shared_close_location(high, low, close),
+            dtype=float,
         )
 
         source_available = pd.to_datetime(source["available_at"], utc=True)
