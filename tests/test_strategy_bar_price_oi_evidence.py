@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from crypto_strategy_lab.strategy_bar_price_oi_evidence import (
     EVIDENCE_ID,
@@ -9,11 +10,9 @@ from crypto_strategy_lab.strategy_bar_price_oi_evidence import (
     install_strategy_bar_price_oi_evidence,
 )
 
-# Production installs this before the active GUI/native rule modules are used.
-install_strategy_bar_price_oi_evidence()
-
 from crypto_strategy_lab import rule_native_engine, strategy_profiles, strategy_rule_model
 from crypto_strategy_lab.gui import rule_strategy_builder
+from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
 from crypto_strategy_lab.strategy_rule_model import compile_profiles, normalize_rule
 
@@ -28,6 +27,26 @@ def _menu_contains(items, target):
         if _menu_contains(children, target):
             return True
     return False
+
+
+def test_strategy_bar_price_oi_evidence_is_statically_registered_without_app_startup():
+    assert EVIDENCE_ID in strategy_profiles.RULE_INDICATORS
+    assert strategy_rule_model.rule_value_options(EVIDENCE_ID) == RULE_VALUES
+    assert strategy_rule_model.CATEGORICAL_VALUE_CODES[EVIDENCE_ID]["FLAT_OR_MIXED"] == 6.0
+    assert rule_native_engine._RESEARCH_CATEGORICAL_FIELDS[EVIDENCE_ID] == (
+        "futures_positioning",
+        "price_oi_state",
+    )
+    assert rule_strategy_builder.EVIDENCE_LABELS[EVIDENCE_ID] == EVIDENCE_LABEL
+    assert _menu_contains(rule_strategy_builder.EVIDENCE_MENU_TREE, EVIDENCE_ID)
+
+
+def test_legacy_engine_rejects_price_oi_instead_of_falling_through_to_vwap():
+    engine = object.__new__(BacktestEngine)
+    with pytest.raises(ValueError, match="does not implement strategy rule indicator"):
+        engine._strategy_profile_rule_value(
+            0, "LONG", SimpleNamespace(), EVIDENCE_ID
+        )
 
 
 def test_strategy_bar_price_oi_evidence_is_registered_and_idempotent():
