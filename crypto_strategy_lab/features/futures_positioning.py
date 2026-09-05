@@ -32,58 +32,6 @@ def futures_positioning_price_resource(
     return FeatureDataResource(DatasetKind.KLINES, interval, FUTURES_POSITIONING_FEATURE_NAME)
 
 
-def _elapsed_change(
-    frame: pd.DataFrame,
-    column: str,
-    horizon: pd.Timedelta,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compare each observation with the last observation at or before T-H."""
-    values = pd.to_numeric(frame[column], errors="coerce").to_numpy(float)
-    times = pd.DatetimeIndex(pd.to_datetime(frame["available_at"], utc=True)).asi8
-    prior_i = np.searchsorted(times, times - horizon.value, side="right") - 1
-    prior = np.full(len(frame), np.nan)
-    valid = prior_i >= 0
-    prior[valid] = values[prior_i[valid]]
-    finite = np.isfinite(values) & np.isfinite(prior)
-    change = np.full(len(frame), np.nan)
-    change[finite] = values[finite] - prior[finite]
-    pct = np.divide(
-        change,
-        prior,
-        out=np.full(len(frame), np.nan),
-        where=finite & (prior != 0),
-    )
-    return change, pct
-
-
-def _time_zscore(
-    frame: pd.DataFrame,
-    column: str,
-    days: float,
-    minimum: int,
-) -> np.ndarray:
-    return np.asarray(
-        rolling_time_zscore(
-            pd.to_numeric(frame[column], errors="coerce").to_numpy(float),
-            pd.to_datetime(frame["available_at"], utc=True).dt.to_pydatetime(),
-            days=days,
-            minimum=minimum,
-        ),
-        dtype=float,
-    )
-
-
-def _state(price: np.ndarray, oi: np.ndarray) -> np.ndarray:
-    out = np.full(len(price), "UNKNOWN", object)
-    finite = np.isfinite(price) & np.isfinite(oi)
-    out[finite] = "FLAT_OR_MIXED"
-    out[finite & (price > 0) & (oi > 0)] = "PRICE_UP_OI_UP"
-    out[finite & (price > 0) & (oi < 0)] = "PRICE_UP_OI_DOWN"
-    out[finite & (price < 0) & (oi > 0)] = "PRICE_DOWN_OI_UP"
-    out[finite & (price < 0) & (oi < 0)] = "PRICE_DOWN_OI_DOWN"
-    return out
-
-
 @dataclass(frozen=True, slots=True)
 class FuturesPositioningFeatureProvider:
     definition: FeatureDefinition = FeatureDefinition(
