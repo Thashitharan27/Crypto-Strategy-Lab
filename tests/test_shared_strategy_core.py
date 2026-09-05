@@ -90,3 +90,14 @@ def test_shared_asof_oi_zscore_accepts_unsorted_observations() -> None:
     ]
     query = times[1] + pd.Timedelta(hours=12)
     assert asof_oi_zscore(observations, query.to_pydatetime()) == 2.0
+
+
+def test_shared_asof_oi_zscore_keeps_last_duplicate_timestamp_value() -> None:
+    timestamp = pd.Timestamp("2026-01-02T00:00:00Z")
+    observations = [
+        (timestamp.to_pydatetime(), 9.0),
+        (pd.Timestamp("2026-01-01T00:00:00Z").to_pydatetime(), 1.0),
+        (timestamp.to_pydatetime(), 2.0),
+    ]
+    query = timestamp + pd.Timedelta(hours=1)
+    assert asof_oi_zscore(observations, query.to_pydatetime()) == 2.0
