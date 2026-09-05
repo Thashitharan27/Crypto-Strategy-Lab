@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from crypto_strategy_core.candles import (
     atr,
@@ -155,3 +156,18 @@ def test_shared_candle_evidence_does_not_let_future_rows_change_past_values() ->
 
     np.testing.assert_allclose(changed_momentum[: cutoff + 1], baseline[: cutoff + 1], equal_nan=True)
     np.testing.assert_allclose(changed_vwap[: cutoff + 1], baseline_vwap[: cutoff + 1], equal_nan=True)
+
+
+def test_shared_vwap_rejects_newest_first_timestamps() -> None:
+    times = pd.date_range("2026-01-01", periods=4, freq="1h", tz="UTC")
+    close = np.array([100.0, 101.0, 102.0, 103.0])
+    high, low = close + 1.0, close - 1.0
+    volume = np.ones(4)
+    with pytest.raises(ValueError, match="chronological"):
+        utc_session_vwap(
+            times[::-1],
+            high[::-1],
+            low[::-1],
+            close[::-1],
+            volume[::-1],
+        )
