@@ -8,6 +8,8 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_core.funding import funding_rule_evidence_series
+
 from crypto_strategy_lab.data.alignment import causal_asof_join
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
@@ -17,15 +19,6 @@ from .base import FeatureDefinition, OutputField, ParameterDefinition
 
 FUNDING_CONTEXT_FEATURE_NAME = "funding_context"
 FUNDING_CONTEXT_FEATURE_VERSION = "5"
-
-
-def _funding_bias(rate: np.ndarray) -> np.ndarray:
-    state = np.full(len(rate), "UNKNOWN", dtype=object)
-    finite = np.isfinite(rate)
-    state[finite] = "NEUTRAL"
-    state[finite & (rate > 0)] = "POSITIVE"
-    state[finite & (rate < 0)] = "NEGATIVE"
-    return state
 
 
 def _datetime_ns(values) -> np.ndarray:
@@ -38,28 +31,6 @@ def _datetime_ns(values) -> np.ndarray:
     """
     index = pd.DatetimeIndex(pd.to_datetime(values, utc=True))
     return index.to_numpy(dtype="datetime64[ns]").astype(np.int64, copy=False)
-
-
-def _trailing_window_sums(
-    decision_times: pd.Series,
-    event_times: pd.Series,
-    rates: np.ndarray,
-    window: pd.Timedelta,
-) -> tuple[np.ndarray, np.ndarray]:
-    decisions_ns = _datetime_ns(decision_times)
-    events_ns = _datetime_ns(event_times)
-    finite = np.isfinite(rates)
-    safe_rates = np.where(finite, rates, 0.0)
-    prefix_sum = np.concatenate(([0.0], np.cumsum(safe_rates)))
-    prefix_count = np.concatenate(([0], np.cumsum(finite.astype(int))))
-    window_ns = int(window.value)
-
-    right = np.searchsorted(events_ns, decisions_ns, side="right")
-    # A trailing H window is (T-H, T], avoiding double counting the boundary event.
-    left = np.searchsorted(events_ns, decisions_ns - window_ns, side="right")
-    sums = prefix_sum[right] - prefix_sum[left]
-    counts = prefix_count[right] - prefix_count[left]
-    return sums.astype(float), counts.astype(int)
 
 
 def _settlement_batches(
@@ -226,64 +197,51 @@ class FundingContextFeatureProvider:
         # already-published events. No future row participates in this value.
         right["funding_interval_hours"] = valid_explicit.combine_first(valid_observed)
 
-        # All derivatives are calculated on the event timeline before alignment.
-        right["funding_previous"] = right["funding_rate"].shift(1)
-        right["funding_change"] = right["funding_rate"] - right["funding_previous"]
-        right["funding_3_event_mean"] = right["funding_rate"].rolling(
-            3, min_periods=3
-        ).mean()
-        event_series = pd.Series(
-            right["funding_rate"].to_numpy(float),
-            index=pd.DatetimeIndex(right["available_at"]),
-        )
-        rolling = event_series.rolling(
-            f'{float(parameters["funding_zscore_window_days"])}D',
-            min_periods=int(parameters["funding_zscore_min_samples"]),
-        )
-        std = rolling.std(ddof=0)
-        right["funding_7d_zscore"] = (
-            (event_series - rolling.mean()) / std.where(std > 0)
-        ).to_numpy()
-
         joined = causal_asof_join(decisions, right)
         output = pd.DataFrame(
             {
                 "timestamp": pd.to_datetime(joined["timestamp"], utc=True),
                 "available_at": pd.to_datetime(joined["decision_time"], utc=True),
-                "funding_source_available_at": pd.to_datetime(
-                    joined["available_at"], utc=True
-                ),
-                "funding_rate": pd.to_numeric(joined["funding_rate"], errors="coerce"),
-                "funding_previous": pd.to_numeric(
-                    joined["funding_previous"], errors="coerce"
-                ),
-                "funding_change": pd.to_numeric(joined["funding_change"], errors="coerce"),
-                "funding_3_event_mean": pd.to_numeric(
-                    joined["funding_3_event_mean"], errors="coerce"
-                ),
-                "funding_7d_zscore": pd.to_numeric(
-                    joined["funding_7d_zscore"], errors="coerce"
-                ),
                 "funding_interval_hours": pd.to_numeric(
                     joined["funding_interval_hours"], errors="coerce"
                 ),
             }
         )
+        shared = funding_rule_evidence_series(
+            output["available_at"].tolist(),
+            right["available_at"].tolist(),
+            right["funding_rate"].to_numpy(float).tolist(),
+            zscore_window_days=float(parameters["funding_zscore_window_days"]),
+            zscore_min_samples=int(parameters["funding_zscore_min_samples"]),
+            extreme_zscore=float(parameters["funding_extreme_zscore"]),
+        )
+        for column in (
+            "funding_rate",
+            "funding_rate_bps",
+            "funding_bias",
+            "funding_previous",
+            "funding_change",
+            "funding_3_event_mean",
+            "funding_7d_zscore",
+            "funding_24h_sum",
+            "funding_24h_sum_bps",
+            "funding_24h_count",
+        ):
+            output[column] = shared[column]
+        output["funding_source_available_at"] = pd.to_datetime(
+            shared["funding_source_available_at"], utc=True
+        )
+        output["funding_extreme_positive"] = pd.Series(
+            pd.array(shared["funding_extreme_positive"], dtype="boolean"),
+            index=output.index,
+        )
+        output["funding_extreme_negative"] = pd.Series(
+            pd.array(shared["funding_extreme_negative"], dtype="boolean"),
+            index=output.index,
+        )
         output["funding_age_hours"] = (
             output["available_at"] - output["funding_source_available_at"]
         ).dt.total_seconds() / 3600.0
-        output["funding_rate_bps"] = output["funding_rate"] * 10000.0
-        output["funding_bias"] = _funding_bias(output["funding_rate"].to_numpy(float))
-
-        threshold = float(parameters["funding_extreme_zscore"])
-        z = output["funding_7d_zscore"]
-        positive = pd.Series(pd.array([pd.NA] * len(output), dtype="boolean"), index=output.index)
-        negative = pd.Series(pd.array([pd.NA] * len(output), dtype="boolean"), index=output.index)
-        known = z.notna()
-        positive.loc[known] = z.loc[known] >= threshold
-        negative.loc[known] = z.loc[known] <= -threshold
-        output["funding_extreme_positive"] = positive
-        output["funding_extreme_negative"] = negative
         output["time_to_next_funding"] = _time_to_next_known_funding(
             output["available_at"],
             output["funding_source_available_at"],
@@ -297,15 +255,6 @@ class FundingContextFeatureProvider:
         )
 
         event_rates = right["funding_rate"].to_numpy(float)
-        trailing_sum, trailing_count = _trailing_window_sums(
-            output["available_at"],
-            right["available_at"],
-            event_rates,
-            pd.Timedelta(hours=24),
-        )
-        output["funding_24h_sum"] = trailing_sum
-        output["funding_24h_sum_bps"] = trailing_sum * 10000.0
-        output["funding_24h_count"] = trailing_count
         output["funding_settlements_json"] = _settlement_batches(
             output["timestamp"],
             output["available_at"],

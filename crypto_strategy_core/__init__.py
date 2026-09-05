@@ -2,6 +2,7 @@
 
 from .rules import CORE_CONTRACT_VERSION, PROFILE_KEYS, RULE_INDICATORS
 from .indicators import wilder_rsi
+from .funding import funding_bias, funding_rule_evidence_at, funding_rule_evidence_series
 from .candles import (
     atr,
     bollinger_bands,
@@ -20,6 +21,9 @@ __all__ = [
     "PROFILE_KEYS",
     "RULE_INDICATORS",
     "wilder_rsi",
+    "funding_bias",
+    "funding_rule_evidence_at",
+    "funding_rule_evidence_series",
     "atr",
     "bollinger_bands",
     "causal_trailing_return",
