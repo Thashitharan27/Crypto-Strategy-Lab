@@ -78,6 +78,7 @@ jobs:
           tests/test_shared_strategy_core.py
           tests/test_shared_candle_evidence.py
           tests/test_shared_funding_evidence.py
+          tests/test_shared_positioning_evidence.py
           tests/test_strategy_bar_price_oi_evidence.py
           tests/test_directional_di_rule_builder.py
           tests/test_worker_profile_modes.py
