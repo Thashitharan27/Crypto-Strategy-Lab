@@ -7,15 +7,13 @@ from typing import Mapping
 import numpy as np
 import pandas as pd
 
-from crypto_strategy_lab.atr import atr
+from crypto_strategy_core.sr_evidence import support_resistance_context_series
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.data.timing import interval_to_timedelta
-from crypto_strategy_lab.higher_timeframe_sr import HigherTimeframeSRDetector, resample_ohlc_for_sr
 from crypto_strategy_lab.support_resistance import (
     LocationClassification,
     SRContext,
-    SupportResistanceDetector,
     TradeLocationRating,
 )
 
@@ -151,74 +149,43 @@ class SupportResistanceFeatureProvider:
         high = pd.to_numeric(source["high"], errors="raise").to_numpy(float)
         low = pd.to_numeric(source["low"], errors="raise").to_numpy(float)
         close = pd.to_numeric(source["close"], errors="raise").to_numpy(float)
-        atr_values = pd.to_numeric(directional["atr"], errors="raise").to_numpy(float)
-        source_available = pd.to_datetime(source["available_at"], utc=True).reset_index(drop=True)
-        dependency_available = pd.to_datetime(directional["available_at"], utc=True).reset_index(drop=True)
-        available = pd.concat([source_available, dependency_available], axis=1).max(axis=1)
+        atr_values = pd.to_numeric(
+            directional["atr"], errors="raise"
+        ).to_numpy(float)
+        source_available = pd.to_datetime(
+            source["available_at"], utc=True
+        ).reset_index(drop=True)
+        dependency_available = pd.to_datetime(
+            directional["available_at"], utc=True
+        ).reset_index(drop=True)
+        available = pd.concat(
+            [source_available, dependency_available], axis=1
+        ).max(axis=1)
 
+        shared = support_resistance_context_series(
+            source_times.tolist(),
+            available.tolist(),
+            open_,
+            high,
+            low,
+            close,
+            atr_values,
+            strategy_minutes=strategy_minutes,
+            parameters=parameters,
+        )
+        effective_minutes = shared.effective_minutes
         rows: list[dict[str, object]] = []
-        if effective_minutes == strategy_minutes:
-            detector = SupportResistanceDetector(**detector_config)
-            for i in range(len(source)):
-                long_context = detector.analyze_price_location(
-                    i, open_, high, low, close, atr_values, "LONG"
-                )
-                short_context = detector.analyze_price_location(
-                    i, open_, high, low, close, atr_values, "SHORT"
-                )
-                row = {
-                    "timestamp": source_times.iloc[i],
-                    "available_at": available.iloc[i],
-                    "sr_completed_candle_time": available.iloc[i],
-                }
-                row.update(_flatten("long", long_context))
-                row.update(_flatten("short", short_context))
-                rows.append(row)
-        else:
-            legacy = pd.DataFrame(
-                {
-                    "timestamp": source_times,
-                    "open": open_,
-                    "high": high,
-                    "low": low,
-                    "close": close,
-                }
-            )
-            htf = resample_ohlc_for_sr(legacy, strategy_minutes, effective_minutes)
-            htf_open = htf["open"].to_numpy(float)
-            htf_high = htf["high"].to_numpy(float)
-            htf_low = htf["low"].to_numpy(float)
-            htf_close = htf["close"].to_numpy(float)
-            htf_atr = atr(htf_high, htf_low, htf_close, atr_period)
-            htf_end = pd.to_datetime(htf["end_time"], utc=True)
-            htf_end_ns = htf_end.to_numpy(dtype="datetime64[ns]")
-            detector = HigherTimeframeSRDetector(**detector_config)
-            for i in range(len(source)):
-                available_i = pd.Timestamp(available.iloc[i])
-                needle = np.datetime64(available_i.tz_convert("UTC").tz_localize(None).to_datetime64(), "ns")
-                htf_i = int(np.searchsorted(htf_end_ns, needle, side="right") - 1)
-                if htf_i < 0:
-                    long_context = detector._default_context()
-                    short_context = detector._default_context()
-                    completed = pd.NaT
-                else:
-                    long_context = detector.analyze_external_price(
-                        htf_i, htf_open, htf_high, htf_low, htf_close, htf_atr,
-                        "LONG", float(close[i]),
-                    )
-                    short_context = detector.analyze_external_price(
-                        htf_i, htf_open, htf_high, htf_low, htf_close, htf_atr,
-                        "SHORT", float(close[i]),
-                    )
-                    completed = htf_end.iloc[htf_i]
-                row = {
-                    "timestamp": source_times.iloc[i],
-                    "available_at": available_i,
-                    "sr_completed_candle_time": completed,
-                }
-                row.update(_flatten("long", long_context))
-                row.update(_flatten("short", short_context))
-                rows.append(row)
+        for index, (long_context, short_context, completed) in enumerate(
+            zip(shared.long, shared.short, shared.completed_candle_time)
+        ):
+            row = {
+                "timestamp": source_times.iloc[index],
+                "available_at": available.iloc[index],
+                "sr_completed_candle_time": completed,
+            }
+            row.update(_flatten("long", long_context))
+            row.update(_flatten("short", short_context))
+            rows.append(row)
 
         output = pd.DataFrame(rows)
         output["available_at"] = pd.to_datetime(output["available_at"], utc=True)
