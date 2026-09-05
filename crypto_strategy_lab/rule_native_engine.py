@@ -113,6 +113,7 @@ _RESEARCH_NUMERIC_FIELDS = {
     ),
 }
 _RESEARCH_CATEGORICAL_FIELDS = {
+    "PRICE_OI_STATE": ("futures_positioning", "price_oi_state"),
     "OI_VS_PRICE_STATE_1H": ("futures_positioning", "oi_vs_price_state_1h"),
     "FUNDING_BIAS": ("funding_context", "funding_bias"),
     "FUNDING_EXTREME_POSITIVE": ("funding_context", "funding_extreme_positive"),
