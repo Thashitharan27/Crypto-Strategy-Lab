@@ -103,7 +103,12 @@ class TakerFlowContextFeatureProvider:
             out["available_at"] - out["taker_source_available_at"]
         ).dt.total_seconds()
         for column in self.definition.output_columns:
-            if column in {"taker_source_available_at", "taker_age_seconds"}:
+            if column in {
+                "timestamp",
+                "available_at",
+                "taker_source_available_at",
+                "taker_age_seconds",
+            }:
                 continue
             out[column] = pd.to_numeric(out[column], errors="coerce")
 
