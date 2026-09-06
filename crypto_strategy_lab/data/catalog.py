@@ -82,7 +82,7 @@ class DataCatalog:
         return [
             (
                 root_text,
-                str(record.path.resolve()),
+                str(record.path.absolute()),
                 record.exchange,
                 record.market.value,
                 record.dataset.value,
@@ -119,8 +119,8 @@ class DataCatalog:
                 [
                     (
                         root_text,
-                        str(record.path.resolve()),
-                        str(record.path.resolve().parent),
+                        str(record.path.absolute()),
+                        str(record.path.absolute().parent),
                     )
                     for record in records
                 ],
@@ -151,7 +151,7 @@ class DataCatalog:
                 self._insert_archive_rows(con, root_text, records)
                 if directory_mtimes is not None:
                     rows = [
-                        (root_text, str(Path(path).resolve()), int(mtime_ns))
+                        (root_text, str(Path(path).absolute()), int(mtime_ns))
                         for path, mtime_ns in directory_mtimes.items()
                     ]
                     if rows:
@@ -207,7 +207,7 @@ class DataCatalog:
                 # them. starts_with avoids wildcard escaping problems in Windows
                 # paths that may contain '%' or '_'.
                 for removed in sorted(removed_directories):
-                    removed_text = str(Path(removed).resolve())
+                    removed_text = str(Path(removed).absolute())
                     prefix = removed_text + separator
                     con.execute(
                         """
@@ -239,7 +239,7 @@ class DataCatalog:
                 # Reconcile only direct archive files in directories whose mtime
                 # changed (plus every directory in a newly discovered subtree).
                 for directory, records in replacements.items():
-                    directory_text = str(Path(directory).resolve())
+                    directory_text = str(Path(directory).absolute())
                     con.execute(
                         """
                         DELETE FROM archives
@@ -268,7 +268,7 @@ class DataCatalog:
                     [root_text],
                 )
                 directory_rows = [
-                    (root_text, str(Path(path).resolve()), int(mtime_ns))
+                    (root_text, str(Path(path).absolute()), int(mtime_ns))
                     for path, mtime_ns in directory_mtimes.items()
                 ]
                 if directory_rows:
