@@ -160,8 +160,9 @@ class BacktestEngine:
             finite=np.isfinite(current)&np.isfinite(previous)
             bull=finite&(current>0)&(previous<=0)
             bear=finite&(current<0)&(previous>=0)
-            self.macd_cross_state[1:][bull]="BULLISH"
-            self.macd_cross_state[1:][bear]="BEARISH"
+            indices=np.arange(1,len(self.close))
+            self.macd_cross_state[indices[bull]]="BULLISH"
+            self.macd_cross_state[indices[bear]]="BEARISH"
         self.macd_zero_state=np.full(len(self.close),"AT_ZERO",dtype=object)
         self.macd_zero_state[np.isfinite(self.macd_line_values)&(self.macd_line_values>0)]="ABOVE_ZERO"
         self.macd_zero_state[np.isfinite(self.macd_line_values)&(self.macd_line_values<0)]="BELOW_ZERO"
@@ -393,6 +394,10 @@ class BacktestEngine:
             return self._daily_entry_decision(i, active_at_candle_start)
         return {"execution_index": i, "indicator_index": i, "scheduled_timestamp": None, "actual_entry_timestamp": self._entry_time(i), "entry_schedule_status": None} if self._should_enter(i) else None
     def _should_enter(self,i):
+        # Sparse signal strategies should not manufacture one rejected candidate
+        # on every ordinary candle. DI/DMI retain their historical cadence.
+        if getattr(self,"signal_strategy_mode","DI")=="MACD_PULLBACK" and self._selected_direction(i) is None:
+            return False
         if not np.isfinite(self.risk[i]) or self.risk[i] <= 0 or len(self.active_pairs) >= self.config.max_active_pairs or not self._in_trading_window(i):
             return False
         if self.last_timeout_exit_time is not None and self._entry_time(i) <= self.last_timeout_exit_time:
@@ -713,6 +718,19 @@ class BacktestEngine:
             self._execution_time(i), raw, capped
         )
         pair.trade_direction = direction
+        pair.signal_strategy_mode = getattr(self,"signal_strategy_mode","DI")
+        pair.ema_50 = float(self.ema_50_values[ind_i]) if np.isfinite(self.ema_50_values[ind_i]) else np.nan
+        pair.ema_100 = float(self.ema_100_values[ind_i]) if np.isfinite(self.ema_100_values[ind_i]) else np.nan
+        pair.ema_200 = float(self.ema_200_values[ind_i]) if np.isfinite(self.ema_200_values[ind_i]) else np.nan
+        pair.ema_50_distance_atr = self._strategy_profile_rule_value(ind_i,direction,active_profile,"EMA_50_DISTANCE_ATR")
+        pair.ema_100_distance_atr = self._strategy_profile_rule_value(ind_i,direction,active_profile,"EMA_100_DISTANCE_ATR")
+        pair.ema_200_distance_atr = self._strategy_profile_rule_value(ind_i,direction,active_profile,"EMA_200_DISTANCE_ATR")
+        pair.macd_line = float(self.macd_line_values[ind_i]) if np.isfinite(self.macd_line_values[ind_i]) else np.nan
+        pair.macd_signal = float(self.macd_signal_values[ind_i]) if np.isfinite(self.macd_signal_values[ind_i]) else np.nan
+        pair.macd_histogram = float(self.macd_histogram_values[ind_i]) if np.isfinite(self.macd_histogram_values[ind_i]) else np.nan
+        pair.macd_histogram_change = float(self.macd_histogram_change_values[ind_i]) if np.isfinite(self.macd_histogram_change_values[ind_i]) else np.nan
+        pair.macd_cross_state = str(self.macd_cross_state[ind_i])
+        pair.macd_zero_state = str(self.macd_zero_state[ind_i])
         pair.daily_schedule_enabled = self.config.enable_daily_entry_schedule
         pair.scheduled_entry_time = self.config.daily_entry_time
         pair.scheduled_entry_timezone = self.config.daily_entry_timezone
@@ -1404,6 +1422,19 @@ class BacktestEngine:
             "result_type": row_kind,
             "side": primary.side.value,
             "trade_direction": getattr(p, "trade_direction", primary.side.value),
+            "signal_strategy": getattr(p, "signal_strategy_mode", "DI"),
+            "ema_50": getattr(p, "ema_50", np.nan),
+            "ema_100": getattr(p, "ema_100", np.nan),
+            "ema_200": getattr(p, "ema_200", np.nan),
+            "ema_50_distance_atr": getattr(p, "ema_50_distance_atr", np.nan),
+            "ema_100_distance_atr": getattr(p, "ema_100_distance_atr", np.nan),
+            "ema_200_distance_atr": getattr(p, "ema_200_distance_atr", np.nan),
+            "macd_line": getattr(p, "macd_line", np.nan),
+            "macd_signal": getattr(p, "macd_signal", np.nan),
+            "macd_histogram": getattr(p, "macd_histogram", np.nan),
+            "macd_histogram_change": getattr(p, "macd_histogram_change", np.nan),
+            "macd_cross_state": getattr(p, "macd_cross_state", "NONE"),
+            "macd_zero_state": getattr(p, "macd_zero_state", "AT_ZERO"),
             "strategy_profile_key": profile_key_value,
             "strategy_profile_run_mode": self.config.strategy_profile_run_mode,
             "applied_reward_risk_ratio": applied_rr,
