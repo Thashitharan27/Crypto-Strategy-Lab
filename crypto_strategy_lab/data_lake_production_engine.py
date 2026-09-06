@@ -170,6 +170,10 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         )
         self.atr_values, self.atr_pct_values = prepared.atr, prepared.atr_pct
         self.adx_values, self.plus_di_values, self.minus_di_values = prepared.adx, prepared.plus_di, prepared.minus_di
+        # Signal-strategy features are lightweight causal transforms of the
+        # already-prepared close/ATR arrays, so they do not invalidate Data Lake caches.
+        self._configure_signal_features()
+        self.signal_strategy_mode = self._infer_signal_strategy_mode()
         for name in (
             "bb_middle", "bb_upper", "bb_lower", "bb_width", "bb_width_pct",
             "bb_width_1", "bb_width_3", "bb_width_5", "bb_width_change",
