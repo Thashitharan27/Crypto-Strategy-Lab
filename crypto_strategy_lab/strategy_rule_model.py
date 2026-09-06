@@ -24,7 +24,9 @@ from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, RULE_INDICATORS
 # selection but adds a deliberately simple, non-optimized trend confirmation
 # baseline at compile time. LONG/SHORT eligibility still belongs to the market
 # permission grid below.
-DIRECTION_MODES = ("DI", "DMI_TREND")
+SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK")
+# Backward-compatible internal name retained while the UI moves to "Signal Strategy".
+DIRECTION_MODES = SIGNAL_STRATEGIES
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
 SIDES = ("LONG", "SHORT")
 MARKET_PERMISSIONS = tuple(f"{regime}_{side}" for regime in REGIMES for side in SIDES)
@@ -36,6 +38,8 @@ RULE_KINDS = ("REQUIRED", "VETO", "FLIP")
 _BOOL_VALUES = ("TRUE", "FALSE")
 CATEGORICAL_RULE_VALUES = {
     "DI_PRESSURE_STATE": ("EXPANDING", "CONTRACTING", "MIXED"),
+    "MACD_CROSS_STATE": ("BULLISH", "BEARISH", "NONE"),
+    "MACD_ZERO_STATE": ("ABOVE_ZERO", "BELOW_ZERO", "AT_ZERO"),
     "SR_NEAR_SUPPORT": _BOOL_VALUES,
     "SR_NEAR_RESISTANCE": _BOOL_VALUES,
     "SR_INSIDE_SUPPORT_ZONE": _BOOL_VALUES,
@@ -82,6 +86,8 @@ CATEGORICAL_RULE_VALUES = {
 }
 CATEGORICAL_VALUE_CODES = {
     "DI_PRESSURE_STATE": {"EXPANDING": 1.0, "CONTRACTING": 2.0, "MIXED": 3.0},
+    "MACD_CROSS_STATE": {"BULLISH": 1.0, "BEARISH": 2.0, "NONE": 3.0},
+    "MACD_ZERO_STATE": {"ABOVE_ZERO": 1.0, "BELOW_ZERO": 2.0, "AT_ZERO": 3.0},
     "SR_NEAR_SUPPORT": {"TRUE": 1.0, "FALSE": 0.0},
     "SR_NEAR_RESISTANCE": {"TRUE": 1.0, "FALSE": 0.0},
     "SR_INSIDE_SUPPORT_ZONE": {"TRUE": 1.0, "FALSE": 0.0},
@@ -242,7 +248,11 @@ def _profile_scope(profile_key: str) -> tuple[str, str]:
 
 
 def effective_side(source_side: str, direction_mode: str) -> str:
-    """Return the DI-selected side; the chosen mode may add confirmations."""
+    """Return the source side used to compile the six mature engine profiles.
+
+    The runtime signal strategy may choose that side from DI or from a non-DI
+    trigger such as MACD_PULLBACK. Market permissions remain a separate concern.
+    """
     mode = str(direction_mode).upper()
     if mode not in DIRECTION_MODES:
         raise ValueError(f"unsupported direction mode: {direction_mode}")
@@ -346,6 +356,28 @@ def _dmi_trend_native_rules() -> tuple[dict, ...]:
     )
 
 
+
+def _macd_pullback_native_rules() -> tuple[dict, ...]:
+    """Persist the MACD signal-strategy choice without adding a hidden filter.
+
+    Direction is generated at runtime from a fresh 12/26/9 MACD crossover on
+    the pullback side of zero. This marker rule rejects only non-finite MACD
+    evidence, so EMA and other confirmations remain fully researcher-authored.
+    """
+    return (
+        {
+            "action": "REJECT",
+            "indicator": "MACD_HISTOGRAM",
+            "condition": "OUTSIDE",
+            "minimum": LOW,
+            "maximum": HIGH,
+            f"{_META_PREFIX}kind": "REQUIRED",
+            _DMI_TREND_MODE_MARKER: "MACD_PULLBACK",
+            _DMI_TREND_RULE_MARKER: "MACD_PULLBACK_SIGNAL",
+        },
+    )
+
+
 def compile_profiles(
     *,
     direction_mode: str,
@@ -379,7 +411,12 @@ def compile_profiles(
         regime, source_side = _profile_scope(key)
         side = effective_side(source_side, mode)
         enabled = f"{regime}_{side}" in permissions
-        native_rules = list(_dmi_trend_native_rules()) if mode == "DMI_TREND" else []
+        if mode == "DMI_TREND":
+            native_rules = list(_dmi_trend_native_rules())
+        elif mode == "MACD_PULLBACK":
+            native_rules = list(_macd_pullback_native_rules())
+        else:
+            native_rules = []
         for rule in required:
             if _applies(rule, regime, side):
                 native_rules.append(_native_rule(rule, required=True))
@@ -442,8 +479,9 @@ def infer_direction_mode(strategy_profiles) -> str:
         )
     for profile in strategy_profiles.values():
         for rule in getattr(profile, "entry_rules", ()):
-            if str(rule.get(_DMI_TREND_MODE_MARKER, "")).upper() == "DMI_TREND":
-                return "DMI_TREND"
+            mode = str(rule.get(_DMI_TREND_MODE_MARKER, "")).upper()
+            if mode in DIRECTION_MODES and mode != "DI":
+                return mode
     return "DI"
 
 

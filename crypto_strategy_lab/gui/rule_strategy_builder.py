@@ -54,6 +54,15 @@ EVIDENCE_LABELS = {
     "ADX": "ADX",
     "ADX_CHANGE": "ADX Change (1 bar)",
     "ATR_PCT": "ATR % (decimal)",
+    "EMA_50_DISTANCE_ATR": "Price − EMA 50 (ATR)",
+    "EMA_100_DISTANCE_ATR": "Price − EMA 100 (ATR)",
+    "EMA_200_DISTANCE_ATR": "Price − EMA 200 (ATR)",
+    "MACD_LINE": "MACD Line (12/26)",
+    "MACD_SIGNAL": "MACD Signal (9)",
+    "MACD_HISTOGRAM": "MACD Histogram",
+    "MACD_HISTOGRAM_CHANGE": "MACD Histogram Change (1 bar)",
+    "MACD_CROSS_STATE": "MACD Cross State",
+    "MACD_ZERO_STATE": "MACD Zero State",
     "RSI": "RSI",
     "BB_WIDTH": "BB Width (decimal)",
     "CLOSE_LOCATION": "Close Location",
@@ -116,10 +125,20 @@ EVIDENCE_GROUPS = (
             "DI_SPREAD_CHANGE",
         ),
     ),
-    ("Trend & Volatility", ("ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH")),
+    (
+        "Trend & Volatility",
+        (
+            "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
+            "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
+        ),
+    ),
     (
         "Momentum & Price",
-        ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
+        (
+            "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
+            "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
+            "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
+        ),
     ),
     (
         "Futures — Open Interest & Positioning",
@@ -212,10 +231,25 @@ EVIDENCE_MENU_TREE = (
             "DI_SPREAD_CHANGE",
         ),
     ),
-    ("Trend & Volatility", ("ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH")),
+    (
+        "Trend & Volatility",
+        (
+            "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
+            "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
+        ),
+    ),
     (
         "Momentum & Price",
-        ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
+        (
+            "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
+            (
+                "MACD",
+                (
+                    "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
+                    "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
+                ),
+            ),
+        ),
     ),
     (
         "Futures",
@@ -308,7 +342,11 @@ OPERATOR_LABELS = {
     "IS": "Is",
     "IS_NOT": "Is Not",
 }
-DIRECTION_LABELS = {"DI": "DI Direction", "DMI_TREND": "DMI Trend — Baseline"}
+DIRECTION_LABELS = {
+    "DI": "DI Direction",
+    "DMI_TREND": "DMI Trend — Baseline",
+    "MACD_PULLBACK": "MACD Pullback — 12/26/9",
+}
 
 
 def _humanize(value: str) -> str:
@@ -637,13 +675,13 @@ class RuleStrategyBuilder(QWidget):
         summary_layout.addWidget(self.summary, 1)
         layout.addWidget(summary_box)
 
-        direction_box = QGroupBox("1. Direction & Market Eligibility")
+        direction_box = QGroupBox("1. Signal Strategy & Market Eligibility")
         direction_layout = QVBoxLayout(direction_box)
         direction_form = QFormLayout()
         self.direction_mode = QComboBox()
         for mode in DIRECTION_MODES:
             self.direction_mode.addItem(DIRECTION_LABELS[mode], mode)
-        direction_form.addRow("Direction strategy", self.direction_mode)
+        direction_form.addRow("Signal strategy", self.direction_mode)
         direction_layout.addLayout(direction_form)
 
         permission = QGridLayout()
@@ -664,8 +702,9 @@ class RuleStrategyBuilder(QWidget):
         note = QLabel(
             "These are permissions only. DI Direction uses raw +DI/-DI side selection. "
             "DMI Trend keeps that side selection and adds built-in ADX ≥ 20, non-falling ADX, "
-            "and expanding DI pressure. The grid still decides where that side may trade; for the "
-            "first clean trend test, enable Bull/Bear and leave Sideways off."
+            "and expanding DI pressure. MACD Pullback creates a candidate only on a fresh 12/26/9 "
+            "MACD crossover: bullish below zero or bearish above zero. EMA and S/R confirmation "
+            "remain optional Entry/Veto evidence so their value can be measured rather than assumed."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#52606d")
