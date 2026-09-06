@@ -56,7 +56,8 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
         assert "Paste Overrides" not in buttons
         assert "Show Support / Resistance veto presets" not in checks
         assert "Evidence is grouped and searchable" in labels
-        assert "common S/R choices are shown before advanced S/R details" in labels
+        assert "MR Trade-Direction Stretch is positive" in labels
+        assert "Any MR or S/R rule automatically enables its causal calculation" in labels
     finally:
         window.close()
 
