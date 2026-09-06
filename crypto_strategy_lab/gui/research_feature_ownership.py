@@ -29,7 +29,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crypto_strategy_lab.strategy_rule_model import uses_support_resistance_rules
+from crypto_strategy_lab.strategy_rule_model import (
+    uses_mean_reversion_rules,
+    uses_support_resistance_rules,
+)
 
 
 FRIENDLY_LABELS = {
@@ -247,8 +250,8 @@ class ResearchFeaturesPanel(QWidget):
         self.builder.enable_mr.setText("Include Mean Reversion research")
         self.mr_card = FeatureCard(
             "Mean Reversion",
-            status="RESEARCH ONLY",
-            note="Adds MR context to reports; it does not change a trade unless an explicit strategy rule uses related evidence.",
+            status="RULE-READY",
+            note="Adds MR context to reports. Any explicit MR Entry/Veto/Flip rule automatically makes it a required strategy dependency.",
             enable=self.builder.enable_mr,
             expandable=True,
             expanded=True,
@@ -406,9 +409,11 @@ class ResearchFeaturesPanel(QWidget):
         self.sr_enable.toggled.connect(lambda _checked: self._mark_custom())
         self.trade_enable.toggled.connect(lambda _checked: self._mark_custom())
         self.book_enable.toggled.connect(lambda _checked: self._mark_custom())
+        self.builder.changed.connect(self._sync_mr_requirement)
         self.builder.changed.connect(self._sync_sr_requirement)
         self.form.changed.connect(self.refresh_visibility)
 
+        self._sync_mr_requirement()
         self._sync_sr_requirement()
         self.refresh_visibility()
         self._infer_preset()
@@ -461,6 +466,7 @@ class ResearchFeaturesPanel(QWidget):
             self.book_enable.setChecked(book)
         finally:
             self._applying_preset = False
+        self._sync_mr_requirement()
         self._sync_sr_requirement()
         self.refresh_visibility()
 
@@ -479,6 +485,29 @@ class ResearchFeaturesPanel(QWidget):
         index = self.preset.findData(native)
         if index >= 0:
             self.preset.setCurrentIndex(index)
+
+    def _sync_mr_requirement(self, *_args) -> None:
+        try:
+            required = uses_mean_reversion_rules(
+                self.builder.required_rules.rules(),
+                self.builder.veto_rules.rules(),
+                self.builder.flip_rules.rules(),
+            )
+        except (AttributeError, TypeError, ValueError):
+            required = False
+        if required:
+            if not self.builder.enable_mr.isChecked():
+                self.builder.enable_mr.setChecked(True)
+            self.builder.enable_mr.setEnabled(False)
+            self.builder.enable_mr.setText("Mean Reversion calculation required by strategy rule")
+            self.mr_card.set_status("REQUIRED BY STRATEGY")
+        else:
+            self.builder.enable_mr.setEnabled(True)
+            self.builder.enable_mr.setText("Include Mean Reversion research")
+            self.mr_card.set_status(
+                "RULE-READY" if self.builder.enable_mr.isChecked() else "OFF · RULE-READY"
+            )
+        self.refresh_visibility()
 
     def _sync_sr_requirement(self, *_args) -> None:
         try:
@@ -531,9 +560,10 @@ class ResearchFeaturesPanel(QWidget):
         for name in ("sr_hold_confirmation_bars", "sr_hold_confirmation_atr"):
             self.sr_card.set_field_visible(name, hold)
 
-        self.mr_card.set_status(
-            "RESEARCH ONLY" if self.builder.enable_mr.isChecked() else "OFF"
-        )
+        if self.builder.enable_mr.isEnabled():
+            self.mr_card.set_status(
+                "RULE-READY" if self.builder.enable_mr.isChecked() else "OFF · RULE-READY"
+            )
         if self.sr_enable.isEnabled():
             self.sr_card.set_status(
                 "RESEARCH ONLY" if self.sr_enable.isChecked() else "OFF / RESEARCH ONLY"
