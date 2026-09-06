@@ -165,7 +165,7 @@ class GuiApplicationService:
         # A researcher-requested refresh intentionally invalidates any prior
         # one-shot validation snapshot before touching the raw archive tree.
         self._validated_catalog_snapshot = None
-        count = self.store.refresh_catalog()
+        count = self.store.refresh_catalog(force_full=True)
         self._catalog_generation = int(getattr(self, "_catalog_generation", 0)) + 1
         return count
 
