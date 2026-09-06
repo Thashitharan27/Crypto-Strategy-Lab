@@ -133,15 +133,12 @@ EVIDENCE_GROUPS = (
         ),
     ),
     (
-        "MACD",
+        "Momentum & Price",
         (
+            "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
             "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
             "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
         ),
-    ),
-    (
-        "Momentum & Price",
-        ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
     ),
     (
         "Futures — Open Interest & Positioning",
@@ -242,15 +239,17 @@ EVIDENCE_MENU_TREE = (
         ),
     ),
     (
-        "MACD",
-        (
-            "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
-            "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
-        ),
-    ),
-    (
         "Momentum & Price",
-        ("RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE"),
+        (
+            "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
+            (
+                "MACD",
+                (
+                    "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
+                    "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
+                ),
+            ),
+        ),
     ),
     (
         "Futures",
