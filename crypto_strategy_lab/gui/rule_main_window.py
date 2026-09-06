@@ -618,6 +618,19 @@ class MainWindow(LegacyMainWindow):
         # remember separate feature switches just to use causal rule evidence.
         if uses_mean_reversion_rules(required_rules, veto_rules, flip_rules):
             authored["enable_mean_reversion_analysis"] = True
+            mr_evidence = {
+                rule["evidence"]
+                for rule in (*required_rules, *veto_rules, *flip_rules)
+                if rule["evidence"] in MEAN_REVERSION_RULE_EVIDENCE
+            }
+            distance_evidence = {
+                "MR_TRADE_STRETCH_ATR", "MR_DISTANCE_ATR", "MR_MOTION",
+                "MR_STRENGTH", "MR_STATE", "MR_DISTANCE_CHANGE_ATR",
+            }
+            if mr_evidence & distance_evidence:
+                features = replace(features, mean_reversion_track_atr_distance=True)
+            if mr_evidence & {"MR_MOTION", "MR_DISTANCE_CHANGE_ATR"}:
+                features = replace(features, mean_reversion_track_motion=True)
         if uses_support_resistance_rules(required_rules, veto_rules, flip_rules):
             features = replace(features, enable_support_resistance_analysis=True)
 
