@@ -13,6 +13,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     rule_value_options,
     uses_mean_reversion_rules,
 )
+from crypto_strategy_core.rules import CORE_CONTRACT_VERSION
 from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS
 
 
@@ -45,6 +46,7 @@ def _engine():
 
 
 def test_mean_reversion_rule_evidence_is_registered_in_shared_contract():
+    assert CORE_CONTRACT_VERSION == 2
     assert MR_EVIDENCE <= set(RULE_INDICATORS)
 
 
