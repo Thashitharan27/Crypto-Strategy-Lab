@@ -18,6 +18,8 @@ class BacktestEngine:
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.volume=self.data["volume"].to_numpy(float) if "volume" in self.data else np.ones(len(self.data),float); self.times=self.data.timestamp.to_numpy()
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array()
+        self._configure_signal_features()
+        self.signal_strategy_mode=self._infer_signal_strategy_mode()
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
@@ -131,8 +133,52 @@ class BacktestEngine:
             self.log(f"SR analysis failed at index {i}: {e}")
             return None
 
+    def _infer_signal_strategy_mode(self):
+        """Recover the compiled signal strategy without adding a config fork."""
+        for profile in self.config.strategy_profiles.values():
+            for rule in getattr(profile, "entry_rules", ()):
+                mode=str(rule.get("_strategy_direction_mode", "")).upper()
+                if mode in {"DMI_TREND", "MACD_PULLBACK"}:
+                    return mode
+        return "DI"
+
+    def _configure_signal_features(self):
+        """Prepare causal EMA/MACD arrays shared by signals and generic rules."""
+        self.ema_50_values=ema(self.close,50)
+        self.ema_100_values=ema(self.close,100)
+        self.ema_200_values=ema(self.close,200)
+        macd_fast=ema(self.close,12)
+        macd_slow=ema(self.close,26)
+        self.macd_line_values=macd_fast-macd_slow
+        self.macd_signal_values=ema(self.macd_line_values,9)
+        self.macd_histogram_values=self.macd_line_values-self.macd_signal_values
+        self.macd_histogram_change_values=self.macd_histogram_values-lag(self.macd_histogram_values,1)
+        self.macd_cross_state=np.full(len(self.close),"NONE",dtype=object)
+        if len(self.close)>1:
+            current=self.macd_histogram_values[1:]
+            previous=self.macd_histogram_values[:-1]
+            finite=np.isfinite(current)&np.isfinite(previous)
+            bull=finite&(current>0)&(previous<=0)
+            bear=finite&(current<0)&(previous>=0)
+            self.macd_cross_state[1:][bull]="BULLISH"
+            self.macd_cross_state[1:][bear]="BEARISH"
+        self.macd_zero_state=np.full(len(self.close),"AT_ZERO",dtype=object)
+        self.macd_zero_state[np.isfinite(self.macd_line_values)&(self.macd_line_values>0)]="ABOVE_ZERO"
+        self.macd_zero_state[np.isfinite(self.macd_line_values)&(self.macd_line_values<0)]="BELOW_ZERO"
+
     def _selected_direction(self, i):
-        """Select direction solely from DI values known at candle ``i``."""
+        """Select a side from the active causal signal strategy at candle ``i``."""
+        mode=getattr(self,"signal_strategy_mode","DI")
+        if mode=="MACD_PULLBACK":
+            line=float(self.macd_line_values[i])
+            if not np.isfinite(line):
+                return None
+            state=str(self.macd_cross_state[i])
+            if state=="BULLISH" and line<=0:
+                return "LONG"
+            if state=="BEARISH" and line>=0:
+                return "SHORT"
+            return None
         if not self.config.enable_di_direction_selection:
             return None
         plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i])
@@ -410,8 +456,8 @@ class BacktestEngine:
         return False, None
 
     def _profile_context(self, i):
-        plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i]); regime=self._regime_at(i)
-        if not all(np.isfinite(v) for v in (plus,minus)) or regime is None:
+        regime=self._regime_at(i)
+        if regime is None:
             return None
         direction=self._selected_direction(i)
         if direction is None: return None
@@ -421,10 +467,10 @@ class BacktestEngine:
     def _strategy_profile_filter_result(self, i, execution_i=None):
         context=self._profile_context(i)
         if context is None:
-            plus=float(self.plus_di_values[i]); minus=float(self.minus_di_values[i]); regime=self._regime_at(i)
-            if not all(np.isfinite(v) for v in (plus,minus)) or regime is None:
+            regime=self._regime_at(i)
+            if regime is None:
                 return False,"Strategy profile classification indicator warm-up incomplete"
-            return False,"Strategy profile direction unavailable"
+            return False,"Signal strategy direction unavailable"
         regime,direction,key,profile=context
         if not profile.enabled: return False,f"Strategy profile {key} is disabled"
         if profile.entry_rules:
@@ -439,6 +485,17 @@ class BacktestEngine:
         if indicator=="DI_SPREAD": return float(self.di_spread[i])
         if indicator=="ADX": return float(self.adx_values[i])
         if indicator=="ATR_PCT": return float(self.atr_pct_values[i])
+        if indicator in {"EMA_50_DISTANCE_ATR","EMA_100_DISTANCE_ATR","EMA_200_DISTANCE_ATR"}:
+            period={"EMA_50_DISTANCE_ATR":50,"EMA_100_DISTANCE_ATR":100,"EMA_200_DISTANCE_ATR":200}[indicator]
+            mean=getattr(self,f"ema_{period}_values")[i]; atr_value=float(self.atr_values[i])
+            if not np.isfinite(mean) or not np.isfinite(atr_value) or atr_value<=0: return np.nan
+            return (float(self.close[i])-float(mean))/atr_value
+        if indicator=="MACD_LINE": return float(self.macd_line_values[i])
+        if indicator=="MACD_SIGNAL": return float(self.macd_signal_values[i])
+        if indicator=="MACD_HISTOGRAM": return float(self.macd_histogram_values[i])
+        if indicator=="MACD_HISTOGRAM_CHANGE": return float(self.macd_histogram_change_values[i])
+        if indicator=="MACD_CROSS_STATE": return {"BULLISH":1.0,"BEARISH":2.0,"NONE":3.0}.get(str(self.macd_cross_state[i]),np.nan)
+        if indicator=="MACD_ZERO_STATE": return {"ABOVE_ZERO":1.0,"BELOW_ZERO":2.0,"AT_ZERO":3.0}.get(str(self.macd_zero_state[i]),np.nan)
         if indicator=="RSI": return float(self.profile_rsi_values[profile.rsi_period][i])
         if indicator=="BB_WIDTH": return float(self.bb_width[i])
         if indicator=="CLOSE_LOCATION": return float(self.close_location_values[i])
