@@ -40,6 +40,18 @@ CATEGORICAL_RULE_VALUES = {
     "DI_PRESSURE_STATE": ("EXPANDING", "CONTRACTING", "MIXED"),
     "MACD_CROSS_STATE": ("BULLISH", "BEARISH", "NONE"),
     "MACD_ZERO_STATE": ("ABOVE_ZERO", "BELOW_ZERO", "AT_ZERO"),
+    "MR_MOTION": ("TOWARD_MEAN", "AWAY_FROM_MEAN", "FLAT"),
+    "MR_BB_LOCATION": (
+        "BELOW_LOWER_BAND", "LOWER_HALF", "AT_MEAN", "UPPER_HALF", "ABOVE_UPPER_BAND"
+    ),
+    "MR_SIGNAL": (
+        "STRONG_LONG", "STRONG_SHORT", "POTENTIAL_LONG", "POTENTIAL_SHORT", "NEUTRAL"
+    ),
+    "MR_TRADE_ALIGNMENT": ("FAVORS_REVERSION", "AGAINST_REVERSION", "NEUTRAL"),
+    "MR_STRENGTH": ("NEUTRAL", "WEAK", "MODERATE", "STRONG"),
+    "MR_STATE": (
+        "STRONGLY_BELOW_MEAN", "BELOW_MEAN", "NEAR_MEAN", "ABOVE_MEAN", "STRONGLY_ABOVE_MEAN"
+    ),
     "SR_NEAR_SUPPORT": _BOOL_VALUES,
     "SR_NEAR_RESISTANCE": _BOOL_VALUES,
     "SR_INSIDE_SUPPORT_ZONE": _BOOL_VALUES,
@@ -88,6 +100,23 @@ CATEGORICAL_VALUE_CODES = {
     "DI_PRESSURE_STATE": {"EXPANDING": 1.0, "CONTRACTING": 2.0, "MIXED": 3.0},
     "MACD_CROSS_STATE": {"BULLISH": 1.0, "BEARISH": 2.0, "NONE": 3.0},
     "MACD_ZERO_STATE": {"ABOVE_ZERO": 1.0, "BELOW_ZERO": 2.0, "AT_ZERO": 3.0},
+    "MR_MOTION": {"TOWARD_MEAN": 1.0, "AWAY_FROM_MEAN": 2.0, "FLAT": 3.0},
+    "MR_BB_LOCATION": {
+        "BELOW_LOWER_BAND": 1.0, "LOWER_HALF": 2.0, "AT_MEAN": 3.0,
+        "UPPER_HALF": 4.0, "ABOVE_UPPER_BAND": 5.0,
+    },
+    "MR_SIGNAL": {
+        "STRONG_LONG": 1.0, "STRONG_SHORT": 2.0, "POTENTIAL_LONG": 3.0,
+        "POTENTIAL_SHORT": 4.0, "NEUTRAL": 5.0,
+    },
+    "MR_TRADE_ALIGNMENT": {
+        "FAVORS_REVERSION": 1.0, "AGAINST_REVERSION": 2.0, "NEUTRAL": 3.0,
+    },
+    "MR_STRENGTH": {"NEUTRAL": 1.0, "WEAK": 2.0, "MODERATE": 3.0, "STRONG": 4.0},
+    "MR_STATE": {
+        "STRONGLY_BELOW_MEAN": 1.0, "BELOW_MEAN": 2.0, "NEAR_MEAN": 3.0,
+        "ABOVE_MEAN": 4.0, "STRONGLY_ABOVE_MEAN": 5.0,
+    },
     "SR_NEAR_SUPPORT": {"TRUE": 1.0, "FALSE": 0.0},
     "SR_NEAR_RESISTANCE": {"TRUE": 1.0, "FALSE": 0.0},
     "SR_INSIDE_SUPPORT_ZONE": {"TRUE": 1.0, "FALSE": 0.0},
@@ -133,6 +162,9 @@ CATEGORICAL_VALUE_CODES = {
     "FUNDING_EXTREME_NEGATIVE": {"TRUE": 1.0, "FALSE": 0.0},
     "MARK_INDEX_BASIS_STATE": {"NEGATIVE": 1.0, "NEUTRAL": 2.0, "POSITIVE": 3.0},
 }
+MEAN_REVERSION_RULE_EVIDENCE = frozenset(
+    indicator for indicator in RULE_INDICATORS if indicator.startswith("MR_")
+)
 SUPPORT_RESISTANCE_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("SR_")
 )
@@ -144,6 +176,18 @@ _META_PREFIX = "_builder_"
 
 def is_categorical_evidence(evidence: str) -> bool:
     return str(evidence).upper() in CATEGORICAL_RULE_VALUES
+
+
+def is_mean_reversion_evidence(evidence: str) -> bool:
+    return str(evidence).upper() in MEAN_REVERSION_RULE_EVIDENCE
+
+
+def uses_mean_reversion_rules(*rule_groups) -> bool:
+    return any(
+        is_mean_reversion_evidence(rule.get("evidence", ""))
+        for group in rule_groups
+        for rule in (group or ())
+    )
 
 
 def is_support_resistance_evidence(evidence: str) -> bool:
