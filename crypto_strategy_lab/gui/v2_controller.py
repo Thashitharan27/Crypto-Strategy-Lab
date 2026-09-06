@@ -130,14 +130,19 @@ class GuiApplicationService:
         request: GuiResearchRequest,
         report: DataQualityReport,
     ) -> None:
-        if any(
+        # A validation performed only against the persisted startup catalog must
+        # never suppress discovery in the following run. The catalog generation
+        # becomes positive only after this application service has explicitly
+        # refreshed the raw archive tree in the current process.
+        generation = int(getattr(self, "_catalog_generation", 0))
+        if generation <= 0 or any(
             dataset.status is DataQualityStatus.ERROR
             for dataset in report.datasets
         ):
             self._validated_catalog_snapshot = None
             return
         self._validated_catalog_snapshot = (
-            int(getattr(self, "_catalog_generation", 0)),
+            generation,
             self._request_identity(request),
             time.monotonic(),
         )
