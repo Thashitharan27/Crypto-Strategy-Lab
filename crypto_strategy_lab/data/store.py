@@ -172,8 +172,18 @@ class MarketDataStore:
                     replacements.setdefault(subtree_directory, [])
                 for record in subtree_records:
                     replacements.setdefault(
-                        str(record.path.resolve().parent), []
+                        str(record.path.absolute().parent), []
                     ).append(record)
+
+        # A directory can disappear between the initial stat pass and its direct
+        # rescan. Remove any stale descendant snapshot rows discovered in that
+        # race before committing the incremental state.
+        for directory_text in list(updated_directories):
+            if any(
+                self._path_is_within(directory_text, removed)
+                for removed in removed_roots
+            ):
+                updated_directories.pop(directory_text, None)
 
         self.catalog.apply_incremental_root(
             self.raw_root,
