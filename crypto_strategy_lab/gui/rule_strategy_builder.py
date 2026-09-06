@@ -68,8 +68,8 @@ EVIDENCE_LABELS = {
     "CLOSE_LOCATION": "Close Location",
     "MOMENTUM": "Momentum Return",
     "VWAP_DISTANCE": "VWAP Distance (ATR)",
-    "MR_TRADE_STRETCH_ATR": "MR — Trade Stretch (ATR)",
-    "MR_DISTANCE_ATR": "MR — Distance From Mean (ATR)",
+    "MR_TRADE_STRETCH_ATR": "MR — Trade-Direction Stretch (ATR)",
+    "MR_DISTANCE_ATR": "MR — Price − Mean (ATR)",
     "MR_MOTION": "MR — Motion",
     "MR_BB_ZSCORE": "MR — BB Z-Score",
     "MR_BB_LOCATION": "MR — BB Location",
@@ -77,7 +77,7 @@ EVIDENCE_LABELS = {
     "MR_TRADE_ALIGNMENT": "MR — Trade Alignment",
     "MR_STRENGTH": "MR — Strength",
     "MR_STATE": "MR — State",
-    "MR_DISTANCE_CHANGE_ATR": "MR — Distance Change (ATR)",
+    "MR_DISTANCE_CHANGE_ATR": "MR — Distance Change (ATR, 1 bar)",
     "SR_NEAR_SUPPORT": "S/R — Near Support",
     "SR_NEAR_RESISTANCE": "S/R — Near Resistance",
     "SR_INSIDE_SUPPORT_ZONE": "S/R — Inside Support Zone",
@@ -779,7 +779,7 @@ class RuleStrategyBuilder(QWidget):
         row.addStretch()
         required_layout.addLayout(row)
         evidence_note = QLabel(
-            "Evidence is grouped and searchable; common S/R choices are shown before advanced S/R details. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. A REQUIRED rule rejects a trade when its evidence is missing; missing VETO evidence does not create a rejection. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
+            "Evidence is grouped and searchable; Mean Reversion and common S/R choices are shown before advanced details. MR Trade-Direction Stretch is positive when price is extended in the candidate trade direction, for both LONG and SHORT. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. A REQUIRED rule rejects a trade when its evidence is missing; missing VETO evidence does not create a rejection. Any MR or S/R rule automatically enables its causal calculation; configure calculation settings on Research Features."
         )
         evidence_note.setWordWrap(True)
         evidence_note.setStyleSheet("color:#52606d")
