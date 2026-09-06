@@ -15,6 +15,10 @@ def test_shared_rule_contract_is_csl_rule_contract() -> None:
     assert "RSI" in RULE_INDICATORS
     assert "OI_ZSCORE_7D" in RULE_INDICATORS
     assert "TAKER_FLOW_PERSISTENCE" in RULE_INDICATORS
+    assert "SR_SUPPORT_TEST_COUNT" in RULE_INDICATORS
+    assert "SR_RESISTANCE_TEST_COUNT" in RULE_INDICATORS
+    assert "SR_BARS_SINCE_SUPPORT_TEST" in RULE_INDICATORS
+    assert "SR_BARS_SINCE_RESISTANCE_TEST" in RULE_INDICATORS
 
 
 def test_shared_rsi_matches_previous_csl_pandas_semantics() -> None:
