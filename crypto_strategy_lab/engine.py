@@ -153,7 +153,9 @@ class BacktestEngine:
         self.macd_signal_values=ema(self.macd_line_values,9)
         self.macd_histogram_values=self.macd_line_values-self.macd_signal_values
         self.macd_histogram_change_values=self.macd_histogram_values-lag(self.macd_histogram_values,1)
-        self.macd_cross_state=np.full(len(self.close),"NONE",dtype=object)
+        self.macd_cross_state=np.full(len(self.close),"UNKNOWN",dtype=object)
+        finite_hist=np.isfinite(self.macd_histogram_values)
+        self.macd_cross_state[finite_hist]="NONE"
         if len(self.close)>1:
             current=self.macd_histogram_values[1:]
             previous=self.macd_histogram_values[:-1]
@@ -163,9 +165,11 @@ class BacktestEngine:
             indices=np.arange(1,len(self.close))
             self.macd_cross_state[indices[bull]]="BULLISH"
             self.macd_cross_state[indices[bear]]="BEARISH"
-        self.macd_zero_state=np.full(len(self.close),"AT_ZERO",dtype=object)
-        self.macd_zero_state[np.isfinite(self.macd_line_values)&(self.macd_line_values>0)]="ABOVE_ZERO"
-        self.macd_zero_state[np.isfinite(self.macd_line_values)&(self.macd_line_values<0)]="BELOW_ZERO"
+        self.macd_zero_state=np.full(len(self.close),"UNKNOWN",dtype=object)
+        finite_line=np.isfinite(self.macd_line_values)
+        self.macd_zero_state[finite_line]="AT_ZERO"
+        self.macd_zero_state[finite_line&(self.macd_line_values>0)]="ABOVE_ZERO"
+        self.macd_zero_state[finite_line&(self.macd_line_values<0)]="BELOW_ZERO"
 
     def _selected_direction(self, i):
         """Select a side from the active causal signal strategy at candle ``i``."""
@@ -1433,8 +1437,8 @@ class BacktestEngine:
             "macd_signal": getattr(p, "macd_signal", np.nan),
             "macd_histogram": getattr(p, "macd_histogram", np.nan),
             "macd_histogram_change": getattr(p, "macd_histogram_change", np.nan),
-            "macd_cross_state": getattr(p, "macd_cross_state", "NONE"),
-            "macd_zero_state": getattr(p, "macd_zero_state", "AT_ZERO"),
+            "macd_cross_state": getattr(p, "macd_cross_state", "UNKNOWN"),
+            "macd_zero_state": getattr(p, "macd_zero_state", "UNKNOWN"),
             "strategy_profile_key": profile_key_value,
             "strategy_profile_run_mode": self.config.strategy_profile_run_mode,
             "applied_reward_risk_ratio": applied_rr,
