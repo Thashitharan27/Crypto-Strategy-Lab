@@ -1257,7 +1257,12 @@ class MainWindow(QMainWindow):
         nav.addWidget(quick_run)
         self._connect_request_refresh()
         self._connect_live_summary()
-        self.service.refresh_catalog()
+        # Startup must stay metadata-only. A full raw archive discovery walks the
+        # entire Binance data lake and can take minutes on large installations.
+        # The persisted DuckDB catalog is enough to render the initial GUI; the
+        # explicit range-validation path refreshes discovery before revalidation.
+        if startup_status:
+            startup_status("Loading cached market-data catalog...")
         self._load_catalog()
         self.apply_config(self.config)
         if startup_status:
