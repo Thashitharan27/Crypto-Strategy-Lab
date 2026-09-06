@@ -138,6 +138,62 @@ def test_simulator_stage_timings_expose_post_engine_costs():
     assert timings["strategy_simulation_total"] == pytest.approx(2.0)
 
 
+def test_gui_cached_startup_validation_cannot_suppress_run_catalog_refresh(tmp_path):
+    class FakeStore:
+        def __init__(self):
+            self.progress_callback = None
+
+        def data_quality_report(
+            self,
+            request,
+            dataset,
+            *,
+            interval=None,
+            required=True,
+            **kwargs,
+        ):
+            assert dataset is DatasetKind.KLINES
+            return _ok_quality_report(request, dataset, interval, required)
+
+    class FakeRunner:
+        def __init__(self):
+            self.refresh_flags = []
+
+        def run(self, request, config, *, refresh_catalog=True, **kwargs):
+            self.refresh_flags.append(bool(refresh_catalog))
+            return "completed"
+
+    runner = FakeRunner()
+    service = object.__new__(GuiApplicationService)
+    service.raw_root = tmp_path / "raw"
+    service.cache_root = tmp_path / "cache"
+    service.store = FakeStore()
+    service.catalog = SimpleNamespace()
+    service.completed_runs = SimpleNamespace()
+    service._runner_factory = lambda output_root: runner
+    service.progress_callback = None
+    service._catalog_generation = 0
+    service._validated_catalog_snapshot = None
+
+    request = GuiResearchRequest(
+        exchange="binance",
+        market=MarketKind.FUTURES_UM,
+        symbol="BTCUSDT",
+        period_start=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        period_end=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        strategy_timeframe="4h",
+        intrabar_timeframe=None,
+    )
+    config = ResearchRunConfig()
+
+    report = service.required_data_quality(request)
+    assert report.overall_status is DataQualityStatus.OK
+    assert service._validated_catalog_snapshot is None
+
+    assert service.run(request, config) == "completed"
+    assert runner.refresh_flags == [True]
+
+
 def test_gui_run_reuses_recent_validated_catalog_snapshot_once(tmp_path):
     class FakeStore:
         def __init__(self):
