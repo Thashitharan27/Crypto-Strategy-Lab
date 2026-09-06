@@ -165,7 +165,7 @@ def scan_archive_directory(
             try:
                 if entry.is_dir(follow_symlinks=False):
                     stat = entry.stat(follow_symlinks=False)
-                    children[str(Path(entry.path).resolve())] = stat.st_mtime_ns
+                    children[str(Path(entry.path).absolute())] = stat.st_mtime_ns
                     continue
                 if Path(entry.name).suffix.lower() not in {".zip", ".csv"}:
                     continue
@@ -177,7 +177,7 @@ def scan_archive_directory(
                 # observing the directory. The next refresh will see it.
                 continue
             record = infer_archive_record(
-                Path(entry.path).resolve(),
+                Path(entry.path).absolute(),
                 root,
                 stat_result=stat,
             )
