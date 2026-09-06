@@ -39,6 +39,10 @@ def _sr_context():
         nearest_resistance_distance_atr=2.5,
         support_rejection_atr=0.8,
         resistance_rejection_atr=0.1,
+        support_test_count=2,
+        resistance_test_count=4,
+        bars_since_support_test=1,
+        bars_since_resistance_test=3,
     )
 
 
@@ -119,6 +123,18 @@ def test_support_resistance_numeric_rule_values_reuse_one_prepared_context():
     assert engine._strategy_profile_rule_value(
         0, "LONG", profile, "SR_SUPPORT_REJECTION_ATR"
     ) == 0.8
+    assert engine._strategy_profile_rule_value(
+        0, "LONG", profile, "SR_SUPPORT_TEST_COUNT"
+    ) == 2.0
+    assert engine._strategy_profile_rule_value(
+        0, "LONG", profile, "SR_RESISTANCE_TEST_COUNT"
+    ) == 4.0
+    assert engine._strategy_profile_rule_value(
+        0, "LONG", profile, "SR_BARS_SINCE_SUPPORT_TEST"
+    ) == 1.0
+    assert engine._strategy_profile_rule_value(
+        0, "LONG", profile, "SR_BARS_SINCE_RESISTANCE_TEST"
+    ) == 3.0
     assert calls == [(0, "LONG")]
 
 
