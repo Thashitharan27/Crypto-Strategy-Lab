@@ -1,6 +1,6 @@
 """Canonical strategy-rule contract shared by research and live runtimes."""
 
-CORE_CONTRACT_VERSION = 1
+CORE_CONTRACT_VERSION = 2
 
 PROFILE_KEYS = (
     "bull_long",
