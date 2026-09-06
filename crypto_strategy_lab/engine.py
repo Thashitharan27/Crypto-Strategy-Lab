@@ -13,6 +13,19 @@ from crypto_strategy_lab.strategy_profiles import profile_key
 from crypto_strategy_lab.support_resistance import SupportResistanceDetector
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Position, Side, TradePair
 
+
+def _signal_ema(values, period: int) -> np.ndarray:
+    """Causal EMA for signal strategies, independent of prepared MR shims."""
+    if period <= 0:
+        raise ValueError("signal EMA period must be positive")
+    return (
+        pd.Series(np.asarray(values, dtype=float))
+        .ewm(span=period, adjust=False, min_periods=period)
+        .mean()
+        .to_numpy(float)
+    )
+
+
 class BacktestEngine:
     def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
@@ -144,13 +157,13 @@ class BacktestEngine:
 
     def _configure_signal_features(self):
         """Prepare causal EMA/MACD arrays shared by signals and generic rules."""
-        self.ema_50_values=ema(self.close,50)
-        self.ema_100_values=ema(self.close,100)
-        self.ema_200_values=ema(self.close,200)
-        macd_fast=ema(self.close,12)
-        macd_slow=ema(self.close,26)
+        self.ema_50_values=_signal_ema(self.close,50)
+        self.ema_100_values=_signal_ema(self.close,100)
+        self.ema_200_values=_signal_ema(self.close,200)
+        macd_fast=_signal_ema(self.close,12)
+        macd_slow=_signal_ema(self.close,26)
         self.macd_line_values=macd_fast-macd_slow
-        self.macd_signal_values=ema(self.macd_line_values,9)
+        self.macd_signal_values=_signal_ema(self.macd_line_values,9)
         self.macd_histogram_values=self.macd_line_values-self.macd_signal_values
         self.macd_histogram_change_values=self.macd_histogram_values-lag(self.macd_histogram_values,1)
         self.macd_cross_state=np.full(len(self.close),"UNKNOWN",dtype=object)
