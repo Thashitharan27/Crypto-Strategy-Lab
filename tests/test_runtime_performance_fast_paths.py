@@ -200,8 +200,9 @@ def test_gui_run_reuses_recent_validated_catalog_snapshot_once(tmp_path):
             self.progress_callback = None
             self.refresh_count = 0
 
-        def refresh_catalog(self):
+        def refresh_catalog(self, *, force_full=False):
             self.refresh_count += 1
+            assert force_full is True
             return 123
 
         def data_quality_report(
