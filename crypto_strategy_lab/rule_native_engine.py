@@ -128,6 +128,22 @@ _RESEARCH_RULE_INDICATORS = frozenset(
     (*_RESEARCH_NUMERIC_FIELDS, *_RESEARCH_CATEGORICAL_FIELDS)
 )
 
+_MR_NUMERIC_FIELDS = {
+    "MR_DISTANCE_ATR": "mean_reversion_distance_atr",
+    "MR_BB_ZSCORE": "mean_reversion_bb_zscore",
+    "MR_DISTANCE_CHANGE_ATR": "mean_reversion_distance_change_atr",
+}
+_MR_CATEGORICAL_FIELDS = {
+    "MR_MOTION": "mean_reversion_motion",
+    "MR_BB_LOCATION": "mean_reversion_bb_location",
+    "MR_SIGNAL": "mean_reversion_signal",
+    "MR_STRENGTH": "mean_reversion_strength_label",
+    "MR_STATE": "mean_reversion_state",
+}
+_MR_RULE_INDICATORS = frozenset(
+    ("MR_TRADE_STRETCH_ATR", "MR_TRADE_ALIGNMENT", *_MR_NUMERIC_FIELDS, *_MR_CATEGORICAL_FIELDS)
+)
+
 
 class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine):
     """Current native runtime with prepared research evidence available to rules."""
@@ -234,6 +250,57 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
             return DI_PRESSURE_STATE_CODES.get(str(states[i]).upper(), np.nan)
         raise KeyError(indicator)
 
+    def _prepared_mean_reversion_value(self, i, direction, indicator):
+        """Read already-prepared MR evidence without recalculating the feature."""
+        config = getattr(self, "config", None)
+        if config is not None and not bool(getattr(config, "enable_mean_reversion_analysis", False)):
+            return np.nan
+
+        if indicator == "MR_TRADE_STRETCH_ATR":
+            if direction not in {"LONG", "SHORT"}:
+                return np.nan
+            raw = float(self.mean_reversion_distance_atr[i])
+            if not np.isfinite(raw):
+                return np.nan
+            return raw if direction == "LONG" else -raw
+
+        if indicator in _MR_NUMERIC_FIELDS:
+            raw = getattr(self, _MR_NUMERIC_FIELDS[indicator])[i]
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                return np.nan
+            return value if np.isfinite(value) else np.nan
+
+        if indicator == "MR_TRADE_ALIGNMENT":
+            if direction not in {"LONG", "SHORT"}:
+                return np.nan
+            signal = str(self.mean_reversion_signal[i]).upper()
+            if signal.endswith("_LONG"):
+                expected = "LONG"
+            elif signal.endswith("_SHORT"):
+                expected = "SHORT"
+            elif signal == "NEUTRAL":
+                expected = None
+            else:
+                return np.nan
+            raw = (
+                "NEUTRAL"
+                if expected is None
+                else "FAVORS_REVERSION"
+                if direction == expected
+                else "AGAINST_REVERSION"
+            )
+            return CATEGORICAL_VALUE_CODES[indicator][raw]
+
+        if indicator in _MR_CATEGORICAL_FIELDS:
+            raw = getattr(self, _MR_CATEGORICAL_FIELDS[indicator])[i]
+            if hasattr(raw, "value"):
+                raw = raw.value
+            key = str(raw).upper()
+            return CATEGORICAL_VALUE_CODES[indicator].get(key, np.nan)
+        raise KeyError(indicator)
+
     def _prepared_sr_context(self, i, direction):
         """Return one O(1) prepared S/R context and reuse it for all rules at the row."""
         if direction not in {"LONG", "SHORT"}:
@@ -337,6 +404,8 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
             "OPPOSING_DI_CHANGE",
         } and hasattr(self, "di_pressure_spread_change"):
             return self._prepared_pressure_value(i, direction, indicator)
+        if indicator in _MR_RULE_INDICATORS:
+            return self._prepared_mean_reversion_value(i, direction, indicator)
         if indicator in _SR_RULE_INDICATORS:
             return self._prepared_sr_value(i, direction, indicator)
         if indicator in _RESEARCH_RULE_INDICATORS:
