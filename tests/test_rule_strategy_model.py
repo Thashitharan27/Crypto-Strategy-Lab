@@ -178,6 +178,25 @@ def test_broken_support_veto_and_room_requirement_compile_through_generic_rules(
     assert native[1]["minimum"] == native[1]["maximum"] == 5.0
 
 
+def test_bear_short_resistance_test_count_under_three_compiles_to_reject_three_plus():
+    rule = new_rule(kind="REQUIRED", evidence="SR_RESISTANCE_TEST_COUNT")
+    rule.update(operator="LT", value=3.0, regime="BEAR", side="SHORT")
+    strategy, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(rule,),
+    )
+
+    assert not strategy["bull_short"].entry_rules
+    assert not strategy["bear_long"].entry_rules
+    native = strategy["bear_short"].entry_rules[0]
+    assert native["indicator"] == "SR_RESISTANCE_TEST_COUNT"
+    # Required value < 3 rejects the complement: 3 or more.
+    assert native["condition"] == "INSIDE"
+    assert native["minimum"] == 3.0
+    assert native["maximum"] > 1e300
+
+
 def test_support_resistance_rule_dependency_is_detected_from_any_rule_group():
     ordinary = new_rule(kind="REQUIRED", evidence="DI_SPREAD")
     sr = new_rule(kind="VETO", evidence="SR_NEAR_RESISTANCE")
