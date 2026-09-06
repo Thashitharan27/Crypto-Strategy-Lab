@@ -44,3 +44,16 @@ def test_every_rule_evidence_has_a_searchable_category_path():
         "Support & Resistance",
         "Advanced S/R",
     )
+    assert paths["SR_RESISTANCE_TEST_COUNT"] == (
+        "Support & Resistance",
+        "Advanced S/R",
+    )
+    assert paths["SR_BARS_SINCE_SUPPORT_TEST"] == (
+        "Support & Resistance",
+        "Advanced S/R",
+    )
+    assert EVIDENCE_LABELS["SR_SUPPORT_TEST_COUNT"] == "S/R — Support Test Count"
+    assert (
+        EVIDENCE_LABELS["SR_BARS_SINCE_RESISTANCE_TEST"]
+        == "S/R — Bars Since Resistance Test"
+    )
