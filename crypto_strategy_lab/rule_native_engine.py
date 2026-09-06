@@ -35,6 +35,10 @@ _SR_NUMERIC_FIELDS = {
     "SR_RESISTANCE_DISTANCE_ATR": "nearest_resistance_distance_atr",
     "SR_SUPPORT_REJECTION_ATR": "support_rejection_atr",
     "SR_RESISTANCE_REJECTION_ATR": "resistance_rejection_atr",
+    "SR_SUPPORT_TEST_COUNT": "support_test_count",
+    "SR_RESISTANCE_TEST_COUNT": "resistance_test_count",
+    "SR_BARS_SINCE_SUPPORT_TEST": "bars_since_support_test",
+    "SR_BARS_SINCE_RESISTANCE_TEST": "bars_since_resistance_test",
 }
 _SR_RULE_INDICATORS = frozenset((*_SR_CATEGORICAL_FIELDS, *_SR_NUMERIC_FIELDS))
 
