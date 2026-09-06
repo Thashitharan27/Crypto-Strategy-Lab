@@ -68,6 +68,16 @@ EVIDENCE_LABELS = {
     "CLOSE_LOCATION": "Close Location",
     "MOMENTUM": "Momentum Return",
     "VWAP_DISTANCE": "VWAP Distance (ATR)",
+    "MR_TRADE_STRETCH_ATR": "MR — Trade-Direction Stretch (ATR)",
+    "MR_DISTANCE_ATR": "MR — Price − Mean (ATR)",
+    "MR_MOTION": "MR — Motion",
+    "MR_BB_ZSCORE": "MR — BB Z-Score",
+    "MR_BB_LOCATION": "MR — BB Location",
+    "MR_SIGNAL": "MR — Signal",
+    "MR_TRADE_ALIGNMENT": "MR — Trade Alignment",
+    "MR_STRENGTH": "MR — Strength",
+    "MR_STATE": "MR — State",
+    "MR_DISTANCE_CHANGE_ATR": "MR — Distance Change (ATR, 1 bar)",
     "SR_NEAR_SUPPORT": "S/R — Near Support",
     "SR_NEAR_RESISTANCE": "S/R — Near Resistance",
     "SR_INSIDE_SUPPORT_ZONE": "S/R — Inside Support Zone",
@@ -142,6 +152,21 @@ EVIDENCE_GROUPS = (
             "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
             "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
             "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
+        ),
+    ),
+    (
+        "Mean Reversion",
+        (
+            "MR_TRADE_STRETCH_ATR",
+            "MR_DISTANCE_ATR",
+            "MR_MOTION",
+            "MR_BB_ZSCORE",
+            "MR_BB_LOCATION",
+            "MR_SIGNAL",
+            "MR_TRADE_ALIGNMENT",
+            "MR_STRENGTH",
+            "MR_STATE",
+            "MR_DISTANCE_CHANGE_ATR",
         ),
     ),
     (
@@ -256,6 +281,23 @@ EVIDENCE_MENU_TREE = (
                     "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
                     "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
                 ),
+            ),
+        ),
+    ),
+    (
+        "Mean Reversion",
+        (
+            (
+                "Entry Location",
+                ("MR_TRADE_STRETCH_ATR", "MR_DISTANCE_ATR", "MR_MOTION"),
+            ),
+            (
+                "Confirmation",
+                ("MR_BB_ZSCORE", "MR_BB_LOCATION", "MR_SIGNAL", "MR_TRADE_ALIGNMENT"),
+            ),
+            (
+                "Advanced",
+                ("MR_STRENGTH", "MR_STATE", "MR_DISTANCE_CHANGE_ATR"),
             ),
         ),
     ),
@@ -737,7 +779,7 @@ class RuleStrategyBuilder(QWidget):
         row.addStretch()
         required_layout.addLayout(row)
         evidence_note = QLabel(
-            "Evidence is grouped and searchable; common S/R choices are shown before advanced S/R details. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. A REQUIRED rule rejects a trade when its evidence is missing; missing VETO evidence does not create a rejection. Any S/R rule automatically enables causal S/R calculation; configure its calculation settings on Research Features."
+            "Evidence is grouped and searchable; Mean Reversion and common S/R choices are shown before advanced details. MR Trade-Direction Stretch is positive when price is extended in the candidate trade direction, for both LONG and SHORT. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. A REQUIRED rule rejects a trade when its evidence is missing; missing VETO evidence does not create a rejection. Any MR or S/R rule automatically enables its causal calculation; configure calculation settings on Research Features."
         )
         evidence_note.setWordWrap(True)
         evidence_note.setStyleSheet("color:#52606d")

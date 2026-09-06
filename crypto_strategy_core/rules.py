@@ -1,6 +1,6 @@
 """Canonical strategy-rule contract shared by research and live runtimes."""
 
-CORE_CONTRACT_VERSION = 1
+CORE_CONTRACT_VERSION = 2
 
 PROFILE_KEYS = (
     "bull_long",
@@ -35,6 +35,16 @@ RULE_INDICATORS = (
     "CLOSE_LOCATION",
     "MOMENTUM",
     "VWAP_DISTANCE",
+    "MR_TRADE_STRETCH_ATR",
+    "MR_DISTANCE_ATR",
+    "MR_MOTION",
+    "MR_BB_ZSCORE",
+    "MR_BB_LOCATION",
+    "MR_SIGNAL",
+    "MR_TRADE_ALIGNMENT",
+    "MR_STRENGTH",
+    "MR_STATE",
+    "MR_DISTANCE_CHANGE_ATR",
     "SR_NEAR_SUPPORT",
     "SR_NEAR_RESISTANCE",
     "SR_INSIDE_SUPPORT_ZONE",

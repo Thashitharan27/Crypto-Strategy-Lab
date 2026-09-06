@@ -22,6 +22,7 @@ def test_evidence_picker_uses_compact_top_level_categories():
         "Directional / DI",
         "Trend & Volatility",
         "Momentum & Price",
+        "Mean Reversion",
         "Futures",
         "Support & Resistance",
     )
@@ -38,6 +39,9 @@ def test_evidence_picker_uses_compact_top_level_categories():
 def test_every_rule_evidence_has_a_searchable_category_path():
     paths = _evidence_menu_paths()
     assert set(paths) == set(RULE_INDICATORS)
+    assert paths["MR_TRADE_STRETCH_ATR"] == ("Mean Reversion", "Entry Location")
+    assert paths["MR_SIGNAL"] == ("Mean Reversion", "Confirmation")
+    assert paths["MR_STATE"] == ("Mean Reversion", "Advanced")
     assert paths["FUNDING_RATE_BPS"] == ("Futures", "Funding")
     assert paths["OI_CHANGE_PCT_1H"] == ("Futures", "Open Interest & Positioning")
     assert paths["SR_SUPPORT_STATE"] == (

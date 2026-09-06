@@ -56,7 +56,8 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
         assert "Paste Overrides" not in buttons
         assert "Show Support / Resistance veto presets" not in checks
         assert "Evidence is grouped and searchable" in labels
-        assert "common S/R choices are shown before advanced S/R details" in labels
+        assert "MR Trade-Direction Stretch is positive" in labels
+        assert "Any MR or S/R rule automatically enables its causal calculation" in labels
     finally:
         window.close()
 
@@ -179,6 +180,26 @@ def test_sr_veto_rule_is_categorical_and_automatically_enables_sr_features():
         assert native["condition"] == "INSIDE"
         assert native["minimum"] == native["maximum"] == 1.0
         assert not config.strategy.profiles["bull_short"].entry_rules
+    finally:
+        window.close()
+
+
+def test_mean_reversion_rule_automatically_enables_mr_context():
+    _app, window = _window()
+    try:
+        window.rule_builder.enable_mr.setChecked(False)
+        window.feature_form.widgets["mean_reversion_track_atr_distance"].setChecked(False)
+        rule = new_rule(kind="VETO", evidence="MR_TRADE_STRETCH_ATR")
+        rule.update(operator="GTE", value=1.25, regime="ALL", side="ALL")
+        window.rule_builder.veto_rules.set_rules((rule,))
+
+        config = window.build_config()
+        assert config.strategy.enable_mean_reversion_analysis is True
+        assert config.features.mean_reversion_track_atr_distance is True
+        native = config.strategy.profiles["bull_long"].entry_rules[0]
+        assert native["indicator"] == "MR_TRADE_STRETCH_ATR"
+        assert native["condition"] == "INSIDE"
+        assert native["minimum"] == 1.25
     finally:
         window.close()
 
