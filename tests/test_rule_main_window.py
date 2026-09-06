@@ -46,7 +46,7 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
         )
 
         assert "Strategy Summary" in group_titles
-        assert "1. Direction & Market Eligibility" in group_titles
+        assert "1. Signal Strategy & Market Eligibility" in group_titles
         assert "2. Entry Rules — all applicable rules must pass" in group_titles
         assert "3. Avoid / Veto Rules — matching conditions reject the trade" in group_titles
         assert "DI Pressure State" not in group_titles
@@ -65,11 +65,13 @@ def test_direction_selector_contains_di_control_and_dmi_trend_strategy():
     _app, window = _window()
     try:
         selector = window.rule_builder.direction_mode
-        assert selector.count() == 2
+        assert selector.count() == 3
         assert selector.currentData() == "DI"
         assert selector.currentText() == "DI Direction"
         assert selector.findData("DMI_TREND") >= 0
         assert selector.itemText(selector.findData("DMI_TREND")) == "DMI Trend — Baseline"
+        assert selector.findData("MACD_PULLBACK") >= 0
+        assert selector.itemText(selector.findData("MACD_PULLBACK")) == "MACD Pullback — 12/26/9"
         assert selector.findData("LONG_ONLY") == -1
         assert selector.findData("SHORT_ONLY") == -1
     finally:
