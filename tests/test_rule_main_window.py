@@ -183,6 +183,24 @@ def test_sr_veto_rule_is_categorical_and_automatically_enables_sr_features():
         window.close()
 
 
+def test_mean_reversion_rule_automatically_enables_mr_context():
+    _app, window = _window()
+    try:
+        window.rule_builder.enable_mr.setChecked(False)
+        rule = new_rule(kind="VETO", evidence="MR_TRADE_STRETCH_ATR")
+        rule.update(operator="GTE", value=1.25, regime="ALL", side="ALL")
+        window.rule_builder.veto_rules.set_rules((rule,))
+
+        config = window.build_config()
+        assert config.strategy.enable_mean_reversion_analysis is True
+        native = config.strategy.profiles["bull_long"].entry_rules[0]
+        assert native["indicator"] == "MR_TRADE_STRETCH_ATR"
+        assert native["condition"] == "INSIDE"
+        assert native["minimum"] == 1.25
+    finally:
+        window.close()
+
+
 def test_sr_numeric_room_rule_uses_same_entry_rule_table():
     _app, window = _window()
     try:
