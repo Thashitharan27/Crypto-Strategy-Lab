@@ -162,3 +162,30 @@ def test_macd_and_ema_rule_evidence_is_reusable_outside_macd_signal_strategy():
     assert engine._strategy_profile_rule_value(
         0, "SHORT", None, "MACD_ZERO_STATE"
     ) == 2.0
+
+
+def test_macd_signal_features_are_causal_and_have_explicit_warmup():
+    first = object.__new__(RuleAwareDataLakeProductionBacktestEngine)
+    second = object.__new__(RuleAwareDataLakeProductionBacktestEngine)
+    close = np.linspace(100.0, 160.0, 260, dtype=float)
+    first.close = close.copy()
+    second.close = close.copy()
+    second.close[-1] = 999.0
+
+    first._configure_signal_features()
+    second._configure_signal_features()
+
+    assert np.isnan(first.ema_200_values[:199]).all()
+    assert np.isfinite(first.ema_200_values[199:]).all()
+    assert np.isnan(first.macd_signal_values[:33]).all()
+    assert np.isfinite(first.macd_signal_values[33:]).all()
+
+    # Changing a future close cannot change any already-completed prior value.
+    np.testing.assert_allclose(
+        first.ema_200_values[:-1], second.ema_200_values[:-1], equal_nan=True
+    )
+    np.testing.assert_allclose(
+        first.macd_histogram_values[:-1],
+        second.macd_histogram_values[:-1],
+        equal_nan=True,
+    )
