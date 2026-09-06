@@ -116,6 +116,16 @@ class MarketDataStore:
             if current_mtime != previous_mtime:
                 changed_directories.append(directory_text)
 
+        if not changed_directories and not removed_directories:
+            count = self.catalog.archive_count(self.raw_root)
+            self.last_catalog_refresh = {
+                "mode": "incremental",
+                "archive_count": count,
+                "directories_checked": len(snapshot),
+                "directories_changed": 0,
+            }
+            return count
+
         # Keep only the highest removed subtree roots; deleting a parent already
         # removes every catalog member and directory snapshot beneath it.
         removed_roots = {
