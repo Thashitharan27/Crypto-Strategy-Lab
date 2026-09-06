@@ -19,6 +19,28 @@ evaluated first, followed by Flip rules; signals matching neither trade in the
 normal DI direction. Use **Add rule** or **Remove selected** to manage any
 number of rules.
 
+## Signal strategies
+
+The Strategy Builder separates **signal generation** from reusable Entry/Veto
+evidence. The current signal strategies are:
+
+- **DI Direction** — raw +DI/-DI chooses LONG or SHORT.
+- **DMI Trend — Baseline** — keeps DI direction and adds the fixed ADX/pressure
+  confirmations used by the existing control strategy.
+- **MACD Pullback — 12/26/9** — creates a candidate only on a fresh MACD/signal
+  crossover on the pullback side of zero: bullish below zero or bearish above
+  zero.
+
+MACD Pullback deliberately does **not** hardcode EMA-200 or support/resistance
+confirmation. EMA-50/100/200 distance, MACD line/signal/histogram/change,
+crossover state, zero-line state, S/R, ADX, DI, futures positioning and other
+evidence remain generic researcher-authored rules. This allows the Lab to test
+whether a confirmation actually adds edge instead of assuming the combination
+from a published strategy is optimal.
+
+Completed trades record the active signal strategy plus EMA/MACD entry context
+so the normal research reports can compare performance by those conditions.
+
 ## DI Direction & Pressure
 
 DI direction selects Long when +DI is above -DI and Short when -DI is above
