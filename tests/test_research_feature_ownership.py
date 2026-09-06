@@ -134,6 +134,26 @@ def test_presets_control_only_explicit_optional_or_heavy_features():
         app.processEvents()
 
 
+def test_mr_rule_makes_mean_reversion_a_required_dependency():
+    app, window, _scroll = _window()
+    try:
+        apply_research_feature_ownership(window)
+        panel = window.research_features_panel
+        window.rule_builder.enable_mr.setChecked(False)
+
+        rule = new_rule(kind="VETO", evidence="MR_TRADE_STRETCH_ATR")
+        window.rule_builder.veto_rules.set_rules((rule,))
+        panel._sync_mr_requirement()
+
+        assert window.rule_builder.enable_mr.isChecked() is True
+        assert window.rule_builder.enable_mr.isEnabled() is False
+        assert panel.mr_card.status.text() == "REQUIRED BY STRATEGY"
+        assert "required by strategy rule" in window.rule_builder.enable_mr.text().lower()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_sr_rule_makes_support_resistance_a_required_dependency():
     app, window, _scroll = _window()
     try:
