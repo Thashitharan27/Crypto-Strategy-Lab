@@ -179,6 +179,8 @@ def test_macd_signal_features_are_causal_and_have_explicit_warmup():
     assert np.isfinite(first.ema_200_values[199:]).all()
     assert np.isnan(first.macd_signal_values[:33]).all()
     assert np.isfinite(first.macd_signal_values[33:]).all()
+    assert first.macd_cross_state[0] == "UNKNOWN"
+    assert first.macd_zero_state[0] == "UNKNOWN"
 
     # Changing a future close cannot change any already-completed prior value.
     np.testing.assert_allclose(
