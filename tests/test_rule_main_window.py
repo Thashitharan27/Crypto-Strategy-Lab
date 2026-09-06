@@ -187,12 +187,14 @@ def test_mean_reversion_rule_automatically_enables_mr_context():
     _app, window = _window()
     try:
         window.rule_builder.enable_mr.setChecked(False)
+        window.feature_form.widgets["mean_reversion_track_atr_distance"].setChecked(False)
         rule = new_rule(kind="VETO", evidence="MR_TRADE_STRETCH_ATR")
         rule.update(operator="GTE", value=1.25, regime="ALL", side="ALL")
         window.rule_builder.veto_rules.set_rules((rule,))
 
         config = window.build_config()
         assert config.strategy.enable_mean_reversion_analysis is True
+        assert config.features.mean_reversion_track_atr_distance is True
         native = config.strategy.profiles["bull_long"].entry_rules[0]
         assert native["indicator"] == "MR_TRADE_STRETCH_ATR"
         assert native["condition"] == "INSIDE"
