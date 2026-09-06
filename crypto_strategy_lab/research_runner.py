@@ -179,6 +179,24 @@ class ResearchRunner:
         timings: dict[str, float] = {}
         before = dict(getattr(self.data_store, "canonical_cache_events", {}))
 
+        if refresh_catalog:
+            emit_progress(
+                progress,
+                kind="stage",
+                phase="catalog_refresh",
+                label="Refreshing market-data catalog",
+                detail=(
+                    "Checking the persistent directory index for new, removed, "
+                    "or changed Binance archives."
+                ),
+            )
+            started = time.perf_counter()
+            self.data_store.refresh_catalog()
+            timings["catalog_refresh"] = time.perf_counter() - started
+            # Discovery has already completed. Keep load_backtest_bundle from
+            # repeating it inside the broader data/features stage.
+            refresh_catalog = False
+
         emit_progress(
             progress,
             kind="stage",
