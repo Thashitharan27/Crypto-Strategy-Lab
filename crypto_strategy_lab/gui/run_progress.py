@@ -42,6 +42,20 @@ class RunProgressRelay(QObject):
         stage = self.window.stage
         detail = self.window.run_progress_detail
         status = getattr(self.window, "run_progress_status", None)
+
+        # Automatic request validation belongs to Run Readiness, not the
+        # backtest progress strip. Timeframe/date changes can trigger this
+        # validator in the background; showing its stage here makes a ready
+        # request look like a strategy run is still active. If the researcher
+        # pressed Run while validation is in flight, _validation_auto_run flips
+        # true and the same event is allowed through as execution preflight.
+        if (
+            kind == "stage"
+            and payload.get("phase") == "required_data_validation"
+            and not bool(getattr(self.window, "_validation_auto_run", False))
+        ):
+            return
+
         if status is not None:
             status.show()
 
