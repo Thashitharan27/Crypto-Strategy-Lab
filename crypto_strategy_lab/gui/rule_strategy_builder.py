@@ -47,6 +47,7 @@ from crypto_strategy_lab.strategy_rule_model import (
 EVIDENCE_LABELS = {
     "DI_SPREAD": "DI Spread",
     "DIRECTIONAL_DI": "Directional DI",
+    "DIRECTIONAL_DI_RATIO": "Directional DI Ratio",
     "DI_PRESSURE_STATE": "DI Pressure State",
     "DI_SPREAD_CHANGE": "DI Spread Change",
     "DIRECTIONAL_DI_CHANGE": "Directional DI Change",
@@ -132,6 +133,7 @@ EVIDENCE_GROUPS = (
         "Directional / DI",
         (
             "DIRECTIONAL_DI",
+            "DIRECTIONAL_DI_RATIO",
             "DI_SPREAD",
             "DI_PRESSURE_STATE",
             "DIRECTIONAL_DI_CHANGE",
