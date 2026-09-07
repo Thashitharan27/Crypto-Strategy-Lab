@@ -47,8 +47,8 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
 
         assert "Strategy Summary" in group_titles
         assert "1. Signal Strategy & Market Eligibility" in group_titles
-        assert "2. Entry Rules — all applicable rules must pass" in group_titles
-        assert "3. Avoid / Veto Rules — matching conditions reject the trade" in group_titles
+        assert "2. Entry Groups — ALL conditions inside; ANY group may qualify" in group_titles
+        assert "3. Avoid / Veto Groups — ALL conditions inside; ANY group vetoes" in group_titles
         assert "DI Pressure State" not in group_titles
         assert "Support / Resistance Veto Presets" not in group_titles
         assert "Profile Overrides" not in group_titles
@@ -99,7 +99,7 @@ def test_evidence_picker_groups_every_current_indicator_once_and_preserves_ids()
         rule = new_rule(kind="REQUIRED", evidence="SR_ROOM_IN_DIRECTION_ATR")
         table = window.rule_builder.required_rules
         table.set_rules((rule,))
-        picker = table.cellWidget(0, 0)
+        picker = table.cellWidget(0, 1)
         assert isinstance(picker, EvidenceComboBox)
         assert picker.currentData() == "SR_ROOM_IN_DIRECTION_ATR"
         assert picker.findData("DI_SPREAD") >= 0
@@ -138,11 +138,11 @@ def test_di_pressure_state_is_authored_as_categorical_entry_rule():
         table = window.rule_builder.required_rules
         table.set_rules((rule,))
 
-        assert isinstance(table.cellWidget(0, 1), QComboBox)
-        assert table.cellWidget(0, 1).currentData() == "IS"
         assert isinstance(table.cellWidget(0, 2), QComboBox)
-        assert table.cellWidget(0, 2).currentData() == "EXPANDING"
-        assert isinstance(table.cellWidget(0, 3), QLabel)
+        assert table.cellWidget(0, 2).currentData() == "IS"
+        assert isinstance(table.cellWidget(0, 3), QComboBox)
+        assert table.cellWidget(0, 3).currentData() == "EXPANDING"
+        assert isinstance(table.cellWidget(0, 4), QLabel)
 
         config = window.build_config()
         native = config.strategy.profiles["bull_long"].entry_rules[0]
@@ -165,11 +165,11 @@ def test_sr_veto_rule_is_categorical_and_automatically_enables_sr_features():
         table = window.rule_builder.veto_rules
         table.set_rules((rule,))
 
-        assert isinstance(table.cellWidget(0, 1), QComboBox)
-        assert table.cellWidget(0, 1).currentData() == "IS"
         assert isinstance(table.cellWidget(0, 2), QComboBox)
-        assert table.cellWidget(0, 2).currentData() == "TRUE"
-        assert isinstance(table.cellWidget(0, 3), QLabel)
+        assert table.cellWidget(0, 2).currentData() == "IS"
+        assert isinstance(table.cellWidget(0, 3), QComboBox)
+        assert table.cellWidget(0, 3).currentData() == "TRUE"
+        assert isinstance(table.cellWidget(0, 4), QLabel)
 
         config = window.build_config()
         assert config.features.enable_support_resistance_analysis is True
@@ -295,5 +295,80 @@ def test_long_only_trading_uses_permissions_without_forcing_direction():
             not profile.flip_direction
             for profile in config.strategy.profiles.values()
         )
+    finally:
+        window.close()
+
+
+def test_rule_builder_groups_conditions_and_keeps_scope_owned_by_group():
+    _app, window = _window()
+    try:
+        from PySide6.QtWidgets import QLineEdit
+
+        table = window.rule_builder.veto_rules
+        first = new_rule(
+            kind="VETO",
+            evidence="MR_STATE",
+            group_id="mr-pocket",
+            group_name="Above mean and extending",
+            regime="BULL",
+            side="LONG",
+        )
+        first.update(operator="IS", value="ABOVE_MEAN")
+        second = new_rule(
+            kind="VETO",
+            evidence="MR_MOTION",
+            group_id="mr-pocket",
+            group_name="Above mean and extending",
+            regime="BULL",
+            side="LONG",
+        )
+        second.update(operator="IS", value="AWAY_FROM_MEAN")
+        table.set_rules((first, second))
+
+        assert table.group_count() == 1
+        assert isinstance(table.cellWidget(0, 0), QLineEdit)
+        assert table.cellWidget(0, 0).text() == "Above mean and extending"
+        assert table.cellWidget(1, 0).text() == "Above mean and extending"
+
+        # Editing group scope on one condition updates the whole group.
+        market = table.cellWidget(0, 5)
+        market.setCurrentIndex(market.findData("BEAR"))
+        assert table.cellWidget(1, 5).currentData() == "BEAR"
+
+        side = table.cellWidget(1, 6)
+        side.setCurrentIndex(side.findData("SHORT"))
+        assert table.cellWidget(0, 6).currentData() == "SHORT"
+
+        name = table.cellWidget(1, 0)
+        name.setText("Renamed pocket")
+        assert table.cellWidget(0, 0).text() == "Renamed pocket"
+
+        rules = table.rules()
+        assert len({rule["group_id"] for rule in rules}) == 1
+        assert {rule["regime"] for rule in rules} == {"BEAR"}
+        assert {rule["side"] for rule in rules} == {"SHORT"}
+        assert {rule["group_name"] for rule in rules} == {"Renamed pocket"}
+    finally:
+        window.close()
+
+
+def test_add_condition_reuses_selected_group_but_add_group_creates_or_alternative():
+    _app, window = _window()
+    try:
+        table = window.rule_builder.required_rules
+        table.add_group()
+        first_group = table.rules()[0]["group_id"]
+        table.selectRow(0)
+        table.add_condition_to_group()
+
+        rules = table.rules()
+        assert len(rules) == 2
+        assert {rule["group_id"] for rule in rules} == {first_group}
+
+        table.add_group()
+        rules = table.rules()
+        assert len(rules) == 3
+        assert table.group_count() == 2
+        assert rules[-1]["group_id"] != first_group
     finally:
         window.close()
