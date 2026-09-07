@@ -387,3 +387,38 @@ def test_condition_group_rejects_mixed_scope_members():
     )
     with pytest.raises(ValueError, match="same market and side scope"):
         normalize_rules((first, second), kind="VETO")
+
+
+def test_mixed_scope_legacy_entry_rules_expand_without_changing_profile_logic():
+    global_rule = {
+        key: value
+        for key, value in new_rule(kind="REQUIRED", evidence="ADX").items()
+        if key not in {"group_id", "group_name"}
+    }
+    global_rule.update(regime="ALL", side="ALL", operator="GTE", value=20.0)
+
+    bull_long_rule = {
+        key: value
+        for key, value in new_rule(kind="REQUIRED", evidence="RSI").items()
+        if key not in {"group_id", "group_name"}
+    }
+    bull_long_rule.update(
+        regime="BULL", side="LONG", operator="LTE", value=70.0
+    )
+
+    migrated = normalize_rules(
+        (global_rule, bull_long_rule), kind="REQUIRED"
+    )
+
+    bull_long = [
+        rule for rule in migrated
+        if rule["regime"] == "BULL" and rule["side"] == "LONG"
+    ]
+    bear_long = [
+        rule for rule in migrated
+        if rule["regime"] == "BEAR" and rule["side"] == "LONG"
+    ]
+
+    assert {rule["evidence"] for rule in bull_long} == {"ADX", "RSI"}
+    assert len({rule["group_id"] for rule in bull_long}) == 1
+    assert {rule["evidence"] for rule in bear_long} == {"ADX"}
