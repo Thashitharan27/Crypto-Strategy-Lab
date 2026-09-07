@@ -10,6 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_core.candles import directional_di_ratio
 from crypto_strategy_lab.data_lake_production_engine import (
     DataLakeProductionBacktestEngine,
 )
@@ -216,14 +217,18 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
 
     def _prepared_pressure_value(self, i, direction, indicator):
         """Read directional/pressure rule evidence from already-prepared arrays."""
-        if indicator == "DIRECTIONAL_DI":
+        if indicator in {"DIRECTIONAL_DI", "DIRECTIONAL_DI_RATIO"}:
             if direction == "LONG":
-                value = float(self.plus_di_values[i])
+                directional = float(self.plus_di_values[i])
+                opposing = float(self.minus_di_values[i])
             elif direction == "SHORT":
-                value = float(self.minus_di_values[i])
+                directional = float(self.minus_di_values[i])
+                opposing = float(self.plus_di_values[i])
             else:
                 return np.nan
-            return value if np.isfinite(value) else np.nan
+            if indicator == "DIRECTIONAL_DI":
+                return directional if np.isfinite(directional) else np.nan
+            return directional_di_ratio(directional, opposing)
 
         if indicator == "DI_SPREAD_CHANGE":
             value = float(self.di_pressure_spread_change[i])
@@ -395,7 +400,7 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
             if not np.isfinite(current) or not np.isfinite(previous):
                 return np.nan
             return current - previous
-        if indicator == "DIRECTIONAL_DI":
+        if indicator in {"DIRECTIONAL_DI", "DIRECTIONAL_DI_RATIO"}:
             return self._prepared_pressure_value(i, direction, indicator)
         if indicator in {
             "DI_PRESSURE_STATE",
