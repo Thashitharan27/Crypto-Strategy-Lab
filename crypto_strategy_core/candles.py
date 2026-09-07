@@ -228,6 +228,20 @@ def directional_pressure_features(
     }
 
 
+def directional_di_ratio(directional_di: float, opposing_di: float) -> float:
+    """Return trade-direction DI dominance, or NaN when the ratio is undefined."""
+    directional = float(directional_di)
+    opposing = float(opposing_di)
+    if (
+        not np.isfinite(directional)
+        or not np.isfinite(opposing)
+        or directional < 0
+        or opposing <= 0
+    ):
+        return np.nan
+    return directional / opposing
+
+
 def directional_rule_evidence(
     plus_di: Sequence[float],
     minus_di: Sequence[float],
@@ -245,6 +259,7 @@ def directional_rule_evidence(
     plus = float(plus_di[index])
     minus = float(minus_di[index])
     directional = plus if side == "LONG" else minus
+    opposing = minus if side == "LONG" else plus
     directional_change = (
         features["long_directional_di_change"][index]
         if side == "LONG"
@@ -262,6 +277,7 @@ def directional_rule_evidence(
     )
     return {
         "DIRECTIONAL_DI": directional,
+        "DIRECTIONAL_DI_RATIO": directional_di_ratio(directional, opposing),
         "DI_SPREAD_CHANGE": float(features["di_pressure_spread_change"][index]),
         "DIRECTIONAL_DI_CHANGE": float(directional_change),
         "OPPOSING_DI_CHANGE": float(opposing_change),
