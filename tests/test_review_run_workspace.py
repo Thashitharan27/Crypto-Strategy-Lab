@@ -281,6 +281,88 @@ def test_completion_wrappers_remain_qobject_bound_after_full_app_composition():
         window.close()
 
 
+def test_timeframe_change_clears_previous_completed_progress():
+    _app, window = _window()
+    try:
+        window.stage.setText("COMPLETED")
+        window.run_progress_status.show()
+        assert not window.run_progress_status.isHidden()
+
+        window._invalidate_range_validation()
+
+        assert window.run_progress_status.isHidden()
+        assert window.readiness_state.text() == "CHECKING DATA…"
+    finally:
+        window.close()
+
+
+def test_passive_request_validation_does_not_take_over_run_progress_strip():
+    _app, window = _window()
+    try:
+        status = window.run_progress_status
+        original_stage = window.stage.text()
+        event = {
+            "kind": "stage",
+            "phase": "required_data_validation",
+            "label": "VALIDATING SELECTED CANDLE RANGE",
+            "detail": "Checking actual candle continuity before strategy execution.",
+        }
+
+        window._validation_auto_run = False
+        window._run_progress_relay.render(event)
+        assert status.isHidden()
+        assert window.stage.text() == original_stage
+
+        window._validation_auto_run = True
+        window._run_progress_relay.render(event)
+        assert not status.isHidden()
+        assert window.stage.text() == "VALIDATING SELECTED CANDLE RANGE"
+    finally:
+        window.close()
+
+
+def test_completion_bridge_explicitly_requests_thread_shutdown():
+    _app, window = _window()
+    try:
+        from crypto_strategy_lab.gui.review_run_install import _ReviewRunCompletionBridge
+
+        class FinishedThread:
+            def __init__(self):
+                self.quit_calls = 0
+                self.delete_calls = 0
+
+            def quit(self):
+                self.quit_calls += 1
+
+            @staticmethod
+            def isRunning():
+                return False
+
+            @staticmethod
+            def isFinished():
+                return True
+
+            def deleteLater(self):
+                self.delete_calls += 1
+
+        thread = FinishedThread()
+        window._thread = thread
+        window._worker = None
+        bridge = _ReviewRunCompletionBridge(
+            window,
+            window.review_run_workspace,
+            lambda result: result,
+            lambda message: message,
+        )
+
+        result = object()
+        assert bridge.finished(result) is result
+        assert thread.quit_calls == 1
+        assert window._thread is None
+    finally:
+        window.close()
+
+
 def test_progress_is_hidden_when_idle_and_revealed_by_real_run_events():
     _app, window = _window()
     try:
