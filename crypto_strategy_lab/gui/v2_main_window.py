@@ -1782,15 +1782,23 @@ class MainWindow(QMainWindow):
         if hasattr(self, "current_research"):
             self._refresh_summary_from_widgets()
 
-    def start_run(self):
-        try:
-            request, config = self.request_model(), self.build_config()
-            config.validate()
-        except Exception as exc:
-            QMessageBox.warning(
-                self, "Invalid research request", str(exc)
-            )
-            return
+    def _start_run_snapshot(self, request, config):
+        """Launch exactly the immutable request/config snapshot supplied by the caller.
+
+        Higher GUI layers may need to validate candle availability before execution.
+        They must not rebuild strategy authoring after that validation completes:
+        doing so can make the visible rules and the actually executed run drift apart.
+        This boundary therefore accepts one already-built config and hands that exact
+        object to RunWorker.
+        """
+        config.validate()
+        thread = getattr(self, "_thread", None)
+        if thread is not None:
+            try:
+                if thread.isRunning():
+                    raise RuntimeError("A research run is already active")
+            except AttributeError:
+                raise RuntimeError("A research run is already active")
         self.run_button.setEnabled(False)
         self.progress.setRange(0, 0)
         self.stage.setText("Native research executing")
@@ -1803,6 +1811,17 @@ class MainWindow(QMainWindow):
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
         self._thread.start()
+
+    def start_run(self):
+        try:
+            request, config = self.request_model(), self.build_config()
+            config.validate()
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Invalid research request", str(exc)
+            )
+            return
+        self._start_run_snapshot(request, config)
 
     def _finished(self, result):
         self.run_button.setEnabled(True)
