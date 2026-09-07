@@ -153,14 +153,18 @@ def test_readiness_drives_primary_action_without_changing_run_path():
 def test_completed_thread_lifecycle_restores_idle_run_action():
     _app, window = _window()
     try:
-        from PySide6.QtCore import QObject, QThread
         from crypto_strategy_lab.gui.review_run_install import (
             _complete_run_thread_lifecycle,
         )
 
+        class ActiveThread:
+            @staticmethod
+            def isRunning():
+                return True
+
         workspace = window.review_run_workspace
-        thread = QThread(window)
-        worker = QObject()
+        thread = ActiveThread()
+        worker = object()
         window._thread = thread
         window._worker = worker
         window._set_readiness(
@@ -176,6 +180,78 @@ def test_completed_thread_lifecycle_restores_idle_run_action():
         assert window._worker is None
         assert window.run_button.text() == "Run Backtest"
         assert window.run_button.isEnabled()
+    finally:
+        window.close()
+
+
+def test_second_run_ignores_stale_finished_thread_and_restores_clean_validation_state():
+    _app, window = _window()
+    try:
+        class ThreadState:
+            def __init__(self, *, running: bool, finished: bool):
+                self.running = running
+                self.finished = finished
+
+            def isRunning(self):
+                return self.running
+
+            def isFinished(self):
+                return self.finished
+
+        class WorkerState:
+            def __init__(self, thread):
+                self._thread = thread
+
+            def thread(self):
+                return self._thread
+
+        workspace = window.review_run_workspace
+
+        # Reproduce the reported state after run #1: the completion UI is ready,
+        # but the old QThread/worker handles survived and validation progress from
+        # the next request has already been painted.
+        stale_thread = ThreadState(running=False, finished=True)
+        window._thread = stale_thread
+        window._worker = WorkerState(stale_thread)
+        window.stage.setText("VALIDATING SELECTED CANDLE RANGE")
+        window.run_progress_status.show()
+
+        window._set_readiness(
+            "READY TO RUN",
+            "All required run data is validated.",
+            state="ready",
+        )
+
+        assert window._thread is None
+        assert window._worker is None
+        assert window.run_button.text() == "Run Backtest"
+        assert window.run_button.isEnabled()
+        assert window.run_progress_status.isHidden()
+
+        # A real validation is distinct from strategy execution.
+        validation_thread = ThreadState(running=True, finished=False)
+        window._validation_thread = validation_thread
+        workspace.refresh_readiness()
+        assert window.run_button.text() == "Validating…"
+        assert not window.run_button.isEnabled()
+
+        # Once validation is complete, the second run is available immediately.
+        window._validation_thread = None
+        window._set_readiness(
+            "READY TO RUN",
+            "All required run data is validated.",
+            state="ready",
+        )
+        assert window.run_button.text() == "Run Backtest"
+        assert window.run_button.isEnabled()
+
+        # Only an actually running backtest may render the Running state.
+        second_thread = ThreadState(running=True, finished=False)
+        window._thread = second_thread
+        window._worker = WorkerState(second_thread)
+        workspace.refresh_readiness()
+        assert window.run_button.text() == "Running…"
+        assert not window.run_button.isEnabled()
     finally:
         window.close()
 
