@@ -10,6 +10,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     infer_direction_mode,
     new_rule,
     normalize_rule,
+    normalize_rules,
 )
 
 
@@ -66,7 +67,9 @@ def test_dmi_trend_keeps_user_rules_separate_and_appends_them_after_baseline():
         "DI_PRESSURE_STATE",
     ]
     recovered = decompile_rules(strategy)
-    assert recovered["REQUIRED"] == (normalize_rule(user_rule),)
+    assert recovered["REQUIRED"] == normalize_rules(
+        (user_rule,), kind="REQUIRED"
+    )
 
 
 def test_raw_di_direction_remains_the_unfiltered_control_group():
