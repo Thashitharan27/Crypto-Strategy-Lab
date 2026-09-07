@@ -11,6 +11,7 @@ from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.gui.rule_strategy_builder import (
     EVIDENCE_GROUPS,
     EVIDENCE_LABELS,
+    _evidence_menu_paths,
 )
 from crypto_strategy_lab.rule_native_engine import (
     RuleAwareDataLakeProductionBacktestEngine,
@@ -25,6 +26,7 @@ def test_directional_di_ratio_is_registered_and_exposed_in_builder():
     assert directional_group.index("DIRECTIONAL_DI_RATIO") > directional_group.index(
         "DIRECTIONAL_DI"
     )
+    assert _evidence_menu_paths()["DIRECTIONAL_DI_RATIO"] == ("Directional / DI",)
 
 
 def test_directional_di_ratio_uses_trade_side_and_rejects_undefined_denominator():
