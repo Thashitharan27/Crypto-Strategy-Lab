@@ -256,6 +256,41 @@ class ReviewRunWorkspace(QWidget):
         self.output_path.setText(self.window.output_root.text())
         self.refresh_readiness()
 
+    @staticmethod
+    def _thread_is_running(thread) -> bool:
+        """Return real QThread activity instead of treating a stale handle as active."""
+        if thread is None:
+            return False
+        try:
+            return bool(thread.isRunning())
+        except (AttributeError, RuntimeError):
+            return False
+
+    def _clear_finished_run_handles(self) -> None:
+        """Retire stale completed-run handles that survived the completion bridge."""
+        thread = getattr(self.window, "_thread", None)
+        if thread is None or self._thread_is_running(thread):
+            return
+        try:
+            finished = bool(thread.isFinished())
+        except (AttributeError, RuntimeError):
+            finished = True
+        if not finished:
+            return
+
+        if getattr(self.window, "_thread", None) is thread:
+            self.window._thread = None
+
+        worker = getattr(self.window, "_worker", None)
+        if worker is None:
+            return
+        try:
+            worker_thread = worker.thread()
+        except (AttributeError, RuntimeError):
+            worker_thread = thread
+        if worker_thread is thread:
+            self.window._worker = None
+
     def refresh_readiness(self) -> None:
         source_title = getattr(self.window, "readiness_state", None)
         source_detail = getattr(self.window, "range_validation", None)
@@ -265,8 +300,13 @@ class ReviewRunWorkspace(QWidget):
         data_state = str(self.window._data_state()).upper()
         blocked = "BLOCK" in upper or "NOT READY" in upper or data_state == "BLOCKED"
         ready = "READY TO RUN" in upper or (data_state == "READY" and "CHECK" not in upper)
-        validation_running = getattr(self.window, "_validation_thread", None) is not None
-        run_running = getattr(self.window, "_thread", None) is not None
+
+        validation_thread = getattr(self.window, "_validation_thread", None)
+        run_thread = getattr(self.window, "_thread", None)
+        validation_running = self._thread_is_running(validation_thread)
+        run_running = self._thread_is_running(run_thread)
+        if run_thread is not None and not run_running:
+            self._clear_finished_run_handles()
 
         if blocked:
             style = "font-size:18px; font-weight:700; color:#a61b1b"
