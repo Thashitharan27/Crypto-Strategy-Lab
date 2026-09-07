@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 import numpy as np, pandas as pd
 from zoneinfo import ZoneInfo
+from crypto_strategy_core.candles import directional_di_ratio
 from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.adx import adx
 from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, DailyEntryMissedPolicy
@@ -505,6 +506,14 @@ class BacktestEngine:
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
         if indicator=="DI_SPREAD": return float(self.di_spread[i])
+        if indicator=="DIRECTIONAL_DI_RATIO":
+            if direction=="LONG":
+                directional=float(self.plus_di_values[i]); opposing=float(self.minus_di_values[i])
+            elif direction=="SHORT":
+                directional=float(self.minus_di_values[i]); opposing=float(self.plus_di_values[i])
+            else:
+                return np.nan
+            return directional_di_ratio(directional,opposing)
         if indicator=="ADX": return float(self.adx_values[i])
         if indicator=="ATR_PCT": return float(self.atr_pct_values[i])
         if indicator in {"EMA_50_DISTANCE_ATR","EMA_100_DISTANCE_ATR","EMA_200_DISTANCE_ATR"}:
