@@ -394,6 +394,22 @@ class MainWindow(RuleMainWindow):
         self.use_validated_range_button.setEnabled(False)
         self.use_validated_range_button.setToolTip("")
         self.use_strategy_bars_button.setEnabled(False)
+
+        # A new request starts a new readiness cycle. Do not carry the previous
+        # run's completed/failed progress strip into a timeframe/date change.
+        # Never hide a genuinely active backtest, but a completed run may still
+        # have a QThread object briefly while Qt finishes tearing it down.
+        progress_status = getattr(self, "run_progress_status", None)
+        run_thread = getattr(self, "_thread", None)
+        try:
+            run_thread_active = bool(run_thread is not None and run_thread.isRunning())
+        except (AttributeError, RuntimeError):
+            run_thread_active = False
+        stage_text = getattr(getattr(self, "stage", None), "text", lambda: "")().upper()
+        run_has_completed = any(word in stage_text for word in ("COMPLETED", "FAILED"))
+        if progress_status is not None and (not run_thread_active or run_has_completed):
+            progress_status.hide()
+
         self._set_readiness(
             "CHECKING DATA…",
             "The selected request changed. Exact candle continuity will be checked automatically; cached validation is reused.",

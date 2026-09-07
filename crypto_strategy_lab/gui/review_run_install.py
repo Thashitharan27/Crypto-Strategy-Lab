@@ -74,6 +74,14 @@ class _ReviewRunCompletionBridge(QObject):
         worker = getattr(self.window, "_worker", None)
         value = self.original_finished(result)
         self.window.run_button.setText("Run Backtest")
+        # RunWorker already wires finished -> QThread.quit. Request shutdown
+        # here as a defensive backstop too, so a delivered run result cannot
+        # leave the next request blocked by a still-running teardown thread.
+        if thread is not None:
+            try:
+                thread.quit()
+            except (AttributeError, RuntimeError):
+                pass
         # The native handler enables the button when simulation/reporting is
         # complete. Keep it disabled until QThread itself has actually stopped.
         self.workspace.refresh_readiness()
@@ -86,6 +94,11 @@ class _ReviewRunCompletionBridge(QObject):
         worker = getattr(self.window, "_worker", None)
         value = self.original_failed(message)
         self.window.run_button.setText("Run Backtest")
+        if thread is not None:
+            try:
+                thread.quit()
+            except (AttributeError, RuntimeError):
+                pass
         self.workspace.refresh_readiness()
         self._watch_thread_finish(thread, worker)
         return value
