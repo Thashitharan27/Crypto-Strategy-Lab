@@ -70,6 +70,7 @@ class MainWindow(LegacyMainWindow):
         # rule widgets exist.
         super().__init__(startup_status=startup_status, service=service)
 
+        self._pending_run_snapshot = None
         self.rule_builder = RuleStrategyBuilder()
         self.base_execution_form = DataclassForm(
             ExecutionProfileConfig(), groups=EXECUTION_PROFILE_GROUPS
@@ -79,6 +80,53 @@ class MainWindow(LegacyMainWindow):
         self.rule_builder.changed.connect(self._refresh_summary_from_widgets)
         self.base_execution_form.changed.connect(self._refresh_summary_from_widgets)
         self.apply_config(self.config)
+
+    def _capture_run_snapshot(self):
+        """Freeze the exact visible request + config for one Run click."""
+        request = self.request_model()
+        config = self.build_config()
+        config.validate()
+        return request, config
+
+    def _set_pending_run_snapshot(self, request, config) -> None:
+        self._pending_run_snapshot = (request, config)
+
+    def _clear_pending_run_snapshot(self):
+        snapshot = getattr(self, "_pending_run_snapshot", None)
+        self._pending_run_snapshot = None
+        return snapshot
+
+    def _launch_pending_run_snapshot(self) -> bool:
+        """Launch the queued Run-click snapshot only if the UI still represents it.
+
+        Validation can take long enough for the researcher to edit rules in the
+        meantime. Never silently execute either the old or newly rebuilt strategy
+        in that case; cancel the queued launch and require a fresh Run click.
+        """
+        snapshot = self._clear_pending_run_snapshot()
+        if snapshot is None:
+            return False
+        request, config = snapshot
+        try:
+            current_request, current_config = self._capture_run_snapshot()
+        except Exception as exc:
+            QMessageBox.warning(self, "Invalid research request", str(exc))
+            return False
+
+        if (
+            self._request_key(current_request) != self._request_key(request)
+            or current_config != config
+        ):
+            self.run_button.setEnabled(True)
+            self.range_validation.setText(
+                "READY — the strategy/configuration changed while validation was "
+                "running. Press Run Backtest again to execute the visible setup."
+            )
+            self.range_validation.setStyleSheet("color:#52606d; font-weight:600")
+            return False
+
+        self._start_run_snapshot(request, config)
+        return True
 
     def _data_panel(self):
         """Add explicit request validation without making catalog refresh expensive."""
@@ -319,7 +367,7 @@ class MainWindow(LegacyMainWindow):
 
         if not hasattr(self.service, "required_data_quality"):
             if auto_run:
-                super().start_run()
+                self._launch_pending_run_snapshot()
             else:
                 self.range_validation.setText(
                     "Exact range validation is unavailable from the current application service."
@@ -371,6 +419,7 @@ class MainWindow(LegacyMainWindow):
         except Exception:
             current_key = None
         if current_key != request_key:
+            self._clear_pending_run_snapshot()
             self._invalidate_range_validation()
             self.range_validation.setText(
                 "STALE VALIDATION — the request changed while validation was running."
@@ -384,6 +433,7 @@ class MainWindow(LegacyMainWindow):
         self._refresh_summary_from_widgets()
 
         if self._quality_has_errors(report):
+            self._clear_pending_run_snapshot()
             self.stage.setText("BLOCKED — REQUIRED CANDLE COVERAGE")
             self.progress.setRange(0, 100)
             self.progress.setValue(0)
@@ -409,10 +459,11 @@ class MainWindow(LegacyMainWindow):
                 "Required strategy/intrabar candles passed validation."
             )
         if auto_run:
-            super().start_run()
+            self._launch_pending_run_snapshot()
 
     def _validation_failed(self, message: str) -> None:
         auto_run = self._validation_auto_run
+        self._clear_pending_run_snapshot()
         self._validation_thread = None
         self._validation_worker = None
         self._validation_request_key = None
@@ -552,12 +603,11 @@ class MainWindow(LegacyMainWindow):
         self.refresh_coverage()
 
     def start_run(self):
-        """Never enter strategy execution before exact required candles validate."""
+        """Run the exact visible rule/config snapshot after required-data validation."""
         if self._validation_thread is not None:
             return
         try:
-            request, config = self.request_model(), self.build_config()
-            config.validate()
+            request, config = self._capture_run_snapshot()
         except Exception as exc:
             QMessageBox.warning(self, "Invalid research request", str(exc))
             return
@@ -568,21 +618,24 @@ class MainWindow(LegacyMainWindow):
             request.intrabar_timeframe,
         )
         if catalog_state == "BLOCKED":
+            self._clear_pending_run_snapshot()
             self.range_validation.setText("BLOCKED AT CATALOG — " + detail)
             self.range_validation.setStyleSheet("color:#a61b1b; font-weight:600")
             QMessageBox.warning(self, "Required candle data unavailable", detail)
             return
 
+        self._set_pending_run_snapshot(request, config)
         key = self._request_key(request)
         if self._validated_request_key == key and self._validated_report is not None:
             if self._quality_has_errors(self._validated_report):
+                self._clear_pending_run_snapshot()
                 QMessageBox.warning(
                     self,
                     "Required candle range is incomplete",
                     "The current request is already validated as incomplete. Adjust the dates or source data before running.",
                 )
                 return
-            super().start_run()
+            self._launch_pending_run_snapshot()
             return
         self._begin_required_data_validation(auto_run=True)
 
