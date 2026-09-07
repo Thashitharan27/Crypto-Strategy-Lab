@@ -315,13 +315,57 @@ def normalize_rules(rules, *, kind: str) -> tuple[dict, ...]:
     if upper_kind not in RULE_KINDS:
         raise ValueError(f"unsupported strategy rule kind: {kind}")
 
-    for rule in normalized:
-        if rule["group_id"]:
-            continue
-        if upper_kind == "REQUIRED":
-            rule["group_id"] = "__legacy_required_group__"
-        else:
-            rule["group_id"] = f"__legacy_{upper_kind.lower()}_{rule['id']}__"
+    if upper_kind == "REQUIRED":
+        legacy = [rule for rule in normalized if not rule["group_id"]]
+        explicit = [rule for rule in normalized if rule["group_id"]]
+        if legacy:
+            scopes = {(rule["regime"], rule["side"]) for rule in legacy}
+            if len(scopes) == 1:
+                # The old rows already share one scope, so they can become one
+                # explicit conjunction without changing where it applies.
+                regime, side = next(iter(scopes))
+                group_id = f"__legacy_required_{regime.lower()}_{side.lower()}__"
+                for rule in legacy:
+                    rule["group_id"] = group_id
+            else:
+                # Mixed legacy scopes cannot be represented faithfully by simply
+                # OR-ing one group per authored scope. Expand the six mature
+                # regime/side profiles instead: each profile receives the exact
+                # conjunction of old REQUIRED rows that used to apply there.
+                expanded = []
+                for regime in REGIMES:
+                    for side in SIDES:
+                        applicable = [
+                            rule for rule in legacy
+                            if rule["regime"] in ("ALL", regime)
+                            and rule["side"] in ("ALL", side)
+                        ]
+                        if not applicable:
+                            continue
+                        group_id = (
+                            f"__legacy_required_{regime.lower()}_{side.lower()}__"
+                        )
+                        group_name = (
+                            f"Legacy Entry {regime.title()} {side.title()}"
+                        )
+                        for rule in applicable:
+                            clone = dict(rule)
+                            clone["id"] = (
+                                f"{rule['id']}__legacy__"
+                                f"{regime.lower()}_{side.lower()}"
+                            )
+                            clone["group_id"] = group_id
+                            clone["group_name"] = group_name
+                            clone["regime"] = regime
+                            clone["side"] = side
+                            expanded.append(clone)
+                normalized = [*explicit, *expanded]
+    else:
+        for rule in normalized:
+            if not rule["group_id"]:
+                rule["group_id"] = (
+                    f"__legacy_{upper_kind.lower()}_{rule['id']}__"
+                )
 
     group_meta: dict[str, dict[str, object]] = {}
     group_order: list[str] = []
