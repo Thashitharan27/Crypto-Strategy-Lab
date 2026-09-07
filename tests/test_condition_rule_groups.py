@@ -1,6 +1,16 @@
 from types import SimpleNamespace
 
+import numpy as np
+
 from crypto_strategy_lab.engine import BacktestEngine
+from crypto_strategy_lab.rule_native_engine import (
+    RuleAwareDataLakeProductionBacktestEngine,
+)
+from crypto_strategy_lab.strategy_rule_model import (
+    MARKET_PERMISSIONS,
+    compile_profiles,
+    new_rule,
+)
 
 
 class _GroupEngine(BacktestEngine):
@@ -160,3 +170,60 @@ def test_runtime_fallback_preserves_old_ungrouped_builder_semantics():
     )
     assert rejected
     assert detail.startswith("Veto Group matched:")
+
+
+def test_bull_long_mr_state_and_motion_veto_only_rejects_the_intersection():
+    group_id = "bull-long-mr-extension"
+    state = new_rule(
+        kind="VETO",
+        evidence="MR_STATE",
+        group_id=group_id,
+        group_name="Above mean and extending",
+        regime="BULL",
+        side="LONG",
+    )
+    state.update(operator="IS", value="ABOVE_MEAN")
+    motion = new_rule(
+        kind="VETO",
+        evidence="MR_MOTION",
+        group_id=group_id,
+        group_name="Above mean and extending",
+        regime="BULL",
+        side="LONG",
+    )
+    motion.update(operator="IS", value="AWAY_FROM_MEAN")
+
+    profiles, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        veto_rules=(state, motion),
+    )
+    profile = profiles["bull_long"]
+
+    engine = object.__new__(RuleAwareDataLakeProductionBacktestEngine)
+    engine.config = SimpleNamespace(enable_mean_reversion_analysis=True)
+    engine.mean_reversion_state = np.array(["ABOVE_MEAN"], dtype=object)
+    engine.mean_reversion_motion = np.array(["AWAY_FROM_MEAN"], dtype=object)
+
+    rejected, detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", profile, "REJECT", profile.reject_rule_match_mode
+    )
+    assert rejected
+    assert detail == "Veto Group matched: Above mean and extending"
+
+    # Same state without the second condition must remain tradable.
+    engine.mean_reversion_motion = np.array(["TOWARD_MEAN"], dtype=object)
+    rejected, detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", profile, "REJECT", profile.reject_rule_match_mode
+    )
+    assert not rejected
+    assert detail is None
+
+    # Same motion without ABOVE_MEAN must also remain tradable.
+    engine.mean_reversion_state = np.array(["NEAR_MEAN"], dtype=object)
+    engine.mean_reversion_motion = np.array(["AWAY_FROM_MEAN"], dtype=object)
+    rejected, detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", profile, "REJECT", profile.reject_rule_match_mode
+    )
+    assert not rejected
+    assert detail is None
