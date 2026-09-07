@@ -8,6 +8,7 @@ from crypto_strategy_core.candles import (
     directional_rule_evidence,
 )
 from crypto_strategy_core.rules import RULE_INDICATORS
+from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.gui.rule_strategy_builder import (
     EVIDENCE_GROUPS,
     EVIDENCE_LABELS,
@@ -71,6 +72,20 @@ def test_native_rule_runtime_uses_candidate_side_ratio():
     assert engine._strategy_profile_rule_value(
         0, "SHORT", profile, "DIRECTIONAL_DI_RATIO"
     ) == pytest.approx(2.0 / 3.0)
+    assert engine._strategy_profile_rule_value(
+        1, "SHORT", profile, "DIRECTIONAL_DI_RATIO"
+    ) == pytest.approx(1.5)
+
+
+def test_legacy_rule_runtime_keeps_directional_ratio_parity():
+    engine = object.__new__(BacktestEngine)
+    engine.plus_di_values = np.array([30.0, 20.0])
+    engine.minus_di_values = np.array([20.0, 30.0])
+    profile = SimpleNamespace()
+
+    assert engine._strategy_profile_rule_value(
+        0, "LONG", profile, "DIRECTIONAL_DI_RATIO"
+    ) == pytest.approx(1.5)
     assert engine._strategy_profile_rule_value(
         1, "SHORT", profile, "DIRECTIONAL_DI_RATIO"
     ) == pytest.approx(1.5)
