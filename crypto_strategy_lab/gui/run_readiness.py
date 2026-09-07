@@ -249,6 +249,7 @@ class MainWindow(SetupMainWindow):
                 raise ValueError("Start Date must be before End Date")
         except Exception as exc:
             if auto_run:
+                self._clear_pending_run_snapshot()
                 QMessageBox.warning(self, "Invalid research request", str(exc))
             self._set_readiness("NOT READY", str(exc), state="blocked")
             return
@@ -262,6 +263,7 @@ class MainWindow(SetupMainWindow):
             self._set_readiness("NOT READY", detail, state="blocked")
             self._refresh_run_data_view()
             if auto_run:
+                self._clear_pending_run_snapshot()
                 QMessageBox.warning(self, "Required candle data unavailable", detail)
             return
 
@@ -271,7 +273,7 @@ class MainWindow(SetupMainWindow):
                 "The current application service cannot perform exact candle-range validation.",
             )
             if auto_run:
-                super().start_run()
+                self._launch_pending_run_snapshot()
             return
 
         self._validation_request_key = self._request_key(request)

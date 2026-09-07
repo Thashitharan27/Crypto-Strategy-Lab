@@ -689,11 +689,22 @@ class MainWindow(RuleMainWindow):
 
     def start_run(self):
         if self._validation_thread is not None:
+            # Automatic readiness validation may already be running when the
+            # researcher presses Run. Freeze the visible strategy now instead of
+            # rebuilding it later when that background validator finishes.
+            try:
+                request, config = self._capture_run_snapshot()
+            except Exception as exc:
+                QMessageBox.warning(self, "Invalid research request", str(exc))
+                return
+            self._set_pending_run_snapshot(request, config)
             self._validation_auto_run = True
             self.run_button.setEnabled(False)
             self._set_readiness(
                 "CHECKING DATA…",
-                "Validation is already running. The backtest will start automatically if the selected required data passes.",
+                "Validation is already running. The exact visible strategy/config "
+                "has been frozen for this Run click and will start automatically "
+                "only if it is still unchanged when validation completes.",
             )
             return
         super().start_run()
