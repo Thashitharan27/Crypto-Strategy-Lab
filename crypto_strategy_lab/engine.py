@@ -497,11 +497,18 @@ class BacktestEngine:
         regime,direction,key,profile=context
         if not profile.enabled: return False,f"Strategy profile {key} is disabled"
         if profile.entry_rules:
-            rejected=self._strategy_profile_rule_group_match(i,direction,profile,"REJECT",profile.reject_rule_match_mode)
-            if rejected: return False,f"Strategy profile {key} rejected by entry rules"
-            flipped=self._strategy_profile_rule_group_match(i,direction,profile,"FLIP",profile.flip_rule_match_mode)
+            rejected,reject_detail=self._strategy_profile_rule_action_result(
+                i,direction,profile,"REJECT",profile.reject_rule_match_mode
+            )
+            if rejected:
+                suffix=f": {reject_detail}" if reject_detail else ""
+                return False,f"Strategy profile {key} rejected by entry rules{suffix}"
+            flipped,flip_detail=self._strategy_profile_rule_action_result(
+                i,direction,profile,"FLIP",profile.flip_rule_match_mode
+            )
             action="will be flipped" if flipped else "will trade in its normal direction"
-            return True,f"Strategy profile {key} passed; flip rules {'matched' if flipped else 'did not match'}: entry {action}"
+            detail=f" ({flip_detail})" if flipped and flip_detail else ""
+            return True,f"Strategy profile {key} passed; flip rules {'matched' if flipped else 'did not match'}{detail}: entry {action}"
         return True,f"Strategy profile {key} passed"
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
@@ -546,11 +553,120 @@ class BacktestEngine:
         inside=float(rule["minimum"]) <= value <= float(rule["maximum"])
         return inside if rule.get("condition","INSIDE")=="INSIDE" else not inside
 
-    def _strategy_profile_rule_group_match(self, i, direction, profile, action, mode):
+    @staticmethod
+    def _strategy_profile_builder_group_key(rule, number, kind):
+        group_id=str(rule.get("_builder_group_id","") or "").strip()
+        if group_id:
+            return group_id
+        # Compatibility with configs saved before explicit condition groups.
+        # REQUIRED rows were one conjunction; VETO/FLIP rows were independent.
+        if kind=="REQUIRED":
+            return "__legacy_required_group__"
+        return f"__legacy_{kind.lower()}_{number}__"
+
+    def _strategy_profile_builder_groups(self, profile, action, kind):
+        groups={}
+        labels={}
+        for number,rule in enumerate(profile.entry_rules):
+            if rule.get("action")!=action:
+                continue
+            if str(rule.get("_builder_kind","")).upper()!=kind:
+                continue
+            # Built-in DMI/MACD rules deliberately have no builder id and remain
+            # native mandatory rules rather than researcher-authored groups.
+            if "_builder_id" not in rule:
+                continue
+            key=self._strategy_profile_builder_group_key(rule,number,kind)
+            groups.setdefault(key,[]).append(rule)
+            label=str(rule.get("_builder_group_name","") or "").strip()
+            if label:
+                labels[key]=label
+        return tuple((key,labels.get(key,key),rules) for key,rules in groups.items())
+
+    def _strategy_profile_rule_action_result(self, i, direction, profile, action, mode):
+        """Evaluate native rules plus researcher-authored condition groups.
+
+        Conditions inside one builder group are ANDed. Builder groups are ORed.
+        REQUIRED groups express alternative entry theses: at least one whole
+        group must pass. VETO/FLIP groups trigger when one whole group matches.
+        Non-builder native rules retain their historical ANY/ALL match mode.
+        """
+        native=[
+            rule for rule in profile.entry_rules
+            if rule.get("action")==action and "_builder_id" not in rule
+        ]
+        if native:
+            matches=[
+                self._strategy_profile_entry_rule_matches(i,direction,profile,rule)
+                for rule in native
+            ]
+            native_match=all(matches) if mode=="ALL" else any(matches)
+            if native_match:
+                return True,"native rule set"
+
+        if action=="REJECT":
+            required_groups=self._strategy_profile_builder_groups(
+                profile,"REJECT","REQUIRED"
+            )
+            if required_groups:
+                passed=[]
+                for _group_id,label,rules in required_groups:
+                    # REQUIRED conditions compile to reject-on-failure native
+                    # rules. A group passes only when none of those inverse
+                    # reject conditions match.
+                    group_pass=not any(
+                        self._strategy_profile_entry_rule_matches(
+                            i,direction,profile,rule
+                        )
+                        for rule in rules
+                    )
+                    if group_pass:
+                        passed.append(label)
+                if not passed:
+                    labels=", ".join(label for _gid,label,_rules in required_groups)
+                    return True,f"no Entry Group matched ({labels})"
+
+            veto_groups=self._strategy_profile_builder_groups(
+                profile,"REJECT","VETO"
+            )
+            for _group_id,label,rules in veto_groups:
+                if all(
+                    self._strategy_profile_entry_rule_matches(
+                        i,direction,profile,rule
+                    )
+                    for rule in rules
+                ):
+                    return True,f"Veto Group matched: {label}"
+            return False,None
+
+        if action=="FLIP":
+            flip_groups=self._strategy_profile_builder_groups(
+                profile,"FLIP","FLIP"
+            )
+            for _group_id,label,rules in flip_groups:
+                if all(
+                    self._strategy_profile_entry_rule_matches(
+                        i,direction,profile,rule
+                    )
+                    for rule in rules
+                ):
+                    return True,f"Flip Group matched: {label}"
+            return False,None
+
         rules=[rule for rule in profile.entry_rules if rule.get("action")==action]
-        if not rules: return False
-        matches=[self._strategy_profile_entry_rule_matches(i,direction,profile,rule) for rule in rules]
-        return all(matches) if mode=="ALL" else any(matches)
+        if not rules:
+            return False,None
+        matches=[
+            self._strategy_profile_entry_rule_matches(i,direction,profile,rule)
+            for rule in rules
+        ]
+        return (all(matches) if mode=="ALL" else any(matches)),None
+
+    def _strategy_profile_rule_group_match(self, i, direction, profile, action, mode):
+        matched,_detail=self._strategy_profile_rule_action_result(
+            i,direction,profile,action,mode
+        )
+        return matched
 
     def _record_skipped_signal(self, i, reason):
         row={"strategy_candle_open_time": self.times[i], "strategy_entry_time": self._entry_time(i), "strategy_entry_price": float(self.close[i]), "adx": float(self.adx_values[i]) if np.isfinite(self.adx_values[i]) else np.nan, "plus_di": float(self.plus_di_values[i]) if np.isfinite(self.plus_di_values[i]) else np.nan, "minus_di": float(self.minus_di_values[i]) if np.isfinite(self.minus_di_values[i]) else np.nan, "di_spread": float(self.di_spread[i]) if np.isfinite(self.di_spread[i]) else np.nan, "market_regime_return": float(self.bull_regime_return_values[i]) if np.isfinite(self.bull_regime_return_values[i]) else np.nan, "bb_width": float(self.bb_width[i]) if np.isfinite(self.bb_width[i]) else np.nan, "entry_filter_passed": False, "entry_filter_reason": reason, "adx_filter_passed": False, "adx_filter_reason": reason}

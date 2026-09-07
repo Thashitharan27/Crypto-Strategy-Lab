@@ -11,6 +11,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     decompile_rules,
     new_rule,
     normalize_rule,
+    normalize_rules,
     rule_operator_options,
     uses_support_resistance_rules,
 )
@@ -271,8 +272,8 @@ def test_builder_metadata_round_trips_scoped_rules_without_profile_ui():
     )
     recovered = decompile_rules(strategy)
 
-    assert recovered["REQUIRED"] == (normalize_rule(required),)
-    assert recovered["VETO"] == (normalize_rule(veto),)
+    assert recovered["REQUIRED"] == normalize_rules((required,), kind="REQUIRED")
+    assert recovered["VETO"] == normalize_rules((veto,), kind="VETO")
     assert recovered["FLIP"] == ()
 
 
@@ -289,3 +290,135 @@ def test_one_base_execution_plan_is_copied_to_internal_engine_inputs():
         base_execution=base,
     )
     assert all(profile == base for profile in execution.values())
+
+
+def test_condition_group_metadata_round_trips_and_scopes_stay_group_owned():
+    group_id = "bull-mr-pocket"
+    first = new_rule(
+        kind="VETO",
+        evidence="MR_STATE",
+        group_id=group_id,
+        group_name="Above mean and extending",
+        regime="BULL",
+        side="LONG",
+    )
+    first.update(operator="IS", value="ABOVE_MEAN")
+    second = new_rule(
+        kind="VETO",
+        evidence="MR_MOTION",
+        group_id=group_id,
+        group_name="Above mean and extending",
+        regime="BULL",
+        side="LONG",
+    )
+    second.update(operator="IS", value="AWAY_FROM_MEAN")
+
+    strategy, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        veto_rules=(first, second),
+    )
+
+    native = strategy["bull_long"].entry_rules
+    assert len(native) == 2
+    assert {rule["_builder_group_id"] for rule in native} == {group_id}
+    assert {rule["_builder_group_name"] for rule in native} == {
+        "Above mean and extending"
+    }
+    assert not strategy["bear_long"].entry_rules
+    assert not strategy["bull_short"].entry_rules
+
+    recovered = decompile_rules(strategy)["VETO"]
+    assert len(recovered) == 2
+    assert {rule["group_id"] for rule in recovered} == {group_id}
+    assert {rule["group_name"] for rule in recovered} == {
+        "Above mean and extending"
+    }
+
+
+def test_legacy_rule_migration_preserves_pre_group_boolean_semantics():
+    required_a = {
+        key: value
+        for key, value in new_rule(kind="REQUIRED", evidence="ADX").items()
+        if key not in {"group_id", "group_name"}
+    }
+    required_b = {
+        key: value
+        for key, value in new_rule(kind="REQUIRED", evidence="DI_SPREAD").items()
+        if key not in {"group_id", "group_name"}
+    }
+    veto_a = {
+        key: value
+        for key, value in new_rule(kind="VETO", evidence="ADX").items()
+        if key not in {"group_id", "group_name"}
+    }
+    veto_b = {
+        key: value
+        for key, value in new_rule(kind="VETO", evidence="MR_STATE").items()
+        if key not in {"group_id", "group_name"}
+    }
+
+    migrated_required = normalize_rules(
+        (required_a, required_b), kind="REQUIRED"
+    )
+    migrated_veto = normalize_rules((veto_a, veto_b), kind="VETO")
+
+    # Old Entry rows were one conjunction: all applicable requirements passed.
+    assert len({rule["group_id"] for rule in migrated_required}) == 1
+    # Old Veto rows were independent OR conditions: each becomes its own group.
+    assert len({rule["group_id"] for rule in migrated_veto}) == 2
+
+
+def test_condition_group_rejects_mixed_scope_members():
+    group_id = "bad-scope"
+    first = new_rule(
+        kind="VETO",
+        evidence="ADX",
+        group_id=group_id,
+        regime="BULL",
+        side="LONG",
+    )
+    second = new_rule(
+        kind="VETO",
+        evidence="DI_SPREAD",
+        group_id=group_id,
+        regime="BEAR",
+        side="LONG",
+    )
+    with pytest.raises(ValueError, match="same market and side scope"):
+        normalize_rules((first, second), kind="VETO")
+
+
+def test_mixed_scope_legacy_entry_rules_expand_without_changing_profile_logic():
+    global_rule = {
+        key: value
+        for key, value in new_rule(kind="REQUIRED", evidence="ADX").items()
+        if key not in {"group_id", "group_name"}
+    }
+    global_rule.update(regime="ALL", side="ALL", operator="GTE", value=20.0)
+
+    bull_long_rule = {
+        key: value
+        for key, value in new_rule(kind="REQUIRED", evidence="RSI").items()
+        if key not in {"group_id", "group_name"}
+    }
+    bull_long_rule.update(
+        regime="BULL", side="LONG", operator="LTE", value=70.0
+    )
+
+    migrated = normalize_rules(
+        (global_rule, bull_long_rule), kind="REQUIRED"
+    )
+
+    bull_long = [
+        rule for rule in migrated
+        if rule["regime"] == "BULL" and rule["side"] == "LONG"
+    ]
+    bear_long = [
+        rule for rule in migrated
+        if rule["regime"] == "BEAR" and rule["side"] == "LONG"
+    ]
+
+    assert {rule["evidence"] for rule in bull_long} == {"ADX", "RSI"}
+    assert len({rule["group_id"] for rule in bull_long}) == 1
+    assert {rule["evidence"] for rule in bear_long} == {"ADX"}

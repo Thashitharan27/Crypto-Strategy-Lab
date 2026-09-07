@@ -39,6 +39,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     is_categorical_evidence,
     new_rule,
     normalize_rule,
+    normalize_rules,
     rule_operator_options,
     rule_value_options,
 )
@@ -532,20 +533,30 @@ class EvidenceComboBox(QComboBox):
 
 
 class RuleTable(QTableWidget):
-    """Compact scoped rule editor supporting numeric and categorical evidence."""
+    """Scoped condition-group editor.
+
+    Conditions inside one group are ANDed. Groups are independent alternatives:
+    any Entry group may qualify, while any Veto/Flip group may trigger its action.
+    Market and side are group scope; changing either on one row synchronizes every
+    condition that belongs to that group.
+    """
 
     changed = Signal()
-    COLUMNS = ("evidence", "operator", "value", "value2", "regime", "side")
+    COLUMNS = (
+        "group", "evidence", "operator", "value", "value2", "regime", "side"
+    )
 
     def __init__(self, kind: str, parent=None):
         super().__init__(0, len(self.COLUMNS), parent)
         self.kind = kind
         self._ids: list[str] = []
+        self._group_ids: list[str] = []
+        self._syncing_group = False
         self.setHorizontalHeaderLabels(
-            ("Evidence", "Condition", "Value", "Upper", "Market", "Side")
+            ("Group", "Evidence", "Condition", "Value", "Upper", "Market", "Side")
         )
         self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(170)
         self.horizontalHeader().setStretchLastSection(True)
 
     @staticmethod
@@ -597,9 +608,9 @@ class RuleTable(QTableWidget):
         operator = self._operator(evidence, rule["operator"])
         value = self._value(evidence, rule["value"])
         upper = self._upper(evidence, rule["value2"])
-        self.setCellWidget(row, 1, operator)
-        self.setCellWidget(row, 2, value)
-        self.setCellWidget(row, 3, upper)
+        self.setCellWidget(row, 2, operator)
+        self.setCellWidget(row, 3, value)
+        self.setCellWidget(row, 4, upper)
         self._connect_control(operator)
         self._connect_control(value)
         if isinstance(upper, QDoubleSpinBox):
@@ -610,23 +621,67 @@ class RuleTable(QTableWidget):
         self._refresh_upper(row)
 
     def _evidence_changed(self, row: int) -> None:
-        evidence = self.cellWidget(row, 0)
+        evidence = self.cellWidget(row, 1)
         if not isinstance(evidence, QComboBox):
             return
         default = new_rule(kind=self.kind, evidence=evidence.currentData())
         self._install_rule_controls(row, default)
         self.changed.emit()
 
+    def _group_name_changed(self, row: int, text: str) -> None:
+        if self._syncing_group or row >= len(self._group_ids):
+            return
+        group_id = self._group_ids[row]
+        self._syncing_group = True
+        try:
+            for other in range(self.rowCount()):
+                if other == row or self._group_ids[other] != group_id:
+                    continue
+                editor = self.cellWidget(other, 0)
+                if isinstance(editor, QLineEdit) and editor.text() != text:
+                    editor.blockSignals(True)
+                    editor.setText(text)
+                    editor.blockSignals(False)
+        finally:
+            self._syncing_group = False
+        self.changed.emit()
+
+    def _group_scope_changed(self, row: int, column: int) -> None:
+        if self._syncing_group or row >= len(self._group_ids):
+            return
+        source = self.cellWidget(row, column)
+        if not isinstance(source, QComboBox):
+            return
+        group_id = self._group_ids[row]
+        value = source.currentData()
+        self._syncing_group = True
+        try:
+            for other in range(self.rowCount()):
+                if other == row or self._group_ids[other] != group_id:
+                    continue
+                target = self.cellWidget(other, column)
+                if not isinstance(target, QComboBox):
+                    continue
+                index = target.findData(value)
+                if index >= 0 and target.currentIndex() != index:
+                    target.blockSignals(True)
+                    target.setCurrentIndex(index)
+                    target.blockSignals(False)
+        finally:
+            self._syncing_group = False
+        self.changed.emit()
+
     def set_rules(self, rules) -> None:
-        normalized = [
-            normalize_rule(rule, expected_kind=self.kind) for rule in (rules or ())
-        ]
+        normalized = list(normalize_rules(rules, kind=self.kind))
         self.blockSignals(True)
         try:
             self.clearContents()
             self.setRowCount(len(normalized))
             self._ids = [rule["id"] for rule in normalized]
+            self._group_ids = [rule["group_id"] for rule in normalized]
             for row, rule in enumerate(normalized):
+                group_name = QLineEdit(rule["group_name"])
+                group_name.setPlaceholderText("Group name")
                 evidence = EvidenceComboBox(rule["evidence"])
                 regime = self._combo(
                     [
@@ -642,12 +697,28 @@ class RuleTable(QTableWidget):
                     ],
                     rule["side"],
                 )
-                self.setCellWidget(row, 0, evidence)
-                self.setCellWidget(row, 4, regime)
-                self.setCellWidget(row, 5, side)
+                self.setCellWidget(row, 0, group_name)
+                self.setCellWidget(row, 1, evidence)
+                self.setCellWidget(row, 5, regime)
+                self.setCellWidget(row, 6, side)
                 self._install_rule_controls(row, rule)
                 self._connect_control(regime)
                 self._connect_control(side)
+                group_name.textChanged.connect(
+                    lambda text, current_row=row: self._group_name_changed(
+                        current_row, text
+                    )
+                )
+                regime.currentIndexChanged.connect(
+                    lambda _index, current_row=row: self._group_scope_changed(
+                        current_row, 5
+                    )
+                )
+                side.currentIndexChanged.connect(
+                    lambda _index, current_row=row: self._group_scope_changed(
+                        current_row, 6
+                    )
+                )
                 evidence.currentIndexChanged.connect(
                     lambda _index, current_row=row: self._evidence_changed(current_row)
                 )
@@ -655,9 +726,9 @@ class RuleTable(QTableWidget):
             self.blockSignals(False)
 
     def _refresh_upper(self, row: int) -> None:
-        evidence = self.cellWidget(row, 0)
-        operator = self.cellWidget(row, 1)
-        upper = self.cellWidget(row, 3)
+        evidence = self.cellWidget(row, 1)
+        operator = self.cellWidget(row, 2)
+        upper = self.cellWidget(row, 4)
         if not isinstance(evidence, QComboBox) or upper is None:
             return
         if is_categorical_evidence(evidence.currentData()):
@@ -669,18 +740,21 @@ class RuleTable(QTableWidget):
     def rules(self) -> tuple[dict, ...]:
         result = []
         for row in range(self.rowCount()):
-            evidence = self.cellWidget(row, 0)
-            operator = self.cellWidget(row, 1)
-            value = self.cellWidget(row, 2)
-            upper = self.cellWidget(row, 3)
-            regime = self.cellWidget(row, 4)
-            side = self.cellWidget(row, 5)
+            group_name = self.cellWidget(row, 0)
+            evidence = self.cellWidget(row, 1)
+            operator = self.cellWidget(row, 2)
+            value = self.cellWidget(row, 3)
+            upper = self.cellWidget(row, 4)
+            regime = self.cellWidget(row, 5)
+            side = self.cellWidget(row, 6)
             evidence_name = evidence.currentData()
             categorical = is_categorical_evidence(evidence_name)
             result.append(
                 normalize_rule(
                     {
                         "id": self._ids[row],
+                        "group_id": self._group_ids[row],
+                        "group_name": group_name.text(),
                         "kind": self.kind,
                         "evidence": evidence_name,
                         "operator": operator.currentData(),
@@ -694,11 +768,50 @@ class RuleTable(QTableWidget):
             )
         return tuple(result)
 
-    def add_rule(self) -> None:
+    def group_count(self) -> int:
+        return len(dict.fromkeys(self._group_ids))
+
+    def _next_group_name(self) -> str:
+        label = {"REQUIRED": "Entry", "VETO": "Veto", "FLIP": "Flip"}[self.kind]
+        return f"{label} Group {self.group_count() + 1}"
+
+    def add_group(self) -> None:
         rules = list(self.rules())
-        rules.append(new_rule(kind=self.kind))
+        rules.append(
+            new_rule(kind=self.kind, group_name=self._next_group_name())
+        )
         self.set_rules(rules)
+        self.selectRow(self.rowCount() - 1)
         self.changed.emit()
+
+    def add_condition_to_group(self) -> None:
+        rules = list(self.rules())
+        if not rules:
+            self.add_group()
+            return
+        selected = sorted({index.row() for index in self.selectedIndexes()})
+        target_row = selected[0] if selected else len(rules) - 1
+        target = rules[target_row]
+        condition = new_rule(
+            kind=self.kind,
+            group_id=target["group_id"],
+            group_name=target["group_name"],
+            regime=target["regime"],
+            side=target["side"],
+        )
+        last = max(
+            index
+            for index, rule in enumerate(rules)
+            if rule["group_id"] == target["group_id"]
+        )
+        rules.insert(last + 1, condition)
+        self.set_rules(rules)
+        self.selectRow(last + 1)
+        self.changed.emit()
+
+    # Compatibility alias for older callers/tests. New UI uses explicit groups.
+    def add_rule(self) -> None:
+        self.add_group()
 
     def remove_selected(self) -> None:
         rows = sorted(
@@ -768,37 +881,47 @@ class RuleStrategyBuilder(QWidget):
         direction_layout.addWidget(note)
         layout.addWidget(direction_box)
 
-        required_box = QGroupBox("2. Entry Rules — all applicable rules must pass")
+        required_box = QGroupBox(
+            "2. Entry Groups — ALL conditions inside; ANY group may qualify"
+        )
         required_layout = QVBoxLayout(required_box)
         self.required_rules = RuleTable("REQUIRED")
         required_layout.addWidget(self.required_rules)
         row = QHBoxLayout()
-        add = QPushButton("+ Add Entry Rule")
+        add = QPushButton("+ Add Entry Group")
+        add_condition = QPushButton("+ Condition to Selected Group")
         remove = QPushButton("Remove Selected")
-        add.clicked.connect(self.required_rules.add_rule)
+        add.clicked.connect(self.required_rules.add_group)
+        add_condition.clicked.connect(self.required_rules.add_condition_to_group)
         remove.clicked.connect(self.required_rules.remove_selected)
         row.addWidget(add)
+        row.addWidget(add_condition)
         row.addWidget(remove)
         row.addStretch()
         required_layout.addLayout(row)
         evidence_note = QLabel(
-            "Evidence is grouped and searchable; Mean Reversion and common S/R choices are shown before advanced details. MR Trade-Direction Stretch is positive when price is extended in the candidate trade direction, for both LONG and SHORT. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. A REQUIRED rule rejects a trade when its evidence is missing; missing VETO evidence does not create a rejection. Any MR or S/R rule automatically enables its causal calculation; configure calculation settings on Research Features."
+            "Condition Groups are intentionally simple: conditions inside one group are ANDed; Entry groups are alternatives, so any complete Entry group may qualify. Market and Side belong to the group and stay synchronized across its rows. Evidence is grouped and searchable; Mean Reversion and common S/R choices are shown before advanced details. MR Trade-Direction Stretch is positive when price is extended in the candidate trade direction, for both LONG and SHORT. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. Missing REQUIRED evidence fails that Entry group; missing VETO evidence does not create a rejection. Any MR or S/R rule automatically enables its causal calculation; configure calculation settings on Research Features."
         )
         evidence_note.setWordWrap(True)
         evidence_note.setStyleSheet("color:#52606d")
         required_layout.addWidget(evidence_note)
         layout.addWidget(required_box)
 
-        veto_box = QGroupBox("3. Avoid / Veto Rules — matching conditions reject the trade")
+        veto_box = QGroupBox(
+            "3. Avoid / Veto Groups — ALL conditions inside; ANY group vetoes"
+        )
         veto_layout = QVBoxLayout(veto_box)
         self.veto_rules = RuleTable("VETO")
         veto_layout.addWidget(self.veto_rules)
         row = QHBoxLayout()
-        add = QPushButton("+ Add Veto Rule")
+        add = QPushButton("+ Add Veto Group")
+        add_condition = QPushButton("+ Condition to Selected Group")
         remove = QPushButton("Remove Selected")
-        add.clicked.connect(self.veto_rules.add_rule)
+        add.clicked.connect(self.veto_rules.add_group)
+        add_condition.clicked.connect(self.veto_rules.add_condition_to_group)
         remove.clicked.connect(self.veto_rules.remove_selected)
         row.addWidget(add)
+        row.addWidget(add_condition)
         row.addWidget(remove)
         row.addStretch()
         veto_layout.addLayout(row)
@@ -822,7 +945,7 @@ class RuleStrategyBuilder(QWidget):
         self.advanced = QGroupBox("5. Advanced")
         advanced_layout = QVBoxLayout(self.advanced)
         advanced_note = QLabel(
-            "Direction flip rules are explicit conditional actions. Entry timing is separate from evidence filters."
+            "Direction Flip Groups use the same condition-group model: ALL conditions inside a group must match, and ANY complete Flip group may trigger. Entry timing is separate from evidence filters."
         )
         advanced_note.setWordWrap(True)
         advanced_note.setStyleSheet("color:#52606d")
@@ -830,11 +953,14 @@ class RuleStrategyBuilder(QWidget):
         self.flip_rules = RuleTable("FLIP")
         advanced_layout.addWidget(self.flip_rules)
         row = QHBoxLayout()
-        add = QPushButton("+ Add Direction Flip Rule")
+        add = QPushButton("+ Add Flip Group")
+        add_condition = QPushButton("+ Condition to Selected Group")
         remove = QPushButton("Remove Selected")
-        add.clicked.connect(self.flip_rules.add_rule)
+        add.clicked.connect(self.flip_rules.add_group)
+        add_condition.clicked.connect(self.flip_rules.add_condition_to_group)
         remove.clicked.connect(self.flip_rules.remove_selected)
         row.addWidget(add)
+        row.addWidget(add_condition)
         row.addWidget(remove)
         row.addStretch()
         advanced_layout.addLayout(row)
@@ -920,8 +1046,10 @@ class RuleStrategyBuilder(QWidget):
         self.summary.setText(
             f"{DIRECTION_LABELS[self.direction_mode.currentData()]}  ·  "
             f"{' · '.join(markets)}  ·  "
-            f"{len(self.required_rules.rules())} entry rule(s)  ·  "
-            f"{len(self.veto_rules.rules())} veto rule(s)"
+            f"{self.required_rules.group_count()} entry group(s) / "
+            f"{len(self.required_rules.rules())} condition(s)  ·  "
+            f"{self.veto_rules.group_count()} veto group(s) / "
+            f"{len(self.veto_rules.rules())} condition(s)"
         )
 
     def set_from_strategy(self, strategy) -> None:

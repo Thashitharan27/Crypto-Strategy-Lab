@@ -210,8 +210,16 @@ def rule_value_options(evidence: str) -> tuple[str, ...]:
     return CATEGORICAL_RULE_VALUES.get(str(evidence).upper(), ())
 
 
-def new_rule(*, kind: str = "REQUIRED", evidence: str = "DI_SPREAD") -> dict:
-    """Return one researcher-facing rule row with stable round-trip identity."""
+def new_rule(
+    *,
+    kind: str = "REQUIRED",
+    evidence: str = "DI_SPREAD",
+    group_id: str | None = None,
+    group_name: str = "",
+    regime: str = "ALL",
+    side: str = "ALL",
+) -> dict:
+    """Return one researcher-facing condition with stable group identity."""
     evidence = str(evidence).upper()
     if is_categorical_evidence(evidence):
         operator = "IS"
@@ -223,13 +231,15 @@ def new_rule(*, kind: str = "REQUIRED", evidence: str = "DI_SPREAD") -> dict:
         value2 = 0.0
     return {
         "id": uuid4().hex,
+        "group_id": str(group_id or uuid4().hex),
+        "group_name": str(group_name or ""),
         "kind": kind,
         "evidence": evidence,
         "operator": operator,
         "value": value,
         "value2": value2,
-        "regime": "ALL",
-        "side": "ALL",
+        "regime": str(regime).upper(),
+        "side": str(side).upper(),
     }
 
 
@@ -238,8 +248,13 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
         raise ValueError("strategy rule must be an object")
     value = dict(rule)
     value.setdefault("id", uuid4().hex)
+    value.setdefault("group_id", "")
+    value.setdefault("group_name", "")
     value.setdefault("kind", expected_kind or "REQUIRED")
     value.setdefault("evidence", "DI_SPREAD")
+    value["id"] = str(value["id"])
+    value["group_id"] = str(value["group_id"] or "").strip()
+    value["group_name"] = str(value["group_name"] or "").strip()
     value["kind"] = str(value["kind"]).upper()
     value["evidence"] = str(value["evidence"]).upper()
     categorical = is_categorical_evidence(value["evidence"])
@@ -283,7 +298,105 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
 
 
 def normalize_rules(rules, *, kind: str) -> tuple[dict, ...]:
-    return tuple(normalize_rule(rule, expected_kind=kind) for rule in (rules or ()))
+    """Normalize condition groups while preserving pre-group configuration semantics.
+
+    Existing REQUIRED rows historically behaved as one conjunction, so ungrouped
+    REQUIRED rows migrate into one shared group. Existing VETO/FLIP rows
+    historically behaved independently (OR), so each ungrouped row migrates into
+    its own one-condition group.
+    """
+    normalized = [
+        normalize_rule(rule, expected_kind=kind) for rule in (rules or ())
+    ]
+    if not normalized:
+        return ()
+
+    upper_kind = str(kind).upper()
+    if upper_kind not in RULE_KINDS:
+        raise ValueError(f"unsupported strategy rule kind: {kind}")
+
+    if upper_kind == "REQUIRED":
+        legacy = [rule for rule in normalized if not rule["group_id"]]
+        explicit = [rule for rule in normalized if rule["group_id"]]
+        if legacy:
+            scopes = {(rule["regime"], rule["side"]) for rule in legacy}
+            if len(scopes) == 1:
+                # The old rows already share one scope, so they can become one
+                # explicit conjunction without changing where it applies.
+                regime, side = next(iter(scopes))
+                group_id = f"__legacy_required_{regime.lower()}_{side.lower()}__"
+                for rule in legacy:
+                    rule["group_id"] = group_id
+            else:
+                # Mixed legacy scopes cannot be represented faithfully by simply
+                # OR-ing one group per authored scope. Expand the six mature
+                # regime/side profiles instead: each profile receives the exact
+                # conjunction of old REQUIRED rows that used to apply there.
+                expanded = []
+                for regime in REGIMES:
+                    for side in SIDES:
+                        applicable = [
+                            rule for rule in legacy
+                            if rule["regime"] in ("ALL", regime)
+                            and rule["side"] in ("ALL", side)
+                        ]
+                        if not applicable:
+                            continue
+                        group_id = (
+                            f"__legacy_required_{regime.lower()}_{side.lower()}__"
+                        )
+                        group_name = (
+                            f"Legacy Entry {regime.title()} {side.title()}"
+                        )
+                        for rule in applicable:
+                            clone = dict(rule)
+                            clone["id"] = (
+                                f"{rule['id']}__legacy__"
+                                f"{regime.lower()}_{side.lower()}"
+                            )
+                            clone["group_id"] = group_id
+                            clone["group_name"] = group_name
+                            clone["regime"] = regime
+                            clone["side"] = side
+                            expanded.append(clone)
+                normalized = [*explicit, *expanded]
+    else:
+        for rule in normalized:
+            if not rule["group_id"]:
+                rule["group_id"] = (
+                    f"__legacy_{upper_kind.lower()}_{rule['id']}__"
+                )
+
+    group_meta: dict[str, dict[str, object]] = {}
+    group_order: list[str] = []
+    for rule in normalized:
+        group_id = rule["group_id"]
+        if group_id not in group_meta:
+            group_order.append(group_id)
+            group_meta[group_id] = {
+                "regime": rule["regime"],
+                "side": rule["side"],
+                "names": [],
+            }
+        meta = group_meta[group_id]
+        if meta["regime"] != rule["regime"] or meta["side"] != rule["side"]:
+            raise ValueError(
+                "all conditions in one rule group must share the same market and side scope"
+            )
+        if rule["group_name"]:
+            meta["names"].append(rule["group_name"])
+
+    label = {"REQUIRED": "Entry", "VETO": "Veto", "FLIP": "Flip"}[upper_kind]
+    for number, group_id in enumerate(group_order, 1):
+        names = list(dict.fromkeys(group_meta[group_id]["names"]))
+        if len(names) > 1:
+            raise ValueError("all conditions in one rule group must share one group name")
+        canonical_name = names[0] if names else f"{label} Group {number}"
+        for rule in normalized:
+            if rule["group_id"] == group_id:
+                rule["group_name"] = canonical_name
+
+    return tuple(normalized)
 
 
 def _profile_scope(profile_key: str) -> tuple[str, str]:
@@ -345,6 +458,8 @@ def _native_rule(rule: dict, *, required: bool) -> dict:
         "minimum": minimum,
         "maximum": maximum,
         f"{_META_PREFIX}id": rule["id"],
+        f"{_META_PREFIX}group_id": rule["group_id"],
+        f"{_META_PREFIX}group_name": rule["group_name"],
         f"{_META_PREFIX}kind": rule["kind"],
         f"{_META_PREFIX}operator": rule["operator"],
         f"{_META_PREFIX}value": rule["value"],
@@ -490,6 +605,8 @@ def _builder_rule(native_rule: dict) -> dict | None:
         return None
     return normalize_rule({
         "id": native_rule[f"{_META_PREFIX}id"],
+        "group_id": native_rule.get(f"{_META_PREFIX}group_id", ""),
+        "group_name": native_rule.get(f"{_META_PREFIX}group_name", ""),
         "kind": native_rule.get(f"{_META_PREFIX}kind", "VETO"),
         "evidence": native_rule.get("indicator", "DI_SPREAD"),
         "operator": native_rule.get(f"{_META_PREFIX}operator", "BETWEEN"),
@@ -510,7 +627,7 @@ def decompile_rules(strategy_profiles) -> dict[str, tuple[dict, ...]]:
                 continue
             by_kind[rule["kind"]][rule["id"]] = rule
     return {
-        kind: tuple(deepcopy(list(items.values())))
+        kind: normalize_rules(deepcopy(list(items.values())), kind=kind)
         for kind, items in by_kind.items()
     }
 
