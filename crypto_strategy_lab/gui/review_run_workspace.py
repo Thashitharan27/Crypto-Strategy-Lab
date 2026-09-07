@@ -161,12 +161,16 @@ class ReviewRunWorkspace(QWidget):
             required_rules = tuple(builder.required_rules.rules())
             veto_rules = tuple(builder.veto_rules.rules())
             flip_rules = tuple(builder.flip_rules.rules())
+            required_group_count = builder.required_rules.group_count()
+            veto_group_count = builder.veto_rules.group_count()
+            flip_group_count = builder.flip_rules.group_count()
         else:
             direction_text = "DI Direction" if config.strategy.enable_di_direction_selection else "Native direction"
             permissions = [
                 key for key, profile in config.strategy.profiles.items() if profile.enabled
             ]
             required_rules = veto_rules = flip_rules = ()
+            required_group_count = veto_group_count = flip_group_count = 0
 
         if len(permissions) == 6:
             markets_text = "All 6 environments"
@@ -182,17 +186,23 @@ class ReviewRunWorkspace(QWidget):
         else:
             parts = []
             if required_rules:
-                parts.append(f"{len(required_rules)} required")
+                parts.append(
+                    f"{required_group_count} Entry group(s) / {len(required_rules)} condition(s)"
+                )
             if veto_rules:
-                parts.append(f"{len(veto_rules)} veto")
+                parts.append(
+                    f"{veto_group_count} Veto group(s) / {len(veto_rules)} condition(s)"
+                )
             if flip_rules:
-                parts.append(f"{len(flip_rules)} flip")
+                parts.append(
+                    f"{flip_group_count} Flip group(s) / {len(flip_rules)} condition(s)"
+                )
             entry_text = " · ".join(parts)
 
         all_rules = (*required_rules, *veto_rules, *flip_rules)
         pressure_count = self._count_rule_evidence(all_rules, PRESSURE_EVIDENCE)
         if pressure_count:
-            pressure_text = f"Used by {pressure_count} entry rule(s)"
+            pressure_text = f"Used by {pressure_count} rule condition(s)"
         elif getattr(config.strategy, "enable_di_pressure_analysis", False):
             pressure_text = "Research context only"
         else:
@@ -207,7 +217,7 @@ class ReviewRunWorkspace(QWidget):
             all_rules, set(SUPPORT_RESISTANCE_RULE_EVIDENCE)
         )
         if sr_count:
-            sr_text = f"Used by {sr_count} entry / veto rule(s)"
+            sr_text = f"Used by {sr_count} rule condition(s)"
         elif config.features.enable_support_resistance_analysis:
             sr_text = "Research context only"
         else:
