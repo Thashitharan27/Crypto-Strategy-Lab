@@ -259,6 +259,7 @@ EVIDENCE_MENU_TREE = (
         "Directional / DI",
         (
             "DIRECTIONAL_DI",
+            "DIRECTIONAL_DI_RATIO",
             "DI_SPREAD",
             "DI_PRESSURE_STATE",
             "DIRECTIONAL_DI_CHANGE",
