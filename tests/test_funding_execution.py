@@ -157,6 +157,32 @@ def test_empty_settlement_transport_cannot_silently_become_zero_funding() -> Non
         _extract_prepared_funding_events(prepared, prepared.research[0])
 
 
+def test_legacy_nan_transport_is_ignored_only_on_empty_warmup_row() -> None:
+    frame = _daily_funding_frame()
+    warmup = frame.iloc[[0]].copy()
+    warmup["timestamp"] = warmup["timestamp"] - pd.Timedelta(days=1)
+    warmup["available_at"] = warmup["available_at"] - pd.Timedelta(days=1)
+    for column in warmup.columns:
+        if column not in {"timestamp", "available_at"}:
+            warmup[column] = np.nan
+    padded = pd.concat([warmup, frame], ignore_index=True)
+    prepared = _prepared_from_funding_frame(padded)
+
+    times, rates = _extract_prepared_funding_events(prepared, prepared.research[0])
+
+    assert len(times) == 5
+    assert len(rates) == 5
+
+
+def test_nan_transport_with_real_funding_observation_remains_invalid() -> None:
+    frame = _daily_funding_frame()
+    frame.loc[0, "funding_settlements_json"] = np.nan
+    prepared = _prepared_from_funding_frame(frame)
+
+    with pytest.raises(ValueError, match="Invalid prepared funding settlement payload"):
+        _extract_prepared_funding_events(prepared, prepared.research[0])
+
+
 def test_absent_funding_context_is_allowed_to_have_no_settlements() -> None:
     prepared = SimpleNamespace(
         timestamp=np.asarray(["2026-01-01T00:00:00"], dtype="datetime64[ns]"),
