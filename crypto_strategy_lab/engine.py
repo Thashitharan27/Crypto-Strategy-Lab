@@ -27,6 +27,18 @@ def _signal_ema(values, period: int) -> np.ndarray:
     )
 
 
+def _ema_stack_state_code(ema_50: float, ema_100: float, ema_200: float) -> float:
+    """Encode strict 50/100/200 EMA ordering for categorical strategy rules."""
+    values = (float(ema_50), float(ema_100), float(ema_200))
+    if not all(np.isfinite(value) for value in values):
+        return np.nan
+    if values[0] > values[1] > values[2]:
+        return 1.0  # BULLISH_STACK
+    if values[0] < values[1] < values[2]:
+        return 2.0  # BEARISH_STACK
+    return 3.0  # MIXED
+
+
 class BacktestEngine:
     def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
@@ -523,6 +535,12 @@ class BacktestEngine:
             return directional_di_ratio(directional,opposing)
         if indicator=="ADX": return float(self.adx_values[i])
         if indicator=="ATR_PCT": return float(self.atr_pct_values[i])
+        if indicator=="EMA_STACK_STATE":
+            return _ema_stack_state_code(
+                self.ema_50_values[i],
+                self.ema_100_values[i],
+                self.ema_200_values[i],
+            )
         if indicator in {"EMA_50_DISTANCE_ATR","EMA_100_DISTANCE_ATR","EMA_200_DISTANCE_ATR"}:
             period={"EMA_50_DISTANCE_ATR":50,"EMA_100_DISTANCE_ATR":100,"EMA_200_DISTANCE_ATR":200}[indicator]
             mean=getattr(self,f"ema_{period}_values")[i]; atr_value=float(self.atr_values[i])
