@@ -53,6 +53,8 @@ class _Simulator:
         *,
         data_config,
         feature_config,
+        trading_start=None,
+        trading_end=None,
     ):
         self.call = (
             prepared,
@@ -61,6 +63,8 @@ class _Simulator:
             execution_config,
             data_config,
             feature_config,
+            trading_start,
+            trading_end,
         )
         return pd.DataFrame({"result": [1]})
 
@@ -142,7 +146,10 @@ def test_runner_uses_injected_composition_and_single_feature_config(monkeypatch)
     result = runner.run(request, config, refresh_catalog=False)
 
     assert observed["store"] is runner.data_store
-    assert observed["request"] is request
+    assert observed["request"].start < request.start
+    assert observed["request"].end == request.end
+    assert observed["kwargs"]["research_start"] == request.start
+    assert observed["kwargs"]["intrabar_start"] == request.start
     assert observed["kwargs"]["feature_registry"] is registry
     assert observed["kwargs"]["feature_config"] is config.features
     assert "atr_period" not in observed["kwargs"]
@@ -152,6 +159,8 @@ def test_runner_uses_injected_composition_and_single_feature_config(monkeypatch)
     assert simulator.call[3] is config.execution
     assert simulator.call[4] is config.data
     assert simulator.call[5] is config.features
+    assert simulator.call[6] == request.start
+    assert simulator.call[7] == request.end
     assert len(reporter.calls) == 1
     assert result.feature_cache_metadata["state_transition_daily"]["cache_hit"] is True
     assert result.stage_timings["engine_init"] == 0.25

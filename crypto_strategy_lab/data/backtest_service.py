@@ -264,6 +264,40 @@ def _research_parameters(
     return dict((feature_parameters or {}).get(name, {}))
 
 
+def _strategy_slice_for_request(strategy: pd.DataFrame, request: DataRequest) -> pd.DataFrame:
+    """Return only user-scope strategy rows from a warmed canonical frame."""
+    starts = pd.to_datetime(strategy["period_start"], utc=True, errors="raise")
+    mask = (starts >= pd.Timestamp(request.start)) & (starts < pd.Timestamp(request.end))
+    return strategy.loc[mask].reset_index(drop=True)
+
+
+def _align_research_frame_to_strategy(
+    frame: pd.DataFrame,
+    strategy: pd.DataFrame,
+) -> pd.DataFrame:
+    """Pad user-scope research rows onto the full warmed strategy timeline."""
+    target = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(strategy["period_start"], utc=True, errors="raise"),
+            "_strategy_available_at": pd.to_datetime(
+                strategy["available_at"], utc=True, errors="raise"
+            ),
+        }
+    )
+    source = frame.copy()
+    source["timestamp"] = pd.to_datetime(source["timestamp"], utc=True, errors="raise")
+    source["available_at"] = pd.to_datetime(
+        source["available_at"], utc=True, errors="coerce"
+    )
+    aligned = target.merge(source, on="timestamp", how="left", sort=False)
+    aligned["available_at"] = aligned["available_at"].fillna(
+        aligned["_strategy_available_at"]
+    )
+    aligned = aligned.drop(columns=["_strategy_available_at"])
+    aligned.attrs.update(frame.attrs)
+    return aligned
+
+
 def _optional_futures_research_features(
     store: MarketDataStore,
     request: DataRequest,
@@ -568,6 +602,7 @@ def load_backtest_bundle(
     benchmark_interval: str = "1h",
     refresh_catalog: bool = True,
     intrabar_start: datetime | None = None,
+    research_start: datetime | None = None,
     atr_period: int = 14,
     adx_period: int = 14,
     di_pressure_lookback: int = 3,
@@ -623,6 +658,14 @@ def load_backtest_bundle(
     strategy_minutes = int(
         interval_to_timedelta(request.strategy_interval).total_seconds() // 60
     )
+    research_request = request
+    if research_start is not None:
+        bounded_start = max(request.start, research_start)
+        if bounded_start >= request.end:
+            raise ValueError("research_start must be before the request end")
+        if bounded_start != request.start:
+            research_request = replace(request, start=bounded_start)
+    research_strategy = _strategy_slice_for_request(strategy, research_request)
 
     if feature_config is not None:
         market_regime_method = str(feature_config.market_regime_method)
@@ -682,17 +725,17 @@ def load_backtest_bundle(
     usable_research_datasets: set[DatasetKind] | None = None
     positioning_price_usable = False
     taker_flow_usable = False
-    if request.market == MarketKind.FUTURES_UM:
+    if research_request.market == MarketKind.FUTURES_UM:
         usable_research_datasets = set()
         for dataset, interval in (
             (DatasetKind.FUTURES_METRICS, None),
             (DatasetKind.FUNDING_RATE, None),
-            (DatasetKind.MARK_PRICE_KLINES, request.strategy_interval),
-            (DatasetKind.INDEX_PRICE_KLINES, request.strategy_interval),
-            (DatasetKind.PREMIUM_INDEX_KLINES, request.strategy_interval),
+            (DatasetKind.MARK_PRICE_KLINES, research_request.strategy_interval),
+            (DatasetKind.INDEX_PRICE_KLINES, research_request.strategy_interval),
+            (DatasetKind.PREMIUM_INDEX_KLINES, research_request.strategy_interval),
         ):
             report = store.data_quality_report(
-                request,
+                research_request,
                 dataset,
                 interval=interval,
                 required=False,
@@ -702,7 +745,7 @@ def load_backtest_bundle(
                 usable_research_datasets.add(dataset)
 
         price_quality_request = _interval_dataset_request(
-            request,
+            research_request,
             DatasetKind.KLINES,
             FUTURES_POSITIONING_PRICE_INTERVAL,
         )
@@ -721,7 +764,7 @@ def load_backtest_bundle(
         taker_interval = str(taker_parameters.get("taker_flow_interval", "5m"))
         interval_to_timedelta(taker_interval)
         taker_quality_request = _interval_dataset_request(
-            request,
+            research_request,
             DatasetKind.KLINES,
             taker_interval,
         )
@@ -735,11 +778,11 @@ def load_backtest_bundle(
         taker_flow_usable = _quality_is_usable_optional(taker_report)
 
         if trade_flow_enabled:
-            coverage = store.catalog.coverage(store.raw_root, market=request.market,
-                dataset=trade_flow_source, symbol=request.symbol)
+            coverage = store.catalog.coverage(store.raw_root, market=research_request.market,
+                dataset=trade_flow_source, symbol=research_request.symbol)
             missing = coverage.archive_count == 0
             partial = (not missing and (coverage.first_period is None or coverage.last_period is None
-                or coverage.first_period > request.start or coverage.last_period < request.end))
+                or coverage.first_period > research_request.start or coverage.last_period < research_request.end))
             issues = ()
             if missing:
                 issues = (DataQualityIssue("MISSING_SOURCE", DataQualityStatus.ERROR,
@@ -748,8 +791,8 @@ def load_backtest_bundle(
                 issues = (DataQualityIssue("PARTIAL_SOURCE_COVERAGE", DataQualityStatus.WARN,
                     f"Partial {trade_flow_source.value} source coverage", details={}),)
             agg_report = DatasetQualityReport(dataset=trade_flow_source.value,
-                symbol=request.symbol, interval=None, required=True,
-                requested_start=request.start.isoformat(), requested_end=request.end.isoformat(),
+                symbol=research_request.symbol, interval=None, required=True,
+                requested_start=research_request.start.isoformat(), requested_end=research_request.end.isoformat(),
                 observed_start=str(coverage.first_period) if coverage.first_period else None,
                 observed_end=str(coverage.last_period) if coverage.last_period else None,
                 complete_start=str(coverage.first_period) if coverage.first_period else None,
@@ -764,15 +807,15 @@ def load_backtest_bundle(
         if order_book_enabled:
             available_book_sources = 0
             for dataset in (DatasetKind.BOOK_TICKER, DatasetKind.BOOK_DEPTH):
-                report = store.data_quality_report(request, dataset, required=False)
+                report = store.data_quality_report(research_request, dataset, required=False)
                 quality_reports.append(report)
                 if _quality_is_usable_optional(report):
                     usable_research_datasets.add(dataset)
                     available_book_sources += 1
             if not available_book_sources:
                 missing = DatasetQualityReport(
-                    dataset="order_book", symbol=request.symbol, interval="1m", required=True,
-                    requested_start=request.start.isoformat(), requested_end=request.end.isoformat(),
+                    dataset="order_book", symbol=research_request.symbol, interval="1m", required=True,
+                    requested_start=research_request.start.isoformat(), requested_end=research_request.end.isoformat(),
                     observed_start=None, observed_end=None, complete_start=None, complete_end=None,
                     row_count=0, source_identity=None, status=DataQualityStatus.ERROR,
                     issues=(DataQualityIssue("MISSING_ORDER_BOOK_SOURCES", DataQualityStatus.ERROR,
@@ -806,8 +849,8 @@ def load_backtest_bundle(
 
     research_features = _optional_futures_research_features(
         store,
-        request,
-        canonical,
+        research_request,
+        research_strategy,
         trade_flow_enabled=trade_flow_enabled,
         trade_flow_source=trade_flow_source if trade_flow_enabled else DatasetKind.AGG_TRADES,
         large_trade_quote_threshold=large_trade_quote_threshold if trade_flow_enabled else None,
@@ -818,12 +861,18 @@ def load_backtest_bundle(
         taker_flow_usable=taker_flow_usable,
         order_book_enabled=order_book_enabled,
     )
+    research_features = {
+        name: _align_research_frame_to_strategy(frame, strategy)
+        for name, frame in research_features.items()
+    }
 
     intrabar = None
     actual_intrabar_interval = None
     if request.intrabar_interval:
         effective_start = (
-            max(request.start, intrabar_start) if intrabar_start else request.start
+            max(request.start, intrabar_start)
+            if intrabar_start
+            else research_request.start
         )
         intrabar_request = DataRequest(
             symbol=request.symbol,
@@ -914,7 +963,7 @@ def load_backtest_bundle(
         )
         benchmark_request = DataRequest(
             symbol=benchmark_symbol,
-            start=request.start - timedelta(days=warmup_days),
+            start=research_request.start - timedelta(days=warmup_days),
             end=request.end,
             strategy_interval=benchmark_interval,
             market=request.market,
