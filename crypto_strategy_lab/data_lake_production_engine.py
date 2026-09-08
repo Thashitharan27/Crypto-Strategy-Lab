@@ -231,8 +231,21 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             raise ValueError("native runtime requires prepared support/resistance context")
         self.sr_detector = PreparedSupportResistanceContextReader(sr_block.values) if sr_block else None
         self._pending_sr_context=None; self.last_timeout_exit_time=None
-        self.trading_start=pd.Timestamp(config.trading_start_date, tz="UTC") if config.trading_start_date else None
-        self.trading_end=pd.Timestamp(config.trading_end_date, tz="UTC") if config.trading_end_date else None
+
+        def prepared_window_timestamp(value):
+            if value is None:
+                return None
+            timestamp = pd.Timestamp(value)
+            if timestamp.tzinfo is not None:
+                timestamp = timestamp.tz_convert("UTC").tz_localize(None)
+            return timestamp
+
+        # PreparedBacktestFrame timestamps are immutable UTC instants stored as
+        # timezone-naive datetime64[ns]. Keep the trading window in the same
+        # representation so the inherited hot-path comparison never mixes
+        # tz-aware and tz-naive timestamps.
+        self.trading_start=prepared_window_timestamp(config.trading_start_date)
+        self.trading_end=prepared_window_timestamp(config.trading_end_date)
         self.first_valid_atr_timestamp=self._first_valid_atr_timestamp()
         self.warmup_candle_count=int(np.sum(self.times < self.trading_start.to_datetime64())) if self.trading_start is not None else 0
         self.daily_entry_tz=ZoneInfo(config.daily_entry_timezone)
