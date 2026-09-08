@@ -365,7 +365,7 @@ def _optional_futures_research_features(
             metrics_request = _dataset_request(
                 request,
                 DatasetKind.FUTURES_METRICS,
-                start=research_request.start - timedelta(days=warmup_days),
+                start=request.start - timedelta(days=warmup_days),
             )
             strategy_signature = store.source_signature(
                 _dataset_request(request, DatasetKind.KLINES),
@@ -725,7 +725,7 @@ def load_backtest_bundle(
     usable_research_datasets: set[DatasetKind] | None = None
     positioning_price_usable = False
     taker_flow_usable = False
-    if research_research_request.market == MarketKind.FUTURES_UM:
+    if research_request.market == MarketKind.FUTURES_UM:
         usable_research_datasets = set()
         for dataset, interval in (
             (DatasetKind.FUTURES_METRICS, None),
@@ -963,7 +963,7 @@ def load_backtest_bundle(
         )
         benchmark_request = DataRequest(
             symbol=benchmark_symbol,
-            start=request.start - timedelta(days=warmup_days),
+            start=research_request.start - timedelta(days=warmup_days),
             end=request.end,
             strategy_interval=benchmark_interval,
             market=request.market,
