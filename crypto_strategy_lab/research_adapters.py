@@ -57,7 +57,15 @@ def prepared_policy_config(run_config) -> PreparedPolicyConfig:
     )
 
 
-def native_simulator_config(data_config, feature_config, strategy_config, execution_config):
+def native_simulator_config(
+    data_config,
+    feature_config,
+    strategy_config,
+    execution_config,
+    *,
+    trading_start=None,
+    trading_end=None,
+):
     """Translate composition only at the mature simulator boundary.
 
     ReportingConfig is intentionally absent: report/output changes cannot alter
@@ -97,6 +105,26 @@ def native_simulator_config(data_config, feature_config, strategy_config, execut
         enable_indicator_lifecycle_analysis=False,
         config_version=2,
     )
+
+    def utc_naive_iso(value):
+        timestamp = pd.Timestamp(value)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize("UTC")
+        else:
+            timestamp = timestamp.tz_convert("UTC")
+        return timestamp.tz_localize(None).isoformat()
+
+    if trading_start is not None:
+        values["trading_start_date"] = utc_naive_iso(trading_start)
+    if trading_end is not None:
+        exclusive_end = pd.Timestamp(trading_end)
+        if exclusive_end.tzinfo is None:
+            exclusive_end = exclusive_end.tz_localize("UTC")
+        else:
+            exclusive_end = exclusive_end.tz_convert("UTC")
+        values["trading_end_date"] = utc_naive_iso(
+            exclusive_end - pd.Timedelta(nanoseconds=1)
+        )
     return build_enhanced_backtest_config(values, require_paths=False)
 
 
@@ -295,6 +323,8 @@ class NativeSimulator:
         *,
         data_config,
         feature_config,
+        trading_start=None,
+        trading_end=None,
     ):
         if not isinstance(strategy, BoundNativeStrategyPolicy):
             raise TypeError("NativeSimulator requires a bound strategy policy")
@@ -314,6 +344,8 @@ class NativeSimulator:
             feature_config,
             strategy.config,
             execution_config,
+            trading_start=trading_start,
+            trading_end=trading_end,
         )
         self.last_adapter_setup_seconds = time.perf_counter() - started
 
