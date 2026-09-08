@@ -6,13 +6,13 @@ causal research evidence, not separate hidden/global filters.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -20,8 +20,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMenu,
     QPushButton,
+    QScrollArea,
     QSpinBox,
-    QTableWidget,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -535,13 +535,14 @@ class EvidenceComboBox(QComboBox):
             self.setCurrentIndex(index)
 
 
-class RuleTable(QTableWidget):
-    """Scoped condition-group editor.
+class RuleTable(QWidget):
+    """Card-based scoped condition-group editor.
 
     Conditions inside one group are ANDed. Groups are independent alternatives:
     any Entry group may qualify, while any Veto/Flip group may trigger its action.
-    Market and side are group scope; changing either on one row synchronizes every
-    condition that belongs to that group.
+    Market and side belong to the group header rather than being repeated on every
+    condition. New groups and new conditions are inserted at the top so the latest
+    edit stays in view.
     """
 
     changed = Signal()
@@ -550,17 +551,26 @@ class RuleTable(QTableWidget):
     )
 
     def __init__(self, kind: str, parent=None):
-        super().__init__(0, len(self.COLUMNS), parent)
+        super().__init__(parent)
         self.kind = kind
-        self._ids: list[str] = []
-        self._group_ids: list[str] = []
-        self._syncing_group = False
-        self.setHorizontalHeaderLabels(
-            ("Group", "Evidence", "Condition", "Value", "Upper", "Market", "Side")
-        )
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setMinimumHeight(170)
-        self.horizontalHeader().setStretchLastSection(True)
+        self._groups: dict[str, dict] = {}
+        self._rows: list[dict] = []
+        self._selected_row: int | None = None
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setMinimumHeight(190)
+
+        self.cards_host = QWidget()
+        self.cards_layout = QVBoxLayout(self.cards_host)
+        self.cards_layout.setContentsMargins(2, 2, 2, 2)
+        self.cards_layout.setSpacing(8)
+        self.scroll.setWidget(self.cards_host)
+        outer.addWidget(self.scroll)
 
     @staticmethod
     def _combo(options, current):
@@ -577,6 +587,7 @@ class RuleTable(QTableWidget):
         box.setRange(-1_000_000_000.0, 1_000_000_000.0)
         box.setDecimals(6)
         box.setValue(float(value))
+        box.setMinimumWidth(105)
         return box
 
     def _operator(self, evidence: str, current: str):
@@ -600,201 +611,419 @@ class RuleTable(QTableWidget):
             return label
         return self._number(float(current))
 
-    def _connect_control(self, widget) -> None:
+    def _connect_control(self, widget, group_id: str) -> None:
         if isinstance(widget, QDoubleSpinBox):
-            widget.valueChanged.connect(lambda *_args: self.changed.emit())
+            widget.valueChanged.connect(
+                lambda *_args, gid=group_id: self._notify_changed(gid)
+            )
         elif isinstance(widget, QComboBox):
-            widget.currentIndexChanged.connect(lambda *_args: self.changed.emit())
+            widget.currentIndexChanged.connect(
+                lambda *_args, gid=group_id: self._notify_changed(gid)
+            )
 
-    def _install_rule_controls(self, row: int, rule: dict) -> None:
-        evidence = rule["evidence"]
-        operator = self._operator(evidence, rule["operator"])
-        value = self._value(evidence, rule["value"])
-        upper = self._upper(evidence, rule["value2"])
-        self.setCellWidget(row, 2, operator)
-        self.setCellWidget(row, 3, value)
-        self.setCellWidget(row, 4, upper)
-        self._connect_control(operator)
-        self._connect_control(value)
+    def _clear_cards(self) -> None:
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._groups = {}
+        self._rows = []
+        self._selected_row = None
+
+    def _make_condition_row(self, rule: dict, group_id: str) -> dict:
+        wrapper = QWidget()
+        row_layout = QHBoxLayout(wrapper)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(6)
+
+        evidence = EvidenceComboBox(rule["evidence"])
+        evidence.setMinimumWidth(190)
+        operator = self._operator(rule["evidence"], rule["operator"])
+        operator.setMinimumWidth(90)
+        value = self._value(rule["evidence"], rule["value"])
+        upper = self._upper(rule["evidence"], rule["value2"])
+        remove = QPushButton("×")
+        remove.setFixedWidth(28)
+        remove.setToolTip("Remove this condition")
+
+        row_layout.addWidget(evidence, 3)
+        row_layout.addWidget(operator, 1)
+        row_layout.addWidget(value, 2)
+        row_layout.addWidget(upper, 2)
+        row_layout.addWidget(remove)
+
+        row_info = {
+            "id": rule["id"],
+            "group_id": group_id,
+            "widget": wrapper,
+            "layout": row_layout,
+            "evidence": evidence,
+            "operator": operator,
+            "value": value,
+            "upper": upper,
+            "remove": remove,
+        }
+        self._rows.append(row_info)
+
+        self._connect_control(operator, group_id)
+        self._connect_control(value, group_id)
         if isinstance(upper, QDoubleSpinBox):
-            self._connect_control(upper)
-        operator.currentIndexChanged.connect(
-            lambda _index, current_row=row: self._refresh_upper(current_row)
+            self._connect_control(upper, group_id)
+
+        evidence.currentIndexChanged.connect(
+            lambda _index, rid=rule["id"]: self._evidence_changed(rid)
         )
-        self._refresh_upper(row)
+        operator.currentIndexChanged.connect(
+            lambda _index, rid=rule["id"]: self._refresh_upper_by_id(rid)
+        )
+        remove.clicked.connect(
+            lambda _checked=False, rid=rule["id"]: self._remove_condition(rid)
+        )
+        self._refresh_upper_for_row(row_info)
+        return row_info
 
-    def _evidence_changed(self, row: int) -> None:
-        evidence = self.cellWidget(row, 1)
-        if not isinstance(evidence, QComboBox):
-            return
-        default = new_rule(kind=self.kind, evidence=evidence.currentData())
-        self._install_rule_controls(row, default)
-        self.changed.emit()
+    def _make_group_card(self, group_id: str, group_rules: list[dict]) -> QFrame:
+        first = group_rules[0]
+        card = QFrame()
+        card.setObjectName("ruleGroupCard")
+        card.setStyleSheet(
+            "QFrame#ruleGroupCard {"
+            "background:#ffffff; border:1px solid #d9e2ec; border-radius:7px;"
+            "}"
+        )
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(10, 8, 10, 8)
+        card_layout.setSpacing(7)
 
-    def _group_name_changed(self, row: int, text: str) -> None:
-        if self._syncing_group or row >= len(self._group_ids):
-            return
-        group_id = self._group_ids[row]
-        self._syncing_group = True
-        try:
-            for other in range(self.rowCount()):
-                if other == row or self._group_ids[other] != group_id:
-                    continue
-                editor = self.cellWidget(other, 0)
-                if isinstance(editor, QLineEdit) and editor.text() != text:
-                    editor.blockSignals(True)
-                    editor.setText(text)
-                    editor.blockSignals(False)
-        finally:
-            self._syncing_group = False
-        self.changed.emit()
+        header = QHBoxLayout()
+        group_name = QLineEdit(first["group_name"])
+        group_name.setPlaceholderText("Group name")
+        group_name.setMinimumWidth(180)
+        regime = self._combo(
+            [
+                ("ALL", "All Markets"),
+                *((item, item.title()) for item in REGIMES),
+            ],
+            first["regime"],
+        )
+        side = self._combo(
+            [
+                ("ALL", "All Sides"),
+                *((item, item.title()) for item in SIDES),
+            ],
+            first["side"],
+        )
+        add_condition = QPushButton("+ Add condition")
+        add_condition.setToolTip("Add a new condition at the top of this group")
+        delete_group = QPushButton("Delete group")
+        delete_group.setToolTip("Remove this whole condition group")
 
-    def _group_scope_changed(self, row: int, column: int) -> None:
-        if self._syncing_group or row >= len(self._group_ids):
-            return
-        source = self.cellWidget(row, column)
-        if not isinstance(source, QComboBox):
-            return
-        group_id = self._group_ids[row]
-        value = source.currentData()
-        self._syncing_group = True
-        try:
-            for other in range(self.rowCount()):
-                if other == row or self._group_ids[other] != group_id:
-                    continue
-                target = self.cellWidget(other, column)
-                if not isinstance(target, QComboBox):
-                    continue
-                index = target.findData(value)
-                if index >= 0 and target.currentIndex() != index:
-                    target.blockSignals(True)
-                    target.setCurrentIndex(index)
-                    target.blockSignals(False)
-        finally:
-            self._syncing_group = False
-        self.changed.emit()
+        header.addWidget(group_name, 2)
+        header.addStretch()
+        header.addWidget(QLabel("Market"))
+        header.addWidget(regime)
+        header.addWidget(QLabel("Side"))
+        header.addWidget(side)
+        header.addWidget(add_condition)
+        header.addWidget(delete_group)
+        card_layout.addLayout(header)
+
+        logic_text = {
+            "REQUIRED": "ALL conditions below must match for this Entry group.",
+            "VETO": "ALL conditions below must match for this Veto group.",
+            "FLIP": "ALL conditions below must match for this Flip group.",
+        }[self.kind]
+        logic = QLabel(logic_text)
+        logic.setStyleSheet("color:#52606d; font-size:11px")
+        card_layout.addWidget(logic)
+
+        preview = QLabel()
+        preview.setWordWrap(True)
+        preview.setStyleSheet(
+            "color:#334e68; background:#f7f9fb; padding:5px; border-radius:4px"
+        )
+        card_layout.addWidget(preview)
+
+        conditions = QVBoxLayout()
+        conditions.setSpacing(5)
+        card_layout.addLayout(conditions)
+
+        self._groups[group_id] = {
+            "id": group_id,
+            "card": card,
+            "name": group_name,
+            "regime": regime,
+            "side": side,
+            "preview": preview,
+        }
+
+        for index, rule in enumerate(group_rules):
+            if index:
+                and_label = QLabel("AND")
+                and_label.setAlignment(Qt.AlignCenter)
+                and_label.setStyleSheet("color:#7b8794; font-weight:600")
+                conditions.addWidget(and_label)
+            row_info = self._make_condition_row(rule, group_id)
+            conditions.addWidget(row_info["widget"])
+
+        group_name.textChanged.connect(
+            lambda _text, gid=group_id: self._notify_changed(gid)
+        )
+        regime.currentIndexChanged.connect(
+            lambda _index, gid=group_id: self._notify_changed(gid)
+        )
+        side.currentIndexChanged.connect(
+            lambda _index, gid=group_id: self._notify_changed(gid)
+        )
+        add_condition.clicked.connect(
+            lambda _checked=False, gid=group_id: self.add_condition_to_group_id(gid)
+        )
+        delete_group.clicked.connect(
+            lambda _checked=False, gid=group_id: self._remove_group(gid)
+        )
+        return card
 
     def set_rules(self, rules) -> None:
         normalized = list(normalize_rules(rules, kind=self.kind))
         self.blockSignals(True)
         try:
-            self.clearContents()
-            self.setRowCount(len(normalized))
-            self._ids = [rule["id"] for rule in normalized]
-            self._group_ids = [rule["group_id"] for rule in normalized]
-            for row, rule in enumerate(normalized):
-                group_name = QLineEdit(rule["group_name"])
-                group_name.setPlaceholderText("Group name")
-                evidence = EvidenceComboBox(rule["evidence"])
-                regime = self._combo(
-                    [
-                        ("ALL", "All Markets"),
-                        *((item, item.title()) for item in REGIMES),
-                    ],
-                    rule["regime"],
+            self._clear_cards()
+
+            grouped: dict[str, list[dict]] = {}
+            for rule in normalized:
+                grouped.setdefault(rule["group_id"], []).append(rule)
+
+            if not grouped:
+                empty = QLabel(
+                    "No groups yet. Add a group to define conditions for this section."
                 )
-                side = self._combo(
-                    [
-                        ("ALL", "All Sides"),
-                        *((item, item.title()) for item in SIDES),
-                    ],
-                    rule["side"],
-                )
-                self.setCellWidget(row, 0, group_name)
-                self.setCellWidget(row, 1, evidence)
-                self.setCellWidget(row, 5, regime)
-                self.setCellWidget(row, 6, side)
-                self._install_rule_controls(row, rule)
-                self._connect_control(regime)
-                self._connect_control(side)
-                group_name.textChanged.connect(
-                    lambda text, current_row=row: self._group_name_changed(
-                        current_row, text
+                empty.setStyleSheet("color:#7b8794; padding:10px")
+                self.cards_layout.addWidget(empty)
+                self.cards_layout.addStretch()
+                return
+
+            for index, (group_id, group_rules) in enumerate(grouped.items()):
+                if index:
+                    or_label = QLabel("OR")
+                    or_label.setAlignment(Qt.AlignCenter)
+                    or_label.setStyleSheet(
+                        "color:#52606d; font-weight:700; padding:1px"
                     )
+                    self.cards_layout.addWidget(or_label)
+                self.cards_layout.addWidget(
+                    self._make_group_card(group_id, group_rules)
                 )
-                regime.currentIndexChanged.connect(
-                    lambda _index, current_row=row: self._group_scope_changed(
-                        current_row, 5
-                    )
-                )
-                side.currentIndexChanged.connect(
-                    lambda _index, current_row=row: self._group_scope_changed(
-                        current_row, 6
-                    )
-                )
-                evidence.currentIndexChanged.connect(
-                    lambda _index, current_row=row: self._evidence_changed(current_row)
-                )
+
+            self.cards_layout.addStretch()
+            for group_id in grouped:
+                self._refresh_group_preview(group_id)
         finally:
             self.blockSignals(False)
 
-    def _refresh_upper(self, row: int) -> None:
-        evidence = self.cellWidget(row, 1)
-        operator = self.cellWidget(row, 2)
-        upper = self.cellWidget(row, 4)
-        if not isinstance(evidence, QComboBox) or upper is None:
+    def _find_row(self, rule_id: str) -> dict | None:
+        return next((row for row in self._rows if row["id"] == rule_id), None)
+
+    def _refresh_upper_for_row(self, row: dict) -> None:
+        evidence = row["evidence"]
+        operator = row["operator"]
+        upper = row["upper"]
+        categorical = is_categorical_evidence(evidence.currentData())
+        enabled = (
+            not categorical
+            and operator.currentData() in {"BETWEEN", "OUTSIDE"}
+        )
+        upper.setEnabled(enabled)
+        upper.setVisible(enabled)
+
+    def _refresh_upper_by_id(self, rule_id: str) -> None:
+        row = self._find_row(rule_id)
+        if row is not None:
+            self._refresh_upper_for_row(row)
+            self._notify_changed(row["group_id"])
+
+
+    def _evidence_changed(self, rule_id: str) -> None:
+        row = self._find_row(rule_id)
+        if row is None:
             return
-        if is_categorical_evidence(evidence.currentData()):
-            upper.setEnabled(False)
+
+        evidence_name = row["evidence"].currentData()
+        default = new_rule(kind=self.kind, evidence=evidence_name)
+        operator = self._operator(evidence_name, default["operator"])
+        operator.setMinimumWidth(90)
+        value = self._value(evidence_name, default["value"])
+        upper = self._upper(evidence_name, default["value2"])
+
+        old_operator = row["operator"]
+        old_value = row["value"]
+        old_upper = row["upper"]
+        row["layout"].replaceWidget(old_operator, operator)
+        row["layout"].replaceWidget(old_value, value)
+        row["layout"].replaceWidget(old_upper, upper)
+        old_operator.deleteLater()
+        old_value.deleteLater()
+        old_upper.deleteLater()
+        row["operator"] = operator
+        row["value"] = value
+        row["upper"] = upper
+
+        self._connect_control(operator, row["group_id"])
+        self._connect_control(value, row["group_id"])
+        if isinstance(upper, QDoubleSpinBox):
+            self._connect_control(upper, row["group_id"])
+        operator.currentIndexChanged.connect(
+            lambda _index, rid=rule_id: self._refresh_upper_by_id(rid)
+        )
+        self._refresh_upper_for_row(row)
+        self._notify_changed(row["group_id"])
+
+    def _condition_text(self, row: dict) -> str:
+        evidence = row["evidence"].currentText()
+        operator = row["operator"].currentText()
+        value_widget = row["value"]
+        if isinstance(value_widget, QComboBox):
+            value = value_widget.currentText()
+        else:
+            value = f"{value_widget.value():g}"
+
+        text = f"{evidence} {operator} {value}"
+        if (
+            row["operator"].currentData() in {"BETWEEN", "OUTSIDE"}
+            and isinstance(row["upper"], QDoubleSpinBox)
+        ):
+            text += f" and {row['upper'].value():g}"
+        return text
+
+    def _refresh_group_preview(self, group_id: str) -> None:
+        group = self._groups.get(group_id)
+        if group is None:
             return
-        if isinstance(operator, QComboBox):
-            upper.setEnabled(operator.currentData() in {"BETWEEN", "OUTSIDE"})
+        parts = [
+            self._condition_text(row)
+            for row in self._rows
+            if row["group_id"] == group_id
+        ]
+        prefix = {
+            "REQUIRED": "Qualify when",
+            "VETO": "Reject when",
+            "FLIP": "Flip direction when",
+        }[self.kind]
+        group["preview"].setText(
+            f"{prefix}: " + " AND ".join(parts) if parts else f"{prefix}: —"
+        )
+
+    def _notify_changed(self, group_id: str | None = None) -> None:
+        if group_id is None:
+            for current in self._groups:
+                self._refresh_group_preview(current)
+        else:
+            self._refresh_group_preview(group_id)
+        self.changed.emit()
 
     def rules(self) -> tuple[dict, ...]:
         result = []
-        for row in range(self.rowCount()):
-            group_name = self.cellWidget(row, 0)
-            evidence = self.cellWidget(row, 1)
-            operator = self.cellWidget(row, 2)
-            value = self.cellWidget(row, 3)
-            upper = self.cellWidget(row, 4)
-            regime = self.cellWidget(row, 5)
-            side = self.cellWidget(row, 6)
+        for row in self._rows:
+            group = self._groups[row["group_id"]]
+            evidence = row["evidence"]
+            operator = row["operator"]
+            value = row["value"]
+            upper = row["upper"]
             evidence_name = evidence.currentData()
             categorical = is_categorical_evidence(evidence_name)
             result.append(
                 normalize_rule(
                     {
-                        "id": self._ids[row],
-                        "group_id": self._group_ids[row],
-                        "group_name": group_name.text(),
+                        "id": row["id"],
+                        "group_id": row["group_id"],
+                        "group_name": group["name"].text(),
                         "kind": self.kind,
                         "evidence": evidence_name,
                         "operator": operator.currentData(),
-                        "value": value.currentData() if categorical else value.value(),
-                        "value2": None if categorical else upper.value(),
-                        "regime": regime.currentData(),
-                        "side": side.currentData(),
+                        "value": (
+                            value.currentData() if categorical else value.value()
+                        ),
+                        "value2": (
+                            None
+                            if categorical or not isinstance(upper, QDoubleSpinBox)
+                            else upper.value()
+                        ),
+                        "regime": group["regime"].currentData(),
+                        "side": group["side"].currentData(),
                     },
                     expected_kind=self.kind,
                 )
             )
         return tuple(result)
 
+    def rowCount(self) -> int:
+        """Compatibility helper for callers/tests from the previous table UI."""
+        return len(self._rows)
+
+    def cellWidget(self, row: int, column: int):
+        """Expose logical row controls while the visual surface uses cards."""
+        if row < 0 or row >= len(self._rows):
+            return None
+        item = self._rows[row]
+        group = self._groups[item["group_id"]]
+        mapping = {
+            0: group["name"],
+            1: item["evidence"],
+            2: item["operator"],
+            3: item["value"],
+            4: item["upper"],
+            5: group["regime"],
+            6: group["side"],
+        }
+        return mapping.get(column)
+
+    def selectRow(self, row: int) -> None:
+        """Compatibility selection used by non-card callers."""
+        if 0 <= row < len(self._rows):
+            self._selected_row = row
+
     def group_count(self) -> int:
-        return len(dict.fromkeys(self._group_ids))
+        return len(self._groups)
 
     def _next_group_name(self) -> str:
         label = {"REQUIRED": "Entry", "VETO": "Veto", "FLIP": "Flip"}[self.kind]
-        return f"{label} Group {self.group_count() + 1}"
+        existing = {
+            group["name"].text().strip()
+            for group in self._groups.values()
+        }
+        number = self.group_count() + 1
+        candidate = f"{label} Group {number}"
+        while candidate in existing:
+            number += 1
+            candidate = f"{label} Group {number}"
+        return candidate
+
+    def _focus_rule(self, rule_id: str) -> None:
+        row = self._find_row(rule_id)
+        if row is None:
+            return
+        row["evidence"].setFocus()
+        self.scroll.ensureWidgetVisible(row["widget"], 20, 20)
 
     def add_group(self) -> None:
         rules = list(self.rules())
-        rules.append(
-            new_rule(kind=self.kind, group_name=self._next_group_name())
-        )
+        rule = new_rule(kind=self.kind, group_name=self._next_group_name())
+        rules.insert(0, rule)
         self.set_rules(rules)
-        self.selectRow(self.rowCount() - 1)
+        self._selected_row = 0
+        QTimer.singleShot(0, lambda rid=rule["id"]: self._focus_rule(rid))
         self.changed.emit()
 
-    def add_condition_to_group(self) -> None:
+    def add_condition_to_group_id(self, group_id: str) -> None:
         rules = list(self.rules())
-        if not rules:
+        target = next(
+            (rule for rule in rules if rule["group_id"] == group_id),
+            None,
+        )
+        if target is None:
             self.add_group()
             return
-        selected = sorted({index.row() for index in self.selectedIndexes()})
-        target_row = selected[0] if selected else len(rules) - 1
-        target = rules[target_row]
+
         condition = new_rule(
             kind=self.kind,
             group_id=target["group_id"],
@@ -802,31 +1031,57 @@ class RuleTable(QTableWidget):
             regime=target["regime"],
             side=target["side"],
         )
-        last = max(
+        insert_at = next(
             index
             for index, rule in enumerate(rules)
-            if rule["group_id"] == target["group_id"]
+            if rule["group_id"] == group_id
         )
-        rules.insert(last + 1, condition)
+        rules.insert(insert_at, condition)
         self.set_rules(rules)
-        self.selectRow(last + 1)
+        self._selected_row = next(
+            index for index, row in enumerate(self._rows)
+            if row["id"] == condition["id"]
+        )
+        QTimer.singleShot(
+            0, lambda rid=condition["id"]: self._focus_rule(rid)
+        )
         self.changed.emit()
 
-    # Compatibility alias for older callers/tests. New UI uses explicit groups.
-    def add_rule(self) -> None:
-        self.add_group()
+    def add_condition_to_group(self) -> None:
+        """Compatibility action; card buttons call the group-specific version."""
+        if not self._rows:
+            self.add_group()
+            return
+        row = (
+            self._selected_row
+            if self._selected_row is not None
+            and 0 <= self._selected_row < len(self._rows)
+            else 0
+        )
+        self.add_condition_to_group_id(self._rows[row]["group_id"])
+
+    def _remove_condition(self, rule_id: str) -> None:
+        rules = [rule for rule in self.rules() if rule["id"] != rule_id]
+        self.set_rules(rules)
+        self.changed.emit()
+
+    def _remove_group(self, group_id: str) -> None:
+        rules = [
+            rule for rule in self.rules()
+            if rule["group_id"] != group_id
+        ]
+        self.set_rules(rules)
+        self.changed.emit()
 
     def remove_selected(self) -> None:
-        rows = sorted(
-            {index.row() for index in self.selectedIndexes()}, reverse=True
-        )
-        if not rows:
+        """Compatibility action retained for callers from the previous UI."""
+        if (
+            self._selected_row is None
+            or self._selected_row < 0
+            or self._selected_row >= len(self._rows)
+        ):
             return
-        rules = list(self.rules())
-        for row in rows:
-            rules.pop(row)
-        self.set_rules(rules)
-        self.changed.emit()
+        self._remove_condition(self._rows[self._selected_row]["id"])
 
 
 class RuleStrategyBuilder(QWidget):
@@ -892,18 +1147,13 @@ class RuleStrategyBuilder(QWidget):
         required_layout.addWidget(self.required_rules)
         row = QHBoxLayout()
         add = QPushButton("+ Add Entry Group")
-        add_condition = QPushButton("+ Condition to Selected Group")
-        remove = QPushButton("Remove Selected")
+        add.setToolTip("Add a new Entry group at the top")
         add.clicked.connect(self.required_rules.add_group)
-        add_condition.clicked.connect(self.required_rules.add_condition_to_group)
-        remove.clicked.connect(self.required_rules.remove_selected)
         row.addWidget(add)
-        row.addWidget(add_condition)
-        row.addWidget(remove)
         row.addStretch()
         required_layout.addLayout(row)
         evidence_note = QLabel(
-            "Condition Groups are intentionally simple: conditions inside one group are ANDed; Entry groups are alternatives, so any complete Entry group may qualify. Market and Side belong to the group and stay synchronized across its rows. Evidence is grouped and searchable; Mean Reversion and common S/R choices are shown before advanced details. MR Trade-Direction Stretch is positive when price is extended in the candidate trade direction, for both LONG and SHORT. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. Missing REQUIRED evidence fails that Entry group; missing VETO evidence does not create a rejection. Any MR or S/R rule automatically enables its causal calculation; configure calculation settings on Research Features."
+            "Condition Groups are intentionally simple: conditions inside one group are ANDed; Entry groups are alternatives, so any complete Entry group may qualify. Market and Side belong to the group header. New groups and new conditions appear at the top, and each card has its own Add condition and Delete group controls. Evidence is grouped and searchable; Mean Reversion and common S/R choices are shown before advanced details. MR Trade-Direction Stretch is positive when price is extended in the candidate trade direction, for both LONG and SHORT. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. Missing REQUIRED evidence fails that Entry group; missing VETO evidence does not create a rejection. Any MR or S/R rule automatically enables its causal calculation; configure calculation settings on Research Features."
         )
         evidence_note.setWordWrap(True)
         evidence_note.setStyleSheet("color:#52606d")
@@ -918,14 +1168,9 @@ class RuleStrategyBuilder(QWidget):
         veto_layout.addWidget(self.veto_rules)
         row = QHBoxLayout()
         add = QPushButton("+ Add Veto Group")
-        add_condition = QPushButton("+ Condition to Selected Group")
-        remove = QPushButton("Remove Selected")
+        add.setToolTip("Add a new Veto group at the top")
         add.clicked.connect(self.veto_rules.add_group)
-        add_condition.clicked.connect(self.veto_rules.add_condition_to_group)
-        remove.clicked.connect(self.veto_rules.remove_selected)
         row.addWidget(add)
-        row.addWidget(add_condition)
-        row.addWidget(remove)
         row.addStretch()
         veto_layout.addLayout(row)
         layout.addWidget(veto_box)
@@ -957,14 +1202,9 @@ class RuleStrategyBuilder(QWidget):
         advanced_layout.addWidget(self.flip_rules)
         row = QHBoxLayout()
         add = QPushButton("+ Add Flip Group")
-        add_condition = QPushButton("+ Condition to Selected Group")
-        remove = QPushButton("Remove Selected")
+        add.setToolTip("Add a new Flip group at the top")
         add.clicked.connect(self.flip_rules.add_group)
-        add_condition.clicked.connect(self.flip_rules.add_condition_to_group)
-        remove.clicked.connect(self.flip_rules.remove_selected)
         row.addWidget(add)
-        row.addWidget(add_condition)
-        row.addWidget(remove)
         row.addStretch()
         advanced_layout.addLayout(row)
 
