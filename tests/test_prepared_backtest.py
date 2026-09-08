@@ -174,6 +174,26 @@ def test_production_runtime_constructs_natively_from_prepared_arrays(monkeypatch
     assert [row[0] for row in window.rows()] == [5, 6, 7]
 
 
+def test_prepared_trading_window_matches_naive_utc_timeline():
+    prepared = PreparedBacktestFrame(**valid_kwargs(30))
+    config = replace(
+        BacktestConfig(),
+        strategy_timeframe_minutes=240,
+        intrabar_timeframe_minutes=1,
+        telemetry_interval_minutes=240,
+        trading_start_date="2025-01-02T00:00:00",
+        trading_end_date="2025-01-03T23:59:59.999999999",
+    )
+
+    engine = DataLakeProductionBacktestEngine.from_prepared(prepared, None, config)
+
+    assert engine.trading_start == pd.Timestamp("2025-01-02T00:00:00")
+    assert engine.trading_start.tzinfo is None
+    assert engine.trading_end.tzinfo is None
+    assert engine._in_trading_window(0) is False
+    assert engine._in_trading_window(5) is True
+
+
 def test_array_lengths_must_match():
     kwargs = valid_kwargs()
     kwargs["adx"] = np.ones(2)
