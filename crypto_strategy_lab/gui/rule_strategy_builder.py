@@ -714,6 +714,8 @@ class RuleTable(QWidget):
             ],
             first["side"],
         )
+        add_condition = QPushButton("+ Add condition")
+        add_condition.setToolTip("Add a new condition at the top of this group")
         delete_group = QPushButton("Delete group")
         delete_group.setToolTip("Remove this whole condition group")
 
@@ -723,6 +725,7 @@ class RuleTable(QWidget):
         header.addWidget(regime)
         header.addWidget(QLabel("Side"))
         header.addWidget(side)
+        header.addWidget(add_condition)
         header.addWidget(delete_group)
         card_layout.addLayout(header)
 
@@ -735,21 +738,16 @@ class RuleTable(QWidget):
         logic.setStyleSheet("color:#52606d; font-size:11px")
         card_layout.addWidget(logic)
 
-        conditions = QVBoxLayout()
-        conditions.setSpacing(5)
-        card_layout.addLayout(conditions)
-
         preview = QLabel()
         preview.setWordWrap(True)
         preview.setStyleSheet(
             "color:#334e68; background:#f7f9fb; padding:5px; border-radius:4px"
         )
+        card_layout.addWidget(preview)
 
-        add_condition = QPushButton("+ Add condition")
-        add_condition.setToolTip("Add a new condition at the top of this group")
-        footer = QHBoxLayout()
-        footer.addWidget(add_condition)
-        footer.addStretch()
+        conditions = QVBoxLayout()
+        conditions.setSpacing(5)
+        card_layout.addLayout(conditions)
 
         self._groups[group_id] = {
             "id": group_id,
@@ -768,9 +766,6 @@ class RuleTable(QWidget):
                 conditions.addWidget(and_label)
             row_info = self._make_condition_row(rule, group_id)
             conditions.addWidget(row_info["widget"])
-
-        card_layout.addWidget(preview)
-        card_layout.addLayout(footer)
 
         group_name.textChanged.connect(
             lambda _text, gid=group_id: self._notify_changed(gid)
@@ -847,15 +842,6 @@ class RuleTable(QWidget):
             self._refresh_upper_for_row(row)
             self._notify_changed(row["group_id"])
 
-    def _replace_condition_widget(
-        self, row: dict, key: str, widget: QWidget, layout_index: int
-    ) -> None:
-        old = row[key]
-        row["layout"].replaceWidget(old, widget)
-        old.deleteLater()
-        row[key] = widget
-        item = row["layout"].takeAt(layout_index)
-        row["layout"].insertWidget(layout_index, widget)
 
     def _evidence_changed(self, rule_id: str) -> None:
         row = self._find_row(rule_id)
