@@ -352,23 +352,28 @@ def test_rule_builder_groups_conditions_and_keeps_scope_owned_by_group():
         window.close()
 
 
-def test_add_condition_reuses_selected_group_but_add_group_creates_or_alternative():
+def test_add_condition_reuses_selected_group_and_new_items_appear_at_top():
     _app, window = _window()
     try:
         table = window.rule_builder.required_rules
         table.add_group()
-        first_group = table.rules()[0]["group_id"]
+        original = table.rules()[0]
+        first_group = original["group_id"]
+
         table.selectRow(0)
         table.add_condition_to_group()
 
         rules = table.rules()
         assert len(rules) == 2
         assert {rule["group_id"] for rule in rules} == {first_group}
+        assert rules[0]["id"] != original["id"]
+        assert rules[1]["id"] == original["id"]
 
         table.add_group()
         rules = table.rules()
         assert len(rules) == 3
         assert table.group_count() == 2
-        assert rules[-1]["group_id"] != first_group
+        assert rules[0]["group_id"] != first_group
+        assert {rule["group_id"] for rule in rules[1:]} == {first_group}
     finally:
         window.close()
