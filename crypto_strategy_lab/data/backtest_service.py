@@ -293,6 +293,16 @@ def _align_research_frame_to_strategy(
     aligned["available_at"] = aligned["available_at"].fillna(
         aligned["_strategy_available_at"]
     )
+
+    # Optional research features are intentionally scoped to the selected
+    # research window while the strategy timeline may include earlier warm-up
+    # rows. Funding carries a non-null execution transport column; padded warm-up
+    # rows therefore need an explicit empty settlement batch rather than NaN.
+    if "funding_settlements_json" in aligned.columns:
+        aligned["funding_settlements_json"] = aligned[
+            "funding_settlements_json"
+        ].fillna("[]")
+
     aligned = aligned.drop(columns=["_strategy_available_at"])
     aligned.attrs.update(frame.attrs)
     return aligned
