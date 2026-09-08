@@ -59,6 +59,7 @@ EVIDENCE_LABELS = {
     "EMA_50_DISTANCE_ATR": "Price − EMA 50 (ATR)",
     "EMA_100_DISTANCE_ATR": "Price − EMA 100 (ATR)",
     "EMA_200_DISTANCE_ATR": "Price − EMA 200 (ATR)",
+    "EMA_STACK_STATE": "EMA Stack State (50 / 100 / 200)",
     "MACD_LINE": "MACD Line (12/26)",
     "MACD_SIGNAL": "MACD Signal (9)",
     "MACD_HISTOGRAM": "MACD Histogram",
@@ -147,6 +148,7 @@ EVIDENCE_GROUPS = (
         (
             "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
+            "EMA_STACK_STATE",
         ),
     ),
     (
@@ -273,6 +275,7 @@ EVIDENCE_MENU_TREE = (
         (
             "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
+            "EMA_STACK_STATE",
         ),
     ),
     (
