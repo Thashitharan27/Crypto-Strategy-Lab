@@ -103,6 +103,7 @@ def test_optional_research_rows_are_padded_only_for_strategy_warmup() -> None:
             "timestamp": times[1:],
             "available_at": times[1:] + pd.Timedelta(minutes=15),
             "value": [1.0, 2.0],
+            "funding_settlements_json": ["[]", "[[1,0.0001]]"],
         }
     )
     feature.attrs["feature_cache_key"] = "research-scope-key"
@@ -113,6 +114,11 @@ def test_optional_research_rows_are_padded_only_for_strategy_warmup() -> None:
     assert np.isnan(aligned.loc[0, "value"])
     assert aligned.loc[1:, "value"].tolist() == [1.0, 2.0]
     assert aligned.loc[0, "available_at"] == strategy.loc[0, "available_at"]
+    assert aligned.loc[0, "funding_settlements_json"] == "[]"
+    assert aligned.loc[1:, "funding_settlements_json"].tolist() == [
+        "[]",
+        "[[1,0.0001]]",
+    ]
     assert aligned.attrs["feature_cache_key"] == "research-scope-key"
 
 
