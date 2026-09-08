@@ -9,12 +9,14 @@ from typing import Any, Mapping, Protocol, Sequence
 import pandas as pd
 
 from .data.backtest_service import BacktestDataBundle, load_backtest_bundle
+from .data.schemas import DatasetKind
 from .data.timing import interval_to_timedelta, normalize_binance_interval
 from .data.quality import DataQualityReport
 from .prepared_backtest import from_data_lake_bundle, intrabar_from_data_lake_bundle
 from .prepared_cache import bundle_prepared_identity
 from .progress import emit_progress
 from .research_adapters import prepared_policy_config
+from .research_warmup import expand_strategy_request
 
 
 class Simulator(Protocol):
@@ -27,6 +29,8 @@ class Simulator(Protocol):
         *,
         data_config,
         feature_config,
+        trading_start=None,
+        trading_end=None,
     ): ...
 
 
@@ -197,19 +201,44 @@ class ResearchRunner:
             # repeating it inside the broader data/features stage.
             refresh_catalog = False
 
+        earliest_strategy_start = None
+        if catalog is not None and hasattr(catalog, "coverage"):
+            try:
+                coverage = catalog.coverage(
+                    self.data_store.raw_root,
+                    market=request.market,
+                    dataset=DatasetKind.KLINES,
+                    symbol=request.symbol,
+                    interval=request.strategy_interval,
+                )
+                earliest_strategy_start = coverage.first_period
+            except Exception:
+                # Loading/quality validation remains authoritative if a custom
+                # store does not expose the production catalog contract.
+                earliest_strategy_start = None
+        data_request = expand_strategy_request(
+            request,
+            run_config,
+            earliest_start=earliest_strategy_start,
+        )
+
         emit_progress(
             progress,
             kind="stage",
             phase="data_features",
             label="Preparing data & research features",
-            detail="Existing caches are reused; only missing cache partitions are built.",
+            detail=(
+                "Existing caches are reused; strategy history is extended before "
+                "the selected start only for causal warm-up."
+            ),
         )
         started = time.perf_counter()
         bundle = load_backtest_bundle(
             self.data_store,
-            request,
+            data_request,
             refresh_catalog=refresh_catalog,
-            intrabar_start=intrabar_start,
+            intrabar_start=intrabar_start or request.start,
+            research_start=request.start,
             feature_registry=self.feature_registry,
             feature_config=run_config.features,
             data_config=run_config.data,
@@ -284,6 +313,8 @@ class ResearchRunner:
             run_config.execution,
             data_config=effective_data_config,
             feature_config=run_config.features,
+            trading_start=request.start,
+            trading_end=request.end,
         )
         simulation_total = time.perf_counter() - simulation_started
         timings.update(_simulator_stage_timings(self.simulator, simulation_total))
