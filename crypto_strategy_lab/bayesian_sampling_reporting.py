@@ -99,6 +99,8 @@ class BayesianSamplingCsvManifestReporter(CsvManifestReporter):
             context.config.features,
             context.config.strategy,
             context.config.execution,
+            trading_start=result.request.start,
+            trading_end=result.request.end,
         )
         intrabar = intrabar_from_data_lake_bundle(context.bundle)
         samples = generate_bayesian_research_samples(
