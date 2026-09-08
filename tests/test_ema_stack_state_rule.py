@@ -9,6 +9,7 @@ from crypto_strategy_lab.gui.rule_strategy_builder import (
 )
 from crypto_strategy_lab.strategy_rule_model import (
     CATEGORICAL_VALUE_CODES,
+    MARKET_PERMISSIONS,
     compile_profiles,
     is_categorical_evidence,
     new_rule,
@@ -49,7 +50,11 @@ def test_required_bullish_ema_stack_compiles_to_entry_requirement():
     )
     rule["value"] = "BULLISH_STACK"
 
-    strategy, _execution = compile_profiles(required_rules=(rule,))
+    strategy, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(rule,),
+    )
     compiled = strategy["bull_long"].entry_rules[0]
 
     assert compiled["indicator"] == "EMA_STACK_STATE"
