@@ -58,6 +58,17 @@ def _block_values(block):
     return getattr(block, "values", None)
 
 
+def _is_missing_scalar(value) -> bool:
+    """Return True only for scalar missing values such as None/NaN/NaT."""
+    if value is None:
+        return True
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(missing) if np.isscalar(missing) else False
+
+
 def _has_in_run_funding_observation(prepared, values) -> bool:
     """Detect known settlements so missing transport cannot masquerade as $0."""
     if prepared is None or values is None or len(getattr(prepared, "timestamp", ())) == 0:
@@ -104,9 +115,29 @@ def _extract_prepared_funding_events(prepared, block) -> tuple[np.ndarray, np.nd
 
     event_times: list[np.datetime64] = []
     event_rates: list[float] = []
-    for raw in batches:
-        if raw is None:
-            continue
+    source_values = values.get("funding_source_available_at")
+    funding_rates = values.get("funding_rate")
+    for index, raw in enumerate(batches):
+        if _is_missing_scalar(raw):
+            # PR #221 introduced strategy-only warm-up rows ahead of the
+            # selected research window. Prepared frames created before the
+            # padding fix may contain NaN here. That is safe only when the same
+            # padded row has no funding observation at all; otherwise a missing
+            # transport remains a hard error so funding can never silently
+            # disappear from P&L.
+            source_missing = (
+                source_values is None
+                or index >= len(source_values)
+                or _is_missing_scalar(source_values[index])
+            )
+            rate_missing = (
+                funding_rates is None
+                or index >= len(funding_rates)
+                or _is_missing_scalar(funding_rates[index])
+            )
+            if source_missing and rate_missing:
+                continue
+            raise ValueError("Invalid prepared funding settlement payload")
         try:
             parsed = json.loads(str(raw))
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
