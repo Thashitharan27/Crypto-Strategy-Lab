@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from crypto_strategy_lab.adx import wilder_rma
 from crypto_strategy_lab.config import BacktestConfig, EntryMode, RiskMode
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.strategy_profiles import (
@@ -55,6 +56,38 @@ def profile_config(**changes):
     )
     base.update(changes)
     return BacktestConfig(**base)
+
+
+def test_profile_integer_looking_float_fields_are_normalized() -> None:
+    profile = StrategyProfile(
+        enabled=True,
+        rsi_period=14.0,
+        momentum_lookback_hours=24.0,
+        timeout_minutes=480.0,
+    )
+    assert type(profile.rsi_period) is int
+    assert type(profile.momentum_lookback_hours) is int
+    assert type(profile.timeout_minutes) is int
+    assert (profile.rsi_period, profile.momentum_lookback_hours, profile.timeout_minutes) == (
+        14,
+        24,
+        480,
+    )
+
+
+def test_profile_fractional_integer_fields_are_rejected() -> None:
+    with pytest.raises(ValueError, match="rsi_period must be a positive integer"):
+        StrategyProfile(rsi_period=14.5)
+
+
+def test_wilder_rma_accepts_integer_looking_float_period_without_range_type_error() -> None:
+    values = pd.Series(range(20), dtype=float).to_numpy()
+    result = wilder_rma(values, 3.0)
+    assert len(result) == len(values)
+    assert pd.notna(result).any()
+
+    with pytest.raises(ValueError, match="period must be a positive integer"):
+        wilder_rma(values, 3.5)
 
 
 def test_profile_serialization_round_trip_preserves_all_six_profiles():
