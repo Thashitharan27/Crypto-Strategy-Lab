@@ -456,7 +456,7 @@ class ResearchFeaturesPanel(QWidget):
         try:
             values = {
                 "FAST": (False, False, False, False),
-                "STANDARD": (True, False, False, False),
+                "STANDARD": (True, True, False, False),
                 "DEEP": (True, True, True, True),
             }[preset]
             mr, sr, trade, book = values
@@ -479,7 +479,7 @@ class ResearchFeaturesPanel(QWidget):
         )
         native = {
             (False, False, False, False): "FAST",
-            (True, False, False, False): "STANDARD",
+            (True, True, False, False): "STANDARD",
             (True, True, True, True): "DEEP",
         }.get(state, "CUSTOM")
         index = self.preset.findData(native)
