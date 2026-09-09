@@ -338,25 +338,40 @@ class NativeSimulator:
         self.last_signals = None
         self.last_telemetry = None
 
+        def run_stage(label, action):
+            try:
+                return action()
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Native simulator failed during {label}: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+
         started = time.perf_counter()
-        native_config = native_simulator_config(
-            data_config,
-            feature_config,
-            strategy.config,
-            execution_config,
-            trading_start=trading_start,
-            trading_end=trading_end,
+        native_config = run_stage(
+            "config translation",
+            lambda: native_simulator_config(
+                data_config,
+                feature_config,
+                strategy.config,
+                execution_config,
+                trading_start=trading_start,
+                trading_end=trading_end,
+            ),
         )
         self.last_adapter_setup_seconds = time.perf_counter() - started
 
         started = time.perf_counter()
-        engine = RuleAwareDataLakeProductionBacktestEngine.from_prepared(
-            prepared, intrabar, native_config
+        engine = run_stage(
+            "engine initialization",
+            lambda: RuleAwareDataLakeProductionBacktestEngine.from_prepared(
+                prepared, intrabar, native_config
+            ),
         )
         self.last_engine_init_seconds = time.perf_counter() - started
 
         started = time.perf_counter()
-        trades = engine.run()
+        trades = run_stage("engine candle loop", engine.run)
         self.last_simulation_seconds = time.perf_counter() - started
 
         # Passive observation only: use records produced by this exact run.
@@ -366,7 +381,10 @@ class NativeSimulator:
         _release_canonicalized_rejection_metadata(trades)
 
         started = time.perf_counter()
-        self.last_signals = _signal_frame(prepared, trades, skipped_signals)
+        self.last_signals = run_stage(
+            "signal capture",
+            lambda: _signal_frame(prepared, trades, skipped_signals),
+        )
         self.last_signal_capture_seconds = time.perf_counter() - started
 
         # Bayesian scoring is downstream-only. It uses only completed outcomes
@@ -375,16 +393,22 @@ class NativeSimulator:
         # completed results, while real production frames stay schema-strict.
         started = time.perf_counter()
         if _is_completed_trade_result(trades):
-            trades = enrich_bayesian_trade_probabilities(trades)
+            trades = run_stage(
+                "Bayesian enrichment",
+                lambda: enrich_bayesian_trade_probabilities(trades),
+            )
         self.last_bayesian_seconds = time.perf_counter() - started
 
         started = time.perf_counter()
-        clear_rejections = getattr(skipped_signals, "clear", None)
-        if clear_rejections is not None:
-            clear_rejections()
-        telemetry_rows = getattr(engine, "telemetry_rows", ())
-        if telemetry_rows:
-            self.last_telemetry = pd.DataFrame(telemetry_rows)
+        def cleanup():
+            clear_rejections = getattr(skipped_signals, "clear", None)
+            if clear_rejections is not None:
+                clear_rejections()
+            telemetry_rows = getattr(engine, "telemetry_rows", ())
+            if telemetry_rows:
+                self.last_telemetry = pd.DataFrame(telemetry_rows)
+
+        run_stage("adapter cleanup", cleanup)
         self.last_adapter_cleanup_seconds = time.perf_counter() - started
         return trades
 
