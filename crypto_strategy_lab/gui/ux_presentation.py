@@ -41,6 +41,7 @@ FIELDS = {
 }
 
 ENUM_LABELS = {
+    "sr_timeframe_minutes": {0: "Same as strategy", 60: "1h", 240: "4h", 1440: "1d"},
     "strategy_profile_run_mode": {"COMBINED_SHARED_CAPITAL": "Combined — Shared Account", "ISOLATED_PROFILES": "Each Profile Independently", "BOTH": "Combined + Independent Comparison"},
     "tie_policy": {"PESSIMISTIC": "Conservative — Stop First", "OPTIMISTIC": "Optimistic — Target First", "INTRABAR": "Resolve Using Intrabar Data"},
     "market_regime_method": {"BTC_STRUCTURAL": "BTC Structural Trend", "ASSET_STRUCTURAL": "Selected Asset Structural Trend", "ASSET_RETURN": "Selected Asset Trailing Return"},
