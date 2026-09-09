@@ -872,11 +872,13 @@ class RuleTable(QWidget):
         evidence_name = row["evidence"].currentData()
         default = new_rule(kind=self.kind, evidence=evidence_name)
         sr_timeframe = row["sr_timeframe"]
+        was_sr = sr_timeframe.isVisible()
         if is_support_resistance_evidence(evidence_name):
             sr_timeframe.setVisible(True)
-            # Switching into S/R from another evidence type should start from the
-            # explicit strategy-timeframe context, not the legacy configured alias.
-            if sr_timeframe.currentData() is None:
+            # Only a genuine switch from non-S/R into S/R gets the new explicit
+            # Strategy-TF default. Existing legacy S/R rules may intentionally
+            # retain "Configured S/R (legacy)" while their evidence field is edited.
+            if not was_sr and sr_timeframe.currentData() is None:
                 index = sr_timeframe.findData(default["sr_timeframe_minutes"])
                 if index >= 0:
                     sr_timeframe.setCurrentIndex(index)
