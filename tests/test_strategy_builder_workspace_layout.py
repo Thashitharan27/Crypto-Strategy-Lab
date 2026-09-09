@@ -92,8 +92,8 @@ def test_condition_editor_keeps_evidence_separate_from_compact_value_controls():
             regime="BULL",
             side="LONG",
             evidence="SR_NEAR_SUPPORT",
-            sr_timeframe_minutes=60,
         )
+        rule["sr_timeframe_minutes"] = 60
         builder.required_rules.set_rules((rule,))
         row = builder.required_rules._rows[0]
 
