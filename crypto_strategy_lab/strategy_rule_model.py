@@ -170,6 +170,10 @@ MEAN_REVERSION_RULE_EVIDENCE = frozenset(
 SUPPORT_RESISTANCE_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("SR_")
 )
+# Researcher-authored S/R rules can select one causal structure context without
+# changing the canonical indicator ID. 0 means the strategy timeframe; None is
+# reserved for legacy rules that intentionally use FeatureConfig.sr_timeframe_minutes.
+SR_RULE_TIMEFRAMES = (0, 60, 240, 1440)
 LOW = -1e308
 HIGH = 1e308
 
@@ -240,6 +244,7 @@ def new_rule(
         "operator": operator,
         "value": value,
         "value2": value2,
+        "sr_timeframe_minutes": 0 if is_support_resistance_evidence(evidence) else None,
         "regime": str(regime).upper(),
         "side": str(side).upper(),
     }
@@ -263,6 +268,9 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
     value.setdefault("operator", "IS" if categorical else "GTE")
     value.setdefault("value", rule_value_options(value["evidence"])[0] if categorical else 0.0)
     value.setdefault("value2", None if categorical else 0.0)
+    # A missing S/R timeframe marks pre-multitimeframe builder rules. Those keep
+    # the exact legacy/global S/R selection rather than being silently migrated.
+    had_sr_timeframe = "sr_timeframe_minutes" in value
     value.setdefault("regime", "ALL")
     value.setdefault("side", "ALL")
     if expected_kind is not None:
@@ -283,6 +291,29 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
         raise ValueError(f"unsupported strategy rule regime scope: {value['regime']}")
     if value["side"] not in ("ALL", *SIDES):
         raise ValueError(f"unsupported strategy rule side scope: {value['side']}")
+
+    if is_support_resistance_evidence(value["evidence"]):
+        if not had_sr_timeframe:
+            # Preserve the configured S/R timeframe for historical authored rules.
+            value["sr_timeframe_minutes"] = None
+        else:
+            raw_timeframe = value.get("sr_timeframe_minutes")
+            if raw_timeframe is None:
+                value["sr_timeframe_minutes"] = None
+            else:
+                try:
+                    numeric_timeframe = float(raw_timeframe)
+                    normalized_timeframe = int(numeric_timeframe)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError("S/R rule timeframe must be Strategy TF, 1h, 4h or 1d") from exc
+                if (
+                    numeric_timeframe != normalized_timeframe
+                    or normalized_timeframe not in SR_RULE_TIMEFRAMES
+                ):
+                    raise ValueError("S/R rule timeframe must be Strategy TF, 1h, 4h or 1d")
+                value["sr_timeframe_minutes"] = normalized_timeframe
+    else:
+        value["sr_timeframe_minutes"] = None
 
     if categorical:
         value["value"] = str(value["value"]).upper()
@@ -453,7 +484,7 @@ def _native_rule(rule: dict, *, required: bool) -> dict:
         "OUTSIDE" if matching_condition == "INSIDE" else "INSIDE"
     ) if required else matching_condition
     action = "FLIP" if rule["kind"] == "FLIP" else "REJECT"
-    return {
+    native = {
         "action": action,
         "indicator": rule["evidence"],
         "condition": condition,
@@ -469,6 +500,11 @@ def _native_rule(rule: dict, *, required: bool) -> dict:
         f"{_META_PREFIX}regime": rule["regime"],
         f"{_META_PREFIX}side": rule["side"],
     }
+    if is_support_resistance_evidence(rule["evidence"]):
+        native[f"{_META_PREFIX}sr_timeframe_minutes"] = rule.get(
+            "sr_timeframe_minutes"
+        )
+    return native
 
 
 _DMI_TREND_MODE_MARKER = "_strategy_direction_mode"
@@ -614,6 +650,9 @@ def _builder_rule(native_rule: dict) -> dict | None:
         "operator": native_rule.get(f"{_META_PREFIX}operator", "BETWEEN"),
         "value": native_rule.get(f"{_META_PREFIX}value", native_rule.get("minimum", 0.0)),
         "value2": native_rule.get(f"{_META_PREFIX}value2", native_rule.get("maximum", 0.0)),
+        "sr_timeframe_minutes": native_rule.get(
+            f"{_META_PREFIX}sr_timeframe_minutes", None
+        ),
         "regime": native_rule.get(f"{_META_PREFIX}regime", "ALL"),
         "side": native_rule.get(f"{_META_PREFIX}side", "ALL"),
     })
