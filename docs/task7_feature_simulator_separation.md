@@ -79,7 +79,14 @@ For higher-timeframe S/R it reuses the mature causal resampling/detector semanti
 - the current strategy close is used only as the evaluation price, matching the mature HTF path;
 - `sr_completed_candle_time` records the exact HTF candle used and is validated not to exceed feature availability.
 
-Native execution consumes the prepared row through `PreparedSupportResistanceContextReader`; it does not rebuild pivots or an HTF detector.
+Native execution consumes the configured primary prepared row through `PreparedSupportResistanceContextReader`; it does not rebuild pivots or an HTF detector.
+
+The research path also prepares independent S/R namespaces for the strategy
+timeframe and compatible higher timeframes (1h, 4h, 1d). These contexts are
+never collapsed into a combined score or minimum-room value. Researcher-authored
+S/R rules carry their selected timeframe explicitly and read only that context;
+legacy rules without timeframe metadata continue to use the configured primary
+S/R timeframe.
 
 ### Volatility
 
