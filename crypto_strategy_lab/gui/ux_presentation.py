@@ -37,6 +37,10 @@ FIELDS = {
     "risk_multiplier": FieldPresentation("Risk Multiplier", unit="x", decimals=2),
     "timeout_minutes": FieldPresentation("Maximum Holding Time", unit=" min", decimals=0),
     "strategy_profile_run_mode": FieldPresentation("Profile Test Mode"),
+    "sr_timeframe_minutes": FieldPresentation(
+        "Primary S/R Timeframe",
+        "Backward-compatible primary S/R context. Individual S/R rules can independently choose Strategy TF, 1h, 4h or 1d.",
+    ),
     "tie_policy": FieldPresentation("Same-bar Resolution"),
 }
 

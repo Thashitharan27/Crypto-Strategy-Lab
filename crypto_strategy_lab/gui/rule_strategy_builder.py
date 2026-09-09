@@ -37,6 +37,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     infer_direction_mode,
     infer_market_permissions,
     is_categorical_evidence,
+    is_support_resistance_evidence,
     new_rule,
     normalize_rule,
     normalize_rules,
@@ -408,6 +409,13 @@ DIRECTION_LABELS = {
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
 }
+SR_TIMEFRAME_OPTIONS = (
+    (None, "Configured S/R (legacy)"),
+    (0, "Strategy TF"),
+    (60, "1h"),
+    (240, "4h"),
+    (1440, "1d"),
+)
 
 
 def _humanize(value: str) -> str:
@@ -547,7 +555,8 @@ class RuleTable(QWidget):
 
     changed = Signal()
     COLUMNS = (
-        "group", "evidence", "operator", "value", "value2", "regime", "side"
+        "group", "evidence", "operator", "value", "value2", "regime", "side",
+        "sr_timeframe",
     )
 
     def __init__(self, kind: str, parent=None):
@@ -639,6 +648,15 @@ class RuleTable(QWidget):
 
         evidence = EvidenceComboBox(rule["evidence"])
         evidence.setMinimumWidth(190)
+        sr_timeframe = self._combo(
+            SR_TIMEFRAME_OPTIONS,
+            rule.get("sr_timeframe_minutes"),
+        )
+        sr_timeframe.setMinimumWidth(105)
+        sr_timeframe.setToolTip(
+            "S/R structure timeframe for this condition. Each timeframe is calculated independently."
+        )
+        sr_timeframe.setVisible(is_support_resistance_evidence(rule["evidence"]))
         operator = self._operator(rule["evidence"], rule["operator"])
         operator.setMinimumWidth(90)
         value = self._value(rule["evidence"], rule["value"])
@@ -648,6 +666,7 @@ class RuleTable(QWidget):
         remove.setToolTip("Remove this condition")
 
         row_layout.addWidget(evidence, 3)
+        row_layout.addWidget(sr_timeframe, 1)
         row_layout.addWidget(operator, 1)
         row_layout.addWidget(value, 2)
         row_layout.addWidget(upper, 2)
@@ -659,6 +678,7 @@ class RuleTable(QWidget):
             "widget": wrapper,
             "layout": row_layout,
             "evidence": evidence,
+            "sr_timeframe": sr_timeframe,
             "operator": operator,
             "value": value,
             "upper": upper,
@@ -666,6 +686,7 @@ class RuleTable(QWidget):
         }
         self._rows.append(row_info)
 
+        self._connect_control(sr_timeframe, group_id)
         self._connect_control(operator, group_id)
         self._connect_control(value, group_id)
         if isinstance(upper, QDoubleSpinBox):
@@ -850,6 +871,19 @@ class RuleTable(QWidget):
 
         evidence_name = row["evidence"].currentData()
         default = new_rule(kind=self.kind, evidence=evidence_name)
+        sr_timeframe = row["sr_timeframe"]
+        was_sr = sr_timeframe.isVisible()
+        if is_support_resistance_evidence(evidence_name):
+            sr_timeframe.setVisible(True)
+            # Only a genuine switch from non-S/R into S/R gets the new explicit
+            # Strategy-TF default. Existing legacy S/R rules may intentionally
+            # retain "Configured S/R (legacy)" while their evidence field is edited.
+            if not was_sr and sr_timeframe.currentData() is None:
+                index = sr_timeframe.findData(default["sr_timeframe_minutes"])
+                if index >= 0:
+                    sr_timeframe.setCurrentIndex(index)
+        else:
+            sr_timeframe.setVisible(False)
         operator = self._operator(evidence_name, default["operator"])
         operator.setMinimumWidth(90)
         value = self._value(evidence_name, default["value"])
@@ -887,6 +921,9 @@ class RuleTable(QWidget):
         else:
             value = f"{value_widget.value():g}"
 
+        if is_support_resistance_evidence(row["evidence"].currentData()):
+            timeframe = row["sr_timeframe"].currentText()
+            evidence = f"{evidence} [{timeframe}]"
         text = f"{evidence} {operator} {value}"
         if (
             row["operator"].currentData() in {"BETWEEN", "OUTSIDE"}
@@ -929,6 +966,7 @@ class RuleTable(QWidget):
             operator = row["operator"]
             value = row["value"]
             upper = row["upper"]
+            sr_timeframe = row["sr_timeframe"]
             evidence_name = evidence.currentData()
             categorical = is_categorical_evidence(evidence_name)
             result.append(
@@ -947,6 +985,11 @@ class RuleTable(QWidget):
                             None
                             if categorical or not isinstance(upper, QDoubleSpinBox)
                             else upper.value()
+                        ),
+                        "sr_timeframe_minutes": (
+                            sr_timeframe.currentData()
+                            if is_support_resistance_evidence(evidence_name)
+                            else None
                         ),
                         "regime": group["regime"].currentData(),
                         "side": group["side"].currentData(),
@@ -974,6 +1017,7 @@ class RuleTable(QWidget):
             4: item["upper"],
             5: group["regime"],
             6: group["side"],
+            7: item["sr_timeframe"],
         }
         return mapping.get(column)
 

@@ -42,6 +42,12 @@ _SR_NUMERIC_FIELDS = {
     "SR_BARS_SINCE_RESISTANCE_TEST": "bars_since_resistance_test",
 }
 _SR_RULE_INDICATORS = frozenset((*_SR_CATEGORICAL_FIELDS, *_SR_NUMERIC_FIELDS))
+_SR_RESEARCH_CONTEXTS = {
+    0: ("support_resistance_strategy", "sr_strategy"),
+    60: ("support_resistance_1h", "sr_1h"),
+    240: ("support_resistance_4h", "sr_4h"),
+    1440: ("support_resistance_1d", "sr_1d"),
+}
 
 # These are lightweight source-native research blocks already prepared by the
 # Data Lake service whenever validated local coverage exists. Values remain in
@@ -345,6 +351,51 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
             return value if np.isfinite(value) else np.nan
         raise KeyError(indicator)
 
+    def _prepared_sr_value_for_timeframe(
+        self, i, direction, indicator, timeframe_minutes
+    ):
+        """Read one explicitly selected independent S/R context."""
+        if direction not in {"LONG", "SHORT"}:
+            return np.nan
+        config = getattr(self, "config", None)
+        if config is None or not bool(
+            getattr(config, "enable_support_resistance_analysis", False)
+        ):
+            return np.nan
+        try:
+            requested = int(timeframe_minutes)
+        except (TypeError, ValueError, OverflowError):
+            return np.nan
+
+        strategy_minutes = int(getattr(config, "strategy_timeframe_minutes", 0))
+        context_key = 0 if requested in {0, strategy_minutes} else requested
+        block_info = _SR_RESEARCH_CONTEXTS.get(context_key)
+        if block_info is None:
+            return np.nan
+        feature_name, prefix = block_info
+        field = (
+            _SR_CATEGORICAL_FIELDS.get(indicator)
+            or _SR_NUMERIC_FIELDS.get(indicator)
+        )
+        if field is None:
+            raise KeyError(indicator)
+        column = f"{prefix}_{direction.lower()}_{field}"
+        raw = self._prepared_research_raw_value(i, feature_name, column)
+        if indicator in _SR_CATEGORICAL_FIELDS:
+            if raw is None or raw is pd.NA:
+                return np.nan
+            try:
+                if bool(pd.isna(raw)):
+                    return np.nan
+            except (TypeError, ValueError):
+                return np.nan
+            return self._categorical_sr_value(indicator, raw)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return np.nan
+        return value if np.isfinite(value) else np.nan
+
     def _prepared_research_raw_value(self, i, feature_name, column):
         """Read one aligned research fact from DataFrame or native prepared block."""
         block = getattr(self, "research_features", {}).get(feature_name)
@@ -425,9 +476,16 @@ class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine
         therefore rejects the candidate. VETO/FLIP rules keep fail-open matching:
         absent optional evidence cannot manufacture a veto or direction flip.
         """
-        value = self._strategy_profile_rule_value(
-            i, direction, profile, rule["indicator"]
-        )
+        indicator = rule["indicator"]
+        sr_timeframe = rule.get("_builder_sr_timeframe_minutes")
+        if indicator in _SR_RULE_INDICATORS and sr_timeframe is not None:
+            value = self._prepared_sr_value_for_timeframe(
+                i, direction, indicator, sr_timeframe
+            )
+        else:
+            value = self._strategy_profile_rule_value(
+                i, direction, profile, indicator
+            )
         if not np.isfinite(value):
             return str(rule.get("_builder_kind", "")).upper() == "REQUIRED"
         inside = float(rule["minimum"]) <= value <= float(rule["maximum"])

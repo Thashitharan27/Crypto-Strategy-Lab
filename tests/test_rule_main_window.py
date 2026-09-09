@@ -221,6 +221,35 @@ def test_sr_numeric_room_rule_uses_same_entry_rule_table():
         window.close()
 
 
+def test_sr_rule_has_independent_timeframe_selector_and_roundtrips():
+    _app, window = _window()
+    try:
+        from PySide6.QtWidgets import QComboBox
+
+        rule = new_rule(kind="REQUIRED", evidence="SR_ROOM_IN_DIRECTION_ATR")
+        rule.update(operator="GTE", value=3.0, side="LONG")
+        table = window.rule_builder.required_rules
+        table.set_rules((rule,))
+
+        timeframe = table.cellWidget(0, 7)
+        assert isinstance(timeframe, QComboBox)
+        assert [timeframe.itemData(i) for i in range(timeframe.count())] == [
+            None, 0, 60, 240, 1440
+        ]
+        assert timeframe.currentData() == 0
+        timeframe.setCurrentIndex(timeframe.findData(60))
+
+        config = window.build_config()
+        native = config.strategy.profiles["bull_long"].entry_rules[0]
+        assert native["_builder_sr_timeframe_minutes"] == 60
+
+        window.apply_config(config)
+        recovered = window.rule_builder.required_rules.rules()[0]
+        assert recovered["sr_timeframe_minutes"] == 60
+    finally:
+        window.close()
+
+
 def test_pressure_calculation_stays_on_but_global_pressure_filter_is_neutral():
     _app, window = _window()
     try:

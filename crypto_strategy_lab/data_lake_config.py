@@ -362,6 +362,35 @@ class ResearchRunConfig:
                 raise ValueError(f"{key}: profile feature periods must be positive")
             if profile.rsi_period != features.mean_reversion_rsi_period:
                 raise ValueError(f"{key}: profile RSI period must match prepared MR RSI period")
+            for rule in profile.entry_rules:
+                if not isinstance(rule, dict):
+                    continue
+                raw_sr_timeframe = rule.get("_builder_sr_timeframe_minutes")
+                if raw_sr_timeframe is None:
+                    continue
+                try:
+                    sr_rule_minutes = int(raw_sr_timeframe)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(
+                        f"{key}: S/R rule timeframe is invalid"
+                    ) from exc
+                if sr_rule_minutes not in {0, 60, 240, 1440}:
+                    raise ValueError(
+                        f"{key}: S/R rule timeframe must be Strategy TF, 1h, 4h or 1d"
+                    )
+                effective_rule_minutes = (
+                    data.strategy_timeframe_minutes
+                    if sr_rule_minutes == 0
+                    else sr_rule_minutes
+                )
+                if (
+                    effective_rule_minutes < data.strategy_timeframe_minutes
+                    or effective_rule_minutes % data.strategy_timeframe_minutes
+                ):
+                    raise ValueError(
+                        f"{key}: S/R rule timeframe must be the strategy timeframe "
+                        "or a compatible higher timeframe"
+                    )
         if execution.initial_equity <= 0 or execution.fixed_r <= 0 or execution.percent_r <= 0:
             raise ValueError("execution equity/risk settings must be positive")
         if not 0 < execution.risk_per_leg < 1:
