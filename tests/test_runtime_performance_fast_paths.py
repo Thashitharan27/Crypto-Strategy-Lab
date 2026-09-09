@@ -116,6 +116,71 @@ def test_native_simulator_detaches_rejection_attrs_before_signal_capture(monkeyp
     assert simulator.last_adapter_cleanup_seconds >= 0.0
 
 
+def test_native_simulator_names_engine_initialization_failure(monkeypatch):
+    class FailingFactory:
+        @classmethod
+        def from_prepared(cls, prepared, intrabar, native_config):
+            raise TypeError("'float' object cannot be interpreted as an integer")
+
+    monkeypatch.setattr(
+        adapters,
+        "RuleAwareDataLakeProductionBacktestEngine",
+        FailingFactory,
+    )
+    monkeypatch.setattr(
+        adapters,
+        "native_simulator_config",
+        lambda *args, **kwargs: object(),
+    )
+
+    simulator = NativeSimulator()
+    with pytest.raises(RuntimeError, match="engine initialization.*TypeError.*float"):
+        simulator.run(
+            prepared=None,
+            intrabar=None,
+            strategy=BoundNativeStrategyPolicy(config=object()),
+            execution_config=object(),
+            data_config=object(),
+            feature_config=object(),
+        )
+
+
+def test_native_simulator_names_engine_candle_loop_failure(monkeypatch):
+    class FailingEngine:
+        telemetry_rows = ()
+        skipped_signals = []
+
+        def run(self):
+            raise TypeError("'float' object cannot be interpreted as an integer")
+
+    class Factory:
+        @classmethod
+        def from_prepared(cls, prepared, intrabar, native_config):
+            return FailingEngine()
+
+    monkeypatch.setattr(
+        adapters,
+        "RuleAwareDataLakeProductionBacktestEngine",
+        Factory,
+    )
+    monkeypatch.setattr(
+        adapters,
+        "native_simulator_config",
+        lambda *args, **kwargs: object(),
+    )
+
+    simulator = NativeSimulator()
+    with pytest.raises(RuntimeError, match="engine candle loop.*TypeError.*float"):
+        simulator.run(
+            prepared=None,
+            intrabar=None,
+            strategy=BoundNativeStrategyPolicy(config=object()),
+            execution_config=object(),
+            data_config=object(),
+            feature_config=object(),
+        )
+
+
 def test_simulator_stage_timings_expose_post_engine_costs():
     simulator = SimpleNamespace(
         last_adapter_setup_seconds=0.1,

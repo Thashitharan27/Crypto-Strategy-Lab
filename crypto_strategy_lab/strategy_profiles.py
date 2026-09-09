@@ -2,10 +2,25 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
+import math
 from typing import Any
 
 from crypto_strategy_core.rules import PROFILE_KEYS, RULE_INDICATORS
 
+
+
+def _positive_integral(value: Any, label: str) -> int:
+    """Normalize integer-looking inputs without silently truncating fractions."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be a positive integer")
+    try:
+        numeric = float(value)
+        result = int(numeric)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{label} must be a positive integer") from exc
+    if not math.isfinite(numeric) or numeric != result or result < 1:
+        raise ValueError(f"{label} must be a positive integer")
+    return result
 
 
 @dataclass(frozen=True)
@@ -47,6 +62,26 @@ class StrategyProfile:
     atr_checkpoint_bb_width_minimum: float = 0.03
     atr_checkpoint_profit_lock_start: float = 3.0
     atr_checkpoint_profit_lock_distance: float = 1.0
+
+    def __post_init__(self) -> None:
+        # StrategyProfile is also an adapter target for the composed v3 runtime.
+        # Dataclass annotations do not coerce values, so a persisted/programmatic
+        # 14.0 could otherwise survive into legacy integer-only consumers.
+        object.__setattr__(
+            self, "rsi_period", _positive_integral(self.rsi_period, "rsi_period")
+        )
+        object.__setattr__(
+            self,
+            "momentum_lookback_hours",
+            _positive_integral(
+                self.momentum_lookback_hours, "momentum_lookback_hours"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "timeout_minutes",
+            _positive_integral(self.timeout_minutes, "timeout_minutes"),
+        )
 
     def validate(self, key: str = "profile") -> None:
         if self.reward_risk_ratio <= 0 or self.risk_multiplier <= 0:
