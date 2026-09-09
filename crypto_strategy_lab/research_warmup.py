@@ -48,7 +48,21 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
     )
 
     if bool(features.enable_support_resistance_analysis):
-        sr_minutes = int(features.sr_timeframe_minutes or strategy_minutes)
+        configured_sr_minutes = int(
+            features.sr_timeframe_minutes or strategy_minutes
+        )
+        independent_sr_minutes = [
+            strategy_minutes,
+            *(
+                minutes
+                for minutes in (60, 240, 1440)
+                if minutes > strategy_minutes and minutes % strategy_minutes == 0
+            ),
+        ]
+        # Independent S/R outputs must be fully warmed at the research boundary,
+        # otherwise an early 1h/4h/1d rule would compare against incomplete
+        # structure simply because the run started recently.
+        sr_minutes = max(configured_sr_minutes, *independent_sr_minutes)
         sr_bars = (
             int(features.sr_lookback_bars)
             + max(int(features.sr_pivot_left), int(features.sr_pivot_right))
