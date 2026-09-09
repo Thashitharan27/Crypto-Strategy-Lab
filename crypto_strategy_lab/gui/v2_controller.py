@@ -237,10 +237,21 @@ class GuiApplicationService:
         config.validate()
         callback = getattr(self, "progress_callback", None)
         reuse_validated_catalog = self._consume_validated_catalog_snapshot(request)
+        last_stage = {"phase": "starting", "label": "Starting native research"}
+
+        def observed_progress(event):
+            if event.get("kind") == "stage":
+                last_stage["phase"] = str(event.get("phase") or last_stage["phase"])
+                last_stage["label"] = str(event.get("label") or last_stage["label"])
+            if callback is not None:
+                callback(event)
+
         # The observer is attached only for this run. Data/cache layers can emit
         # partition-level events without depending on Qt or changing their public
-        # result contracts.
-        self.store.progress_callback = callback
+        # result contracts. Keep the last coarse stage so a runtime failure tells
+        # the researcher where it occurred instead of showing only Python's final
+        # exception text.
+        self.store.progress_callback = observed_progress
         try:
             runner = self._runner(Path(config.reporting.output_dir))
             kwargs = {}
@@ -251,9 +262,12 @@ class GuiApplicationService:
             emit_progress(
                 callback,
                 kind="failed",
-                phase="failed",
+                phase=last_stage["phase"],
                 label="RUN FAILED",
-                detail=str(exc),
+                detail=(
+                    f"Failed during {last_stage['label']}: "
+                    f"{type(exc).__name__}: {exc}"
+                ),
             )
             raise
         finally:
