@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, get_type_hints
 
 
 CONFIG_VERSION = 3
@@ -398,6 +398,28 @@ def _strict(cls, raw, label):
     if unknown:
         raise ValueError(f"Unknown {label} settings: " + ", ".join(unknown))
     values = dict(raw)
+
+    # JSON does not preserve the semantic distinction between integer-looking
+    # numbers authored as 4 and 4.0.  Dataclasses also do not coerce runtime
+    # values from their annotations.  Normalize fields declared as int here so
+    # downstream algorithms that legitimately use range()/period counts never
+    # receive a float from a saved config.  Fractional values are rejected
+    # rather than silently truncated.
+    type_hints = get_type_hints(cls)
+    for name, annotation in type_hints.items():
+        if annotation is not int or name not in values:
+            continue
+        value = values[name]
+        if isinstance(value, bool):
+            raise ValueError(f"{label}.{name} must be an integer")
+        try:
+            numeric = float(value)
+            integral = int(numeric)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"{label}.{name} must be an integer") from exc
+        if numeric != integral:
+            raise ValueError(f"{label}.{name} must be an integer")
+        values[name] = integral
     if cls is StrategyProfileConfig and isinstance(values.get("entry_rules"), list):
         values["entry_rules"] = tuple(values["entry_rules"])
     if cls is ReportingConfig and isinstance(values.get("lifecycle_early_checkpoints"), list):

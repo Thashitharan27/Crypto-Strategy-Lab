@@ -9,7 +9,11 @@ import pandas as pd
 
 from .candles import atr as shared_atr
 from .higher_timeframe_sr import HigherTimeframeSRDetector, resample_ohlc_for_sr
-from .support_resistance import SRContext, SupportResistanceDetector
+from .support_resistance import (
+    SRContext,
+    SupportResistanceDetector,
+    _positive_integral,
+)
 
 SR_CONTEXT_FIELDS = (
     "nearest_support_price", "nearest_support_bar_index",
@@ -83,9 +87,14 @@ def support_resistance_evidence_series(
         raise ValueError("S/R candle and decision timestamps must be chronological")
     if bool(np.any(decisions.asi8 < candles.asi8)):
         raise ValueError("S/R decision time cannot precede its strategy candle")
-    if strategy_minutes <= 0 or atr_period <= 0:
-        raise ValueError("S/R strategy timeframe and ATR period must be positive")
-    effective_minutes = int(sr_timeframe_minutes or strategy_minutes)
+    strategy_minutes = _positive_integral(strategy_minutes, "strategy_minutes")
+    atr_period = _positive_integral(atr_period, "atr_period")
+    if sr_timeframe_minutes:
+        effective_minutes = _positive_integral(
+            sr_timeframe_minutes, "sr_timeframe_minutes"
+        )
+    else:
+        effective_minutes = strategy_minutes
     if effective_minutes < strategy_minutes or effective_minutes % strategy_minutes:
         raise ValueError(
             "S/R timeframe must be the strategy timeframe or an integer multiple"

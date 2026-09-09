@@ -17,6 +17,13 @@ def fixtures(side="LONG", minutes=60, duplicate=False):
     return trade,tel
 
 
+def test_integer_looking_float_phase_count_does_not_reach_range_as_float():
+    trades, tel = fixtures()
+    out, validation = build_lifecycle_analysis(trades, tel, phases=4.0)
+    assert not out.empty
+    assert isinstance(validation, pd.DataFrame)
+
+
 def test_long_lifecycle_phases_slope_checkpoints_and_excursion():
     trades,tel=fixtures(); out,validation=build_lifecycle_analysis(trades,tel); row=out.iloc[0]
     assert row.adx_slope_per_hour == pytest.approx(4)

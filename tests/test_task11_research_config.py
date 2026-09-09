@@ -20,6 +20,40 @@ def test_v3_is_strict_and_flat_aliases_are_rejected():
         )
 
 
+def test_v3_normalizes_integer_looking_numeric_values_before_runtime():
+    config = normalize_data_lake_config(
+        {
+            "config_version": 3,
+            "data": {"strategy_timeframe_minutes": 15.0},
+            "features": {
+                "enable_support_resistance_analysis": True,
+                "sr_timeframe_minutes": 60.0,
+                "sr_pivot_left": 5.0,
+                "sr_pivot_right": 5.0,
+                "sr_lookback_bars": 200.0,
+            },
+            "reporting": {"lifecycle_phases": 4.0},
+        }
+    )
+    assert type(config.data.strategy_timeframe_minutes) is int
+    assert type(config.features.sr_timeframe_minutes) is int
+    assert type(config.features.sr_pivot_left) is int
+    assert type(config.features.sr_pivot_right) is int
+    assert type(config.features.sr_lookback_bars) is int
+    assert type(config.reporting.lifecycle_phases) is int
+    assert config.features.sr_timeframe_minutes == 60
+
+
+def test_v3_rejects_fractional_values_for_integer_fields():
+    with pytest.raises(ValueError, match="features.sr_pivot_left must be an integer"):
+        normalize_data_lake_config(
+            {
+                "config_version": 3,
+                "features": {"sr_pivot_left": 2.5},
+            }
+        )
+
+
 def test_v3_defaults_preserve_pre_split_data_lake_semantics():
     config = ResearchRunConfig()
     assert config.data.strategy_timeframe_minutes == 15

@@ -106,6 +106,20 @@ class SRContext:
     resistance_zone_high: Optional[float] = None
 
 
+def _positive_integral(value, name: str) -> int:
+    """Return a positive integer without silently truncating fractional input."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        numeric = float(value)
+        result = int(numeric)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric != result or result < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return result
+
+
 class SwingDetector:
     """Detects swing highs and swing lows with no look-ahead bias."""
     
@@ -121,9 +135,11 @@ class SwingDetector:
             pivot_right: candles to right of candidate peak/valley (enforces confirmation delay)
             min_bars_between: minimum bars between adjacent swings
         """
-        self.pivot_left = pivot_left
-        self.pivot_right = pivot_right
-        self.min_bars_between = min_bars_between
+        self.pivot_left = _positive_integral(pivot_left, "pivot_left")
+        self.pivot_right = _positive_integral(pivot_right, "pivot_right")
+        self.min_bars_between = _positive_integral(
+            min_bars_between, "min_bars_between"
+        )
         
     def detect_swing_highs(
         self, high: NDArray[np.float64], index: int
@@ -328,11 +344,13 @@ class SupportResistanceDetector:
             pivot_left=pivot_left, pivot_right=pivot_right
         )
         self.zone_merger = SRZoneMerger(zone_width_atr=zone_width_atr)
-        self.lookback_bars = lookback_bars
+        self.lookback_bars = _positive_integral(lookback_bars, "lookback_bars")
         self.zone_width_atr = zone_width_atr
         self.near_distance_atr = near_distance_atr
         self.enable_hold_confirmation = bool(enable_hold_confirmation)
-        self.hold_confirmation_bars = max(1, int(hold_confirmation_bars))
+        self.hold_confirmation_bars = _positive_integral(
+            hold_confirmation_bars, "hold_confirmation_bars"
+        )
         self.hold_confirmation_atr = max(0.0, float(hold_confirmation_atr))
         self.break_tolerance_atr = max(0.0, float(break_tolerance_atr))
         self.break_basis = str(break_basis).upper()
