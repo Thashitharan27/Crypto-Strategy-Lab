@@ -4,12 +4,25 @@ from __future__ import annotations
 import numpy as np
 
 
+def _positive_integral_period(value) -> int:
+    """Return a positive integer period without truncating fractional inputs."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("period must be a positive integer")
+    try:
+        numeric = float(value)
+        period = int(numeric)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("period must be a positive integer") from exc
+    if not np.isfinite(numeric) or numeric != period or period <= 0:
+        raise ValueError("period must be a positive integer")
+    return period
+
+
 def wilder_rma(values: np.ndarray, period: int) -> np.ndarray:
     """TradingView-compatible Wilder RMA seeded with an SMA."""
+    period = _positive_integral_period(period)
     values = np.asarray(values, dtype=float)
     out = np.full(len(values), np.nan, dtype=float)
-    if period <= 0:
-        raise ValueError("period must be positive")
     finite = np.isfinite(values)
     for start in range(0, max(0, len(values) - period + 1)):
         window = values[start:start + period]
