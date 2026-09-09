@@ -77,6 +77,16 @@ def build_lifecycle_analysis(trades: pd.DataFrame, telemetry: pd.DataFrame, phas
     then bounded inclusively by the leg's true entry and exit times. Empty phase
     bins use the nearest observation to the phase midpoint.
     """
+    if isinstance(phases, (bool, np.bool_)):
+        raise ValueError("lifecycle phases must be a positive integer")
+    try:
+        numeric_phases = float(phases)
+        phases = int(numeric_phases)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("lifecycle phases must be a positive integer") from exc
+    if not np.isfinite(numeric_phases) or numeric_phases != phases or phases <= 0:
+        raise ValueError("lifecycle phases must be a positive integer")
+
     # Normalize telemetry and group it once.  The previous implementation scanned
     # the complete telemetry frame for every leg, which made this O(trades *
     # telemetry).  Group indices retain the exact original rows without making
