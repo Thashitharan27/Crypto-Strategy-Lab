@@ -235,7 +235,7 @@ def new_rule(
         operator = "GTE"
         value = 30.0 if evidence == "DI_SPREAD" else 0.0
         value2 = 0.0
-    return {
+    rule = {
         "id": uuid4().hex,
         "group_id": str(group_id or uuid4().hex),
         "group_name": str(group_name or ""),
@@ -244,10 +244,12 @@ def new_rule(
         "operator": operator,
         "value": value,
         "value2": value2,
-        "sr_timeframe_minutes": 0 if is_support_resistance_evidence(evidence) else None,
         "regime": str(regime).upper(),
         "side": str(side).upper(),
     }
+    if is_support_resistance_evidence(evidence):
+        rule["sr_timeframe_minutes"] = 0
+    return rule
 
 
 def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
@@ -313,7 +315,7 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
                     raise ValueError("S/R rule timeframe must be Strategy TF, 1h, 4h or 1d")
                 value["sr_timeframe_minutes"] = normalized_timeframe
     else:
-        value["sr_timeframe_minutes"] = None
+        value.pop("sr_timeframe_minutes", None)
 
     if categorical:
         value["value"] = str(value["value"]).upper()
