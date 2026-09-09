@@ -422,3 +422,60 @@ def test_mixed_scope_legacy_entry_rules_expand_without_changing_profile_logic():
     assert {rule["evidence"] for rule in bull_long} == {"ADX", "RSI"}
     assert len({rule["group_id"] for rule in bull_long}) == 1
     assert {rule["evidence"] for rule in bear_long} == {"ADX"}
+
+
+def test_muted_group_round_trips_without_becoming_an_active_dependency():
+    muted = new_rule(
+        kind="REQUIRED",
+        evidence="SR_NEAR_SUPPORT",
+        group_name="HTF support experiment",
+        regime="BULL",
+        side="LONG",
+        group_enabled=False,
+    )
+    muted.update(operator="IS", value="TRUE", sr_timeframe_minutes=60)
+
+    assert uses_support_resistance_rules((muted,)) is False
+
+    strategy, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(muted,),
+    )
+    native = strategy["bull_long"].entry_rules[0]
+    assert native["_builder_group_enabled"] is False
+    assert native["indicator"] == "SR_NEAR_SUPPORT"
+
+    recovered = decompile_rules(strategy)["REQUIRED"]
+    assert len(recovered) == 1
+    assert recovered[0]["group_enabled"] is False
+    assert recovered[0]["group_name"] == "HTF support experiment"
+    assert recovered[0]["sr_timeframe_minutes"] == 60
+
+
+def test_rule_group_active_state_must_be_consistent_inside_one_group():
+    group_id = "mixed-mute-state"
+    active = new_rule(
+        kind="VETO",
+        evidence="ADX",
+        group_id=group_id,
+        group_name="Mixed state",
+        group_enabled=True,
+    )
+    muted = new_rule(
+        kind="VETO",
+        evidence="RSI",
+        group_id=group_id,
+        group_name="Mixed state",
+        group_enabled=False,
+    )
+
+    with pytest.raises(ValueError, match="active/muted state"):
+        normalize_rules((active, muted), kind="VETO")
+
+
+def test_legacy_rules_without_group_enabled_default_to_active():
+    legacy = new_rule(kind="REQUIRED", evidence="ADX")
+    legacy.pop("group_enabled")
+    normalized = normalize_rule(legacy)
+    assert normalized["group_enabled"] is True
