@@ -227,3 +227,88 @@ def test_bull_long_mr_state_and_motion_veto_only_rejects_the_intersection():
     )
     assert not rejected
     assert detail is None
+
+
+def test_muted_required_group_does_not_reject_clean_baseline():
+    engine = _engine()
+    muted_required = _rule(
+        action="REJECT",
+        kind="REQUIRED",
+        group="muted-entry",
+        name="Experimental entry filters",
+        matched=True,
+        rule_id="mr1",
+    )
+    muted_required["_builder_group_enabled"] = False
+    profile = SimpleNamespace(entry_rules=(muted_required,))
+
+    rejected, detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", profile, "REJECT", "ANY"
+    )
+    assert not rejected
+    assert detail is None
+
+
+def test_muted_veto_and_flip_groups_have_zero_runtime_effect():
+    engine = _engine()
+
+    muted_veto = _rule(
+        action="REJECT",
+        kind="VETO",
+        group="muted-veto",
+        name="Muted veto",
+        matched=True,
+        rule_id="mv1",
+    )
+    muted_veto["_builder_group_enabled"] = False
+    veto_profile = SimpleNamespace(entry_rules=(muted_veto,))
+    rejected, detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", veto_profile, "REJECT", "ANY"
+    )
+    assert not rejected
+    assert detail is None
+
+    muted_flip = _rule(
+        action="FLIP",
+        kind="FLIP",
+        group="muted-flip",
+        name="Muted flip",
+        matched=True,
+        rule_id="mf1",
+    )
+    muted_flip["_builder_group_enabled"] = False
+    flip_profile = SimpleNamespace(entry_rules=(muted_flip,))
+    flipped, detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", flip_profile, "FLIP", "ANY"
+    )
+    assert not flipped
+    assert detail is None
+
+
+def test_muted_and_active_required_groups_only_consider_active_group():
+    engine = _engine()
+    muted = _rule(
+        action="REJECT",
+        kind="REQUIRED",
+        group="muted",
+        name="Muted entry",
+        matched=False,
+        rule_id="m1",
+    )
+    muted["_builder_group_enabled"] = False
+    active = _rule(
+        action="REJECT",
+        kind="REQUIRED",
+        group="active",
+        name="Active entry",
+        matched=True,
+        rule_id="a1",
+    )
+    profile = SimpleNamespace(entry_rules=(muted, active))
+
+    rejected, detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", profile, "REJECT", "ANY"
+    )
+    assert rejected
+    assert "Active entry" in detail
+    assert "Muted entry" not in detail
