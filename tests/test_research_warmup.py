@@ -71,6 +71,29 @@ def test_support_resistance_warmup_uses_its_configured_timeframe() -> None:
     assert strategy_warmup_period(config) == pd.Timedelta(days=210, hours=8)
 
 
+def test_multitimeframe_sr_warmup_covers_highest_independent_context() -> None:
+    base = ResearchRunConfig()
+    config = replace(
+        base,
+        data=replace(
+            base.data,
+            strategy_timeframe_minutes=15,
+            intrabar_timeframe_minutes=1,
+        ),
+        features=replace(
+            base.features,
+            enable_support_resistance_analysis=True,
+            sr_timeframe_minutes=0,
+            sr_lookback_bars=200,
+            sr_pivot_left=5,
+            sr_pivot_right=5,
+        ),
+    )
+    # 1d is the highest independent context for a 15m strategy, so 210 S/R
+    # candles plus the normal two strategy-bar safety margin are available.
+    assert strategy_warmup_period(config) >= pd.Timedelta(days=210)
+
+
 def test_expanded_strategy_request_clamps_to_available_history() -> None:
     request = DataRequest(
         symbol="BTCUSDT",
