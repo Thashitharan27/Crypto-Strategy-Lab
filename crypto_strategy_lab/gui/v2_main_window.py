@@ -320,6 +320,7 @@ class DataclassForm(QWidget):
         "strategy_profile_run_mode": ("COMBINED_SHARED_CAPITAL", "ISOLATED_PROFILES", "BOTH"),
         "entry_mode": ("WAIT_UNTIL_CLOSED", "EVERY_N_CANDLES"),
         "sr_filter_mode": ("ANALYSIS_ONLY", "APPLY_ENTRY_RULES"),
+        "sr_timeframe_minutes": (0, 60, 240, 1440),
         "daily_entry_missed_policy": ("SKIP_DAY", "NEXT_AVAILABLE_CANDLE"),
         "market_regime_method": ("BTC_STRUCTURAL", "ASSET_STRUCTURAL", "ASSET_RETURN"),
         "trade_flow_source": ("AGG_TRADES", "TRADES"),
@@ -1171,7 +1172,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Crypto Strategy Lab — Research Workstation")
         self.resize(1500, 920)
         self.service = service or GuiApplicationService(MARKET_DATA_ROOT, CACHE_DIR)
-        self.config = ResearchRunConfig()
+        base_config = ResearchRunConfig()
+        self.config = replace(
+            base_config,
+            features=replace(
+                base_config.features,
+                enable_support_resistance_analysis=True,
+            ),
+        )
         self._manifest = None
         self._run_dir = None
         self._thread = None
@@ -1189,7 +1197,7 @@ class MainWindow(QMainWindow):
         self.strategy_form = DataclassForm(
             StrategyConfig(), excluded={"profiles"}, groups=STRATEGY_GROUPS
         )
-        self.feature_form = DataclassForm(FeatureConfig(), groups=FEATURE_GROUPS)
+        self.feature_form = DataclassForm(self.config.features, groups=FEATURE_GROUPS)
         self.execution_form = DataclassForm(
             ExecutionConfig(), excluded={"profiles"}, groups=EXECUTION_GROUPS
         )
