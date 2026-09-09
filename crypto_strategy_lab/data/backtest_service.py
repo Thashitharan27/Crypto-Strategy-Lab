@@ -224,13 +224,15 @@ def _prefix_sr_research_frame(
 ) -> pd.DataFrame:
     """Give one S/R timeframe its own stable output namespace."""
     prefix = f"sr_{label}_"
-    renamed = frame.rename(
-        columns={
-            column: f"{prefix}{column}"
-            for column in frame.columns
-            if column not in {"timestamp", "available_at"}
-        }
-    ).copy()
+    rename_map = {}
+    for column in frame.columns:
+        if column in {"timestamp", "available_at"}:
+            continue
+        if column == "sr_completed_candle_time":
+            rename_map[column] = f"{prefix}completed_candle_time"
+        else:
+            rename_map[column] = f"{prefix}{column}"
+    renamed = frame.rename(columns=rename_map).copy()
     renamed.attrs.update(frame.attrs)
     renamed.attrs["sr_context_label"] = label
     renamed.attrs["sr_context_timeframe_minutes"] = int(timeframe_minutes)
