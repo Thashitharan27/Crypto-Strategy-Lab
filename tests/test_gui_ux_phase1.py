@@ -299,7 +299,7 @@ def test_entry_evidence_framework_maps_current_native_roles_without_inventing_se
         assert roles["DI Direction"][0] == "Direction"
         assert roles["DI Pressure"][0] == "Analyze Only"
         assert roles["Mean Reversion"][0] == "Analyze Only"
-        assert roles["Support / Resistance"][0] == "Off"
+        assert roles["Support / Resistance"][0] == "Analyze Only"
         for source in ("Open Interest","Funding","Positioning / Basis","Taker Flow"):
             assert roles[source][0] == "Analyze Only"
         assert roles["Trade Flow"][0] == "Off"
@@ -328,6 +328,8 @@ def test_sr_trade_flow_and_order_book_roles_follow_existing_native_controls():
     _app,window=_window()
     try:
         workspace=window.strategy_workspace
+        assert workspace.evidence_roles()["Support / Resistance"][0] == "Analyze Only"
+        window.feature_form.widgets["enable_support_resistance_analysis"].setChecked(False)
         assert workspace.evidence_roles()["Support / Resistance"][0] == "Off"
         window.feature_form.widgets["enable_support_resistance_analysis"].setChecked(True)
         assert workspace.evidence_roles()["Support / Resistance"][0] == "Analyze Only"
