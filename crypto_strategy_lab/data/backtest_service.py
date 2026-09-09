@@ -203,6 +203,96 @@ def _interval_dataset_request(
     )
 
 
+_INDEPENDENT_SR_TIMEFRAMES = ((60, "1h"), (240, "4h"), (1440, "1d"))
+
+
+def _sr_research_targets(strategy_minutes: int) -> tuple[tuple[int, str], ...]:
+    """Return strategy S/R plus compatible higher contexts, never a combined score."""
+    strategy_minutes = int(strategy_minutes)
+    targets: list[tuple[int, str]] = [(strategy_minutes, "strategy")]
+    for minutes, label in _INDEPENDENT_SR_TIMEFRAMES:
+        if minutes > strategy_minutes and minutes % strategy_minutes == 0:
+            targets.append((minutes, label))
+    return tuple(targets)
+
+
+def _prefix_sr_research_frame(
+    frame: pd.DataFrame,
+    *,
+    label: str,
+    timeframe_minutes: int,
+) -> pd.DataFrame:
+    """Give one S/R timeframe its own stable output namespace."""
+    prefix = f"sr_{label}_"
+    renamed = frame.rename(
+        columns={
+            column: f"{prefix}{column}"
+            for column in frame.columns
+            if column not in {"timestamp", "available_at"}
+        }
+    ).copy()
+    renamed.attrs.update(frame.attrs)
+    renamed.attrs["sr_context_label"] = label
+    renamed.attrs["sr_context_timeframe_minutes"] = int(timeframe_minutes)
+    return renamed
+
+
+def _independent_sr_research_features(
+    store: MarketDataStore,
+    registry,
+    request: DataRequest,
+    canonical: pd.DataFrame,
+    feature_parameters: Mapping[str, Mapping[str, object]],
+    primary_sr: pd.DataFrame,
+    *,
+    strategy_minutes: int,
+) -> dict[str, pd.DataFrame]:
+    """Materialize independent S/R contexts for research and rules.
+
+    The existing unprefixed support_resistance block remains the configured
+    primary context for backwards compatibility. These additional blocks never
+    aggregate, minimize, or score across timeframes; each remains independently
+    inspectable and independently filterable.
+    """
+    base_sr = dict(feature_parameters.get("support_resistance", {}))
+    if not base_sr:
+        return {}
+    primary_minutes = int(
+        base_sr.get("sr_timeframe_minutes", 0) or strategy_minutes
+    )
+    dependency_names = set(registry.dependency_order(["support_resistance"]))
+    cache = FeatureFrameCache(store.cache.root)
+    result: dict[str, pd.DataFrame] = {}
+
+    for minutes, label in _sr_research_targets(strategy_minutes):
+        if minutes == primary_minutes:
+            frame = primary_sr
+        else:
+            parameters = {
+                name: dict(feature_parameters[name])
+                for name in dependency_names
+                if name in feature_parameters
+            }
+            parameters["support_resistance"] = {
+                **base_sr,
+                "sr_timeframe_minutes": int(minutes),
+            }
+            computed = registry.execute(
+                ["support_resistance"],
+                request,
+                {DatasetKind.KLINES: canonical},
+                parameters=parameters,
+                cache=cache,
+            )
+            frame = computed["support_resistance"]
+        result[f"support_resistance_{label}"] = _prefix_sr_research_frame(
+            frame,
+            label=label,
+            timeframe_minutes=minutes,
+        )
+    return result
+
+
 _OPTIONAL_COVERAGE_ISSUES = {
     "LEADING_COVERAGE_GAP",
     "TRAILING_COVERAGE_GAP",
@@ -875,6 +965,18 @@ def load_backtest_bundle(
         name: _align_research_frame_to_strategy(frame, strategy)
         for name, frame in research_features.items()
     }
+    if enable_support_resistance_analysis and sr_features is not None:
+        research_features.update(
+            _independent_sr_research_features(
+                store,
+                registry,
+                request,
+                canonical,
+                feature_parameters,
+                sr_features,
+                strategy_minutes=strategy_minutes,
+            )
+        )
 
     intrabar = None
     actual_intrabar_interval = None
