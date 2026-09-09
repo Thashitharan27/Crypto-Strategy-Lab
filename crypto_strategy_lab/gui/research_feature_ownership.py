@@ -55,7 +55,7 @@ FRIENDLY_LABELS = {
     "structural_regime_slope_lookback_days": "SMA slope lookback",
     "bull_regime_lookback_days": "Return lookback",
     "bull_regime_return_threshold": "Bull / bear threshold",
-    "sr_timeframe_minutes": "S/R timeframe",
+    "sr_timeframe_minutes": "Primary S/R timeframe (legacy)",
     "sr_pivot_left": "Pivot bars left",
     "sr_pivot_right": "Pivot bars right",
     "sr_lookback_bars": "Lookback bars",
@@ -277,15 +277,29 @@ class ResearchFeaturesPanel(QWidget):
         self.sr_card = FeatureCard(
             "Support / Resistance",
             status="OFF / RESEARCH ONLY",
-            note="Enable for S/R research. Any explicit S/R Entry/Veto rule automatically makes this a required strategy dependency.",
+            note=(
+                "Calculates independent Strategy-TF and compatible higher-timeframe "
+                "S/R contexts. Choose the timeframe on each S/R Entry/Veto/Flip "
+                "condition; no combined S/R score is created."
+            ),
             enable=self.sr_enable,
             expandable=True,
             expanded=False,
         )
+
+        self.sr_prepared_timeframes = QLabel()
+        self.sr_prepared_timeframes.setWordWrap(True)
+        self.sr_prepared_timeframes.setStyleSheet(
+            "color:#334e68; background:#f7f9fb; padding:7px 9px; "
+            "border:1px solid #d9e2ec; margin:2px 8px 4px 8px"
+        )
+        # Keep the prepared-context summary visible even while detailed S/R
+        # settings are collapsed.
+        self.sr_card.layout().insertWidget(1, self.sr_prepared_timeframes)
+
         self._add_fields(
             self.sr_card,
             (
-                "sr_timeframe_minutes",
                 "sr_pivot_left",
                 "sr_pivot_right",
                 "sr_lookback_bars",
@@ -298,6 +312,40 @@ class ResearchFeaturesPanel(QWidget):
                 "sr_break_basis",
             ),
         )
+
+        # The old single-timeframe selector still owns the unprefixed primary
+        # S/R context for saved-config compatibility. It is not the way new
+        # multi-timeframe rules select evidence, so keep it out of the normal
+        # settings surface and expose it only under an explicit legacy section.
+        self.sr_legacy_section = QWidget()
+        sr_legacy_layout = QVBoxLayout(self.sr_legacy_section)
+        sr_legacy_layout.setContentsMargins(0, 4, 0, 0)
+        self.sr_legacy_toggle = QToolButton()
+        self.sr_legacy_toggle.setText("Advanced / Legacy primary S/R timeframe")
+        self.sr_legacy_toggle.setCheckable(True)
+        self.sr_legacy_toggle.setChecked(False)
+        sr_legacy_layout.addWidget(self.sr_legacy_toggle)
+
+        self.sr_legacy_body = QWidget()
+        sr_legacy_form = QFormLayout(self.sr_legacy_body)
+        sr_legacy_form.setContentsMargins(8, 2, 0, 2)
+        sr_legacy_note = QLabel(
+            "Compatibility setting for the historical unprefixed S/R context. "
+            "New S/R rules select Strategy TF, 1h, 4h or 1d independently in "
+            "the Strategy Builder."
+        )
+        sr_legacy_note.setWordWrap(True)
+        sr_legacy_note.setStyleSheet("color:#52606d")
+        sr_legacy_form.addRow(sr_legacy_note)
+        sr_legacy_form.addRow(
+            "Primary S/R timeframe (legacy)",
+            self.widgets["sr_timeframe_minutes"],
+        )
+        self.sr_legacy_body.setVisible(False)
+        self.sr_legacy_toggle.toggled.connect(self.sr_legacy_body.setVisible)
+        sr_legacy_layout.addWidget(self.sr_legacy_body)
+        self.sr_card.form.addRow(self.sr_legacy_section)
+
         layout.addWidget(self.sr_card)
 
         self._section(layout, "Futures Market Research — automatic when data is available")
@@ -399,6 +447,11 @@ class ResearchFeaturesPanel(QWidget):
         self.widgets["market_regime_method"].currentIndexChanged.connect(
             lambda _index: self.refresh_visibility()
         )
+        strategy_tf = getattr(self.window, "strategy_tf", None)
+        if strategy_tf is not None and hasattr(strategy_tf, "currentIndexChanged"):
+            strategy_tf.currentIndexChanged.connect(
+                lambda _index: self._refresh_sr_timeframe_summary()
+            )
         self.widgets["enable_sr_hold_confirmation"].toggled.connect(
             lambda _checked: self.refresh_visibility()
         )
@@ -440,6 +493,48 @@ class ResearchFeaturesPanel(QWidget):
         for name in names:
             widget = self.widgets[name]
             card.add_field(name, widget, FRIENDLY_LABELS.get(name, name.replace("_", " ").title()))
+
+    def _strategy_timeframe_context(self) -> tuple[int | None, str]:
+        selector = getattr(self.window, "strategy_tf", None)
+        if selector is None:
+            return None, "Strategy TF"
+        raw = selector.currentData() if hasattr(selector, "currentData") else None
+        if raw in (None, "") and hasattr(selector, "currentText"):
+            raw = selector.currentText()
+        text = str(raw or "").strip().lower()
+        known = {
+            "1m": 1,
+            "5m": 5,
+            "15m": 15,
+            "1h": 60,
+            "4h": 240,
+            "1d": 1440,
+        }
+        minutes = known.get(text)
+        return minutes, (text if minutes is not None else "Strategy TF")
+
+    def _refresh_sr_timeframe_summary(self) -> None:
+        minutes, label = self._strategy_timeframe_context()
+        if minutes is None:
+            text = (
+                "Prepared S/R timeframes: Strategy TF + compatible higher TFs. "
+                "Each context stays separate and is selected per S/R rule."
+            )
+        else:
+            contexts = [f"Strategy TF ({label})"]
+            for higher_minutes, higher_label in (
+                (60, "1h"),
+                (240, "4h"),
+                (1440, "1d"),
+            ):
+                if higher_minutes > minutes and higher_minutes % minutes == 0:
+                    contexts.append(higher_label)
+            text = (
+                "Prepared S/R timeframes: "
+                + " · ".join(contexts)
+                + ". Each context stays separate; select the timeframe on each S/R rule."
+            )
+        self.sr_prepared_timeframes.setText(text)
 
     def _mark_custom(self, *_args) -> None:
         if self._applying_preset:
@@ -533,6 +628,7 @@ class ResearchFeaturesPanel(QWidget):
         self.refresh_visibility()
 
     def refresh_visibility(self, *_args) -> None:
+        self._refresh_sr_timeframe_summary()
         method = self.widgets["market_regime_method"].currentData()
         structural = method in {"BTC_STRUCTURAL", "ASSET_STRUCTURAL"}
         for name in (
