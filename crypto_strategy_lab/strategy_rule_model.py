@@ -188,9 +188,18 @@ def is_mean_reversion_evidence(evidence: str) -> bool:
     return str(evidence).upper() in MEAN_REVERSION_RULE_EVIDENCE
 
 
+def _rule_group_enabled(rule: dict) -> bool:
+    """Return whether one builder rule's group is active.
+
+    Historical rules predate group muting and therefore default to active.
+    """
+    return bool(rule.get("group_enabled", True))
+
+
 def uses_mean_reversion_rules(*rule_groups) -> bool:
     return any(
-        is_mean_reversion_evidence(rule.get("evidence", ""))
+        _rule_group_enabled(rule)
+        and is_mean_reversion_evidence(rule.get("evidence", ""))
         for group in rule_groups
         for rule in (group or ())
     )
@@ -202,7 +211,8 @@ def is_support_resistance_evidence(evidence: str) -> bool:
 
 def uses_support_resistance_rules(*rule_groups) -> bool:
     return any(
-        is_support_resistance_evidence(rule.get("evidence", ""))
+        _rule_group_enabled(rule)
+        and is_support_resistance_evidence(rule.get("evidence", ""))
         for group in rule_groups
         for rule in (group or ())
     )
@@ -224,6 +234,7 @@ def new_rule(
     group_name: str = "",
     regime: str = "ALL",
     side: str = "ALL",
+    group_enabled: bool = True,
 ) -> dict:
     """Return one researcher-facing condition with stable group identity."""
     evidence = str(evidence).upper()
@@ -239,6 +250,7 @@ def new_rule(
         "id": uuid4().hex,
         "group_id": str(group_id or uuid4().hex),
         "group_name": str(group_name or ""),
+        "group_enabled": bool(group_enabled),
         "kind": kind,
         "evidence": evidence,
         "operator": operator,
@@ -259,11 +271,23 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
     value.setdefault("id", uuid4().hex)
     value.setdefault("group_id", "")
     value.setdefault("group_name", "")
+    value.setdefault("group_enabled", True)
     value.setdefault("kind", expected_kind or "REQUIRED")
     value.setdefault("evidence", "DI_SPREAD")
     value["id"] = str(value["id"])
     value["group_id"] = str(value["group_id"] or "").strip()
     value["group_name"] = str(value["group_name"] or "").strip()
+    raw_group_enabled = value["group_enabled"]
+    if isinstance(raw_group_enabled, str):
+        normalized_flag = raw_group_enabled.strip().lower()
+        if normalized_flag in {"true", "1", "yes", "on"}:
+            value["group_enabled"] = True
+        elif normalized_flag in {"false", "0", "no", "off"}:
+            value["group_enabled"] = False
+        else:
+            raise ValueError("strategy rule group_enabled must be boolean")
+    else:
+        value["group_enabled"] = bool(raw_group_enabled)
     value["kind"] = str(value["kind"]).upper()
     value["evidence"] = str(value["evidence"]).upper()
     categorical = is_categorical_evidence(value["evidence"])
@@ -411,12 +435,17 @@ def normalize_rules(rules, *, kind: str) -> tuple[dict, ...]:
             group_meta[group_id] = {
                 "regime": rule["regime"],
                 "side": rule["side"],
+                "enabled": rule["group_enabled"],
                 "names": [],
             }
         meta = group_meta[group_id]
         if meta["regime"] != rule["regime"] or meta["side"] != rule["side"]:
             raise ValueError(
                 "all conditions in one rule group must share the same market and side scope"
+            )
+        if meta["enabled"] != rule["group_enabled"]:
+            raise ValueError(
+                "all conditions in one rule group must share the same active/muted state"
             )
         if rule["group_name"]:
             meta["names"].append(rule["group_name"])
@@ -495,6 +524,7 @@ def _native_rule(rule: dict, *, required: bool) -> dict:
         f"{_META_PREFIX}id": rule["id"],
         f"{_META_PREFIX}group_id": rule["group_id"],
         f"{_META_PREFIX}group_name": rule["group_name"],
+        f"{_META_PREFIX}group_enabled": rule["group_enabled"],
         f"{_META_PREFIX}kind": rule["kind"],
         f"{_META_PREFIX}operator": rule["operator"],
         f"{_META_PREFIX}value": rule["value"],
@@ -647,6 +677,7 @@ def _builder_rule(native_rule: dict) -> dict | None:
         "id": native_rule[f"{_META_PREFIX}id"],
         "group_id": native_rule.get(f"{_META_PREFIX}group_id", ""),
         "group_name": native_rule.get(f"{_META_PREFIX}group_name", ""),
+        "group_enabled": native_rule.get(f"{_META_PREFIX}group_enabled", True),
         "kind": native_rule.get(f"{_META_PREFIX}kind", "VETO"),
         "evidence": native_rule.get("indicator", "DI_SPREAD"),
         "operator": native_rule.get(f"{_META_PREFIX}operator", "BETWEEN"),
