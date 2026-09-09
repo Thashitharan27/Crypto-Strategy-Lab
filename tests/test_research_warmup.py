@@ -122,6 +122,35 @@ def test_optional_research_rows_are_padded_only_for_strategy_warmup() -> None:
     assert aligned.attrs["feature_cache_key"] == "research-scope-key"
 
 
+def test_native_simulator_config_normalizes_profile_integer_looking_floats() -> None:
+    base = ResearchRunConfig()
+    strategy_profiles = dict(base.strategy.profiles)
+    execution_profiles = dict(base.execution.profiles)
+    strategy_profiles["bull_long"] = replace(
+        strategy_profiles["bull_long"],
+        rsi_period=14.0,
+        momentum_lookback_hours=24.0,
+    )
+    execution_profiles["bull_long"] = replace(
+        execution_profiles["bull_long"],
+        timeout_minutes=480.0,
+    )
+    strategy = replace(base.strategy, profiles=strategy_profiles)
+    execution = replace(base.execution, profiles=execution_profiles)
+
+    native = native_simulator_config(
+        base.data,
+        base.features,
+        strategy,
+        execution,
+    )
+
+    profile = native.strategy_profiles["bull_long"]
+    assert type(profile.rsi_period) is int
+    assert type(profile.momentum_lookback_hours) is int
+    assert type(profile.timeout_minutes) is int
+
+
 def test_native_simulator_window_preserves_end_exclusive_request() -> None:
     config = ResearchRunConfig()
     start = datetime(2026, 1, 1, tzinfo=UTC)
