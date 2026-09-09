@@ -26,6 +26,7 @@ def test_percentage_display_and_edit_roundtrip(native, shown):
 def test_friendly_enum_labels_preserve_native_values():
     assert ENUM_LABELS["strategy_profile_run_mode"]["COMBINED_SHARED_CAPITAL"] == "Combined — Shared Account"
     assert ENUM_LABELS["tie_policy"]["PESSIMISTIC"] == "Conservative — Stop First"
+    assert ENUM_LABELS["sr_timeframe_minutes"] == {0: "Same as strategy", 60: "1h", 240: "4h", 1440: "1d"}
     assert set(PROFILE_LABELS) == {"bull_long","bull_short","bear_long","bear_short","sideways_long","sideways_short"}
 
 
@@ -80,6 +81,27 @@ def _window():
         catalog=Catalog()
         def refresh_catalog(self): return 0
     return app,MainWindow(service=Service())
+
+
+def test_new_gui_defaults_sr_on_and_uses_friendly_timeframe_dropdown():
+    _app,window=_window()
+    try:
+        from PySide6.QtWidgets import QComboBox
+
+        sr_toggle=window.feature_form.widgets["enable_support_resistance_analysis"]
+        timeframe=window.feature_form.widgets["sr_timeframe_minutes"]
+        assert sr_toggle.isChecked() is True
+        assert isinstance(timeframe,QComboBox)
+        assert [(timeframe.itemText(i),timeframe.itemData(i)) for i in range(timeframe.count())] == [
+            ("Same as strategy",0),("1h",60),("4h",240),("1d",1440)
+        ]
+
+        timeframe.setCurrentIndex(timeframe.findData(60))
+        built=window.build_config()
+        assert built.features.enable_support_resistance_analysis is True
+        assert built.features.sr_timeframe_minutes == 60
+    finally:
+        window.close()
 
 
 def test_arbitrary_native_float_precision_survives_untouched_gui_roundtrip():

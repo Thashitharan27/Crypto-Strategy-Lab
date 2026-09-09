@@ -123,6 +123,13 @@ def test_presets_control_only_explicit_optional_or_heavy_features():
         assert panel.trade_enable.isChecked() is False
         assert panel.book_enable.isChecked() is False
 
+        panel.preset.setCurrentIndex(panel.preset.findData("STANDARD"))
+        panel._apply_selected_preset()
+        assert window.rule_builder.enable_mr.isChecked() is True
+        assert panel.sr_enable.isChecked() is True
+        assert panel.trade_enable.isChecked() is False
+        assert panel.book_enable.isChecked() is False
+
         panel.preset.setCurrentIndex(panel.preset.findData("DEEP"))
         panel._apply_selected_preset()
         assert window.rule_builder.enable_mr.isChecked() is True
