@@ -21,6 +21,23 @@ from crypto_strategy_lab.support_resistance import (
 class TestSwingDetector:
     """Tests for swing high and swing low detection."""
     
+    def test_integral_float_settings_are_normalized_before_range_use(self):
+        detector = SwingDetector(
+            pivot_left=2.0,
+            pivot_right=2.0,
+            min_bars_between=1.0,
+        )
+        highs = np.array([10, 12, 15, 12, 10, 11, 13], dtype=np.float64)
+
+        assert type(detector.pivot_left) is int
+        assert type(detector.pivot_right) is int
+        assert type(detector.min_bars_between) is int
+        assert detector.detect_swing_highs(highs, 6) == [2]
+
+    def test_fractional_swing_settings_are_rejected_instead_of_truncated(self):
+        with pytest.raises(ValueError, match="pivot_left must be a positive integer"):
+            SwingDetector(pivot_left=2.5, pivot_right=2)
+
     def test_swing_high_detection_basic(self):
         """Swing highs detected at clear peaks."""
         detector = SwingDetector(pivot_left=2, pivot_right=2)
