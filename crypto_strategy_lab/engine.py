@@ -582,6 +582,13 @@ class BacktestEngine:
             return "__legacy_required_group__"
         return f"__legacy_{kind.lower()}_{number}__"
 
+    @staticmethod
+    def _strategy_profile_builder_group_enabled(rule):
+        value=rule.get("_builder_group_enabled",True)
+        if isinstance(value,str):
+            return value.strip().lower() not in {"false","0","no","off"}
+        return bool(value)
+
     def _strategy_profile_builder_groups(self, profile, action, kind):
         groups={}
         labels={}
@@ -593,6 +600,10 @@ class BacktestEngine:
             # Built-in DMI/MACD rules deliberately have no builder id and remain
             # native mandatory rules rather than researcher-authored groups.
             if "_builder_id" not in rule:
+                continue
+            # Muted builder groups stay embedded in the profile for save/load and
+            # auditability, but they are absent from runtime rule evaluation.
+            if not self._strategy_profile_builder_group_enabled(rule):
                 continue
             key=self._strategy_profile_builder_group_key(rule,number,kind)
             groups.setdefault(key,[]).append(rule)
