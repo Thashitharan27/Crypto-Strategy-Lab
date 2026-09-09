@@ -132,3 +132,82 @@ def test_adding_condition_keeps_the_edited_group_selected_and_inserts_at_top():
     finally:
         builder.close()
         app.processEvents()
+
+
+def test_group_mute_is_visible_persistent_and_bulk_reversible():
+    app, builder, _widgets = _builder()
+    try:
+        first = new_rule(
+            kind="REQUIRED",
+            group_name="Primary filters",
+            regime="BULL",
+            side="LONG",
+            evidence="ADX",
+        )
+        second = new_rule(
+            kind="REQUIRED",
+            group_name="Secondary filters",
+            regime="BULL",
+            side="LONG",
+            evidence="RSI",
+        )
+        builder.required_rules.set_rules((first, second))
+
+        first_group = builder.required_rules._groups[first["group_id"]]
+        first_group["enabled"].setChecked(False)
+
+        muted_rules = [
+            rule for rule in builder.required_rules.rules()
+            if rule["group_id"] == first["group_id"]
+        ]
+        assert muted_rules
+        assert all(rule["group_enabled"] is False for rule in muted_rules)
+        assert first_group["muted_notice"].isHidden() is False
+        assert "MUTED" in first_group["list_item"].text()
+        builder.refresh_summary()
+        assert "1 GROUP MUTED" in builder.summary.text()
+        assert "1 muted" in builder.rule_tabs.tabText(0)
+
+        builder.required_rules.set_all_groups_enabled(False)
+        assert builder.required_rules.muted_group_count() == 2
+        assert all(
+            rule["group_enabled"] is False
+            for rule in builder.required_rules.rules()
+        )
+
+        builder.required_rules.set_all_groups_enabled(True)
+        assert builder.required_rules.muted_group_count() == 0
+        assert all(
+            rule["group_enabled"] is True
+            for rule in builder.required_rules.rules()
+        )
+    finally:
+        builder.close()
+        app.processEvents()
+
+
+def test_new_condition_inherits_muted_group_state():
+    app, builder, _widgets = _builder()
+    try:
+        rule = new_rule(
+            kind="VETO",
+            group_name="Muted experiment",
+            regime="SIDEWAYS",
+            side="LONG",
+            evidence="ADX",
+            group_enabled=False,
+        )
+        builder.veto_rules.set_rules((rule,))
+        group_id = rule["group_id"]
+
+        builder.veto_rules.add_condition_to_group_id(group_id)
+
+        rules = [
+            item for item in builder.veto_rules.rules()
+            if item["group_id"] == group_id
+        ]
+        assert len(rules) == 2
+        assert all(item["group_enabled"] is False for item in rules)
+    finally:
+        builder.close()
+        app.processEvents()

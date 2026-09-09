@@ -674,7 +674,8 @@ class MainWindow(LegacyMainWindow):
             mr_evidence = {
                 rule["evidence"]
                 for rule in (*required_rules, *veto_rules, *flip_rules)
-                if rule["evidence"] in MEAN_REVERSION_RULE_EVIDENCE
+                if rule.get("group_enabled", True)
+                and rule["evidence"] in MEAN_REVERSION_RULE_EVIDENCE
             }
             distance_evidence = {
                 "MR_TRADE_STRETCH_ATR", "MR_DISTANCE_ATR", "MR_MOTION",

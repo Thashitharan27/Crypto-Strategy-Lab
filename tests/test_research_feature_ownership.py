@@ -219,3 +219,25 @@ def test_sr_rule_makes_support_resistance_a_required_dependency():
     finally:
         window.close()
         app.processEvents()
+
+
+def test_muted_rule_does_not_force_research_feature_dependency():
+    app, window, _scroll = _window()
+    try:
+        apply_research_feature_ownership(window)
+        panel = window.research_features_panel
+        panel.sr_enable.setChecked(False)
+
+        rule = new_rule(
+            kind="REQUIRED",
+            evidence="SR_TRADE_LOCATION_RATING",
+            group_enabled=False,
+        )
+        window.rule_builder.required_rules.set_rules((rule,))
+        panel._sync_sr_requirement()
+
+        assert panel.sr_enable.isEnabled() is True
+        assert panel.sr_card.status.text() != "REQUIRED BY STRATEGY"
+    finally:
+        window.close()
+        app.processEvents()

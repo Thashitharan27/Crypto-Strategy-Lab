@@ -614,6 +614,27 @@ class RuleTable(QWidget):
         group_layout.addWidget(self.group_list, 1)
 
         add_label = {"REQUIRED": "Entry", "VETO": "Veto", "FLIP": "Flip"}[self.kind]
+        bulk_row = QHBoxLayout()
+        bulk_row.setContentsMargins(0, 0, 0, 0)
+        bulk_row.setSpacing(4)
+        self.mute_all_button = QPushButton("Mute all")
+        self.mute_all_button.setToolTip(
+            "Temporarily mute every group in this tab without deleting its conditions"
+        )
+        self.enable_all_button = QPushButton("Enable all")
+        self.enable_all_button.setToolTip(
+            "Re-enable every muted group in this tab"
+        )
+        self.mute_all_button.clicked.connect(
+            lambda: self.set_all_groups_enabled(False)
+        )
+        self.enable_all_button.clicked.connect(
+            lambda: self.set_all_groups_enabled(True)
+        )
+        bulk_row.addWidget(self.mute_all_button)
+        bulk_row.addWidget(self.enable_all_button)
+        group_layout.addLayout(bulk_row)
+
         self.add_group_button = QPushButton(f"+ Add {add_label} Group")
         self.add_group_button.setToolTip("Add a new group at the top")
         self.add_group_button.clicked.connect(self.add_group)
@@ -808,7 +829,8 @@ class RuleTable(QWidget):
         name = group["name"].text().strip() or "Unnamed group"
         regime = group["regime"].currentText()
         side = group["side"].currentText()
-        return f"{name}\n{regime} · {side}"
+        state = "ACTIVE" if group["enabled"].isChecked() else "MUTED"
+        return f"{state} — {name}\n{regime} · {side}"
 
     def _refresh_group_list_item(self, group_id: str) -> None:
         group = self._groups.get(group_id)
@@ -852,20 +874,35 @@ class RuleTable(QWidget):
             ],
             first["side"],
         )
+        group_enabled = QToolButton()
+        group_enabled.setCheckable(True)
+        group_enabled.setChecked(bool(first.get("group_enabled", True)))
+        group_enabled.setToolButtonStyle(Qt.ToolButtonTextOnly)
         add_condition = QPushButton("+ Add condition")
         add_condition.setToolTip("Add a new condition at the top of this group")
         delete_group = QPushButton("Delete group")
         delete_group.setToolTip("Remove this whole condition group")
 
         header.addWidget(group_name, 0, 0, 1, 3)
-        header.addWidget(add_condition, 0, 3)
-        header.addWidget(delete_group, 0, 4)
+        header.addWidget(group_enabled, 0, 3)
+        header.addWidget(add_condition, 0, 4)
+        header.addWidget(delete_group, 0, 5)
         header.addWidget(QLabel("Market"), 1, 0)
         header.addWidget(regime, 1, 1)
         header.addWidget(QLabel("Side"), 1, 2)
         header.addWidget(side, 1, 3)
         header.setColumnStretch(0, 1)
         card_layout.addLayout(header)
+
+        muted_notice = QLabel(
+            "MUTED — this group is saved, but none of its conditions will affect the next run."
+        )
+        muted_notice.setWordWrap(True)
+        muted_notice.setStyleSheet(
+            "background:#fff7e6; border:1px solid #f0c36d; "
+            "padding:6px; font-weight:600; color:#7a4b00"
+        )
+        card_layout.addWidget(muted_notice)
 
         logic_text = {
             "REQUIRED": "ALL conditions below must match for this Entry group.",
@@ -909,6 +946,8 @@ class RuleTable(QWidget):
             "name": group_name,
             "regime": regime,
             "side": side,
+            "enabled": group_enabled,
+            "muted_notice": muted_notice,
             "preview": preview,
             "logic_toggle": logic_toggle,
             "list_item": None,
@@ -932,6 +971,10 @@ class RuleTable(QWidget):
         side.currentIndexChanged.connect(
             lambda _index, gid=group_id: self._group_header_changed(gid)
         )
+        group_enabled.toggled.connect(
+            lambda _checked, gid=group_id: self._group_enabled_changed(gid)
+        )
+        self._refresh_group_state_ui(group_id)
         add_condition.clicked.connect(
             lambda _checked=False, gid=group_id: self.add_condition_to_group_id(gid)
         )
@@ -939,6 +982,33 @@ class RuleTable(QWidget):
             lambda _checked=False, gid=group_id: self._remove_group(gid)
         )
         return card
+
+    def _refresh_group_state_ui(self, group_id: str) -> None:
+        group = self._groups.get(group_id)
+        if group is None:
+            return
+        enabled = group["enabled"].isChecked()
+        group["enabled"].setText("Active" if enabled else "Muted")
+        group["enabled"].setToolTip(
+            "Mute this group temporarily; all conditions remain saved and editable"
+            if enabled
+            else "Re-enable this group so its conditions affect the next run"
+        )
+        group["muted_notice"].setVisible(not enabled)
+        group["card"].setStyleSheet(
+            "QFrame#ruleGroupCard {"
+            + (
+                "background:#ffffff; border:1px solid #d9e2ec; border-radius:7px;"
+                if enabled
+                else "background:#fbfbfb; border:2px solid #f0c36d; border-radius:7px;"
+            )
+            + "}"
+        )
+        self._refresh_group_list_item(group_id)
+
+    def _group_enabled_changed(self, group_id: str) -> None:
+        self._refresh_group_state_ui(group_id)
+        self._notify_changed(group_id)
 
     def _group_header_changed(self, group_id: str) -> None:
         self._refresh_group_list_item(group_id)
@@ -965,7 +1035,7 @@ class RuleTable(QWidget):
                 item.setData(Qt.UserRole, group_id)
                 self.group_list.addItem(item)
                 self._groups[group_id]["list_item"] = item
-                self._refresh_group_list_item(group_id)
+                self._refresh_group_state_ui(group_id)
                 self._refresh_group_preview(group_id)
 
             target = preferred_group if preferred_group in grouped else next(iter(grouped))
@@ -1105,6 +1175,7 @@ class RuleTable(QWidget):
                         "id": row["id"],
                         "group_id": row["group_id"],
                         "group_name": group["name"].text(),
+                        "group_enabled": group["enabled"].isChecked(),
                         "kind": self.kind,
                         "evidence": evidence_name,
                         "operator": operator.currentData(),
@@ -1160,6 +1231,28 @@ class RuleTable(QWidget):
     def group_count(self) -> int:
         return len(self._groups)
 
+    def muted_group_count(self) -> int:
+        return sum(
+            not group["enabled"].isChecked()
+            for group in self._groups.values()
+        )
+
+    def active_group_count(self) -> int:
+        return self.group_count() - self.muted_group_count()
+
+    def set_all_groups_enabled(self, enabled: bool) -> None:
+        changed = False
+        for group in self._groups.values():
+            toggle = group["enabled"]
+            if toggle.isChecked() != bool(enabled):
+                toggle.blockSignals(True)
+                toggle.setChecked(bool(enabled))
+                toggle.blockSignals(False)
+                changed = True
+            self._refresh_group_state_ui(group["id"])
+        if changed:
+            self._notify_changed()
+
     def _next_group_name(self) -> str:
         label = {"REQUIRED": "Entry", "VETO": "Veto", "FLIP": "Flip"}[self.kind]
         existing = {
@@ -1206,6 +1299,7 @@ class RuleTable(QWidget):
             group_name=target["group_name"],
             regime=target["regime"],
             side=target["side"],
+            group_enabled=target.get("group_enabled", True),
         )
         insert_at = next(
             index
@@ -1349,7 +1443,7 @@ class RuleStrategyBuilder(QWidget):
         workspace_layout.setContentsMargins(8, 10, 8, 8)
 
         workspace_note = QLabel(
-            "Edit one rule family and one group at a time. Conditions inside a group are ANDed; groups are alternatives."
+            "Edit one rule family and one group at a time. Conditions inside a group are ANDed; groups are alternatives. Muted groups stay saved but do not affect the run."
         )
         workspace_note.setWordWrap(True)
         workspace_note.setStyleSheet("color:#52606d")
@@ -1514,16 +1608,37 @@ class RuleStrategyBuilder(QWidget):
         veto_conditions = len(self.veto_rules.rules())
         flip_groups = self.flip_rules.group_count()
         flip_conditions = len(self.flip_rules.rules())
+        entry_muted = self.required_rules.muted_group_count()
+        veto_muted = self.veto_rules.muted_group_count()
+        flip_muted = self.flip_rules.muted_group_count()
+        total_muted = entry_muted + veto_muted + flip_muted
+        muted_warning = (
+            f"  ·  ⚠ {total_muted} GROUP{'S' if total_muted != 1 else ''} MUTED"
+            if total_muted
+            else ""
+        )
         self.summary.setText(
             f"{DIRECTION_LABELS[self.direction_mode.currentData()]}  ·  "
             f"{' · '.join(markets)}  ·  "
             f"Entry {entry_groups}/{entry_conditions}  ·  "
             f"Veto {veto_groups}/{veto_conditions}  ·  "
             f"Flip {flip_groups}/{flip_conditions}"
+            f"{muted_warning}"
         )
-        self.rule_tabs.setTabText(0, f"Entry  {entry_groups}/{entry_conditions}")
-        self.rule_tabs.setTabText(1, f"Veto  {veto_groups}/{veto_conditions}")
-        self.rule_tabs.setTabText(2, f"Flip  {flip_groups}/{flip_conditions}")
+
+        def tab_text(label, groups, conditions, muted):
+            suffix = f" · {muted} muted" if muted else ""
+            return f"{label}  {groups}/{conditions}{suffix}"
+
+        self.rule_tabs.setTabText(
+            0, tab_text("Entry", entry_groups, entry_conditions, entry_muted)
+        )
+        self.rule_tabs.setTabText(
+            1, tab_text("Veto", veto_groups, veto_conditions, veto_muted)
+        )
+        self.rule_tabs.setTabText(
+            2, tab_text("Flip", flip_groups, flip_conditions, flip_muted)
+        )
 
     def set_from_strategy(self, strategy) -> None:
         profiles = strategy.profiles
