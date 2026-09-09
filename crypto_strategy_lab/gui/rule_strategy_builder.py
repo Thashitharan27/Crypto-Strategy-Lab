@@ -18,10 +18,15 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
     QPushButton,
-    QScrollArea,
     QSpinBox,
+    QSplitter,
+    QStackedWidget,
+    QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -544,13 +549,12 @@ class EvidenceComboBox(QComboBox):
 
 
 class RuleTable(QWidget):
-    """Card-based scoped condition-group editor.
+    """Focused master/detail editor for scoped condition groups.
 
     Conditions inside one group are ANDed. Groups are independent alternatives:
     any Entry group may qualify, while any Veto/Flip group may trigger its action.
-    Market and side belong to the group header rather than being repeated on every
-    condition. New groups and new conditions are inserted at the top so the latest
-    edit stays in view.
+    Only the selected group is expanded, which keeps large strategies readable and
+    lets the Strategy Builder rely on its single outer page scrollbar.
     """
 
     changed = Signal()
@@ -568,18 +572,70 @@ class RuleTable(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(6)
 
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setMinimumHeight(190)
+        logic = {
+            "REQUIRED": "Inside a group: AND  •  Entry groups are OR alternatives",
+            "VETO": "Inside a group: AND  •  Any complete Veto group rejects",
+            "FLIP": "Inside a group: AND  •  Any complete Flip group changes direction",
+        }[self.kind]
+        logic_banner = QLabel(logic)
+        logic_banner.setStyleSheet(
+            "color:#52606d; background:#f7f9fb; padding:6px; border-radius:4px"
+        )
+        outer.addWidget(logic_banner)
 
-        self.cards_host = QWidget()
-        self.cards_layout = QVBoxLayout(self.cards_host)
-        self.cards_layout.setContentsMargins(2, 2, 2, 2)
-        self.cards_layout.setSpacing(8)
-        self.scroll.setWidget(self.cards_host)
-        outer.addWidget(self.scroll)
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+
+        group_panel = QFrame()
+        group_panel.setObjectName("ruleGroupNavigator")
+        group_panel.setStyleSheet(
+            "QFrame#ruleGroupNavigator {"
+            "background:#f7f9fb; border:1px solid #d9e2ec; border-radius:6px;"
+            "}"
+        )
+        group_layout = QVBoxLayout(group_panel)
+        group_layout.setContentsMargins(8, 8, 8, 8)
+        group_layout.setSpacing(6)
+
+        group_title = QLabel("GROUPS")
+        group_title.setStyleSheet(
+            "font-size:10px; font-weight:700; color:#52606d; letter-spacing:1px"
+        )
+        group_layout.addWidget(group_title)
+
+        self.group_list = QListWidget()
+        self.group_list.setMinimumWidth(155)
+        self.group_list.setSpacing(2)
+        self.group_list.setToolTip(
+            "Select one group to edit. Drag the divider to resize this list."
+        )
+        group_layout.addWidget(self.group_list, 1)
+
+        add_label = {"REQUIRED": "Entry", "VETO": "Veto", "FLIP": "Flip"}[self.kind]
+        self.add_group_button = QPushButton(f"+ Add {add_label} Group")
+        self.add_group_button.setToolTip("Add a new group at the top")
+        self.add_group_button.clicked.connect(self.add_group)
+        group_layout.addWidget(self.add_group_button)
+
+        self.detail_stack = QStackedWidget()
+        self.empty_detail = QLabel(
+            "No groups yet. Add a group on the left to start defining conditions."
+        )
+        self.empty_detail.setWordWrap(True)
+        self.empty_detail.setAlignment(Qt.AlignCenter)
+        self.empty_detail.setStyleSheet("color:#7b8794; padding:24px")
+        self.detail_stack.addWidget(self.empty_detail)
+
+        self.splitter.addWidget(group_panel)
+        self.splitter.addWidget(self.detail_stack)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([205, 900])
+        outer.addWidget(self.splitter)
+
+        self.group_list.currentItemChanged.connect(self._active_group_changed)
 
     @staticmethod
     def _combo(options, current):
@@ -630,24 +686,69 @@ class RuleTable(QWidget):
                 lambda *_args, gid=group_id: self._notify_changed(gid)
             )
 
+    def current_group_id(self) -> str | None:
+        item = self.group_list.currentItem()
+        return item.data(Qt.UserRole) if item is not None else None
+
+    def _select_group(self, group_id: str | None) -> None:
+        if group_id is None:
+            self.group_list.setCurrentRow(-1)
+            self.detail_stack.setCurrentWidget(self.empty_detail)
+            return
+        for row in range(self.group_list.count()):
+            item = self.group_list.item(row)
+            if item.data(Qt.UserRole) == group_id:
+                self.group_list.setCurrentRow(row)
+                return
+
+    def _active_group_changed(self, current, _previous) -> None:
+        if current is None:
+            self.detail_stack.setCurrentWidget(self.empty_detail)
+            return
+        group = self._groups.get(current.data(Qt.UserRole))
+        if group is not None:
+            self.detail_stack.setCurrentWidget(group["card"])
+
     def _clear_cards(self) -> None:
-        while self.cards_layout.count():
-            item = self.cards_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        self.group_list.clear()
+        while self.detail_stack.count() > 1:
+            widget = self.detail_stack.widget(1)
+            self.detail_stack.removeWidget(widget)
+            widget.deleteLater()
+        self.detail_stack.setCurrentWidget(self.empty_detail)
         self._groups = {}
         self._rows = []
         self._selected_row = None
 
     def _make_condition_row(self, rule: dict, group_id: str) -> dict:
-        wrapper = QWidget()
-        row_layout = QHBoxLayout(wrapper)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(6)
+        wrapper = QFrame()
+        wrapper.setObjectName("conditionCard")
+        wrapper.setStyleSheet(
+            "QFrame#conditionCard {"
+            "background:#ffffff; border:1px solid #e4eaf0; border-radius:5px;"
+            "}"
+        )
+        card_layout = QVBoxLayout(wrapper)
+        card_layout.setContentsMargins(8, 7, 8, 7)
+        card_layout.setSpacing(5)
+
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(6)
 
         evidence = EvidenceComboBox(rule["evidence"])
-        evidence.setMinimumWidth(190)
+        evidence.setMinimumWidth(220)
+        remove = QPushButton("×")
+        remove.setFixedWidth(28)
+        remove.setToolTip("Remove this condition")
+        title_row.addWidget(evidence, 1)
+        title_row.addWidget(remove)
+        card_layout.addLayout(title_row)
+
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(6)
+
         sr_timeframe = self._combo(
             SR_TIMEFRAME_OPTIONS,
             rule.get("sr_timeframe_minutes"),
@@ -657,26 +758,24 @@ class RuleTable(QWidget):
             "S/R structure timeframe for this condition. Each timeframe is calculated independently."
         )
         sr_timeframe.setVisible(is_support_resistance_evidence(rule["evidence"]))
+
         operator = self._operator(rule["evidence"], rule["operator"])
         operator.setMinimumWidth(90)
         value = self._value(rule["evidence"], rule["value"])
         upper = self._upper(rule["evidence"], rule["value2"])
-        remove = QPushButton("×")
-        remove.setFixedWidth(28)
-        remove.setToolTip("Remove this condition")
 
-        row_layout.addWidget(evidence, 3)
-        row_layout.addWidget(sr_timeframe, 1)
-        row_layout.addWidget(operator, 1)
-        row_layout.addWidget(value, 2)
-        row_layout.addWidget(upper, 2)
-        row_layout.addWidget(remove)
+        controls.addWidget(sr_timeframe, 1)
+        controls.addWidget(operator, 1)
+        controls.addWidget(value, 2)
+        controls.addWidget(upper, 2)
+        controls.addStretch(1)
+        card_layout.addLayout(controls)
 
         row_info = {
             "id": rule["id"],
             "group_id": group_id,
             "widget": wrapper,
-            "layout": row_layout,
+            "layout": controls,
             "evidence": evidence,
             "sr_timeframe": sr_timeframe,
             "operator": operator,
@@ -704,6 +803,21 @@ class RuleTable(QWidget):
         self._refresh_upper_for_row(row_info)
         return row_info
 
+    def _group_list_text(self, group_id: str) -> str:
+        group = self._groups[group_id]
+        name = group["name"].text().strip() or "Unnamed group"
+        regime = group["regime"].currentText()
+        side = group["side"].currentText()
+        return f"{name}\n{regime} · {side}"
+
+    def _refresh_group_list_item(self, group_id: str) -> None:
+        group = self._groups.get(group_id)
+        if group is None:
+            return
+        item = group.get("list_item")
+        if item is not None:
+            item.setText(self._group_list_text(group_id))
+
     def _make_group_card(self, group_id: str, group_rules: list[dict]) -> QFrame:
         first = group_rules[0]
         card = QFrame()
@@ -714,10 +828,13 @@ class RuleTable(QWidget):
             "}"
         )
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(10, 8, 10, 8)
+        card_layout.setContentsMargins(10, 9, 10, 10)
         card_layout.setSpacing(7)
 
-        header = QHBoxLayout()
+        header = QGridLayout()
+        header.setHorizontalSpacing(7)
+        header.setVerticalSpacing(5)
+
         group_name = QLineEdit(first["group_name"])
         group_name.setPlaceholderText("Group name")
         group_name.setMinimumWidth(180)
@@ -740,14 +857,14 @@ class RuleTable(QWidget):
         delete_group = QPushButton("Delete group")
         delete_group.setToolTip("Remove this whole condition group")
 
-        header.addWidget(group_name, 2)
-        header.addStretch()
-        header.addWidget(QLabel("Market"))
-        header.addWidget(regime)
-        header.addWidget(QLabel("Side"))
-        header.addWidget(side)
-        header.addWidget(add_condition)
-        header.addWidget(delete_group)
+        header.addWidget(group_name, 0, 0, 1, 3)
+        header.addWidget(add_condition, 0, 3)
+        header.addWidget(delete_group, 0, 4)
+        header.addWidget(QLabel("Market"), 1, 0)
+        header.addWidget(regime, 1, 1)
+        header.addWidget(QLabel("Side"), 1, 2)
+        header.addWidget(side, 1, 3)
+        header.setColumnStretch(0, 1)
         card_layout.addLayout(header)
 
         logic_text = {
@@ -755,19 +872,35 @@ class RuleTable(QWidget):
             "VETO": "ALL conditions below must match for this Veto group.",
             "FLIP": "ALL conditions below must match for this Flip group.",
         }[self.kind]
+        logic_row = QHBoxLayout()
         logic = QLabel(logic_text)
         logic.setStyleSheet("color:#52606d; font-size:11px")
-        card_layout.addWidget(logic)
+        logic_toggle = QToolButton()
+        logic_toggle.setText("View logic")
+        logic_toggle.setCheckable(True)
+        logic_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        logic_toggle.setArrowType(Qt.RightArrow)
+        logic_row.addWidget(logic)
+        logic_row.addStretch()
+        logic_row.addWidget(logic_toggle)
+        card_layout.addLayout(logic_row)
 
         preview = QLabel()
         preview.setWordWrap(True)
+        preview.setVisible(False)
         preview.setStyleSheet(
-            "color:#334e68; background:#f7f9fb; padding:5px; border-radius:4px"
+            "color:#334e68; background:#f7f9fb; padding:6px; border-radius:4px"
         )
         card_layout.addWidget(preview)
 
+        def toggle_preview(checked: bool) -> None:
+            preview.setVisible(checked)
+            logic_toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+
+        logic_toggle.toggled.connect(toggle_preview)
+
         conditions = QVBoxLayout()
-        conditions.setSpacing(5)
+        conditions.setSpacing(6)
         card_layout.addLayout(conditions)
 
         self._groups[group_id] = {
@@ -777,6 +910,8 @@ class RuleTable(QWidget):
             "regime": regime,
             "side": side,
             "preview": preview,
+            "logic_toggle": logic_toggle,
+            "list_item": None,
         }
 
         for index, rule in enumerate(group_rules):
@@ -789,13 +924,13 @@ class RuleTable(QWidget):
             conditions.addWidget(row_info["widget"])
 
         group_name.textChanged.connect(
-            lambda _text, gid=group_id: self._notify_changed(gid)
+            lambda _text, gid=group_id: self._group_header_changed(gid)
         )
         regime.currentIndexChanged.connect(
-            lambda _index, gid=group_id: self._notify_changed(gid)
+            lambda _index, gid=group_id: self._group_header_changed(gid)
         )
         side.currentIndexChanged.connect(
-            lambda _index, gid=group_id: self._notify_changed(gid)
+            lambda _index, gid=group_id: self._group_header_changed(gid)
         )
         add_condition.clicked.connect(
             lambda _checked=False, gid=group_id: self.add_condition_to_group_id(gid)
@@ -805,8 +940,13 @@ class RuleTable(QWidget):
         )
         return card
 
+    def _group_header_changed(self, group_id: str) -> None:
+        self._refresh_group_list_item(group_id)
+        self._notify_changed(group_id)
+
     def set_rules(self, rules) -> None:
         normalized = list(normalize_rules(rules, kind=self.kind))
+        preferred_group = self.current_group_id()
         self.blockSignals(True)
         try:
             self._clear_cards()
@@ -816,29 +956,20 @@ class RuleTable(QWidget):
                 grouped.setdefault(rule["group_id"], []).append(rule)
 
             if not grouped:
-                empty = QLabel(
-                    "No groups yet. Add a group to define conditions for this section."
-                )
-                empty.setStyleSheet("color:#7b8794; padding:10px")
-                self.cards_layout.addWidget(empty)
-                self.cards_layout.addStretch()
                 return
 
-            for index, (group_id, group_rules) in enumerate(grouped.items()):
-                if index:
-                    or_label = QLabel("OR")
-                    or_label.setAlignment(Qt.AlignCenter)
-                    or_label.setStyleSheet(
-                        "color:#52606d; font-weight:700; padding:1px"
-                    )
-                    self.cards_layout.addWidget(or_label)
-                self.cards_layout.addWidget(
-                    self._make_group_card(group_id, group_rules)
-                )
-
-            self.cards_layout.addStretch()
-            for group_id in grouped:
+            for group_id, group_rules in grouped.items():
+                card = self._make_group_card(group_id, group_rules)
+                self.detail_stack.addWidget(card)
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, group_id)
+                self.group_list.addItem(item)
+                self._groups[group_id]["list_item"] = item
+                self._refresh_group_list_item(group_id)
                 self._refresh_group_preview(group_id)
+
+            target = preferred_group if preferred_group in grouped else next(iter(grouped))
+            self._select_group(target)
         finally:
             self.blockSignals(False)
 
@@ -863,7 +994,6 @@ class RuleTable(QWidget):
             self._refresh_upper_for_row(row)
             self._notify_changed(row["group_id"])
 
-
     def _evidence_changed(self, rule_id: str) -> None:
         row = self._find_row(rule_id)
         if row is None:
@@ -875,15 +1005,13 @@ class RuleTable(QWidget):
         was_sr = sr_timeframe.isVisible()
         if is_support_resistance_evidence(evidence_name):
             sr_timeframe.setVisible(True)
-            # Only a genuine switch from non-S/R into S/R gets the new explicit
-            # Strategy-TF default. Existing legacy S/R rules may intentionally
-            # retain "Configured S/R (legacy)" while their evidence field is edited.
             if not was_sr and sr_timeframe.currentData() is None:
                 index = sr_timeframe.findData(default["sr_timeframe_minutes"])
                 if index >= 0:
                     sr_timeframe.setCurrentIndex(index)
         else:
             sr_timeframe.setVisible(False)
+
         operator = self._operator(evidence_name, default["operator"])
         operator.setMinimumWidth(90)
         value = self._value(evidence_name, default["value"])
@@ -954,8 +1082,10 @@ class RuleTable(QWidget):
         if group_id is None:
             for current in self._groups:
                 self._refresh_group_preview(current)
+                self._refresh_group_list_item(current)
         else:
             self._refresh_group_preview(group_id)
+            self._refresh_group_list_item(group_id)
         self.changed.emit()
 
     def rules(self) -> tuple[dict, ...]:
@@ -1025,6 +1155,7 @@ class RuleTable(QWidget):
         """Compatibility selection used by non-card callers."""
         if 0 <= row < len(self._rows):
             self._selected_row = row
+            self._select_group(self._rows[row]["group_id"])
 
     def group_count(self) -> int:
         return len(self._groups)
@@ -1046,14 +1177,15 @@ class RuleTable(QWidget):
         row = self._find_row(rule_id)
         if row is None:
             return
+        self._select_group(row["group_id"])
         row["evidence"].setFocus()
-        self.scroll.ensureWidgetVisible(row["widget"], 20, 20)
 
     def add_group(self) -> None:
         rules = list(self.rules())
         rule = new_rule(kind=self.kind, group_name=self._next_group_name())
         rules.insert(0, rule)
         self.set_rules(rules)
+        self._select_group(rule["group_id"])
         self._selected_row = 0
         QTimer.singleShot(0, lambda rid=rule["id"]: self._focus_rule(rid))
         self.changed.emit()
@@ -1082,6 +1214,7 @@ class RuleTable(QWidget):
         )
         rules.insert(insert_at, condition)
         self.set_rules(rules)
+        self._select_group(group_id)
         self._selected_row = next(
             index for index, row in enumerate(self._rows)
             if row["id"] == condition["id"]
@@ -1105,8 +1238,12 @@ class RuleTable(QWidget):
         self.add_condition_to_group_id(self._rows[row]["group_id"])
 
     def _remove_condition(self, rule_id: str) -> None:
+        row = self._find_row(rule_id)
+        preferred_group = row["group_id"] if row is not None else self.current_group_id()
         rules = [rule for rule in self.rules() if rule["id"] != rule_id]
         self.set_rules(rules)
+        if preferred_group in self._groups:
+            self._select_group(preferred_group)
         self.changed.emit()
 
     def _remove_group(self, group_id: str) -> None:
@@ -1136,19 +1273,44 @@ class RuleStrategyBuilder(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
 
-        summary_box = QGroupBox("Strategy Summary")
-        summary_layout = QHBoxLayout(summary_box)
+        summary_frame = QFrame()
+        summary_frame.setObjectName("strategySummaryBar")
+        summary_frame.setStyleSheet(
+            "QFrame#strategySummaryBar {"
+            "background:#f7f9fb; border:1px solid #d9e2ec; border-radius:6px;"
+            "}"
+        )
+        summary_layout = QHBoxLayout(summary_frame)
+        summary_layout.setContentsMargins(10, 7, 10, 7)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
-        self.summary.setStyleSheet(
-            "font-weight:600; background:#f7f9fb; padding:8px; border:1px solid #d9e2ec"
-        )
+        self.summary.setStyleSheet("font-weight:600; color:#243b53")
         summary_layout.addWidget(self.summary, 1)
-        layout.addWidget(summary_box)
+        layout.addWidget(summary_frame)
 
-        direction_box = QGroupBox("1. Signal Strategy & Market Eligibility")
-        direction_layout = QVBoxLayout(direction_box)
+        self.direction_toggle = QToolButton()
+        self.direction_toggle.setText("1. Strategy & Markets")
+        self.direction_toggle.setCheckable(True)
+        self.direction_toggle.setChecked(True)
+        self.direction_toggle.setArrowType(Qt.DownArrow)
+        self.direction_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.direction_toggle.setStyleSheet("font-weight:700; text-align:left")
+        layout.addWidget(self.direction_toggle)
+
+        self.direction_box = QFrame()
+        self.direction_box.setObjectName("strategyMarketsBody")
+        self.direction_box.setStyleSheet(
+            "QFrame#strategyMarketsBody {"
+            "background:#ffffff; border:1px solid #d9e2ec; border-radius:6px;"
+            "}"
+        )
+        direction_layout = QVBoxLayout(self.direction_box)
+        direction_layout.setContentsMargins(10, 8, 10, 9)
+        direction_layout.setSpacing(6)
+
         direction_form = QFormLayout()
         self.direction_mode = QComboBox()
         for mode in DIRECTION_MODES:
@@ -1171,55 +1333,74 @@ class RuleStrategyBuilder(QWidget):
                 permission.addWidget(check, row, column)
                 check.toggled.connect(lambda _checked: self._notify())
         direction_layout.addLayout(permission)
+
         note = QLabel(
-            "These are permissions only. DI Direction uses raw +DI/-DI side selection. "
-            "DMI Trend keeps that side selection and adds built-in ADX ≥ 20, non-falling ADX, "
-            "and expanding DI pressure. MACD Pullback creates a candidate only on a fresh 12/26/9 "
-            "MACD crossover: bullish below zero or bearish above zero. EMA and S/R confirmation "
-            "remain optional Entry/Veto evidence so their value can be measured rather than assumed."
+            "Market boxes are permissions only. Entry/Veto evidence remains the measurable strategy logic."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#52606d")
         direction_layout.addWidget(note)
-        layout.addWidget(direction_box)
+        layout.addWidget(self.direction_box)
 
-        required_box = QGroupBox(
-            "2. Entry Groups — ALL conditions inside; ANY group may qualify"
+        self.direction_toggle.toggled.connect(self._toggle_direction_section)
+
+        workspace_box = QGroupBox("2. Rule Workspace")
+        workspace_layout = QVBoxLayout(workspace_box)
+        workspace_layout.setContentsMargins(8, 10, 8, 8)
+
+        workspace_note = QLabel(
+            "Edit one rule family and one group at a time. Conditions inside a group are ANDed; groups are alternatives."
         )
-        required_layout = QVBoxLayout(required_box)
+        workspace_note.setWordWrap(True)
+        workspace_note.setStyleSheet("color:#52606d")
+        workspace_layout.addWidget(workspace_note)
+
+        self.rule_tabs = QTabWidget()
+        self.rule_tabs.setDocumentMode(True)
+
         self.required_rules = RuleTable("REQUIRED")
-        required_layout.addWidget(self.required_rules)
-        row = QHBoxLayout()
-        add = QPushButton("+ Add Entry Group")
-        add.setToolTip("Add a new Entry group at the top")
-        add.clicked.connect(self.required_rules.add_group)
-        row.addWidget(add)
-        row.addStretch()
-        required_layout.addLayout(row)
-        evidence_note = QLabel(
-            "Condition Groups are intentionally simple: conditions inside one group are ANDed; Entry groups are alternatives, so any complete Entry group may qualify. Market and Side belong to the group header. New groups and new conditions appear at the top, and each card has its own Add condition and Delete group controls. Evidence is grouped and searchable; Mean Reversion and common S/R choices are shown before advanced details. MR Trade-Direction Stretch is positive when price is extended in the candidate trade direction, for both LONG and SHORT. OI, Funding, Basis and Taker Flow use causal prepared research when local coverage exists. Missing REQUIRED evidence fails that Entry group; missing VETO evidence does not create a rejection. Any MR or S/R rule automatically enables its causal calculation; configure calculation settings on Research Features."
+        entry_page = QWidget()
+        entry_layout = QVBoxLayout(entry_page)
+        entry_layout.setContentsMargins(4, 6, 4, 4)
+        entry_layout.addWidget(self.required_rules)
+        entry_help = QLabel(
+            "Entry groups qualify candidates. Missing REQUIRED evidence fails only the affected group."
         )
-        evidence_note.setWordWrap(True)
-        evidence_note.setStyleSheet("color:#52606d")
-        required_layout.addWidget(evidence_note)
-        layout.addWidget(required_box)
+        entry_help.setWordWrap(True)
+        entry_help.setStyleSheet("color:#52606d; font-size:11px")
+        entry_layout.addWidget(entry_help)
+        self.rule_tabs.addTab(entry_page, "Entry")
 
-        veto_box = QGroupBox(
-            "3. Avoid / Veto Groups — ALL conditions inside; ANY group vetoes"
-        )
-        veto_layout = QVBoxLayout(veto_box)
         self.veto_rules = RuleTable("VETO")
+        veto_page = QWidget()
+        veto_layout = QVBoxLayout(veto_page)
+        veto_layout.setContentsMargins(4, 6, 4, 4)
         veto_layout.addWidget(self.veto_rules)
-        row = QHBoxLayout()
-        add = QPushButton("+ Add Veto Group")
-        add.setToolTip("Add a new Veto group at the top")
-        add.clicked.connect(self.veto_rules.add_group)
-        row.addWidget(add)
-        row.addStretch()
-        veto_layout.addLayout(row)
-        layout.addWidget(veto_box)
+        veto_help = QLabel(
+            "Any complete Veto group rejects the candidate. Missing VETO evidence does not create a rejection."
+        )
+        veto_help.setWordWrap(True)
+        veto_help.setStyleSheet("color:#52606d; font-size:11px")
+        veto_layout.addWidget(veto_help)
+        self.rule_tabs.addTab(veto_page, "Veto")
 
-        research_box = QGroupBox("4. Research-only Evidence")
+        self.flip_rules = RuleTable("FLIP")
+        flip_page = QWidget()
+        flip_layout = QVBoxLayout(flip_page)
+        flip_layout.setContentsMargins(4, 6, 4, 4)
+        flip_layout.addWidget(self.flip_rules)
+        flip_help = QLabel(
+            "Flip groups use the same AND-inside / OR-between-groups model and act only when a complete group matches."
+        )
+        flip_help.setWordWrap(True)
+        flip_help.setStyleSheet("color:#52606d; font-size:11px")
+        flip_layout.addWidget(flip_help)
+        self.rule_tabs.addTab(flip_page, "Flip")
+
+        workspace_layout.addWidget(self.rule_tabs)
+        layout.addWidget(workspace_box)
+
+        research_box = QGroupBox("3. Research-only Evidence")
         research_layout = QHBoxLayout(research_box)
         self.enable_mr = QCheckBox("Attach Mean Reversion context")
         self.enable_mr.setChecked(True)
@@ -1232,25 +1413,16 @@ class RuleStrategyBuilder(QWidget):
         research_layout.addWidget(self.research_status, 1)
         layout.addWidget(research_box)
 
-        self.show_advanced = QCheckBox("Show advanced direction actions and entry timing")
+        self.show_advanced = QCheckBox("Show advanced entry timing")
         layout.addWidget(self.show_advanced)
-        self.advanced = QGroupBox("5. Advanced")
+        self.advanced = QGroupBox("4. Advanced")
         advanced_layout = QVBoxLayout(self.advanced)
         advanced_note = QLabel(
-            "Direction Flip Groups use the same condition-group model: ALL conditions inside a group must match, and ANY complete Flip group may trigger. Entry timing is separate from evidence filters."
+            "Entry timing is separate from Entry/Veto/Flip evidence and does not change rule semantics."
         )
         advanced_note.setWordWrap(True)
         advanced_note.setStyleSheet("color:#52606d")
         advanced_layout.addWidget(advanced_note)
-        self.flip_rules = RuleTable("FLIP")
-        advanced_layout.addWidget(self.flip_rules)
-        row = QHBoxLayout()
-        add = QPushButton("+ Add Flip Group")
-        add.setToolTip("Add a new Flip group at the top")
-        add.clicked.connect(self.flip_rules.add_group)
-        row.addWidget(add)
-        row.addStretch()
-        advanced_layout.addLayout(row)
 
         timing_form = QFormLayout()
         self.entry_mode = QComboBox()
@@ -1309,6 +1481,12 @@ class RuleStrategyBuilder(QWidget):
             table.changed.connect(self._notify)
         self._notify()
 
+    def _toggle_direction_section(self, expanded: bool) -> None:
+        self.direction_box.setVisible(expanded)
+        self.direction_toggle.setArrowType(
+            Qt.DownArrow if expanded else Qt.RightArrow
+        )
+
     def _notify(self):
         self.refresh_summary()
         self.changed.emit()
@@ -1330,14 +1508,22 @@ class RuleStrategyBuilder(QWidget):
                 if f"{regime}_{side}" in permissions
             ]
             markets.append(f"{regime.title()} {'/'.join(sides) if sides else 'Off'}")
+        entry_groups = self.required_rules.group_count()
+        entry_conditions = len(self.required_rules.rules())
+        veto_groups = self.veto_rules.group_count()
+        veto_conditions = len(self.veto_rules.rules())
+        flip_groups = self.flip_rules.group_count()
+        flip_conditions = len(self.flip_rules.rules())
         self.summary.setText(
             f"{DIRECTION_LABELS[self.direction_mode.currentData()]}  ·  "
             f"{' · '.join(markets)}  ·  "
-            f"{self.required_rules.group_count()} entry group(s) / "
-            f"{len(self.required_rules.rules())} condition(s)  ·  "
-            f"{self.veto_rules.group_count()} veto group(s) / "
-            f"{len(self.veto_rules.rules())} condition(s)"
+            f"Entry {entry_groups}/{entry_conditions}  ·  "
+            f"Veto {veto_groups}/{veto_conditions}  ·  "
+            f"Flip {flip_groups}/{flip_conditions}"
         )
+        self.rule_tabs.setTabText(0, f"Entry  {entry_groups}/{entry_conditions}")
+        self.rule_tabs.setTabText(1, f"Veto  {veto_groups}/{veto_conditions}")
+        self.rule_tabs.setTabText(2, f"Flip  {flip_groups}/{flip_conditions}")
 
     def set_from_strategy(self, strategy) -> None:
         profiles = strategy.profiles
