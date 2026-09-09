@@ -20,6 +20,14 @@ def _window():
 
     window = widgets.QWidget()
     window.pages = widgets.QStackedWidget(window)
+    window.strategy_tf = widgets.QComboBox()
+    for native, label in (
+        ("15m", "15 Minutes"),
+        ("1h", "1 Hour"),
+        ("4h", "4 Hours"),
+        ("1d", "1 Day"),
+    ):
+        window.strategy_tf.addItem(label, native)
 
     strategy_page = widgets.QWidget()
     strategy_layout = widgets.QVBoxLayout(strategy_page)
@@ -76,6 +84,38 @@ def test_research_features_are_reorganized_without_replacing_authoritative_form(
         original_panel = window.research_features_panel
         apply_research_feature_ownership(window)
         assert window.research_features_panel is original_panel
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_sr_main_research_ui_shows_prepared_contexts_and_hides_legacy_selector():
+    app, window, _scroll = _window()
+    try:
+        apply_research_feature_ownership(window)
+        panel = window.research_features_panel
+
+        assert "Strategy TF (15m)" in panel.sr_prepared_timeframes.text()
+        assert "1h" in panel.sr_prepared_timeframes.text()
+        assert "4h" in panel.sr_prepared_timeframes.text()
+        assert "1d" in panel.sr_prepared_timeframes.text()
+        assert "stays separate" in panel.sr_prepared_timeframes.text()
+
+        # The old global/primary selector is no longer one of the normal S/R
+        # settings. It remains available only after explicitly opening legacy.
+        assert "sr_timeframe_minutes" not in panel.sr_card._field_rows
+        assert panel.sr_legacy_body.isHidden()
+        assert panel.widgets["sr_timeframe_minutes"].parentWidget() is panel.sr_legacy_body
+
+        panel.sr_legacy_toggle.setChecked(True)
+        assert not panel.sr_legacy_body.isHidden()
+
+        window.strategy_tf.setCurrentIndex(window.strategy_tf.findData("4h"))
+        panel._refresh_sr_timeframe_summary()
+        summary = panel.sr_prepared_timeframes.text()
+        assert "Strategy TF (4h)" in summary
+        assert "1d" in summary
+        assert "1h" not in summary
     finally:
         window.close()
         app.processEvents()
