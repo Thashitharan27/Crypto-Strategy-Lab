@@ -79,6 +79,10 @@ FEATURE_GROUPS = (
     ("Support / Resistance", (
         "enable_support_resistance_analysis", "sr_timeframe_minutes",
         "sr_pivot_left", "sr_pivot_right", "sr_lookback_bars",
+        "sr_15m_pivot_left", "sr_15m_pivot_right", "sr_15m_lookback_bars",
+        "sr_1h_pivot_left", "sr_1h_pivot_right", "sr_1h_lookback_bars",
+        "sr_4h_pivot_left", "sr_4h_pivot_right", "sr_4h_lookback_bars",
+        "sr_1d_pivot_left", "sr_1d_pivot_right", "sr_1d_lookback_bars",
         "sr_zone_width_atr", "sr_near_distance_atr",
         "enable_sr_hold_confirmation", "sr_hold_confirmation_bars",
         "sr_hold_confirmation_atr", "sr_break_tolerance_atr", "sr_break_basis",
@@ -364,6 +368,10 @@ class DataclassForm(QWidget):
             ),
             "enable_support_resistance_analysis": (
                 "sr_timeframe_minutes", "sr_pivot_left", "sr_pivot_right", "sr_lookback_bars",
+                "sr_15m_pivot_left", "sr_15m_pivot_right", "sr_15m_lookback_bars",
+                "sr_1h_pivot_left", "sr_1h_pivot_right", "sr_1h_lookback_bars",
+                "sr_4h_pivot_left", "sr_4h_pivot_right", "sr_4h_lookback_bars",
+                "sr_1d_pivot_left", "sr_1d_pivot_right", "sr_1d_lookback_bars",
                 "sr_zone_width_atr", "sr_near_distance_atr", "enable_sr_hold_confirmation",
                 "sr_hold_confirmation_bars", "sr_hold_confirmation_atr", "sr_break_tolerance_atr",
                 "sr_break_basis",

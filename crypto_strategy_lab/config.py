@@ -73,7 +73,7 @@ class BacktestConfig:
     sr_lookback_bars: int = 200
     sr_zone_width_atr: float = 0.5
     sr_near_distance_atr: float = 0.75
-    enable_sr_hold_confirmation: bool = False
+    enable_sr_hold_confirmation: bool = True
     sr_hold_confirmation_bars: int = 3
     sr_hold_confirmation_atr: float = 0.25
     sr_break_tolerance_atr: float = 0.25

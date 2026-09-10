@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -59,6 +60,18 @@ FRIENDLY_LABELS = {
     "sr_pivot_left": "Pivot bars left",
     "sr_pivot_right": "Pivot bars right",
     "sr_lookback_bars": "Lookback bars",
+    "sr_15m_pivot_left": "15m pivot left",
+    "sr_15m_pivot_right": "15m pivot right",
+    "sr_15m_lookback_bars": "15m lookback",
+    "sr_1h_pivot_left": "1h pivot left",
+    "sr_1h_pivot_right": "1h pivot right",
+    "sr_1h_lookback_bars": "1h lookback",
+    "sr_4h_pivot_left": "4h pivot left",
+    "sr_4h_pivot_right": "4h pivot right",
+    "sr_4h_lookback_bars": "4h lookback",
+    "sr_1d_pivot_left": "1d pivot left",
+    "sr_1d_pivot_right": "1d pivot right",
+    "sr_1d_lookback_bars": "1d lookback",
     "sr_zone_width_atr": "Zone width",
     "sr_near_distance_atr": "Near-zone distance",
     "enable_sr_hold_confirmation": "Confirm level hold",
@@ -297,15 +310,55 @@ class ResearchFeaturesPanel(QWidget):
         # settings are collapsed.
         self.sr_card.layout().insertWidget(1, self.sr_prepared_timeframes)
 
+        self.sr_detection_box = QGroupBox("Detection sensitivity by timeframe")
+        detection = QGridLayout(self.sr_detection_box)
+        detection.addWidget(QLabel("Context"), 0, 0)
+        detection.addWidget(QLabel("Pivot left"), 0, 1)
+        detection.addWidget(QLabel("Pivot right"), 0, 2)
+        detection.addWidget(QLabel("Lookback bars"), 0, 3)
+        detection_rows = (
+            ("Shared fallback", "sr_pivot_left", "sr_pivot_right", "sr_lookback_bars", False),
+            ("15m", "sr_15m_pivot_left", "sr_15m_pivot_right", "sr_15m_lookback_bars", True),
+            ("1h", "sr_1h_pivot_left", "sr_1h_pivot_right", "sr_1h_lookback_bars", True),
+            ("4h", "sr_4h_pivot_left", "sr_4h_pivot_right", "sr_4h_lookback_bars", True),
+            ("1d", "sr_1d_pivot_left", "sr_1d_pivot_right", "sr_1d_lookback_bars", True),
+        )
+        for row, (label, left_name, right_name, lookback_name, override) in enumerate(
+            detection_rows, 1
+        ):
+            detection.addWidget(QLabel(label), row, 0)
+            for column, name in enumerate((left_name, right_name, lookback_name), 1):
+                widget = self.widgets[name]
+                if override and hasattr(widget, "setSpecialValueText"):
+                    widget.setMinimum(0)
+                    widget.setSpecialValueText("Shared")
+                    widget.setToolTip(
+                        "0/Shared inherits the shared fallback. Set a positive value only when "
+                        "this timeframe needs a different structural horizon."
+                    )
+                detection.addWidget(widget, row, column)
+        detection_note = QLabel(
+            "Bar counts are timeframe-specific: 5 confirmation bars means 75 minutes on 15m, "
+            "5 hours on 1h, 20 hours on 4h and 5 days on 1d. Leave an override on Shared "
+            "until research justifies changing it."
+        )
+        detection_note.setWordWrap(True)
+        detection_note.setStyleSheet("color:#52606d")
+        detection.addWidget(detection_note, 6, 0, 1, 4)
+        self.sr_card.form.addRow(self.sr_detection_box)
+
+        interaction_note = QLabel(
+            "Level hold confirmation is always calculated as S/R evidence. It does not filter "
+            "trades by itself; Entry/Veto/Flip rules decide whether the held/state evidence matters."
+        )
+        interaction_note.setWordWrap(True)
+        interaction_note.setStyleSheet("color:#52606d")
+        self.sr_card.form.addRow(interaction_note)
         self._add_fields(
             self.sr_card,
             (
-                "sr_pivot_left",
-                "sr_pivot_right",
-                "sr_lookback_bars",
                 "sr_zone_width_atr",
                 "sr_near_distance_atr",
-                "enable_sr_hold_confirmation",
                 "sr_hold_confirmation_bars",
                 "sr_hold_confirmation_atr",
                 "sr_break_tolerance_atr",
@@ -452,9 +505,6 @@ class ResearchFeaturesPanel(QWidget):
             strategy_tf.currentIndexChanged.connect(
                 lambda _index: self._refresh_sr_timeframe_summary()
             )
-        self.widgets["enable_sr_hold_confirmation"].toggled.connect(
-            lambda _checked: self.refresh_visibility()
-        )
         self.sr_enable.toggled.connect(lambda _checked: self.refresh_visibility())
         self.trade_enable.toggled.connect(lambda _checked: self.refresh_visibility())
         self.book_enable.toggled.connect(lambda _checked: self.refresh_visibility())
@@ -479,6 +529,11 @@ class ResearchFeaturesPanel(QWidget):
         threshold = self.widgets.get("large_trade_quote_threshold")
         if threshold is not None and hasattr(threshold, "setPlaceholderText"):
             threshold.setPlaceholderText("Auto / disabled")
+        hold_confirmation = self.widgets.get("enable_sr_hold_confirmation")
+        if hold_confirmation is not None:
+            hold_confirmation.setChecked(True)
+            hold_confirmation.setEnabled(False)
+            hold_confirmation.hide()
         windows = self.widgets.get("trade_flow_windows")
         if windows is not None and hasattr(windows, "setMaximumHeight"):
             windows.setMaximumHeight(80)
@@ -652,9 +707,15 @@ class ResearchFeaturesPanel(QWidget):
                 "Asset Return classifies Bull / Bear / Sideways from the causal trailing return and symmetric threshold."
             )
 
-        hold = self.widgets["enable_sr_hold_confirmation"].isChecked()
+        # The compatibility flag is intentionally normalized to ON in the GUI.
+        # Hold/state evidence is calculated regardless of whether a strategy rule uses it.
+        hold_widget = self.widgets["enable_sr_hold_confirmation"]
+        if not hold_widget.isChecked():
+            hold_widget.blockSignals(True)
+            hold_widget.setChecked(True)
+            hold_widget.blockSignals(False)
         for name in ("sr_hold_confirmation_bars", "sr_hold_confirmation_atr"):
-            self.sr_card.set_field_visible(name, hold)
+            self.sr_card.set_field_visible(name, True)
 
         if self.builder.enable_mr.isEnabled():
             self.mr_card.set_status(

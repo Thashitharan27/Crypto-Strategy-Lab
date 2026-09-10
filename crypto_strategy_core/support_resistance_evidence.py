@@ -60,7 +60,7 @@ def support_resistance_evidence_series(
     lookback_bars: int = 200,
     zone_width_atr: float = 0.5,
     near_distance_atr: float = 0.75,
-    enable_hold_confirmation: bool = False,
+    enable_hold_confirmation: bool = True,
     hold_confirmation_bars: int = 3,
     hold_confirmation_atr: float = 0.25,
     break_tolerance_atr: float = 0.25,

@@ -59,21 +59,30 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
                 if minutes > strategy_minutes and minutes % strategy_minutes == 0
             ),
         ]
-        # Independent S/R outputs must be fully warmed at the research boundary,
-        # otherwise an early 1h/4h/1d rule would compare against incomplete
-        # structure simply because the run started recently.
-        sr_minutes = max(configured_sr_minutes, *independent_sr_minutes)
-        sr_bars = (
-            int(features.sr_lookback_bars)
-            + max(int(features.sr_pivot_left), int(features.sr_pivot_right))
-            + (
-                int(features.sr_hold_confirmation_bars)
-                if bool(features.enable_sr_hold_confirmation)
-                else 0
+        # Independent S/R outputs must be fully warmed at the research boundary.
+        # Each timeframe gets its own pivot/lookback horizon; using one shared bar
+        # count for 15m and 1d would give those settings very different meanings.
+        for sr_minutes in sorted({configured_sr_minutes, *independent_sr_minutes}):
+            if hasattr(features, "sr_detection_parameters"):
+                detection = features.sr_detection_parameters(sr_minutes)
+                pivot_left = int(detection["sr_pivot_left"])
+                pivot_right = int(detection["sr_pivot_right"])
+                lookback_bars = int(detection["sr_lookback_bars"])
+            else:
+                pivot_left = int(features.sr_pivot_left)
+                pivot_right = int(features.sr_pivot_right)
+                lookback_bars = int(features.sr_lookback_bars)
+            sr_bars = (
+                lookback_bars
+                + max(pivot_left, pivot_right)
+                + (
+                    int(features.sr_hold_confirmation_bars)
+                    if bool(features.enable_sr_hold_confirmation)
+                    else 0
+                )
+                + 5
             )
-            + 5
-        )
-        duration = max(duration, pd.Timedelta(minutes=sr_minutes * sr_bars))
+            duration = max(duration, pd.Timedelta(minutes=sr_minutes * sr_bars))
 
     if str(features.market_regime_method).upper() == "ASSET_RETURN":
         duration = max(

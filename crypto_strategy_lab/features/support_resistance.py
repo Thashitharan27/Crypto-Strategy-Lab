@@ -26,7 +26,7 @@ from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 SUPPORT_RESISTANCE_FEATURE_NAME = "support_resistance"
-SUPPORT_RESISTANCE_FEATURE_VERSION = "2"
+SUPPORT_RESISTANCE_FEATURE_VERSION = "3"
 
 
 def _optional_float(value):
@@ -56,9 +56,21 @@ class SupportResistanceFeatureProvider:
             "sr_pivot_left": ParameterDefinition(int, 5),
             "sr_pivot_right": ParameterDefinition(int, 5),
             "sr_lookback_bars": ParameterDefinition(int, 200),
+            "sr_15m_pivot_left": ParameterDefinition(int, 0),
+            "sr_15m_pivot_right": ParameterDefinition(int, 0),
+            "sr_15m_lookback_bars": ParameterDefinition(int, 0),
+            "sr_1h_pivot_left": ParameterDefinition(int, 0),
+            "sr_1h_pivot_right": ParameterDefinition(int, 0),
+            "sr_1h_lookback_bars": ParameterDefinition(int, 0),
+            "sr_4h_pivot_left": ParameterDefinition(int, 0),
+            "sr_4h_pivot_right": ParameterDefinition(int, 0),
+            "sr_4h_lookback_bars": ParameterDefinition(int, 0),
+            "sr_1d_pivot_left": ParameterDefinition(int, 0),
+            "sr_1d_pivot_right": ParameterDefinition(int, 0),
+            "sr_1d_lookback_bars": ParameterDefinition(int, 0),
             "sr_zone_width_atr": ParameterDefinition(float, 0.5),
             "sr_near_distance_atr": ParameterDefinition(float, 0.75),
-            "enable_sr_hold_confirmation": ParameterDefinition(bool, False),
+            "enable_sr_hold_confirmation": ParameterDefinition(bool, True),
             "sr_hold_confirmation_bars": ParameterDefinition(int, 3),
             "sr_hold_confirmation_atr": ParameterDefinition(float, 0.25),
             "sr_break_tolerance_atr": ParameterDefinition(float, 0.25),
@@ -105,22 +117,40 @@ class SupportResistanceFeatureProvider:
         if not source_times.equals(dependency_times):
             raise ValueError("S/R dependency timestamps do not match klines")
 
-        detector_config = {
+        strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
+        configured_minutes = int(parameters.get("sr_timeframe_minutes", 0) or 0)
+        effective_minutes = configured_minutes or strategy_minutes
+        atr_period = int(parameters.get("atr_period", 14))
+
+        shared_detection = {
             "pivot_left": int(parameters.get("sr_pivot_left", 5)),
             "pivot_right": int(parameters.get("sr_pivot_right", 5)),
             "lookback_bars": int(parameters.get("sr_lookback_bars", 200)),
+        }
+        timeframe_label = {15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(
+            effective_minutes
+        )
+        resolved_detection = dict(shared_detection)
+        if timeframe_label is not None:
+            for key in ("pivot_left", "pivot_right", "lookback_bars"):
+                override = int(parameters.get(f"sr_{timeframe_label}_{key}", 0) or 0)
+                if override < 0:
+                    raise ValueError(
+                        f"sr_{timeframe_label}_{key} must be zero (inherit) or positive"
+                    )
+                if override:
+                    resolved_detection[key] = override
+
+        detector_config = {
+            **resolved_detection,
             "zone_width_atr": float(parameters.get("sr_zone_width_atr", 0.5)),
             "near_distance_atr": float(parameters.get("sr_near_distance_atr", 0.75)),
-            "enable_hold_confirmation": bool(parameters.get("enable_sr_hold_confirmation", False)),
+            "enable_hold_confirmation": bool(parameters.get("enable_sr_hold_confirmation", True)),
             "hold_confirmation_bars": int(parameters.get("sr_hold_confirmation_bars", 3)),
             "hold_confirmation_atr": float(parameters.get("sr_hold_confirmation_atr", 0.25)),
             "break_tolerance_atr": float(parameters.get("sr_break_tolerance_atr", 0.25)),
             "break_basis": str(parameters.get("sr_break_basis", "CLOSE")).upper(),
         }
-        strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
-        configured_minutes = int(parameters.get("sr_timeframe_minutes", 0) or 0)
-        effective_minutes = configured_minutes or strategy_minutes
-        atr_period = int(parameters.get("atr_period", 14))
 
         open_ = pd.to_numeric(source["open"], errors="raise").to_numpy(float)
         high = pd.to_numeric(source["high"], errors="raise").to_numpy(float)
