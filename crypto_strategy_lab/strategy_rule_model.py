@@ -164,6 +164,27 @@ CATEGORICAL_VALUE_CODES = {
     "FUNDING_EXTREME_NEGATIVE": {"TRUE": 1.0, "FALSE": 0.0},
     "MARK_INDEX_BASIS_STATE": {"NEGATIVE": 1.0, "NEUTRAL": 2.0, "POSITIVE": 3.0},
 }
+# Rule-authoring presets are aliases over raw categorical states. They never
+# replace the underlying research classification, so saved exact-state rules
+# keep their original meaning. Presets must map to contiguous native codes so
+# the mature min/max rule engine can evaluate them without special runtime logic.
+CATEGORICAL_RULE_PRESETS = {
+    "MR_STATE": {
+        "ANY_BELOW_MEAN": ("STRONGLY_BELOW_MEAN", "BELOW_MEAN"),
+        "ANY_ABOVE_MEAN": ("ABOVE_MEAN", "STRONGLY_ABOVE_MEAN"),
+    },
+}
+CATEGORICAL_RULE_VALUE_OPTIONS = {
+    "MR_STATE": (
+        "STRONGLY_BELOW_MEAN",
+        "BELOW_MEAN",
+        "ANY_BELOW_MEAN",
+        "NEAR_MEAN",
+        "ABOVE_MEAN",
+        "STRONGLY_ABOVE_MEAN",
+        "ANY_ABOVE_MEAN",
+    ),
+}
 MEAN_REVERSION_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("MR_")
 )
@@ -223,7 +244,10 @@ def rule_operator_options(evidence: str) -> tuple[str, ...]:
 
 
 def rule_value_options(evidence: str) -> tuple[str, ...]:
-    return CATEGORICAL_RULE_VALUES.get(str(evidence).upper(), ())
+    evidence = str(evidence).upper()
+    return CATEGORICAL_RULE_VALUE_OPTIONS.get(
+        evidence, CATEGORICAL_RULE_VALUES.get(evidence, ())
+    )
 
 
 def new_rule(
@@ -484,12 +508,26 @@ def _applies(rule: dict, regime: str, side: str) -> bool:
     return rule["regime"] in ("ALL", regime) and rule["side"] in ("ALL", side)
 
 
+def _categorical_rule_range(evidence: str, value: str) -> tuple[float, float]:
+    preset_members = CATEGORICAL_RULE_PRESETS.get(evidence, {}).get(value)
+    if not preset_members:
+        code = CATEGORICAL_VALUE_CODES[evidence][value]
+        return code, code
+
+    codes = sorted(CATEGORICAL_VALUE_CODES[evidence][member] for member in preset_members)
+    if any(right - left != 1.0 for left, right in zip(codes, codes[1:])):
+        raise ValueError(
+            f"categorical rule preset {value} for {evidence} must use contiguous state codes"
+        )
+    return codes[0], codes[-1]
+
+
 def _range(rule: dict) -> tuple[float, float, str]:
     operator = rule["operator"]
     evidence = rule["evidence"]
     if is_categorical_evidence(evidence):
-        code = CATEGORICAL_VALUE_CODES[evidence][rule["value"]]
-        return code, code, "INSIDE" if operator == "IS" else "OUTSIDE"
+        minimum, maximum = _categorical_rule_range(evidence, rule["value"])
+        return minimum, maximum, "INSIDE" if operator == "IS" else "OUTSIDE"
 
     first, second = float(rule["value"]), float(rule["value2"])
     if operator == "GT":
