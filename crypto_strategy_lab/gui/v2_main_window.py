@@ -102,13 +102,14 @@ FEATURE_GROUPS = (
 EXECUTION_GROUPS = (
     ("Risk", (
         "initial_equity", "risk_mode", "fixed_r", "percent_r", "atr_multiplier",
-        "risk_per_leg", "max_effective_leverage_per_leg",
+        "sr_stop_timeframe_minutes", "sr_stop_buffer_atr", "sr_stop_maximum_atr",
+        "sr_stop_no_level_policy", "risk_per_leg", "max_effective_leverage_per_leg",
         "max_combined_effective_leverage", "max_active_pairs",
     ), None),
     ("Take Profit", (
-        "sr_take_profit_mode", "sr_take_profit_maximum_r",
-        "sr_take_profit_minimum_r", "sr_take_profit_buffer_r",
-        "sr_take_profit_no_level_policy",
+        "sr_take_profit_mode", "sr_take_profit_timeframe_minutes",
+        "sr_take_profit_maximum_r", "sr_take_profit_minimum_r",
+        "sr_take_profit_buffer_r", "sr_take_profit_no_level_policy",
     ), None),
     ("Fees", (
         "maker_fee", "taker_fee", "use_maker_entry", "use_maker_exit",
@@ -326,9 +327,12 @@ class DataclassForm(QWidget):
         "trade_flow_source": ("AGG_TRADES", "TRADES"),
         "sr_break_basis": ("CLOSE", "WICK"),
         "mean_reversion_mean_type": ("SMA", "EMA"),
-        "risk_mode": ("ATR", "FIXED", "PERCENT"),
+        "risk_mode": ("ATR", "FIXED", "PERCENT", "SR_STRUCTURE"),
+        "sr_stop_timeframe_minutes": (0, 60, 240, 1440),
+        "sr_stop_no_level_policy": ("USE_ATR_STOP", "REJECT_TRADE"),
         "tie_policy": ("PESSIMISTIC", "OPTIMISTIC", "INTRABAR"),
-        "sr_take_profit_mode": ("FIXED_R", "SR_CAPPED_R"),
+        "sr_take_profit_timeframe_minutes": (-1, 0, 60, 240, 1440),
+        "sr_take_profit_mode": ("FIXED_R", "SR_CAPPED_R", "SR_LEVEL"),
         "sr_take_profit_no_level_policy": ("USE_FIXED_TP", "REJECT_TRADE"),
         "flip_rule_match_mode": ("ANY", "ALL"),
         "reject_rule_match_mode": ("ANY", "ALL"),
