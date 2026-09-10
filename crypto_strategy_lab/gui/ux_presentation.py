@@ -34,6 +34,10 @@ FIELDS = {
     "percent_r": FieldPresentation("Price Distance", unit="%", scale=100, decimals=4),
     "reward_risk_ratio": FieldPresentation("Profit Target", unit=" R", decimals=2),
     "stop_loss_multiple": FieldPresentation("Stop Distance", unit=" distance units", decimals=2),
+    "sr_stop_timeframe_minutes": FieldPresentation("S/R Stop Timeframe", "Independent S/R context used for structural stop placement."),
+    "sr_stop_buffer_atr": FieldPresentation("Buffer Beyond S/R", "Extra distance beyond the outer edge of the S/R zone, measured in strategy ATR.", unit=" × ATR", decimals=2),
+    "sr_stop_maximum_atr": FieldPresentation("Maximum Structural Stop", "Reject structural stops farther than this many strategy ATR from entry.", unit=" × ATR", decimals=2),
+    "sr_take_profit_timeframe_minutes": FieldPresentation("S/R Target Timeframe", "Independent S/R context used for the profit target."),
     "risk_multiplier": FieldPresentation("Risk Multiplier", unit="x", decimals=2),
     "timeout_minutes": FieldPresentation("Maximum Holding Time", unit=" min", decimals=0),
     "strategy_profile_run_mode": FieldPresentation("Profile Test Mode"),
@@ -46,15 +50,18 @@ FIELDS = {
 
 ENUM_LABELS = {
     "sr_timeframe_minutes": {0: "Same as strategy", 60: "1h", 240: "4h", 1440: "1d"},
+    "sr_stop_timeframe_minutes": {0: "Strategy Timeframe", 60: "1h", 240: "4h", 1440: "1d"},
+    "sr_take_profit_timeframe_minutes": {-1: "Primary S/R Context", 0: "Strategy Timeframe", 60: "1h", 240: "4h", 1440: "1d"},
     "strategy_profile_run_mode": {"COMBINED_SHARED_CAPITAL": "Combined — Shared Account", "ISOLATED_PROFILES": "Each Profile Independently", "BOTH": "Combined + Independent Comparison"},
     "tie_policy": {"PESSIMISTIC": "Conservative — Stop First", "OPTIMISTIC": "Optimistic — Target First", "INTRABAR": "Resolve Using Intrabar Data"},
     "market_regime_method": {"BTC_STRUCTURAL": "BTC Structural Trend", "ASSET_STRUCTURAL": "Selected Asset Structural Trend", "ASSET_RETURN": "Selected Asset Trailing Return"},
     "sr_filter_mode": {"ANALYSIS_ONLY": "Analysis Only — Do Not Block Trades", "APPLY_ENTRY_RULES": "Use S/R Entry Filters"},
-    "risk_mode": {"ATR": "ATR Volatility", "PERCENT": "Percent of Price", "FIXED": "Fixed Price Distance"},
+    "risk_mode": {"ATR": "ATR Volatility", "PERCENT": "Percent of Price", "FIXED": "Fixed Price Distance", "SR_STRUCTURE": "S/R Structural Stop"},
     "trade_flow_source": {"AGG_TRADES": "Aggregate Trades", "TRADES": "Trades"},
     "flip_rule_match_mode": {"ANY": "Any Rule (OR)", "ALL": "All Rules (AND)"},
     "reject_rule_match_mode": {"ANY": "Any Rule (OR)", "ALL": "All Rules (AND)"},
-    "sr_take_profit_mode": {"FIXED_R": "Fixed R Target", "SR_CAPPED_R": "Cap Target at Support/Resistance"},
+    "sr_stop_no_level_policy": {"USE_ATR_STOP": "Use ATR Stop When No Valid S/R Exists", "REJECT_TRADE": "Reject Trade When No Valid S/R Exists"},
+    "sr_take_profit_mode": {"FIXED_R": "Fixed R Target", "SR_CAPPED_R": "Cap Fixed-R Target at Support/Resistance", "SR_LEVEL": "Structural S/R Target"},
     "sr_take_profit_no_level_policy": {"USE_FIXED_TP": "Use Fixed Target When No Level Exists", "REJECT_TRADE": "Reject Trade When No Valid Level Exists"},
 }
 
