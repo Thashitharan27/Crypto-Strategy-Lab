@@ -11,7 +11,7 @@ from crypto_strategy_lab.strategy_profiles import StrategyProfile, default_profi
 
 
 class RiskMode(str, Enum):
-    FIXED = "FIXED"; PERCENT = "PERCENT"; ATR = "ATR"
+    FIXED = "FIXED"; PERCENT = "PERCENT"; ATR = "ATR"; SR_STRUCTURE = "SR_STRUCTURE"
 class EntryMode(str, Enum):
     WAIT_UNTIL_CLOSED = "WAIT_UNTIL_CLOSED"; EVERY_N_CANDLES = "EVERY_N_CANDLES"
 class TiePolicy(str, Enum):
