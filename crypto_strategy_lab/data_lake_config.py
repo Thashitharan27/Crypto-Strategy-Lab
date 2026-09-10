@@ -50,9 +50,26 @@ class FeatureConfig:
     sr_pivot_left: int = 5
     sr_pivot_right: int = 5
     sr_lookback_bars: int = 200
+    # Per-timeframe detection overrides. 0 means inherit the shared values above,
+    # preserving historical configs while allowing each S/R context to have an
+    # appropriate structural horizon.
+    sr_15m_pivot_left: int = 0
+    sr_15m_pivot_right: int = 0
+    sr_15m_lookback_bars: int = 0
+    sr_1h_pivot_left: int = 0
+    sr_1h_pivot_right: int = 0
+    sr_1h_lookback_bars: int = 0
+    sr_4h_pivot_left: int = 0
+    sr_4h_pivot_right: int = 0
+    sr_4h_lookback_bars: int = 0
+    sr_1d_pivot_left: int = 0
+    sr_1d_pivot_right: int = 0
+    sr_1d_lookback_bars: int = 0
     sr_zone_width_atr: float = 0.5
     sr_near_distance_atr: float = 0.75
-    enable_sr_hold_confirmation: bool = False
+    # Retained in the native config for old files/API compatibility. The GUI no
+    # longer exposes this switch and normal research keeps confirmation enabled.
+    enable_sr_hold_confirmation: bool = True
     sr_hold_confirmation_bars: int = 3
     sr_hold_confirmation_atr: float = 0.25
     sr_break_tolerance_atr: float = 0.25
@@ -78,6 +95,39 @@ class FeatureConfig:
     funding_zscore_min_samples: int = 6
     funding_extreme_zscore: float = 2.0
     basis_zscore_window_days: float = 7.0
+
+    def sr_detection_parameters(self, timeframe_minutes: int) -> dict[str, int]:
+        """Resolve pivot/lookback settings for one independent S/R timeframe.
+
+        A zero timeframe-specific value inherits the historical shared setting.
+        This keeps old saved configurations stable while making 15m/1h/4h/1d
+        structural sensitivity independently configurable.
+        """
+        result = {
+            "sr_pivot_left": int(self.sr_pivot_left),
+            "sr_pivot_right": int(self.sr_pivot_right),
+            "sr_lookback_bars": int(self.sr_lookback_bars),
+        }
+        label = {15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(
+            int(timeframe_minutes)
+        )
+        if label is None:
+            return result
+        for key in ("pivot_left", "pivot_right", "lookback_bars"):
+            override = int(getattr(self, f"sr_{label}_{key}"))
+            if override < 0:
+                raise ValueError(f"sr_{label}_{key} must be zero (inherit) or positive")
+            if override:
+                result[f"sr_{key}"] = override
+        return result
+
+    def sr_detection_override_parameters(self) -> dict[str, int]:
+        """Return raw per-timeframe overrides for feature-cache identity."""
+        return {
+            f"sr_{label}_{key}": int(getattr(self, f"sr_{label}_{key}"))
+            for label in ("15m", "1h", "4h", "1d")
+            for key in ("pivot_left", "pivot_right", "lookback_bars")
+        }
 
     def registry_parameters(self, *, strategy_timeframe_minutes: int | None = None) -> dict[str, dict[str, Any]]:
         """Authoritative registered-feature parameters owned by FeatureConfig."""
@@ -140,9 +190,8 @@ class FeatureConfig:
             result["support_resistance"] = {
                 "atr_period": int(self.atr_period),
                 "sr_timeframe_minutes": effective_sr,
-                "sr_pivot_left": int(self.sr_pivot_left),
-                "sr_pivot_right": int(self.sr_pivot_right),
-                "sr_lookback_bars": int(self.sr_lookback_bars),
+                **self.sr_detection_parameters(effective_sr),
+                **self.sr_detection_override_parameters(),
                 "sr_zone_width_atr": float(self.sr_zone_width_atr),
                 "sr_near_distance_atr": float(self.sr_near_distance_atr),
                 "enable_sr_hold_confirmation": bool(self.enable_sr_hold_confirmation),

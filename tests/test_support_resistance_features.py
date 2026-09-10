@@ -198,7 +198,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 
     assert isinstance(engine, SRDynamicTPBacktestEngine)
     assert isinstance(engine.sr_detector, PreparedSupportResistanceContextReader)
-    assert engine.support_resistance_feature_source == "support_resistance@2"
+    assert engine.support_resistance_feature_source == "support_resistance@3"
     assert engine.sr_uses_higher_timeframe is False
 
     index = 75

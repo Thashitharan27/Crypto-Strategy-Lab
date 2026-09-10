@@ -66,7 +66,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "sr_lookback_bars": 200,
     "sr_zone_width_atr": 0.5,
     "sr_near_distance_atr": 0.75,
-    "enable_sr_hold_confirmation": False,
+    "enable_sr_hold_confirmation": True,
     "sr_hold_confirmation_bars": 3,
     "sr_hold_confirmation_atr": 0.25,
     "sr_break_tolerance_atr": 0.25,
