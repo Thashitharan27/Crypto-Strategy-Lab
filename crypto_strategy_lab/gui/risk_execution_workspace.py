@@ -152,21 +152,26 @@ class RiskExecutionWorkspace(QWidget):
         self.stop_card.add_field("atr_multiplier", "ATR Distance Multiplier", self.account["atr_multiplier"])
         self.stop_card.add_field("percent_r", "Price Distance", self.account["percent_r"])
         self.stop_card.add_field("fixed_r", "Fixed Price Distance", self.account["fixed_r"])
+        self.stop_card.add_field("sr_stop_timeframe_minutes", "S/R Stop Timeframe", self.account["sr_stop_timeframe_minutes"])
+        self.stop_card.add_field("sr_stop_buffer_atr", "Buffer Beyond S/R", self.account["sr_stop_buffer_atr"])
+        self.stop_card.add_field("sr_stop_maximum_atr", "Maximum Structural Stop", self.account["sr_stop_maximum_atr"])
+        self.stop_card.add_field("sr_stop_no_level_policy", "If No Valid S/R Exists", self.account["sr_stop_no_level_policy"])
         self.stop_card.add_field("stop_loss_multiple", "Stop Multiplier", self.trade["stop_loss_multiple"])
         layout.addWidget(self.stop_card)
 
         self.target_card = FormCard(
             "3. Profit Target",
-            note="Fixed R is the baseline. S/R-Constrained Target can cap the target and reject trades that do not have enough room.",
+            note="Fixed R is the baseline. S/R can either cap the fixed-R target or place the target from the selected market structure.",
         )
         self.target_card.add_field("sr_take_profit_mode", "Target Policy", self.account["sr_take_profit_mode"])
         self.target_card.add_field("reward_risk_ratio", "Base Profit Target", self.trade["reward_risk_ratio"])
+        self.target_card.add_field("sr_take_profit_timeframe_minutes", "S/R Target Timeframe", self.account["sr_take_profit_timeframe_minutes"])
         self.target_card.add_field("sr_take_profit_minimum_r", "Minimum Acceptable Target", self.account["sr_take_profit_minimum_r"])
         self.target_card.add_field("sr_take_profit_maximum_r", "Maximum S/R Target Cap", self.account["sr_take_profit_maximum_r"])
         self.target_card.add_field("sr_take_profit_buffer_r", "Buffer Before S/R", self.account["sr_take_profit_buffer_r"])
         self.target_card.add_field("sr_take_profit_no_level_policy", "If No Opposing S/R Exists", self.account["sr_take_profit_no_level_policy"])
         self.sr_dependency_note = QLabel(
-            "S/R target policy automatically requires causal Support / Resistance calculation; no separate enable step is needed."
+            "Structural S/R stop/target policies automatically require causal Support / Resistance calculation; no separate enable step is needed."
         )
         self.sr_dependency_note.setWordWrap(True)
         self.sr_dependency_note.setStyleSheet("color:#52606d; margin:2px 8px 6px 8px")
@@ -273,17 +278,29 @@ class RiskExecutionWorkspace(QWidget):
 
     def refresh_visibility(self, *_args) -> None:
         mode = str(self.account["risk_mode"].currentData() or "ATR")
+        structural_stop = mode == "SR_STRUCTURE"
         self.stop_card.set_row_visible("atr_multiplier", mode == "ATR")
         self.stop_card.set_row_visible("percent_r", mode == "PERCENT")
         self.stop_card.set_row_visible("fixed_r", mode == "FIXED")
-
-        sr_target = str(self.account["sr_take_profit_mode"].currentData() or "FIXED_R") == "SR_CAPPED_R"
         for name in (
-            "sr_take_profit_minimum_r", "sr_take_profit_maximum_r",
-            "sr_take_profit_buffer_r", "sr_take_profit_no_level_policy",
+            "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
+            "sr_stop_maximum_atr", "sr_stop_no_level_policy",
+        ):
+            self.stop_card.set_row_visible(name, structural_stop)
+        # Structural mode owns the full initial stop distance. The legacy stop
+        # multiplier remains preserved in the profile but is not a user-facing
+        # input for the final structural stop.
+        self.stop_card.set_row_visible("stop_loss_multiple", not structural_stop)
+
+        target_mode = str(self.account["sr_take_profit_mode"].currentData() or "FIXED_R")
+        sr_target = target_mode in ("SR_CAPPED_R", "SR_LEVEL")
+        for name in (
+            "sr_take_profit_timeframe_minutes", "sr_take_profit_minimum_r",
+            "sr_take_profit_maximum_r", "sr_take_profit_buffer_r",
+            "sr_take_profit_no_level_policy",
         ):
             self.target_card.set_row_visible(name, sr_target)
-        self.sr_dependency_note.setVisible(sr_target)
+        self.sr_dependency_note.setVisible(structural_stop or sr_target)
 
         toggles = {
             "break_even_enabled": ("break_even_activation_r", "break_even_offset_r"),
@@ -314,12 +331,31 @@ class RiskExecutionWorkspace(QWidget):
         self.refresh_summary_from_widgets()
 
     @staticmethod
-    def _distance_description(execution) -> str:
+    def _timeframe_description(minutes: int, *, primary: bool = False) -> str:
+        minutes = int(minutes)
+        if primary and minutes == -1:
+            return "primary S/R context"
+        if minutes == 0:
+            return "strategy timeframe"
+        if minutes % 1440 == 0:
+            return f"{minutes // 1440}d"
+        if minutes % 60 == 0:
+            return f"{minutes // 60}h"
+        return f"{minutes}m"
+
+    @classmethod
+    def _distance_description(cls, execution) -> str:
         mode = str(execution.risk_mode).upper()
         if mode == "ATR":
             return f"{execution.atr_multiplier:g}× ATR distance unit"
         if mode == "PERCENT":
             return f"{execution.percent_r * 100:g}% of price distance unit"
+        if mode == "SR_STRUCTURE":
+            timeframe = cls._timeframe_description(execution.sr_stop_timeframe_minutes)
+            return (
+                f"structural S/R on {timeframe}, {execution.sr_stop_buffer_atr:g}× ATR "
+                f"beyond the zone, maximum {execution.sr_stop_maximum_atr:g}× ATR"
+            )
         return f"{execution.fixed_r:g} fixed-price distance unit"
 
     @staticmethod
@@ -345,11 +381,24 @@ class RiskExecutionWorkspace(QWidget):
         effective_risk = float(execution.risk_per_leg) * float(base.risk_multiplier)
         risk_dollars = float(execution.initial_equity) * effective_risk
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
-        if str(execution.sr_take_profit_mode).upper() == "SR_CAPPED_R":
+        target_mode = str(execution.sr_take_profit_mode).upper()
+        if target_mode == "SR_CAPPED_R":
+            timeframe = self._timeframe_description(
+                execution.sr_take_profit_timeframe_minutes, primary=True
+            )
             target = (
-                f"S/R-constrained target (base {base.reward_risk_ratio:g}R, "
+                f"S/R-constrained target from {timeframe} (base {base.reward_risk_ratio:g}R, "
                 f"minimum {execution.sr_take_profit_minimum_r:g}R, "
                 f"cap {execution.sr_take_profit_maximum_r:g}R)"
+            )
+        elif target_mode == "SR_LEVEL":
+            timeframe = self._timeframe_description(
+                execution.sr_take_profit_timeframe_minutes, primary=True
+            )
+            target = (
+                f"structural S/R target from {timeframe} "
+                f"(minimum {execution.sr_take_profit_minimum_r:g}R, "
+                f"safety cap {execution.sr_take_profit_maximum_r:g}R)"
             )
         else:
             target = f"fixed {base.reward_risk_ratio:g}R target"
@@ -358,10 +407,15 @@ class RiskExecutionWorkspace(QWidget):
             if abs(float(base.risk_multiplier) - 1.0) > 1e-12
             else ""
         )
+        stop_description = (
+            f"Stop distance uses {self._distance_description(execution)}. "
+            if str(execution.risk_mode).upper() == "SR_STRUCTURE"
+            else f"Stop distance uses {self._distance_description(execution)} with a {stop_mult:g}× stop multiplier. "
+        )
         self.summary_label.setText(
             f"${execution.initial_equity:,.2f} equity · base risk {execution.risk_per_leg * 100:.2f}%"
             f"{multiplier} → effective risk budget {effective_risk * 100:.2f}% (${risk_dollars:,.2f}). "
-            f"Stop distance uses {self._distance_description(execution)} with a {stop_mult:g}× stop multiplier. "
+            f"{stop_description}"
             f"Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
             f"Management: {self._management_description(base)}."
         )

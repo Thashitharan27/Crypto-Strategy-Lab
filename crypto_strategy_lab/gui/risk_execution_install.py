@@ -22,7 +22,7 @@ def _rules_require_support_resistance(window) -> bool:
 
 
 def _sync_target_sr_dependency(window) -> None:
-    """S/R-capped targets own their causal S/R dependency automatically."""
+    """Structural S/R stop/target policies own their causal S/R dependency."""
     if getattr(window, "_syncing_target_sr_dependency", False):
         return
     execution_form = getattr(window, "execution_form", None)
@@ -30,26 +30,40 @@ def _sync_target_sr_dependency(window) -> None:
     if execution_form is None or feature_form is None:
         return
     target_mode = execution_form.widgets.get("sr_take_profit_mode")
+    stop_mode = execution_form.widgets.get("risk_mode")
     sr_toggle = feature_form.widgets.get("enable_support_resistance_analysis")
-    if target_mode is None or sr_toggle is None:
+    if target_mode is None or stop_mode is None or sr_toggle is None:
         return
 
     window._syncing_target_sr_dependency = True
     try:
-        required_by_target = str(target_mode.currentData() or "FIXED_R") == "SR_CAPPED_R"
+        target_value = str(target_mode.currentData() or "FIXED_R")
+        stop_value = str(stop_mode.currentData() or "ATR")
+        required_by_target = target_value in {"SR_CAPPED_R", "SR_LEVEL"}
+        required_by_stop = stop_value == "SR_STRUCTURE"
+        required_by_execution = required_by_target or required_by_stop
         was_required = bool(getattr(window, "_sr_target_dependency_active", False))
         panel = getattr(window, "research_features_panel", None)
 
-        if required_by_target:
+        if required_by_execution:
             if not was_required:
                 window._sr_target_previous_checked = bool(sr_toggle.isChecked())
             window._sr_target_dependency_active = True
             if not sr_toggle.isChecked():
                 sr_toggle.setChecked(True)
             sr_toggle.setEnabled(False)
-            sr_toggle.setText("Support / Resistance calculation required by target policy")
+            if required_by_target and required_by_stop:
+                label = "stop + target policies"
+                status = "REQUIRED BY EXECUTION POLICY"
+            elif required_by_stop:
+                label = "stop policy"
+                status = "REQUIRED BY STOP POLICY"
+            else:
+                label = "target policy"
+                status = "REQUIRED BY TARGET POLICY"
+            sr_toggle.setText(f"Support / Resistance calculation required by {label}")
             if panel is not None:
-                panel.sr_card.set_status("REQUIRED BY TARGET POLICY")
+                panel.sr_card.set_status(status)
                 panel.refresh_visibility()
             return
 
@@ -98,6 +112,9 @@ def apply_risk_execution_workspace(window) -> None:
     window.execution_form.changed.connect(workspace.refresh_summary_from_widgets)
     window.base_execution_form.changed.connect(workspace.refresh_summary_from_widgets)
     window.execution_form.widgets["sr_take_profit_mode"].currentIndexChanged.connect(
+        lambda _index: _sync_target_sr_dependency(window)
+    )
+    window.execution_form.widgets["risk_mode"].currentIndexChanged.connect(
         lambda _index: _sync_target_sr_dependency(window)
     )
     window.feature_form.widgets["enable_support_resistance_analysis"].toggled.connect(
