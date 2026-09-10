@@ -432,7 +432,10 @@ class ResearchRunConfig:
         sr_target = execution.sr_take_profit_mode in {"SR_CAPPED_R", "SR_LEVEL"}
         if (structural_stop or sr_target) and not features.enable_support_resistance_analysis:
             raise ValueError("S/R analysis must be enabled by structural S/R execution policies")
-        if sr_target and any(profile.partial_profit_enabled for profile in execution.profiles.values()):
+        if sr_target and any(
+            strategy.profiles[key].enabled and execution.profiles[key].partial_profit_enabled
+            for key in strategy.profiles
+        ):
             raise ValueError("S/R take profit is not compatible with partial take-profit profiles")
         if execution.tie_policy not in {"PESSIMISTIC", "OPTIMISTIC", "INTRABAR"}:
             raise ValueError("invalid tie policy")
