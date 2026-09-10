@@ -29,6 +29,9 @@ def _risk_label(config: BacktestConfig) -> str:
         return f"ATR{config.atr_period}x{_format_number(config.atr_multiplier)}"
     if mode == "PERCENT":
         return f"PCT{_format_number(config.percent_r * 100)}"
+    if mode == "SR_STRUCTURE":
+        timeframe = int(getattr(config, "sr_stop_timeframe_minutes", 0) or config.strategy_timeframe_minutes)
+        return f"SRSTOP{timeframe}m"
     return f"FIXED{_format_number(config.fixed_r)}"
 
 
