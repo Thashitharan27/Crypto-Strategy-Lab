@@ -242,6 +242,10 @@ class ExecutionConfig:
     fixed_r: float = 100.0
     percent_r: float = 0.002
     atr_multiplier: float = 1.0
+    sr_stop_timeframe_minutes: int = 0
+    sr_stop_buffer_atr: float = 0.25
+    sr_stop_maximum_atr: float = 3.0
+    sr_stop_no_level_policy: str = "USE_ATR_STOP"
     risk_per_leg: float = 0.01
     max_effective_leverage_per_leg: float | None = 3.0
     max_combined_effective_leverage: float | None = 5.0
@@ -253,6 +257,7 @@ class ExecutionConfig:
     tie_policy: str = "PESSIMISTIC"
     max_active_pairs: int = 1
     zero_cost_comparison: bool = False
+    sr_take_profit_timeframe_minutes: int = -1
     sr_take_profit_mode: str = "FIXED_R"
     sr_take_profit_maximum_r: float = 3.0
     sr_take_profit_minimum_r: float = 1.5
@@ -395,8 +400,40 @@ class ResearchRunConfig:
             raise ValueError("execution equity/risk settings must be positive")
         if not 0 < execution.risk_per_leg < 1:
             raise ValueError("risk per leg must be between 0 and 1")
-        if execution.risk_mode not in {"FIXED", "PERCENT", "ATR"}:
+        if execution.risk_mode not in {"FIXED", "PERCENT", "ATR", "SR_STRUCTURE"}:
             raise ValueError("invalid risk mode")
+        if execution.sr_stop_timeframe_minutes not in {0, 60, 240, 1440}:
+            raise ValueError("invalid S/R stop timeframe")
+        if execution.sr_take_profit_timeframe_minutes not in {-1, 0, 60, 240, 1440}:
+            raise ValueError("invalid S/R target timeframe")
+        for value, label in (
+            (execution.sr_stop_timeframe_minutes, "S/R stop"),
+            (execution.sr_take_profit_timeframe_minutes, "S/R target"),
+        ):
+            if value <= 0:
+                continue
+            if value < data.strategy_timeframe_minutes or value % data.strategy_timeframe_minutes:
+                raise ValueError(f"{label} timeframe must be the strategy timeframe or a compatible higher timeframe")
+        if execution.sr_stop_buffer_atr < 0 or execution.sr_stop_maximum_atr <= 0:
+            raise ValueError("invalid S/R structural stop settings")
+        if execution.sr_stop_no_level_policy not in {"USE_ATR_STOP", "REJECT_TRADE"}:
+            raise ValueError("invalid S/R stop no-level policy")
+        if execution.sr_take_profit_mode not in {"FIXED_R", "SR_CAPPED_R", "SR_LEVEL"}:
+            raise ValueError("invalid S/R take-profit mode")
+        if execution.sr_take_profit_no_level_policy not in {"USE_FIXED_TP", "REJECT_TRADE"}:
+            raise ValueError("invalid S/R take-profit no-level policy")
+        if execution.sr_take_profit_minimum_r <= 0 or execution.sr_take_profit_maximum_r <= 0:
+            raise ValueError("S/R take-profit R values must be positive")
+        if execution.sr_take_profit_minimum_r > execution.sr_take_profit_maximum_r:
+            raise ValueError("S/R minimum TP cannot exceed maximum TP")
+        if execution.sr_take_profit_buffer_r < 0:
+            raise ValueError("S/R take-profit buffer cannot be negative")
+        structural_stop = execution.risk_mode == "SR_STRUCTURE"
+        sr_target = execution.sr_take_profit_mode in {"SR_CAPPED_R", "SR_LEVEL"}
+        if (structural_stop or sr_target) and not features.enable_support_resistance_analysis:
+            raise ValueError("S/R analysis must be enabled by structural S/R execution policies")
+        if sr_target and any(profile.partial_profit_enabled for profile in execution.profiles.values()):
+            raise ValueError("S/R take profit is not compatible with partial take-profit profiles")
         if execution.tie_policy not in {"PESSIMISTIC", "OPTIMISTIC", "INTRABAR"}:
             raise ValueError("invalid tie policy")
         if execution.max_active_pairs <= 0:
