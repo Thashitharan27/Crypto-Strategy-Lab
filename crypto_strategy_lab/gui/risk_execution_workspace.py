@@ -407,15 +407,16 @@ class RiskExecutionWorkspace(QWidget):
             if abs(float(base.risk_multiplier) - 1.0) > 1e-12
             else ""
         )
+        stop_description = (
+            f"Stop distance uses {self._distance_description(execution)}. "
+            if str(execution.risk_mode).upper() == "SR_STRUCTURE"
+            else f"Stop distance uses {self._distance_description(execution)} with a {stop_mult:g}× stop multiplier. "
+        )
         self.summary_label.setText(
             f"${execution.initial_equity:,.2f} equity · base risk {execution.risk_per_leg * 100:.2f}%"
             f"{multiplier} → effective risk budget {effective_risk * 100:.2f}% (${risk_dollars:,.2f}). "
-            (
-                f"Stop distance uses {self._distance_description(execution)}. "
-                if str(execution.risk_mode).upper() == "SR_STRUCTURE"
-                else f"Stop distance uses {self._distance_description(execution)} with a {stop_mult:g}× stop multiplier. "
-            )
-            + f"Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
+            f"{stop_description}"
+            f"Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
             f"Management: {self._management_description(base)}."
         )
 
