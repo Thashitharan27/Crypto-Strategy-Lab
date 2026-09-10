@@ -38,6 +38,14 @@ SR_HTF_DEFAULTS: dict[str, Any] = {
 }
 
 SR_DYNAMIC_TP_DEFAULTS: dict[str, Any] = {
+    # Structural stop defaults are inert unless risk_mode == SR_STRUCTURE.
+    "sr_stop_timeframe_minutes": 0,
+    "sr_stop_buffer_atr": 0.25,
+    "sr_stop_maximum_atr": 3.0,
+    "sr_stop_no_level_policy": "USE_ATR_STOP",
+    # -1 preserves the historical S/R-capped TP behaviour by using the configured
+    # primary S/R context. 0 explicitly means the strategy-timeframe context.
+    "sr_take_profit_timeframe_minutes": -1,
     "sr_take_profit_mode": "FIXED_R",
     "sr_take_profit_maximum_r": 3.0,
     "sr_take_profit_minimum_r": 1.5,
@@ -69,6 +77,11 @@ class EnhancedBacktestConfig(BacktestConfig):
     mean_reversion_track_atr_distance: bool = True
     mean_reversion_track_motion: bool = True
     sr_timeframe_minutes: int = 0
+    sr_stop_timeframe_minutes: int = 0
+    sr_stop_buffer_atr: float = 0.25
+    sr_stop_maximum_atr: float = 3.0
+    sr_stop_no_level_policy: str = "USE_ATR_STOP"
+    sr_take_profit_timeframe_minutes: int = -1
     sr_take_profit_mode: str = "FIXED_R"
     sr_take_profit_maximum_r: float = 3.0
     sr_take_profit_minimum_r: float = 1.5
@@ -109,12 +122,35 @@ class EnhancedBacktestConfig(BacktestConfig):
             if sr_tf % self.strategy_timeframe_minutes != 0:
                 raise ValueError("S/R timeframe must be an integer multiple of the strategy timeframe")
 
+        stop_tf = int(self.sr_stop_timeframe_minutes)
+        tp_tf = int(self.sr_take_profit_timeframe_minutes)
+        object.__setattr__(self, "sr_stop_timeframe_minutes", stop_tf)
+        object.__setattr__(self, "sr_take_profit_timeframe_minutes", tp_tf)
+        if stop_tf not in (0, 60, 240, 1440):
+            raise ValueError("S/R stop timeframe must be Strategy TF, 1h, 4h or 1d")
+        if tp_tf not in (-1, 0, 60, 240, 1440):
+            raise ValueError("S/R target timeframe must be Primary, Strategy TF, 1h, 4h or 1d")
+        for value, label in ((stop_tf, "S/R stop"), (tp_tf, "S/R target")):
+            if value <= 0:
+                continue
+            if value < self.strategy_timeframe_minutes or value % self.strategy_timeframe_minutes:
+                raise ValueError(f"{label} timeframe must be the strategy timeframe or a compatible higher timeframe")
+
+        stop_no_level_policy = str(self.sr_stop_no_level_policy).upper()
+        object.__setattr__(self, "sr_stop_no_level_policy", stop_no_level_policy)
+        if stop_no_level_policy not in ("USE_ATR_STOP", "REJECT_TRADE"):
+            raise ValueError("sr_stop_no_level_policy must be USE_ATR_STOP or REJECT_TRADE")
+        if self.sr_stop_buffer_atr < 0:
+            raise ValueError("S/R stop buffer cannot be negative")
+        if self.sr_stop_maximum_atr <= 0:
+            raise ValueError("S/R maximum stop distance must be positive")
+
         tp_mode = str(self.sr_take_profit_mode).upper()
         no_level_policy = str(self.sr_take_profit_no_level_policy).upper()
         object.__setattr__(self, "sr_take_profit_mode", tp_mode)
         object.__setattr__(self, "sr_take_profit_no_level_policy", no_level_policy)
-        if tp_mode not in ("FIXED_R", "SR_CAPPED_R"):
-            raise ValueError("sr_take_profit_mode must be FIXED_R or SR_CAPPED_R")
+        if tp_mode not in ("FIXED_R", "SR_CAPPED_R", "SR_LEVEL"):
+            raise ValueError("sr_take_profit_mode must be FIXED_R, SR_CAPPED_R or SR_LEVEL")
         if no_level_policy not in ("USE_FIXED_TP", "REJECT_TRADE"):
             raise ValueError("sr_take_profit_no_level_policy must be USE_FIXED_TP or REJECT_TRADE")
         if self.sr_take_profit_maximum_r <= 0 or self.sr_take_profit_minimum_r <= 0:
@@ -123,12 +159,15 @@ class EnhancedBacktestConfig(BacktestConfig):
             raise ValueError("S/R minimum TP cannot exceed maximum TP")
         if self.sr_take_profit_buffer_r < 0:
             raise ValueError("S/R take-profit buffer cannot be negative")
-        if tp_mode == "SR_CAPPED_R" and not self.enable_support_resistance_analysis:
-            raise ValueError("S/R analysis must be enabled when S/R-capped take profit is selected")
-        if tp_mode == "SR_CAPPED_R":
+
+        structural_stop = getattr(self.risk_mode, "value", self.risk_mode) == "SR_STRUCTURE"
+        sr_target = tp_mode in ("SR_CAPPED_R", "SR_LEVEL")
+        if (structural_stop or sr_target) and not self.enable_support_resistance_analysis:
+            raise ValueError("S/R analysis must be enabled when a structural S/R stop or target is selected")
+        if sr_target:
             enabled_profiles = [p for p in self.strategy_profiles.values() if p.enabled]
             if any(getattr(p, "partial_profit_enabled", False) for p in enabled_profiles):
-                raise ValueError("S/R-capped take profit is not compatible with partial take-profit profiles")
+                raise ValueError("S/R take profit is not compatible with partial take-profit profiles")
 
 
 def enhanced_default_gui_config() -> dict[str, Any]:
