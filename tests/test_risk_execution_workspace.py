@@ -72,6 +72,9 @@ def test_stop_distance_method_shows_only_the_active_parameter():
         atr = window.execution_form.widgets["atr_multiplier"]
         percent = window.execution_form.widgets["percent_r"]
         fixed = window.execution_form.widgets["fixed_r"]
+        sr_timeframe = window.execution_form.widgets["sr_stop_timeframe_minutes"]
+        sr_buffer = window.execution_form.widgets["sr_stop_buffer_atr"]
+        stop_multiplier = window.base_execution_form.widgets["stop_loss_multiple"]
 
         mode.setCurrentIndex(mode.findData("ATR"))
         workspace.refresh_visibility()
@@ -90,6 +93,41 @@ def test_stop_distance_method_shows_only_the_active_parameter():
         assert atr.isHidden()
         assert percent.isHidden()
         assert not fixed.isHidden()
+
+        mode.setCurrentIndex(mode.findData("SR_STRUCTURE"))
+        workspace.refresh_visibility()
+        assert atr.isHidden()
+        assert percent.isHidden()
+        assert fixed.isHidden()
+        assert not sr_timeframe.isHidden()
+        assert not sr_buffer.isHidden()
+        assert stop_multiplier.isHidden()
+        assert "structural s/r" in workspace.summary_label.text().lower()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_sr_structural_stop_automatically_owns_support_resistance_dependency():
+    app, window = _window()
+    try:
+        stop_mode = window.execution_form.widgets["risk_mode"]
+        sr_toggle = window.feature_form.widgets["enable_support_resistance_analysis"]
+        panel = window.research_features_panel
+
+        sr_toggle.setChecked(False)
+        stop_mode.setCurrentIndex(stop_mode.findData("SR_STRUCTURE"))
+        app.processEvents()
+
+        assert sr_toggle.isChecked() is True
+        assert sr_toggle.isEnabled() is False
+        assert panel.sr_card.status.text() == "REQUIRED BY STOP POLICY"
+        assert window.build_config().features.enable_support_resistance_analysis is True
+
+        stop_mode.setCurrentIndex(stop_mode.findData("ATR"))
+        app.processEvents()
+        assert sr_toggle.isEnabled() is True
+        assert sr_toggle.isChecked() is False
     finally:
         window.close()
         app.processEvents()
@@ -133,6 +171,11 @@ def test_sr_target_policy_automatically_owns_support_resistance_dependency():
         assert panel.sr_card.status.text() == "REQUIRED BY TARGET POLICY"
         assert not window.execution_form.widgets["sr_take_profit_minimum_r"].isHidden()
         assert window.build_config().features.enable_support_resistance_analysis is True
+
+        target_mode.setCurrentIndex(target_mode.findData("SR_LEVEL"))
+        app.processEvents()
+        assert sr_toggle.isChecked() is True
+        assert not window.execution_form.widgets["sr_take_profit_timeframe_minutes"].isHidden()
 
         target_mode.setCurrentIndex(target_mode.findData("FIXED_R"))
         app.processEvents()
