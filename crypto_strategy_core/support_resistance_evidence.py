@@ -8,10 +8,13 @@ import numpy as np
 import pandas as pd
 
 from .candles import atr as shared_atr
-from .higher_timeframe_sr import HigherTimeframeSRDetector, resample_ohlc_for_sr
+from .higher_timeframe_sr import resample_ohlc_for_sr
+from .research_support_resistance import (
+    ResearchHigherTimeframeSRDetector,
+    ResearchSupportResistanceDetector,
+)
 from .support_resistance import (
     SRContext,
-    SupportResistanceDetector,
     _positive_integral,
 )
 
@@ -116,7 +119,7 @@ def support_resistance_evidence_series(
     rows: list[dict[str, object]] = []
 
     if effective_minutes == strategy_minutes:
-        detector = SupportResistanceDetector(**config)
+        detector = ResearchSupportResistanceDetector(**config)
         for index in range(size):
             long_context = detector.analyze_price_location(
                 index, open_, high, low, close, atr_source, "LONG"
@@ -151,7 +154,7 @@ def support_resistance_evidence_series(
     )
     htf_end = pd.DatetimeIndex(pd.to_datetime(htf["end_time"], utc=True))
     htf_end_ns = htf_end.asi8
-    detector = HigherTimeframeSRDetector(**config)
+    detector = ResearchHigherTimeframeSRDetector(**config)
 
     for index, decision_time in enumerate(decisions):
         htf_index = int(
