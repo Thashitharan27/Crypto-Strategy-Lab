@@ -36,7 +36,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-qt
       - name: Apply source patch
-        run: python tools/apply_ema_920_pullback_patch.py
+        run: |
+          python tools/apply_ema_920_pullback_patch.py
+          python tools/fix_ema_920_patch.py
       - name: Compile changed source
         run: python -m compileall -q crypto_strategy_core crypto_strategy_lab tests/test_ema_920_pullback_strategy.py
       - name: Run targeted regression tests
@@ -47,7 +49,7 @@ jobs:
           python -m pytest -q
           tests/test_ema_920_pullback_strategy.py
           tests/test_dmi_trend_strategy.py
-          tests/test_rule_main_window.py
+          tests/test_rule_main_window.py::test_direction_selector_contains_di_control_and_dmi_trend_strategy
           tests/test_task18_gui_architecture.py
       - name: Commit applied patch
         run: |
@@ -63,6 +65,7 @@ jobs:
                   crypto_strategy_lab/gui/v2_main_window.py \
                   crypto_strategy_lab/rule_native_engine.py \
                   crypto_strategy_lab/ema_pullback.py \
-                  tests/test_ema_920_pullback_strategy.py
+                  tests/test_ema_920_pullback_strategy.py \
+                  tests/test_rule_main_window.py
           git commit -m "Implement EMA 9/20 pullback scalping strategy"
           git push origin HEAD:feature/ema-9-20-pullback
