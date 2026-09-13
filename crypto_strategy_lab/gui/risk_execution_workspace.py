@@ -135,8 +135,20 @@ class RiskExecutionWorkspace(QWidget):
         plan_layout.addWidget(self.summary_label)
         layout.addWidget(self.plan_box)
 
+        self.entry_card = FormCard(
+            "1. Entry Execution",
+            note=(
+                "Choose when a completed strategy signal becomes an executable fill. "
+                "Next Candle Open is the causal default for EMA 9/20 scalping."
+            ),
+        )
+        self.entry_card.add_field(
+            "entry_timing_mode", "Entry Fill Timing", self.account["entry_timing_mode"]
+        )
+        layout.addWidget(self.entry_card)
+
         self.account_card = FormCard(
-            "1. Account Risk & Position Sizing",
+            "2. Account Risk & Position Sizing",
             note="These controls define the account risk budget and how many positions may be open at once.",
         )
         self.account_card.add_field("initial_equity", "Starting Equity", self.account["initial_equity"])
@@ -145,8 +157,8 @@ class RiskExecutionWorkspace(QWidget):
         layout.addWidget(self.account_card)
 
         self.stop_card = FormCard(
-            "2. Stop & Position Sizing",
-            note="Choose one distance method. Only the parameter used by that method is shown.",
+            "3. Stop & Position Sizing",
+            note="The visible controls always reflect the stop logic actually used by the selected strategy.",
         )
         self.stop_card.add_field("risk_mode", "Stop Distance Method", self.account["risk_mode"])
         self.stop_card.add_field("atr_multiplier", "ATR Distance Multiplier", self.account["atr_multiplier"])
@@ -157,11 +169,23 @@ class RiskExecutionWorkspace(QWidget):
         self.stop_card.add_field("sr_stop_maximum_atr", "Maximum Structural Stop", self.account["sr_stop_maximum_atr"])
         self.stop_card.add_field("sr_stop_no_level_policy", "If No Valid S/R Exists", self.account["sr_stop_no_level_policy"])
         self.stop_card.add_field("stop_loss_multiple", "Stop Multiplier", self.trade["stop_loss_multiple"])
+
+        self.ema_stop_method = QLabel("EMA 9/20 Micro-Swing — Automatic")
+        self.ema_stop_method.setStyleSheet("font-weight:600")
+        self.ema_stop_confirmation = QLabel("2 left / 2 right")
+        self.ema_stop_lookback = QLabel("20 bars")
+        self.ema_stop_buffer = QLabel("0.05 × ATR")
+        self.ema_stop_maximum = QLabel("1.50 × ATR")
+        self.stop_card.add_field("ema_920_stop_method", "Stop Method", self.ema_stop_method)
+        self.stop_card.add_field("ema_920_stop_confirmation", "Swing Confirmation", self.ema_stop_confirmation)
+        self.stop_card.add_field("ema_920_stop_lookback", "Swing Lookback", self.ema_stop_lookback)
+        self.stop_card.add_field("ema_920_stop_buffer", "Stop Buffer", self.ema_stop_buffer)
+        self.stop_card.add_field("ema_920_stop_maximum", "Maximum Stop", self.ema_stop_maximum)
         layout.addWidget(self.stop_card)
 
         self.target_card = FormCard(
-            "3. Profit Target",
-            note="Fixed R is the baseline. S/R can either cap the fixed-R target or place the target from the selected market structure.",
+            "4. Profit Target",
+            note="The visible controls always reflect the target logic actually used by the selected strategy.",
         )
         self.target_card.add_field("sr_take_profit_mode", "Target Policy", self.account["sr_take_profit_mode"])
         self.target_card.add_field("reward_risk_ratio", "Base Profit Target", self.trade["reward_risk_ratio"])
@@ -170,6 +194,11 @@ class RiskExecutionWorkspace(QWidget):
         self.target_card.add_field("sr_take_profit_maximum_r", "Maximum S/R Target Cap", self.account["sr_take_profit_maximum_r"])
         self.target_card.add_field("sr_take_profit_buffer_r", "Buffer Before S/R", self.account["sr_take_profit_buffer_r"])
         self.target_card.add_field("sr_take_profit_no_level_policy", "If No Opposing S/R Exists", self.account["sr_take_profit_no_level_policy"])
+        self.ema_target_method = QLabel("EMA 9/20 Fixed 1R — Automatic")
+        self.ema_target_method.setStyleSheet("font-weight:600")
+        self.ema_target_value = QLabel("1.00 R")
+        self.target_card.add_field("ema_920_target_method", "Target Method", self.ema_target_method)
+        self.target_card.add_field("ema_920_target_value", "Profit Target", self.ema_target_value)
         self.sr_dependency_note = QLabel(
             "Structural S/R stop/target policies automatically require causal Support / Resistance calculation; no separate enable step is needed."
         )
@@ -179,7 +208,7 @@ class RiskExecutionWorkspace(QWidget):
         layout.addWidget(self.target_card)
 
         self.management_card = FormCard(
-            "4. Trade Management",
+            "5. Trade Management",
             note="Optional management stays compact while disabled. Enabling a feature reveals only its relevant settings.",
         )
         self.management_card.add_control("break_even_enabled", self.trade["break_even_enabled"])
@@ -242,6 +271,10 @@ class RiskExecutionWorkspace(QWidget):
 
         self.account["risk_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["sr_take_profit_mode"].currentIndexChanged.connect(self.refresh_visibility)
+        self.account["entry_timing_mode"].currentIndexChanged.connect(self.refresh_summary_from_widgets)
+        builder = getattr(self.window, "rule_builder", None)
+        if builder is not None:
+            builder.direction_mode.currentIndexChanged.connect(self.refresh_visibility)
         for name in (
             "break_even_enabled", "trailing_enabled", "partial_profit_enabled",
             "partial_stop_enabled", "timeout_enabled", "r_step_trailing_enabled",
@@ -276,31 +309,72 @@ class RiskExecutionWorkspace(QWidget):
         if hasattr(self.account["atr_multiplier"], "setSuffix"):
             self.account["atr_multiplier"].setSuffix(" × ATR")
 
+    def _signal_strategy_mode(self) -> str:
+        builder = getattr(self.window, "rule_builder", None)
+        if builder is None:
+            return "DI"
+        return str(builder.direction_mode.currentData() or "DI").upper()
+
+    def _ema_920_selected(self) -> bool:
+        return self._signal_strategy_mode() == "EMA_9_20_PULLBACK"
+
     def refresh_visibility(self, *_args) -> None:
+        ema_920 = self._ema_920_selected()
         mode = str(self.account["risk_mode"].currentData() or "ATR")
         structural_stop = mode == "SR_STRUCTURE"
-        self.stop_card.set_row_visible("atr_multiplier", mode == "ATR")
-        self.stop_card.set_row_visible("percent_r", mode == "PERCENT")
-        self.stop_card.set_row_visible("fixed_r", mode == "FIXED")
-        for name in (
-            "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
-            "sr_stop_maximum_atr", "sr_stop_no_level_policy",
-        ):
-            self.stop_card.set_row_visible(name, structural_stop)
-        # Structural mode owns the full initial stop distance. The legacy stop
-        # multiplier remains preserved in the profile but is not a user-facing
-        # input for the final structural stop.
-        self.stop_card.set_row_visible("stop_loss_multiple", not structural_stop)
+
+        ema_stop_fields = (
+            "ema_920_stop_method", "ema_920_stop_confirmation",
+            "ema_920_stop_lookback", "ema_920_stop_buffer", "ema_920_stop_maximum",
+        )
+        for name in ema_stop_fields:
+            self.stop_card.set_row_visible(name, ema_920)
+        if ema_920:
+            for name in (
+                "risk_mode", "atr_multiplier", "percent_r", "fixed_r",
+                "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
+                "sr_stop_maximum_atr", "sr_stop_no_level_policy", "stop_loss_multiple",
+            ):
+                self.stop_card.set_row_visible(name, False)
+        else:
+            self.stop_card.set_row_visible("risk_mode", True)
+            self.stop_card.set_row_visible("atr_multiplier", mode == "ATR")
+            self.stop_card.set_row_visible("percent_r", mode == "PERCENT")
+            self.stop_card.set_row_visible("fixed_r", mode == "FIXED")
+            for name in (
+                "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
+                "sr_stop_maximum_atr", "sr_stop_no_level_policy",
+            ):
+                self.stop_card.set_row_visible(name, structural_stop)
+            # Structural mode owns the full initial stop distance. The legacy stop
+            # multiplier remains preserved in the profile but is not a user-facing
+            # input for the final structural stop.
+            self.stop_card.set_row_visible("stop_loss_multiple", not structural_stop)
 
         target_mode = str(self.account["sr_take_profit_mode"].currentData() or "FIXED_R")
         sr_target = target_mode in ("SR_CAPPED_R", "SR_LEVEL")
-        for name in (
-            "sr_take_profit_timeframe_minutes", "sr_take_profit_minimum_r",
-            "sr_take_profit_maximum_r", "sr_take_profit_buffer_r",
-            "sr_take_profit_no_level_policy",
-        ):
-            self.target_card.set_row_visible(name, sr_target)
-        self.sr_dependency_note.setVisible(structural_stop or sr_target)
+        for name in ("ema_920_target_method", "ema_920_target_value"):
+            self.target_card.set_row_visible(name, ema_920)
+        if ema_920:
+            self.target_card.set_row_visible("sr_take_profit_mode", False)
+            self.target_card.set_row_visible("reward_risk_ratio", False)
+            for name in (
+                "sr_take_profit_timeframe_minutes", "sr_take_profit_minimum_r",
+                "sr_take_profit_maximum_r", "sr_take_profit_buffer_r",
+                "sr_take_profit_no_level_policy",
+            ):
+                self.target_card.set_row_visible(name, False)
+            self.sr_dependency_note.setVisible(False)
+        else:
+            self.target_card.set_row_visible("sr_take_profit_mode", True)
+            self.target_card.set_row_visible("reward_risk_ratio", True)
+            for name in (
+                "sr_take_profit_timeframe_minutes", "sr_take_profit_minimum_r",
+                "sr_take_profit_maximum_r", "sr_take_profit_buffer_r",
+                "sr_take_profit_no_level_policy",
+            ):
+                self.target_card.set_row_visible(name, sr_target)
+            self.sr_dependency_note.setVisible(structural_stop or sr_target)
 
         toggles = {
             "break_even_enabled": ("break_even_activation_r", "break_even_offset_r"),
@@ -381,40 +455,62 @@ class RiskExecutionWorkspace(QWidget):
         effective_risk = float(execution.risk_per_leg) * float(base.risk_multiplier)
         risk_dollars = float(execution.initial_equity) * effective_risk
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
-        target_mode = str(execution.sr_take_profit_mode).upper()
-        if target_mode == "SR_CAPPED_R":
-            timeframe = self._timeframe_description(
-                execution.sr_take_profit_timeframe_minutes, primary=True
-            )
-            target = (
-                f"S/R-constrained target from {timeframe} (base {base.reward_risk_ratio:g}R, "
-                f"minimum {execution.sr_take_profit_minimum_r:g}R, "
-                f"cap {execution.sr_take_profit_maximum_r:g}R)"
-            )
-        elif target_mode == "SR_LEVEL":
-            timeframe = self._timeframe_description(
-                execution.sr_take_profit_timeframe_minutes, primary=True
-            )
-            target = (
-                f"structural S/R target from {timeframe} "
-                f"(minimum {execution.sr_take_profit_minimum_r:g}R, "
-                f"safety cap {execution.sr_take_profit_maximum_r:g}R)"
-            )
+        ema_920 = self._ema_920_selected()
+
+        timing = str(getattr(execution, "entry_timing_mode", "SIGNAL_CLOSE")).upper()
+        entry_fill = (
+            "Next Candle Open — Causal"
+            if timing == "NEXT_CANDLE_OPEN"
+            else "Signal Candle Close — Legacy"
+        )
+
+        if ema_920:
+            target = "automatic fixed 1.00R target"
         else:
-            target = f"fixed {base.reward_risk_ratio:g}R target"
+            target_mode = str(execution.sr_take_profit_mode).upper()
+            if target_mode == "SR_CAPPED_R":
+                timeframe = self._timeframe_description(
+                    execution.sr_take_profit_timeframe_minutes, primary=True
+                )
+                target = (
+                    f"S/R-constrained target from {timeframe} (base {base.reward_risk_ratio:g}R, "
+                    f"minimum {execution.sr_take_profit_minimum_r:g}R, "
+                    f"cap {execution.sr_take_profit_maximum_r:g}R)"
+                )
+            elif target_mode == "SR_LEVEL":
+                timeframe = self._timeframe_description(
+                    execution.sr_take_profit_timeframe_minutes, primary=True
+                )
+                target = (
+                    f"structural S/R target from {timeframe} "
+                    f"(minimum {execution.sr_take_profit_minimum_r:g}R, "
+                    f"safety cap {execution.sr_take_profit_maximum_r:g}R)"
+                )
+            else:
+                target = f"fixed {base.reward_risk_ratio:g}R target"
+
         multiplier = (
             f" · risk multiplier {base.risk_multiplier:g}×"
             if abs(float(base.risk_multiplier) - 1.0) > 1e-12
             else ""
         )
-        stop_description = (
-            f"Stop distance uses {self._distance_description(execution)}. "
-            if str(execution.risk_mode).upper() == "SR_STRUCTURE"
-            else f"Stop distance uses {self._distance_description(execution)} with a {stop_mult:g}× stop multiplier. "
-        )
+        if ema_920:
+            stop_description = (
+                "Stop: EMA 9/20 confirmed micro-swing (2-left / 2-right, "
+                "20-bar lookback, 0.05× ATR buffer, maximum 1.50× ATR). "
+            )
+        elif str(execution.risk_mode).upper() == "SR_STRUCTURE":
+            stop_description = f"Stop distance uses {self._distance_description(execution)}. "
+        else:
+            stop_description = (
+                f"Stop distance uses {self._distance_description(execution)} "
+                f"with a {stop_mult:g}× stop multiplier. "
+            )
+
         self.summary_label.setText(
             f"${execution.initial_equity:,.2f} equity · base risk {execution.risk_per_leg * 100:.2f}%"
             f"{multiplier} → effective risk budget {effective_risk * 100:.2f}% (${risk_dollars:,.2f}). "
+            f"Entry fill: {entry_fill}. "
             f"{stop_description}"
             f"Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
             f"Management: {self._management_description(base)}."
