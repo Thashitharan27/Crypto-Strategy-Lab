@@ -1,0 +1,79 @@
+name: Apply next-candle-open entry timing
+
+on:
+  push:
+    branches: [ feature/next-candle-open-entry ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: next-candle-open-entry-patch
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/next-candle-open-entry
+          fetch-depth: 0
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install Qt runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-qt
+      - name: Apply source patch
+        run: python tools/apply_next_candle_open_patch.py
+      - name: Compile changed source
+        run: >-
+          python -m compileall -q
+          crypto_strategy_lab
+          tests/test_next_candle_open_entry.py
+      - name: Run targeted regression tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONPATH: ${{ github.workspace }}
+        run: >-
+          python -m pytest -q
+          tests/test_next_candle_open_entry.py
+          tests/test_ema_920_pullback_strategy.py
+          tests/test_sr_dynamic_tp.py
+          tests/test_dmi_trend_strategy.py
+          tests/test_gui_config_logic.py
+          tests/test_task11_research_config.py
+          tests/test_task18_gui_architecture.py
+          tests/test_rule_main_window.py::test_direction_selector_contains_di_control_and_dmi_trend_strategy
+      - name: Commit applied patch
+        run: |
+          if git diff --quiet --exit-code; then
+            echo "No patch changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crypto_strategy_lab/config.py \
+                  crypto_strategy_lab/gui/config_logic.py \
+                  crypto_strategy_lab/data_lake_config.py \
+                  crypto_strategy_lab/gui/v2_main_window.py \
+                  crypto_strategy_lab/gui/ux_presentation.py \
+                  crypto_strategy_lab/gui/rule_main_window.py \
+                  crypto_strategy_lab/engine.py \
+                  crypto_strategy_lab/data_lake_production_engine.py \
+                  crypto_strategy_lab/sr_dynamic_tp_engine.py \
+                  crypto_strategy_lab/ema_pullback.py \
+                  tests/test_next_candle_open_entry.py
+          git commit -m "Add causal next-candle-open entry timing"
+          git push origin HEAD:feature/next-candle-open-entry
