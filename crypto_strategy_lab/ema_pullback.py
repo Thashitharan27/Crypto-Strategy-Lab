@@ -223,6 +223,18 @@ class Ema920PullbackMixin:
         entry = float(self._expected_entry_price(i, execution_i, direction))
         buffer_price = atr * self.ema_920_stop_buffer_atr
         stop_price = level - buffer_price if direction == "LONG" else level + buffer_price
+        if execution_i is not None and execution_i > i:
+            raw_open = float(self.open[execution_i])
+            gap_through = raw_open <= stop_price if direction == "LONG" else raw_open >= stop_price
+            if gap_through:
+                return {
+                    "passed": False, "applied": False,
+                    "reason": "ENTRY_INVALIDATED_GAP_THROUGH_STOP",
+                    "distance": None, "level_price": level, "boundary_price": level,
+                    "stop_price": stop_price,
+                    "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
+                    "micro_swing_index": swing_i, "micro_swing": True,
+                }
         distance = entry - stop_price if direction == "LONG" else stop_price - entry
         if not np.isfinite(distance) or distance <= 0:
             return {"passed": False, "applied": False, "reason": "EMA920_SWING_ON_WRONG_SIDE", "distance": None}
@@ -258,6 +270,16 @@ class Ema920PullbackMixin:
             pos.micro_swing_level_price = plan.get("level_price", np.nan)
             pos.micro_swing_stop_price = plan.get("stop_price", np.nan)
             pos.micro_swing_stop_distance_atr = plan.get("distance_atr", np.nan)
+
+    def _build_result_row(self, p, row_kind, positions):
+        row = super()._build_result_row(p, row_kind, positions)
+        pos = positions[0] if positions else None
+        row["micro_swing_stop_applied"] = bool(getattr(pos, "micro_swing_stop_applied", False)) if pos is not None else False
+        row["micro_swing_index"] = getattr(pos, "micro_swing_index", None) if pos is not None else None
+        row["micro_swing_level_price"] = getattr(pos, "micro_swing_level_price", np.nan) if pos is not None else np.nan
+        row["micro_swing_stop_price"] = getattr(pos, "micro_swing_stop_price", np.nan) if pos is not None else np.nan
+        row["micro_swing_stop_distance_atr"] = getattr(pos, "micro_swing_stop_distance_atr", np.nan) if pos is not None else np.nan
+        return row
 
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):
         before = len(self.active_pairs)

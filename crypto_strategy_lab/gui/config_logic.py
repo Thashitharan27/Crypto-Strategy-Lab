@@ -10,6 +10,7 @@ from crypto_strategy_lab.config import (
     BacktestConfig,
     DailyEntryMissedPolicy,
     EntryMode,
+    EntryTimingMode,
     IntrabarMissingPolicy,
     RiskMode,
     TiePolicy,
@@ -28,6 +29,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "output_dir": "output",
     "run_name": "",
     "entry_mode": "WAIT_UNTIL_CLOSED",
+    "entry_timing_mode": "SIGNAL_CLOSE",
     "entry_interval": 1,
     "max_active_pairs": 1,
     "tie_policy": "PESSIMISTIC",
@@ -183,6 +185,8 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         pass
     if values["entry_mode"] not in (EntryMode.WAIT_UNTIL_CLOSED.value, EntryMode.EVERY_N_CANDLES.value):
         errors.append("Invalid entry mode.")
+    if values["entry_timing_mode"] not in (EntryTimingMode.SIGNAL_CLOSE.value, EntryTimingMode.NEXT_CANDLE_OPEN.value):
+        errors.append("Invalid entry timing mode.")
     if values["risk_mode"] not in [e.value for e in RiskMode]:
         errors.append("Invalid risk mode.")
     if values["tie_policy"] not in (TiePolicy.PESSIMISTIC.value, TiePolicy.OPTIMISTIC.value):
@@ -236,6 +240,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         strategy_profile_run_mode=str(merged["strategy_profile_run_mode"]),
         strategy_profiles=merged["strategy_profiles"],
         entry_mode=EntryMode(merged["entry_mode"]),
+        entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]),
         entry_interval=int(merged["entry_interval"]),
         enable_di_direction_selection=bool(merged["enable_di_direction_selection"]),
         enable_di_pressure_analysis=bool(merged["enable_di_pressure_analysis"]),

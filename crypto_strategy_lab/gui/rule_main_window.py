@@ -80,6 +80,20 @@ class MainWindow(LegacyMainWindow):
         self.rule_builder.changed.connect(self._refresh_summary_from_widgets)
         self.base_execution_form.changed.connect(self._refresh_summary_from_widgets)
         self.apply_config(self.config)
+        self.rule_builder.direction_mode.activated.connect(
+            self._apply_signal_strategy_entry_timing_default
+        )
+
+    def _apply_signal_strategy_entry_timing_default(self, *_args) -> None:
+        """Apply a researcher-facing default only on an explicit strategy selection."""
+        timing = self.execution_form.widgets.get("entry_timing_mode")
+        if timing is None or not hasattr(timing, "findData"):
+            return
+        strategy = self.rule_builder.direction_mode.currentData()
+        target = "NEXT_CANDLE_OPEN" if strategy == "EMA_9_20_PULLBACK" else "SIGNAL_CLOSE"
+        index = timing.findData(target)
+        if index >= 0:
+            timing.setCurrentIndex(index)
 
     def _capture_run_snapshot(self):
         """Freeze the exact visible request + config for one Run click."""

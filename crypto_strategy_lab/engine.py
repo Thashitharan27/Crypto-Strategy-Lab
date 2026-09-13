@@ -46,7 +46,7 @@ class BacktestEngine:
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array()
         self._configure_signal_features()
         self.signal_strategy_mode=self._infer_signal_strategy_mode()
-        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_next_open_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
         self.mean_reversion_mean=ema(self.close,config.mean_reversion_period)
@@ -286,15 +286,21 @@ class BacktestEngine:
         for i in range(total):
             self.current_index=i
             active_at_candle_start = bool(self.active_pairs)
+            # A queued next-open order becomes live at this candle's open, before
+            # any intrabar/high-low processing for the execution candle.
+            self._execute_pending_next_open_entry(i, active_at_candle_start)
             self._update_positions_to_strategy_index(i); self._record_active_telemetry(i); self._collect_closed_pairs()
             decision = self._entry_decision(i, active_at_candle_start)
             if decision:
                 self.signals_evaluated += 1
-                passed, reason = self._entry_filter_result(decision["indicator_index"], decision["execution_index"])
-                if passed: self._open_pair(decision["execution_index"], passed, reason, decision)
+                if decision.get("defer_to_next_open"):
+                    self.pending_next_open_entry = decision
                 else:
-                    self._record_skipped_signal(decision["indicator_index"], reason)
-                    if self.config.enable_daily_entry_schedule: self._record_skipped_daily_entry(decision["scheduled_timestamp"], "FILTER_REJECTED", reason)
+                    passed, reason = self._entry_filter_result(decision["indicator_index"], decision["execution_index"])
+                    if passed: self._open_pair(decision["execution_index"], passed, reason, decision)
+                    else:
+                        self._record_skipped_signal(decision["indicator_index"], reason)
+                        if self.config.enable_daily_entry_schedule: self._record_skipped_daily_entry(decision["scheduled_timestamp"], "FILTER_REJECTED", reason)
             processed=i+1
             if processed == total or processed % self.progress_interval == 0:
                 self._emit_progress(processed,total)
@@ -419,10 +425,49 @@ class BacktestEngine:
     def _base_entry_allowed(self, i):
         return i > 0 and np.isfinite(self.risk[i-1]) and self.risk[i-1] > 0 and len(self.active_pairs) < self.config.max_active_pairs and self._in_trading_window(i)
 
+    def _entry_timing_mode(self):
+        raw = getattr(self.config, "entry_timing_mode", "SIGNAL_CLOSE")
+        return str(getattr(raw, "value", raw)).upper()
+
     def _entry_decision(self, i, active_at_candle_start=False):
         if self.config.enable_daily_entry_schedule:
             return self._daily_entry_decision(i, active_at_candle_start)
-        return {"execution_index": i, "indicator_index": i, "scheduled_timestamp": None, "actual_entry_timestamp": self._entry_time(i), "entry_schedule_status": None} if self._should_enter(i) else None
+        if self._entry_timing_mode() == "NEXT_CANDLE_OPEN":
+            if i + 1 >= len(self.times) or not self._should_enter(i):
+                return None
+            return {
+                "execution_index": i + 1,
+                "indicator_index": i,
+                "scheduled_timestamp": pd.Timestamp(self.times[i + 1]),
+                "actual_entry_timestamp": None,
+                "entry_schedule_status": "NEXT_CANDLE_OPEN",
+                "fill_price_source": "NEXT_CANDLE_OPEN",
+                "defer_to_next_open": True,
+            }
+        return {
+            "execution_index": i,
+            "indicator_index": i,
+            "scheduled_timestamp": None,
+            "actual_entry_timestamp": self._entry_time(i),
+            "entry_schedule_status": None,
+            "fill_price_source": "SIGNAL_CLOSE",
+        } if self._should_enter(i) else None
+
+    def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
+        decision = self.pending_next_open_entry
+        if not decision or int(decision.get("execution_index", -1)) != i:
+            return
+        self.pending_next_open_entry = None
+        indicator_i = int(decision["indicator_index"])
+        decision["actual_entry_timestamp"] = pd.Timestamp(self.times[i])
+        if active_at_candle_start or len(self.active_pairs) >= self.config.max_active_pairs:
+            self._record_skipped_signal(indicator_i, "NEXT_OPEN_ACTIVE_TRADE")
+            return
+        passed, reason = self._entry_filter_result(indicator_i, i)
+        if passed:
+            self._open_pair(i, passed, reason, decision)
+        else:
+            self._record_skipped_signal(indicator_i, reason)
     def _should_enter(self,i):
         # Sparse signal strategies should not manufacture one rejected candidate
         # on every ordinary candle. DI/DMI retain their historical cadence.
@@ -716,7 +761,13 @@ class BacktestEngine:
 
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):
         ind_i = schedule["indicator_index"] if schedule else i
-        raw = self.open[i] if self.config.enable_daily_entry_schedule else self.close[i]
+        fill_source = str((schedule or {}).get("fill_price_source", "")).upper()
+        open_fill = self.config.enable_daily_entry_schedule or fill_source == "NEXT_CANDLE_OPEN"
+        raw = self.open[i] if open_fill else self.close[i]
+        entry_timestamp = (schedule or {}).get("actual_entry_timestamp")
+        if entry_timestamp is None:
+            entry_timestamp = pd.Timestamp(self.times[i]) if open_fill else self._execution_time(i)
+        entry_timestamp = pd.Timestamp(entry_timestamp)
         profile_context = self._profile_context(ind_i)
         if profile_context is None:
             raise ValueError("Cannot open a trade without a current Strategy Profile context")
@@ -758,7 +809,7 @@ class BacktestEngine:
         entry_fee_rate = self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
         entry_fee = entry * qty * entry_fee_rate
         pos = Position(
-            side, self._execution_time(i), i, entry, stop, sl, tp, qty, risk_amt, entry * qty,
+            side, entry_timestamp, i, entry, stop, sl, tp, qty, risk_amt, entry * qty,
             float(self.atr_values[ind_i]), uncapped, qty * entry / self.current_equity,
             distance_unit=r, entry_fee=entry_fee, fees=entry_fee, original_sl=sl,
             be_enabled=active_profile.break_even_enabled,
@@ -884,12 +935,34 @@ class BacktestEngine:
                     pos.sr_zone_low = sr_context.resistance_zone_low
                     pos.sr_zone_high = sr_context.resistance_zone_high
         
+        pair_candle_time = (
+            pd.Timestamp(self.times[ind_i])
+            if fill_source == "NEXT_CANDLE_OPEN"
+            else pd.Timestamp(self.times[i])
+        )
         pair = TradePair(
-            self.next_pair_id, long, short, self.current_equity, pd.Timestamp(self.times[i]),
-            self._execution_time(i), raw, capped
+            self.next_pair_id, long, short, self.current_equity, pair_candle_time,
+            entry_timestamp, raw, capped
         )
         pair.trade_direction = direction
         pair.signal_strategy_mode = getattr(self,"signal_strategy_mode","DI")
+        pair.entry_timing_mode = (
+            "NEXT_CANDLE_OPEN" if fill_source == "NEXT_CANDLE_OPEN"
+            else "SCHEDULED_CANDLE_OPEN" if self.config.enable_daily_entry_schedule
+            else "SIGNAL_CLOSE"
+        )
+        pair.signal_candle_time = pd.Timestamp(self.times[ind_i])
+        pair.signal_available_at = pd.Timestamp(self.times[ind_i]) + self.entry_delta
+        pair.signal_close_price = float(self.close[ind_i])
+        pair.next_bar_open_price = float(self.open[i]) if fill_source == "NEXT_CANDLE_OPEN" else np.nan
+        if fill_source == "NEXT_CANDLE_OPEN" and pair.signal_close_price:
+            gap = float(self.open[i]) - pair.signal_close_price
+            pair.entry_gap_pct = gap / pair.signal_close_price
+            atr_for_gap = float(self.atr_values[ind_i])
+            pair.entry_gap_atr = gap / atr_for_gap if np.isfinite(atr_for_gap) and atr_for_gap > 0 else np.nan
+        else:
+            pair.entry_gap_pct = 0.0
+            pair.entry_gap_atr = 0.0
         pair.ema_50 = float(self.ema_50_values[ind_i]) if np.isfinite(self.ema_50_values[ind_i]) else np.nan
         pair.ema_100 = float(self.ema_100_values[ind_i]) if np.isfinite(self.ema_100_values[ind_i]) else np.nan
         pair.ema_200 = float(self.ema_200_values[ind_i]) if np.isfinite(self.ema_200_values[ind_i]) else np.nan
@@ -1594,6 +1667,13 @@ class BacktestEngine:
             "side": primary.side.value,
             "trade_direction": getattr(p, "trade_direction", primary.side.value),
             "signal_strategy": getattr(p, "signal_strategy_mode", "DI"),
+            "entry_timing_mode": getattr(p, "entry_timing_mode", "SIGNAL_CLOSE"),
+            "signal_candle_time": getattr(p, "signal_candle_time", p.strategy_candle_open_time),
+            "signal_available_at": getattr(p, "signal_available_at", p.strategy_entry_time),
+            "signal_close_price": getattr(p, "signal_close_price", np.nan),
+            "next_bar_open_price": getattr(p, "next_bar_open_price", np.nan),
+            "entry_gap_pct": getattr(p, "entry_gap_pct", 0.0),
+            "entry_gap_atr": getattr(p, "entry_gap_atr", 0.0),
             "ema_50": getattr(p, "ema_50", np.nan),
             "ema_100": getattr(p, "ema_100", np.nan),
             "ema_200": getattr(p, "ema_200", np.nan),
@@ -1637,6 +1717,7 @@ class BacktestEngine:
             "strategy_entry_price": p.strategy_entry_price,
             "entry_time": p.strategy_entry_time,
             "entry_price": primary.entry_price,
+            "actual_entry_price": primary.entry_price,
             "strategy_timeframe_minutes": self.config.strategy_timeframe_minutes,
             "intrabar_timeframe_minutes": self.config.intrabar_timeframe_minutes,
             "atr_period": self.config.atr_period,

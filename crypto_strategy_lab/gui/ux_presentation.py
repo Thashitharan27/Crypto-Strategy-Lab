@@ -41,6 +41,10 @@ FIELDS = {
     "risk_multiplier": FieldPresentation("Risk Multiplier", unit="x", decimals=2),
     "timeout_minutes": FieldPresentation("Maximum Holding Time", unit=" min", decimals=0),
     "strategy_profile_run_mode": FieldPresentation("Profile Test Mode"),
+    "entry_timing_mode": FieldPresentation(
+        "Entry Fill Timing",
+        "Signal Close preserves historical fills. Next Candle Open queues a completed signal and fills at the next strategy candle open before that candle is processed.",
+    ),
     "sr_timeframe_minutes": FieldPresentation(
         "Primary S/R Timeframe",
         "Backward-compatible primary S/R context. Individual S/R rules can independently choose Strategy TF, 1h, 4h or 1d.",
@@ -49,6 +53,10 @@ FIELDS = {
 }
 
 ENUM_LABELS = {
+    "entry_timing_mode": {
+        "SIGNAL_CLOSE": "Signal Candle Close — Legacy",
+        "NEXT_CANDLE_OPEN": "Next Candle Open — Causal",
+    },
     "sr_timeframe_minutes": {0: "Same as strategy", 60: "1h", 240: "4h", 1440: "1d"},
     "sr_stop_timeframe_minutes": {0: "Strategy Timeframe", 60: "1h", 240: "4h", 1440: "1d"},
     "sr_take_profit_timeframe_minutes": {-1: "Primary S/R Context", 0: "Strategy Timeframe", 60: "1h", 240: "4h", 1440: "1d"},

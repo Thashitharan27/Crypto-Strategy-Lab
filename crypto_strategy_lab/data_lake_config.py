@@ -286,6 +286,7 @@ class StrategyConfig:
 @dataclass(frozen=True)
 class ExecutionConfig:
     profiles: Mapping[str, ExecutionProfileConfig] = field(default_factory=_execution_profiles)
+    entry_timing_mode: str = "SIGNAL_CLOSE"
     initial_equity: float = 1000.0
     risk_mode: str = "ATR"
     fixed_r: float = 100.0
@@ -445,6 +446,8 @@ class ResearchRunConfig:
                         f"{key}: S/R rule timeframe must be the strategy timeframe "
                         "or a compatible higher timeframe"
                     )
+        if execution.entry_timing_mode not in {"SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"}:
+            raise ValueError("invalid entry timing mode")
         if execution.initial_equity <= 0 or execution.fixed_r <= 0 or execution.percent_r <= 0:
             raise ValueError("execution equity/risk settings must be positive")
         if not 0 < execution.risk_per_leg < 1:
