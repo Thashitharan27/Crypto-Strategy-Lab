@@ -62,6 +62,13 @@ EVIDENCE_LABELS = {
     "ADX": "ADX",
     "ADX_CHANGE": "ADX Change (1 bar)",
     "ATR_PCT": "ATR % (decimal)",
+    "EMA_9_DISTANCE_ATR": "Price − EMA 9 (ATR)",
+    "EMA_20_DISTANCE_ATR": "Price − EMA 20 (ATR)",
+    "EMA_9_20_SPREAD_ATR": "EMA 9 − EMA 20 (ATR)",
+    "EMA_9_SLOPE_ATR": "EMA 9 Slope (ATR / bar)",
+    "EMA_20_SLOPE_ATR": "EMA 20 Slope (ATR / bar)",
+    "VOLUME_RATIO_20": "Volume / Prior 20-Bar Average",
+    "VOLUME_CHANGE_PCT": "Volume Change (1 bar, decimal)",
     "EMA_50_DISTANCE_ATR": "Price − EMA 50 (ATR)",
     "EMA_100_DISTANCE_ATR": "Price − EMA 100 (ATR)",
     "EMA_200_DISTANCE_ATR": "Price − EMA 200 (ATR)",
@@ -153,6 +160,9 @@ EVIDENCE_GROUPS = (
         "Trend & Volatility",
         (
             "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
+            "EMA_9_DISTANCE_ATR", "EMA_20_DISTANCE_ATR", "EMA_9_20_SPREAD_ATR",
+            "EMA_9_SLOPE_ATR", "EMA_20_SLOPE_ATR",
+            "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
             "EMA_STACK_STATE",
         ),
@@ -280,6 +290,9 @@ EVIDENCE_MENU_TREE = (
         "Trend & Volatility",
         (
             "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
+            "EMA_9_DISTANCE_ATR", "EMA_20_DISTANCE_ATR", "EMA_9_20_SPREAD_ATR",
+            "EMA_9_SLOPE_ATR", "EMA_20_SLOPE_ATR",
+            "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
             "EMA_STACK_STATE",
         ),
@@ -413,6 +426,7 @@ DIRECTION_LABELS = {
     "DI": "DI Direction",
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
+    "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
 }
 SR_TIMEFRAME_OPTIONS = (
     (None, "Configured S/R (legacy)"),

@@ -66,13 +66,15 @@ def test_direction_selector_contains_di_control_and_dmi_trend_strategy():
     _app, window = _window()
     try:
         selector = window.rule_builder.direction_mode
-        assert selector.count() == 3
+        assert selector.count() == 4
         assert selector.currentData() == "DI"
         assert selector.currentText() == "DI Direction"
         assert selector.findData("DMI_TREND") >= 0
         assert selector.itemText(selector.findData("DMI_TREND")) == "DMI Trend — Baseline"
         assert selector.findData("MACD_PULLBACK") >= 0
         assert selector.itemText(selector.findData("MACD_PULLBACK")) == "MACD Pullback — 12/26/9"
+        assert selector.findData("EMA_9_20_PULLBACK") >= 0
+        assert selector.itemText(selector.findData("EMA_9_20_PULLBACK")) == "EMA 9/20 Pullback — Scalping"
         assert selector.findData("LONG_ONLY") == -1
         assert selector.findData("SHORT_ONLY") == -1
     finally:

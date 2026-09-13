@@ -33,7 +33,7 @@ from .ux_presentation import (
 )
 
 
-STRATEGY_TIMEFRAMES = ("15m", "1h", "4h", "1d")
+STRATEGY_TIMEFRAMES = ("1m", "5m", "15m", "1h", "4h", "1d")
 INTRABAR_TIMEFRAMES = ("1m", "5m", "15m")
 TIMEFRAME_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
 TIMEFRAME_LABELS = {

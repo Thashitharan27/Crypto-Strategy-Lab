@@ -14,6 +14,7 @@ from crypto_strategy_core.candles import directional_di_ratio
 from crypto_strategy_lab.data_lake_production_engine import (
     DataLakeProductionBacktestEngine,
 )
+from crypto_strategy_lab.ema_pullback import Ema920PullbackMixin
 from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_VALUE_CODES
 
 
@@ -152,7 +153,7 @@ _MR_RULE_INDICATORS = frozenset(
 )
 
 
-class RuleAwareDataLakeProductionBacktestEngine(DataLakeProductionBacktestEngine):
+class RuleAwareDataLakeProductionBacktestEngine(Ema920PullbackMixin, DataLakeProductionBacktestEngine):
     """Current native runtime with prepared research evidence available to rules."""
 
     @classmethod
