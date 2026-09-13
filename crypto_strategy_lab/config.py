@@ -14,6 +14,8 @@ class RiskMode(str, Enum):
     FIXED = "FIXED"; PERCENT = "PERCENT"; ATR = "ATR"; SR_STRUCTURE = "SR_STRUCTURE"
 class EntryMode(str, Enum):
     WAIT_UNTIL_CLOSED = "WAIT_UNTIL_CLOSED"; EVERY_N_CANDLES = "EVERY_N_CANDLES"
+class EntryTimingMode(str, Enum):
+    SIGNAL_CLOSE = "SIGNAL_CLOSE"; NEXT_CANDLE_OPEN = "NEXT_CANDLE_OPEN"
 class TiePolicy(str, Enum):
     PESSIMISTIC = "PESSIMISTIC"; OPTIMISTIC = "OPTIMISTIC"; INTRABAR = "INTRABAR"
 class IntrabarMissingPolicy(str, Enum):
@@ -60,6 +62,7 @@ class BacktestConfig:
     bb_stddevs: float = 2.0
 
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
+    entry_timing_mode: EntryTimingMode = EntryTimingMode.SIGNAL_CLOSE
     entry_interval: int = 1
     enable_di_direction_selection: bool = True
     enable_di_pressure_analysis: bool = True
@@ -175,6 +178,8 @@ class BacktestConfig:
             object.__setattr__(self, "risk_mode", RiskMode(self.risk_mode))
         if isinstance(self.entry_mode, str):
             object.__setattr__(self, "entry_mode", EntryMode(self.entry_mode))
+        if isinstance(self.entry_timing_mode, str):
+            object.__setattr__(self, "entry_timing_mode", EntryTimingMode(self.entry_timing_mode))
         if isinstance(self.tie_policy, str):
             object.__setattr__(self, "tie_policy", TiePolicy(self.tie_policy))
         if isinstance(self.daily_entry_missed_policy, str):

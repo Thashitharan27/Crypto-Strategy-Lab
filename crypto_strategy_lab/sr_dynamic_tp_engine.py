@@ -49,7 +49,9 @@ class SRDynamicTPBacktestEngine(EnhancedBacktestEngine):
         return "resistance_zone_high", "nearest_resistance_price"
 
     def _expected_entry_price(self, indicator_i: int, execution_i: int | None, direction: str) -> float:
-        if self.config.enable_daily_entry_schedule and execution_i is not None:
+        if execution_i is not None and execution_i > indicator_i:
+            raw = float(self.open[execution_i])
+        elif self.config.enable_daily_entry_schedule and execution_i is not None:
             raw = float(self.open[execution_i])
         else:
             raw = float(self.close[indicator_i])
