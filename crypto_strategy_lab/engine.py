@@ -39,6 +39,21 @@ def _ema_stack_state_code(ema_50: float, ema_100: float, ema_200: float) -> floa
     return 3.0  # MIXED
 
 
+def _price_vs_ema_stack_code(price: float, ema_50: float, ema_100: float, ema_200: float) -> float:
+    """Classify signal-close location against all three EMAs, whatever their order."""
+    values = (float(price), float(ema_50), float(ema_100), float(ema_200))
+    if not all(np.isfinite(value) for value in values):
+        return np.nan
+    lowest, highest = min(values[1:]), max(values[1:])
+    if price > highest:
+        return 1.0  # ABOVE_ALL_EMAS
+    if price < lowest:
+        return 3.0  # BELOW_ALL_EMAS
+    if lowest < price < highest:
+        return 2.0  # AMONG_EMAS
+    return np.nan  # Exactly on an outer boundary is none of the three states.
+
+
 class BacktestEngine:
     def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
@@ -582,6 +597,13 @@ class BacktestEngine:
         if indicator=="ATR_PCT": return float(self.atr_pct_values[i])
         if indicator=="EMA_STACK_STATE":
             return _ema_stack_state_code(
+                self.ema_50_values[i],
+                self.ema_100_values[i],
+                self.ema_200_values[i],
+            )
+        if indicator=="PRICE_VS_EMA_STACK":
+            return _price_vs_ema_stack_code(
+                self.close[i],
                 self.ema_50_values[i],
                 self.ema_100_values[i],
                 self.ema_200_values[i],
