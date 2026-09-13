@@ -24,7 +24,7 @@ from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, RULE_INDICATORS
 # selection but adds a deliberately simple, non-optimized trend confirmation
 # baseline at compile time. LONG/SHORT eligibility still belongs to the market
 # permission grid below.
-SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK")
+SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK")
 # Backward-compatible internal name retained while the UI moves to "Signal Strategy".
 DIRECTION_MODES = SIGNAL_STRATEGIES
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
@@ -645,6 +645,27 @@ def _macd_pullback_native_rules() -> tuple[dict, ...]:
     )
 
 
+def _ema_9_20_pullback_native_rules() -> tuple[dict, ...]:
+    """Persist the causal 9/20 EMA pullback signal-strategy choice.
+
+    Runtime direction is produced only when the completed confirmation candle
+    follows a low-volume pullback into the EMA band. This marker remains a
+    no-op rule so every threshold can still be researched independently.
+    """
+    return (
+        {
+            "action": "REJECT",
+            "indicator": "EMA_9_20_SPREAD_ATR",
+            "condition": "OUTSIDE",
+            "minimum": LOW,
+            "maximum": HIGH,
+            f"{_META_PREFIX}kind": "REQUIRED",
+            _DMI_TREND_MODE_MARKER: "EMA_9_20_PULLBACK",
+            _DMI_TREND_RULE_MARKER: "EMA_9_20_PULLBACK_SIGNAL",
+        },
+    )
+
+
 def compile_profiles(
     *,
     direction_mode: str,
@@ -682,6 +703,8 @@ def compile_profiles(
             native_rules = list(_dmi_trend_native_rules())
         elif mode == "MACD_PULLBACK":
             native_rules = list(_macd_pullback_native_rules())
+        elif mode == "EMA_9_20_PULLBACK":
+            native_rules = list(_ema_9_20_pullback_native_rules())
         else:
             native_rules = []
         for rule in required:
