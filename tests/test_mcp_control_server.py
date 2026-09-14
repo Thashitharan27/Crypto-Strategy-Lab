@@ -17,6 +17,33 @@ class FakeControl:
     def set_run_settings(self, run_id, patch):
         return {"run_id": run_id, "patch": patch}
 
+    def get_strategy_capabilities(self):
+        return {"indicators": {}}
+
+    def get_rule_workspace(self, run_id, profile=None):
+        return {"run_id": run_id, "profile": profile}
+
+    def list_rule_groups(self, run_id, profile, family):
+        return {"run_id": run_id, "profile": profile, "family": family}
+
+    def set_rule_groups(self, run_id, profile, family, groups):
+        return {"run_id": run_id, "profile": profile, "family": family, "groups": groups}
+
+    def add_rule_group(self, run_id, profile, family, group):
+        return {"run_id": run_id, "profile": profile, "family": family, "group": group}
+
+    def update_rule_group(self, run_id, group_id, patch):
+        return {"run_id": run_id, "group_id": group_id, "patch": patch}
+
+    def delete_rule_group(self, run_id, group_id):
+        return {"run_id": run_id, "group_id": group_id}
+
+    def mute_rule_group(self, run_id, group_id):
+        return {"run_id": run_id, "group_id": group_id, "enabled": False}
+
+    def unmute_rule_group(self, run_id, group_id):
+        return {"run_id": run_id, "group_id": group_id, "enabled": True}
+
     def set_filter_groups(self, run_id, profile, rules, **kwargs):
         return {"run_id": run_id, "profile": profile, "rules": rules, **kwargs}
 
@@ -99,6 +126,15 @@ def test_unified_server_keeps_expected_tool_groups_stable():
         "load_config",
         "create_run",
         "set_run_settings",
+        "get_strategy_capabilities",
+        "get_rule_workspace",
+        "list_rule_groups",
+        "set_rule_groups",
+        "add_rule_group",
+        "update_rule_group",
+        "delete_rule_group",
+        "mute_rule_group",
+        "unmute_rule_group",
         "set_filter_groups",
         "validate_run",
         "start_run",

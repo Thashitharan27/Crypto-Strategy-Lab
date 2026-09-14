@@ -1,9 +1,10 @@
 """Unified opt-in MCP server for local backtest control and completed-run research.
 
 The 8766 endpoint is the primary ChatGPT-facing Crypto Strategy Lab surface. It
-combines the bounded backtest-only control actions with the same read-only
-completed-run analysis tools exposed by ``mcp_server.server``. The legacy 8765
-read-only server remains available for backward compatibility.
+combines bounded backtest-only control actions, GUI-parity Strategy Builder rule
+groups, and the same read-only completed-run analysis tools exposed by
+``mcp_server.server``. The legacy 8765 read-only server remains available for
+backward compatibility.
 
 Write capability remains deliberately narrow: this server cannot execute
 arbitrary shell commands, edit source code, access credentials, place exchange
@@ -16,8 +17,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from crypto_strategy_lab.control_service import BacktestControlService
 from crypto_strategy_lab.paths import CACHE_DIR, CONFIG_DIR, MARKET_DATA_ROOT, OUTPUT_DIR, PROJECT_ROOT
+from crypto_strategy_lab.rule_control_service import RuleAwareBacktestControlService
 from mcp_server.server import BacktestReports
 
 
@@ -45,6 +46,15 @@ CONTROL_TOOLS = (
     "load_config",
     "create_run",
     "set_run_settings",
+    "get_strategy_capabilities",
+    "get_rule_workspace",
+    "list_rule_groups",
+    "set_rule_groups",
+    "add_rule_group",
+    "update_rule_group",
+    "delete_rule_group",
+    "mute_rule_group",
+    "unmute_rule_group",
     "set_filter_groups",
     "validate_run",
     "start_run",
@@ -55,7 +65,9 @@ CONTROL_TOOLS = (
 )
 
 
-def create_control_server(control: BacktestControlService, reports: BacktestReports):
+def create_control_server(
+    control: RuleAwareBacktestControlService, reports: BacktestReports
+):
     """Create one MCP server containing bounded control and read-only research tools."""
     from mcp.server import MCPServer
 
@@ -66,7 +78,7 @@ def create_control_server(control: BacktestControlService, reports: BacktestRepo
     # ------------------------------------------------------------------
     @server.tool()
     def control_info() -> dict[str, Any]:
-        """Describe the backtest-only control boundary and its safety restrictions."""
+        """Describe the backtest-only boundary and preferred research workflow."""
         return control.info()
 
     @server.tool()
@@ -109,6 +121,72 @@ def create_control_server(control: BacktestControlService, reports: BacktestRepo
         """Deep-merge strict config settings into a DRAFT and invalidate prior approval."""
         return control.set_run_settings(run_id, patch)
 
+    # ------------------------------------------------------------------
+    # First-class Strategy Builder rule workspace.
+    # ------------------------------------------------------------------
+    @server.tool()
+    def get_strategy_capabilities() -> dict[str, Any]:
+        """Return valid indicators, GUI labels, conditions, categorical values and group semantics."""
+        return control.get_strategy_capabilities()
+
+    @server.tool()
+    def get_rule_workspace(
+        run_id: str, profile: str | None = None
+    ) -> dict[str, Any]:
+        """Read back Entry/Veto/Flip groups exactly as the Strategy Builder represents them."""
+        return control.get_rule_workspace(run_id, profile)
+
+    @server.tool()
+    def list_rule_groups(
+        run_id: str, profile: str, family: str
+    ) -> dict[str, Any]:
+        """List one profile's ENTRY, VETO or FLIP groups with stable IDs and mute state."""
+        return control.list_rule_groups(run_id, profile, family)
+
+    @server.tool()
+    def set_rule_groups(
+        run_id: str,
+        profile: str,
+        family: str,
+        groups: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Replace only exact-profile groups for one family. Shared-scope groups are preserved."""
+        return control.set_rule_groups(run_id, profile, family, groups)
+
+    @server.tool()
+    def add_rule_group(
+        run_id: str,
+        profile: str,
+        family: str,
+        group: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Add one independent Strategy Builder rule group without replacing existing groups."""
+        return control.add_rule_group(run_id, profile, family, group)
+
+    @server.tool()
+    def update_rule_group(
+        run_id: str, group_id: str, patch: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Update one stable rule group by ID without disturbing sibling groups."""
+        return control.update_rule_group(run_id, group_id, patch)
+
+    @server.tool()
+    def delete_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
+        """Delete one rule group by stable ID and leave every other group untouched."""
+        return control.delete_rule_group(run_id, group_id)
+
+    @server.tool()
+    def mute_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
+        """Mute one saved group so it has zero runtime effect without deleting it."""
+        return control.mute_rule_group(run_id, group_id)
+
+    @server.tool()
+    def unmute_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
+        """Re-enable one previously muted saved rule group."""
+        return control.unmute_rule_group(run_id, group_id)
+
+    # Low-level compatibility API retained for existing clients/configuration
+    # surgery. Walk-forward Strategy Builder work should use the tools above.
     @server.tool()
     def set_filter_groups(
         run_id: str,
@@ -119,7 +197,7 @@ def create_control_server(control: BacktestControlService, reports: BacktestRepo
         flip_rule_match_mode: str | None = None,
         reject_rule_match_mode: str | None = None,
     ) -> dict[str, Any]:
-        """Replace one regime/direction profile's entry-rule payload."""
+        """Legacy low-level replacement of a profile's native entry_rules payload."""
         return control.set_filter_groups(
             run_id,
             profile,
@@ -283,7 +361,7 @@ def main() -> None:
             "CRYPTO_STRATEGY_LAB_CONTROL_MAX_CONCURRENT must be a positive integer"
         ) from exc
 
-    control = BacktestControlService(
+    control = RuleAwareBacktestControlService(
         project_root=PROJECT_ROOT,
         raw_root=_path_from_env("CRYPTO_STRATEGY_LAB_RAW_ROOT", MARKET_DATA_ROOT),
         cache_root=_path_from_env("CRYPTO_STRATEGY_LAB_CACHE_DIR", CACHE_DIR),
