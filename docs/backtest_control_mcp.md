@@ -1,66 +1,81 @@
-# Backtest Control MCP
+# Unified Crypto Strategy Lab MCP
 
-Crypto Strategy Lab now has two deliberately separate MCP surfaces:
+Crypto Strategy Lab now has one primary ChatGPT-facing MCP endpoint:
 
 | Surface | Default endpoint | Purpose |
 |---|---|---|
-| Completed-run reports | `http://127.0.0.1:8765/mcp` | Read-only analysis of completed runs |
-| Backtest control | `http://127.0.0.1:8766/mcp` | Opt-in creation, validation, execution, status, and cancellation of local backtests |
+| **Unified research + control** | `http://127.0.0.1:8766/mcp` | Create/validate/run local backtests and analyze completed outputs through one plugin |
+| Legacy reports-only endpoint | `http://127.0.0.1:8765/mcp` | Backward-compatible read-only analysis only |
 
-The control server is **backtest-only**. It does not provide general shell execution, source-code editing, credential access, exchange-order actions, or live-trading actions.
+The recommended ChatGPT plugin should point to **8766**. That single plugin can start a backtest, wait for it to finish, identify the resulting run, and immediately inspect the completed run without switching connectors.
+
+The write boundary is still **backtest-only**. The unified server does not provide arbitrary shell execution, source-code editing, credential access, exchange-order actions, or live-trading actions.
 
 ## Architecture
 
 ```text
-ChatGPT Work / MCP client
+ChatGPT / Work / MCP client
         |
         v
-Backtest Control MCP :8766
+Unified Crypto Strategy Lab MCP :8766
+        |
+        +---------------------------+
+        |                           |
+        v                           v
+Backtest control               Read-only research
+        |                           |
+        v                           |
+BacktestControlService             |
+        |                           |
+        | fixed argv, shell=False   |
+        v                           |
+tools/data_lake_run.py              |
+        |                           |
+        v                           |
+ResearchRunner -> NativeSimulator   |
+        |                           |
+        v                           |
+output/ ----------------------------+
         |
         v
-BacktestControlService
-        |
-        | fixed argument list, shell=False
-        v
-tools/data_lake_run.py
-        |
-        v
-ResearchRunner -> NativeSimulator -> existing engine
-        |
-        v
-output/
-        |
-        v
-Read-only Reports MCP :8765
+manifest-backed completed run
 ```
 
-The control layer intentionally launches the existing `tools/data_lake_run.py` adapter rather than implementing another simulator path. The CLI adapter already uses the authoritative `ResearchRunner`, so a run started through MCP uses the same native research composition as the current v2 application service.
+The control layer launches the existing `tools/data_lake_run.py` adapter rather than implementing another simulator path. The CLI adapter uses the authoritative `ResearchRunner`, so MCP-started runs use the same native research composition as the v2 application service.
 
-A child process is used only to provide reliable run status and cancellation. The executable and runner script are fixed by the service; callers cannot supply a command or shell string.
+The same endpoint also exposes the existing `BacktestReports` implementation. Completed-run analysis therefore keeps the same manifest verification, path confinement, artifact-integrity checks, and read-only SQL restrictions as the legacy report server.
 
-## Start the control server
+## Desktop ChatGPT integration
 
-The server is disabled unless explicitly enabled.
+The Crypto Strategy Lab **ChatGPT Integration** tab now starts the unified MCP module automatically.
 
-PowerShell:
+Its default endpoint is:
+
+```text
+http://127.0.0.1:8766/mcp
+```
+
+When the GUI starts the connection it sets the required control opt-in internally and launches:
+
+```text
+python -m mcp_server.control_server
+```
+
+The existing tunnel then exposes this one local endpoint to the configured ChatGPT plugin.
+
+If you start it manually instead, use PowerShell:
 
 ```powershell
 $env:CRYPTO_STRATEGY_LAB_ENABLE_CONTROL = "1"
 python -m mcp_server.control_server
 ```
 
-The default local endpoint is:
-
-```text
-http://127.0.0.1:8766/mcp
-```
-
-The server always binds to loopback (`127.0.0.1`). Do not expose this endpoint directly to the public internet.
+The server always binds to loopback (`127.0.0.1`). Do not expose the local endpoint directly to the public internet.
 
 ### Optional environment settings
 
 ```text
-CRYPTO_STRATEGY_LAB_CONTROL_MCP_PORT       default 8766
+CRYPTO_STRATEGY_LAB_CONTROL_MCP_PORT        default 8766
 CRYPTO_STRATEGY_LAB_CONTROL_MAX_CONCURRENT default 1
 CRYPTO_STRATEGY_LAB_RAW_ROOT               default application market-data root
 CRYPTO_STRATEGY_LAB_CACHE_DIR              default project cache directory
@@ -68,11 +83,11 @@ CRYPTO_STRATEGY_LAB_OUTPUT_DIR             default project output directory
 CRYPTO_STRATEGY_LAB_CONFIG_DIR             default config/data_lake
 ```
 
-Only one MCP-started backtest runs concurrently by default. This reduces accidental CPU/RAM pressure when an assistant is exploring several experiments.
+Only one MCP-started backtest runs concurrently by default. This reduces accidental CPU/RAM pressure during autonomous experiment loops.
 
-## Exposed tools
+## Tools exposed by the unified endpoint
 
-The control MCP exposes only these bounded actions:
+### Backtest control
 
 - `control_info`
 - `list_configs`
@@ -87,6 +102,21 @@ The control MCP exposes only these bounded actions:
 - `cancel_run`
 - `read_control_log`
 
+### Completed-run research
+
+- `list_runs`
+- `latest_run`
+- `get_run_manifest`
+- `list_run_files`
+- `read_report`
+- `read_run_file`
+- `query_trades`
+- `query_signals`
+- `query_feature_context`
+- `query_parquet`
+- `research_aggregate`
+- `compare_runs`
+
 There is no arbitrary command tool and no live-trading/order tool.
 
 ## Required execution workflow
@@ -100,59 +130,56 @@ A backtest cannot be started immediately after it is created.
 5. `validate_run` returns a `validation_token` tied to the exact request and configuration.
 6. Call `start_run(run_id, validation_token)`.
 7. Poll `get_run_status` until it reaches a terminal state.
-8. Analyze the resulting completed run through the existing read-only report MCP.
+8. When completed, use the research tools on the resulting completed run.
 
-Any change to a draft after validation clears the approval. `start_run` will refuse the old token, so the modified run must be validated and reviewed again.
+Any change to a draft after validation clears the approval. `start_run` refuses an old token, so the modified run must be validated again.
 
-## Example
+## One-plugin research loop
 
-Create a draft from a saved native v3 config:
-
-```text
-create_run(
-  symbol="BTCUSDT",
-  start="2020-01-01",
-  end="2026-01-01",
-  config_name="my_btc_1d.json",
-  strategy_timeframe="1d"
-)
-```
-
-Patch only the desired settings:
-
-```json
-{
-  "strategy": {
-    "entry_interval": 1
-  },
-  "execution": {
-    "maker_fee": 0.0002,
-    "taker_fee": 0.0005
-  }
-}
-```
-
-Replace the entry rules for one regime/direction profile:
+A ChatGPT research workflow can now stay inside the same plugin:
 
 ```text
-set_filter_groups(
-  run_id="...",
-  profile="bull_long",
-  rules=[...]
-)
+create_run
+  -> set_run_settings / set_filter_groups
+  -> validate_run
+  -> start_run
+  -> get_run_status
+  -> list_runs / get_run_manifest
+  -> query_trades / research_aggregate / compare_runs
+  -> decide next training experiment
 ```
 
-Then validate:
+This is the intended foundation for walk-forward testing and other iterative research.
+
+## Walk-forward discipline
+
+A valid walk-forward process must freeze the selected training configuration before measuring the next unseen period.
 
 ```text
-validate_run(run_id="...")
+TRAIN window
+   -> discover/select configuration
+   -> freeze exact configuration
+   -> TEST unseen window
+   -> record result without modifying the frozen test
+   -> roll the window forward
 ```
 
-The returned preview includes the request, data/features, strategy policy, profile state/rule counts, execution settings, and reporting settings. Only the exact validated fingerprint can be started.
+Example rolling structure:
+
+```text
+Train 2020-2022 -> Test 2023
+Train 2021-2023 -> Test 2024
+Train 2022-2024 -> Test 2025
+Train 2023-2025 -> Test 2026
+```
+
+Do not tune a fold after seeing that fold's out-of-sample result and still count it as out-of-sample. The validation-token and manifest/config hashes provide the building blocks for proving that the test configuration was frozen before execution.
+
+A future higher-level walk-forward orchestrator can be added on top of this endpoint, but the current primitive workflow is intentionally kept explicit first so each create -> validate -> run -> read step can be verified independently.
 
 ## Configuration and path safety
 
-The control service accepts only the strict nested **ResearchRunConfig v3** contract. Unknown sections and unknown component settings are rejected by the same native configuration parser used by the Data Lake runner.
+The control service accepts only the strict nested **ResearchRunConfig v3** contract. Unknown sections and unknown component settings are rejected by the native configuration parser used by the Data Lake runner.
 
 Saved configurations are confined beneath the configured Data Lake config directory. Absolute paths, `..` traversal, non-JSON config names, and symlinked config path components are rejected.
 
@@ -160,15 +187,26 @@ The reporting output directory is owned by the control service. A caller cannot 
 
 Control-job state and logs live under the configured cache directory. Generated backtest results remain under the configured output root.
 
+## Read-only research safety
+
+Completed-run research still uses `BacktestReports` and therefore retains the existing protections:
+
+- runs must be direct children of the allowed output root;
+- path traversal and absolute paths are rejected;
+- symlinked run files are rejected;
+- registered artifacts are integrity-checked against the manifest;
+- SQL is restricted to read-only `SELECT`, `WITH`, `DESCRIBE`, and `SHOW` patterns;
+- external file scans, mutating SQL, multiple statements, extensions, attach/copy/install/load operations are rejected.
+
 ## Cancellation
 
 `cancel_run` can cancel a DRAFT immediately or terminate the fixed child process for a RUNNING backtest. If normal termination does not complete, the control service escalates to killing that child process.
 
-A cancelled or failed process can leave partial output files from work already performed. The existing read-only report MCP continues to use completed manifest-backed runs, so partial control output is not treated as a valid completed research run.
+A cancelled or failed process can leave partial output files from work already performed. The read-only research tools use completed manifest-backed runs, so partial control output is not treated as a valid completed research run.
 
 ## Machine-readable completion
 
-`tools/data_lake_run.py` now supports an optional `--result-json` argument. The control service supplies a private per-job result path. On successful completion the CLI writes, atomically:
+`tools/data_lake_run.py` supports an optional `--result-json` argument. The control service supplies a private per-job result path. On successful completion the CLI writes, atomically:
 
 ```json
 {
@@ -181,6 +219,16 @@ A cancelled or failed process can leave partial output files from work already p
 
 This lets the control server identify the exact output directory without parsing terminal text.
 
+## Legacy 8765 endpoint
+
+`python -m mcp_server.server` still provides the original read-only report server, defaulting to:
+
+```text
+http://127.0.0.1:8765/mcp
+```
+
+It is retained for backward compatibility and for situations where a strictly read-only connection is desired. The normal ChatGPT plugin should use the unified **8766** endpoint instead.
+
 ## Live trading boundary
 
-Keep live trading separate from this service. If live-trading automation is ever considered, it should use a different process, endpoint, permission model, and explicit safety/approval controls. The Backtest Control MCP should remain unable to place exchange orders.
+Keep live trading separate from this service. If live-trading automation is ever considered, it should use a different process, endpoint, permission model, and explicit safety/approval controls. The unified Crypto Strategy Lab MCP must remain unable to place exchange orders.
