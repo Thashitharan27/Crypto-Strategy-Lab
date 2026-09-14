@@ -44,6 +44,12 @@ def build_parser():
         default=None,
         help="Optional runtime override for ReportingConfig.output_dir",
     )
+    parser.add_argument(
+        "--result-json",
+        type=Path,
+        default=None,
+        help="Optional machine-readable result file for local control integrations.",
+    )
     return parser
 
 
@@ -72,17 +78,18 @@ def main():
         (BayesianSamplingCsvManifestReporter(output_root),),
     )
     result = runner.run(request, config)
-    print(
-        json.dumps(
-            {
-                "run_dir": str(result.output_dir.resolve()),
-                "trade_rows": len(result.trades),
-                "prepared_cache_hit": result.prepared_cache_hit,
-                "prepared_cache_key": result.prepared_cache_key,
-            },
-            indent=2,
-        )
-    )
+    payload = {
+        "run_dir": str(result.output_dir.resolve()),
+        "trade_rows": len(result.trades),
+        "prepared_cache_hit": result.prepared_cache_hit,
+        "prepared_cache_key": result.prepared_cache_key,
+    }
+    if args.result_json is not None:
+        args.result_json.parent.mkdir(parents=True, exist_ok=True)
+        temporary = args.result_json.with_name(f".{args.result_json.name}.tmp")
+        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        temporary.replace(args.result_json)
+    print(json.dumps(payload, indent=2))
     return 0
 
 

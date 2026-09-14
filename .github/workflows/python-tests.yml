@@ -124,7 +124,9 @@ jobs:
           crypto_strategy_lab/bayesian_research.py
           crypto_strategy_lab/bayesian_sampling.py
           crypto_strategy_lab/bayesian_sampling_reporting.py
+          crypto_strategy_lab/control_service.py
           mcp_server/server.py
+          mcp_server/control_server.py
           tools/data_lake_validate.py
           tools/data_lake_run.py
           tools/data_lake_benchmark.py
@@ -192,6 +194,8 @@ jobs:
           tests/test_research_sampling.py
           tests/test_task17_reporting.py
           tests/test_mcp_server.py
+          tests/test_control_service.py
+          tests/test_mcp_control_server.py
           tests/test_rewrite_config_current.py
 
   full-suite-observation:
