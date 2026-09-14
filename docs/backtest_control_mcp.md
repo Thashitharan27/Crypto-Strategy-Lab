@@ -1,6 +1,6 @@
 # Unified Crypto Strategy Lab MCP
 
-Crypto Strategy Lab now has one primary ChatGPT-facing MCP endpoint:
+Crypto Strategy Lab has one primary ChatGPT-facing MCP endpoint:
 
 | Surface | Default endpoint | Purpose |
 |---|---|---|
@@ -25,7 +25,7 @@ Unified Crypto Strategy Lab MCP :8766
 Backtest control               Read-only research
         |                           |
         v                           |
-BacktestControlService             |
+Rule-aware control service          |
         |                           |
         | fixed argv, shell=False   |
         v                           |
@@ -47,9 +47,7 @@ The same endpoint also exposes the existing `BacktestReports` implementation. Co
 
 ## Desktop ChatGPT integration
 
-The Crypto Strategy Lab **ChatGPT Integration** tab now starts the unified MCP module automatically.
-
-Its default endpoint is:
+The Crypto Strategy Lab **ChatGPT Integration** tab starts the unified MCP module automatically. Its default endpoint is:
 
 ```text
 http://127.0.0.1:8766/mcp
@@ -60,8 +58,6 @@ When the GUI starts the connection it sets the required control opt-in internall
 ```text
 python -m mcp_server.control_server
 ```
-
-The existing tunnel then exposes this one local endpoint to the configured ChatGPT plugin.
 
 If you start it manually instead, use PowerShell:
 
@@ -87,14 +83,23 @@ Only one MCP-started backtest runs concurrently by default. This reduces acciden
 
 ## Tools exposed by the unified endpoint
 
-### Backtest control
+### Backtest control and Strategy Builder workspace
 
 - `control_info`
 - `list_configs`
 - `load_config`
 - `create_run`
 - `set_run_settings`
-- `set_filter_groups`
+- `get_strategy_capabilities`
+- `get_rule_workspace`
+- `list_rule_groups`
+- `set_rule_groups`
+- `add_rule_group`
+- `update_rule_group`
+- `delete_rule_group`
+- `mute_rule_group`
+- `unmute_rule_group`
+- `set_filter_groups` — legacy low-level compatibility only
 - `validate_run`
 - `start_run`
 - `get_run_status`
@@ -119,28 +124,187 @@ Only one MCP-started backtest runs concurrently by default. This reduces acciden
 
 There is no arbitrary command tool and no live-trading/order tool.
 
+## Strategy Builder rule-group model
+
+The MCP now uses the **same authored rule-group model as the current GUI**. It does not ask a model to construct low-level numeric `entry_rules` for normal research.
+
+There are three first-class families:
+
+```text
+ENTRY
+VETO
+FLIP
+```
+
+Their current GUI/runtime semantics are fixed and explicit:
+
+```text
+conditions inside one group = ALL / AND
+groups inside one family     = OR alternatives
+```
+
+For example, three Bull Long veto groups mean:
+
+```text
+Veto Group 1 = MR_STATE ABOVE_MEAN AND MR_MOTION AWAY_FROM_MEAN
+OR
+Veto Group 2 = MR_STATE STRONGLY_ABOVE_MEAN AND MR_MOTION AWAY_FROM_MEAN
+OR
+Veto Group 3 = MR_STATE ABOVE_MEAN AND MR_MOTION TOWARD_MEAN AND MR_STRENGTH WEAK
+```
+
+Any complete Veto group rejects. Entry groups work as alternative qualifying theses, and any complete Flip group triggers the direction change.
+
+The old profile-wide `reject_rule_match_mode` and `flip_rule_match_mode` remain in the mature native config for compatibility, but **they are not the logic selector for Strategy Builder groups**. If research requires `A OR B`, author two groups rather than creating an MCP-only ANY mode that the GUI cannot represent.
+
+### Human-readable categorical conditions
+
+The high-level group API accepts the same categorical labels used by the Strategy Builder. For example:
+
+```json
+{
+  "indicator": "MR_STATE",
+  "condition": "EQUALS",
+  "value": "ABOVE_MEAN"
+}
+```
+
+instead of requiring the internal numeric code `4`.
+
+The adapter translates the authored label to the mature simulator's numeric range internally and embeds the builder metadata needed to round-trip it back to the GUI. Read-back returns the human-readable label again.
+
+GUI display labels are also accepted where unambiguous, for example `MR — State`; native IDs such as `MR_STATE` remain the canonical returned identifiers.
+
+### Capability discovery
+
+Call:
+
+```text
+get_strategy_capabilities()
+```
+
+before authoring unfamiliar rules. It returns:
+
+- valid profile names;
+- signal strategies;
+- market regime method IDs and GUI display names;
+- all supported indicator IDs and GUI display names;
+- numeric vs categorical type;
+- valid conditions;
+- valid categorical values;
+- S/R timeframe support;
+- the exact group semantics.
+
+This removes the need to discover identifiers such as `ASSET_RETURN`, `MR_STATE`, or categorical value mappings by trial backtests.
+
+### Read-back and independent group mutations
+
+Use:
+
+```text
+get_rule_workspace(run_id, profile="bull_long")
+```
+
+or:
+
+```text
+list_rule_groups(run_id, profile="bull_long", family="VETO")
+```
+
+to verify the exact workspace after each mutation.
+
+Every group has a stable `id`. The normal walk-forward editing tools are therefore incremental:
+
+```text
+add_rule_group
+update_rule_group
+delete_rule_group
+mute_rule_group
+unmute_rule_group
+```
+
+Adding a new group does not replace sibling groups. Muting preserves the name, conditions and stable ID while giving that group zero runtime effect. This is intended for diagnostic comparisons such as mute -> run -> compare -> unmute.
+
+`set_rule_groups` is available when a whole exact-profile family should be replaced intentionally. It preserves broader shared-scope groups rather than silently deleting a rule that also applies to other profiles.
+
+### Example: three learned Bull Long veto groups
+
+```json
+{
+  "run_id": "control_...",
+  "profile": "bull_long",
+  "family": "VETO",
+  "groups": [
+    {
+      "id": "group_1",
+      "name": "Above mean extending",
+      "enabled": true,
+      "match_mode": "ALL",
+      "conditions": [
+        {"indicator": "MR_STATE", "condition": "EQUALS", "value": "ABOVE_MEAN"},
+        {"indicator": "MR_MOTION", "condition": "EQUALS", "value": "AWAY_FROM_MEAN"}
+      ]
+    },
+    {
+      "id": "group_2",
+      "name": "Strongly above mean extending",
+      "enabled": true,
+      "match_mode": "ALL",
+      "conditions": [
+        {"indicator": "MR_STATE", "condition": "EQUALS", "value": "STRONGLY_ABOVE_MEAN"},
+        {"indicator": "MR_MOTION", "condition": "EQUALS", "value": "AWAY_FROM_MEAN"}
+      ]
+    },
+    {
+      "id": "group_3",
+      "name": "Weak toward-mean pocket",
+      "enabled": true,
+      "match_mode": "ALL",
+      "conditions": [
+        {"indicator": "MR_STATE", "condition": "EQUALS", "value": "ABOVE_MEAN"},
+        {"indicator": "MR_MOTION", "condition": "EQUALS", "value": "TOWARD_MEAN"},
+        {"indicator": "MR_STRENGTH", "condition": "EQUALS", "value": "WEAK"}
+      ]
+    }
+  ]
+}
+```
+
+After setting or incrementally adding groups, call `get_rule_workspace` before validation to confirm no learned group was overwritten.
+
+### Legacy low-level setter
+
+`set_filter_groups` is retained so existing clients do not break, but it directly replaces one native profile's `entry_rules` payload. It should not be used for new walk-forward Strategy Builder work because it bypasses the high-level Entry/Veto/Flip workspace.
+
+The preferred workflow is the first-class group API above.
+
 ## Required execution workflow
 
 A backtest cannot be started immediately after it is created.
 
 1. `create_run` creates a **DRAFT**.
-2. Optionally use `set_run_settings` and/or `set_filter_groups`.
-3. Call `validate_run`.
-4. Review the returned preview.
-5. `validate_run` returns a `validation_token` tied to the exact request and configuration.
-6. Call `start_run(run_id, validation_token)`.
-7. Poll `get_run_status` until it reaches a terminal state.
-8. When completed, use the research tools on the resulting completed run.
+2. Use `get_strategy_capabilities` when needed.
+3. Read the existing workspace with `get_rule_workspace` or `list_rule_groups`.
+4. Add/update/mute/delete only the intended groups.
+5. Read the workspace again and verify it.
+6. Call `validate_run`.
+7. Review the returned preview.
+8. `validate_run` returns a `validation_token` tied to the exact request and configuration.
+9. Call `start_run(run_id, validation_token)`.
+10. Poll `get_run_status` until terminal.
+11. When completed, use the research tools on the resulting completed run.
 
-Any change to a draft after validation clears the approval. `start_run` refuses an old token, so the modified run must be validated again.
+Any rule-group or settings change to a draft after validation clears the approval. `start_run` refuses the old token, so the modified run must be validated again.
 
 ## One-plugin research loop
 
-A ChatGPT research workflow can now stay inside the same plugin:
+A ChatGPT research workflow can stay inside the same plugin:
 
 ```text
 create_run
-  -> set_run_settings / set_filter_groups
+  -> get_rule_workspace
+  -> add/update/mute rule groups
+  -> get_rule_workspace (verify exact state)
   -> validate_run
   -> start_run
   -> get_run_status
@@ -175,7 +339,7 @@ Train 2023-2025 -> Test 2026
 
 Do not tune a fold after seeing that fold's out-of-sample result and still count it as out-of-sample. The validation-token and manifest/config hashes provide the building blocks for proving that the test configuration was frozen before execution.
 
-A future higher-level walk-forward orchestrator can be added on top of this endpoint, but the current primitive workflow is intentionally kept explicit first so each create -> validate -> run -> read step can be verified independently.
+A future higher-level walk-forward orchestrator can be added on top of this endpoint, but the primitive workflow is intentionally explicit first so each create -> verify -> validate -> run -> read step can be audited independently.
 
 ## Configuration and path safety
 
@@ -228,6 +392,15 @@ http://127.0.0.1:8765/mcp
 ```
 
 It is retained for backward compatibility and for situations where a strictly read-only connection is desired. The normal ChatGPT plugin should use the unified **8766** endpoint instead.
+
+## Deferred control improvements
+
+Two useful control-plane improvements are intentionally separate from this rule-group change:
+
+- cloning an **unsaved current GUI workspace** directly into an MCP draft;
+- a simplified canonical high-level execution/risk schema over the mature underlying config fields.
+
+They can be added without changing the rule-group contract above.
 
 ## Live trading boundary
 
