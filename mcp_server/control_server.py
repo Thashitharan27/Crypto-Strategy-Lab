@@ -1,8 +1,13 @@
-"""Opt-in write-capable MCP control server for local backtests only.
+"""Unified opt-in MCP server for local backtest control and completed-run research.
 
-This server is deliberately separate from ``mcp_server.server`` so the existing
-report-analysis endpoint remains read-only.  It binds to loopback, is disabled
-unless explicitly enabled, and delegates execution to BacktestControlService.
+The 8766 endpoint is the primary ChatGPT-facing Crypto Strategy Lab surface. It
+combines the bounded backtest-only control actions with the same read-only
+completed-run analysis tools exposed by ``mcp_server.server``. The legacy 8765
+read-only server remains available for backward compatibility.
+
+Write capability remains deliberately narrow: this server cannot execute
+arbitrary shell commands, edit source code, access credentials, place exchange
+orders, or control live trading.
 """
 from __future__ import annotations
 
@@ -13,16 +18,52 @@ from typing import Any
 
 from crypto_strategy_lab.control_service import BacktestControlService
 from crypto_strategy_lab.paths import CACHE_DIR, CONFIG_DIR, MARKET_DATA_ROOT, OUTPUT_DIR, PROJECT_ROOT
+from mcp_server.server import BacktestReports
 
 
 LOGGER = logging.getLogger("crypto_strategy_lab.mcp.control")
 
 
-def create_control_server(control: BacktestControlService):
+READ_TOOLS = (
+    "list_runs",
+    "latest_run",
+    "get_run_manifest",
+    "list_run_files",
+    "read_report",
+    "read_run_file",
+    "query_trades",
+    "query_signals",
+    "query_feature_context",
+    "query_parquet",
+    "research_aggregate",
+    "compare_runs",
+)
+
+CONTROL_TOOLS = (
+    "control_info",
+    "list_configs",
+    "load_config",
+    "create_run",
+    "set_run_settings",
+    "set_filter_groups",
+    "validate_run",
+    "start_run",
+    "get_run_status",
+    "list_control_runs",
+    "cancel_run",
+    "read_control_log",
+)
+
+
+def create_control_server(control: BacktestControlService, reports: BacktestReports):
+    """Create one MCP server containing bounded control and read-only research tools."""
     from mcp.server import MCPServer
 
-    server = MCPServer("Crypto Strategy Lab Backtest Control")
+    server = MCPServer("Crypto Strategy Lab")
 
+    # ------------------------------------------------------------------
+    # Bounded backtest-control tools.
+    # ------------------------------------------------------------------
     @server.tool()
     def control_info() -> dict[str, Any]:
         """Describe the backtest-only control boundary and its safety restrictions."""
@@ -121,6 +162,86 @@ def create_control_server(control: BacktestControlService):
         """Read a bounded tail of this control job's stdout or stderr."""
         return control.read_control_log(run_id, stream, lines)
 
+    # ------------------------------------------------------------------
+    # Completed-run research tools. These delegate to the existing
+    # manifest-backed BacktestReports implementation and remain read-only.
+    # ------------------------------------------------------------------
+    @server.tool()
+    def list_runs(limit: int = 50) -> list[dict[str, Any]]:
+        """List completed manifest-backed runs beneath the configured output root."""
+        LOGGER.info("Unified MCP tool called: list_runs")
+        return reports.list_runs(limit)
+
+    @server.tool()
+    def latest_run() -> dict[str, Any]:
+        """Return metadata and summary for the latest completed run."""
+        LOGGER.info("Unified MCP tool called: latest_run")
+        return reports.latest_run()
+
+    @server.tool()
+    def get_run_manifest(run: str) -> dict[str, Any]:
+        """Return the verified canonical manifest for one completed run."""
+        LOGGER.info("Unified MCP tool called: get_run_manifest run=%s", run)
+        return reports.get_run_manifest(run)
+
+    @server.tool()
+    def list_run_files(run: str) -> list[dict[str, Any]]:
+        """List files available inside one completed run."""
+        LOGGER.info("Unified MCP tool called: list_run_files run=%s", run)
+        return reports.list_run_files(run)
+
+    @server.tool()
+    def read_report(
+        run: str, filename: str, sheet: str | None = None, limit: int = 200
+    ) -> dict[str, Any]:
+        """Read a supported report file from a completed run."""
+        LOGGER.info("Unified MCP tool called: read_report run=%s filename=%s", run, filename)
+        return reports.read_report(run, filename, sheet, limit)
+
+    @server.tool()
+    def read_run_file(
+        run: str, filename: str, sheet: str | None = None, limit: int = 200
+    ) -> dict[str, Any]:
+        """Read a supported file from a completed run."""
+        LOGGER.info("Unified MCP tool called: read_run_file run=%s filename=%s", run, filename)
+        return reports.read_run_file(run, filename, sheet, limit)
+
+    @server.tool()
+    def query_trades(run: str, sql: str) -> dict[str, Any]:
+        """Run a restricted read-only SQL query over a completed run's trades."""
+        LOGGER.info("Unified MCP tool called: query_trades run=%s", run)
+        return reports.query_trades(run, sql)
+
+    @server.tool()
+    def query_signals(run: str, sql: str) -> dict[str, Any]:
+        """Run a restricted read-only SQL query over a completed run's signals."""
+        LOGGER.info("Unified MCP tool called: query_signals run=%s", run)
+        return reports.query_signals(run, sql)
+
+    @server.tool()
+    def query_feature_context(run: str, sql: str) -> dict[str, Any]:
+        """Query the completed run's feature-context parquet with restricted SQL."""
+        LOGGER.info("Unified MCP tool called: query_feature_context run=%s", run)
+        return reports.query_feature_context(run, sql)
+
+    @server.tool()
+    def query_parquet(run: str, filename: str, sql: str) -> dict[str, Any]:
+        """Query an allowed parquet inside a completed run using restricted SQL."""
+        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run, filename)
+        return reports.query_parquet(run, filename, sql)
+
+    @server.tool()
+    def research_aggregate(run: str, spec: dict[str, Any]) -> dict[str, Any]:
+        """Run the existing bounded feature-research aggregation on a completed run."""
+        LOGGER.info("Unified MCP tool called: research_aggregate run=%s", run)
+        return reports.research_aggregate(run, spec)
+
+    @server.tool()
+    def compare_runs(runs: list[str]) -> list[dict[str, Any]]:
+        """Compare 2-10 completed runs with provenance checks."""
+        LOGGER.info("Unified MCP tool called: compare_runs count=%d", len(runs))
+        return reports.compare_runs(runs)
+
     return server
 
 
@@ -133,8 +254,9 @@ def main() -> None:
     enabled = os.environ.get("CRYPTO_STRATEGY_LAB_ENABLE_CONTROL", "").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
         raise SystemExit(
-            "Backtest control MCP is disabled. Set CRYPTO_STRATEGY_LAB_ENABLE_CONTROL=1 "
-            "to opt in. The read-only report MCP remains available separately."
+            "Unified Crypto Strategy Lab MCP is disabled. Set "
+            "CRYPTO_STRATEGY_LAB_ENABLE_CONTROL=1 to opt in. The legacy read-only "
+            "report MCP remains available separately on port 8765."
         )
 
     logging.basicConfig(
@@ -171,19 +293,17 @@ def main() -> None:
         ),
         max_concurrent_runs=max_concurrent,
     )
+    reports = BacktestReports(control.output_root)
     host = "127.0.0.1"
-    LOGGER.info("Backtest control MCP starting (BACKTEST_ONLY)")
+    LOGGER.info("Unified Crypto Strategy Lab MCP starting (BACKTEST_CONTROL + READ_ONLY_RESEARCH)")
     LOGGER.info("Host: %s", host)
     LOGGER.info("Port: %s", port)
     LOGGER.info("Raw data root: %s", control.raw_root)
     LOGGER.info("Output root: %s", control.output_root)
     LOGGER.info("Max concurrent runs: %s", control.max_concurrent_runs)
-    LOGGER.info(
-        "Available tools: control_info, list_configs, load_config, create_run, "
-        "set_run_settings, set_filter_groups, validate_run, start_run, "
-        "get_run_status, list_control_runs, cancel_run, read_control_log"
-    )
-    create_control_server(control).run(
+    LOGGER.info("Control tools: %s", ", ".join(CONTROL_TOOLS))
+    LOGGER.info("Research tools: %s", ", ".join(READ_TOOLS))
+    create_control_server(control, reports).run(
         transport="streamable-http",
         host=host,
         port=port,
