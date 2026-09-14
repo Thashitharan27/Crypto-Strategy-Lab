@@ -115,7 +115,7 @@ crypto_strategy_lab/      Installable application package
   loader.py               OHLCV loading and validation
   output_manager.py       Reports and run-folder management
 docs/                     Implementation and design documentation
-mcp_server/               Read-only report MCP server
+mcp_server/               Unified control/research MCP plus legacy read-only server
 tests/                    Automated regression suite
 tools/                    Offline import and maintenance utilities
 Crypto Strategy Lab.vbs   Normal no-console Windows launcher
@@ -171,47 +171,88 @@ passwords or personal access tokens. Pull and commit/push are disabled while a
 backtest or portfolio calculation is running. After an update, restart Crypto
 Strategy Lab manually to load the downloaded source.
 
-## Local MCP Server
+## Local MCP Servers
 
-A local, read-only MCP server lets an MCP client inspect existing backtest reports. Install the dependencies with:
+Crypto Strategy Lab provides two local MCP entry points.
 
-```powershell
-pip install -r requirements.txt
+### Unified research + control endpoint (recommended)
+
+The primary ChatGPT-facing server is:
+
+```text
+http://127.0.0.1:8766/mcp
 ```
 
-By default the server exposes only this project's `output` directory at
-`http://127.0.0.1:8765/mcp`. Set `CRYPTO_STRATEGY_LAB_OUTPUT_DIR` to select a
-different existing output root, or `CRYPTO_STRATEGY_LAB_MCP_PORT` to change the
-local port. Paths are resolved beneath that root and the server cannot edit
-files, run backtests or commands, or execute mutating SQL.
+It exposes both:
 
-The supported tools are `list_runs`, `latest_run`, `list_run_files`,
-`read_report`, `query_trades`, and `compare_runs`. They support saved CSV, XLSX,
-JSON, and TXT reports; DuckDB access is restricted to read-only queries over a
-run's `trade_list.csv`. Connecting ChatGPT or another client (and configuring a
-supported MCP tunnel when needed) is a separate step. Do not expose the local
-server directly to the public internet.
+- bounded backtest control (`create_run`, configuration changes, validation,
+  start/status/cancel); and
+- the existing read-only completed-run research tools (`list_runs`, manifest and
+  report reads, restricted parquet queries, research aggregation, comparisons).
+
+The control path can launch only the fixed Data Lake backtest runner. It cannot
+run arbitrary shell commands, edit source code, read credentials, place exchange
+orders, or control live trading. The completed-run research path remains
+manifest-backed and read-only.
+
+Manual startup requires explicit opt-in:
+
+```powershell
+$env:CRYPTO_STRATEGY_LAB_ENABLE_CONTROL="1"
+python -m mcp_server.control_server
+```
+
+See `docs/backtest_control_mcp.md` for the complete tool list, safety model, and
+the intended create -> validate -> run -> analyze workflow.
+
+### Legacy reports-only endpoint
+
+The original strictly read-only report server remains available for backward
+compatibility at:
+
+```text
+http://127.0.0.1:8765/mcp
+```
+
+Start it with:
+
+```powershell
+python -m mcp_server.server
+```
+
+Set `CRYPTO_STRATEGY_LAB_OUTPUT_DIR` to select a different existing output root,
+or `CRYPTO_STRATEGY_LAB_MCP_PORT` to change its local port. Paths are resolved
+beneath that root and the server cannot edit files, run backtests or commands,
+or execute mutating SQL.
+
+Both local servers bind to `127.0.0.1`. Connecting ChatGPT or another client (and
+configuring a supported MCP tunnel when needed) is a separate step. Do not expose
+the local endpoints directly to the public internet.
 
 ## ChatGPT Integration
 
-The desktop application's **ChatGPT** tab can run both the existing read-only
-MCP server and an OpenAI Secure Tunnel without separate command windows:
+The desktop application's **ChatGPT** tab now starts the **unified 8766 MCP** and
+an OpenAI Secure Tunnel without separate command windows:
 
 1. Create the OpenAI tunnel externally once and download `tunnel-client.exe`.
 2. Open **Crypto Strategy Lab → ChatGPT**.
 3. Browse to the tunnel client executable (its location is not fixed).
 4. Paste the tunnel ID supplied when the tunnel was created.
 5. Choose **Set / Change API Key** and securely save the tunnel runtime API key.
-6. Select **Start ChatGPT Connection**. The local MCP server becomes ready
+6. Keep the MCP port at **8766** unless you intentionally need another local port.
+7. Select **Start ChatGPT Connection**. The unified local MCP becomes ready
    before the secure tunnel is started.
-7. Enable the Crypto Strategy Lab plugin in ChatGPT.
+8. Enable or refresh the single **Crypto Strategy Lab** plugin in ChatGPT.
+
+That one plugin can now run a backtest and then read/analyze the completed output
+through the same MCP connection. This is the base workflow for iterative research
+and walk-forward testing.
 
 The runtime API key is stored through `keyring` in Windows Credential Manager;
 it is never saved in application settings, configuration files, command-line
 arguments, or connection logs. The tunnel path, tunnel ID, auto-start choice,
 and local port are non-secret settings. **Test Configuration** performs local
-checks only and does not make a model request. The MCP endpoint remains bound to
-`127.0.0.1` and retains its read-only report-access security model.
+checks only and does not make a model request.
 
 Use **Open Logs** for bounded, redacted MCP/tunnel diagnostics. Processes
 started by the GUI are stopped in tunnel-then-server order. Because Qt-owned
