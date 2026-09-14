@@ -10,6 +10,30 @@ from crypto_strategy_lab.control_service import BacktestControlService
 class RuleAwareBacktestControlService(BacktestControlService):
     """Backtest control plus GUI-parity Strategy Builder group operations."""
 
+    def info(self) -> dict[str, Any]:
+        payload = super().info()
+        payload["preferred_rule_workflow"] = [
+            "get_strategy_capabilities",
+            "get_rule_workspace / list_rule_groups",
+            "add_rule_group / update_rule_group / mute_rule_group / delete_rule_group",
+            "get_rule_workspace to verify exact read-back",
+            "validate_run",
+            "start_run with the returned validation_token",
+        ]
+        payload["rule_group_semantics"] = {
+            "families": ["ENTRY", "VETO", "FLIP"],
+            "conditions_inside_group": "ALL",
+            "groups_inside_family": "OR",
+            "categorical_values": "GUI/native labels are accepted",
+        }
+        payload["legacy_control"] = {
+            "set_filter_groups": (
+                "Low-level compatibility API. Prefer the first-class rule-group tools "
+                "for Strategy Builder / walk-forward research."
+            )
+        }
+        return payload
+
     @staticmethod
     def get_strategy_capabilities() -> dict[str, Any]:
         return strategy_capabilities()
