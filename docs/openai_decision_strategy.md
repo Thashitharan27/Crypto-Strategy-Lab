@@ -26,12 +26,21 @@ Raw model confidence is a ranking signal, not a guaranteed calibrated
 probability. Backtest reports should later be used to measure actual win rate by
 confidence band and calibrate it empirically.
 
-## Causality
+## Causality and market context
 
 The snapshot ends at the signal candle. It contains no eventual trade result and
 no future candle. Directional evidence is supplied symmetrically: raw `+DI` and
 `-DI`, plus separate LONG and SHORT pressure/S/R contexts. The independent AI
 strategy is not told what DI would have selected.
+
+The model receives the already-causal evidence available to the mature runtime,
+including current/recent OHLCV, ATR/ADX/DI, RSI, EMA structure, MACD, mean
+reversion, futures positioning, funding/basis and taker flow. Support/resistance
+is supplied independently for LONG and SHORT at the strategy timeframe and at
+each available higher timeframe (1h, 4h and 1D). Higher-timeframe contexts are
+never merged into one synthetic S/R value. The mature engine's confirmed-swing
+market-structure snapshot is also supplied, so only pivots confirmed by the
+signal time can influence the AI decision.
 
 The exact deterministic trade contract for each side is included so the model
 can distinguish, for example, a small-R scalp from a longer-horizon target.
