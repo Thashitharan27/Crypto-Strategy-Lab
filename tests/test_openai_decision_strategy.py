@@ -135,10 +135,33 @@ def test_ai_snapshot_keeps_higher_timeframe_sr_independent_and_adds_structure():
                 "market_structure_breakout_confirmed_by_close": True,
             }
 
-    enriched = enrich_ai_snapshot(Engine(), 0, {"market_regime": "BULL"})
+    base_snapshot = {
+        "market_regime": "BULL",
+        "directional_context": {
+            "LONG": {
+                "trade_contract": {
+                    "enabled": False,
+                    "reward_risk_ratio": 2.0,
+                }
+            },
+            "SHORT": {
+                "trade_contract": {
+                    "enabled": True,
+                    "reward_risk_ratio": 1.0,
+                }
+            },
+        },
+    }
+    enriched = enrich_ai_snapshot(Engine(), 0, base_snapshot)
     htf = enriched["higher_timeframe_support_resistance"]
 
     assert enriched["symbol"] == "BTCUSDT"
+    assert "enabled" not in enriched["directional_context"]["LONG"]["trade_contract"]
+    assert "enabled" not in enriched["directional_context"]["SHORT"]["trade_contract"]
+    assert (
+        enriched["directional_context"]["LONG"]["trade_contract"]["reward_risk_ratio"]
+        == 2.0
+    )
     assert htf["1h"]["long"]["support_state"] == "SUPPORT_HELD"
     assert htf["1h"]["long"]["room_in_direction_atr"] == 3.4
     assert htf["1h"]["short"]["resistance_state"] == "RESISTANCE_TESTING"
