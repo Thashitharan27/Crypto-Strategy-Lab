@@ -5,8 +5,16 @@ import pytest
 from crypto_strategy_lab.ai_decision import (
     AI_DECISION_JSON_SCHEMA,
     AIDecisionCache,
+    OPENAI_DECISION_MODE,
     decision_cache_key,
     validate_ai_decision,
+)
+from crypto_strategy_lab.strategy_rule_model import (
+    DIRECTION_MODES,
+    MARKET_PERMISSIONS,
+    compile_profiles,
+    decompile_rules,
+    infer_direction_mode,
 )
 
 
@@ -53,6 +61,32 @@ def test_schema_has_no_abstain_or_no_trade_choice():
         "LONG",
         "SHORT",
     ]
+
+
+def test_openai_decision_is_a_first_class_signal_mode():
+    assert OPENAI_DECISION_MODE in DIRECTION_MODES
+    strategy, _execution = compile_profiles(
+        direction_mode=OPENAI_DECISION_MODE,
+        market_permissions=MARKET_PERMISSIONS,
+    )
+    assert infer_direction_mode(strategy) == OPENAI_DECISION_MODE
+    assert decompile_rules(strategy) == {
+        "REQUIRED": (),
+        "VETO": (),
+        "FLIP": (),
+    }
+    for profile in strategy.values():
+        marker = profile.entry_rules[0]
+        assert marker["_strategy_direction_mode"] == OPENAI_DECISION_MODE
+        assert marker["_strategy_builtin_rule"] == "OPENAI_DIRECTION_SIGNAL"
+        assert marker["action"] == "REJECT"
+        assert marker["condition"] == "OUTSIDE"
+
+
+def test_gui_exposes_openai_signal_label():
+    from crypto_strategy_lab.gui.rule_strategy_builder import DIRECTION_LABELS
+
+    assert DIRECTION_LABELS[OPENAI_DECISION_MODE] == "AI Decision — OpenAI"
 
 
 def test_cache_round_trip_is_snapshot_and_model_specific(tmp_path):
