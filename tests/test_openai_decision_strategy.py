@@ -9,6 +9,7 @@ from crypto_strategy_lab.ai_decision import (
     decision_cache_key,
     validate_ai_decision,
 )
+from crypto_strategy_lab.ai_snapshot_enrichment import enrich_ai_snapshot
 from crypto_strategy_lab.strategy_rule_model import (
     DIRECTION_MODES,
     MARKET_PERMISSIONS,
@@ -87,6 +88,57 @@ def test_gui_exposes_openai_signal_label():
     from crypto_strategy_lab.gui.rule_strategy_builder import DIRECTION_LABELS
 
     assert DIRECTION_LABELS[OPENAI_DECISION_MODE] == "AI Decision — OpenAI"
+
+
+def test_control_workspace_exposes_openai_signal_label_without_gui_dependency():
+    from crypto_strategy_lab.control_rule_workspace import SIGNAL_STRATEGIES
+
+    assert SIGNAL_STRATEGIES[OPENAI_DECISION_MODE] == "AI Decision — OpenAI"
+
+
+def test_ai_snapshot_keeps_higher_timeframe_sr_independent_and_adds_structure():
+    class Engine:
+        def _prepared_research_raw_value(self, _i, feature_name, column):
+            values = {
+                (
+                    "support_resistance_1h",
+                    "sr_1h_long_support_state",
+                ): "SUPPORT_HELD",
+                (
+                    "support_resistance_1h",
+                    "sr_1h_long_room_in_direction_atr",
+                ): 3.4,
+                (
+                    "support_resistance_1h",
+                    "sr_1h_short_resistance_state",
+                ): "RESISTANCE_TESTING",
+                (
+                    "support_resistance_4h",
+                    "sr_4h_long_support_state",
+                ): "APPROACHING_SUPPORT",
+                (
+                    "support_resistance_1d",
+                    "sr_1d_short_resistance_state",
+                ): "RESISTANCE_HELD",
+            }
+            return values.get((feature_name, column))
+
+        def _market_structure_snapshot(self, _i):
+            return {
+                "market_structure_direction": "LONG",
+                "market_structure_reason": "HIGHER_HIGH_AND_HIGHER_LOW",
+                "market_structure_breakout_confirmed_by_close": True,
+            }
+
+    enriched = enrich_ai_snapshot(Engine(), 0, {"market_regime": "BULL"})
+    htf = enriched["higher_timeframe_support_resistance"]
+
+    assert htf["1h"]["long"]["support_state"] == "SUPPORT_HELD"
+    assert htf["1h"]["long"]["room_in_direction_atr"] == 3.4
+    assert htf["1h"]["short"]["resistance_state"] == "RESISTANCE_TESTING"
+    assert htf["4h"]["long"]["support_state"] == "APPROACHING_SUPPORT"
+    assert htf["1d"]["short"]["resistance_state"] == "RESISTANCE_HELD"
+    assert enriched["confirmed_market_structure"]["market_structure_direction"] == "LONG"
 
 
 def test_cache_round_trip_is_snapshot_and_model_specific(tmp_path):
