@@ -82,24 +82,28 @@ def snapshot_symbol(engine) -> str | None:
     return match.group(1) if match else stem or None
 
 
-def _remove_permission_flags(snapshot: dict[str, Any]) -> None:
-    """Keep deterministic market permissions from biasing the AI side choice."""
+def _remove_permission_hints(snapshot: dict[str, Any]) -> None:
+    """Keep deterministic market permissions out of the model's evidence.
+
+    The model must rate LONG and SHORT from market evidence even if one side is
+    disabled by the execution policy. Permission gating remains downstream.
+    """
     directional = snapshot.get("directional_context")
     if not isinstance(directional, dict):
         return
     for side in ("LONG", "SHORT"):
-        context = directional.get(side)
-        if not isinstance(context, dict):
+        side_context = directional.get(side)
+        if not isinstance(side_context, dict):
             continue
-        contract = context.get("trade_contract")
+        contract = side_context.get("trade_contract")
         if isinstance(contract, dict):
             contract.pop("enabled", None)
 
 
 def enrich_ai_snapshot(engine, i: int, snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Add identity/structure while keeping permissions outside AI reasoning."""
+    """Add identity, independent HTF S/R and confirmed causal structure."""
     result = dict(snapshot)
-    _remove_permission_flags(result)
+    _remove_permission_hints(result)
     result["symbol"] = snapshot_symbol(engine)
     result["higher_timeframe_support_resistance"] = higher_timeframe_sr_snapshot(
         engine, i
