@@ -1,6 +1,8 @@
 """Enrich AI direction snapshots with causal higher-timeframe structure."""
 from __future__ import annotations
 
+from pathlib import Path
+import re
 from typing import Any
 
 from crypto_strategy_core.support_resistance_evidence import SR_CONTEXT_FIELDS
@@ -66,9 +68,24 @@ def confirmed_market_structure_snapshot(engine, i: int):
         return None
 
 
+def snapshot_symbol(engine) -> str | None:
+    """Recover the traded symbol without exposing a path or GUI-only request object."""
+    config = getattr(engine, "config", None)
+    configured = str(getattr(config, "market_symbol", "") or "").strip().upper()
+    if configured and configured != "POLICY":
+        return configured
+    input_csv = str(getattr(config, "input_csv", "") or "").strip()
+    if not input_csv:
+        return None
+    stem = Path(input_csv).stem.upper()
+    match = re.match(r"([A-Z]+?)(?:USDT|USD|BTC|ETH)?(?:_|-|$)", stem)
+    return match.group(1) if match else stem or None
+
+
 def enrich_ai_snapshot(engine, i: int, snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Add independent HTF S/R and confirmed structure without changing base facts."""
+    """Add identity, independent HTF S/R and confirmed causal structure."""
     result = dict(snapshot)
+    result["symbol"] = snapshot_symbol(engine)
     result["higher_timeframe_support_resistance"] = higher_timeframe_sr_snapshot(
         engine, i
     )
