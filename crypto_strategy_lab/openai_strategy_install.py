@@ -6,11 +6,19 @@ strategy/profile/runtime seams without duplicating the production engine.
 from __future__ import annotations
 
 from dataclasses import replace
+import importlib.abc
+import importlib.machinery
+import sys
 
 from crypto_strategy_lab.ai_decision import OPENAI_DECISION_MODE, OpenAIDecisionMixin
 
 
 _INSTALLED = False
+_LABEL = "AI Decision — OpenAI"
+_LABEL_MODULES = {
+    "crypto_strategy_lab.gui.rule_strategy_builder": "DIRECTION_LABELS",
+    "crypto_strategy_lab.control_rule_workspace": "SIGNAL_STRATEGIES",
+}
 
 
 def _openai_marker_rule() -> dict:
@@ -26,6 +34,55 @@ def _openai_marker_rule() -> dict:
         "_strategy_direction_mode": OPENAI_DECISION_MODE,
         "_strategy_builtin_rule": "OPENAI_DIRECTION_SIGNAL",
     }
+
+
+def _patch_label_module(fullname: str, module) -> None:
+    mapping_name = _LABEL_MODULES.get(fullname)
+    if not mapping_name:
+        return
+    mapping = getattr(module, mapping_name, None)
+    if isinstance(mapping, dict):
+        mapping.setdefault(OPENAI_DECISION_MODE, _LABEL)
+
+
+class _LabelPatchLoader(importlib.abc.Loader):
+    def __init__(self, fullname: str, wrapped):
+        self.fullname = fullname
+        self.wrapped = wrapped
+
+    def create_module(self, spec):
+        creator = getattr(self.wrapped, "create_module", None)
+        return creator(spec) if creator is not None else None
+
+    def exec_module(self, module):
+        self.wrapped.exec_module(module)
+        _patch_label_module(self.fullname, module)
+
+
+class _LabelPatchFinder(importlib.abc.MetaPathFinder):
+    _openai_decision_label_finder = True
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname not in _LABEL_MODULES:
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        if spec is None or spec.loader is None:
+            return spec
+        if not isinstance(spec.loader, _LabelPatchLoader):
+            spec.loader = _LabelPatchLoader(fullname, spec.loader)
+        return spec
+
+
+def _install_lazy_labels() -> None:
+    for fullname in _LABEL_MODULES:
+        module = sys.modules.get(fullname)
+        if module is not None:
+            _patch_label_module(fullname, module)
+    if not any(
+        getattr(finder, "_openai_decision_label_finder", False)
+        for finder in sys.meta_path
+    ):
+        sys.meta_path.insert(0, _LabelPatchFinder())
 
 
 def _install_strategy_authoring() -> None:
@@ -142,4 +199,5 @@ def install_openai_decision_strategy() -> None:
         return
     _install_strategy_authoring()
     _install_runtime()
+    _install_lazy_labels()
     _INSTALLED = True
