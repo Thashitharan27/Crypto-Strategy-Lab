@@ -11,6 +11,7 @@ import importlib.machinery
 import sys
 
 from crypto_strategy_lab.ai_decision import OPENAI_DECISION_MODE, OpenAIDecisionMixin
+from crypto_strategy_lab.ai_snapshot_enrichment import enrich_ai_snapshot
 
 
 _INSTALLED = False
@@ -142,9 +143,14 @@ def _install_runtime() -> None:
     for name in helper_names:
         setattr(BacktestEngine, name, getattr(OpenAIDecisionMixin, name))
 
+    original_ai_market_snapshot = BacktestEngine._ai_market_snapshot
     original_infer = BacktestEngine._infer_signal_strategy_mode
     original_selected = BacktestEngine._selected_direction
     original_build_row = BacktestEngine._build_result_row
+
+    def ai_market_snapshot(self, i):
+        snapshot = original_ai_market_snapshot(self, i)
+        return enrich_ai_snapshot(self, i, snapshot)
 
     def infer_signal_strategy_mode(self):
         for profile in self.config.strategy_profiles.values():
@@ -187,6 +193,7 @@ def _install_runtime() -> None:
         )
         return row
 
+    BacktestEngine._ai_market_snapshot = ai_market_snapshot
     BacktestEngine._infer_signal_strategy_mode = infer_signal_strategy_mode
     BacktestEngine._selected_direction = selected_direction
     BacktestEngine._build_result_row = build_result_row
