@@ -97,7 +97,12 @@ def test_control_workspace_exposes_openai_signal_label_without_gui_dependency():
 
 
 def test_ai_snapshot_keeps_higher_timeframe_sr_independent_and_adds_structure():
+    class Config:
+        market_symbol = "BTCUSDT"
+
     class Engine:
+        config = Config()
+
         def _prepared_research_raw_value(self, _i, feature_name, column):
             values = {
                 (
@@ -133,6 +138,7 @@ def test_ai_snapshot_keeps_higher_timeframe_sr_independent_and_adds_structure():
     enriched = enrich_ai_snapshot(Engine(), 0, {"market_regime": "BULL"})
     htf = enriched["higher_timeframe_support_resistance"]
 
+    assert enriched["symbol"] == "BTCUSDT"
     assert htf["1h"]["long"]["support_state"] == "SUPPORT_HELD"
     assert htf["1h"]["long"]["room_in_direction_atr"] == 3.4
     assert htf["1h"]["short"]["resistance_state"] == "RESISTANCE_TESTING"
