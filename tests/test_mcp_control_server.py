@@ -224,6 +224,8 @@ def test_unified_server_keeps_expected_tool_groups_stable():
         "read_walk_forward_experiment",
         "list_walk_forward_experiments",
         "append_walk_forward_experiment_event",
+        "materialize_walk_forward_strategy",
+        "create_run_from_walk_forward_experiment",
     }
     assert set(READ_TOOLS) == {
         "list_runs",
