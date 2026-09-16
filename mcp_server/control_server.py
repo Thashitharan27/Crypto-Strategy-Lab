@@ -2,14 +2,14 @@
 
 The 8766 endpoint is the primary ChatGPT-facing Crypto Strategy Lab surface. It
 combines bounded backtest control, GUI-parity Strategy Builder rule groups,
-restricted walk-forward state persistence, and the same read-only completed-run
-analysis tools exposed by ``mcp_server.server``. The legacy 8765 read-only server
-remains available for backward compatibility.
+restricted walk-forward persistence, event-sourced causal experiments, and the
+same read-only completed-run analysis tools exposed by ``mcp_server.server``.
+The legacy 8765 read-only server remains available for backward compatibility.
 
 Write capability remains deliberately narrow: this server cannot execute
 arbitrary shell commands, edit source code, access credentials, place exchange
-orders, or control live trading. Walk-forward persistence is confined to one
-project-local state directory and fixed Markdown/JSONL filenames.
+orders, or control live trading. Walk-forward persistence is confined to fixed
+project-local directories and validated state/experiment identifiers.
 """
 from __future__ import annotations
 
@@ -70,6 +70,13 @@ WALK_FORWARD_STATE_TOOLS = (
     "read_walk_forward_state",
     "update_walk_forward_state",
     "append_walk_forward_event",
+)
+
+CAUSAL_EXPERIMENT_TOOLS = (
+    "create_walk_forward_experiment",
+    "read_walk_forward_experiment",
+    "list_walk_forward_experiments",
+    "append_walk_forward_experiment_event",
 )
 
 
@@ -249,7 +256,7 @@ def create_control_server(
         return control.read_control_log(run_id, stream, lines)
 
     # ------------------------------------------------------------------
-    # Restricted causal walk-forward state tools.
+    # Legacy/human-readable walk-forward state tools.
     # ------------------------------------------------------------------
     @server.tool()
     def create_walk_forward_state(
@@ -285,6 +292,63 @@ def create_control_server(
     ) -> dict[str, Any]:
         """Append an immutable JSONL audit event linked to the current state hash."""
         return control.append_walk_forward_event(state_id, event)
+
+    # ------------------------------------------------------------------
+    # Event-sourced causal experiment tools.
+    # ------------------------------------------------------------------
+    @server.tool()
+    def create_walk_forward_experiment(
+        experiment_id: str,
+        definition: dict[str, Any],
+        operation_id: str,
+        initial_phase: str = "RESEARCH_WF",
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Create an immutable causal experiment definition and authoritative event stream."""
+        return control.create_walk_forward_experiment(
+            experiment_id,
+            definition,
+            operation_id,
+            initial_phase,
+            notes,
+        )
+
+    @server.tool()
+    def read_walk_forward_experiment(
+        experiment_id: str, recent_events: int = 100
+    ) -> dict[str, Any]:
+        """Read a verified causal experiment chain and its derived current state."""
+        return control.read_walk_forward_experiment(experiment_id, recent_events)
+
+    @server.tool()
+    def list_walk_forward_experiments() -> list[dict[str, Any]]:
+        """List bounded causal experiment identities and current chain heads."""
+        return control.list_walk_forward_experiments()
+
+    @server.tool()
+    def append_walk_forward_experiment_event(
+        experiment_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        effective_market_time: str | None = None,
+        event_time: str | None = None,
+        source: str = "CHATGPT_RESEARCH",
+    ) -> dict[str, Any]:
+        """Append one idempotent hash-chained event after causal-state validation."""
+        return control.append_walk_forward_experiment_event(
+            experiment_id,
+            event_type,
+            payload,
+            operation_id,
+            expected_sequence,
+            expected_state_hash,
+            effective_market_time,
+            event_time,
+            source,
+        )
 
     # ------------------------------------------------------------------
     # Completed-run research tools. These delegate to the existing
@@ -351,7 +415,7 @@ def create_control_server(
     @server.tool()
     def query_parquet(run: str, filename: str, sql: str) -> dict[str, Any]:
         """Query an allowed parquet inside a completed run using restricted SQL."""
-        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run)
+        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run, filename)
         return reports.query_parquet(run, filename, sql)
 
     @server.tool()
@@ -421,7 +485,7 @@ def main() -> None:
     host = "127.0.0.1"
     LOGGER.info(
         "Unified Crypto Strategy Lab MCP starting "
-        "(BACKTEST_CONTROL + WALK_FORWARD_STATE + READ_ONLY_RESEARCH)"
+        "(BACKTEST_CONTROL + WALK_FORWARD_STATE + CAUSAL_EXPERIMENTS + READ_ONLY_RESEARCH)"
     )
     LOGGER.info("Host: %s", host)
     LOGGER.info("Port: %s", port)
@@ -430,6 +494,7 @@ def main() -> None:
     LOGGER.info("Max concurrent runs: %s", control.max_concurrent_runs)
     LOGGER.info("Control tools: %s", ", ".join(CONTROL_TOOLS))
     LOGGER.info("Walk-forward state tools: %s", ", ".join(WALK_FORWARD_STATE_TOOLS))
+    LOGGER.info("Causal experiment tools: %s", ", ".join(CAUSAL_EXPERIMENT_TOOLS))
     LOGGER.info("Research tools: %s", ", ".join(READ_TOOLS))
     create_control_server(control, reports).run(
         transport="streamable-http",
