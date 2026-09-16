@@ -8,6 +8,7 @@ It deliberately never validates, starts, shadows, or promotes a run by itself.
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -75,10 +76,18 @@ def _profile_from_payload(payload: dict[str, Any], inherited: str | None = None)
     raise ValueError("executable rule is missing an exact profile")
 
 
+def _stable_condition_id(rule_id: str, rule_version: str, index: int) -> str:
+    digest = hashlib.sha256(
+        f"{rule_id}@{rule_version}:{index}".encode("utf-8")
+    ).hexdigest()[:12]
+    return f"wf_{digest}_{index}"
+
+
 def _executable_group(
     payload: dict[str, Any],
     *,
     rule_id: str,
+    rule_version: str,
     inherited: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     prior = deepcopy(inherited or {})
@@ -98,6 +107,15 @@ def _executable_group(
             f"active rule {rule_id} has no executable conditions; migrate or refine it with a full rule definition"
         )
 
+    normalized_conditions: list[dict[str, Any]] = []
+    for index, raw_condition in enumerate(conditions, 1):
+        if not isinstance(raw_condition, dict):
+            raise ValueError(f"active rule {rule_id} contains a non-object condition")
+        condition = deepcopy(raw_condition)
+        if condition.get("id") in (None, ""):
+            condition["id"] = _stable_condition_id(rule_id, rule_version, index)
+        normalized_conditions.append(condition)
+
     group_id = str(
         payload.get("group_id")
         or merged_group.get("id")
@@ -116,9 +134,9 @@ def _executable_group(
     group = {
         "id": group_id,
         "name": name,
-        "enabled": bool(enabled),
+        "enabled": enabled,
         "match_mode": match_mode,
-        "conditions": deepcopy(conditions),
+        "conditions": normalized_conditions,
     }
     return profile, group
 
@@ -149,6 +167,7 @@ def _active_rule_versions(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             profile, group = _executable_group(
                 payload,
                 rule_id=rule_id,
+                rule_version=version,
                 inherited=inherited,
             )
             record = {
@@ -292,12 +311,13 @@ def materialize_walk_forward_strategy(
         profile = rule["profile"]
         family = rule["family"]
         group = deepcopy(rule["group"])
-        workspace.add_group(profile, family, group)
-        groups_by_profile[profile][family].append(group)
-        if family == "ENTRY" and bool(group.get("enabled", True)):
+        built = workspace.add_group(profile, family, group)
+        groups_by_profile[profile][family].append(built)
+        if family == "ENTRY" and bool(built.get("enabled", True)):
             profiles_with_entry.add(profile)
 
     materialized_config = workspace.to_config()
+    materialized_config.setdefault("reporting", {})["output_dir"] = str(control.output_root)
     original_profiles = (base_config.get("strategy") or {}).get("profiles") or {}
     for profile in PROFILE_KEYS:
         original_enabled = bool((original_profiles.get(profile) or {}).get("enabled", False))
@@ -446,6 +466,7 @@ def create_run_from_walk_forward_experiment(
         snapshot_path = _persist_snapshot(control, snapshot_payload)
         job = control._job(run_id)
         provenance["strategy_snapshot_path"] = str(snapshot_path.relative_to(control.project_root))
+        provenance["run_config_sha256"] = canonical_sha256(job.config)
         _atomic_json(job.state_dir / "walk_forward_provenance.json", provenance)
     except Exception:
         try:
