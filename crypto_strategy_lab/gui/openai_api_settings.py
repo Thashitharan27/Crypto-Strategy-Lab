@@ -1,16 +1,9 @@
 """OpenAI API credential settings for the desktop GUI.
 
 The API key is intentionally kept outside ResearchRunConfig and all run artifacts.
-On Windows the GUI persists it as the current user's OPENAI_API_KEY environment
-variable, matching OpenAI's recommended environment-variable setup. The running
-process is updated immediately so the user does not need to restart the app.
+Persistent storage uses the operating-system credential vault via ``keyring``.
 """
 from __future__ import annotations
-
-import ctypes
-from ctypes import wintypes
-import os
-from typing import Any
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
@@ -26,144 +19,21 @@ from PySide6.QtWidgets import (
 )
 
 from crypto_strategy_lab.ai_decision import AI_MODEL
+from crypto_strategy_lab.openai_credentials import (
+    activate_openai_api_key,
+    openai_api_key_status,
+    remove_saved_openai_api_key,
+    save_openai_api_key,
+)
 
 
-OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 OPENAI_API_KEYS_URL = "https://platform.openai.com/api-keys"
 OPENAI_USAGE_URL = "https://platform.openai.com/usage"
 
 
-def _windows_user_environment_value(name: str) -> str | None:
-    """Read one user-level Windows environment value without shelling out."""
-    if os.name != "nt":
-        return None
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-            value, _kind = winreg.QueryValueEx(key, name)
-    except (FileNotFoundError, OSError):
-        return None
-    value = str(value).strip()
-    return value or None
-
-
-def _broadcast_windows_environment_change() -> None:
-    """Tell Explorer/new child processes that the user environment changed."""
-    if os.name != "nt":
-        return
-    try:
-        hwnd_broadcast = 0xFFFF
-        wm_settingchange = 0x001A
-        smto_abortifhung = 0x0002
-        result = wintypes.DWORD_PTR()
-        ctypes.windll.user32.SendMessageTimeoutW(
-            hwnd_broadcast,
-            wm_settingchange,
-            0,
-            "Environment",
-            smto_abortifhung,
-            5000,
-            ctypes.byref(result),
-        )
-    except Exception:
-        # The current process is already updated directly. Broadcasting is only
-        # for future sibling processes and must never prevent saving the key.
-        pass
-
-
-def _save_windows_user_environment_value(name: str, value: str) -> None:
-    if os.name != "nt":
-        return
-    import winreg
-
-    with winreg.CreateKeyEx(
-        winreg.HKEY_CURRENT_USER,
-        "Environment",
-        0,
-        winreg.KEY_SET_VALUE,
-    ) as key:
-        winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
-    _broadcast_windows_environment_change()
-
-
-def _delete_windows_user_environment_value(name: str) -> bool:
-    if os.name != "nt":
-        return False
-    try:
-        import winreg
-
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            "Environment",
-            0,
-            winreg.KEY_SET_VALUE,
-        ) as key:
-            winreg.DeleteValue(key, name)
-    except (FileNotFoundError, OSError):
-        return False
-    _broadcast_windows_environment_change()
-    return True
-
-
-def activate_saved_openai_api_key() -> str | None:
-    """Load a persisted Windows user key into this process when necessary."""
-    runtime = str(os.environ.get(OPENAI_API_KEY_ENV, "")).strip()
-    if runtime:
-        return runtime
-    saved = _windows_user_environment_value(OPENAI_API_KEY_ENV)
-    if saved:
-        os.environ[OPENAI_API_KEY_ENV] = saved
-        return saved
-    return None
-
-
-def openai_api_key_status() -> dict[str, Any]:
-    """Return non-secret status information only; never expose the key value."""
-    runtime = str(os.environ.get(OPENAI_API_KEY_ENV, "")).strip() or None
-    saved = _windows_user_environment_value(OPENAI_API_KEY_ENV)
-    if runtime is None and saved:
-        os.environ[OPENAI_API_KEY_ENV] = saved
-        runtime = saved
-    if saved:
-        source = "Windows user environment"
-    elif runtime:
-        source = "current/inherited process environment"
-    else:
-        source = None
-    return {
-        "configured": bool(runtime or saved),
-        "source": source,
-        "persistent": bool(saved),
-    }
-
-
-def save_openai_api_key(value: str) -> dict[str, Any]:
-    """Activate the key now and persist it for this Windows user when possible."""
-    key = str(value).strip()
-    if not key:
-        raise ValueError("Enter an OpenAI API key before saving.")
-    if any(character.isspace() for character in key):
-        raise ValueError("The API key must not contain whitespace.")
-
-    # Immediate use by OpenAI SDK clients in this running application.
-    os.environ[OPENAI_API_KEY_ENV] = key
-    if os.name == "nt":
-        _save_windows_user_environment_value(OPENAI_API_KEY_ENV, key)
-    return openai_api_key_status()
-
-
-def remove_saved_openai_api_key() -> dict[str, Any]:
-    """Remove the user-saved key and clear it from the running process."""
-    if os.name == "nt":
-        _delete_windows_user_environment_value(OPENAI_API_KEY_ENV)
-    os.environ.pop(OPENAI_API_KEY_ENV, None)
-    return openai_api_key_status()
-
-
-def test_openai_api_key(value: str | None = None) -> dict[str, Any]:
+def test_openai_api_key(value: str | None = None) -> dict[str, object]:
     """Authenticate with the Models endpoint; this does not generate model output."""
-    key = str(value or "").strip() or activate_saved_openai_api_key()
+    key = str(value or "").strip() or activate_openai_api_key()
     if not key:
         return {"ok": False, "message": "No OpenAI API key is configured."}
     try:
@@ -191,7 +61,7 @@ def test_openai_api_key(value: str | None = None) -> dict[str, Any]:
                 "warning": True,
                 "message": (
                     "The key authenticated, but this project restricts model-list access. "
-                    "The strategy can still work if the Responses and Batch endpoints are permitted."
+                    "The strategy can still work if Responses and Batch permissions are enabled."
                 ),
             }
         return {"ok": False, "message": f"OpenAI connection failed: {exc}"}
@@ -217,7 +87,7 @@ class OpenAIAPISettingsWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        activate_saved_openai_api_key()
+        activate_openai_api_key()
 
         layout = QVBoxLayout(self)
         intro = QLabel(
@@ -271,9 +141,10 @@ class OpenAIAPISettingsWidget(QWidget):
         security_box = QGroupBox("Security / Billing")
         security_layout = QVBoxLayout(security_box)
         security_note = QLabel(
-            "On Windows, Save API Key stores OPENAI_API_KEY in your Windows user environment and "
-            "also activates it immediately for this running app. This is separate from ChatGPT Plus. "
-            "Use an API Project with a sensible budget and restricted permissions where practical."
+            "Save API Key stores the secret in the operating-system credential vault "
+            "(Windows Credential Manager on Windows) and activates OPENAI_API_KEY only inside "
+            "the running process. This API billing is separate from ChatGPT Plus. Use an API "
+            "Project with a sensible budget and restricted permissions where practical."
         )
         security_note.setWordWrap(True)
         security_layout.addWidget(security_note)
@@ -309,7 +180,7 @@ class OpenAIAPISettingsWidget(QWidget):
     def refresh_status(self) -> None:
         status = openai_api_key_status()
         if status["configured"]:
-            persistence = "persistent" if status["persistent"] else "session/inherited"
+            persistence = "saved" if status["persistent"] else "environment/session"
             self.status_label.setText(
                 f"Status: Configured ({status['source']}; {persistence})."
             )
@@ -330,18 +201,20 @@ class OpenAIAPISettingsWidget(QWidget):
         self.refresh_status()
         if status["persistent"]:
             self.result_label.setText(
-                "API key saved to the Windows user environment and activated for this app."
+                "API key saved securely in the OS credential vault and activated for this app."
             )
         else:
-            self.result_label.setText(
-                "API key activated for this app session. Persistent GUI saving is currently Windows-only."
-            )
+            self.result_label.setText("API key activated for this app session.")
 
     def remove_key(self) -> None:
-        remove_saved_openai_api_key()
+        try:
+            remove_saved_openai_api_key()
+        except Exception as exc:
+            self.result_label.setText(f"Could not remove saved API key: {exc}")
+            return
         self.key_input.clear()
         self.show_key.setChecked(False)
-        self.result_label.setText("Saved OpenAI API key removed from this app/user environment.")
+        self.result_label.setText("Saved OpenAI API key removed from the OS credential vault.")
         self.refresh_status()
 
     def test_connection(self) -> None:
