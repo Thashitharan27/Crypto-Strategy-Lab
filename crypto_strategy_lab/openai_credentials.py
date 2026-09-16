@@ -111,8 +111,9 @@ def remove_saved_openai_api_key() -> dict[str, Any]:
         try:
             keyring.delete_password(KEYRING_SERVICE, KEYRING_USERNAME)
         except Exception as exc:
-            # Some backends raise when the credential disappeared between read/delete.
-            if exc.__class__.__name__ not in {"PasswordDeleteError", "KeyringError"}:
+            # Some backends raise only because the credential disappeared between
+            # the read and delete calls; other errors should remain visible.
+            if exc.__class__.__name__ != "PasswordDeleteError":
                 raise
 
     runtime = str(os.environ.get(OPENAI_API_KEY_ENV, "")).strip() or None
