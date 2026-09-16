@@ -1,0 +1,270 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from crypto_strategy_lab.causal_experiment import CausalExperimentStore
+
+
+def _definition() -> dict:
+    return {
+        "symbol": "BTCUSDT",
+        "strategy_timeframe": "1d",
+        "intrabar_timeframe": "1m",
+        "strategy": "DI_DIRECTION",
+        "stop_loss": {"type": "ATR", "multiple": 1.0},
+        "take_profit": {"type": "R", "multiple": 1.0},
+        "regime_method": "ASSET_RETURN",
+        "risk_model": "FIXED_FRACTIONAL",
+        "reference_run": "BTCUSDT_1d_reference",
+        "initial_equity": 2500.0,
+        "risk_pct": 1.0,
+        "decision_time": "WAIT_UNTIL_CLOSED",
+        "feature_schema_version": 1,
+        "fee_model_version": "native",
+    }
+
+
+def _create(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    created = store.create(
+        "BTCUSDT_1D_DI_1R_WF001",
+        _definition(),
+        "create:BTC:001",
+    )
+    return store, created
+
+
+def test_create_read_and_list_experiment(tmp_path):
+    store, created = _create(tmp_path)
+
+    assert created["sequence"] == 1
+    assert created["phase"] == "RESEARCH_WF"
+    assert len(created["state_hash"]) == 64
+
+    readback = store.read("BTCUSDT_1D_DI_1R_WF001")
+    assert readback["manifest"]["definition"]["reference_run"] == "BTCUSDT_1d_reference"
+    assert readback["sequence"] == 1
+    assert readback["state_hash"] == created["state_hash"]
+    assert readback["derived_state"]["phase"] == "RESEARCH_WF"
+
+    rows = store.list_experiments()
+    assert rows == [
+        {
+            "experiment_id": "BTCUSDT_1D_DI_1R_WF001",
+            "created_at": readback["manifest"]["created_at"],
+            "definition_sha256": readback["manifest"]["definition_sha256"],
+            "symbol": "BTCUSDT",
+            "strategy_timeframe": "1d",
+            "sequence": 1,
+            "state_hash": created["state_hash"],
+            "phase": "RESEARCH_WF",
+        }
+    ]
+
+
+def test_definition_requires_experiment_identity_fields(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition.pop("take_profit")
+
+    with pytest.raises(ValueError, match="take_profit"):
+        store.create("BTC_TEST", definition, "create:missing")
+
+
+def test_context_freeze_reveal_state_machine(tmp_path):
+    store, created = _create(tmp_path)
+    experiment_id = "BTCUSDT_1D_DI_1R_WF001"
+
+    captured = store.append_event(
+        experiment_id,
+        "CANDIDATE_CONTEXT_CAPTURED",
+        {"candidate_id": "2021-05-05T00:00:00Z", "feature_hash": "abc123"},
+        "candidate:2021-05-05:capture",
+        created["sequence"],
+        created["state_hash"],
+        effective_market_time="2021-05-05T00:00:00Z",
+    )
+    assert captured["derived_state"]["candidate_states"]["2021-05-05T00:00:00Z"] == "ENTRY_CONTEXT_CAPTURED"
+
+    with pytest.raises(ValueError, match="decision is frozen"):
+        store.append_event(
+            experiment_id,
+            "OUTCOME_REVEALED",
+            {"candidate_id": "2021-05-05T00:00:00Z", "net_r": 1.0},
+            "candidate:2021-05-05:reveal-too-soon",
+            captured["sequence"],
+            captured["state_hash"],
+        )
+
+    frozen = store.append_event(
+        experiment_id,
+        "DECISION_FROZEN",
+        {
+            "candidate_id": "2021-05-05T00:00:00Z",
+            "final_action": "LONG",
+            "ai_side": "LONG",
+            "ai_confidence": 74,
+            "matched_entry_rule_versions": ["Entry15@v3"],
+            "state_hash_at_decision": captured["state_hash"],
+        },
+        "candidate:2021-05-05:freeze",
+        captured["sequence"],
+        captured["state_hash"],
+    )
+
+    revealed = store.append_event(
+        experiment_id,
+        "OUTCOME_REVEALED",
+        {"candidate_id": "2021-05-05T00:00:00Z", "net_r": 1.0},
+        "candidate:2021-05-05:reveal",
+        frozen["sequence"],
+        frozen["state_hash"],
+    )
+    assert revealed["derived_state"]["candidate_states"]["2021-05-05T00:00:00Z"] == "OUTCOME_REVEALED"
+
+
+def test_append_is_idempotent_by_operation_id(tmp_path):
+    store, created = _create(tmp_path)
+    kwargs = dict(
+        experiment_id="BTCUSDT_1D_DI_1R_WF001",
+        event_type="REVIEW_COMPLETED",
+        payload={"cadence": "MONTHLY", "period": "2021-05"},
+        operation_id="review:2021-05",
+        expected_sequence=created["sequence"],
+        expected_state_hash=created["state_hash"],
+        effective_market_time="2021-05-31T23:59:59Z",
+    )
+
+    first = store.append_event(**kwargs)
+    second = store.append_event(**kwargs)
+
+    assert first["idempotent_replay"] is False
+    assert second["idempotent_replay"] is True
+    assert second["sequence"] == first["sequence"]
+    assert second["state_hash"] == first["state_hash"]
+    assert store.read("BTCUSDT_1D_DI_1R_WF001")["sequence"] == 2
+
+
+def test_stale_sequence_or_hash_is_rejected(tmp_path):
+    store, created = _create(tmp_path)
+    appended = store.append_event(
+        "BTCUSDT_1D_DI_1R_WF001",
+        "REVIEW_COMPLETED",
+        {"cadence": "MONTHLY"},
+        "review:first",
+        created["sequence"],
+        created["state_hash"],
+    )
+    assert appended["sequence"] == 2
+
+    with pytest.raises(ValueError, match="changed since it was read"):
+        store.append_event(
+            "BTCUSDT_1D_DI_1R_WF001",
+            "REVIEW_COMPLETED",
+            {"cadence": "MONTHLY"},
+            "review:stale",
+            created["sequence"],
+            created["state_hash"],
+        )
+
+
+def test_rule_events_require_precise_version_and_effective_time(tmp_path):
+    store, created = _create(tmp_path)
+
+    with pytest.raises(ValueError, match="rule metadata"):
+        store.append_event(
+            "BTCUSDT_1D_DI_1R_WF001",
+            "ENTRY_LEARNED",
+            {"rule_id": "Entry15"},
+            "rule:Entry15:bad",
+            created["sequence"],
+            created["state_hash"],
+        )
+
+    learned = store.append_event(
+        "BTCUSDT_1D_DI_1R_WF001",
+        "ENTRY_LEARNED",
+        {
+            "rule_id": "Entry15",
+            "rule_version": "v1",
+            "effective_from": "2021-05-05T02:51:00Z",
+            "reason": "Resolved teacher winner established structure",
+            "evidence_source": "TEACHER",
+            "learned_from_trade": "teacher-123",
+            "conditions": [{"indicator": "ADX", "condition": "GTE", "value": 20}],
+        },
+        "rule:Entry15:v1",
+        created["sequence"],
+        created["state_hash"],
+        effective_market_time="2021-05-05T02:51:00Z",
+    )
+    rule = learned["derived_state"]["rules"]["Entry15@v1"]
+    assert rule["deployment_status"] == "RESEARCH_ONLY"
+    assert rule["effective_from"] == "2021-05-05T02:51:00Z"
+
+    with pytest.raises(ValueError, match="supersedes_version"):
+        store.append_event(
+            "BTCUSDT_1D_DI_1R_WF001",
+            "ENTRY_REFINED",
+            {
+                "rule_id": "Entry15",
+                "rule_version": "v2",
+                "effective_from": "2021-06-01T00:00:00Z",
+                "reason": "DI threshold refinement",
+                "evidence_source": "PROSPECTIVE_WF",
+            },
+            "rule:Entry15:v2:bad",
+            learned["sequence"],
+            learned["state_hash"],
+        )
+
+
+def test_phase_and_rule_deployment_are_derived_from_events(tmp_path):
+    store, created = _create(tmp_path)
+    learned = store.append_event(
+        "BTCUSDT_1D_DI_1R_WF001",
+        "ENTRY_LEARNED",
+        {
+            "rule_id": "Entry1",
+            "rule_version": "v1",
+            "effective_from": "2021-01-01T00:00:00Z",
+            "reason": "teacher evidence",
+            "evidence_source": "TEACHER",
+        },
+        "rule:Entry1:v1",
+        created["sequence"],
+        created["state_hash"],
+    )
+    shadow = store.append_event(
+        "BTCUSDT_1D_DI_1R_WF001",
+        "RULE_PROMOTED_TO_SHADOW",
+        {"rule_id": "Entry1", "rule_version": "v1"},
+        "rule:Entry1:v1:shadow",
+        learned["sequence"],
+        learned["state_hash"],
+    )
+    phase = store.append_event(
+        "BTCUSDT_1D_DI_1R_WF001",
+        "PHASE_CHANGED",
+        {"phase": "SHADOW", "reason": "walk-forward validated"},
+        "phase:shadow",
+        shadow["sequence"],
+        shadow["state_hash"],
+    )
+
+    state = phase["derived_state"]
+    assert state["phase"] == "SHADOW"
+    assert state["rules"]["Entry1@v1"]["deployment_status"] == "SHADOW"
+
+
+def test_hash_chain_detects_manual_event_tampering(tmp_path):
+    store, _ = _create(tmp_path)
+    events_path = tmp_path / "experiments" / "BTCUSDT_1D_DI_1R_WF001" / "events.jsonl"
+    rows = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["payload"]["initial_phase"] = "LIVE"
+    events_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="hash"):
+        store.read("BTCUSDT_1D_DI_1R_WF001")
