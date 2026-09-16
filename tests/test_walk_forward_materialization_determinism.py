@@ -24,8 +24,8 @@ def test_executable_group_assigns_stable_condition_ids():
     assert profile_a == profile_b == "bull_long"
     assert group_a == group_b
     assert [condition["id"] for condition in group_a["conditions"]] == [
-        "wf_a659081894ad_1",
-        "wf_8cf6226675de_2",
+        "wf_8caf703b5df3_1",
+        "wf_cd1a8efe869b_2",
     ]
 
 
