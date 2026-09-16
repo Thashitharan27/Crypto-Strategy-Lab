@@ -1,15 +1,9 @@
 """Unified opt-in MCP server for local backtest control and completed-run research.
 
-The 8766 endpoint is the primary ChatGPT-facing Crypto Strategy Lab surface. It
-combines bounded backtest control, GUI-parity Strategy Builder rule groups,
-restricted walk-forward persistence, event-sourced causal experiments, and the
-same read-only completed-run analysis tools exposed by ``mcp_server.server``.
-The legacy 8765 read-only server remains available for backward compatibility.
-
-Write capability remains deliberately narrow: this server cannot execute
-arbitrary shell commands, edit source code, access credentials, place exchange
-orders, or control live trading. Walk-forward persistence is confined to fixed
-project-local directories and validated state/experiment identifiers.
+The 8766 endpoint combines bounded backtest control, GUI-parity Strategy Builder
+rule groups, restricted walk-forward persistence, event-sourced causal research,
+and read-only completed-run analysis. It cannot place exchange orders or perform
+arbitrary filesystem/source/shell actions.
 """
 from __future__ import annotations
 
@@ -26,6 +20,14 @@ from crypto_strategy_lab.walk_forward_candidate_engine import (
 from crypto_strategy_lab.walk_forward_materialization import (
     create_run_from_walk_forward_experiment as _create_run_from_walk_forward_experiment,
     materialize_walk_forward_strategy as _materialize_walk_forward_strategy,
+)
+from crypto_strategy_lab.walk_forward_orchestrator import (
+    advance_walk_forward as _advance_walk_forward,
+    freeze_and_reveal_walk_forward_candidate as _freeze_and_reveal_walk_forward_candidate,
+    record_walk_forward_review as _record_walk_forward_review,
+    record_walk_forward_teacher_review as _record_walk_forward_teacher_review,
+    resolve_walk_forward_trade as _resolve_walk_forward_trade,
+    submit_walk_forward_decision as _submit_walk_forward_decision,
 )
 from mcp_server.server import BacktestReports
 
@@ -85,6 +87,12 @@ CAUSAL_EXPERIMENT_TOOLS = (
     "list_walk_forward_experiments",
     "append_walk_forward_experiment_event",
     "get_next_walk_forward_candidate",
+    "freeze_and_reveal_walk_forward_candidate",
+    "resolve_walk_forward_trade",
+    "advance_walk_forward",
+    "submit_walk_forward_decision",
+    "record_walk_forward_review",
+    "record_walk_forward_teacher_review",
     "materialize_walk_forward_strategy",
     "create_run_from_walk_forward_experiment",
 )
@@ -160,59 +168,47 @@ def create_control_server(
         return control.get_strategy_capabilities()
 
     @server.tool()
-    def get_rule_workspace(
-        run_id: str, profile: str | None = None
-    ) -> dict[str, Any]:
-        """Read back Entry/Veto/Flip groups exactly as the Strategy Builder represents them."""
+    def get_rule_workspace(run_id: str, profile: str | None = None) -> dict[str, Any]:
+        """Read Entry/Veto/Flip groups exactly as Strategy Builder represents them."""
         return control.get_rule_workspace(run_id, profile)
 
     @server.tool()
-    def list_rule_groups(
-        run_id: str, profile: str, family: str
-    ) -> dict[str, Any]:
-        """List one profile's ENTRY, VETO or FLIP groups with stable IDs and mute state."""
+    def list_rule_groups(run_id: str, profile: str, family: str) -> dict[str, Any]:
+        """List one profile's ENTRY, VETO or FLIP groups."""
         return control.list_rule_groups(run_id, profile, family)
 
     @server.tool()
     def set_rule_groups(
-        run_id: str,
-        profile: str,
-        family: str,
-        groups: list[dict[str, Any]],
+        run_id: str, profile: str, family: str, groups: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        """Replace only exact-profile groups for one family. Shared-scope groups are preserved."""
+        """Replace one exact profile/family's groups while preserving siblings."""
         return control.set_rule_groups(run_id, profile, family, groups)
 
     @server.tool()
     def add_rule_group(
-        run_id: str,
-        profile: str,
-        family: str,
-        group: dict[str, Any],
+        run_id: str, profile: str, family: str, group: dict[str, Any]
     ) -> dict[str, Any]:
-        """Add one independent Strategy Builder rule group without replacing existing groups."""
+        """Add one independent Strategy Builder rule group."""
         return control.add_rule_group(run_id, profile, family, group)
 
     @server.tool()
-    def update_rule_group(
-        run_id: str, group_id: str, patch: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Update one stable rule group by ID without disturbing sibling groups."""
+    def update_rule_group(run_id: str, group_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Update one stable rule group by ID."""
         return control.update_rule_group(run_id, group_id, patch)
 
     @server.tool()
     def delete_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
-        """Delete one rule group by stable ID and leave every other group untouched."""
+        """Delete one rule group by stable ID."""
         return control.delete_rule_group(run_id, group_id)
 
     @server.tool()
     def mute_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
-        """Mute one saved group so it has zero runtime effect without deleting it."""
+        """Mute one saved group without deleting it."""
         return control.mute_rule_group(run_id, group_id)
 
     @server.tool()
     def unmute_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
-        """Re-enable one previously muted saved rule group."""
+        """Re-enable one muted group."""
         return control.unmute_rule_group(run_id, group_id)
 
     @server.tool()
@@ -238,50 +234,46 @@ def create_control_server(
 
     @server.tool()
     def validate_run(run_id: str) -> dict[str, Any]:
-        """Validate a DRAFT and return its human-readable preview plus approval token."""
+        """Validate a DRAFT and return its preview and approval token."""
         return control.validate_run(run_id)
 
     @server.tool()
     def start_run(run_id: str, validation_token: str) -> dict[str, Any]:
-        """Start only the exact DRAFT approved by the latest validate_run call."""
+        """Start only the exact DRAFT approved by validate_run."""
         return control.start_run(run_id, validation_token)
 
     @server.tool()
     def get_run_status(run_id: str) -> dict[str, Any]:
-        """Poll a control run and return process/result state."""
+        """Poll one control run."""
         return control.get_run_status(run_id)
 
     @server.tool()
     def list_control_runs(limit: int = 50) -> list[dict[str, Any]]:
-        """List backtests created through this control-server process."""
+        """List backtests created through this control server."""
         return control.list_control_runs(limit)
 
     @server.tool()
     def cancel_run(run_id: str) -> dict[str, Any]:
-        """Cancel a DRAFT or terminate a running fixed backtest child process."""
+        """Cancel a DRAFT or terminate a running fixed backtest child."""
         return control.cancel_run(run_id)
 
     @server.tool()
     def read_control_log(
         run_id: str, stream: str = "stderr", lines: int = 100
     ) -> dict[str, Any]:
-        """Read a bounded tail of this control job's stdout or stderr."""
+        """Read a bounded tail of a control job log."""
         return control.read_control_log(run_id, stream, lines)
 
     @server.tool()
     def create_walk_forward_state(
-        state_id: str,
-        markdown: str,
-        initial_event: dict[str, Any] | None = None,
+        state_id: str, markdown: str, initial_event: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        """Create one canonical Markdown state in the fixed walk_forward_state directory."""
+        """Create one canonical Markdown walk-forward state."""
         return control.create_walk_forward_state(state_id, markdown, initial_event)
 
     @server.tool()
-    def read_walk_forward_state(
-        state_id: str, recent_events: int = 50
-    ) -> dict[str, Any]:
-        """Read one canonical Markdown state and a bounded tail of JSONL audit events."""
+    def read_walk_forward_state(state_id: str, recent_events: int = 50) -> dict[str, Any]:
+        """Read one canonical Markdown state and audit tail."""
         return control.read_walk_forward_state(state_id, recent_events)
 
     @server.tool()
@@ -291,16 +283,12 @@ def create_control_server(
         expected_sha256: str,
         event: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Atomically update a state only when expected_sha256 matches the current file."""
-        return control.update_walk_forward_state(
-            state_id, markdown, expected_sha256, event
-        )
+        """Atomically update one state after SHA verification."""
+        return control.update_walk_forward_state(state_id, markdown, expected_sha256, event)
 
     @server.tool()
-    def append_walk_forward_event(
-        state_id: str, event: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Append an immutable JSONL audit event linked to the current state hash."""
+    def append_walk_forward_event(state_id: str, event: dict[str, Any]) -> dict[str, Any]:
+        """Append one immutable legacy walk-forward audit event."""
         return control.append_walk_forward_event(state_id, event)
 
     @server.tool()
@@ -311,25 +299,21 @@ def create_control_server(
         initial_phase: str = "RESEARCH_WF",
         notes: str | None = None,
     ) -> dict[str, Any]:
-        """Create an immutable causal experiment definition and authoritative event stream."""
+        """Create an immutable causal experiment and authoritative event stream."""
         return control.create_walk_forward_experiment(
-            experiment_id,
-            definition,
-            operation_id,
-            initial_phase,
-            notes,
+            experiment_id, definition, operation_id, initial_phase, notes
         )
 
     @server.tool()
     def read_walk_forward_experiment(
         experiment_id: str, recent_events: int = 100
     ) -> dict[str, Any]:
-        """Read a verified causal experiment chain and its derived current state."""
+        """Read a verified causal experiment and derived state."""
         return control.read_walk_forward_experiment(experiment_id, recent_events)
 
     @server.tool()
     def list_walk_forward_experiments() -> list[dict[str, Any]]:
-        """List bounded causal experiment identities and current chain heads."""
+        """List causal experiments and current heads."""
         return control.list_walk_forward_experiments()
 
     @server.tool()
@@ -344,7 +328,7 @@ def create_control_server(
         event_time: str | None = None,
         source: str = "CHATGPT_RESEARCH",
     ) -> dict[str, Any]:
-        """Append one idempotent hash-chained event after causal-state validation."""
+        """Append one idempotent causal event after sequence/hash validation."""
         return control.append_walk_forward_experiment_event(
             experiment_id,
             event_type,
@@ -365,7 +349,7 @@ def create_control_server(
         expected_state_hash: str,
         max_scan_rows: int = 250000,
     ) -> dict[str, Any]:
-        """Apply current causal rules to Every Viable Entry and capture the first eligible entry without outcome data."""
+        """Apply causal rules to EVE and capture the first eligible outcome-hidden candidate."""
         try:
             return _get_next_walk_forward_candidate(
                 control,
@@ -380,13 +364,190 @@ def create_control_server(
             return _connection_safe_error("get_next_walk_forward_candidate", exc)
 
     @server.tool()
+    def freeze_and_reveal_walk_forward_candidate(
+        experiment_id: str,
+        candidate_id: str,
+        candidate_token: str,
+        final_action: str,
+        confidence_pct: int,
+        reasoning: str,
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+    ) -> dict[str, Any]:
+        """Fsync the frozen LONG/SHORT decision before reading and revealing exact outcome."""
+        try:
+            return _freeze_and_reveal_walk_forward_candidate(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                candidate_id=candidate_id,
+                candidate_token=candidate_token,
+                final_action=final_action,
+                confidence_pct=confidence_pct,
+                reasoning=reasoning,
+                operation_id=operation_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+            )
+        except Exception as exc:
+            return _connection_safe_error("freeze_and_reveal_walk_forward_candidate", exc)
+
+    @server.tool()
+    def resolve_walk_forward_trade(
+        experiment_id: str,
+        candidate_id: str,
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+    ) -> dict[str, Any]:
+        """Settle a revealed research trade from current equity, risk%, and immutable net R."""
+        try:
+            return _resolve_walk_forward_trade(
+                control,
+                experiment_id=experiment_id,
+                candidate_id=candidate_id,
+                operation_id=operation_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+            )
+        except Exception as exc:
+            return _connection_safe_error("resolve_walk_forward_trade", exc)
+
+    @server.tool()
+    def advance_walk_forward(
+        experiment_id: str,
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        review_interval_months: int = 3,
+        max_scan_rows: int = 250000,
+        max_transitions: int = 20,
+    ) -> dict[str, Any]:
+        """Advance deterministic causal work until a human/ChatGPT judgment is required."""
+        try:
+            return _advance_walk_forward(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                operation_id=operation_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+                review_interval_months=review_interval_months,
+                max_scan_rows=max_scan_rows,
+                max_transitions=max_transitions,
+            )
+        except Exception as exc:
+            return _connection_safe_error("advance_walk_forward", exc)
+
+    @server.tool()
+    def submit_walk_forward_decision(
+        experiment_id: str,
+        candidate_id: str,
+        candidate_token: str,
+        final_action: str,
+        confidence_pct: int,
+        reasoning: str,
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        auto_advance: bool = True,
+        review_interval_months: int = 3,
+    ) -> dict[str, Any]:
+        """Freeze decision, reveal outcome, settle equity, and continue automatically after wins."""
+        try:
+            return _submit_walk_forward_decision(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                candidate_id=candidate_id,
+                candidate_token=candidate_token,
+                final_action=final_action,
+                confidence_pct=confidence_pct,
+                reasoning=reasoning,
+                operation_id=operation_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+                auto_advance=auto_advance,
+                review_interval_months=review_interval_months,
+            )
+        except Exception as exc:
+            return _connection_safe_error("submit_walk_forward_decision", exc)
+
+    @server.tool()
+    def record_walk_forward_review(
+        experiment_id: str,
+        review_type: str,
+        decision: str,
+        notes: str,
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        candidate_id: str | None = None,
+        rule_events: list[dict[str, Any]] | None = None,
+        auto_advance: bool = True,
+        review_interval_months: int = 3,
+    ) -> dict[str, Any]:
+        """Record a loss/periodic judgment plus optional rule events and continue."""
+        try:
+            return _record_walk_forward_review(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                review_type=review_type,
+                decision=decision,
+                notes=notes,
+                operation_id=operation_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+                candidate_id=candidate_id,
+                rule_events=rule_events,
+                auto_advance=auto_advance,
+                review_interval_months=review_interval_months,
+            )
+        except Exception as exc:
+            return _connection_safe_error("record_walk_forward_review", exc)
+
+    @server.tool()
+    def record_walk_forward_teacher_review(
+        experiment_id: str,
+        teacher_pair_id: str,
+        decision: str,
+        notes: str,
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        rule_events: list[dict[str, Any]] | None = None,
+        auto_advance: bool = True,
+        review_interval_months: int = 3,
+    ) -> dict[str, Any]:
+        """Record the next teacher winner judgment plus optional ENTRY learning and continue."""
+        try:
+            return _record_walk_forward_teacher_review(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                teacher_pair_id=teacher_pair_id,
+                decision=decision,
+                notes=notes,
+                operation_id=operation_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+                rule_events=rule_events,
+                auto_advance=auto_advance,
+                review_interval_months=review_interval_months,
+            )
+        except Exception as exc:
+            return _connection_safe_error("record_walk_forward_teacher_review", exc)
+
+    @server.tool()
     def materialize_walk_forward_strategy(
         experiment_id: str,
         expected_sequence: int,
         expected_state_hash: str,
         include_config: bool = False,
     ) -> dict[str, Any]:
-        """Materialize exact active causal rules at a verified chain head without creating a run."""
+        """Materialize exact active causal rules at one verified chain head."""
         try:
             return _materialize_walk_forward_strategy(
                 control,
@@ -408,7 +569,7 @@ def create_control_server(
         expected_state_hash: str,
         run_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a provenance-linked DRAFT backtest from one exact walk-forward chain head."""
+        """Create a provenance-linked DRAFT backtest from one exact walk-forward head."""
         try:
             return _create_run_from_walk_forward_experiment(
                 control,
@@ -425,78 +586,67 @@ def create_control_server(
 
     @server.tool()
     def list_runs(limit: int = 50) -> list[dict[str, Any]]:
-        """List completed manifest-backed runs beneath the configured output root."""
+        """List completed manifest-backed runs."""
         LOGGER.info("Unified MCP tool called: list_runs")
         return reports.list_runs(limit)
 
     @server.tool()
     def latest_run() -> dict[str, Any]:
         """Return metadata and summary for the latest completed run."""
-        LOGGER.info("Unified MCP tool called: latest_run")
         return reports.latest_run()
 
     @server.tool()
     def get_run_manifest(run: str) -> dict[str, Any]:
         """Return the verified canonical manifest for one completed run."""
-        LOGGER.info("Unified MCP tool called: get_run_manifest run=%s", run)
         return reports.get_run_manifest(run)
 
     @server.tool()
     def list_run_files(run: str) -> list[dict[str, Any]]:
-        """List files available inside one completed run."""
-        LOGGER.info("Unified MCP tool called: list_run_files run=%s", run)
+        """List files inside one completed run."""
         return reports.list_run_files(run)
 
     @server.tool()
     def read_report(
         run: str, filename: str, sheet: str | None = None, limit: int = 200
     ) -> dict[str, Any]:
-        """Read a supported report file from a completed run."""
-        LOGGER.info("Unified MCP tool called: read_report run=%s filename=%s", run, filename)
+        """Read a supported report file."""
         return reports.read_report(run, filename, sheet, limit)
 
     @server.tool()
     def read_run_file(
         run: str, filename: str, sheet: str | None = None, limit: int = 200
     ) -> dict[str, Any]:
-        """Read a supported file from a completed run."""
-        LOGGER.info("Unified MCP tool called: read_run_file run=%s filename=%s", run, filename)
+        """Read a supported completed-run file."""
         return reports.read_run_file(run, filename, sheet, limit)
 
     @server.tool()
     def query_trades(run: str, sql: str) -> dict[str, Any]:
-        """Run a restricted read-only SQL query over a completed run's trades."""
-        LOGGER.info("Unified MCP tool called: query_trades run=%s", run)
+        """Run restricted read-only SQL over completed trades."""
         return reports.query_trades(run, sql)
 
     @server.tool()
     def query_signals(run: str, sql: str) -> dict[str, Any]:
-        """Run a restricted read-only SQL query over a completed run's signals."""
-        LOGGER.info("Unified MCP tool called: query_signals run=%s", run)
+        """Run restricted read-only SQL over completed signals."""
         return reports.query_signals(run, sql)
 
     @server.tool()
     def query_feature_context(run: str, sql: str) -> dict[str, Any]:
-        """Query the completed run's feature-context parquet with restricted SQL."""
-        LOGGER.info("Unified MCP tool called: query_feature_context run=%s", run)
+        """Run restricted SQL over causal feature context."""
         return reports.query_feature_context(run, sql)
 
     @server.tool()
     def query_parquet(run: str, filename: str, sql: str) -> dict[str, Any]:
-        """Query an allowed parquet inside a completed run using restricted SQL."""
-        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run, filename)
+        """Query an allowed parquet inside a completed run."""
         return reports.query_parquet(run, filename, sql)
 
     @server.tool()
     def research_aggregate(run: str, spec: dict[str, Any]) -> dict[str, Any]:
-        """Run the existing bounded feature-research aggregation on a completed run."""
-        LOGGER.info("Unified MCP tool called: research_aggregate run=%s", run)
+        """Run bounded feature-research aggregation."""
         return reports.research_aggregate(run, spec)
 
     @server.tool()
     def compare_runs(runs: list[str]) -> list[dict[str, Any]]:
         """Compare 2-10 completed runs with provenance checks."""
-        LOGGER.info("Unified MCP tool called: compare_runs count=%d", len(runs))
         return reports.compare_runs(runs)
 
     return server
@@ -516,46 +666,32 @@ def main() -> None:
             "report MCP remains available separately on port 8765."
         )
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
         port = int(os.environ.get("CRYPTO_STRATEGY_LAB_CONTROL_MCP_PORT", "8766"))
         if not 1 <= port <= 65535:
             raise ValueError
     except ValueError as exc:
-        raise SystemExit(
-            "CRYPTO_STRATEGY_LAB_CONTROL_MCP_PORT must be an integer from 1 to 65535"
-        ) from exc
+        raise SystemExit("CRYPTO_STRATEGY_LAB_CONTROL_MCP_PORT must be an integer from 1 to 65535") from exc
 
     try:
-        max_concurrent = int(
-            os.environ.get("CRYPTO_STRATEGY_LAB_CONTROL_MAX_CONCURRENT", "1")
-        )
+        max_concurrent = int(os.environ.get("CRYPTO_STRATEGY_LAB_CONTROL_MAX_CONCURRENT", "1"))
         if max_concurrent <= 0:
             raise ValueError
     except ValueError as exc:
-        raise SystemExit(
-            "CRYPTO_STRATEGY_LAB_CONTROL_MAX_CONCURRENT must be a positive integer"
-        ) from exc
+        raise SystemExit("CRYPTO_STRATEGY_LAB_CONTROL_MAX_CONCURRENT must be a positive integer") from exc
 
     control = RuleAwareBacktestControlService(
         project_root=PROJECT_ROOT,
         raw_root=_path_from_env("CRYPTO_STRATEGY_LAB_RAW_ROOT", MARKET_DATA_ROOT),
         cache_root=_path_from_env("CRYPTO_STRATEGY_LAB_CACHE_DIR", CACHE_DIR),
         output_root=_path_from_env("CRYPTO_STRATEGY_LAB_OUTPUT_DIR", OUTPUT_DIR),
-        config_root=_path_from_env(
-            "CRYPTO_STRATEGY_LAB_CONFIG_DIR", CONFIG_DIR / "data_lake"
-        ),
+        config_root=_path_from_env("CRYPTO_STRATEGY_LAB_CONFIG_DIR", CONFIG_DIR / "data_lake"),
         max_concurrent_runs=max_concurrent,
     )
     reports = BacktestReports(control.output_root)
     host = "127.0.0.1"
-    LOGGER.info(
-        "Unified Crypto Strategy Lab MCP starting "
-        "(BACKTEST_CONTROL + WALK_FORWARD_STATE + CAUSAL_EXPERIMENTS + READ_ONLY_RESEARCH)"
-    )
+    LOGGER.info("Unified Crypto Strategy Lab MCP starting")
     LOGGER.info("Host: %s", host)
     LOGGER.info("Port: %s", port)
     LOGGER.info("Raw data root: %s", control.raw_root)

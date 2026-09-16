@@ -179,9 +179,6 @@ def test_control_server_registers_unified_research_and_bounded_control_tools():
         | set(CAUSAL_EXPERIMENT_TOOLS)
         | set(READ_TOOLS)
     )
-
-    # The unified endpoint may start backtests and maintain bounded causal ledgers,
-    # but it still cannot perform arbitrary writes or touch live trading.
     assert "shell" not in server._tool_manager._tools
     assert "live_trade" not in server._tool_manager._tools
     assert "place_order" not in server._tool_manager._tools
@@ -225,6 +222,12 @@ def test_unified_server_keeps_expected_tool_groups_stable():
         "list_walk_forward_experiments",
         "append_walk_forward_experiment_event",
         "get_next_walk_forward_candidate",
+        "freeze_and_reveal_walk_forward_candidate",
+        "resolve_walk_forward_trade",
+        "advance_walk_forward",
+        "submit_walk_forward_decision",
+        "record_walk_forward_review",
+        "record_walk_forward_teacher_review",
         "materialize_walk_forward_strategy",
         "create_run_from_walk_forward_experiment",
     }
