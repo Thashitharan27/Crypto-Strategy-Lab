@@ -97,6 +97,47 @@ def test_api_key_entry_is_password_masked_and_save_clears_field(monkeypatch):
         widget.close()
 
 
+def test_ai_generation_toggle_changes_only_current_process_mode(monkeypatch):
+    _widgets, _app = _qt_app()
+    import crypto_strategy_lab.gui.openai_api_settings as settings
+
+    monkeypatch.setattr(settings, "activate_openai_api_key", lambda: None)
+    monkeypatch.setattr(
+        settings,
+        "openai_api_key_status",
+        lambda: {"configured": False, "source": None, "persistent": False},
+    )
+    monkeypatch.delenv(settings.AI_CACHE_MODE_ENV, raising=False)
+
+    widget = settings.OpenAIAPISettingsWidget()
+    try:
+        assert settings.current_ai_runtime_mode() == settings.AI_CACHE_ONLY
+        assert widget.generate_missing_checkbox.isChecked() is False
+        assert "CACHE_ONLY" in widget.mode_status_label.text()
+
+        widget.generate_missing_checkbox.setChecked(True)
+        assert os.environ[settings.AI_CACHE_MODE_ENV] == settings.AI_CACHE_THEN_API
+        assert settings.current_ai_runtime_mode() == settings.AI_CACHE_THEN_API
+        assert "CACHE_THEN_API" in widget.mode_status_label.text()
+        assert "paid API calls" in widget.result_label.text()
+
+        widget.generate_missing_checkbox.setChecked(False)
+        assert settings.AI_CACHE_MODE_ENV not in os.environ
+        assert settings.current_ai_runtime_mode() == settings.AI_CACHE_ONLY
+        assert "CACHE_ONLY" in widget.mode_status_label.text()
+    finally:
+        widget.close()
+
+
+def test_invalid_runtime_mode_fails_closed(monkeypatch):
+    import crypto_strategy_lab.gui.openai_api_settings as settings
+
+    monkeypatch.setenv(settings.AI_CACHE_MODE_ENV, "SOMETHING_UNSAFE")
+    assert settings.current_ai_runtime_mode() == settings.AI_CACHE_ONLY
+    with pytest.raises(ValueError, match="Unsupported AI runtime mode"):
+        settings.set_ai_runtime_mode("SOMETHING_UNSAFE")
+
+
 def test_connection_without_key_does_not_make_network_call(monkeypatch):
     import crypto_strategy_lab.gui.openai_api_settings as settings
 
