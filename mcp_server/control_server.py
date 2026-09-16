@@ -20,6 +20,10 @@ from typing import Any
 
 from crypto_strategy_lab.paths import CACHE_DIR, CONFIG_DIR, MARKET_DATA_ROOT, OUTPUT_DIR, PROJECT_ROOT
 from crypto_strategy_lab.rule_control_service import RuleAwareBacktestControlService
+from crypto_strategy_lab.walk_forward_materialization import (
+    create_run_from_walk_forward_experiment as _create_run_from_walk_forward_experiment,
+    materialize_walk_forward_strategy as _materialize_walk_forward_strategy,
+)
 from mcp_server.server import BacktestReports
 
 
@@ -77,7 +81,20 @@ CAUSAL_EXPERIMENT_TOOLS = (
     "read_walk_forward_experiment",
     "list_walk_forward_experiments",
     "append_walk_forward_experiment_event",
+    "materialize_walk_forward_strategy",
+    "create_run_from_walk_forward_experiment",
 )
+
+
+def _connection_safe_error(operation: str, exc: Exception) -> dict[str, Any]:
+    LOGGER.exception("Causal materialization operation failed: %s", operation)
+    return {
+        "ok": False,
+        "operation": operation,
+        "error_type": type(exc).__name__,
+        "error": str(exc)[:2000],
+        "connection_safe": True,
+    }
 
 
 def create_control_server(
@@ -350,6 +367,50 @@ def create_control_server(
             source,
         )
 
+    @server.tool()
+    def materialize_walk_forward_strategy(
+        experiment_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        include_config: bool = False,
+    ) -> dict[str, Any]:
+        """Materialize exact active causal rules at a verified chain head without creating a run."""
+        try:
+            return _materialize_walk_forward_strategy(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+                include_config=include_config,
+            )
+        except Exception as exc:
+            return _connection_safe_error("materialize_walk_forward_strategy", exc)
+
+    @server.tool()
+    def create_run_from_walk_forward_experiment(
+        experiment_id: str,
+        start: str,
+        end: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        run_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a provenance-linked DRAFT backtest from one exact walk-forward chain head."""
+        try:
+            return _create_run_from_walk_forward_experiment(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                start=start,
+                end=end,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+                run_name=run_name,
+            )
+        except Exception as exc:
+            return _connection_safe_error("create_run_from_walk_forward_experiment", exc)
+
     # ------------------------------------------------------------------
     # Completed-run research tools. These delegate to the existing
     # manifest-backed BacktestReports implementation and remain read-only.
@@ -415,7 +476,7 @@ def create_control_server(
     @server.tool()
     def query_parquet(run: str, filename: str, sql: str) -> dict[str, Any]:
         """Query an allowed parquet inside a completed run using restricted SQL."""
-        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run, filename)
+        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run)
         return reports.query_parquet(run, filename, sql)
 
     @server.tool()
