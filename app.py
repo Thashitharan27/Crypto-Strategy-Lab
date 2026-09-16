@@ -41,6 +41,7 @@ from crypto_strategy_lab.gui.portfolio_replay_install import (
 from crypto_strategy_lab.gui.chatgpt_autostart_install import (
     apply_chatgpt_autostart,
 )
+from crypto_strategy_lab.gui.openai_api_install import apply_openai_api_settings
 from crypto_strategy_lab.gui.github_sync_install import apply_github_sync_safety
 from crypto_strategy_lab.gui.desktop_style import (
     apply_application_style,
@@ -97,6 +98,7 @@ def main() -> int:
         apply_validation_gap_diagnostics(window)
         apply_portfolio_replay_workspace(window)
         apply_chatgpt_autostart(window)
+        apply_openai_api_settings(window)
         apply_github_sync_safety(window)
         apply_shell_style(window)
         status("Ready")
