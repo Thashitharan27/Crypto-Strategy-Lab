@@ -296,6 +296,21 @@ def materialize_walk_forward_strategy(
 
     active_rules = _active_rule_versions(events)
     workspace = RuleWorkspace(base_config)
+    legacy_counts = workspace.workspace().get("legacy_native_rule_counts", {})
+    legacy_profiles = {
+        profile: int(count)
+        for profile, count in legacy_counts.items()
+        if int(count) > 0
+    }
+    if legacy_profiles:
+        details = ", ".join(
+            f"{profile}={count}" for profile, count in sorted(legacy_profiles.items())
+        )
+        raise ValueError(
+            "reference run contains legacy native entry rules that are not part of the causal rule ledger; "
+            f"explicitly migrate or remove them before materialization ({details})"
+        )
+
     # The teacher/reference run supplies immutable non-rule settings, not the
     # learned production rule set.  Replace all builder rule families with the
     # causally active experiment rules.  Strategy built-ins remain compiler-owned.
