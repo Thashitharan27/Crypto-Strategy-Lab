@@ -141,7 +141,10 @@ def _install_runtime() -> None:
         "_ai_direction_decision",
     )
     for name in helper_names:
-        setattr(BacktestEngine, name, getattr(OpenAIDecisionMixin, name))
+        # Preserve the descriptor exactly as declared on the mixin. Using
+        # getattr() here unwraps @staticmethod and turns it into a bound method
+        # after assignment to BacktestEngine, which injects an unwanted self.
+        setattr(BacktestEngine, name, OpenAIDecisionMixin.__dict__[name])
 
     original_ai_market_snapshot = BacktestEngine._ai_market_snapshot
     original_infer = BacktestEngine._infer_signal_strategy_mode
