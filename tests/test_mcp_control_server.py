@@ -1,4 +1,5 @@
 from mcp_server.control_server import (
+    CAUSAL_EXPERIMENT_TOOLS,
     CONTROL_TOOLS,
     READ_TOOLS,
     WALK_FORWARD_STATE_TOOLS,
@@ -87,6 +88,47 @@ class FakeControl:
     def append_walk_forward_event(self, state_id, event):
         return {"state_id": state_id, "event": event}
 
+    def create_walk_forward_experiment(
+        self, experiment_id, definition, operation_id, initial_phase="RESEARCH_WF", notes=None
+    ):
+        return {
+            "experiment_id": experiment_id,
+            "definition": definition,
+            "operation_id": operation_id,
+            "initial_phase": initial_phase,
+            "notes": notes,
+        }
+
+    def read_walk_forward_experiment(self, experiment_id, recent_events=100):
+        return {"experiment_id": experiment_id, "recent_events": recent_events}
+
+    def list_walk_forward_experiments(self):
+        return []
+
+    def append_walk_forward_experiment_event(
+        self,
+        experiment_id,
+        event_type,
+        payload,
+        operation_id,
+        expected_sequence,
+        expected_state_hash,
+        effective_market_time=None,
+        event_time=None,
+        source="CHATGPT_RESEARCH",
+    ):
+        return {
+            "experiment_id": experiment_id,
+            "event_type": event_type,
+            "payload": payload,
+            "operation_id": operation_id,
+            "expected_sequence": expected_sequence,
+            "expected_state_hash": expected_state_hash,
+            "effective_market_time": effective_market_time,
+            "event_time": event_time,
+            "source": source,
+        }
+
 
 class FakeReports:
     def list_runs(self, limit):
@@ -132,11 +174,14 @@ def test_control_server_registers_unified_research_and_bounded_control_tools():
     server = create_control_server(FakeControl(), FakeReports())
     assert isinstance(server, MCPServer)
     assert set(server._tool_manager._tools) == (
-        set(CONTROL_TOOLS) | set(WALK_FORWARD_STATE_TOOLS) | set(READ_TOOLS)
+        set(CONTROL_TOOLS)
+        | set(WALK_FORWARD_STATE_TOOLS)
+        | set(CAUSAL_EXPERIMENT_TOOLS)
+        | set(READ_TOOLS)
     )
 
-    # The unified endpoint may start backtests, maintain a restricted WF ledger,
-    # and analyze completed outputs, but it still cannot perform arbitrary writes.
+    # The unified endpoint may start backtests and maintain bounded causal ledgers,
+    # but it still cannot perform arbitrary writes or touch live trading.
     assert "shell" not in server._tool_manager._tools
     assert "live_trade" not in server._tool_manager._tools
     assert "place_order" not in server._tool_manager._tools
@@ -173,6 +218,12 @@ def test_unified_server_keeps_expected_tool_groups_stable():
         "read_walk_forward_state",
         "update_walk_forward_state",
         "append_walk_forward_event",
+    }
+    assert set(CAUSAL_EXPERIMENT_TOOLS) == {
+        "create_walk_forward_experiment",
+        "read_walk_forward_experiment",
+        "list_walk_forward_experiments",
+        "append_walk_forward_experiment_event",
     }
     assert set(READ_TOOLS) == {
         "list_runs",

@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from crypto_strategy_lab.causal_experiment import CausalExperimentStore
 from crypto_strategy_lab.control_rule_workspace import RuleWorkspace, strategy_capabilities
 from crypto_strategy_lab.control_service import BacktestControlService
 from crypto_strategy_lab.walk_forward_state import WalkForwardStateStore
 
 
 class RuleAwareBacktestControlService(BacktestControlService):
-    """Backtest control plus GUI-parity Strategy Builder and WF state operations."""
+    """Backtest control plus Strategy Builder, WF state, and causal experiment operations."""
 
     def _walk_forward_store(self) -> WalkForwardStateStore:
         with self._lock:
@@ -17,6 +18,14 @@ class RuleAwareBacktestControlService(BacktestControlService):
             if store is None:
                 store = WalkForwardStateStore(self.project_root / "walk_forward_state")
                 self._walk_forward_state_store = store
+            return store
+
+    def _causal_experiment_store(self) -> CausalExperimentStore:
+        with self._lock:
+            store = getattr(self, "_causal_experiment_event_store", None)
+            if store is None:
+                store = CausalExperimentStore(self.project_root / "walk_forward_experiments")
+                self._causal_experiment_event_store = store
             return store
 
     def info(self) -> dict[str, Any]:
@@ -38,7 +47,7 @@ class RuleAwareBacktestControlService(BacktestControlService):
         payload["walk_forward_state"] = {
             "root": str(self.project_root / "walk_forward_state"),
             "filesystem_scope": "fixed directory only",
-            "state_format": "Markdown canonical snapshot",
+            "state_format": "Markdown canonical snapshot (legacy/human-readable compatibility)",
             "audit_format": "append-only JSONL",
             "stale_write_protection": "SHA-256 compare-before-update",
             "workflow": [
@@ -46,6 +55,25 @@ class RuleAwareBacktestControlService(BacktestControlService):
                 "read_walk_forward_state",
                 "update_walk_forward_state with expected_sha256",
                 "append_walk_forward_event",
+            ],
+        }
+        payload["causal_experiments"] = {
+            "root": str(self.project_root / "walk_forward_experiments"),
+            "source_of_truth": "hash-chained append-only JSONL event stream",
+            "immutable_definition": True,
+            "idempotency": "operation_id",
+            "stale_write_protection": "expected_sequence + expected_state_hash",
+            "phases": ["RESEARCH_WF", "VALIDATED", "SHADOW", "LIVE", "RETIRED"],
+            "decision_protocol": [
+                "CANDIDATE_CONTEXT_CAPTURED",
+                "DECISION_FROZEN",
+                "OUTCOME_REVEALED",
+            ],
+            "workflow": [
+                "create_walk_forward_experiment",
+                "read_walk_forward_experiment",
+                "append_walk_forward_experiment_event",
+                "list_walk_forward_experiments",
             ],
         }
         payload["legacy_control"] = {
@@ -154,6 +182,9 @@ class RuleAwareBacktestControlService(BacktestControlService):
             lambda workspace: workspace.set_group_enabled(group_id, True),
         )
 
+    # ------------------------------------------------------------------
+    # Legacy/human-readable walk-forward state persistence.
+    # ------------------------------------------------------------------
     def create_walk_forward_state(
         self,
         state_id: str,
@@ -186,3 +217,58 @@ class RuleAwareBacktestControlService(BacktestControlService):
     ) -> dict[str, Any]:
         """Append one immutable JSONL audit event for an existing walk-forward state."""
         return self._walk_forward_store().append_event(state_id, event)
+
+    # ------------------------------------------------------------------
+    # Event-sourced causal experiment protocol.
+    # ------------------------------------------------------------------
+    def create_walk_forward_experiment(
+        self,
+        experiment_id: str,
+        definition: dict[str, Any],
+        operation_id: str,
+        initial_phase: str = "RESEARCH_WF",
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        """Create an immutable strategy experiment and its authoritative event stream."""
+        return self._causal_experiment_store().create(
+            experiment_id,
+            definition,
+            operation_id,
+            initial_phase=initial_phase,
+            notes=notes,
+        )
+
+    def read_walk_forward_experiment(
+        self, experiment_id: str, recent_events: int = 100
+    ) -> dict[str, Any]:
+        """Read an experiment definition, verified chain head, and derived causal state."""
+        return self._causal_experiment_store().read(experiment_id, recent_events)
+
+    def list_walk_forward_experiments(self) -> list[dict[str, Any]]:
+        """List bounded causal experiment identities and their current chain heads."""
+        return self._causal_experiment_store().list_experiments()
+
+    def append_walk_forward_experiment_event(
+        self,
+        experiment_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        effective_market_time: str | None = None,
+        event_time: str | None = None,
+        source: str = "CHATGPT_RESEARCH",
+    ) -> dict[str, Any]:
+        """Append one idempotent event after sequence/hash and causal-state validation."""
+        return self._causal_experiment_store().append_event(
+            experiment_id,
+            event_type,
+            payload,
+            operation_id,
+            expected_sequence,
+            expected_state_hash,
+            effective_market_time=effective_market_time,
+            event_time=event_time,
+            source=source,
+        )
