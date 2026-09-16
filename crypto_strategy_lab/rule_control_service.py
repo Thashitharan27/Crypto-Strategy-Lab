@@ -5,10 +5,19 @@ from typing import Any, Callable
 
 from crypto_strategy_lab.control_rule_workspace import RuleWorkspace, strategy_capabilities
 from crypto_strategy_lab.control_service import BacktestControlService
+from crypto_strategy_lab.walk_forward_state import WalkForwardStateStore
 
 
 class RuleAwareBacktestControlService(BacktestControlService):
-    """Backtest control plus GUI-parity Strategy Builder group operations."""
+    """Backtest control plus GUI-parity Strategy Builder and WF state operations."""
+
+    def _walk_forward_store(self) -> WalkForwardStateStore:
+        with self._lock:
+            store = getattr(self, "_walk_forward_state_store", None)
+            if store is None:
+                store = WalkForwardStateStore(self.project_root / "walk_forward_state")
+                self._walk_forward_state_store = store
+            return store
 
     def info(self) -> dict[str, Any]:
         payload = super().info()
@@ -25,6 +34,19 @@ class RuleAwareBacktestControlService(BacktestControlService):
             "conditions_inside_group": "ALL",
             "groups_inside_family": "OR",
             "categorical_values": "GUI/native labels are accepted",
+        }
+        payload["walk_forward_state"] = {
+            "root": str(self.project_root / "walk_forward_state"),
+            "filesystem_scope": "fixed directory only",
+            "state_format": "Markdown canonical snapshot",
+            "audit_format": "append-only JSONL",
+            "stale_write_protection": "SHA-256 compare-before-update",
+            "workflow": [
+                "create_walk_forward_state",
+                "read_walk_forward_state",
+                "update_walk_forward_state with expected_sha256",
+                "append_walk_forward_event",
+            ],
         }
         payload["legacy_control"] = {
             "set_filter_groups": (
@@ -131,3 +153,36 @@ class RuleAwareBacktestControlService(BacktestControlService):
             run_id,
             lambda workspace: workspace.set_group_enabled(group_id, True),
         )
+
+    def create_walk_forward_state(
+        self,
+        state_id: str,
+        markdown: str,
+        initial_event: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create one bounded canonical walk-forward Markdown state."""
+        return self._walk_forward_store().create(state_id, markdown, initial_event)
+
+    def read_walk_forward_state(
+        self, state_id: str, recent_events: int = 50
+    ) -> dict[str, Any]:
+        """Read one canonical state plus a bounded tail of its audit history."""
+        return self._walk_forward_store().read(state_id, recent_events)
+
+    def update_walk_forward_state(
+        self,
+        state_id: str,
+        markdown: str,
+        expected_sha256: str,
+        event: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Update one state atomically after verifying the caller read its current hash."""
+        return self._walk_forward_store().update(
+            state_id, markdown, expected_sha256, event
+        )
+
+    def append_walk_forward_event(
+        self, state_id: str, event: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Append one immutable JSONL audit event for an existing walk-forward state."""
+        return self._walk_forward_store().append_event(state_id, event)
