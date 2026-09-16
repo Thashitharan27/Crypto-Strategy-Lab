@@ -1,14 +1,15 @@
 """Unified opt-in MCP server for local backtest control and completed-run research.
 
 The 8766 endpoint is the primary ChatGPT-facing Crypto Strategy Lab surface. It
-combines bounded backtest-only control actions, GUI-parity Strategy Builder rule
-groups, and the same read-only completed-run analysis tools exposed by
-``mcp_server.server``. The legacy 8765 read-only server remains available for
-backward compatibility.
+combines bounded backtest control, GUI-parity Strategy Builder rule groups,
+restricted walk-forward state persistence, and the same read-only completed-run
+analysis tools exposed by ``mcp_server.server``. The legacy 8765 read-only server
+remains available for backward compatibility.
 
 Write capability remains deliberately narrow: this server cannot execute
 arbitrary shell commands, edit source code, access credentials, place exchange
-orders, or control live trading.
+orders, or control live trading. Walk-forward persistence is confined to one
+project-local state directory and fixed Markdown/JSONL filenames.
 """
 from __future__ import annotations
 
@@ -64,6 +65,13 @@ CONTROL_TOOLS = (
     "read_control_log",
 )
 
+WALK_FORWARD_STATE_TOOLS = (
+    "create_walk_forward_state",
+    "read_walk_forward_state",
+    "update_walk_forward_state",
+    "append_walk_forward_event",
+)
+
 
 def create_control_server(
     control: RuleAwareBacktestControlService, reports: BacktestReports
@@ -78,7 +86,7 @@ def create_control_server(
     # ------------------------------------------------------------------
     @server.tool()
     def control_info() -> dict[str, Any]:
-        """Describe the backtest-only boundary and preferred research workflow."""
+        """Describe the bounded backtest/research boundary and preferred workflow."""
         return control.info()
 
     @server.tool()
@@ -241,6 +249,44 @@ def create_control_server(
         return control.read_control_log(run_id, stream, lines)
 
     # ------------------------------------------------------------------
+    # Restricted causal walk-forward state tools.
+    # ------------------------------------------------------------------
+    @server.tool()
+    def create_walk_forward_state(
+        state_id: str,
+        markdown: str,
+        initial_event: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create one canonical Markdown state in the fixed walk_forward_state directory."""
+        return control.create_walk_forward_state(state_id, markdown, initial_event)
+
+    @server.tool()
+    def read_walk_forward_state(
+        state_id: str, recent_events: int = 50
+    ) -> dict[str, Any]:
+        """Read one canonical Markdown state and a bounded tail of JSONL audit events."""
+        return control.read_walk_forward_state(state_id, recent_events)
+
+    @server.tool()
+    def update_walk_forward_state(
+        state_id: str,
+        markdown: str,
+        expected_sha256: str,
+        event: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically update a state only when expected_sha256 matches the current file."""
+        return control.update_walk_forward_state(
+            state_id, markdown, expected_sha256, event
+        )
+
+    @server.tool()
+    def append_walk_forward_event(
+        state_id: str, event: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Append an immutable JSONL audit event linked to the current state hash."""
+        return control.append_walk_forward_event(state_id, event)
+
+    # ------------------------------------------------------------------
     # Completed-run research tools. These delegate to the existing
     # manifest-backed BacktestReports implementation and remain read-only.
     # ------------------------------------------------------------------
@@ -305,7 +351,7 @@ def create_control_server(
     @server.tool()
     def query_parquet(run: str, filename: str, sql: str) -> dict[str, Any]:
         """Query an allowed parquet inside a completed run using restricted SQL."""
-        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run, filename)
+        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run)
         return reports.query_parquet(run, filename, sql)
 
     @server.tool()
@@ -373,13 +419,17 @@ def main() -> None:
     )
     reports = BacktestReports(control.output_root)
     host = "127.0.0.1"
-    LOGGER.info("Unified Crypto Strategy Lab MCP starting (BACKTEST_CONTROL + READ_ONLY_RESEARCH)")
+    LOGGER.info(
+        "Unified Crypto Strategy Lab MCP starting "
+        "(BACKTEST_CONTROL + WALK_FORWARD_STATE + READ_ONLY_RESEARCH)"
+    )
     LOGGER.info("Host: %s", host)
     LOGGER.info("Port: %s", port)
     LOGGER.info("Raw data root: %s", control.raw_root)
     LOGGER.info("Output root: %s", control.output_root)
     LOGGER.info("Max concurrent runs: %s", control.max_concurrent_runs)
     LOGGER.info("Control tools: %s", ", ".join(CONTROL_TOOLS))
+    LOGGER.info("Walk-forward state tools: %s", ", ".join(WALK_FORWARD_STATE_TOOLS))
     LOGGER.info("Research tools: %s", ", ".join(READ_TOOLS))
     create_control_server(control, reports).run(
         transport="streamable-http",
