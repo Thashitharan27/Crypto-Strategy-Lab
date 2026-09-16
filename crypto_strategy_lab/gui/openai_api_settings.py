@@ -1,9 +1,13 @@
-"""OpenAI API credential settings for the desktop GUI.
+"""OpenAI API credential and runtime settings for the desktop GUI.
 
 The API key is intentionally kept outside ResearchRunConfig and all run artifacts.
 Persistent storage uses the operating-system credential vault via ``keyring``.
+The AI generation mode is deliberately session-only so saving an API key cannot
+silently enable paid model calls for future application launches.
 """
 from __future__ import annotations
+
+import os
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
@@ -18,7 +22,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from crypto_strategy_lab.ai_decision import AI_MODEL
+from crypto_strategy_lab.ai_decision import (
+    AI_CACHE_MODE_ENV,
+    AI_CACHE_ONLY,
+    AI_CACHE_THEN_API,
+    AI_MODEL,
+)
 from crypto_strategy_lab.openai_credentials import (
     activate_openai_api_key,
     openai_api_key_status,
@@ -29,6 +38,28 @@ from crypto_strategy_lab.openai_credentials import (
 
 OPENAI_API_KEYS_URL = "https://platform.openai.com/api-keys"
 OPENAI_USAGE_URL = "https://platform.openai.com/usage"
+
+
+def current_ai_runtime_mode() -> str:
+    """Return the effective runtime mode, failing closed to CACHE_ONLY."""
+    mode = str(os.environ.get(AI_CACHE_MODE_ENV, AI_CACHE_ONLY)).strip().upper()
+    if mode not in {AI_CACHE_ONLY, AI_CACHE_THEN_API}:
+        return AI_CACHE_ONLY
+    return mode
+
+
+def set_ai_runtime_mode(mode: str) -> str:
+    """Set the AI runtime mode for this application process only."""
+    normalized = str(mode).strip().upper()
+    if normalized not in {AI_CACHE_ONLY, AI_CACHE_THEN_API}:
+        raise ValueError(f"Unsupported AI runtime mode: {mode}")
+    if normalized == AI_CACHE_ONLY:
+        # No persistent setting is written. Removing the override restores the
+        # engine's built-in safe default for this process.
+        os.environ.pop(AI_CACHE_MODE_ENV, None)
+    else:
+        os.environ[AI_CACHE_MODE_ENV] = AI_CACHE_THEN_API
+    return normalized
 
 
 def test_openai_api_key(value: str | None = None) -> dict[str, object]:
@@ -83,7 +114,7 @@ def test_openai_api_key(value: str | None = None) -> dict[str, object]:
 
 
 class OpenAIAPISettingsWidget(QWidget):
-    """GUI page for safely configuring the OpenAI API credential."""
+    """GUI page for safely configuring the OpenAI API credential and run mode."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -138,6 +169,36 @@ class OpenAIAPISettingsWidget(QWidget):
         credential_layout.addWidget(self.result_label)
         layout.addWidget(credential_box)
 
+        mode_box = QGroupBox("AI Run Mode — This App Session")
+        mode_layout = QVBoxLayout(mode_box)
+        self.generate_missing_checkbox = QCheckBox(
+            "Allow paid API calls for missing AI decisions"
+        )
+        self.generate_missing_checkbox.setObjectName("openai_generate_missing_decisions")
+        self.generate_missing_checkbox.setChecked(
+            current_ai_runtime_mode() == AI_CACHE_THEN_API
+        )
+        self.generate_missing_checkbox.toggled.connect(self._set_generation_allowed)
+        mode_layout.addWidget(self.generate_missing_checkbox)
+
+        self.mode_status_label = QLabel()
+        self.mode_status_label.setWordWrap(True)
+        mode_layout.addWidget(self.mode_status_label)
+
+        mode_warning = QLabel(
+            "Unchecked = CACHE_ONLY: cached AI decisions may be reused, but a cache miss stops the run "
+            "before any API spend. Checked = CACHE_THEN_API: each missing decision may call the OpenAI "
+            "Responses API synchronously and is then cached. Use this only for small/short tests. For "
+            "large historical or low-timeframe runs, prepare the Batch cache first. This choice is not "
+            "saved and normally returns to CACHE_ONLY when the app restarts."
+        )
+        mode_warning.setWordWrap(True)
+        mode_warning.setStyleSheet(
+            "background:#fff7e6; padding:10px; border:1px solid #e6c56b"
+        )
+        mode_layout.addWidget(mode_warning)
+        layout.addWidget(mode_box)
+
         security_box = QGroupBox("Security / Billing")
         security_layout = QVBoxLayout(security_box)
         security_note = QLabel(
@@ -165,17 +226,44 @@ class OpenAIAPISettingsWidget(QWidget):
         layout.addWidget(security_box)
 
         model_note = QLabel(
-            f"Current AI Decision default: {AI_MODEL}. Historical runs remain CACHE_ONLY unless you "
-            "explicitly prepare/submit Batch API work."
+            f"Current AI Decision default: {AI_MODEL}. Generated decisions are keyed by the full causal "
+            "snapshot plus model/prompt identity, so unchanged decisions can be reused from cache."
         )
         model_note.setWordWrap(True)
         model_note.setStyleSheet("color:#52606d; padding:6px")
         layout.addWidget(model_note)
         layout.addStretch()
         self.refresh_status()
+        self._refresh_mode_status()
 
     def _set_key_visibility(self, visible: bool) -> None:
         self.key_input.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password)
+
+    def _set_generation_allowed(self, enabled: bool) -> None:
+        mode = AI_CACHE_THEN_API if enabled else AI_CACHE_ONLY
+        set_ai_runtime_mode(mode)
+        self._refresh_mode_status()
+        if enabled:
+            self.result_label.setText(
+                "AI generation enabled for this app session. Missing decisions may make paid API calls."
+            )
+        else:
+            self.result_label.setText(
+                "AI generation disabled. CACHE_ONLY safety mode is active."
+            )
+
+    def _refresh_mode_status(self) -> None:
+        mode = current_ai_runtime_mode()
+        if mode == AI_CACHE_THEN_API:
+            self.mode_status_label.setText(
+                "Current mode: CACHE_THEN_API — cache misses may use the paid OpenAI API."
+            )
+            self.mode_status_label.setStyleSheet("font-weight:bold; color:#9a5b00")
+        else:
+            self.mode_status_label.setText(
+                "Current mode: CACHE_ONLY — cache misses stop safely with no API call."
+            )
+            self.mode_status_label.setStyleSheet("font-weight:bold; color:#246b35")
 
     def refresh_status(self) -> None:
         status = openai_api_key_status()
