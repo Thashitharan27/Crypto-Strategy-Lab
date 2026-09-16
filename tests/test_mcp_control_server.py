@@ -1,4 +1,9 @@
-from mcp_server.control_server import CONTROL_TOOLS, READ_TOOLS, create_control_server
+from mcp_server.control_server import (
+    CONTROL_TOOLS,
+    READ_TOOLS,
+    WALK_FORWARD_STATE_TOOLS,
+    create_control_server,
+)
 
 
 class FakeControl:
@@ -65,6 +70,23 @@ class FakeControl:
     def read_control_log(self, run_id, stream, lines):
         return {"run_id": run_id, "stream": stream, "lines": lines}
 
+    def create_walk_forward_state(self, state_id, markdown, initial_event=None):
+        return {"state_id": state_id, "markdown": markdown, "initial_event": initial_event}
+
+    def read_walk_forward_state(self, state_id, recent_events=50):
+        return {"state_id": state_id, "recent_events": recent_events}
+
+    def update_walk_forward_state(self, state_id, markdown, expected_sha256, event=None):
+        return {
+            "state_id": state_id,
+            "markdown": markdown,
+            "expected_sha256": expected_sha256,
+            "event": event,
+        }
+
+    def append_walk_forward_event(self, state_id, event):
+        return {"state_id": state_id, "event": event}
+
 
 class FakeReports:
     def list_runs(self, limit):
@@ -109,14 +131,17 @@ def test_control_server_registers_unified_research_and_bounded_control_tools():
 
     server = create_control_server(FakeControl(), FakeReports())
     assert isinstance(server, MCPServer)
-    assert set(server._tool_manager._tools) == set(CONTROL_TOOLS) | set(READ_TOOLS)
+    assert set(server._tool_manager._tools) == (
+        set(CONTROL_TOOLS) | set(WALK_FORWARD_STATE_TOOLS) | set(READ_TOOLS)
+    )
 
-    # The unified endpoint may start backtests and analyze completed outputs, but
-    # its write boundary must remain backtest-only.
+    # The unified endpoint may start backtests, maintain a restricted WF ledger,
+    # and analyze completed outputs, but it still cannot perform arbitrary writes.
     assert "shell" not in server._tool_manager._tools
     assert "live_trade" not in server._tool_manager._tools
     assert "place_order" not in server._tool_manager._tools
     assert "edit_source" not in server._tool_manager._tools
+    assert "write_file" not in server._tool_manager._tools
 
 
 def test_unified_server_keeps_expected_tool_groups_stable():
@@ -142,6 +167,12 @@ def test_unified_server_keeps_expected_tool_groups_stable():
         "list_control_runs",
         "cancel_run",
         "read_control_log",
+    }
+    assert set(WALK_FORWARD_STATE_TOOLS) == {
+        "create_walk_forward_state",
+        "read_walk_forward_state",
+        "update_walk_forward_state",
+        "append_walk_forward_event",
     }
     assert set(READ_TOOLS) == {
         "list_runs",

@@ -9,6 +9,9 @@ cache/
 output/
 outputs/
 
+# Canonical causal walk-forward state is runtime research data, not source.
+walk_forward_state/
+
 # Local Data Lake research configs are user/run-specific and can be created freely.
 # Keep the canonical repository smoke fixture tracked.
 config/data_lake/*.json
