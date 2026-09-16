@@ -6,7 +6,6 @@ regenerated from the immutable experiment definition and events.
 """
 from __future__ import annotations
 
-from collections import deque
 from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
@@ -73,8 +72,8 @@ RULE_EVENT_TYPES = {
 }
 
 PHASES = {"RESEARCH_WF", "VALIDATED", "SHADOW", "LIVE", "RETIRED"}
-RULE_DEPLOYMENT_STATUSES = {"RESEARCH_ONLY", "SHADOW", "LIVE_ACTIVE", "RETIRED"}
 LEDGERS = {"RESEARCH", "SHADOW", "LIVE"}
+EVIDENCE_SOURCES = {"TEACHER", "PROSPECTIVE_WF", "SHADOW", "LIVE"}
 
 
 def _utc_now() -> str:
@@ -170,6 +169,8 @@ class CausalExperimentStore:
             raise ValueError("event_type must be upper snake case")
         if value not in KNOWN_EVENT_TYPES:
             raise ValueError(f"unsupported event_type: {value}")
+        if value == "WF_CREATED":
+            raise ValueError("WF_CREATED is emitted only by create_walk_forward_experiment")
         return value
 
     def _dir(self, experiment_id: str) -> tuple[str, Path]:
@@ -283,6 +284,16 @@ class CausalExperimentStore:
                 state = "COMPLETE"
         return state
 
+    @staticmethod
+    def _rule_versions(events: list[dict[str, Any]]) -> set[tuple[str, str]]:
+        versions: set[tuple[str, str]] = set()
+        for event in events:
+            if event.get("event_type") not in RULE_EVENT_TYPES:
+                continue
+            payload = event.get("payload") or {}
+            versions.add((str(payload.get("rule_id")), str(payload.get("rule_version"))))
+        return versions
+
     @classmethod
     def _validate_event_semantics(
         cls,
@@ -301,12 +312,25 @@ class CausalExperimentStore:
             if not candidate_id:
                 raise ValueError(f"{event_type} requires payload.candidate_id")
             current = cls._candidate_state(events, candidate_id)
-            if event_type == "CANDIDATE_CONTEXT_CAPTURED" and current != "UNSEEN":
-                raise ValueError(f"candidate {candidate_id} has already been captured")
+            if event_type == "CANDIDATE_CONTEXT_CAPTURED":
+                if current != "UNSEEN":
+                    raise ValueError(f"candidate {candidate_id} has already been captured")
+                if not str(payload.get("feature_hash", "")).strip():
+                    raise ValueError("CANDIDATE_CONTEXT_CAPTURED requires payload.feature_hash")
             if event_type == "FEATURE_CONTEXT_INVALID" and current != "ENTRY_CONTEXT_CAPTURED":
                 raise ValueError("feature invalidation requires captured candidate context")
-            if event_type == "DECISION_FROZEN" and current != "ENTRY_CONTEXT_CAPTURED":
-                raise ValueError("decision can only be frozen after candidate context is captured")
+            if event_type == "DECISION_FROZEN":
+                if current != "ENTRY_CONTEXT_CAPTURED":
+                    raise ValueError("decision can only be frozen after candidate context is captured")
+                missing = [
+                    key
+                    for key in ("final_action", "state_hash_at_decision")
+                    if payload.get(key) in (None, "")
+                ]
+                if missing:
+                    raise ValueError(
+                        "DECISION_FROZEN missing required fields: " + ", ".join(missing)
+                    )
             if event_type == "OUTCOME_REVEALED" and current != "DECISION_FROZEN":
                 raise ValueError("outcome cannot be revealed before a decision is frozen")
             if event_type == "TRADE_ENTERED" and current not in {"DECISION_FROZEN", "OUTCOME_REVEALED"}:
@@ -316,8 +340,8 @@ class CausalExperimentStore:
             candidate_id = str(payload.get("candidate_id", "")).strip()
             if candidate_id:
                 current = cls._candidate_state(events, candidate_id)
-                if current not in {"DECISION_FROZEN", "OUTCOME_REVEALED"}:
-                    raise ValueError("prospective trade resolution requires a frozen decision")
+                if current != "OUTCOME_REVEALED":
+                    raise ValueError("prospective trade resolution requires a revealed outcome")
             ledger = str(payload.get("ledger", "RESEARCH")).upper()
             if ledger not in LEDGERS:
                 raise ValueError(f"ledger must be one of: {', '.join(sorted(LEDGERS))}")
@@ -328,12 +352,28 @@ class CausalExperimentStore:
             if missing:
                 raise ValueError(f"{event_type} missing rule metadata: {', '.join(missing)}")
             _parse_iso(str(payload["effective_from"]), "payload.effective_from")
-            if event_type == "ENTRY_REFINED" and payload.get("supersedes_version") in (None, ""):
-                raise ValueError("ENTRY_REFINED requires payload.supersedes_version")
+            evidence_source = str(payload["evidence_source"]).upper()
+            if evidence_source not in EVIDENCE_SOURCES:
+                raise ValueError(
+                    f"evidence_source must be one of: {', '.join(sorted(EVIDENCE_SOURCES))}"
+                )
+            existing_versions = cls._rule_versions(events)
+            key = (str(payload["rule_id"]), str(payload["rule_version"]))
+            if key in existing_versions:
+                raise ValueError("rule version already exists")
+            if event_type == "ENTRY_REFINED":
+                supersedes = payload.get("supersedes_version")
+                if supersedes in (None, ""):
+                    raise ValueError("ENTRY_REFINED requires payload.supersedes_version")
+                if (str(payload["rule_id"]), str(supersedes)) not in existing_versions:
+                    raise ValueError("ENTRY_REFINED supersedes an unknown rule version")
 
         if event_type in {"RULE_PROMOTED_TO_SHADOW", "RULE_PROMOTED_TO_LIVE", "RULE_RETIRED"}:
             if payload.get("rule_id") in (None, "") or payload.get("rule_version") in (None, ""):
                 raise ValueError(f"{event_type} requires payload.rule_id and payload.rule_version")
+            key = (str(payload["rule_id"]), str(payload["rule_version"]))
+            if key not in cls._rule_versions(events):
+                raise ValueError(f"{event_type} references an unknown rule version")
 
         if event_type == "PHASE_CHANGED":
             phase = str(payload.get("phase", "")).upper()
@@ -459,6 +499,13 @@ class CausalExperimentStore:
                 "experiment_id": value,
                 "event_type": "WF_CREATED",
                 "operation_id": operation_id,
+                "operation_fingerprint": _sha256_json(
+                    {
+                        "event_type": "WF_CREATED",
+                        "definition_sha256": manifest["definition_sha256"],
+                        "initial_phase": phase,
+                    }
+                ),
                 "recorded_at": recorded_at,
                 "event_time": recorded_at,
                 "effective_market_time": None,
@@ -567,10 +614,22 @@ class CausalExperimentStore:
             if effective_market_time is not None
             else None
         )
-        occurred = _parse_iso(event_time, "event_time") if event_time is not None else _utc_now()
+        requested_event_time = (
+            _parse_iso(event_time, "event_time") if event_time is not None else None
+        )
+        occurred = requested_event_time or _utc_now()
         source_value = str(source).strip().upper()
         if not source_value:
             raise ValueError("source cannot be empty")
+        operation_fingerprint = _sha256_json(
+            {
+                "event_type": event_type,
+                "payload": payload,
+                "effective_market_time": effective,
+                "requested_event_time": requested_event_time,
+                "source": source_value,
+            }
+        )
 
         value, directory, manifest_path, events_path = self._paths(experiment_id)
         with self._lock:
@@ -583,6 +642,8 @@ class CausalExperimentStore:
 
             existing = self._find_operation(events, operation_id)
             if existing is not None:
+                if existing.get("operation_fingerprint") != operation_fingerprint:
+                    raise ValueError("operation_id was already used for a different causal mutation")
                 return {
                     "experiment_id": value,
                     "idempotent_replay": True,
@@ -596,6 +657,13 @@ class CausalExperimentStore:
                     "causal experiment changed since it was read; read it again before appending"
                 )
 
+            if event_type == "DECISION_FROZEN":
+                decision_hash = str(payload.get("state_hash_at_decision", "")).strip().lower()
+                if decision_hash != state_hash:
+                    raise ValueError(
+                        "DECISION_FROZEN state_hash_at_decision must equal the current experiment state hash"
+                    )
+
             self._validate_event_semantics(events, event_type, payload)
             recorded_at = _utc_now()
             record = {
@@ -605,6 +673,7 @@ class CausalExperimentStore:
                 "experiment_id": value,
                 "event_type": event_type,
                 "operation_id": operation_id,
+                "operation_fingerprint": operation_fingerprint,
                 "recorded_at": recorded_at,
                 "event_time": occurred,
                 "effective_market_time": effective,
