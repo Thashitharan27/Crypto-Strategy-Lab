@@ -20,6 +20,9 @@ from typing import Any
 
 from crypto_strategy_lab.paths import CACHE_DIR, CONFIG_DIR, MARKET_DATA_ROOT, OUTPUT_DIR, PROJECT_ROOT
 from crypto_strategy_lab.rule_control_service import RuleAwareBacktestControlService
+from crypto_strategy_lab.walk_forward_candidate_engine import (
+    get_next_walk_forward_candidate as _get_next_walk_forward_candidate,
+)
 from crypto_strategy_lab.walk_forward_materialization import (
     create_run_from_walk_forward_experiment as _create_run_from_walk_forward_experiment,
     materialize_walk_forward_strategy as _materialize_walk_forward_strategy,
@@ -81,13 +84,14 @@ CAUSAL_EXPERIMENT_TOOLS = (
     "read_walk_forward_experiment",
     "list_walk_forward_experiments",
     "append_walk_forward_experiment_event",
+    "get_next_walk_forward_candidate",
     "materialize_walk_forward_strategy",
     "create_run_from_walk_forward_experiment",
 )
 
 
 def _connection_safe_error(operation: str, exc: Exception) -> dict[str, Any]:
-    LOGGER.exception("Causal materialization operation failed: %s", operation)
+    LOGGER.exception("Causal research operation failed: %s", operation)
     return {
         "ok": False,
         "operation": operation,
@@ -105,9 +109,6 @@ def create_control_server(
 
     server = MCPServer("Crypto Strategy Lab")
 
-    # ------------------------------------------------------------------
-    # Bounded backtest-control tools.
-    # ------------------------------------------------------------------
     @server.tool()
     def control_info() -> dict[str, Any]:
         """Describe the bounded backtest/research boundary and preferred workflow."""
@@ -153,9 +154,6 @@ def create_control_server(
         """Deep-merge strict config settings into a DRAFT and invalidate prior approval."""
         return control.set_run_settings(run_id, patch)
 
-    # ------------------------------------------------------------------
-    # First-class Strategy Builder rule workspace.
-    # ------------------------------------------------------------------
     @server.tool()
     def get_strategy_capabilities() -> dict[str, Any]:
         """Return valid indicators, GUI labels, conditions, categorical values and group semantics."""
@@ -217,8 +215,6 @@ def create_control_server(
         """Re-enable one previously muted saved rule group."""
         return control.unmute_rule_group(run_id, group_id)
 
-    # Low-level compatibility API retained for existing clients/configuration
-    # surgery. Walk-forward Strategy Builder work should use the tools above.
     @server.tool()
     def set_filter_groups(
         run_id: str,
@@ -272,9 +268,6 @@ def create_control_server(
         """Read a bounded tail of this control job's stdout or stderr."""
         return control.read_control_log(run_id, stream, lines)
 
-    # ------------------------------------------------------------------
-    # Legacy/human-readable walk-forward state tools.
-    # ------------------------------------------------------------------
     @server.tool()
     def create_walk_forward_state(
         state_id: str,
@@ -310,9 +303,6 @@ def create_control_server(
         """Append an immutable JSONL audit event linked to the current state hash."""
         return control.append_walk_forward_event(state_id, event)
 
-    # ------------------------------------------------------------------
-    # Event-sourced causal experiment tools.
-    # ------------------------------------------------------------------
     @server.tool()
     def create_walk_forward_experiment(
         experiment_id: str,
@@ -368,6 +358,28 @@ def create_control_server(
         )
 
     @server.tool()
+    def get_next_walk_forward_candidate(
+        experiment_id: str,
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        max_scan_rows: int = 250000,
+    ) -> dict[str, Any]:
+        """Apply current causal rules to Every Viable Entry and capture the first eligible entry without outcome data."""
+        try:
+            return _get_next_walk_forward_candidate(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                operation_id=operation_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+                max_scan_rows=max_scan_rows,
+            )
+        except Exception as exc:
+            return _connection_safe_error("get_next_walk_forward_candidate", exc)
+
+    @server.tool()
     def materialize_walk_forward_strategy(
         experiment_id: str,
         expected_sequence: int,
@@ -411,10 +423,6 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("create_run_from_walk_forward_experiment", exc)
 
-    # ------------------------------------------------------------------
-    # Completed-run research tools. These delegate to the existing
-    # manifest-backed BacktestReports implementation and remain read-only.
-    # ------------------------------------------------------------------
     @server.tool()
     def list_runs(limit: int = 50) -> list[dict[str, Any]]:
         """List completed manifest-backed runs beneath the configured output root."""
@@ -476,7 +484,7 @@ def create_control_server(
     @server.tool()
     def query_parquet(run: str, filename: str, sql: str) -> dict[str, Any]:
         """Query an allowed parquet inside a completed run using restricted SQL."""
-        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run)
+        LOGGER.info("Unified MCP tool called: query_parquet run=%s filename=%s", run, filename)
         return reports.query_parquet(run, filename, sql)
 
     @server.tool()
