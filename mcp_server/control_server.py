@@ -31,6 +31,10 @@ import time
 from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator as _wf_orchestrator
+from crypto_strategy_lab import walk_forward_review_facade as _wf_review_facade
+from crypto_strategy_lab.walk_forward_opposite_replay import (
+    replay_opposite_one_r as _replay_opposite_one_r,
+)
 from crypto_strategy_lab.walk_forward_resume_safety import (
     install_resume_safety as _install_resume_safety,
 )
@@ -60,6 +64,7 @@ for _name in dir(_impl):
 
 
 _ORIGINAL_GET_NEXT_CANDIDATE = _impl._get_next_walk_forward_candidate
+_ORIGINAL_TEACHER_LOSS_DECORATOR = _wf_orchestrator._decorate_teacher_loss_packet
 
 
 def _get_next_candidate_with_strategy_action(*args, **kwargs):
@@ -81,6 +86,49 @@ def _get_next_candidate_with_strategy_action(*args, **kwargs):
     return updated
 
 
+def _decorate_teacher_loss_with_replay(control, reports, experiment_id, result):
+    """Use immutable EVE first, then causally replay opposite 1R from 1m data."""
+    updated = _ORIGINAL_TEACHER_LOSS_DECORATOR(
+        control, reports, experiment_id, result
+    )
+    if not isinstance(updated, dict) or updated.get("status") != "TEACHER_LOSS_REVIEW_REQUIRED":
+        return updated
+
+    current = updated.get("opposite_side_outcome")
+    if isinstance(current, dict) and current.get("available") is True:
+        return updated
+
+    teacher = updated.get("teacher")
+    if not isinstance(teacher, dict):
+        return updated
+    side = str(teacher.get("side", "")).strip().upper()
+    if side not in {"LONG", "SHORT"}:
+        return updated
+    opposite = "SHORT" if side == "LONG" else "LONG"
+
+    store = _wf_orchestrator._impl._store(control)
+    readback = store.read(experiment_id, recent_events=0)
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    reference_run = str(definition.get("reference_run", "")).strip()
+    if not reference_run:
+        return updated
+
+    replay = _replay_opposite_one_r(
+        control,
+        reports,
+        reference_run=reference_run,
+        teacher=teacher,
+        entry_context=updated.get("entry_context") or {},
+        opposite_side=opposite,
+    )
+    updated["opposite_side_outcome"] = replay
+    updated["flip_activation_allowed"] = bool(
+        replay.get("available")
+        and str((replay.get("outcome") or {}).get("result", "")).upper() == "WIN"
+    )
+    return updated
+
+
 def _with_rule_schema(result):
     if not isinstance(result, dict):
         return result
@@ -95,6 +143,11 @@ def _with_rule_schema(result):
     updated.setdefault("rule_event_schema", _rule_event_schema())
     return updated
 
+
+# Patch both modules because the review facade imported the teacher decorator by
+# value, while the orchestrator resolves its module global at call time.
+_wf_orchestrator._decorate_teacher_loss_packet = _decorate_teacher_loss_with_replay
+_wf_review_facade._decorate_teacher_loss_packet = _decorate_teacher_loss_with_replay
 
 # Patch the module globals referenced by the nested MCP tool functions. Tool names
 # remain stable, so existing plugin connections only need a process reconnect.
