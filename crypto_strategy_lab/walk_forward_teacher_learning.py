@@ -2,9 +2,9 @@
 
 Historically teacher/reference trades only surfaced winners because their only
 purpose was ENTRY learning. For symmetric 1:1 setups, resolved teacher losses
-can also be useful causal evidence for FLIP learning. This module keeps the old
-winner behavior for every profile, and adds losses only when that profile's
-immutable reference configuration uses a 1.0R target.
+can also be useful causal evidence for FLIP learning. This module preserves the
+historical winner-only behavior unless the caller explicitly enables teacher
+loss FLIP learning, and even then admits losses only for immutable 1.0R profiles.
 """
 from __future__ import annotations
 
@@ -75,10 +75,14 @@ def next_teacher_for_learning(
     manifest: dict[str, Any],
     run_dir: Path,
     events: list[dict[str, Any]],
+    *,
+    include_losses: bool = False,
 ) -> tuple[dict[str, Any], Any] | None:
     """Return the next causal teacher boundary.
 
-    Winners always remain eligible for ENTRY review. Losses are eligible only
+    Winners always remain eligible for ENTRY review. When ``include_losses`` is
+    false (the default), behavior is intentionally identical to the historical
+    winner-only workflow. When enabled, losses are additionally eligible only
     for profiles whose immutable reference configuration uses a 1.0R target.
     Break-even rows remain non-teaching. Already-recorded teacher pair ids are
     excluded explicitly so multiple trades sharing one resolution timestamp are
@@ -104,7 +108,7 @@ def next_teacher_for_learning(
         ]
         selection = ["pair_id", *optional, "pair_net_r", "exit_time"]
 
-        eligible_loss_profiles = _eligible_loss_profiles(manifest)
+        eligible_loss_profiles = _eligible_loss_profiles(manifest) if include_losses else []
         if "strategy_profile_key" in columns and eligible_loss_profiles:
             placeholders = ", ".join("?" for _ in eligible_loss_profiles)
             where = (
@@ -113,8 +117,8 @@ def next_teacher_for_learning(
             )
             params: list[Any] = list(eligible_loss_profiles)
         else:
-            # Without an exact profile we cannot prove the teacher loss belongs
-            # to a symmetric 1R setup, so preserve the historical winner-only path.
+            # This is both the historical default and the safe fallback when the
+            # exact teacher profile cannot be proven to use a symmetric 1R target.
             where = "pair_net_r > 0"
             params = []
 
@@ -141,7 +145,7 @@ def next_teacher_for_learning(
         result = "WIN" if net_r > 0 else ("LOSS" if net_r < 0 else "BREAKEVEN")
         if result == "LOSS":
             profile = str(values.get("strategy_profile_key") or "").lower()
-            if not profile_supports_teacher_loss_flip(manifest, profile):
+            if not include_losses or not profile_supports_teacher_loss_flip(manifest, profile):
                 continue
 
         resolved = _candidate_impl._utc_timestamp(
