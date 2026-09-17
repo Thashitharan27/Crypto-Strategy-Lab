@@ -8,7 +8,9 @@ semantics and outcome firewall unchanged while making large 15m scans bounded:
 * a pending teacher boundary stops scanning as soon as market time reaches it,
   even when no ENTRY rule currently matches;
 * accelerated callers can resume a scan from an exact (time, signal, side)
-  checkpoint without skipping same-timestamp opportunities.
+  checkpoint without skipping same-timestamp opportunities;
+* teacher winners remain ENTRY evidence, while teacher losses are surfaced only
+  for immutable profiles configured with a symmetric 1.0R target.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ import duckdb
 import pandas as pd
 
 from . import walk_forward_candidate_engine_impl as _impl
+from .walk_forward_teacher_learning import next_teacher_for_learning
 
 for _name in dir(_impl):
     if not _name.startswith("__"):
@@ -68,7 +71,7 @@ def _scan_checkpoint(event: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def _tracking_next_teacher(*args, **kwargs):
-    teacher = _ORIGINAL_NEXT_TEACHER(*args, **kwargs)
+    teacher = next_teacher_for_learning(*args, **kwargs)
     if getattr(_SCAN_CONTEXT, "active", False):
         _SCAN_CONTEXT.teacher_time = teacher[1] if teacher is not None else None
     return teacher
@@ -326,3 +329,4 @@ _impl._max_event_time = _tracking_max_event_time
 _impl.get_next_walk_forward_candidate = get_next_walk_forward_candidate
 
 globals()["_candidate_rows"] = _candidate_rows
+globals()["_next_teacher"] = _tracking_next_teacher
