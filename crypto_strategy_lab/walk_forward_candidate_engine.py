@@ -1,19 +1,20 @@
 """Streaming facade for deterministic causal candidate selection.
 
 The proven candidate-selection logic remains in
-``walk_forward_candidate_engine_impl``.  This facade keeps the causal rule
-semantics and outcome firewall unchanged while making large 15m scans bounded:
+``walk_forward_candidate_engine_impl``. This facade keeps the causal rule
+semantics and outcome firewall unchanged while making large scans bounded:
 
 * DuckDB rows are delivered in small pandas batches instead of one huge frame;
 * a pending teacher boundary stops scanning as soon as market time reaches it,
   even when no ENTRY rule currently matches;
 * accelerated callers can resume a scan from an exact (time, signal, side)
   checkpoint without skipping same-timestamp opportunities;
-* teacher winners remain ENTRY evidence, while teacher losses are surfaced only
-  for immutable profiles configured with a symmetric 1.0R target.
+* teacher losses are considered only inside an explicit teacher-loss FLIP
+  policy, and the underlying selector still requires an immutable 1.0R profile.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 import threading
 from typing import Any
@@ -35,6 +36,7 @@ _ORIGINAL_NEXT_TEACHER = _impl._next_teacher
 _ORIGINAL_MAX_EVENT_TIME = _impl._max_event_time
 _ORIGINAL_GET_NEXT_CANDIDATE = _impl.get_next_walk_forward_candidate
 _SCAN_CONTEXT = threading.local()
+_TEACHER_POLICY_CONTEXT = threading.local()
 
 
 def _clear_scan_context() -> None:
@@ -42,6 +44,28 @@ def _clear_scan_context() -> None:
     _SCAN_CONTEXT.teacher_time = None
     _SCAN_CONTEXT.scan_key = None
     _SCAN_CONTEXT.last_stream = None
+
+
+def _teacher_loss_flip_enabled() -> bool:
+    return bool(getattr(_TEACHER_POLICY_CONTEXT, "enabled", False))
+
+
+@contextmanager
+def teacher_loss_flip_policy(enabled: bool):
+    """Temporarily select whether 1R teacher losses participate in chronology."""
+    marker = object()
+    previous = getattr(_TEACHER_POLICY_CONTEXT, "enabled", marker)
+    _TEACHER_POLICY_CONTEXT.enabled = bool(enabled)
+    try:
+        yield
+    finally:
+        if previous is marker:
+            try:
+                delattr(_TEACHER_POLICY_CONTEXT, "enabled")
+            except AttributeError:
+                pass
+        else:
+            _TEACHER_POLICY_CONTEXT.enabled = previous
 
 
 def _as_utc(value: Any) -> pd.Timestamp:
@@ -71,7 +95,11 @@ def _scan_checkpoint(event: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def _tracking_next_teacher(*args, **kwargs):
-    teacher = next_teacher_for_learning(*args, **kwargs)
+    teacher = next_teacher_for_learning(
+        *args,
+        **kwargs,
+        include_losses=_teacher_loss_flip_enabled(),
+    )
     if getattr(_SCAN_CONTEXT, "active", False):
         _SCAN_CONTEXT.teacher_time = teacher[1] if teacher is not None else None
     return teacher
@@ -81,9 +109,6 @@ def _tracking_max_event_time(events: list[dict[str, Any]]) -> pd.Timestamp | Non
     if not getattr(_SCAN_CONTEXT, "active", False):
         return _ORIGINAL_MAX_EVENT_TIME(events)
 
-    # A scan checkpoint is valid only while it is the newest event. Any teacher,
-    # review, rule or trade event after it changes the causal state and therefore
-    # intentionally invalidates the old scan cursor.
     checkpoint = _scan_checkpoint(events[-1] if events else None)
     if checkpoint is None:
         _SCAN_CONTEXT.scan_key = None
@@ -161,8 +186,6 @@ class _StreamingCandidateRows:
                 cursor_time = _as_utc(self.scan_key["entry_time"]).to_pydatetime()
                 cursor_index = int(self.scan_key["research_signal_index"])
                 cursor_side = str(self.scan_key["side"]).upper()
-                # Exact keyset continuation preserves rows sharing the checkpoint
-                # timestamp instead of skipping or repeatedly rescanning them.
                 where = """
                     WHERE (
                         CAST(t.entry_time AS TIMESTAMPTZ) > ?
@@ -182,9 +205,6 @@ class _StreamingCandidateRows:
                     [cursor_time, cursor_time, cursor_index, cursor_index, cursor_side]
                 )
             elif self.market_cursor is not None:
-                # >= remains intentional for ordinary causal events. Existing
-                # captured identities are removed by the proven engine, preserving
-                # another opportunity at the same timestamp.
                 where = "WHERE CAST(t.entry_time AS TIMESTAMPTZ) >= ?"
                 params.append(self.market_cursor.to_pydatetime())
 
@@ -217,10 +237,7 @@ class _StreamingCandidateRows:
                     if pd.isna(raw_decision_time):
                         raw_decision_time = series.get("entry_time")
                     decision_time = _as_utc(raw_decision_time)
-                    if (
-                        self.teacher_time is not None
-                        and decision_time >= self.teacher_time
-                    ):
+                    if self.teacher_time is not None and decision_time >= self.teacher_time:
                         self.teacher_boundary_reached = True
                         stop = True
                         break
@@ -235,10 +252,7 @@ class _StreamingCandidateRows:
                     yield row_index, series
                     row_index += 1
 
-            if (
-                not self.teacher_boundary_reached
-                and self.rows_yielded >= self.limit
-            ):
+            if not self.teacher_boundary_reached and self.rows_yielded >= self.limit:
                 self.limit_exhausted_before_teacher = True
 
 
@@ -248,7 +262,6 @@ def _candidate_rows(
     cursor: pd.Timestamp | None,
     limit: int,
 ):
-    """Return a DataFrame-compatible bounded streaming row source."""
     stream = _StreamingCandidateRows(
         samples_path,
         context_path,
@@ -272,57 +285,60 @@ def _candidate_rows(
 
 def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
     """Run the proven scanner with bounded teacher-aware resumable delivery."""
-    _clear_scan_context()
-    _SCAN_CONTEXT.active = True
-    try:
-        result = _ORIGINAL_GET_NEXT_CANDIDATE(*args, **kwargs)
-        stream = getattr(_SCAN_CONTEXT, "last_stream", None)
-        if stream is None:
-            return result
-
-        scan = dict(result.get("scan") or {})
-        scan["bounded_scan_rows"] = int(stream.limit)
-        scan["teacher_boundary_reached"] = bool(stream.teacher_boundary_reached)
-        if stream.last_cursor is not None:
-            scan["scan_cursor"] = dict(stream.last_cursor)
-
-        # The implementation historically returned TEACHER_DUE_FIRST after any
-        # finite scan whenever a future teacher existed. If the bounded scan hit
-        # its row limit before reaching that teacher in market time, returning the
-        # teacher would skip unseen prospective opportunities. Convert only that
-        # case into a resumable no-match result; the orchestrator will persist the
-        # exact cursor and continue on the next short MCP request.
-        if (
-            result.get("status") == "TEACHER_DUE_FIRST"
-            and stream.limit_exhausted_before_teacher
-            and not stream.teacher_boundary_reached
-        ):
-            experiment_id = str(result.get("experiment_id") or kwargs.get("experiment_id") or "")
-            expected_sequence = int(kwargs.get("expected_sequence", result.get("sequence")))
-            expected_state_hash = str(
-                kwargs.get("expected_state_hash", result.get("state_hash"))
-            )
-            return {
-                "contract": result.get("contract", CANDIDATE_CONTEXT_CONTRACT),
-                "status": "NO_ELIGIBLE_CANDIDATE_IN_SCAN",
-                "experiment_id": experiment_id,
-                "sequence": expected_sequence,
-                "state_hash": expected_state_hash,
-                "scan": scan,
-                "teacher_pending": True,
-                "outcome_exposed": False,
-            }
-
-        updated = dict(result)
-        updated["scan"] = scan
-        return updated
-    finally:
+    policy_marker = object()
+    requested_policy = kwargs.pop("teacher_loss_flip_enabled", policy_marker)
+    policy = (
+        teacher_loss_flip_policy(bool(requested_policy))
+        if requested_policy is not policy_marker
+        else nullcontext()
+    )
+    with policy:
         _clear_scan_context()
+        _SCAN_CONTEXT.active = True
+        try:
+            result = _ORIGINAL_GET_NEXT_CANDIDATE(*args, **kwargs)
+            stream = getattr(_SCAN_CONTEXT, "last_stream", None)
+            if stream is None:
+                return result
+
+            scan = dict(result.get("scan") or {})
+            scan["bounded_scan_rows"] = int(stream.limit)
+            scan["teacher_boundary_reached"] = bool(stream.teacher_boundary_reached)
+            if stream.last_cursor is not None:
+                scan["scan_cursor"] = dict(stream.last_cursor)
+
+            if (
+                result.get("status") == "TEACHER_DUE_FIRST"
+                and stream.limit_exhausted_before_teacher
+                and not stream.teacher_boundary_reached
+            ):
+                experiment_id = str(
+                    result.get("experiment_id") or kwargs.get("experiment_id") or ""
+                )
+                expected_sequence = int(
+                    kwargs.get("expected_sequence", result.get("sequence"))
+                )
+                expected_state_hash = str(
+                    kwargs.get("expected_state_hash", result.get("state_hash"))
+                )
+                return {
+                    "contract": result.get("contract", CANDIDATE_CONTEXT_CONTRACT),
+                    "status": "NO_ELIGIBLE_CANDIDATE_IN_SCAN",
+                    "experiment_id": experiment_id,
+                    "sequence": expected_sequence,
+                    "state_hash": expected_state_hash,
+                    "scan": scan,
+                    "teacher_pending": True,
+                    "outcome_exposed": False,
+                }
+
+            updated = dict(result)
+            updated["scan"] = scan
+            return updated
+        finally:
+            _clear_scan_context()
 
 
-# Functions in the implementation module resolve these helpers from their own
-# module globals. Patch only the delivery/cursor boundary; rule matching,
-# candidate capture and outcome access remain in the proven implementation.
 _impl._candidate_rows = _candidate_rows
 _impl._next_teacher = _tracking_next_teacher
 _impl._max_event_time = _tracking_max_event_time
