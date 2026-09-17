@@ -1,0 +1,280 @@
+"""Validated atomic review writers for causal walk-forward research.
+
+This facade preflights proposed ENTRY/VETO/FLIP mutations through the Strategy
+Builder compiler, then commits the review marker and all rule events in one
+atomic batch. Invalid rules therefore leave the experiment sequence/hash
+unchanged.
+"""
+from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any
+
+from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
+from crypto_strategy_lab.walk_forward_orchestrator import advance_walk_forward
+from crypto_strategy_lab.walk_forward_rule_validation import (
+    append_events_atomic,
+    preflight_rule_events,
+    rule_event_schema,
+    _verified_prefix,
+)
+
+
+def _canonical_rule_specs(
+    canonical: list[dict[str, Any]],
+    operation_id: str,
+    effective_from: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "event_type": item["event_type"],
+            "payload": deepcopy(item["payload"]),
+            "operation_id": _impl._operation(operation_id, f"rule-{index}"),
+            "effective_market_time": effective_from,
+            "source": "CHATGPT_RESEARCH",
+        }
+        for index, item in enumerate(canonical, 1)
+    ]
+
+
+def _with_rule_schema(result: dict[str, Any]) -> dict[str, Any]:
+    if result.get("status") not in {
+        "TEACHER_REVIEW_REQUIRED",
+        "LOSS_REVIEW_REQUIRED",
+        "PERIODIC_REVIEW_REQUIRED",
+    }:
+        return result
+    updated = deepcopy(result)
+    updated.setdefault("rule_event_schema", rule_event_schema())
+    return updated
+
+
+def _advance_after_batch(
+    control: Any,
+    reports: Any,
+    *,
+    experiment_id: str,
+    operation_id: str,
+    batch: dict[str, Any],
+    review_interval_months: int,
+) -> dict[str, Any]:
+    sequence = int(batch["sequence"])
+    state_hash = str(batch["state_hash"])
+    if bool(batch.get("idempotent_replay")):
+        current = _impl._store(control).read(experiment_id, recent_events=0)
+        sequence = int(current["sequence"])
+        state_hash = str(current["state_hash"])
+    return _with_rule_schema(
+        advance_walk_forward(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            operation_id=_impl._operation(operation_id, "advance"),
+            expected_sequence=sequence,
+            expected_state_hash=state_hash,
+            review_interval_months=review_interval_months,
+        )
+    )
+
+
+def record_walk_forward_review(
+    control: Any,
+    reports: Any,
+    *,
+    experiment_id: str,
+    review_type: str,
+    decision: str,
+    notes: str,
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+    candidate_id: str | None = None,
+    rule_events: list[dict[str, Any]] | None = None,
+    auto_advance: bool = True,
+    review_interval_months: int = 3,
+) -> dict[str, Any]:
+    """Validate first, then atomically record a loss/periodic review and rules."""
+    store = _impl._store(control)
+    readback, _all_events, events = _verified_prefix(
+        store, experiment_id, expected_sequence, expected_state_hash
+    )
+    kind = str(review_type).strip().upper()
+    if kind not in {"LOSS", "PERIODIC", "QUARTERLY"}:
+        raise ValueError("review_type must be LOSS or PERIODIC/QUARTERLY")
+    text = str(notes).strip()
+    if not str(decision).strip():
+        raise ValueError("decision cannot be empty")
+    effective = _impl._max_event_time(events)
+    if effective is None:
+        raise ValueError("review requires an established market-time cursor")
+    subject = str(candidate_id or "").strip()
+    if kind == "LOSS":
+        pending = _impl._unreviewed_loss(events)
+        if pending is None:
+            raise ValueError("there is no unresolved loss review")
+        pending_id = str((pending.get("payload") or {}).get("candidate_id", ""))
+        if not subject:
+            subject = pending_id
+        if subject != pending_id:
+            raise ValueError(f"loss review must resolve pending candidate {pending_id}")
+
+    effective_iso = effective.isoformat()
+    allowed = (
+        {"VETO_LEARNED", "ENTRY_REFINED", "FLIP_LEARNED"}
+        if kind == "LOSS"
+        else set(_impl.RULE_EVENT_TYPES)
+    )
+    preflight = preflight_rule_events(
+        control,
+        reports,
+        experiment_id=experiment_id,
+        expected_sequence=expected_sequence,
+        expected_state_hash=expected_state_hash,
+        rule_events=list(rule_events or []),
+        evidence_source="PROSPECTIVE_WF",
+        effective_from=effective_iso,
+        default_reason=text,
+        allowed_types=allowed,
+    )
+    canonical = list(preflight["canonical_rule_events"])
+    payload = {
+        "review_type": "PERIODIC" if kind == "QUARTERLY" else kind,
+        "candidate_id": subject or None,
+        "decision": str(decision).strip().upper(),
+        "notes": text,
+        "reviewed_state_hash": str(expected_state_hash),
+        "validated_rule_event_count": len(canonical),
+        "rule_event_schema_contract": preflight["rule_event_schema"]["contract"],
+    }
+    specs = [
+        {
+            "event_type": "REVIEW_COMPLETED",
+            "payload": payload,
+            "operation_id": _impl._operation(operation_id, "review"),
+            "effective_market_time": effective_iso,
+            "source": "CHATGPT_RESEARCH",
+        },
+        *_canonical_rule_specs(canonical, operation_id, effective_iso),
+    ]
+    batch = append_events_atomic(
+        store,
+        experiment_id=experiment_id,
+        expected_sequence=expected_sequence,
+        expected_state_hash=expected_state_hash,
+        specs=specs,
+    )
+    if not auto_advance:
+        return {
+            "contract": _impl.ORCHESTRATOR_CONTRACT,
+            "status": "REVIEW_RECORDED",
+            "experiment_id": experiment_id,
+            "sequence": batch["sequence"],
+            "state_hash": batch["state_hash"],
+            "canonical_rule_events": canonical,
+            "rule_event_schema": preflight["rule_event_schema"],
+            "atomic_batch": True,
+            "idempotent_replay": bool(batch.get("idempotent_replay")),
+        }
+    return _advance_after_batch(
+        control,
+        reports,
+        experiment_id=experiment_id,
+        operation_id=operation_id,
+        batch=batch,
+        review_interval_months=review_interval_months,
+    )
+
+
+def record_walk_forward_teacher_review(
+    control: Any,
+    reports: Any,
+    *,
+    experiment_id: str,
+    teacher_pair_id: str,
+    decision: str,
+    notes: str,
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+    rule_events: list[dict[str, Any]] | None = None,
+    auto_advance: bool = True,
+    review_interval_months: int = 3,
+) -> dict[str, Any]:
+    """Validate first, then atomically record a teacher winner and ENTRY rules."""
+    store = _impl._store(control)
+    readback, _all_events, events = _verified_prefix(
+        store, experiment_id, expected_sequence, expected_state_hash
+    )
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    reference_run = str(definition.get("reference_run", ""))
+    manifest = reports.get_run_manifest(reference_run)
+    run_dir = reports.resolve_run(reference_run)
+    teacher = _impl._next_teacher(manifest, run_dir, events)
+    if teacher is None:
+        raise ValueError("there is no unresolved teacher winner")
+    boundary, resolution_time = teacher
+    if str(boundary.get("pair_id")) != str(teacher_pair_id):
+        raise ValueError(
+            f"next teacher is pair {boundary.get('pair_id')}, not {teacher_pair_id}"
+        )
+
+    notes_text = str(notes).strip()
+    effective_iso = resolution_time.isoformat()
+    preflight = preflight_rule_events(
+        control,
+        reports,
+        experiment_id=experiment_id,
+        expected_sequence=expected_sequence,
+        expected_state_hash=expected_state_hash,
+        rule_events=list(rule_events or []),
+        evidence_source="TEACHER",
+        effective_from=effective_iso,
+        default_reason=notes_text,
+        allowed_types={"ENTRY_LEARNED", "ENTRY_REFINED"},
+    )
+    canonical = list(preflight["canonical_rule_events"])
+    teacher_payload = {
+        **deepcopy(boundary),
+        "result": "WIN",
+        "review_decision": str(decision).strip().upper(),
+        "notes": notes_text,
+        "validated_rule_event_count": len(canonical),
+        "rule_event_schema_contract": preflight["rule_event_schema"]["contract"],
+    }
+    specs = [
+        {
+            "event_type": "TEACHER_RESOLVED",
+            "payload": teacher_payload,
+            "operation_id": _impl._operation(operation_id, "teacher"),
+            "effective_market_time": effective_iso,
+            "source": "CHATGPT_RESEARCH",
+        },
+        *_canonical_rule_specs(canonical, operation_id, effective_iso),
+    ]
+    batch = append_events_atomic(
+        store,
+        experiment_id=experiment_id,
+        expected_sequence=expected_sequence,
+        expected_state_hash=expected_state_hash,
+        specs=specs,
+    )
+    if not auto_advance:
+        return {
+            "contract": _impl.ORCHESTRATOR_CONTRACT,
+            "status": "TEACHER_REVIEW_RECORDED",
+            "experiment_id": experiment_id,
+            "sequence": batch["sequence"],
+            "state_hash": batch["state_hash"],
+            "canonical_rule_events": canonical,
+            "rule_event_schema": preflight["rule_event_schema"],
+            "atomic_batch": True,
+            "idempotent_replay": bool(batch.get("idempotent_replay")),
+        }
+    return _advance_after_batch(
+        control,
+        reports,
+        experiment_id=experiment_id,
+        operation_id=operation_id,
+        batch=batch,
+        review_interval_months=review_interval_months,
+    )

@@ -1,8 +1,10 @@
 """Hardened facade for the unified Crypto Strategy Lab MCP server.
 
 The full server implementation remains in ``control_server_impl``. This facade
-adds recovery guarantees needed by accelerated walk-forward startup and routes
-MCP decision tools through the separated strategy-action/ChatGPT-view semantics.
+adds recovery guarantees needed by accelerated walk-forward startup, routes MCP
+decision tools through separated strategy-action/ChatGPT-view semantics, and
+preflights review-authored causal rules through the Strategy Builder compiler
+before any review/rule events are committed.
 
 * create_walk_forward_experiment does not report success until a verified
   read-back of the newly written hash chain succeeds;
@@ -11,7 +13,10 @@ MCP decision tools through the separated strategy-action/ChatGPT-view semantics.
   normal connection-safe error;
 * the MCP ``final_action`` argument is retained as a legacy wire name but is
   interpreted only as ChatGPT's independent view. The executable strategy side
-  is always taken from the captured ENTRY/VETO/FLIP result.
+  is always taken from the captured ENTRY/VETO/FLIP result;
+* teacher/loss/periodic review rules are canonicalized and compiled before an
+  atomic review+rules batch is persisted, so invalid rule schemas cannot poison
+  the immutable experiment chain.
 """
 from __future__ import annotations
 
@@ -20,6 +25,11 @@ import time
 from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator as _wf_orchestrator
+from crypto_strategy_lab.walk_forward_review_facade import (
+    record_walk_forward_review as _validated_record_walk_forward_review,
+    record_walk_forward_teacher_review as _validated_record_walk_forward_teacher_review,
+)
+from crypto_strategy_lab.walk_forward_rule_validation import rule_event_schema as _rule_event_schema
 from . import control_server_impl as _impl
 
 for _name in dir(_impl):
@@ -49,6 +59,20 @@ def _get_next_candidate_with_strategy_action(*args, **kwargs):
     return updated
 
 
+def _with_rule_schema(result):
+    if not isinstance(result, dict):
+        return result
+    if result.get("status") not in {
+        "TEACHER_REVIEW_REQUIRED",
+        "LOSS_REVIEW_REQUIRED",
+        "PERIODIC_REVIEW_REQUIRED",
+    }:
+        return result
+    updated = deepcopy(result)
+    updated.setdefault("rule_event_schema", _rule_event_schema())
+    return updated
+
+
 # Patch the module globals referenced by the nested MCP tool functions. Tool names
 # remain stable, so existing plugin connections only need a process reconnect.
 _impl._get_next_walk_forward_candidate = _get_next_candidate_with_strategy_action
@@ -57,6 +81,8 @@ _impl._freeze_and_reveal_walk_forward_candidate = (
 )
 _impl._submit_walk_forward_decision = _wf_orchestrator.submit_walk_forward_view
 _impl._advance_walk_forward = _wf_orchestrator.advance_walk_forward
+_impl._record_walk_forward_review = _validated_record_walk_forward_review
+_impl._record_walk_forward_teacher_review = _validated_record_walk_forward_teacher_review
 
 _ORIGINAL_CREATE_EXPERIMENT = (
     _impl.RuleAwareBacktestControlService.create_walk_forward_experiment
@@ -137,7 +163,7 @@ def _advance_walk_forward_with_create_grace(*args, **kwargs):
     last_error: ValueError | None = None
     for attempt in range(_CREATE_ADVANCE_GRACE_ATTEMPTS):
         try:
-            return _ORIGINAL_ADVANCE_WALK_FORWARD(*args, **kwargs)
+            return _with_rule_schema(_ORIGINAL_ADVANCE_WALK_FORWARD(*args, **kwargs))
         except ValueError as exc:
             if "causal experiment does not exist:" not in str(exc):
                 raise
