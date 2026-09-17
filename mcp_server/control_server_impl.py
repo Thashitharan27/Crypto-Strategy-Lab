@@ -16,6 +16,7 @@ from crypto_strategy_lab.paths import CACHE_DIR, CONFIG_DIR, MARKET_DATA_ROOT, O
 from crypto_strategy_lab.rule_control_service import RuleAwareBacktestControlService
 from crypto_strategy_lab.walk_forward_candidate_engine import (
     get_next_walk_forward_candidate as _get_next_walk_forward_candidate,
+    teacher_loss_flip_policy,
 )
 from crypto_strategy_lab.walk_forward_materialization import (
     create_run_from_walk_forward_experiment as _create_run_from_walk_forward_experiment,
@@ -348,8 +349,9 @@ def create_control_server(
         expected_sequence: int,
         expected_state_hash: str,
         max_scan_rows: int = 250000,
+        teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
-        """Apply causal rules to EVE and capture the first eligible outcome-hidden candidate."""
+        """Capture the next candidate; optionally include eligible 1R teacher losses."""
         try:
             return _get_next_walk_forward_candidate(
                 control,
@@ -359,6 +361,7 @@ def create_control_server(
                 expected_sequence=expected_sequence,
                 expected_state_hash=expected_state_hash,
                 max_scan_rows=max_scan_rows,
+                teacher_loss_flip_enabled=teacher_loss_flip_enabled,
             )
         except Exception as exc:
             return _connection_safe_error("get_next_walk_forward_candidate", exc)
@@ -423,20 +426,22 @@ def create_control_server(
         review_interval_months: int = 3,
         max_scan_rows: int = 250000,
         max_transitions: int = 20,
+        teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
-        """Advance deterministic causal work until a human/ChatGPT judgment is required."""
+        """Advance causal work; optionally surface 1R teacher losses for FLIP review."""
         try:
-            return _advance_walk_forward(
-                control,
-                reports,
-                experiment_id=experiment_id,
-                operation_id=operation_id,
-                expected_sequence=expected_sequence,
-                expected_state_hash=expected_state_hash,
-                review_interval_months=review_interval_months,
-                max_scan_rows=max_scan_rows,
-                max_transitions=max_transitions,
-            )
+            with teacher_loss_flip_policy(teacher_loss_flip_enabled):
+                return _advance_walk_forward(
+                    control,
+                    reports,
+                    experiment_id=experiment_id,
+                    operation_id=operation_id,
+                    expected_sequence=expected_sequence,
+                    expected_state_hash=expected_state_hash,
+                    review_interval_months=review_interval_months,
+                    max_scan_rows=max_scan_rows,
+                    max_transitions=max_transitions,
+                )
         except Exception as exc:
             return _connection_safe_error("advance_walk_forward", exc)
 
@@ -453,24 +458,26 @@ def create_control_server(
         expected_state_hash: str,
         auto_advance: bool = True,
         review_interval_months: int = 3,
+        teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
-        """Freeze decision, reveal outcome, settle equity, and continue automatically after wins."""
+        """Freeze, reveal, settle, and optionally continue with 1R teacher-loss review enabled."""
         try:
-            return _submit_walk_forward_decision(
-                control,
-                reports,
-                experiment_id=experiment_id,
-                candidate_id=candidate_id,
-                candidate_token=candidate_token,
-                final_action=final_action,
-                confidence_pct=confidence_pct,
-                reasoning=reasoning,
-                operation_id=operation_id,
-                expected_sequence=expected_sequence,
-                expected_state_hash=expected_state_hash,
-                auto_advance=auto_advance,
-                review_interval_months=review_interval_months,
-            )
+            with teacher_loss_flip_policy(teacher_loss_flip_enabled):
+                return _submit_walk_forward_decision(
+                    control,
+                    reports,
+                    experiment_id=experiment_id,
+                    candidate_id=candidate_id,
+                    candidate_token=candidate_token,
+                    final_action=final_action,
+                    confidence_pct=confidence_pct,
+                    reasoning=reasoning,
+                    operation_id=operation_id,
+                    expected_sequence=expected_sequence,
+                    expected_state_hash=expected_state_hash,
+                    auto_advance=auto_advance,
+                    review_interval_months=review_interval_months,
+                )
         except Exception as exc:
             return _connection_safe_error("submit_walk_forward_decision", exc)
 
@@ -487,24 +494,26 @@ def create_control_server(
         rule_events: list[dict[str, Any]] | None = None,
         auto_advance: bool = True,
         review_interval_months: int = 3,
+        teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
-        """Record a loss/periodic judgment plus optional rule events and continue."""
+        """Record a review and optionally continue with 1R teacher-loss review enabled."""
         try:
-            return _record_walk_forward_review(
-                control,
-                reports,
-                experiment_id=experiment_id,
-                review_type=review_type,
-                decision=decision,
-                notes=notes,
-                operation_id=operation_id,
-                expected_sequence=expected_sequence,
-                expected_state_hash=expected_state_hash,
-                candidate_id=candidate_id,
-                rule_events=rule_events,
-                auto_advance=auto_advance,
-                review_interval_months=review_interval_months,
-            )
+            with teacher_loss_flip_policy(teacher_loss_flip_enabled):
+                return _record_walk_forward_review(
+                    control,
+                    reports,
+                    experiment_id=experiment_id,
+                    review_type=review_type,
+                    decision=decision,
+                    notes=notes,
+                    operation_id=operation_id,
+                    expected_sequence=expected_sequence,
+                    expected_state_hash=expected_state_hash,
+                    candidate_id=candidate_id,
+                    rule_events=rule_events,
+                    auto_advance=auto_advance,
+                    review_interval_months=review_interval_months,
+                )
         except Exception as exc:
             return _connection_safe_error("record_walk_forward_review", exc)
 
@@ -520,23 +529,25 @@ def create_control_server(
         rule_events: list[dict[str, Any]] | None = None,
         auto_advance: bool = True,
         review_interval_months: int = 3,
+        teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
-        """Record the next teacher winner judgment plus optional ENTRY learning and continue."""
+        """Record a teacher review; opt in to 1R teacher-loss FLIP evidence when needed."""
         try:
-            return _record_walk_forward_teacher_review(
-                control,
-                reports,
-                experiment_id=experiment_id,
-                teacher_pair_id=teacher_pair_id,
-                decision=decision,
-                notes=notes,
-                operation_id=operation_id,
-                expected_sequence=expected_sequence,
-                expected_state_hash=expected_state_hash,
-                rule_events=rule_events,
-                auto_advance=auto_advance,
-                review_interval_months=review_interval_months,
-            )
+            with teacher_loss_flip_policy(teacher_loss_flip_enabled):
+                return _record_walk_forward_teacher_review(
+                    control,
+                    reports,
+                    experiment_id=experiment_id,
+                    teacher_pair_id=teacher_pair_id,
+                    decision=decision,
+                    notes=notes,
+                    operation_id=operation_id,
+                    expected_sequence=expected_sequence,
+                    expected_state_hash=expected_state_hash,
+                    rule_events=rule_events,
+                    auto_advance=auto_advance,
+                    review_interval_months=review_interval_months,
+                )
         except Exception as exc:
             return _connection_safe_error("record_walk_forward_teacher_review", exc)
 
