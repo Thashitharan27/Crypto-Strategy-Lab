@@ -29,11 +29,17 @@ def _parquets(tmp_path, rows):
             "adx": [20.0 + index for index in range(len(rows))],
         }
     )
+    unique_context = {}
+    for signal_index, timestamp, _side in rows:
+        unique_context.setdefault(signal_index, timestamp)
+    context_items = list(unique_context.items())
     context = pd.DataFrame(
         {
-            "strategy_index": [row[0] for row in rows],
-            "decision_available_at": pd.to_datetime([row[1] for row in rows], utc=True),
-            "adx": [20.0 + index for index in range(len(rows))],
+            "strategy_index": [item[0] for item in context_items],
+            "decision_available_at": pd.to_datetime(
+                [item[1] for item in context_items], utc=True
+            ),
+            "adx": [20.0 + index for index in range(len(context_items))],
         }
     )
     with duckdb.connect(":memory:") as connection:
