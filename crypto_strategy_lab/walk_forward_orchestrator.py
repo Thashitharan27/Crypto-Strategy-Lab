@@ -1,14 +1,17 @@
 """Causal walk-forward orchestrator compatibility and bounded-scan facade.
 
 The implementation lives in ``walk_forward_orchestrator_impl``. This facade
-preserves the existing APIs while adding three narrow protections:
+preserves the existing APIs while adding narrow protections and accelerated
+workflow behavior:
 
 * older captured candidates may resolve their immutable ``reference_run`` from
   the experiment definition at the outcome firewall;
 * accelerated scans are capped to a small row budget per MCP request and persist
   an exact causal scan cursor when that budget is exhausted without a candidate;
 * MCP judgment semantics separate the executable ``strategy_action`` determined
-  by ENTRY/VETO/FLIP rules from ChatGPT's independent ``chatgpt_view``.
+  by ENTRY/VETO/FLIP rules from ChatGPT's independent ``chatgpt_view``;
+* resolved teacher losses from immutable 1.0R profiles are surfaced as FLIP
+  review packets without ever touching walk-forward equity.
 
 For new MCP decisions, ChatGPT's view is research evidence only. It never changes
 the side used for TP/SL outcome lookup or walk-forward equity unless an active
@@ -21,6 +24,7 @@ from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
 from crypto_strategy_lab.walk_forward_candidate_engine import SCAN_CHECKPOINT_TYPE
+from crypto_strategy_lab.walk_forward_teacher_learning import TEACHER_LOSS_FLIP_MODE
 
 
 ACCELERATED_SCAN_ROWS = 4096
@@ -503,8 +507,111 @@ for _name in dir(_impl):
 del _name
 
 
+def _teacher_loss_evidence(
+    control: Any,
+    experiment_id: str,
+    profile: str,
+) -> list[dict[str, Any]]:
+    store = _impl._store(control)
+    events = _impl._events(store, experiment_id)
+    rows: list[dict[str, Any]] = []
+    for event in events:
+        if event.get("event_type") != "TEACHER_RESOLVED":
+            continue
+        payload = event.get("payload") or {}
+        if str(payload.get("result", "")).upper() != "LOSS":
+            continue
+        if profile and str(payload.get("strategy_profile_key", "")).lower() != profile:
+            continue
+        rows.append({
+            "pair_id": payload.get("pair_id"),
+            "side": payload.get("side"),
+            "strategy_profile_key": payload.get("strategy_profile_key"),
+            "pair_net_r": payload.get("pair_net_r"),
+            "review_decision": payload.get("review_decision"),
+            "resolution_time": payload.get("resolution_time") or event.get("effective_market_time"),
+            "notes": payload.get("notes"),
+        })
+    return rows[-20:]
+
+
+def _decorate_teacher_loss_packet(
+    control: Any,
+    reports: Any,
+    experiment_id: str,
+    updated: dict[str, Any],
+) -> dict[str, Any]:
+    teacher = updated.get("teacher")
+    if not isinstance(teacher, dict):
+        return updated
+    if str(teacher.get("teacher_learning_mode", "")) != TEACHER_LOSS_FLIP_MODE:
+        return updated
+
+    teacher["result"] = "LOSS"
+    updated["status"] = "TEACHER_LOSS_REVIEW_REQUIRED"
+    updated["review_rule"] = (
+        "This resolved 1:1 teacher loss is FLIP evidence only. Teacher evidence never changes "
+        "walk-forward equity. Use NO_CHANGE or FLIP_EVIDENCE unless repeated prior causal "
+        "evidence and a verified opposite-side 1R win justify FLIP_LEARNED."
+    )
+
+    side = str(teacher.get("side", "")).upper()
+    profile = str(teacher.get("strategy_profile_key", "")).lower()
+    updated["prior_teacher_loss_evidence"] = _teacher_loss_evidence(
+        control, experiment_id, profile
+    )
+    updated["prior_teacher_loss_evidence_count"] = len(
+        updated["prior_teacher_loss_evidence"]
+    )
+
+    entry_context = updated.get("entry_context") or {}
+    trade_context = entry_context.get("trade_entry_context") or {}
+    signal_index = trade_context.get("research_signal_index")
+    if side not in {"LONG", "SHORT"} or signal_index in (None, ""):
+        updated["opposite_side_outcome"] = {
+            "available": False,
+            "reason": "teacher entry context did not expose a unique research signal identity",
+        }
+        updated["flip_activation_allowed"] = False
+        return updated
+
+    store = _impl._store(control)
+    readback = store.read(experiment_id, recent_events=0)
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    reference_run = str(definition.get("reference_run", "")).strip()
+    opposite = "SHORT" if side == "LONG" else "LONG"
+    candidate = {
+        "research_signal_index": int(signal_index),
+        "source_side": side,
+        "reference_sample_id": trade_context.get("research_sample_id"),
+        "strategy_profile_key": profile,
+        "entry_time": teacher.get("entry_time") or trade_context.get("entry_time"),
+    }
+    try:
+        outcome = _impl._outcome_row_after_decision(
+            reports, reference_run, candidate, opposite
+        )
+    except ValueError as exc:
+        updated["opposite_side_outcome"] = {
+            "available": False,
+            "side": opposite,
+            "reason": str(exc),
+        }
+        updated["flip_activation_allowed"] = False
+        return updated
+
+    updated["opposite_side_outcome"] = {
+        "available": True,
+        "side": opposite,
+        "outcome": outcome,
+    }
+    updated["flip_activation_allowed"] = str(outcome.get("result", "")).upper() == "WIN"
+    return updated
+
+
 def _decorate_advance_result(
     control: Any,
+    reports: Any,
     experiment_id: str,
     result: dict[str, Any],
 ) -> dict[str, Any]:
@@ -517,7 +624,7 @@ def _decorate_advance_result(
     candidate_id = str(updated.get("candidate_id") or "").strip()
     if updated.get("status") == "LOSS_REVIEW_REQUIRED" and candidate_id:
         updated.update(_decision_research_fields(control, experiment_id, candidate_id))
-    return updated
+    return _decorate_teacher_loss_packet(control, reports, experiment_id, updated)
 
 
 def advance_walk_forward(
@@ -557,12 +664,12 @@ def advance_walk_forward(
         max_transitions=max_transitions,
     )
     if result.get("status") != "NO_MORE_ACTION_IN_SCAN":
-        return _decorate_advance_result(control, experiment_id, result)
+        return _decorate_advance_result(control, reports, experiment_id, result)
 
     scan = dict(result.get("scan") or {})
     cursor = scan.get("scan_cursor")
     if not isinstance(cursor, dict):
-        return _decorate_advance_result(control, experiment_id, result)
+        return _decorate_advance_result(control, reports, experiment_id, result)
 
     required = ("entry_time", "research_signal_index", "side")
     if any(cursor.get(name) in (None, "") for name in required):
