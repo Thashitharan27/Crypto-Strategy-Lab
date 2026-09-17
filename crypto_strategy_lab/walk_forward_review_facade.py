@@ -11,13 +11,17 @@ from copy import deepcopy
 from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
-from crypto_strategy_lab.walk_forward_orchestrator import advance_walk_forward
+from crypto_strategy_lab.walk_forward_orchestrator import (
+    advance_walk_forward,
+    _decorate_teacher_loss_packet,
+)
 from crypto_strategy_lab.walk_forward_rule_validation import (
     append_events_atomic,
     preflight_rule_events,
     rule_event_schema,
     _verified_prefix,
 )
+from crypto_strategy_lab.walk_forward_teacher_learning import next_teacher_for_learning
 
 
 def _canonical_rule_specs(
@@ -40,6 +44,7 @@ def _canonical_rule_specs(
 def _with_rule_schema(result: dict[str, Any]) -> dict[str, Any]:
     if result.get("status") not in {
         "TEACHER_REVIEW_REQUIRED",
+        "TEACHER_LOSS_REVIEW_REQUIRED",
         "LOSS_REVIEW_REQUIRED",
         "PERIODIC_REVIEW_REQUIRED",
     }:
@@ -200,7 +205,7 @@ def record_walk_forward_teacher_review(
     auto_advance: bool = True,
     review_interval_months: int = 3,
 ) -> dict[str, Any]:
-    """Validate first, then atomically record a teacher winner and ENTRY rules."""
+    """Atomically record a teacher winner ENTRY review or 1R loss FLIP review."""
     store = _impl._store(control)
     readback, _all_events, events = _verified_prefix(
         store, experiment_id, expected_sequence, expected_state_hash
@@ -209,17 +214,29 @@ def record_walk_forward_teacher_review(
     reference_run = str(definition.get("reference_run", ""))
     manifest = reports.get_run_manifest(reference_run)
     run_dir = reports.resolve_run(reference_run)
-    teacher = _impl._next_teacher(manifest, run_dir, events)
+    teacher = next_teacher_for_learning(manifest, run_dir, events)
     if teacher is None:
-        raise ValueError("there is no unresolved teacher winner")
+        raise ValueError("there is no unresolved teacher trade")
     boundary, resolution_time = teacher
     if str(boundary.get("pair_id")) != str(teacher_pair_id):
         raise ValueError(
             f"next teacher is pair {boundary.get('pair_id')}, not {teacher_pair_id}"
         )
 
+    teacher_result = str(boundary.get("result", "WIN")).upper()
+    decision_value = str(decision).strip().upper()
     notes_text = str(notes).strip()
     effective_iso = resolution_time.isoformat()
+
+    if teacher_result == "LOSS":
+        if decision_value not in {"NO_CHANGE", "FLIP_EVIDENCE", "FLIP_LEARNED"}:
+            raise ValueError(
+                "teacher loss decision must be NO_CHANGE, FLIP_EVIDENCE, or FLIP_LEARNED"
+            )
+        allowed_types = {"FLIP_LEARNED"}
+    else:
+        allowed_types = {"ENTRY_LEARNED", "ENTRY_REFINED"}
+
     preflight = preflight_rule_events(
         control,
         reports,
@@ -230,13 +247,38 @@ def record_walk_forward_teacher_review(
         evidence_source="TEACHER",
         effective_from=effective_iso,
         default_reason=notes_text,
-        allowed_types={"ENTRY_LEARNED", "ENTRY_REFINED"},
+        allowed_types=allowed_types,
     )
     canonical = list(preflight["canonical_rule_events"])
+
+    if teacher_result == "LOSS":
+        if decision_value in {"NO_CHANGE", "FLIP_EVIDENCE"} and canonical:
+            raise ValueError(
+                f"{decision_value} records evidence only and cannot activate a FLIP rule"
+            )
+        if decision_value == "FLIP_LEARNED":
+            if not canonical:
+                raise ValueError("FLIP_LEARNED requires at least one FLIP_LEARNED rule event")
+            base_packet = _impl._teacher_review_packet(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                expected_sequence=expected_sequence,
+                expected_state_hash=expected_state_hash,
+                teacher_boundary=boundary,
+            )
+            checked = _decorate_teacher_loss_packet(
+                control, reports, experiment_id, base_packet
+            )
+            if not bool(checked.get("flip_activation_allowed")):
+                raise ValueError(
+                    "teacher loss cannot activate FLIP: opposite-side immutable 1R outcome is not a verified WIN"
+                )
+
     teacher_payload = {
         **deepcopy(boundary),
-        "result": "WIN",
-        "review_decision": str(decision).strip().upper(),
+        "result": teacher_result,
+        "review_decision": decision_value,
         "notes": notes_text,
         "validated_rule_event_count": len(canonical),
         "rule_event_schema_contract": preflight["rule_event_schema"]["contract"],
@@ -265,6 +307,7 @@ def record_walk_forward_teacher_review(
             "experiment_id": experiment_id,
             "sequence": batch["sequence"],
             "state_hash": batch["state_hash"],
+            "teacher_result": teacher_result,
             "canonical_rule_events": canonical,
             "rule_event_schema": preflight["rule_event_schema"],
             "atomic_batch": True,
