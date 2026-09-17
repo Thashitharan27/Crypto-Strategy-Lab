@@ -2,9 +2,9 @@
 
 The full server implementation remains in ``control_server_impl``. This facade
 adds recovery guarantees needed by accelerated walk-forward startup, routes MCP
-decision tools through separated strategy-action/ChatGPT-view semantics, and
-preflights review-authored causal rules through the Strategy Builder compiler
-before any review/rule events are committed.
+decision tools through separated strategy-action/ChatGPT-view semantics,
+preflights review-authored causal rules through the Strategy Builder compiler,
+and makes an already-frozen decision safely resumable if reveal was interrupted.
 
 * create_walk_forward_experiment does not report success until a verified
   read-back of the newly written hash chain succeeds;
@@ -16,7 +16,10 @@ before any review/rule events are committed.
   is always taken from the captured ENTRY/VETO/FLIP result;
 * teacher/loss/periodic review rules are canonicalized and compiled before an
   atomic review+rules batch is persisted, so invalid rule schemas cannot poison
-  the immutable experiment chain.
+  the immutable experiment chain;
+* DECISION_FROZEN can resume directly into outcome reveal after a transport or
+  serialization failure, and EVE outcome scalars are normalized to strict JSON
+  before OUTCOME_REVEALED is appended.
 """
 from __future__ import annotations
 
@@ -25,12 +28,19 @@ import time
 from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator as _wf_orchestrator
+from crypto_strategy_lab.walk_forward_resume_safety import (
+    install_resume_safety as _install_resume_safety,
+)
 from crypto_strategy_lab.walk_forward_review_facade import (
     record_walk_forward_review as _validated_record_walk_forward_review,
     record_walk_forward_teacher_review as _validated_record_walk_forward_teacher_review,
 )
 from crypto_strategy_lab.walk_forward_rule_validation import rule_event_schema as _rule_event_schema
 from . import control_server_impl as _impl
+
+# Install before binding nested MCP tool globals below, so the stable tool names
+# point at the resumable/JSON-safe implementations on every fresh MCP process.
+_install_resume_safety()
 
 for _name in dir(_impl):
     if not _name.startswith("__"):
