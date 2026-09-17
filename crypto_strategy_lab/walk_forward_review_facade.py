@@ -2,7 +2,7 @@
 
 This facade preflights proposed ENTRY/VETO/FLIP mutations through the Strategy
 Builder compiler, then commits the review marker and all rule events in one
-atomic batch.  Invalid rules therefore leave the experiment sequence/hash
+atomic batch. Invalid rules therefore leave the experiment sequence/hash
 unchanged.
 """
 from __future__ import annotations
@@ -37,6 +37,18 @@ def _canonical_rule_specs(
     ]
 
 
+def _with_rule_schema(result: dict[str, Any]) -> dict[str, Any]:
+    if result.get("status") not in {
+        "TEACHER_REVIEW_REQUIRED",
+        "LOSS_REVIEW_REQUIRED",
+        "PERIODIC_REVIEW_REQUIRED",
+    }:
+        return result
+    updated = deepcopy(result)
+    updated.setdefault("rule_event_schema", rule_event_schema())
+    return updated
+
+
 def _advance_after_batch(
     control: Any,
     reports: Any,
@@ -52,14 +64,16 @@ def _advance_after_batch(
         current = _impl._store(control).read(experiment_id, recent_events=0)
         sequence = int(current["sequence"])
         state_hash = str(current["state_hash"])
-    return advance_walk_forward(
-        control,
-        reports,
-        experiment_id=experiment_id,
-        operation_id=_impl._operation(operation_id, "advance"),
-        expected_sequence=sequence,
-        expected_state_hash=state_hash,
-        review_interval_months=review_interval_months,
+    return _with_rule_schema(
+        advance_walk_forward(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            operation_id=_impl._operation(operation_id, "advance"),
+            expected_sequence=sequence,
+            expected_state_hash=state_hash,
+            review_interval_months=review_interval_months,
+        )
     )
 
 
