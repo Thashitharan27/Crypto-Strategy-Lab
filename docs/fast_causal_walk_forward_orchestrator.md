@@ -17,16 +17,33 @@ The event stream remains authoritative and every mutation remains sequence/hash 
 
 1. `read_walk_forward_experiment`
 2. `advance_walk_forward`
-3. Stop only when the action returns one of the judgment states:
+3. If the action returns `SCAN_CHECKPOINTED`, immediately call `advance_walk_forward` again with the returned sequence/hash. This is deterministic continuation, not a judgment point.
+4. Stop only when the action returns one of the judgment states:
    - `CANDIDATE_DECISION_REQUIRED`
    - `TEACHER_REVIEW_REQUIRED`
    - `LOSS_REVIEW_REQUIRED`
    - `PERIODIC_REVIEW_REQUIRED`
-4. For a candidate, call `submit_walk_forward_decision` with the returned candidate ID/token, LONG/SHORT, confidence, and reasoning.
-5. For a loss/periodic review, call `record_walk_forward_review`, optionally with causal rule events.
-6. For a teacher winner, call `record_walk_forward_teacher_review`, optionally with `ENTRY_LEARNED` / `ENTRY_REFINED` rule events.
+5. For a candidate, call `submit_walk_forward_decision` with the returned candidate ID/token, LONG/SHORT, confidence, and reasoning.
+6. For a loss/periodic review, call `record_walk_forward_review`, optionally with causal rule events.
+7. For a teacher winner, call `record_walk_forward_teacher_review`, optionally with `ENTRY_LEARNED` / `ENTRY_REFINED` rule events.
 
-When `auto_advance=true`, deterministic work continues automatically after a completed judgment until the next judgment boundary.
+When `auto_advance=true`, deterministic work continues automatically after a completed judgment until the next judgment boundary or a bounded scan checkpoint.
+
+## Bounded scan checkpoints
+
+Large 15m Every Viable Entry histories can exceed the secure-tunnel response lifetime if one MCP request scans the entire remaining reference run. The accelerated orchestrator therefore scans at most 4,096 candidate rows per request.
+
+If that bounded slice contains no candidate or earlier teacher boundary, the orchestrator appends a `CHECKPOINT_CREATED` event with checkpoint type `CANDIDATE_SCAN_CURSOR_V1` and returns `SCAN_CHECKPOINTED`. The cursor stores the exact deterministic sort key:
+
+```text
+(entry_time, research_signal_index, side)
+```
+
+The next `advance_walk_forward` resumes strictly after that key, including correct handling of multiple opportunities at the same timestamp. No historical opportunity is skipped and no previously scanned row is repeatedly materialized.
+
+A teacher, review, rule change, candidate/trade event, or other later causal mutation invalidates the old scan cursor automatically. The next scan then derives its start from the newer authoritative market-time state instead.
+
+Teacher boundaries are also enforced before rule matching: once a pending teacher winner has resolved by the decision time of the next candidate row, scanning stops and returns `TEACHER_REVIEW_REQUIRED` even when the current strategy has no ENTRY rule that would admit that row. This avoids scanning hundreds of thousands of irrelevant rows before the first teacher review.
 
 ## Outcome firewall
 
