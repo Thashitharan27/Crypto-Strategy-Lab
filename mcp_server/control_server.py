@@ -4,7 +4,8 @@ The full server implementation remains in ``control_server_impl``. This facade
 adds recovery guarantees needed by accelerated walk-forward startup, routes MCP
 decision tools through separated strategy-action/ChatGPT-view semantics,
 preflights review-authored causal rules through the Strategy Builder compiler,
-and makes an already-frozen decision safely resumable if reveal was interrupted.
+makes an already-frozen decision safely resumable if reveal was interrupted,
+and settles canonical nested risk models without requiring legacy root fields.
 
 * create_walk_forward_experiment does not report success until a verified
   read-back of the newly written hash chain succeeds;
@@ -19,7 +20,9 @@ and makes an already-frozen decision safely resumable if reveal was interrupted.
   the immutable experiment chain;
 * DECISION_FROZEN can resume directly into outcome reveal after a transport or
   serialization failure, and EVE outcome scalars are normalized to strict JSON
-  before OUTCOME_REVEALED is appended.
+  before OUTCOME_REVEALED is appended;
+* settlement prefers ``risk_model.risk_per_trade`` and nested ``initial_equity``
+  while retaining legacy top-level ``risk_pct``/``initial_equity`` as fallbacks.
 """
 from __future__ import annotations
 
@@ -36,11 +39,20 @@ from crypto_strategy_lab.walk_forward_review_facade import (
     record_walk_forward_teacher_review as _validated_record_walk_forward_teacher_review,
 )
 from crypto_strategy_lab.walk_forward_rule_validation import rule_event_schema as _rule_event_schema
+from crypto_strategy_lab.walk_forward_settlement_compat import (
+    install_settlement_compat as _install_settlement_compat,
+    resolve_walk_forward_trade as _nested_risk_resolve_walk_forward_trade,
+)
 from . import control_server_impl as _impl
 
 # Install before binding nested MCP tool globals below, so the stable tool names
-# point at the resumable/JSON-safe implementations on every fresh MCP process.
+# point at the resumable/JSON-safe and nested-risk-compatible implementations on
+# every fresh MCP process.
+_install_settlement_compat()
 _install_resume_safety()
+
+# Keep the public orchestrator facade aligned with the runtime implementation.
+_wf_orchestrator.resolve_walk_forward_trade = _nested_risk_resolve_walk_forward_trade
 
 for _name in dir(_impl):
     if not _name.startswith("__"):
@@ -90,6 +102,7 @@ _impl._freeze_and_reveal_walk_forward_candidate = (
     _wf_orchestrator.freeze_and_reveal_walk_forward_view
 )
 _impl._submit_walk_forward_decision = _wf_orchestrator.submit_walk_forward_view
+_impl._resolve_walk_forward_trade = _nested_risk_resolve_walk_forward_trade
 _impl._advance_walk_forward = _wf_orchestrator.advance_walk_forward
 _impl._record_walk_forward_review = _validated_record_walk_forward_review
 _impl._record_walk_forward_teacher_review = _validated_record_walk_forward_teacher_review
