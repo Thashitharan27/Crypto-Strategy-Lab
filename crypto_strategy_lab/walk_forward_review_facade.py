@@ -21,7 +21,6 @@ from crypto_strategy_lab.walk_forward_rule_validation import (
     rule_event_schema,
     _verified_prefix,
 )
-from crypto_strategy_lab.walk_forward_teacher_learning import next_teacher_for_learning
 
 
 def _canonical_rule_specs(
@@ -205,7 +204,7 @@ def record_walk_forward_teacher_review(
     auto_advance: bool = True,
     review_interval_months: int = 3,
 ) -> dict[str, Any]:
-    """Atomically record a teacher winner ENTRY review or 1R loss FLIP review."""
+    """Atomically record a teacher winner ENTRY review or enabled 1R loss FLIP review."""
     store = _impl._store(control)
     readback, _all_events, events = _verified_prefix(
         store, experiment_id, expected_sequence, expected_state_hash
@@ -214,7 +213,10 @@ def record_walk_forward_teacher_review(
     reference_run = str(definition.get("reference_run", ""))
     manifest = reports.get_run_manifest(reference_run)
     run_dir = reports.resolve_run(reference_run)
-    teacher = next_teacher_for_learning(manifest, run_dir, events)
+    # _impl._next_teacher is the policy-aware selector installed by the candidate
+    # facade. Existing direct callers remain winner-only; MCP can explicitly
+    # enable 1R teacher-loss chronology for the duration of this operation.
+    teacher = _impl._next_teacher(manifest, run_dir, events)
     if teacher is None:
         raise ValueError("there is no unresolved teacher trade")
     boundary, resolution_time = teacher
