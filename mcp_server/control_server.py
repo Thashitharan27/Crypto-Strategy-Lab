@@ -86,6 +86,7 @@ def _with_rule_schema(result):
         return result
     if result.get("status") not in {
         "TEACHER_REVIEW_REQUIRED",
+        "TEACHER_LOSS_REVIEW_REQUIRED",
         "LOSS_REVIEW_REQUIRED",
         "PERIODIC_REVIEW_REQUIRED",
     }:
