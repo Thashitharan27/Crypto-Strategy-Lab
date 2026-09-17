@@ -6,12 +6,43 @@ The fast workflow reduces MCP/chat round-trips without weakening causal research
 
 Crypto Strategy Lab performs deterministic work. ChatGPT/human judgment is still required for:
 
-- candidate LONG/SHORT choice and confidence;
+- an independent candidate LONG/SHORT view and confidence;
 - teacher ENTRY learning/refinement;
 - prospective loss review and any VETO/ENTRY/FLIP change;
 - periodic review decisions.
 
 The event stream remains authoritative and every mutation remains sequence/hash guarded and idempotent.
+
+## Strategy action vs ChatGPT view
+
+Candidate direction has two separate meanings and they must never be conflated:
+
+- `strategy_action` is the executable side produced by the currently learned ENTRY/VETO/FLIP rules. This is the side whose immutable TP/SL outcome is revealed and the side used for walk-forward equity settlement.
+- `chatgpt_view` is ChatGPT's independent LONG/SHORT research judgment, frozen before outcome together with confidence and reasoning. It never changes execution by itself.
+
+A real causal FLIP rule changes `strategy_action`. ChatGPT disagreement does not.
+
+Example:
+
+```text
+ENTRY admits LONG
+no FLIP matches
+strategy_action = LONG
+chatgpt_view = SHORT (64%)
+=> reveal and settle the LONG TP/SL outcome
+```
+
+If an active FLIP matches:
+
+```text
+ENTRY admits LONG
+FLIP matches
+strategy_action = SHORT
+chatgpt_view = LONG (61%)
+=> reveal and settle the SHORT TP/SL outcome
+```
+
+The MCP tool schema currently retains `final_action` as a compatibility wire argument. For `submit_walk_forward_decision` and `freeze_and_reveal_walk_forward_candidate`, that argument is interpreted as `chatgpt_view`; it does not override `strategy_action`. New `DECISION_FROZEN` events store both fields explicitly, with `final_action` retained only as a legacy executable alias equal to `strategy_action`.
 
 ## Preferred workflow
 
@@ -23,7 +54,7 @@ The event stream remains authoritative and every mutation remains sequence/hash 
    - `TEACHER_REVIEW_REQUIRED`
    - `LOSS_REVIEW_REQUIRED`
    - `PERIODIC_REVIEW_REQUIRED`
-5. For a candidate, call `submit_walk_forward_decision` with the returned candidate ID/token, LONG/SHORT, confidence, and reasoning.
+5. For a candidate, call `submit_walk_forward_decision` with the returned candidate ID/token, ChatGPT LONG/SHORT view, confidence, and reasoning. The executable `strategy_action` is already fixed by the candidate's causal rules.
 6. For a loss/periodic review, call `record_walk_forward_review`, optionally with causal rule events.
 7. For a teacher winner, call `record_walk_forward_teacher_review`, optionally with `ENTRY_LEARNED` / `ENTRY_REFINED` rule events.
 
@@ -47,20 +78,23 @@ Teacher boundaries are also enforced before rule matching: once a pending teache
 
 ## Outcome firewall
 
-`submit_walk_forward_decision` uses the lower-level `freeze_and_reveal_walk_forward_candidate` path.
+`submit_walk_forward_decision` freezes ChatGPT's research view before the strategy outcome is opened.
 
 The order is strict:
 
 ```text
+ENTRY/VETO/FLIP evaluation -> strategy_action
 CANDIDATE_CONTEXT_CAPTURED
-  -> DECISION_FROZEN (append + flush + fsync)
-  -> open outcome-bearing EVE artifact
+  -> DECISION_FROZEN(strategy_action, chatgpt_view, confidence, reasoning)
+  -> open outcome-bearing EVE artifact for strategy_action
   -> OUTCOME_REVEALED
 ```
 
-The outcome artifact is not opened by the reveal path until the frozen decision event is durable. A retry after a transport/process interruption reuses the already-frozen decision and cannot replace it.
+The outcome artifact is not opened until the frozen view event is durable. A retry after a transport/process interruption reuses the already-frozen evidence and cannot replace it.
 
-If ChatGPT chooses the opposite side from the source candidate, the tool requires an exact immutable Every Viable Entry observation for that signal and frozen side. If there is no unique exact observation, the decision stays frozen and no outcome is revealed. The tool never estimates or mirrors the source-side result.
+ChatGPT disagreement never requires opposite-side EVE data for normal progression. If `strategy_action=LONG` and `chatgpt_view=SHORT`, the resolver reads the exact LONG sample. A missing SHORT sample therefore cannot block a valid LONG walk-forward trade.
+
+Opposite-side EVE data is required only when the executable `strategy_action` itself is opposite the source sample, for example because an active causal FLIP rule changed LONG to SHORT. The tool never infers or mirrors an opposite TP3 result.
 
 ## Deterministic settlement
 
@@ -80,13 +114,16 @@ Teacher trades never call settlement and therefore never change walk-forward equ
 
 After a deterministic research loss, the orchestrator returns `LOSS_REVIEW_REQUIRED` with:
 
-- frozen side, confidence, and reasoning;
+- executable `strategy_action`;
+- frozen `chatgpt_view`, confidence, reasoning, and agreement/disagreement flag;
 - admitting ENTRY group(s), VETO/FLIP matches;
 - entry-time context;
-- revealed immutable outcome and ledger settlement;
-- prior-only causal statistics for all research trades, same profile, same frozen side, and the matched ENTRY groups.
+- revealed immutable strategy outcome and ledger settlement;
+- prior-only causal statistics for research trades admitted by the same strategy side/groups.
 
 A loss remains in equity. `record_walk_forward_review` can record `KEEP_LOSS` with no rule change or append justified prospective rule events. Rules apply only after the review event.
+
+Because ChatGPT's view is separately frozen before outcome, later analysis can measure agreement/disagreement performance, confidence buckets, and recurring disagreement reasons without contaminating the strategy ledger.
 
 ## Teacher review packet
 
