@@ -83,14 +83,22 @@ def _resolved(pair_id: int, when: str) -> dict:
     }
 
 
-def test_one_r_teacher_loss_surfaces_before_later_winner(tmp_path):
-    manifest, run_dir = _reference(tmp_path, 1.0)
-    events = [
+def _events_through_pair_3() -> list[dict]:
+    return [
         _resolved(2, "2025-01-01T04:00:00Z"),
         _resolved(3, "2025-01-02T04:00:00Z"),
     ]
 
-    teacher = next_teacher_for_learning(manifest, run_dir, events)
+
+def test_one_r_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 1.0)
+
+    teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        _events_through_pair_3(),
+        include_losses=True,
+    )
 
     assert teacher is not None
     boundary, _resolved_at = teacher
@@ -100,14 +108,26 @@ def test_one_r_teacher_loss_surfaces_before_later_winner(tmp_path):
     assert boundary["teacher_learning_mode"] == TEACHER_LOSS_FLIP_MODE
 
 
-def test_non_one_r_teacher_loss_keeps_historical_winner_only_behavior(tmp_path):
-    manifest, run_dir = _reference(tmp_path, 3.0)
-    events = [
-        _resolved(2, "2025-01-01T04:00:00Z"),
-        _resolved(3, "2025-01-02T04:00:00Z"),
-    ]
+def test_one_r_default_remains_historical_winner_only_behavior(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 1.0)
 
-    teacher = next_teacher_for_learning(manifest, run_dir, events)
+    teacher = next_teacher_for_learning(manifest, run_dir, _events_through_pair_3())
+
+    assert teacher is not None
+    boundary, _resolved_at = teacher
+    assert boundary["pair_id"] == 5
+    assert boundary["result"] == "WIN"
+
+
+def test_non_one_r_teacher_loss_is_skipped_even_when_opted_in(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 3.0)
+
+    teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        _events_through_pair_3(),
+        include_losses=True,
+    )
 
     assert teacher is not None
     boundary, _resolved_at = teacher
