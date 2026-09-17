@@ -1,24 +1,62 @@
 """Hardened facade for the unified Crypto Strategy Lab MCP server.
 
-The full server implementation remains in ``control_server_impl``.  This facade
-adds two recovery guarantees needed by accelerated walk-forward startup:
+The full server implementation remains in ``control_server_impl``. This facade
+adds recovery guarantees needed by accelerated walk-forward startup and routes
+MCP decision tools through the separated strategy-action/ChatGPT-view semantics.
 
 * create_walk_forward_experiment does not report success until a verified
   read-back of the newly written hash chain succeeds;
 * advance_walk_forward tolerates a very short create/advance overlap by waiting
   briefly for the experiment directory to become visible before returning the
-  normal connection-safe error.
+  normal connection-safe error;
+* the MCP ``final_action`` argument is retained as a legacy wire name but is
+  interpreted only as ChatGPT's independent view. The executable strategy side
+  is always taken from the captured ENTRY/VETO/FLIP result.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import time
 from typing import Any
 
+from crypto_strategy_lab import walk_forward_orchestrator as _wf_orchestrator
 from . import control_server_impl as _impl
 
 for _name in dir(_impl):
     if not _name.startswith("__"):
         globals()[_name] = getattr(_impl, _name)
+
+
+_ORIGINAL_GET_NEXT_CANDIDATE = _impl._get_next_walk_forward_candidate
+
+
+def _get_next_candidate_with_strategy_action(*args, **kwargs):
+    result = _ORIGINAL_GET_NEXT_CANDIDATE(*args, **kwargs)
+    if not isinstance(result, dict):
+        return result
+    updated = deepcopy(result)
+    candidate = updated.get("candidate")
+    if isinstance(candidate, dict):
+        side = str(
+            candidate.get("strategy_action")
+            or candidate.get("rule_effective_side")
+            or candidate.get("source_side")
+            or ""
+        ).strip().upper()
+        if side in {"LONG", "SHORT"}:
+            candidate["strategy_action"] = side
+            updated["strategy_action"] = side
+    return updated
+
+
+# Patch the module globals referenced by the nested MCP tool functions. Tool names
+# remain stable, so existing plugin connections only need a process reconnect.
+_impl._get_next_walk_forward_candidate = _get_next_candidate_with_strategy_action
+_impl._freeze_and_reveal_walk_forward_candidate = (
+    _wf_orchestrator.freeze_and_reveal_walk_forward_view
+)
+_impl._submit_walk_forward_decision = _wf_orchestrator.submit_walk_forward_view
+_impl._advance_walk_forward = _wf_orchestrator.advance_walk_forward
 
 _ORIGINAL_CREATE_EXPERIMENT = (
     _impl.RuleAwareBacktestControlService.create_walk_forward_experiment
