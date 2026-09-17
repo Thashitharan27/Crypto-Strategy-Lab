@@ -21,6 +21,8 @@ and settles canonical nested risk models without requiring legacy root fields.
 * DECISION_FROZEN can resume directly into outcome reveal after a transport or
   serialization failure, and EVE outcome scalars are normalized to strict JSON
   before OUTCOME_REVEALED is appended;
+* already-active prospective FLIP trades fall back to deterministic immutable
+  1m replay when the flipped side has no unique EVE row;
 * settlement prefers ``risk_model.risk_per_trade`` and nested ``initial_equity``
   while retaining legacy top-level ``risk_pct``/``initial_equity`` as fallbacks.
 """
@@ -34,6 +36,9 @@ from crypto_strategy_lab import walk_forward_orchestrator as _wf_orchestrator
 from crypto_strategy_lab import walk_forward_review_facade as _wf_review_facade
 from crypto_strategy_lab.walk_forward_opposite_replay import (
     replay_opposite_one_r as _replay_opposite_one_r,
+)
+from crypto_strategy_lab.walk_forward_prospective_flip_replay import (
+    replay_flipped_candidate_one_r as _replay_flipped_candidate_one_r,
 )
 from crypto_strategy_lab.walk_forward_resume_safety import (
     install_resume_safety as _install_resume_safety,
@@ -65,6 +70,7 @@ for _name in dir(_impl):
 
 _ORIGINAL_GET_NEXT_CANDIDATE = _impl._get_next_walk_forward_candidate
 _ORIGINAL_TEACHER_LOSS_DECORATOR = _wf_orchestrator._decorate_teacher_loss_packet
+_ORIGINAL_REVEAL_STRATEGY_ACTION = _wf_orchestrator._reveal_strategy_action_candidate
 
 
 def _get_next_candidate_with_strategy_action(*args, **kwargs):
@@ -129,6 +135,132 @@ def _decorate_teacher_loss_with_replay(control, reports, experiment_id, result):
     return updated
 
 
+def _reveal_strategy_action_with_flip_replay(
+    control: Any,
+    reports: Any,
+    *,
+    experiment_id: str,
+    candidate_id: str,
+    operation_id: str,
+) -> dict[str, Any]:
+    """Reveal EVE normally, with immutable 1m fallback only for active FLIP trades."""
+    try:
+        return _ORIGINAL_REVEAL_STRATEGY_ACTION(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            candidate_id=candidate_id,
+            operation_id=operation_id,
+        )
+    except ValueError as exc:
+        if (
+            "the frozen side has no unique immutable Every Viable Entry outcome at this signal"
+            not in str(exc)
+        ):
+            raise
+
+    store = _wf_orchestrator._impl._store(control)
+    events = _wf_orchestrator._impl._events(store, experiment_id)
+    reveal_op = _wf_orchestrator._impl._operation(operation_id, "reveal")
+    existing = store._find_operation(events, reveal_op)
+    if existing is not None or store._candidate_state(events, candidate_id) == "OUTCOME_REVEALED":
+        return _ORIGINAL_REVEAL_STRATEGY_ACTION(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            candidate_id=candidate_id,
+            operation_id=operation_id,
+        )
+    if store._candidate_state(events, candidate_id) != "DECISION_FROZEN":
+        raise ValueError("prospective FLIP replay requires a durably frozen decision")
+
+    candidate = (
+        _wf_orchestrator._impl._candidate_capture(events, candidate_id).get("payload")
+        or {}
+    )
+    source_side = str(candidate.get("source_side") or "").strip().upper()
+    strategy_action = _wf_orchestrator._candidate_strategy_action(candidate)
+    if not list(candidate.get("matched_flip_groups") or []):
+        raise ValueError(
+            "missing opposite EVE outcome is not eligible for replay because no active FLIP matched"
+        )
+    expected_flipped = "SHORT" if source_side == "LONG" else "LONG"
+    if source_side not in {"LONG", "SHORT"} or strategy_action != expected_flipped:
+        raise ValueError(
+            "missing opposite EVE outcome is not eligible for replay because strategy_action "
+            "is not the inverse source side"
+        )
+
+    frozen_event = _wf_orchestrator._impl._event_for_candidate(
+        events, "DECISION_FROZEN", candidate_id
+    )
+    if frozen_event is None:
+        raise ValueError("candidate is frozen but DECISION_FROZEN event is missing")
+    frozen = frozen_event.get("payload") or {}
+    stored_strategy = str(
+        frozen.get("strategy_action") or frozen.get("final_action") or ""
+    ).strip().upper()
+    if stored_strategy != strategy_action:
+        raise ValueError("frozen executable side does not match the captured FLIP strategy_action")
+    chatgpt_view = str(
+        frozen.get("chatgpt_view") or frozen.get("final_action") or ""
+    ).strip().upper()
+
+    readback = store.read(experiment_id, recent_events=0)
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    reference_run = str(
+        candidate.get("reference_run") or definition.get("reference_run") or ""
+    ).strip()
+    if not reference_run:
+        raise ValueError("captured candidate and experiment definition have no reference_run")
+
+    outcome = _replay_flipped_candidate_one_r(
+        control,
+        reports,
+        reference_run=reference_run,
+        candidate=candidate,
+        strategy_action=strategy_action,
+    )
+    exit_time = outcome.get("exit_time")
+    appended = store.append_event(
+        experiment_id,
+        "OUTCOME_REVEALED",
+        {
+            "candidate_id": candidate_id,
+            "candidate_token": candidate.get("candidate_token"),
+            "final_action": strategy_action,
+            "strategy_action": strategy_action,
+            "chatgpt_view": chatgpt_view or None,
+            "chatgpt_agrees_with_strategy": (
+                chatgpt_view == strategy_action
+                if chatgpt_view in {"LONG", "SHORT"}
+                else None
+            ),
+            "outcome_contract": _wf_orchestrator._impl.OUTCOME_CONTRACT,
+            "outcome": outcome,
+        },
+        reveal_op,
+        int(readback["sequence"]),
+        str(readback["state_hash"]),
+        effective_market_time=(
+            str(exit_time) if exit_time else str(candidate.get("entry_time"))
+        ),
+        source="DETERMINISTIC_OUTCOME_FIREWALL_FLIP_REPLAY",
+    )
+    return {
+        "contract": _wf_orchestrator._impl.OUTCOME_CONTRACT,
+        "experiment_id": experiment_id,
+        "sequence": appended["sequence"],
+        "state_hash": appended["state_hash"],
+        "candidate_id": candidate_id,
+        "strategy_action": strategy_action,
+        "chatgpt_view": chatgpt_view or None,
+        "outcome": outcome,
+        "outcome_source": "IMMUTABLE_1M_INTRABAR_REPLAY",
+        "idempotent_replay": False,
+    }
+
+
 def _with_rule_schema(result):
     if not isinstance(result, dict):
         return result
@@ -148,6 +280,12 @@ def _with_rule_schema(result):
 # value, while the orchestrator resolves its module global at call time.
 _wf_orchestrator._decorate_teacher_loss_packet = _decorate_teacher_loss_with_replay
 _wf_review_facade._decorate_teacher_loss_packet = _decorate_teacher_loss_with_replay
+
+# Resume-safety and the normal submit path both resolve this module global at
+# call time, so an already-frozen candidate can continue directly into replay.
+_wf_orchestrator._reveal_strategy_action_candidate = (
+    _reveal_strategy_action_with_flip_replay
+)
 
 # Patch the module globals referenced by the nested MCP tool functions. Tool names
 # remain stable, so existing plugin connections only need a process reconnect.
