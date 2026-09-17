@@ -1,8 +1,8 @@
 """Teacher chronology helpers for causal walk-forward learning.
 
 Historically teacher/reference trades only surfaced winners because their only
-purpose was ENTRY learning.  For symmetric 1:1 setups, resolved teacher losses
-can also be useful causal evidence for FLIP learning.  This module keeps the old
+purpose was ENTRY learning. For symmetric 1:1 setups, resolved teacher losses
+can also be useful causal evidence for FLIP learning. This module keeps the old
 winner behavior for every profile, and adds losses only when that profile's
 immutable reference configuration uses a 1.0R target.
 """
@@ -21,9 +21,18 @@ TEACHER_WIN_MODE = "ENTRY_FROM_WINNER"
 TEACHER_LOSS_FLIP_MODE = "FLIP_FROM_LOSS_1R"
 
 
-def _profile_reward_risk_ratio(manifest: dict[str, Any], profile: str) -> float | None:
+def _execution_profiles(manifest: dict[str, Any]) -> dict[str, Any]:
     config = manifest.get("config") or {}
-    profiles = ((config.get("strategy") or {}).get("profiles") or {})
+    execution_profiles = ((config.get("execution") or {}).get("profiles") or {})
+    if execution_profiles:
+        return execution_profiles
+    # Compatibility fallback for any older normalized snapshots that stored the
+    # execution fields with the strategy profiles.
+    return ((config.get("strategy") or {}).get("profiles") or {})
+
+
+def _profile_reward_risk_ratio(manifest: dict[str, Any], profile: str) -> float | None:
+    profiles = _execution_profiles(manifest)
     values = profiles.get(str(profile).lower()) or {}
     raw = values.get("reward_risk_ratio")
     if raw in (None, ""):
@@ -43,8 +52,7 @@ def profile_supports_teacher_loss_flip(
 
 
 def _eligible_loss_profiles(manifest: dict[str, Any]) -> list[str]:
-    config = manifest.get("config") or {}
-    profiles = ((config.get("strategy") or {}).get("profiles") or {})
+    profiles = _execution_profiles(manifest)
     return sorted(
         str(profile).lower()
         for profile in profiles
@@ -72,7 +80,7 @@ def next_teacher_for_learning(
 
     Winners always remain eligible for ENTRY review. Losses are eligible only
     for profiles whose immutable reference configuration uses a 1.0R target.
-    Break-even rows remain non-teaching.  Already-recorded teacher pair ids are
+    Break-even rows remain non-teaching. Already-recorded teacher pair ids are
     excluded explicitly so multiple trades sharing one resolution timestamp are
     not skipped.
     """
