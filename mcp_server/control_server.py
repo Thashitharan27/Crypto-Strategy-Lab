@@ -287,8 +287,9 @@ _wf_orchestrator._reveal_strategy_action_candidate = (
     _reveal_strategy_action_with_flip_replay
 )
 
-# Patch the module globals referenced by the nested MCP tool functions. Tool names
-# remain stable, so existing plugin connections only need a process reconnect.
+# Patch the module globals referenced by the nested MCP tool functions. Existing
+# tool names remain stable. Adding a new MCP action still requires one plugin
+# schema reconnect after the updated server process is restarted.
 _impl._get_next_walk_forward_candidate = _get_next_candidate_with_strategy_action
 _impl._freeze_and_reveal_walk_forward_candidate = (
     _wf_orchestrator.freeze_and_reveal_walk_forward_view
@@ -303,6 +304,7 @@ _ORIGINAL_CREATE_EXPERIMENT = (
     _impl.RuleAwareBacktestControlService.create_walk_forward_experiment
 )
 _ORIGINAL_ADVANCE_WALK_FORWARD = _impl._advance_walk_forward
+_ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS = _impl._continue_walk_forward_autonomous
 _CREATE_ADVANCE_GRACE_ATTEMPTS = 20
 _CREATE_ADVANCE_GRACE_SECONDS = 0.1
 
@@ -374,11 +376,11 @@ def _verified_create_walk_forward_experiment(
     return verified
 
 
-def _advance_walk_forward_with_create_grace(*args, **kwargs):
+def _with_create_advance_grace(action, *args, **kwargs):
     last_error: ValueError | None = None
     for attempt in range(_CREATE_ADVANCE_GRACE_ATTEMPTS):
         try:
-            return _with_rule_schema(_ORIGINAL_ADVANCE_WALK_FORWARD(*args, **kwargs))
+            return _with_rule_schema(action(*args, **kwargs))
         except ValueError as exc:
             if "causal experiment does not exist:" not in str(exc):
                 raise
@@ -389,10 +391,25 @@ def _advance_walk_forward_with_create_grace(*args, **kwargs):
     raise last_error
 
 
+def _advance_walk_forward_with_create_grace(*args, **kwargs):
+    return _with_create_advance_grace(
+        _ORIGINAL_ADVANCE_WALK_FORWARD, *args, **kwargs
+    )
+
+
+def _continue_walk_forward_autonomous_with_create_grace(*args, **kwargs):
+    return _with_create_advance_grace(
+        _ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS, *args, **kwargs
+    )
+
+
 _impl.RuleAwareBacktestControlService.create_walk_forward_experiment = (
     _verified_create_walk_forward_experiment
 )
 _impl._advance_walk_forward = _advance_walk_forward_with_create_grace
+_impl._continue_walk_forward_autonomous = (
+    _continue_walk_forward_autonomous_with_create_grace
+)
 RuleAwareBacktestControlService = _impl.RuleAwareBacktestControlService
 
 

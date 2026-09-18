@@ -46,19 +46,50 @@ The MCP tool schema currently retains `final_action` as a compatibility wire arg
 
 ## Preferred workflow
 
+For normal long-running research, prefer `continue_walk_forward_autonomous` after verifying the authoritative experiment head.
+
+The autonomous action consumes routine deterministic scan checkpoints internally. It returns one of four useful classes:
+
+- a genuine ChatGPT judgment packet:
+  - `CANDIDATE_DECISION_REQUIRED`
+  - `TEACHER_REVIEW_REQUIRED`
+  - `TEACHER_LOSS_REVIEW_REQUIRED`
+  - `LOSS_REVIEW_REQUIRED`
+  - `PERIODIC_REVIEW_REQUIRED`
+- `AUTONOMOUS_CONTINUE`: the current MCP request reached its safe deterministic slice budget; immediately call `continue_walk_forward_autonomous` again with the returned sequence/hash;
+- `NO_MORE_ACTION_IN_SCAN`: there is no further causal action in the available reference data;
+- an inspection-required status: stop automatic progression and inspect the blocker instead of guessing.
+
+Each autonomous result includes an `autonomous` object. When `continue_without_user=true`, ChatGPT should continue within the same response and should not emit a routine progress snapshot or wait for the user. Judgment packets also set `assistant_judgment_required=true`: ChatGPT must perform the same full reasoning as the interactive workflow, persist the judgment using the existing decision/review action with `autonomous_mode=true`, and then resume autonomous continuation. The autonomous judgment actions propagate `max_scan_slices` so a win, loss review, teacher review, or periodic review can immediately continue through routine scan checkpoints.
+
+The low-level interactive workflow remains available:
+
 1. `read_walk_forward_experiment`
 2. `advance_walk_forward`
-3. If the action returns `SCAN_CHECKPOINTED`, immediately call `advance_walk_forward` again with the returned sequence/hash. This is deterministic continuation, not a judgment point.
-4. Stop only when the action returns one of the judgment states:
-   - `CANDIDATE_DECISION_REQUIRED`
-   - `TEACHER_REVIEW_REQUIRED`
-   - `LOSS_REVIEW_REQUIRED`
-   - `PERIODIC_REVIEW_REQUIRED`
-5. For a candidate, call `submit_walk_forward_decision` with the returned candidate ID/token, ChatGPT LONG/SHORT view, confidence, and reasoning. The executable `strategy_action` is already fixed by the candidate's causal rules.
-6. For a loss/periodic review, call `record_walk_forward_review`, optionally with causal rule events.
-7. For a teacher winner, call `record_walk_forward_teacher_review`, optionally with `ENTRY_LEARNED` / `ENTRY_REFINED` rule events.
+3. If the action returns `SCAN_CHECKPOINTED`, immediately call `advance_walk_forward` again with the returned sequence/hash.
+4. Resolve judgment states with `submit_walk_forward_decision`, `record_walk_forward_review`, or `record_walk_forward_teacher_review`.
 
-When `auto_advance=true`, deterministic work continues automatically after a completed judgment until the next judgment boundary or a bounded scan checkpoint.
+No autonomous action invents a LONG/SHORT view, teacher rule, loss veto, FLIP, or periodic-review decision. Those remain ChatGPT judgment.
+
+## Autonomous research and context safety
+
+Autonomous mode is designed to maximize useful work per ChatGPT turn without making the conversation transcript the source of truth.
+
+The authoritative state remains the experiment manifest plus append-only event stream. Every decision, review, rule mutation, settlement, and deterministic scan cursor is persisted before progression continues. A later ChatGPT turn can therefore re-read the experiment head and resume from the exact sequence/hash without relying on old conversational memory.
+
+Context-safety rules for ChatGPT/Work:
+
+- do not repeat `SCAN_CHECKPOINTED` or `AUTONOMOUS_CONTINUE` as user-facing snapshots;
+- while `autonomous.continue_without_user=true`, keep working in the same response;
+- use the complete causal packet for every judgment; never shorten the evidence packet merely to increase throughput;
+- periodically prefer a clean turn boundary well before conversational context pressure becomes material;
+- before a context-budget stop, finish the current judgment, persist it, and leave the experiment at a verified sequence/hash;
+- label that clean stop `SAFE_STOP_CONTEXT_BUDGET` in the user summary; this is not an experiment event and does not change causal state;
+- the next turn begins with `read_walk_forward_experiment` and resumes from the authoritative head.
+
+A conservative operating target is a few dozen full judgment packets per ChatGPT response, not hundreds. Packet size varies substantially, so ChatGPT should stop earlier when loss, teacher, or periodic-review packets are unusually large. This protects reasoning quality while still eliminating routine user `continue` prompts.
+
+The server also caps one autonomous MCP request to a small number of 4,096-row scan slices. Reaching that server-side request budget returns `AUTONOMOUS_CONTINUE`; it is a transport/runtime safeguard, not a reason to involve the user.
 
 ## Bounded scan checkpoints
 

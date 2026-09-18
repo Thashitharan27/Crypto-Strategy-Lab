@@ -24,6 +24,7 @@ from crypto_strategy_lab.walk_forward_materialization import (
 )
 from crypto_strategy_lab.walk_forward_orchestrator import (
     advance_walk_forward as _advance_walk_forward,
+    continue_walk_forward_autonomous as _continue_walk_forward_autonomous,
     freeze_and_reveal_walk_forward_candidate as _freeze_and_reveal_walk_forward_candidate,
     record_walk_forward_review as _record_walk_forward_review,
     record_walk_forward_teacher_review as _record_walk_forward_teacher_review,
@@ -92,6 +93,7 @@ CAUSAL_EXPERIMENT_TOOLS = (
     "freeze_and_reveal_walk_forward_candidate",
     "resolve_walk_forward_trade",
     "advance_walk_forward",
+    "continue_walk_forward_autonomous",
     "submit_walk_forward_decision",
     "record_walk_forward_review",
     "record_walk_forward_teacher_review",
@@ -462,6 +464,36 @@ def create_control_server(
             return _connection_safe_error("advance_walk_forward", exc)
 
     @server.tool()
+    def continue_walk_forward_autonomous(
+        experiment_id: str,
+        operation_id: str,
+        expected_sequence: int,
+        expected_state_hash: str,
+        review_interval_months: int = 3,
+        max_scan_rows: int = 250000,
+        max_transitions: int = 20,
+        max_scan_slices: int = 4,
+        teacher_loss_flip_enabled: bool = False,
+    ) -> dict[str, Any]:
+        """Continue routine causal work without user checkpoints until judgment or a safe request budget."""
+        try:
+            with teacher_loss_flip_policy(teacher_loss_flip_enabled):
+                return _continue_walk_forward_autonomous(
+                    control,
+                    reports,
+                    experiment_id=experiment_id,
+                    operation_id=operation_id,
+                    expected_sequence=expected_sequence,
+                    expected_state_hash=expected_state_hash,
+                    review_interval_months=review_interval_months,
+                    max_scan_rows=max_scan_rows,
+                    max_transitions=max_transitions,
+                    max_scan_slices=max_scan_slices,
+                )
+        except Exception as exc:
+            return _connection_safe_error("continue_walk_forward_autonomous", exc)
+
+    @server.tool()
     def submit_walk_forward_decision(
         experiment_id: str,
         candidate_id: str,
@@ -474,6 +506,8 @@ def create_control_server(
         expected_state_hash: str,
         auto_advance: bool = True,
         review_interval_months: int = 3,
+        autonomous_mode: bool = False,
+        max_scan_slices: int = 4,
         teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
         """Freeze, reveal, settle, and optionally continue with 1R teacher-loss review enabled."""
@@ -493,6 +527,14 @@ def create_control_server(
                     expected_state_hash=expected_state_hash,
                     auto_advance=auto_advance,
                     review_interval_months=review_interval_months,
+                    **(
+                        {
+                            "autonomous_mode": True,
+                            "max_scan_slices": max_scan_slices,
+                        }
+                        if autonomous_mode
+                        else {}
+                    ),
                 )
         except Exception as exc:
             return _connection_safe_error("submit_walk_forward_decision", exc)
@@ -510,6 +552,8 @@ def create_control_server(
         rule_events: list[dict[str, Any]] | None = None,
         auto_advance: bool = True,
         review_interval_months: int = 3,
+        autonomous_mode: bool = False,
+        max_scan_slices: int = 4,
         teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
         """Record a review and optionally continue with 1R teacher-loss review enabled."""
@@ -529,6 +573,14 @@ def create_control_server(
                     rule_events=rule_events,
                     auto_advance=auto_advance,
                     review_interval_months=review_interval_months,
+                    **(
+                        {
+                            "autonomous_mode": True,
+                            "max_scan_slices": max_scan_slices,
+                        }
+                        if autonomous_mode
+                        else {}
+                    ),
                 )
         except Exception as exc:
             return _connection_safe_error("record_walk_forward_review", exc)
@@ -545,6 +597,8 @@ def create_control_server(
         rule_events: list[dict[str, Any]] | None = None,
         auto_advance: bool = True,
         review_interval_months: int = 3,
+        autonomous_mode: bool = False,
+        max_scan_slices: int = 4,
         teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
         """Record a teacher review; opt in to 1R teacher-loss FLIP evidence when needed."""
@@ -563,6 +617,14 @@ def create_control_server(
                     rule_events=rule_events,
                     auto_advance=auto_advance,
                     review_interval_months=review_interval_months,
+                    **(
+                        {
+                            "autonomous_mode": True,
+                            "max_scan_slices": max_scan_slices,
+                        }
+                        if autonomous_mode
+                        else {}
+                    ),
                 )
         except Exception as exc:
             return _connection_safe_error("record_walk_forward_teacher_review", exc)

@@ -28,6 +28,23 @@ from crypto_strategy_lab.walk_forward_teacher_learning import TEACHER_LOSS_FLIP_
 
 
 ACCELERATED_SCAN_ROWS = 4096
+AUTONOMOUS_ORCHESTRATOR_CONTRACT = "causal_walk_forward_autonomous_v1"
+DEFAULT_AUTONOMOUS_SCAN_SLICES = 4
+MAX_AUTONOMOUS_SCAN_SLICES = 16
+AUTONOMOUS_JUDGMENT_STATUSES = frozenset({
+    "CANDIDATE_DECISION_REQUIRED",
+    "TEACHER_REVIEW_REQUIRED",
+    "TEACHER_LOSS_REVIEW_REQUIRED",
+    "LOSS_REVIEW_REQUIRED",
+    "PERIODIC_REVIEW_REQUIRED",
+})
+_AUTONOMOUS_DETERMINISTIC_CONTINUE_STATUSES = frozenset({
+    "SCAN_CHECKPOINTED",
+    "TRANSITION_LIMIT_REACHED",
+})
+_AUTONOMOUS_TERMINAL_STATUSES = frozenset({
+    "NO_MORE_ACTION_IN_SCAN",
+})
 _ORIGINAL_ADVANCE_WALK_FORWARD = _impl.advance_walk_forward
 _ORIGINAL_BUILD_LOSS_REVIEW_PACKET = _impl.build_loss_review_packet
 
@@ -429,6 +446,8 @@ def submit_walk_forward_view(
     final_action: str | None = None,
     auto_advance: bool = True,
     review_interval_months: int = 3,
+    autonomous_mode: bool = False,
+    max_scan_slices: int = DEFAULT_AUTONOMOUS_SCAN_SLICES,
 ) -> dict[str, Any]:
     """Record ChatGPT's view, settle strategy_action, then continue."""
     revealed = freeze_and_reveal_walk_forward_view(
@@ -481,6 +500,17 @@ def submit_walk_forward_view(
             "settlement": settlement,
             **research,
         }
+    if autonomous_mode:
+        return continue_walk_forward_autonomous(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            operation_id=_impl._operation(operation_id, "autonomous"),
+            expected_sequence=int(settled["sequence"]),
+            expected_state_hash=str(settled["state_hash"]),
+            review_interval_months=review_interval_months,
+            max_scan_slices=max_scan_slices,
+        )
     return advance_walk_forward(
         control,
         reports,
@@ -707,6 +737,165 @@ def advance_walk_forward(
         "scan": scan,
         "scan_checkpoint": deepcopy(checkpoint.get("event") or {}).get("payload"),
         "next_required_event": "ADVANCE_WALK_FORWARD",
+        "outcome_exposed": False,
+    }
+
+
+def _autonomous_metadata(
+    *,
+    continue_without_user: bool,
+    assistant_judgment_required: bool,
+    stop_reason: str,
+    scan_slices: int,
+    scan_checkpoints: int,
+    rows_scanned: int,
+    user_input_required: bool = False,
+) -> dict[str, Any]:
+    return {
+        "mode": "AUTONOMOUS_RESEARCH",
+        "continue_without_user": bool(continue_without_user),
+        "assistant_judgment_required": bool(assistant_judgment_required),
+        "user_input_required": bool(user_input_required),
+        "suppress_routine_user_snapshot": bool(continue_without_user),
+        "authoritative_state_persisted": True,
+        "safe_to_resume_from_sequence_hash": True,
+        "stop_reason": str(stop_reason),
+        "scan_slices": int(scan_slices),
+        "scan_checkpoints": int(scan_checkpoints),
+        "rows_scanned": int(rows_scanned),
+    }
+
+
+def continue_walk_forward_autonomous(
+    control: Any,
+    reports: Any,
+    *,
+    experiment_id: str,
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+    review_interval_months: int = 3,
+    max_scan_rows: int = 250000,
+    max_transitions: int = 20,
+    max_scan_slices: int = DEFAULT_AUTONOMOUS_SCAN_SLICES,
+) -> dict[str, Any]:
+    """Collapse routine deterministic checkpoints until judgment or a safe request budget.
+
+    This function never invents ChatGPT judgment. It only consumes deterministic
+    continuation states such as bounded scan checkpoints. Judgment packets are
+    returned intact so ChatGPT can reason over them, persist the decision, and
+    immediately call this action again without requiring user input.
+    """
+    if isinstance(max_scan_slices, bool) or not isinstance(max_scan_slices, int):
+        raise ValueError("max_scan_slices must be an integer")
+    if not 1 <= max_scan_slices <= MAX_AUTONOMOUS_SCAN_SLICES:
+        raise ValueError(
+            f"max_scan_slices must be between 1 and {MAX_AUTONOMOUS_SCAN_SLICES}"
+        )
+
+    sequence = int(expected_sequence)
+    state_hash = str(expected_state_hash)
+    total_rows = 0
+    checkpoints = 0
+    deterministic_slices = 0
+    last_scan: dict[str, Any] | None = None
+
+    for slice_index in range(max_scan_slices):
+        previous_sequence = sequence
+        previous_state_hash = state_hash
+        result = advance_walk_forward(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            operation_id=_impl._operation(
+                operation_id, f"autonomous-slice-{slice_index + 1}"
+            ),
+            expected_sequence=sequence,
+            expected_state_hash=state_hash,
+            review_interval_months=review_interval_months,
+            max_scan_rows=max_scan_rows,
+            max_transitions=max_transitions,
+        )
+        status = str(result.get("status") or "")
+        sequence = int(result.get("sequence", sequence))
+        state_hash = str(result.get("state_hash", state_hash))
+        scan = result.get("scan")
+        if isinstance(scan, dict):
+            last_scan = deepcopy(scan)
+            total_rows += int(scan.get("rows_scanned") or 0)
+
+        if status in AUTONOMOUS_JUDGMENT_STATUSES:
+            updated = deepcopy(result)
+            updated["autonomous_contract"] = AUTONOMOUS_ORCHESTRATOR_CONTRACT
+            updated["autonomous"] = _autonomous_metadata(
+                continue_without_user=True,
+                assistant_judgment_required=True,
+                stop_reason="ASSISTANT_JUDGMENT_REQUIRED",
+                scan_slices=deterministic_slices + 1,
+                scan_checkpoints=checkpoints,
+                rows_scanned=total_rows,
+            )
+            return updated
+
+        if status in _AUTONOMOUS_TERMINAL_STATUSES:
+            updated = deepcopy(result)
+            updated["autonomous_contract"] = AUTONOMOUS_ORCHESTRATOR_CONTRACT
+            updated["autonomous"] = _autonomous_metadata(
+                continue_without_user=False,
+                assistant_judgment_required=False,
+                stop_reason="NO_MORE_CAUSAL_ACTION",
+                scan_slices=deterministic_slices + 1,
+                scan_checkpoints=checkpoints,
+                rows_scanned=total_rows,
+            )
+            return updated
+
+        if status in _AUTONOMOUS_DETERMINISTIC_CONTINUE_STATUSES:
+            if sequence == previous_sequence and state_hash == previous_state_hash:
+                updated = deepcopy(result)
+                updated["autonomous_contract"] = AUTONOMOUS_ORCHESTRATOR_CONTRACT
+                updated["autonomous"] = _autonomous_metadata(
+                    continue_without_user=False,
+                    assistant_judgment_required=False,
+                    stop_reason="INSPECTION_REQUIRED:DETERMINISTIC_NO_PROGRESS",
+                    scan_slices=deterministic_slices + 1,
+                    scan_checkpoints=checkpoints,
+                    rows_scanned=total_rows,
+                )
+                return updated
+            deterministic_slices += 1
+            if status == "SCAN_CHECKPOINTED":
+                checkpoints += 1
+            continue
+
+        updated = deepcopy(result)
+        updated["autonomous_contract"] = AUTONOMOUS_ORCHESTRATOR_CONTRACT
+        updated["autonomous"] = _autonomous_metadata(
+            continue_without_user=False,
+            assistant_judgment_required=False,
+            stop_reason=f"INSPECTION_REQUIRED:{status or 'UNKNOWN'}",
+            scan_slices=deterministic_slices + 1,
+            scan_checkpoints=checkpoints,
+            rows_scanned=total_rows,
+        )
+        return updated
+
+    return {
+        "contract": AUTONOMOUS_ORCHESTRATOR_CONTRACT,
+        "status": "AUTONOMOUS_CONTINUE",
+        "experiment_id": experiment_id,
+        "sequence": sequence,
+        "state_hash": state_hash,
+        "scan": last_scan,
+        "autonomous": _autonomous_metadata(
+            continue_without_user=True,
+            assistant_judgment_required=False,
+            stop_reason="MCP_REQUEST_BUDGET",
+            scan_slices=deterministic_slices,
+            scan_checkpoints=checkpoints,
+            rows_scanned=total_rows,
+        ),
+        "next_required_event": "CONTINUE_WALK_FORWARD_AUTONOMOUS",
         "outcome_exposed": False,
     }
 

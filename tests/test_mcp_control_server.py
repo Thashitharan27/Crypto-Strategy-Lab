@@ -226,6 +226,7 @@ def test_unified_server_keeps_expected_tool_groups_stable():
         "freeze_and_reveal_walk_forward_candidate",
         "resolve_walk_forward_trade",
         "advance_walk_forward",
+        "continue_walk_forward_autonomous",
         "submit_walk_forward_decision",
         "record_walk_forward_review",
         "record_walk_forward_teacher_review",

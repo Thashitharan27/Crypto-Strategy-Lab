@@ -1,0 +1,325 @@
+from __future__ import annotations
+
+import pytest
+
+from crypto_strategy_lab import walk_forward_orchestrator as orchestrator
+from crypto_strategy_lab import walk_forward_review_facade as review_facade
+
+
+def _checkpoint(sequence: int, state_hash: str, rows: int = 4096) -> dict:
+    return {
+        "contract": "causal_walk_forward_orchestrator_v1",
+        "status": "SCAN_CHECKPOINTED",
+        "experiment_id": "BTCUSDT_15M_WF_TEST",
+        "sequence": sequence,
+        "state_hash": state_hash,
+        "scan": {
+            "rows_scanned": rows,
+            "scan_cursor": {
+                "entry_time": f"2025-01-{sequence:02d}T00:00:00+00:00",
+                "research_signal_index": sequence,
+                "side": "LONG",
+            },
+        },
+        "outcome_exposed": False,
+    }
+
+
+def test_autonomous_loop_consumes_scan_checkpoints_until_judgment(monkeypatch):
+    responses = [
+        _checkpoint(2, "h2"),
+        _checkpoint(3, "h3"),
+        {
+            "contract": "causal_walk_forward_orchestrator_v1",
+            "status": "CANDIDATE_DECISION_REQUIRED",
+            "experiment_id": "BTCUSDT_15M_WF_TEST",
+            "sequence": 4,
+            "state_hash": "h4",
+            "candidate_id": "42-long",
+            "candidate_token": "token",
+            "candidate": {"candidate_id": "42-long"},
+            "scan": {"rows_scanned": 12},
+            "outcome_exposed": False,
+        },
+    ]
+    observed = []
+
+    def fake_advance(*args, **kwargs):
+        observed.append(
+            (
+                kwargs["expected_sequence"],
+                kwargs["expected_state_hash"],
+                kwargs["operation_id"],
+            )
+        )
+        return responses.pop(0)
+
+    monkeypatch.setattr(orchestrator, "advance_walk_forward", fake_advance)
+
+    result = orchestrator.continue_walk_forward_autonomous(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        operation_id="auto:test",
+        expected_sequence=1,
+        expected_state_hash="h1",
+        max_scan_slices=4,
+    )
+
+    assert result["status"] == "CANDIDATE_DECISION_REQUIRED"
+    assert result["autonomous_contract"] == orchestrator.AUTONOMOUS_ORCHESTRATOR_CONTRACT
+    assert result["autonomous"]["continue_without_user"] is True
+    assert result["autonomous"]["assistant_judgment_required"] is True
+    assert result["autonomous"]["user_input_required"] is False
+    assert result["autonomous"]["suppress_routine_user_snapshot"] is True
+    assert result["autonomous"]["scan_checkpoints"] == 2
+    assert result["autonomous"]["rows_scanned"] == 8204
+    assert [item[:2] for item in observed] == [(1, "h1"), (2, "h2"), (3, "h3")]
+    assert len({item[2] for item in observed}) == 3
+
+
+def test_autonomous_loop_returns_compact_continue_at_request_budget(monkeypatch):
+    responses = [_checkpoint(2, "h2"), _checkpoint(3, "h3")]
+
+    monkeypatch.setattr(
+        orchestrator,
+        "advance_walk_forward",
+        lambda *args, **kwargs: responses.pop(0),
+    )
+
+    result = orchestrator.continue_walk_forward_autonomous(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        operation_id="auto:budget",
+        expected_sequence=1,
+        expected_state_hash="h1",
+        max_scan_slices=2,
+    )
+
+    assert result["status"] == "AUTONOMOUS_CONTINUE"
+    assert result["sequence"] == 3
+    assert result["state_hash"] == "h3"
+    assert result["next_required_event"] == "CONTINUE_WALK_FORWARD_AUTONOMOUS"
+    assert result["autonomous"]["continue_without_user"] is True
+    assert result["autonomous"]["assistant_judgment_required"] is False
+    assert result["autonomous"]["stop_reason"] == "MCP_REQUEST_BUDGET"
+    assert result["autonomous"]["scan_checkpoints"] == 2
+    assert result["autonomous"]["rows_scanned"] == 8192
+
+
+def test_autonomous_loop_marks_terminal_state_without_requesting_user(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator,
+        "advance_walk_forward",
+        lambda *args, **kwargs: {
+            "contract": "causal_walk_forward_orchestrator_v1",
+            "status": "NO_MORE_ACTION_IN_SCAN",
+            "experiment_id": "BTCUSDT_15M_WF_TEST",
+            "sequence": 5,
+            "state_hash": "h5",
+            "scan": {"rows_scanned": 17},
+        },
+    )
+
+    result = orchestrator.continue_walk_forward_autonomous(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        operation_id="auto:end",
+        expected_sequence=4,
+        expected_state_hash="h4",
+    )
+
+    assert result["status"] == "NO_MORE_ACTION_IN_SCAN"
+    assert result["autonomous"]["continue_without_user"] is False
+    assert result["autonomous"]["assistant_judgment_required"] is False
+    assert result["autonomous"]["user_input_required"] is False
+    assert result["autonomous"]["stop_reason"] == "NO_MORE_CAUSAL_ACTION"
+
+
+def test_autonomous_loop_does_not_guess_unknown_status(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator,
+        "advance_walk_forward",
+        lambda *args, **kwargs: {
+            "contract": "causal_walk_forward_orchestrator_v1",
+            "status": "NEW_UNRECOGNIZED_BOUNDARY",
+            "experiment_id": "BTCUSDT_15M_WF_TEST",
+            "sequence": 8,
+            "state_hash": "h8",
+        },
+    )
+
+    result = orchestrator.continue_walk_forward_autonomous(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        operation_id="auto:unknown",
+        expected_sequence=7,
+        expected_state_hash="h7",
+    )
+
+    assert result["autonomous"]["continue_without_user"] is False
+    assert result["autonomous"]["user_input_required"] is False
+    assert result["autonomous"]["stop_reason"].startswith("INSPECTION_REQUIRED:")
+
+
+@pytest.mark.parametrize("value", [0, 17, True, 1.5])
+def test_autonomous_scan_slice_budget_is_bounded(value):
+    with pytest.raises(ValueError, match="max_scan_slices"):
+        orchestrator.continue_walk_forward_autonomous(
+            None,
+            None,
+            experiment_id="BTCUSDT_15M_WF_TEST",
+            operation_id="auto:bad-budget",
+            expected_sequence=1,
+            expected_state_hash="h1",
+            max_scan_slices=value,
+        )
+
+
+def test_submit_win_in_autonomous_mode_resumes_without_interactive_checkpoint(monkeypatch):
+    observed = {}
+
+    monkeypatch.setattr(
+        orchestrator,
+        "freeze_and_reveal_walk_forward_view",
+        lambda *args, **kwargs: {
+            "sequence": 2,
+            "state_hash": "h2",
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator._impl,
+        "resolve_walk_forward_trade",
+        lambda *args, **kwargs: {
+            "sequence": 3,
+            "state_hash": "h3",
+            "settlement": {"result": "WIN"},
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_decision_research_fields",
+        lambda *args, **kwargs: {},
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "advance_walk_forward",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("interactive advance should not be used")
+        ),
+    )
+
+    def fake_autonomous(*args, **kwargs):
+        observed.update(kwargs)
+        return {
+            "status": "CANDIDATE_DECISION_REQUIRED",
+            "sequence": 4,
+            "state_hash": "h4",
+            "autonomous": {"continue_without_user": True},
+        }
+
+    monkeypatch.setattr(
+        orchestrator,
+        "continue_walk_forward_autonomous",
+        fake_autonomous,
+    )
+
+    result = orchestrator.submit_walk_forward_view(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        candidate_id="42-long",
+        candidate_token="token",
+        confidence_pct=70,
+        reasoning="Causal entry-time evidence supports LONG.",
+        operation_id="decision:auto",
+        expected_sequence=1,
+        expected_state_hash="h1",
+        chatgpt_view="LONG",
+        autonomous_mode=True,
+        max_scan_slices=6,
+    )
+
+    assert result["status"] == "CANDIDATE_DECISION_REQUIRED"
+    assert observed["expected_sequence"] == 3
+    assert observed["expected_state_hash"] == "h3"
+    assert observed["max_scan_slices"] == 6
+
+
+def test_review_batch_in_autonomous_mode_resumes_without_interactive_checkpoint(monkeypatch):
+    observed = {}
+
+    monkeypatch.setattr(
+        review_facade,
+        "advance_walk_forward",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("interactive advance should not be used")
+        ),
+    )
+
+    def fake_autonomous(*args, **kwargs):
+        observed.update(kwargs)
+        return {
+            "status": "PERIODIC_REVIEW_REQUIRED",
+            "sequence": 12,
+            "state_hash": "h12",
+            "autonomous": {"continue_without_user": True},
+        }
+
+    monkeypatch.setattr(
+        review_facade,
+        "continue_walk_forward_autonomous",
+        fake_autonomous,
+    )
+
+    result = review_facade._advance_after_batch(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        operation_id="review:auto",
+        batch={
+            "sequence": 11,
+            "state_hash": "h11",
+            "idempotent_replay": False,
+        },
+        review_interval_months=3,
+        autonomous_mode=True,
+        max_scan_slices=5,
+    )
+
+    assert result["status"] == "PERIODIC_REVIEW_REQUIRED"
+    assert observed["expected_sequence"] == 11
+    assert observed["expected_state_hash"] == "h11"
+    assert observed["max_scan_slices"] == 5
+
+
+def test_autonomous_loop_stops_if_deterministic_status_makes_no_progress(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator,
+        "advance_walk_forward",
+        lambda *args, **kwargs: {
+            "contract": "causal_walk_forward_orchestrator_v1",
+            "status": "TRANSITION_LIMIT_REACHED",
+            "experiment_id": "BTCUSDT_15M_WF_TEST",
+            "sequence": 7,
+            "state_hash": "h7",
+        },
+    )
+
+    result = orchestrator.continue_walk_forward_autonomous(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        operation_id="auto:no-progress",
+        expected_sequence=7,
+        expected_state_hash="h7",
+    )
+
+    assert result["autonomous"]["continue_without_user"] is False
+    assert (
+        result["autonomous"]["stop_reason"]
+        == "INSPECTION_REQUIRED:DETERMINISTIC_NO_PROGRESS"
+    )
