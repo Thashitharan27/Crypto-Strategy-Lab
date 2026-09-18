@@ -602,13 +602,17 @@ def create_control_server(
         expected_state_hash: str,
         candidate_id: str | None = None,
         rule_events: list[dict[str, Any]] | None = None,
+        loss_diagnosis: str | None = None,
+        failure_mechanism: str | None = None,
+        periodic_rule_action: str | None = None,
+        periodic_rationale: str | None = None,
         auto_advance: bool = True,
         review_interval_months: int = 3,
         autonomous_mode: bool = False,
         max_scan_slices: int = 4,
         teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
-        """Record a review and optionally continue with 1R teacher-loss review enabled."""
+        """Record a policy-validated review and optionally continue autonomously."""
         try:
             with teacher_loss_flip_policy(teacher_loss_flip_enabled):
                 return _record_walk_forward_review(
@@ -623,6 +627,10 @@ def create_control_server(
                     expected_state_hash=expected_state_hash,
                     candidate_id=candidate_id,
                     rule_events=rule_events,
+                    loss_diagnosis=loss_diagnosis,
+                    failure_mechanism=failure_mechanism,
+                    periodic_rule_action=periodic_rule_action,
+                    periodic_rationale=periodic_rationale,
                     auto_advance=auto_advance,
                     review_interval_months=review_interval_months,
                     **(
@@ -647,13 +655,15 @@ def create_control_server(
         expected_sequence: int,
         expected_state_hash: str,
         rule_events: list[dict[str, Any]] | None = None,
+        setup_thesis: str | None = None,
+        entry_family: str | None = None,
         auto_advance: bool = True,
         review_interval_months: int = 3,
         autonomous_mode: bool = False,
         max_scan_slices: int = 4,
         teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
-        """Record a teacher review; opt in to 1R teacher-loss FLIP evidence when needed."""
+        """Record a policy-validated teacher review; opt in to 1R loss FLIP evidence when needed."""
         try:
             with teacher_loss_flip_policy(teacher_loss_flip_enabled):
                 return _record_walk_forward_teacher_review(
@@ -667,6 +677,8 @@ def create_control_server(
                     expected_sequence=expected_sequence,
                     expected_state_hash=expected_state_hash,
                     rule_events=rule_events,
+                    setup_thesis=setup_thesis,
+                    entry_family=entry_family,
                     auto_advance=auto_advance,
                     review_interval_months=review_interval_months,
                     **(
