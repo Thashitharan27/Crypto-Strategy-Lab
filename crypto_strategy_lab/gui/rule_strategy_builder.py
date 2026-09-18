@@ -351,26 +351,26 @@ EVIDENCE_MENU_TREE = (
                     "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
                 ),
             ),
-        ),
-    ),
-    (
-        "Multi-Timeframe Price Action",
-        (
             (
-                "Candle Geometry",
+                "Price Action",
                 (
-                    "CANDLE_BODY_ATR", "CANDLE_RANGE_ATR", "BODY_TO_RANGE_RATIO",
-                    "LOWER_WICK_RATIO", "UPPER_WICK_RATIO",
-                    "RANGE_CONTRACTION_RATIO", "BODY_CONTRACTION_RATIO",
-                    "CANDLE_CLOSE_LOCATION",
-                ),
-            ),
-            (
-                "Reversal Triggers",
-                (
-                    "BULLISH_ENGULFING", "BEARISH_ENGULFING",
-                    "BULLISH_PIN_BAR", "BEARISH_PIN_BAR",
-                    "BULLISH_REVERSAL_TRIGGER", "BEARISH_REVERSAL_TRIGGER",
+                    (
+                        "Candle Geometry",
+                        (
+                            "CANDLE_BODY_ATR", "CANDLE_RANGE_ATR", "BODY_TO_RANGE_RATIO",
+                            "LOWER_WICK_RATIO", "UPPER_WICK_RATIO",
+                            "RANGE_CONTRACTION_RATIO", "BODY_CONTRACTION_RATIO",
+                            "CANDLE_CLOSE_LOCATION",
+                        ),
+                    ),
+                    (
+                        "Reversal Triggers",
+                        (
+                            "BULLISH_ENGULFING", "BEARISH_ENGULFING",
+                            "BULLISH_PIN_BAR", "BEARISH_PIN_BAR",
+                            "BULLISH_REVERSAL_TRIGGER", "BEARISH_REVERSAL_TRIGGER",
+                        ),
+                    ),
                 ),
             ),
         ),
