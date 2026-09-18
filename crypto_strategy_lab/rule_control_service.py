@@ -296,6 +296,24 @@ class RuleAwareBacktestControlService(BacktestControlService):
             lambda: self._causal_experiment_store().read(experiment_id, recent_events),
         )
 
+    def summarize_walk_forward_monthly(
+        self,
+        experiment_id: str,
+        ledger: str = "RESEARCH",
+        start_month: str | None = None,
+        end_month: str | None = None,
+    ) -> dict[str, Any]:
+        """Summarize the full authoritative walk-forward ledger by calendar month."""
+        return self._safe_persistence_call(
+            "summarize_walk_forward_monthly",
+            lambda: self._causal_experiment_store().summarize_monthly(
+                experiment_id,
+                ledger=ledger,
+                start_month=start_month,
+                end_month=end_month,
+            ),
+        )
+
     def list_walk_forward_experiments(self) -> list[dict[str, Any]]:
         """List bounded causal experiment identities and their current chain heads."""
         try:
