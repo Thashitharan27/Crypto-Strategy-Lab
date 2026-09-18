@@ -34,6 +34,7 @@ from crypto_strategy_lab.rule_native_engine import (
     _SR_NUMERIC_FIELDS,
 )
 from crypto_strategy_lab.run_manifest import artifact_path, canonical_sha256
+from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_RULE_PRESETS
 from crypto_strategy_lab.walk_forward_materialization import materialize_walk_forward_strategy
 
 
@@ -550,7 +551,16 @@ def _condition_match(
         if not isinstance(target, str) and math.isfinite(observed_number) and math.isfinite(target_number):
             equals = observed_number == target_number
         else:
-            equals = _category(value) == _category(target)
+            observed_category = _category(value)
+            target_category = _category(target)
+            preset_members = CATEGORICAL_RULE_PRESETS.get(indicator, {}).get(
+                target_category or ""
+            )
+            equals = (
+                observed_category in preset_members
+                if preset_members
+                else observed_category == target_category
+            )
         matched = equals if operator == "EQUALS" else not equals
     else:
         observed = _number(value)
