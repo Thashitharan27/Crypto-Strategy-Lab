@@ -478,11 +478,14 @@ class CausalExperimentStore:
         notes: str | None = None,
     ) -> dict[str, Any]:
         """Create an immutable experiment definition and the first WF_CREATED event."""
-        definition = deepcopy(definition)
-        definition.setdefault(
-            "periodic_review_policy", deepcopy(DEFAULT_PERIODIC_REVIEW_POLICY)
-        )
-        definition = self._validate_definition(definition)
+        if not isinstance(definition, dict):
+            definition = self._validate_definition(definition)
+        else:
+            definition = deepcopy(definition)
+            definition.setdefault(
+                "periodic_review_policy", deepcopy(DEFAULT_PERIODIC_REVIEW_POLICY)
+            )
+            definition = self._validate_definition(definition)
         operation_id = self._validate_operation_id(operation_id)
         phase = str(initial_phase).strip().upper()
         if phase not in PHASES:
