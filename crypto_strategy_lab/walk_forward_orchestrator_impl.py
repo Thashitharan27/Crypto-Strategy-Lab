@@ -679,32 +679,56 @@ def _initial_periodic_review_anchor(
     return _utc_timestamp(raw, "initial periodic review anchor")
 
 
-def _periodic_review_due(
+def _periodic_review_anchor(
     events: list[dict[str, Any]],
-    months: int,
-    *,
-    initial_anchor: pd.Timestamp | None = None,
-) -> dict[str, Any] | None:
+    initial_anchor: pd.Timestamp | None,
+) -> tuple[dict[str, Any] | None, pd.Timestamp, str] | None:
     periodic = []
     for event in events:
         if event.get("event_type") != "REVIEW_COMPLETED":
             continue
         payload = event.get("payload") or {}
         kind = str(payload.get("review_type", "")).upper()
-        if kind in {"PERIODIC", "QUARTERLY"} or (not kind and not payload.get("candidate_id")):
+        if kind in {"PERIODIC", "QUARTERLY"} or (
+            not kind and not payload.get("candidate_id")
+        ):
             raw = event.get("effective_market_time")
             if raw:
-                periodic.append((event, _utc_timestamp(raw, "review effective_market_time")))
+                periodic.append(
+                    (event, _utc_timestamp(raw, "review effective_market_time"))
+                )
 
     if periodic:
         last_event, last_time = periodic[-1]
-        anchor_source = "REVIEW_COMPLETED"
-    else:
-        if initial_anchor is None:
-            return None
-        last_event = None
-        last_time = initial_anchor
-        anchor_source = "REFERENCE_PERIOD_START"
+        return last_event, last_time, "REVIEW_COMPLETED"
+    if initial_anchor is None:
+        return None
+    return None, initial_anchor, "REFERENCE_PERIOD_START"
+
+
+def _next_periodic_review_time(
+    events: list[dict[str, Any]],
+    months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> pd.Timestamp | None:
+    anchor = _periodic_review_anchor(events, initial_anchor)
+    if anchor is None:
+        return None
+    _, anchor_time, _ = anchor
+    return anchor_time + pd.DateOffset(months=int(months))
+
+
+def _periodic_review_due(
+    events: list[dict[str, Any]],
+    months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> dict[str, Any] | None:
+    anchor = _periodic_review_anchor(events, initial_anchor)
+    if anchor is None:
+        return None
+    last_event, last_time, anchor_source = anchor
 
     cursor = _max_event_time(events)
     if cursor is None:
@@ -873,10 +897,13 @@ def advance_walk_forward(
             return packet
 
         definition = (readback.get("manifest") or {}).get("definition") or {}
+        initial_review_anchor = _initial_periodic_review_anchor(
+            reports, definition, events
+        )
         periodic = _periodic_review_due(
             events,
             int(review_interval_months),
-            initial_anchor=_initial_periodic_review_anchor(reports, definition, events),
+            initial_anchor=initial_review_anchor,
         )
         if periodic is not None:
             periodic.update(
@@ -887,6 +914,11 @@ def advance_walk_forward(
             )
             return periodic
 
+        next_review_time = _next_periodic_review_time(
+            events,
+            int(review_interval_months),
+            initial_anchor=initial_review_anchor,
+        )
         scan = get_next_walk_forward_candidate(
             control, reports,
             experiment_id=experiment_id,
@@ -894,8 +926,33 @@ def advance_walk_forward(
             expected_sequence=sequence,
             expected_state_hash=state_hash,
             max_scan_rows=max_scan_rows,
+            stop_before_time=(
+                next_review_time.isoformat()
+                if next_review_time is not None
+                else None
+            ),
         )
         status = scan.get("status")
+        if status == "TIME_BOUNDARY_DUE_FIRST":
+            boundary_time = _utc_timestamp(
+                scan.get("boundary_time"), "periodic review scan boundary"
+            )
+            checkpoint = store.append_event(
+                experiment_id,
+                "CHECKPOINT_CREATED",
+                {
+                    "checkpoint_type": "PERIODIC_REVIEW_BOUNDARY_V1",
+                    "review_due_time": boundary_time.isoformat(),
+                },
+                _operation(operation_id, f"periodic-boundary-{step}"),
+                sequence,
+                state_hash,
+                effective_market_time=boundary_time.isoformat(),
+                source="DETERMINISTIC_ORCHESTRATOR",
+            )
+            sequence = int(checkpoint["sequence"])
+            state_hash = str(checkpoint["state_hash"])
+            continue
         if status == "CANDIDATE_CAPTURED":
             return {
                 "contract": ORCHESTRATOR_CONTRACT,
