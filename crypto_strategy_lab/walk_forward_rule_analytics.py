@@ -991,6 +991,11 @@ def _public_rule_record(record: dict[str, Any]) -> dict[str, Any]:
         "rule_ref": record["rule_ref"],
         "family": record["family"],
         "profile": record["profile"],
+        "regime": (
+            record["profile"].rsplit("_", 1)[0]
+            if "_" in record["profile"]
+            else record["profile"]
+        ),
         "group_id": record["group_id"],
         "group_name": record["group_name"],
         "effective_from": record["effective_from"],
