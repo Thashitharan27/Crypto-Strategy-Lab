@@ -23,6 +23,10 @@ import pandas as pd
 from crypto_strategy_core.candles import directional_di_ratio
 from crypto_strategy_lab.causal_experiment import CausalExperimentStore
 from crypto_strategy_lab.data_lake_config import PROFILE_KEYS
+from crypto_strategy_lab.mtf_sr_reaction import (
+    MTF_SR_DERIVED_RULE_INDICATORS,
+    PRICE_ACTION_RULE_INDICATORS,
+)
 from crypto_strategy_lab.rule_native_engine import (
     _RESEARCH_CATEGORICAL_FIELDS,
     _RESEARCH_NUMERIC_FIELDS,
@@ -62,6 +66,46 @@ _SAFE_TRADE_ENTRY_COLUMNS = (
     "mean_reversion_distance_change_atr", "mean_distance_atr",
     "mean_distance_change_atr", "entry_close_location", "close_location",
     "session_vwap",
+)
+
+_MTF_PRICE_ACTION_FIELDS = {
+    "CANDLE_BODY_ATR": "body_atr",
+    "CANDLE_RANGE_ATR": "range_atr",
+    "BODY_TO_RANGE_RATIO": "body_to_range_ratio",
+    "LOWER_WICK_RATIO": "lower_wick_ratio",
+    "UPPER_WICK_RATIO": "upper_wick_ratio",
+    "RANGE_CONTRACTION_RATIO": "range_contraction_ratio",
+    "BODY_CONTRACTION_RATIO": "body_contraction_ratio",
+    "CANDLE_CLOSE_LOCATION": "close_location",
+    "BULLISH_ENGULFING": "bullish_engulfing",
+    "BEARISH_ENGULFING": "bearish_engulfing",
+    "BULLISH_PIN_BAR": "bullish_pin_bar",
+    "BEARISH_PIN_BAR": "bearish_pin_bar",
+    "BULLISH_REVERSAL_TRIGGER": "bullish_reversal_trigger",
+    "BEARISH_REVERSAL_TRIGGER": "bearish_reversal_trigger",
+}
+_MTF_SR_DERIVED_FIELDS = {
+    "SR_APPROACH_MOMENTUM_STATE": "sr_approach_momentum_state",
+    "SR_ROLE_REVERSAL_STATE": "sr_role_reversal_state",
+    "SR_ZONE_PENETRATION_ATR": "sr_zone_penetration_atr",
+    "SR_ZONE_REJECTION_ATR": "sr_zone_rejection_atr",
+    "SR_BREAKOUT_BODY_ATR": "sr_breakout_body_atr",
+    "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR": "sr_breakout_close_beyond_zone_atr",
+}
+_MTF_LABELS = ("strategy", "1h", "4h", "1d")
+_SAFE_TRADE_ENTRY_COLUMNS = (
+    *_SAFE_TRADE_ENTRY_COLUMNS,
+    *(
+        f"mtf_{label}_{field}"
+        for label in _MTF_LABELS
+        for field in _MTF_PRICE_ACTION_FIELDS.values()
+    ),
+    *(
+        f"mtf_{label}_{side}_{field}"
+        for label in _MTF_LABELS
+        for side in ("long", "short")
+        for field in _MTF_SR_DERIVED_FIELDS.values()
+    ),
 )
 
 _DIRECT_NUMERIC = {
@@ -371,6 +415,15 @@ def _sr_prefix(config: dict[str, Any], condition: dict[str, Any]) -> str | None:
     return {60: "sr_1h", 240: "sr_4h", 1440: "sr_1d"}.get(requested)
 
 
+def _mtf_label(config: dict[str, Any], condition: dict[str, Any]) -> str | None:
+    strategy_minutes = int((config.get("data") or {}).get("strategy_timeframe_minutes", 0))
+    raw = condition.get("sr_timeframe_minutes")
+    requested = strategy_minutes if raw in (None, "", 0, "0") else int(raw)
+    if requested == strategy_minutes:
+        return "strategy"
+    return {60: "1h", 240: "4h", 1440: "1d"}.get(requested)
+
+
 def _evidence(
     row: dict[str, Any],
     direction: str,
@@ -384,6 +437,14 @@ def _evidence(
         return _present(row, *_DIRECT_NUMERIC[indicator])
     if indicator in _DIRECT_CATEGORICAL:
         return _present(row, *_DIRECT_CATEGORICAL[indicator])
+    if indicator in PRICE_ACTION_RULE_INDICATORS:
+        label = _mtf_label(config, condition)
+        field = _MTF_PRICE_ACTION_FIELDS.get(indicator)
+        return _present(row, f"mtf_{label}_{field}") if label and field else None
+    if indicator in MTF_SR_DERIVED_RULE_INDICATORS:
+        label = _mtf_label(config, condition)
+        field = _MTF_SR_DERIVED_FIELDS.get(indicator)
+        return _present(row, f"mtf_{label}_{direction.lower()}_{field}") if label and field else None
     if indicator == "DIRECTIONAL_DI":
         return _present(row, "plus_di" if direction == "LONG" else "minus_di")
     if indicator == "DIRECTIONAL_DI_RATIO":
@@ -461,7 +522,7 @@ def _evidence(
     if indicator in _RESEARCH_CATEGORICAL_FIELDS:
         _feature, column = _RESEARCH_CATEGORICAL_FIELDS[indicator]
         return _present(row, column)
-    # EMA-9/20 volume-derived rule evidence is not fully preserved in the current
+    # Any remaining strategy-specific evidence is not fully preserved in the
     # immutable feature-context contract. Missing evidence must never be guessed.
     return None
 
