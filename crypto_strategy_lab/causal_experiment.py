@@ -556,6 +556,290 @@ class CausalExperimentStore:
                 "recent_events": tail,
             }
 
+    def summarize_monthly(
+        self,
+        experiment_id: str,
+        ledger: str = "RESEARCH",
+        start_month: str | None = None,
+        end_month: str | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate all resolved trades into calendar-month performance rows."""
+        ledger_name = str(ledger).strip().upper()
+        if ledger_name not in LEDGERS:
+            raise ValueError(f"ledger must be one of: {', '.join(sorted(LEDGERS))}")
+
+        month_pattern = re.compile(r"^\\d{4}-(0[1-9]|1[0-2])$")
+
+        def validate_month(value: str | None, name: str) -> str | None:
+            if value is None:
+                return None
+            text = str(value).strip()
+            if not month_pattern.fullmatch(text):
+                raise ValueError(f"{name} must use YYYY-MM")
+            return text
+
+        def month_next(value: str) -> str:
+            year, month = (int(part) for part in value.split("-"))
+            if month == 12:
+                return f"{year + 1:04d}-01"
+            return f"{year:04d}-{month + 1:02d}"
+
+        def month_range(first: str, last: str) -> list[str]:
+            rows: list[str] = []
+            current = first
+            while current <= last:
+                rows.append(current)
+                current = month_next(current)
+            return rows
+
+        requested_start = validate_month(start_month, "start_month")
+        requested_end = validate_month(end_month, "end_month")
+
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            if manifest_path.is_symlink() or events_path.is_symlink():
+                raise ValueError("symlinked experiment files are not allowed")
+            if not manifest_path.is_file() or not events_path.is_file():
+                raise ValueError("causal experiment files are incomplete")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            if manifest.get("definition_sha256") != _sha256_json(manifest.get("definition")):
+                raise ValueError("experiment definition hash mismatch")
+            events = self._read_all_events(events_path)
+            sequence, state_hash = self._verify_chain(events)
+
+        definition = manifest.get("definition") or {}
+        reference = definition.get("reference_provenance") or {}
+        initial_equity = definition.get("initial_equity")
+        if initial_equity in (None, "") and isinstance(definition.get("risk_model"), dict):
+            initial_equity = definition["risk_model"].get("initial_equity")
+        initial_equity = float(initial_equity) if initial_equity not in (None, "") else None
+
+        aggregates: dict[str, dict[str, Any]] = {}
+        latest_market_time: str | None = None
+        first_trade_month: str | None = None
+        last_trade_month: str | None = None
+
+        for event in events:
+            effective = event.get("effective_market_time")
+            if effective:
+                normalized = _parse_iso(str(effective), "effective_market_time")
+                if latest_market_time is None or normalized > latest_market_time:
+                    latest_market_time = normalized
+
+            if event.get("event_type") != "TRADE_RESOLVED":
+                continue
+            payload = event.get("payload") or {}
+            if str(payload.get("ledger", "RESEARCH")).upper() != ledger_name:
+                continue
+
+            resolved_at_raw = (
+                event.get("effective_market_time")
+                or event.get("event_time")
+                or event.get("recorded_at")
+            )
+            if not resolved_at_raw:
+                raise ValueError("TRADE_RESOLVED event has no usable time")
+            resolved_at = _parse_iso(str(resolved_at_raw), "TRADE_RESOLVED time")
+            month = resolved_at[:7]
+            first_trade_month = month if first_trade_month is None else min(first_trade_month, month)
+            last_trade_month = month if last_trade_month is None else max(last_trade_month, month)
+
+            try:
+                net_r = float(payload.get("net_r", 0.0))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("TRADE_RESOLVED payload.net_r must be numeric") from exc
+            net_pnl_raw = payload.get("net_pnl")
+            if net_pnl_raw in (None, ""):
+                before_raw = payload.get("equity_before")
+                after_raw = payload.get("equity_after")
+                if before_raw not in (None, "") and after_raw not in (None, ""):
+                    net_pnl_raw = float(after_raw) - float(before_raw)
+                else:
+                    net_pnl_raw = 0.0
+            try:
+                net_pnl = float(net_pnl_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("TRADE_RESOLVED payload.net_pnl must be numeric") from exc
+
+            result = str(payload.get("result", "")).upper()
+            if result not in {"WIN", "LOSS", "BREAKEVEN"}:
+                result = "WIN" if net_r > 0 else ("LOSS" if net_r < 0 else "BREAKEVEN")
+
+            row = aggregates.setdefault(
+                month,
+                {
+                    "month": month,
+                    "wins": 0,
+                    "losses": 0,
+                    "breakevens": 0,
+                    "trades": 0,
+                    "net_r": 0.0,
+                    "net_pnl": 0.0,
+                    "opening_equity": None,
+                    "closing_equity": None,
+                    "first_trade_time": None,
+                    "last_trade_time": None,
+                    "first_trade_sequence": None,
+                    "last_trade_sequence": None,
+                },
+            )
+            row["trades"] += 1
+            row["wins"] += int(result == "WIN")
+            row["losses"] += int(result == "LOSS")
+            row["breakevens"] += int(result == "BREAKEVEN")
+            row["net_r"] += net_r
+            row["net_pnl"] += net_pnl
+
+            if row["first_trade_time"] is None or resolved_at < row["first_trade_time"]:
+                row["first_trade_time"] = resolved_at
+                row["first_trade_sequence"] = event["sequence"]
+                if payload.get("equity_before") not in (None, ""):
+                    row["opening_equity"] = float(payload["equity_before"])
+            if row["last_trade_time"] is None or resolved_at >= row["last_trade_time"]:
+                row["last_trade_time"] = resolved_at
+                row["last_trade_sequence"] = event["sequence"]
+                if payload.get("equity_after") not in (None, ""):
+                    row["closing_equity"] = float(payload["equity_after"])
+
+        reference_start = reference.get("period_start")
+        default_start = None
+        if reference_start:
+            default_start = _parse_iso(str(reference_start), "reference period_start")[:7]
+        default_start = default_start or first_trade_month or (latest_market_time[:7] if latest_market_time else None)
+
+        default_end = latest_market_time[:7] if latest_market_time else last_trade_month
+        default_end = default_end or default_start
+
+        selected_start = requested_start or default_start
+        selected_end = requested_end or default_end
+        if selected_start is None or selected_end is None:
+            return {
+                "contract": "causal_walk_forward_monthly_summary_v1",
+                "experiment_id": value,
+                "ledger": ledger_name,
+                "sequence": sequence,
+                "state_hash": state_hash,
+                "timezone": "UTC",
+                "latest_market_time": latest_market_time,
+                "months": [],
+                "totals": {
+                    "wins": 0,
+                    "losses": 0,
+                    "breakevens": 0,
+                    "trades": 0,
+                    "win_rate_pct": None,
+                    "net_r": 0.0,
+                    "net_pnl": 0.0,
+                    "opening_equity": initial_equity,
+                    "closing_equity": initial_equity,
+                },
+            }
+        if selected_start > selected_end:
+            raise ValueError("start_month cannot be after end_month")
+
+        reference_start_time = (
+            _parse_iso(str(reference_start), "reference period_start") if reference_start else None
+        )
+        rows: list[dict[str, Any]] = []
+        carry_equity = initial_equity
+        prior_months = sorted(month for month in aggregates if month < selected_start)
+        if prior_months:
+            prior_close = aggregates[prior_months[-1]].get("closing_equity")
+            if prior_close not in (None, ""):
+                carry_equity = float(prior_close)
+
+        for month in month_range(selected_start, selected_end):
+            source = aggregates.get(month)
+            if source is None:
+                row = {
+                    "month": month,
+                    "wins": 0,
+                    "losses": 0,
+                    "breakevens": 0,
+                    "trades": 0,
+                    "net_r": 0.0,
+                    "net_pnl": 0.0,
+                    "opening_equity": carry_equity,
+                    "closing_equity": carry_equity,
+                    "first_trade_time": None,
+                    "last_trade_time": None,
+                    "first_trade_sequence": None,
+                    "last_trade_sequence": None,
+                }
+            else:
+                row = dict(source)
+                if row["opening_equity"] is None:
+                    row["opening_equity"] = carry_equity
+                if row["closing_equity"] is None and row["opening_equity"] is not None:
+                    row["closing_equity"] = row["opening_equity"] + row["net_pnl"]
+
+            if row["closing_equity"] is not None:
+                carry_equity = float(row["closing_equity"])
+
+            row["net_r"] = round(float(row["net_r"]), 10)
+            row["net_pnl"] = round(float(row["net_pnl"]), 10)
+            row["opening_equity"] = (
+                round(float(row["opening_equity"]), 10)
+                if row["opening_equity"] is not None
+                else None
+            )
+            row["closing_equity"] = (
+                round(float(row["closing_equity"]), 10)
+                if row["closing_equity"] is not None
+                else None
+            )
+            row["win_rate_pct"] = (
+                round(100.0 * row["wins"] / row["trades"], 2) if row["trades"] else None
+            )
+            if row["opening_equity"] not in (None, 0) and row["closing_equity"] is not None:
+                row["return_pct"] = round(
+                    100.0 * (row["closing_equity"] / row["opening_equity"] - 1.0), 4
+                )
+            else:
+                row["return_pct"] = None
+
+            month_start = f"{month}-01T00:00:00+00:00"
+            next_month_start = f"{month_next(month)}-01T00:00:00+00:00"
+            row["partial"] = bool(
+                (reference_start_time is not None and reference_start_time > month_start)
+                or (latest_market_time is not None and latest_market_time < next_month_start)
+            )
+            rows.append(row)
+
+        total_trades = sum(row["trades"] for row in rows)
+        totals = {
+            "wins": sum(row["wins"] for row in rows),
+            "losses": sum(row["losses"] for row in rows),
+            "breakevens": sum(row["breakevens"] for row in rows),
+            "trades": total_trades,
+            "win_rate_pct": (
+                round(100.0 * sum(row["wins"] for row in rows) / total_trades, 2)
+                if total_trades
+                else None
+            ),
+            "net_r": round(sum(float(row["net_r"]) for row in rows), 10),
+            "net_pnl": round(sum(float(row["net_pnl"]) for row in rows), 10),
+            "opening_equity": rows[0]["opening_equity"] if rows else initial_equity,
+            "closing_equity": rows[-1]["closing_equity"] if rows else initial_equity,
+        }
+
+        return {
+            "contract": "causal_walk_forward_monthly_summary_v1",
+            "experiment_id": value,
+            "ledger": ledger_name,
+            "sequence": sequence,
+            "state_hash": state_hash,
+            "timezone": "UTC",
+            "latest_market_time": latest_market_time,
+            "start_month": selected_start,
+            "end_month": selected_end,
+            "months": rows,
+            "totals": totals,
+        }
+
     def list_experiments(self) -> list[dict[str, Any]]:
         """List experiment identities without exposing arbitrary directory traversal."""
         rows: list[dict[str, Any]] = []
