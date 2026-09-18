@@ -376,6 +376,20 @@ def test_periodic_anchor_respects_manual_policy_and_migration():
         definition, [{"event_type": "MIGRATION_RECORDED"}]
     ) is None
 
+    definition["reference_provenance"] = {}
+    reports = type(
+        "AnchorReports",
+        (),
+        {
+            "get_run_manifest": lambda self, run: {
+                "request": {"start": "2020-02-01T00:00:00+00:00"}
+            }
+        },
+    )()
+    assert analytics._initial_periodic_anchor(
+        definition, [], reports
+    ) == pd.Timestamp("2020-02-01T00:00:00Z")
+
 
 def test_veto_busy_interval_starts_at_capture_and_closes_on_invalidation():
     events = [
