@@ -158,6 +158,22 @@ def test_walk_forward_reads_new_mtf_evidence_by_condition_timeframe():
         )
         == "RETEST_HELD"
     )
+    from crypto_strategy_lab.walk_forward_candidate_engine_impl import _condition_match
+
+    matched, detail = _condition_match(
+        row,
+        "LONG",
+        "bull_long",
+        {
+            "indicator": "SR_ROLE_REVERSAL_STATE",
+            "condition": "EQUALS",
+            "value": "VALID_RETEST",
+            "sr_timeframe_minutes": 240,
+        },
+        config,
+    )
+    assert matched
+    assert detail["availability"] == "AVAILABLE"
     assert (
         _evidence(
             row,
