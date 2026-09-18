@@ -195,6 +195,25 @@ def _last_periodic_review(events: list[dict[str, Any]]) -> dict[str, Any] | None
     return result
 
 
+def _initial_periodic_anchor(
+    definition: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> pd.Timestamp | None:
+    # Match the orchestrator's PR #263 semantics: migrated experiments and
+    # experiments without an explicit REFERENCE_PERIOD_START policy remain
+    # unanchored until a real periodic review is recorded.
+    if any(event.get("event_type") == "MIGRATION_RECORDED" for event in events):
+        return None
+    policy = definition.get("periodic_review_policy") or {}
+    if not isinstance(policy, dict):
+        return None
+    if str(policy.get("initial_anchor", "")).strip().upper() != "REFERENCE_PERIOD_START":
+        return None
+    provenance = definition.get("reference_provenance") or {}
+    raw = provenance.get("period_start") if isinstance(provenance, dict) else None
+    return _optional_utc(raw, "reference period_start")
+
+
 def _market_cursor(events: list[dict[str, Any]]) -> pd.Timestamp | None:
     # Market-time analytics must never use wall-clock recorded_at/event_time. A
     # historical WF can be created years after its reference period.
@@ -1375,11 +1394,7 @@ def summarize_walk_forward_periodic_review(
     )
 
     definition = (readback.get("manifest") or {}).get("definition") or {}
-    provenance = definition.get("reference_provenance") or {}
-    initial_anchor = _optional_utc(
-        provenance.get("period_start") if isinstance(provenance, dict) else None,
-        "reference period_start",
-    )
+    initial_anchor = _initial_periodic_anchor(definition, events)
     anchor = last_review_time or initial_anchor
     due_time = (
         anchor + pd.DateOffset(months=review_interval_months)
