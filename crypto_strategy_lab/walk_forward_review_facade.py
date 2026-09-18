@@ -23,6 +23,12 @@ from crypto_strategy_lab.walk_forward_rule_validation import (
     rule_event_schema,
     _verified_prefix,
 )
+from crypto_strategy_lab.walk_forward_research_policy import (
+    decorate_review_packet,
+    validate_loss_methodology,
+    validate_periodic_methodology,
+    validate_teacher_methodology,
+)
 
 
 def _canonical_rule_specs(
@@ -52,7 +58,7 @@ def _with_rule_schema(result: dict[str, Any]) -> dict[str, Any]:
         return result
     updated = deepcopy(result)
     updated.setdefault("rule_event_schema", rule_event_schema())
-    return updated
+    return decorate_review_packet(updated)
 
 
 def _advance_after_batch(
@@ -111,6 +117,10 @@ def record_walk_forward_review(
     expected_state_hash: str,
     candidate_id: str | None = None,
     rule_events: list[dict[str, Any]] | None = None,
+    loss_diagnosis: str | None = None,
+    failure_mechanism: str | None = None,
+    periodic_rule_action: str | None = None,
+    periodic_rationale: str | None = None,
     auto_advance: bool = True,
     review_interval_months: int = 3,
     autonomous_mode: bool = False,
@@ -160,6 +170,18 @@ def record_walk_forward_review(
         allowed_types=allowed,
     )
     canonical = list(preflight["canonical_rule_events"])
+    if kind == "LOSS":
+        methodology = validate_loss_methodology(
+            canonical,
+            loss_diagnosis=loss_diagnosis,
+            failure_mechanism=failure_mechanism,
+        )
+    else:
+        methodology = validate_periodic_methodology(
+            canonical,
+            periodic_rule_action=periodic_rule_action,
+            periodic_rationale=periodic_rationale,
+        )
     payload = {
         "review_type": "PERIODIC" if kind == "QUARTERLY" else kind,
         "candidate_id": subject or None,
@@ -168,6 +190,7 @@ def record_walk_forward_review(
         "reviewed_state_hash": str(expected_state_hash),
         "validated_rule_event_count": len(canonical),
         "rule_event_schema_contract": preflight["rule_event_schema"]["contract"],
+        **methodology,
     }
     specs = [
         {
@@ -222,6 +245,8 @@ def record_walk_forward_teacher_review(
     expected_sequence: int,
     expected_state_hash: str,
     rule_events: list[dict[str, Any]] | None = None,
+    setup_thesis: str | None = None,
+    entry_family: str | None = None,
     auto_advance: bool = True,
     review_interval_months: int = 3,
     autonomous_mode: bool = False,
@@ -275,6 +300,12 @@ def record_walk_forward_teacher_review(
         allowed_types=allowed_types,
     )
     canonical = list(preflight["canonical_rule_events"])
+    methodology = validate_teacher_methodology(
+        canonical,
+        teacher_result=teacher_result,
+        setup_thesis=setup_thesis,
+        entry_family=entry_family,
+    )
 
     if teacher_result == "LOSS":
         if decision_value in {"NO_CHANGE", "FLIP_EVIDENCE"} and canonical:
@@ -307,6 +338,7 @@ def record_walk_forward_teacher_review(
         "notes": notes_text,
         "validated_rule_event_count": len(canonical),
         "rule_event_schema_contract": preflight["rule_event_schema"]["contract"],
+        **methodology,
     }
     specs = [
         {
