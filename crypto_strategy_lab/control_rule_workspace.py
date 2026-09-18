@@ -29,6 +29,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     infer_direction_mode,
     infer_market_permissions,
     is_categorical_evidence,
+    is_context_timeframe_evidence,
     is_support_resistance_evidence,
     normalize_rule,
     rule_value_options,
@@ -64,6 +65,7 @@ SIGNAL_STRATEGIES = {
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
+    "MTF_SR_REACTION": "MTF S/R Reaction — 4H / 1H / Entry TF",
 }
 
 # Kept in this pure-Python module so the control server does not need to import
@@ -100,6 +102,20 @@ EVIDENCE_LABELS = {
     "RSI": "RSI",
     "BB_WIDTH": "BB Width (decimal)",
     "CLOSE_LOCATION": "Close Location",
+    "CANDLE_BODY_ATR": "Candle Body (ATR)",
+    "CANDLE_RANGE_ATR": "Candle Range (ATR)",
+    "BODY_TO_RANGE_RATIO": "Candle Body / Range",
+    "LOWER_WICK_RATIO": "Lower Wick / Range",
+    "UPPER_WICK_RATIO": "Upper Wick / Range",
+    "RANGE_CONTRACTION_RATIO": "Range / Previous Range",
+    "BODY_CONTRACTION_RATIO": "Body / Previous Body",
+    "CANDLE_CLOSE_LOCATION": "Candle Close Location",
+    "BULLISH_ENGULFING": "Bullish Engulfing",
+    "BEARISH_ENGULFING": "Bearish Engulfing",
+    "BULLISH_PIN_BAR": "Bullish Pin Bar",
+    "BEARISH_PIN_BAR": "Bearish Pin Bar",
+    "BULLISH_REVERSAL_TRIGGER": "Bullish Reversal Trigger (Engulfing / Pin)",
+    "BEARISH_REVERSAL_TRIGGER": "Bearish Reversal Trigger (Engulfing / Pin)",
     "MOMENTUM": "Momentum Return",
     "VWAP_DISTANCE": "VWAP Distance (ATR)",
     "MR_TRADE_STRETCH_ATR": "MR — Trade-Direction Stretch (ATR)",
@@ -130,6 +146,12 @@ EVIDENCE_LABELS = {
     "SR_RESISTANCE_TEST_COUNT": "S/R — Resistance Test Count",
     "SR_BARS_SINCE_SUPPORT_TEST": "S/R — Bars Since Support Test",
     "SR_BARS_SINCE_RESISTANCE_TEST": "S/R — Bars Since Resistance Test",
+    "SR_APPROACH_MOMENTUM_STATE": "S/R — Approach Momentum State",
+    "SR_ROLE_REVERSAL_STATE": "S/R — Break / Retest State",
+    "SR_ZONE_PENETRATION_ATR": "S/R — Zone Penetration (ATR)",
+    "SR_ZONE_REJECTION_ATR": "S/R — Zone Rejection (ATR)",
+    "SR_BREAKOUT_BODY_ATR": "S/R — Breakout Body (ATR)",
+    "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR": "S/R — Close Beyond Zone (ATR)",
     "OI_CHANGE_PCT_5M": "OI Change 5m (decimal)",
     "OI_CHANGE_PCT_1H": "OI Change 1h (decimal)",
     "OI_CHANGE_PCT_24H": "OI Change 24h (decimal)",
@@ -306,7 +328,7 @@ def strategy_capabilities() -> dict[str, Any]:
                 MCP_CATEGORICAL_CONDITIONS if categorical else MCP_NUMERIC_CONDITIONS
             ),
             "values": list(rule_value_options(indicator)) if categorical else None,
-            "supports_sr_timeframe": is_support_resistance_evidence(indicator),
+            "supports_sr_timeframe": is_context_timeframe_evidence(indicator),
         }
     return {
         "rule_group_model": {
@@ -423,7 +445,7 @@ def _condition_to_rule(
             rule["value"] = float(value)
             rule["value2"] = float(value)
 
-    if is_support_resistance_evidence(indicator):
+    if is_context_timeframe_evidence(indicator):
         if "sr_timeframe" in condition:
             rule["sr_timeframe_minutes"] = _sr_timeframe(condition["sr_timeframe"])
         elif "sr_timeframe_minutes" in condition:
@@ -455,7 +477,7 @@ def _condition_from_rule(rule: dict[str, Any]) -> dict[str, Any]:
     else:
         result["condition"] = operator
         result["value"] = float(rule["value"])
-    if is_support_resistance_evidence(indicator):
+    if is_context_timeframe_evidence(indicator):
         timeframe = rule.get("sr_timeframe_minutes")
         result["sr_timeframe_minutes"] = timeframe
         result["sr_timeframe"] = SR_TIMEFRAME_LABELS.get(timeframe, str(timeframe))
