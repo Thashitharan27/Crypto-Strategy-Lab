@@ -801,6 +801,8 @@ def continue_walk_forward_autonomous(
     last_scan: dict[str, Any] | None = None
 
     for slice_index in range(max_scan_slices):
+        previous_sequence = sequence
+        previous_state_hash = state_hash
         result = advance_walk_forward(
             control,
             reports,
@@ -849,6 +851,18 @@ def continue_walk_forward_autonomous(
             return updated
 
         if status in _AUTONOMOUS_DETERMINISTIC_CONTINUE_STATUSES:
+            if sequence == previous_sequence and state_hash == previous_state_hash:
+                updated = deepcopy(result)
+                updated["autonomous_contract"] = AUTONOMOUS_ORCHESTRATOR_CONTRACT
+                updated["autonomous"] = _autonomous_metadata(
+                    continue_without_user=False,
+                    assistant_judgment_required=False,
+                    stop_reason="INSPECTION_REQUIRED:DETERMINISTIC_NO_PROGRESS",
+                    scan_slices=deterministic_slices + 1,
+                    scan_checkpoints=checkpoints,
+                    rows_scanned=total_rows,
+                )
+                return updated
             deterministic_slices += 1
             if status == "SCAN_CHECKPOINTED":
                 checkpoints += 1
