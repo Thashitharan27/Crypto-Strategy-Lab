@@ -60,7 +60,7 @@ The autonomous action consumes routine deterministic scan checkpoints internally
 - `NO_MORE_ACTION_IN_SCAN`: there is no further causal action in the available reference data;
 - an inspection-required status: stop automatic progression and inspect the blocker instead of guessing.
 
-Each autonomous result includes an `autonomous` object. When `continue_without_user=true`, ChatGPT should continue within the same response and should not emit a routine progress snapshot or wait for the user. Judgment packets also set `assistant_judgment_required=true`: ChatGPT must perform the same full reasoning as the interactive workflow, persist the judgment using the existing decision/review action, and then resume autonomous continuation.
+Each autonomous result includes an `autonomous` object. When `continue_without_user=true`, ChatGPT should continue within the same response and should not emit a routine progress snapshot or wait for the user. Judgment packets also set `assistant_judgment_required=true`: ChatGPT must perform the same full reasoning as the interactive workflow, persist the judgment using the existing decision/review action with `autonomous_mode=true`, and then resume autonomous continuation. The autonomous judgment actions propagate `max_scan_slices` so a win, loss review, teacher review, or periodic review can immediately continue through routine scan checkpoints.
 
 The low-level interactive workflow remains available:
 
