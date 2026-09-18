@@ -371,6 +371,7 @@ def test_submit_loss_returns_review_and_review_then_advances(tmp_path):
         candidate_id=first["candidate_id"],
         decision="KEEP_LOSS",
         notes="Valid setup; no repeatable veto mechanism.",
+        loss_diagnosis="NO_CLEAR_CAUSAL_LESSON",
         operation_id="review:loss",
         expected_sequence=loss["sequence"],
         expected_state_hash=loss["state_hash"],
