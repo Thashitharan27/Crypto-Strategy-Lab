@@ -527,8 +527,14 @@ def create_control_server(
                     expected_state_hash=expected_state_hash,
                     auto_advance=auto_advance,
                     review_interval_months=review_interval_months,
-                    autonomous_mode=autonomous_mode,
-                    max_scan_slices=max_scan_slices,
+                    **(
+                        {
+                            "autonomous_mode": True,
+                            "max_scan_slices": max_scan_slices,
+                        }
+                        if autonomous_mode
+                        else {}
+                    ),
                 )
         except Exception as exc:
             return _connection_safe_error("submit_walk_forward_decision", exc)
@@ -567,8 +573,14 @@ def create_control_server(
                     rule_events=rule_events,
                     auto_advance=auto_advance,
                     review_interval_months=review_interval_months,
-                    autonomous_mode=autonomous_mode,
-                    max_scan_slices=max_scan_slices,
+                    **(
+                        {
+                            "autonomous_mode": True,
+                            "max_scan_slices": max_scan_slices,
+                        }
+                        if autonomous_mode
+                        else {}
+                    ),
                 )
         except Exception as exc:
             return _connection_safe_error("record_walk_forward_review", exc)
@@ -605,8 +617,14 @@ def create_control_server(
                     rule_events=rule_events,
                     auto_advance=auto_advance,
                     review_interval_months=review_interval_months,
-                    autonomous_mode=autonomous_mode,
-                    max_scan_slices=max_scan_slices,
+                    **(
+                        {
+                            "autonomous_mode": True,
+                            "max_scan_slices": max_scan_slices,
+                        }
+                        if autonomous_mode
+                        else {}
+                    ),
                 )
         except Exception as exc:
             return _connection_safe_error("record_walk_forward_teacher_review", exc)
