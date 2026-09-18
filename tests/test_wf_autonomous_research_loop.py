@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from crypto_strategy_lab import walk_forward_orchestrator as orchestrator
+from crypto_strategy_lab import walk_forward_review_facade as review_facade
 
 
 def _checkpoint(sequence: int, state_hash: str, rows: int = 4096) -> dict:
@@ -246,3 +247,50 @@ def test_submit_win_in_autonomous_mode_resumes_without_interactive_checkpoint(mo
     assert observed["expected_sequence"] == 3
     assert observed["expected_state_hash"] == "h3"
     assert observed["max_scan_slices"] == 6
+
+
+def test_review_batch_in_autonomous_mode_resumes_without_interactive_checkpoint(monkeypatch):
+    observed = {}
+
+    monkeypatch.setattr(
+        review_facade,
+        "advance_walk_forward",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("interactive advance should not be used")
+        ),
+    )
+
+    def fake_autonomous(*args, **kwargs):
+        observed.update(kwargs)
+        return {
+            "status": "PERIODIC_REVIEW_REQUIRED",
+            "sequence": 12,
+            "state_hash": "h12",
+            "autonomous": {"continue_without_user": True},
+        }
+
+    monkeypatch.setattr(
+        review_facade,
+        "continue_walk_forward_autonomous",
+        fake_autonomous,
+    )
+
+    result = review_facade._advance_after_batch(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        operation_id="review:auto",
+        batch={
+            "sequence": 11,
+            "state_hash": "h11",
+            "idempotent_replay": False,
+        },
+        review_interval_months=3,
+        autonomous_mode=True,
+        max_scan_slices=5,
+    )
+
+    assert result["status"] == "PERIODIC_REVIEW_REQUIRED"
+    assert observed["expected_sequence"] == 11
+    assert observed["expected_state_hash"] == "h11"
+    assert observed["max_scan_slices"] == 5
