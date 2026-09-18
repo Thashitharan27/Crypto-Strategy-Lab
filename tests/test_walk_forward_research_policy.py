@@ -24,16 +24,23 @@ def _rule(event_type: str) -> dict:
     }
 
 
-def test_loss_policy_requires_diagnosis_only_when_authoring_rules():
-    untouched = validate_loss_methodology(
+def test_every_loss_review_requires_a_diagnosis_even_for_no_change():
+    with pytest.raises(ValueError, match="every prospective loss review requires loss_diagnosis"):
+        validate_loss_methodology(
+            [],
+            loss_diagnosis=None,
+            failure_mechanism=None,
+        )
+
+    no_change = validate_loss_methodology(
         [],
-        loss_diagnosis=None,
+        loss_diagnosis="NO_CLEAR_CAUSAL_LESSON",
         failure_mechanism=None,
     )
-    assert untouched["research_policy_contract"] == RESEARCH_POLICY_CONTRACT
-    assert untouched["loss_diagnosis"] is None
+    assert no_change["research_policy_contract"] == RESEARCH_POLICY_CONTRACT
+    assert no_change["loss_diagnosis"] == "NO_CLEAR_CAUSAL_LESSON"
 
-    with pytest.raises(ValueError, match="requires loss_diagnosis"):
+    with pytest.raises(ValueError, match="every prospective loss review requires loss_diagnosis"):
         validate_loss_methodology(
             [_rule("VETO_LEARNED")],
             loss_diagnosis=None,
