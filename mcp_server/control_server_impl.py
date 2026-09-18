@@ -36,6 +36,7 @@ from crypto_strategy_lab.walk_forward_rule_analytics import (
     summarize_walk_forward_rule_performance as _summarize_walk_forward_rule_performance,
 )
 from mcp_server.server import BacktestReports
+from mcp_server.tool_diagnostics import ToolDiagnostics
 
 
 LOGGER = logging.getLogger("crypto_strategy_lab.mcp.control")
@@ -57,6 +58,7 @@ READ_TOOLS = (
 )
 
 CONTROL_TOOLS = (
+    "mcp_health_status",
     "control_info",
     "list_configs",
     "load_config",
@@ -126,23 +128,36 @@ def create_control_server(
     from mcp.server import MCPServer
 
     server = MCPServer("Crypto Strategy Lab")
+    diagnostics = ToolDiagnostics(project_root=PROJECT_ROOT, logger=LOGGER)
+    instrumented_tool = diagnostics.instrument(server)
+    tool_count = (
+        len(CONTROL_TOOLS)
+        + len(WALK_FORWARD_STATE_TOOLS)
+        + len(CAUSAL_EXPERIMENT_TOOLS)
+        + len(READ_TOOLS)
+    )
 
-    @server.tool()
+    @instrumented_tool()
+    def mcp_health_status(recent_calls: int = 10) -> dict[str, Any]:
+        """Return lightweight process readiness and recent MCP call lifecycle diagnostics."""
+        return diagnostics.health(tool_count=tool_count, recent_calls=recent_calls)
+
+    @instrumented_tool()
     def control_info() -> dict[str, Any]:
         """Describe the bounded backtest/research boundary and preferred workflow."""
         return control.info()
 
-    @server.tool()
+    @instrumented_tool()
     def list_configs() -> list[str]:
         """List strict v3 Data Lake configs available beneath the allowed config root."""
         return control.list_configs()
 
-    @server.tool()
+    @instrumented_tool()
     def load_config(name: str) -> dict[str, Any]:
         """Load and validate one strict v3 Data Lake config by relative name."""
         return control.load_config(name)
 
-    @server.tool()
+    @instrumented_tool()
     def create_run(
         symbol: str,
         start: str,
@@ -167,61 +182,61 @@ def create_control_server(
             run_name=run_name,
         )
 
-    @server.tool()
+    @instrumented_tool()
     def set_run_settings(run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         """Deep-merge strict config settings into a DRAFT and invalidate prior approval."""
         return control.set_run_settings(run_id, patch)
 
-    @server.tool()
+    @instrumented_tool()
     def get_strategy_capabilities() -> dict[str, Any]:
         """Return valid indicators, GUI labels, conditions, categorical values and group semantics."""
         return control.get_strategy_capabilities()
 
-    @server.tool()
+    @instrumented_tool()
     def get_rule_workspace(run_id: str, profile: str | None = None) -> dict[str, Any]:
         """Read Entry/Veto/Flip groups exactly as Strategy Builder represents them."""
         return control.get_rule_workspace(run_id, profile)
 
-    @server.tool()
+    @instrumented_tool()
     def list_rule_groups(run_id: str, profile: str, family: str) -> dict[str, Any]:
         """List one profile's ENTRY, VETO or FLIP groups."""
         return control.list_rule_groups(run_id, profile, family)
 
-    @server.tool()
+    @instrumented_tool()
     def set_rule_groups(
         run_id: str, profile: str, family: str, groups: list[dict[str, Any]]
     ) -> dict[str, Any]:
         """Replace one exact profile/family's groups while preserving siblings."""
         return control.set_rule_groups(run_id, profile, family, groups)
 
-    @server.tool()
+    @instrumented_tool()
     def add_rule_group(
         run_id: str, profile: str, family: str, group: dict[str, Any]
     ) -> dict[str, Any]:
         """Add one independent Strategy Builder rule group."""
         return control.add_rule_group(run_id, profile, family, group)
 
-    @server.tool()
+    @instrumented_tool()
     def update_rule_group(run_id: str, group_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         """Update one stable rule group by ID."""
         return control.update_rule_group(run_id, group_id, patch)
 
-    @server.tool()
+    @instrumented_tool()
     def delete_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
         """Delete one rule group by stable ID."""
         return control.delete_rule_group(run_id, group_id)
 
-    @server.tool()
+    @instrumented_tool()
     def mute_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
         """Mute one saved group without deleting it."""
         return control.mute_rule_group(run_id, group_id)
 
-    @server.tool()
+    @instrumented_tool()
     def unmute_rule_group(run_id: str, group_id: str) -> dict[str, Any]:
         """Re-enable one muted group."""
         return control.unmute_rule_group(run_id, group_id)
 
-    @server.tool()
+    @instrumented_tool()
     def set_filter_groups(
         run_id: str,
         profile: str,
@@ -242,51 +257,51 @@ def create_control_server(
             reject_rule_match_mode=reject_rule_match_mode,
         )
 
-    @server.tool()
+    @instrumented_tool()
     def validate_run(run_id: str) -> dict[str, Any]:
         """Validate a DRAFT and return its preview and approval token."""
         return control.validate_run(run_id)
 
-    @server.tool()
+    @instrumented_tool()
     def start_run(run_id: str, validation_token: str) -> dict[str, Any]:
         """Start only the exact DRAFT approved by validate_run."""
         return control.start_run(run_id, validation_token)
 
-    @server.tool()
+    @instrumented_tool()
     def get_run_status(run_id: str) -> dict[str, Any]:
         """Poll one control run."""
         return control.get_run_status(run_id)
 
-    @server.tool()
+    @instrumented_tool()
     def list_control_runs(limit: int = 50) -> list[dict[str, Any]]:
         """List backtests created through this control server."""
         return control.list_control_runs(limit)
 
-    @server.tool()
+    @instrumented_tool()
     def cancel_run(run_id: str) -> dict[str, Any]:
         """Cancel a DRAFT or terminate a running fixed backtest child."""
         return control.cancel_run(run_id)
 
-    @server.tool()
+    @instrumented_tool()
     def read_control_log(
         run_id: str, stream: str = "stderr", lines: int = 100
     ) -> dict[str, Any]:
         """Read a bounded tail of a control job log."""
         return control.read_control_log(run_id, stream, lines)
 
-    @server.tool()
+    @instrumented_tool()
     def create_walk_forward_state(
         state_id: str, markdown: str, initial_event: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """Create one canonical Markdown walk-forward state."""
         return control.create_walk_forward_state(state_id, markdown, initial_event)
 
-    @server.tool()
+    @instrumented_tool()
     def read_walk_forward_state(state_id: str, recent_events: int = 50) -> dict[str, Any]:
         """Read one canonical Markdown state and audit tail."""
         return control.read_walk_forward_state(state_id, recent_events)
 
-    @server.tool()
+    @instrumented_tool()
     def update_walk_forward_state(
         state_id: str,
         markdown: str,
@@ -296,12 +311,12 @@ def create_control_server(
         """Atomically update one state after SHA verification."""
         return control.update_walk_forward_state(state_id, markdown, expected_sha256, event)
 
-    @server.tool()
+    @instrumented_tool()
     def append_walk_forward_event(state_id: str, event: dict[str, Any]) -> dict[str, Any]:
         """Append one immutable legacy walk-forward audit event."""
         return control.append_walk_forward_event(state_id, event)
 
-    @server.tool()
+    @instrumented_tool()
     def create_walk_forward_experiment(
         experiment_id: str,
         definition: dict[str, Any],
@@ -314,14 +329,14 @@ def create_control_server(
             experiment_id, definition, operation_id, initial_phase, notes
         )
 
-    @server.tool()
+    @instrumented_tool()
     def read_walk_forward_experiment(
         experiment_id: str, recent_events: int = 100
     ) -> dict[str, Any]:
         """Read a verified causal experiment and derived state."""
         return control.read_walk_forward_experiment(experiment_id, recent_events)
 
-    @server.tool()
+    @instrumented_tool()
     def summarize_walk_forward_monthly(
         experiment_id: str,
         ledger: str = "RESEARCH",
@@ -336,7 +351,7 @@ def create_control_server(
             end_month,
         )
 
-    @server.tool()
+    @instrumented_tool()
     def summarize_walk_forward_rule_performance(
         experiment_id: str,
         family: str = "ALL",
@@ -364,7 +379,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("summarize_walk_forward_rule_performance", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def summarize_walk_forward_periodic_review(
         experiment_id: str,
         review_interval_months: int = 3,
@@ -382,12 +397,12 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("summarize_walk_forward_periodic_review", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def list_walk_forward_experiments() -> list[dict[str, Any]]:
         """List causal experiments and current heads."""
         return control.list_walk_forward_experiments()
 
-    @server.tool()
+    @instrumented_tool()
     def append_walk_forward_experiment_event(
         experiment_id: str,
         event_type: str,
@@ -412,7 +427,7 @@ def create_control_server(
             source,
         )
 
-    @server.tool()
+    @instrumented_tool()
     def get_next_walk_forward_candidate(
         experiment_id: str,
         operation_id: str,
@@ -436,7 +451,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("get_next_walk_forward_candidate", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def freeze_and_reveal_walk_forward_candidate(
         experiment_id: str,
         candidate_id: str,
@@ -466,7 +481,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("freeze_and_reveal_walk_forward_candidate", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def resolve_walk_forward_trade(
         experiment_id: str,
         candidate_id: str,
@@ -487,7 +502,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("resolve_walk_forward_trade", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def advance_walk_forward(
         experiment_id: str,
         operation_id: str,
@@ -515,7 +530,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("advance_walk_forward", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def continue_walk_forward_autonomous(
         experiment_id: str,
         operation_id: str,
@@ -545,7 +560,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("continue_walk_forward_autonomous", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def submit_walk_forward_decision(
         experiment_id: str,
         candidate_id: str,
@@ -591,7 +606,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("submit_walk_forward_decision", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def record_walk_forward_review(
         experiment_id: str,
         review_type: str,
@@ -645,7 +660,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("record_walk_forward_review", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def record_walk_forward_teacher_review(
         experiment_id: str,
         teacher_pair_id: str,
@@ -693,7 +708,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("record_walk_forward_teacher_review", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def materialize_walk_forward_strategy(
         experiment_id: str,
         expected_sequence: int,
@@ -713,7 +728,7 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("materialize_walk_forward_strategy", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def create_run_from_walk_forward_experiment(
         experiment_id: str,
         start: str,
@@ -737,67 +752,67 @@ def create_control_server(
         except Exception as exc:
             return _connection_safe_error("create_run_from_walk_forward_experiment", exc)
 
-    @server.tool()
+    @instrumented_tool()
     def list_runs(limit: int = 50) -> list[dict[str, Any]]:
         """List completed manifest-backed runs."""
         LOGGER.info("Unified MCP tool called: list_runs")
         return reports.list_runs(limit)
 
-    @server.tool()
+    @instrumented_tool()
     def latest_run() -> dict[str, Any]:
         """Return metadata and summary for the latest completed run."""
         return reports.latest_run()
 
-    @server.tool()
+    @instrumented_tool()
     def get_run_manifest(run: str) -> dict[str, Any]:
         """Return the verified canonical manifest for one completed run."""
         return reports.get_run_manifest(run)
 
-    @server.tool()
+    @instrumented_tool()
     def list_run_files(run: str) -> list[dict[str, Any]]:
         """List files inside one completed run."""
         return reports.list_run_files(run)
 
-    @server.tool()
+    @instrumented_tool()
     def read_report(
         run: str, filename: str, sheet: str | None = None, limit: int = 200
     ) -> dict[str, Any]:
         """Read a supported report file."""
         return reports.read_report(run, filename, sheet, limit)
 
-    @server.tool()
+    @instrumented_tool()
     def read_run_file(
         run: str, filename: str, sheet: str | None = None, limit: int = 200
     ) -> dict[str, Any]:
         """Read a supported completed-run file."""
         return reports.read_run_file(run, filename, sheet, limit)
 
-    @server.tool()
+    @instrumented_tool()
     def query_trades(run: str, sql: str) -> dict[str, Any]:
         """Run restricted read-only SQL over completed trades."""
         return reports.query_trades(run, sql)
 
-    @server.tool()
+    @instrumented_tool()
     def query_signals(run: str, sql: str) -> dict[str, Any]:
         """Run restricted read-only SQL over completed signals."""
         return reports.query_signals(run, sql)
 
-    @server.tool()
+    @instrumented_tool()
     def query_feature_context(run: str, sql: str) -> dict[str, Any]:
         """Run restricted SQL over causal feature context."""
         return reports.query_feature_context(run, sql)
 
-    @server.tool()
+    @instrumented_tool()
     def query_parquet(run: str, filename: str, sql: str) -> dict[str, Any]:
         """Query an allowed parquet inside a completed run."""
         return reports.query_parquet(run, filename, sql)
 
-    @server.tool()
+    @instrumented_tool()
     def research_aggregate(run: str, spec: dict[str, Any]) -> dict[str, Any]:
         """Run bounded feature-research aggregation."""
         return reports.research_aggregate(run, spec)
 
-    @server.tool()
+    @instrumented_tool()
     def compare_runs(runs: list[str]) -> list[dict[str, Any]]:
         """Compare 2-10 completed runs with provenance checks."""
         return reports.compare_runs(runs)
