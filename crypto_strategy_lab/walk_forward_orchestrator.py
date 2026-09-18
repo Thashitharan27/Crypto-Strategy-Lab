@@ -446,6 +446,8 @@ def submit_walk_forward_view(
     final_action: str | None = None,
     auto_advance: bool = True,
     review_interval_months: int = 3,
+    autonomous_mode: bool = False,
+    max_scan_slices: int = DEFAULT_AUTONOMOUS_SCAN_SLICES,
 ) -> dict[str, Any]:
     """Record ChatGPT's view, settle strategy_action, then continue."""
     revealed = freeze_and_reveal_walk_forward_view(
@@ -498,6 +500,17 @@ def submit_walk_forward_view(
             "settlement": settlement,
             **research,
         }
+    if autonomous_mode:
+        return continue_walk_forward_autonomous(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            operation_id=_impl._operation(operation_id, "autonomous"),
+            expected_sequence=int(settled["sequence"]),
+            expected_state_hash=str(settled["state_hash"]),
+            review_interval_months=review_interval_months,
+            max_scan_slices=max_scan_slices,
+        )
     return advance_walk_forward(
         control,
         reports,
