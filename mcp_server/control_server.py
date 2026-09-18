@@ -48,6 +48,9 @@ from crypto_strategy_lab.walk_forward_review_facade import (
     record_walk_forward_teacher_review as _validated_record_walk_forward_teacher_review,
 )
 from crypto_strategy_lab.walk_forward_rule_validation import rule_event_schema as _rule_event_schema
+from crypto_strategy_lab.walk_forward_research_policy import (
+    decorate_review_packet as _decorate_review_packet,
+)
 from crypto_strategy_lab.walk_forward_settlement_compat import (
     install_settlement_compat as _install_settlement_compat,
     resolve_walk_forward_trade as _nested_risk_resolve_walk_forward_trade,
@@ -273,7 +276,7 @@ def _with_rule_schema(result):
         return result
     updated = deepcopy(result)
     updated.setdefault("rule_event_schema", _rule_event_schema())
-    return updated
+    return _decorate_review_packet(updated)
 
 
 # Patch both modules because the review facade imported the teacher decorator by

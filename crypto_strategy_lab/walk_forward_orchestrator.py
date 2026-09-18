@@ -25,6 +25,7 @@ from typing import Any
 from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
 from crypto_strategy_lab.walk_forward_candidate_engine import SCAN_CHECKPOINT_TYPE
 from crypto_strategy_lab.walk_forward_teacher_learning import TEACHER_LOSS_FLIP_MODE
+from crypto_strategy_lab.walk_forward_research_policy import decorate_review_packet
 
 
 ACCELERATED_SCAN_ROWS = 4096
@@ -489,7 +490,7 @@ def submit_walk_forward_view(
             settlement=settlement,
             **research,
         )
-        return packet
+        return decorate_review_packet(packet)
     if not auto_advance:
         return {
             "contract": _impl.ORCHESTRATOR_CONTRACT,
@@ -654,7 +655,25 @@ def _decorate_advance_result(
     candidate_id = str(updated.get("candidate_id") or "").strip()
     if updated.get("status") == "LOSS_REVIEW_REQUIRED" and candidate_id:
         updated.update(_decision_research_fields(control, experiment_id, candidate_id))
-    return _decorate_teacher_loss_packet(control, reports, experiment_id, updated)
+    updated = _decorate_teacher_loss_packet(control, reports, experiment_id, updated)
+    updated = decorate_review_packet(updated)
+    if updated.get("status") == "PERIODIC_REVIEW_REQUIRED":
+        # Periodic evidence is assembled automatically so a new chat cannot
+        # skip the strategic review or rely on memory to request it.
+        from crypto_strategy_lab.walk_forward_rule_analytics import (
+            summarize_walk_forward_periodic_review,
+        )
+
+        updated["periodic_review_summary"] = summarize_walk_forward_periodic_review(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            review_interval_months=int(
+                updated.get("review_interval_months") or 3
+            ),
+            include_veto_effectiveness=True,
+        )
+    return updated
 
 
 def advance_walk_forward(

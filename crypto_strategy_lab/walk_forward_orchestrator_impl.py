@@ -37,6 +37,12 @@ from crypto_strategy_lab.walk_forward_candidate_engine import (
     get_next_walk_forward_candidate,
 )
 from crypto_strategy_lab.walk_forward_materialization import materialize_walk_forward_strategy
+from crypto_strategy_lab.walk_forward_research_policy import (
+    validate_loss_methodology,
+    validate_periodic_methodology,
+    validate_teacher_methodology,
+)
+
 
 
 ORCHESTRATOR_CONTRACT = "causal_walk_forward_orchestrator_v1"
@@ -1110,6 +1116,10 @@ def record_walk_forward_review(
     expected_state_hash: str,
     candidate_id: str | None = None,
     rule_events: list[dict[str, Any]] | None = None,
+    loss_diagnosis: str | None = None,
+    failure_mechanism: str | None = None,
+    periodic_rule_action: str | None = None,
+    periodic_rationale: str | None = None,
     auto_advance: bool = True,
     review_interval_months: int = 3,
 ) -> dict[str, Any]:
@@ -1136,12 +1146,26 @@ def record_walk_forward_review(
             subject = pending_id
         if subject != pending_id:
             raise ValueError(f"loss review must resolve pending candidate {pending_id}")
+    methodology = (
+        validate_loss_methodology(
+            list(rule_events or []),
+            loss_diagnosis=loss_diagnosis,
+            failure_mechanism=failure_mechanism,
+        )
+        if kind == "LOSS"
+        else validate_periodic_methodology(
+            list(rule_events or []),
+            periodic_rule_action=periodic_rule_action,
+            periodic_rationale=periodic_rationale,
+        )
+    )
     payload = {
         "review_type": "PERIODIC" if kind == "QUARTERLY" else kind,
         "candidate_id": subject or None,
         "decision": str(decision).strip().upper(),
         "notes": text,
         "reviewed_state_hash": str(expected_state_hash),
+        **methodology,
     }
     reviewed = store.append_event(
         experiment_id,
@@ -1199,6 +1223,8 @@ def record_walk_forward_teacher_review(
     expected_sequence: int,
     expected_state_hash: str,
     rule_events: list[dict[str, Any]] | None = None,
+    setup_thesis: str | None = None,
+    entry_family: str | None = None,
     auto_advance: bool = True,
     review_interval_months: int = 3,
 ) -> dict[str, Any]:
@@ -1218,14 +1244,22 @@ def record_walk_forward_teacher_review(
         raise ValueError(
             f"next teacher is pair {boundary.get('pair_id')}, not {teacher_pair_id}"
         )
+    teacher_result = str(boundary.get("result", "WIN")).upper()
+    methodology = validate_teacher_methodology(
+        list(rule_events or []),
+        teacher_result=teacher_result,
+        setup_thesis=setup_thesis,
+        entry_family=entry_family,
+    )
     reviewed = store.append_event(
         experiment_id,
         "TEACHER_RESOLVED",
         {
             **deepcopy(boundary),
-            "result": "WIN",
+            "result": teacher_result,
             "review_decision": str(decision).strip().upper(),
             "notes": str(notes).strip(),
+            **methodology,
         },
         _operation(operation_id, "teacher"),
         int(readback["sequence"]),

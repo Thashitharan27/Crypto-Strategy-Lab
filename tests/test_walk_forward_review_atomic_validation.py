@@ -170,6 +170,8 @@ def test_teacher_review_rejects_uncompilable_rule_without_chain_mutation(
         expected_sequence=head["sequence"],
         expected_state_hash=head["state_hash"],
         rule_events=_canonical_di_ratio_rule(),
+        setup_thesis="Bull continuation with reusable directional DI dominance.",
+        entry_family="CONTINUATION",
         auto_advance=False,
     )
     assert recorded["atomic_batch"] is True
@@ -182,6 +184,11 @@ def test_teacher_review_rejects_uncompilable_rule_without_chain_mutation(
         "TEACHER_RESOLVED",
         "ENTRY_LEARNED",
     ]
+    teacher_review = readback["recent_events"][-2]["payload"]
+    assert teacher_review["research_policy_contract"] == "causal_walk_forward_entry_veto_method_v1"
+    assert teacher_review["entry_family"] == "CONTINUATION"
+    assert "directional DI dominance" in teacher_review["setup_thesis"]
+
     learned = readback["recent_events"][-1]["payload"]
     assert learned["conditions"][0]["indicator"] == "DIRECTIONAL_DI_RATIO"
     assert learned["conditions"][0]["condition"] == "GTE"

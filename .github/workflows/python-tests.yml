@@ -128,6 +128,7 @@ jobs:
           crypto_strategy_lab/control_rule_workspace.py
           crypto_strategy_lab/rule_control_service.py
           crypto_strategy_lab/walk_forward_rule_analytics.py
+          crypto_strategy_lab/walk_forward_research_policy.py
           mcp_server/server.py
           mcp_server/control_server.py
           tools/data_lake_validate.py
@@ -202,6 +203,8 @@ jobs:
           tests/test_rule_control_service.py
           tests/test_mcp_control_server.py
           tests/test_walk_forward_rule_analytics.py
+          tests/test_walk_forward_research_policy.py
+          tests/test_walk_forward_review_atomic_validation.py
           tests/test_rewrite_config_current.py
 
   full-suite-observation:
