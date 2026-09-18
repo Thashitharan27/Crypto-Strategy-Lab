@@ -287,8 +287,9 @@ _wf_orchestrator._reveal_strategy_action_candidate = (
     _reveal_strategy_action_with_flip_replay
 )
 
-# Patch the module globals referenced by the nested MCP tool functions. Tool names
-# remain stable, so existing plugin connections only need a process reconnect.
+# Patch the module globals referenced by the nested MCP tool functions. Existing
+# tool names remain stable. Adding a new MCP action still requires one plugin
+# schema reconnect after the updated server process is restarted.
 _impl._get_next_walk_forward_candidate = _get_next_candidate_with_strategy_action
 _impl._freeze_and_reveal_walk_forward_candidate = (
     _wf_orchestrator.freeze_and_reveal_walk_forward_view
