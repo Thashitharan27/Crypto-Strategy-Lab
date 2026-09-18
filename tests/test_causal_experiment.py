@@ -45,6 +45,9 @@ def test_create_read_and_list_experiment(tmp_path):
 
     readback = store.read("BTCUSDT_1D_DI_1R_WF001")
     assert readback["manifest"]["definition"]["reference_run"] == "BTCUSDT_1d_reference"
+    assert readback["manifest"]["definition"]["periodic_review_policy"] == {
+        "initial_anchor": "REFERENCE_PERIOD_START"
+    }
     assert readback["sequence"] == 1
     assert readback["state_hash"] == created["state_hash"]
     assert readback["derived_state"]["phase"] == "RESEARCH_WF"
@@ -62,6 +65,19 @@ def test_create_read_and_list_experiment(tmp_path):
             "phase": "RESEARCH_WF",
         }
     ]
+
+
+def test_manual_periodic_review_anchor_policy_is_preserved(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["periodic_review_policy"] = {"initial_anchor": "manual"}
+
+    store.create("BTC_MANUAL_REVIEW", definition, "create:manual")
+    readback = store.read("BTC_MANUAL_REVIEW")
+
+    assert readback["manifest"]["definition"]["periodic_review_policy"] == {
+        "initial_anchor": "MANUAL"
+    }
 
 
 def test_definition_requires_experiment_identity_fields(tmp_path):

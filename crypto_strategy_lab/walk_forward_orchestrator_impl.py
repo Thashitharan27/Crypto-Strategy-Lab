@@ -650,26 +650,93 @@ def build_loss_review_packet(
     }
 
 
-def _periodic_review_due(events: list[dict[str, Any]], months: int) -> dict[str, Any] | None:
+def _initial_periodic_review_anchor(
+    reports: Any,
+    definition: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> pd.Timestamp | None:
+    if any(event.get("event_type") == "MIGRATION_RECORDED" for event in events):
+        return None
+
+    policy = definition.get("periodic_review_policy") or {}
+    if not isinstance(policy, dict):
+        return None
+    anchor_mode = str(policy.get("initial_anchor", "")).strip().upper()
+    if anchor_mode != "REFERENCE_PERIOD_START":
+        return None
+
+    provenance = definition.get("reference_provenance") or {}
+    raw = provenance.get("period_start") if isinstance(provenance, dict) else None
+    if not raw:
+        reference_run = str(definition.get("reference_run", "")).strip()
+        if not reference_run:
+            return None
+        manifest = reports.get_run_manifest(reference_run)
+        request = manifest.get("request") or {}
+        raw = request.get("start")
+    if not raw:
+        return None
+    return _utc_timestamp(raw, "initial periodic review anchor")
+
+
+def _periodic_review_anchor(
+    events: list[dict[str, Any]],
+    initial_anchor: pd.Timestamp | None,
+) -> tuple[dict[str, Any] | None, pd.Timestamp, str] | None:
     periodic = []
     for event in events:
         if event.get("event_type") != "REVIEW_COMPLETED":
             continue
         payload = event.get("payload") or {}
         kind = str(payload.get("review_type", "")).upper()
-        if kind in {"PERIODIC", "QUARTERLY"} or (not kind and not payload.get("candidate_id")):
+        if kind in {"PERIODIC", "QUARTERLY"} or (
+            not kind and not payload.get("candidate_id")
+        ):
             raw = event.get("effective_market_time")
             if raw:
-                periodic.append((event, _utc_timestamp(raw, "review effective_market_time")))
-    if not periodic:
+                periodic.append(
+                    (event, _utc_timestamp(raw, "review effective_market_time"))
+                )
+
+    if periodic:
+        last_event, last_time = periodic[-1]
+        return last_event, last_time, "REVIEW_COMPLETED"
+    if initial_anchor is None:
         return None
-    last_event, last_time = periodic[-1]
+    return None, initial_anchor, "REFERENCE_PERIOD_START"
+
+
+def _next_periodic_review_time(
+    events: list[dict[str, Any]],
+    months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> pd.Timestamp | None:
+    anchor = _periodic_review_anchor(events, initial_anchor)
+    if anchor is None:
+        return None
+    _, anchor_time, _ = anchor
+    return anchor_time + pd.DateOffset(months=int(months))
+
+
+def _periodic_review_due(
+    events: list[dict[str, Any]],
+    months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> dict[str, Any] | None:
+    anchor = _periodic_review_anchor(events, initial_anchor)
+    if anchor is None:
+        return None
+    last_event, last_time, anchor_source = anchor
+
     cursor = _max_event_time(events)
     if cursor is None:
         return None
     due = last_time + pd.DateOffset(months=int(months))
     if cursor < due:
         return None
+
     history = []
     for event in events:
         if event.get("event_type") != "TRADE_RESOLVED":
@@ -680,11 +747,14 @@ def _periodic_review_due(events: list[dict[str, Any]], months: int) -> dict[str,
         when = _utc_timestamp(raw, "trade resolution time")
         if last_time < when <= cursor:
             history.append(event.get("payload") or {})
+
     return {
         "status": "PERIODIC_REVIEW_REQUIRED",
         "review_interval_months": int(months),
-        "previous_review_sequence": last_event["sequence"],
-        "previous_review_time": last_time.isoformat(),
+        "previous_review_sequence": last_event["sequence"] if last_event is not None else None,
+        "previous_review_time": last_time.isoformat() if last_event is not None else None,
+        "review_anchor_source": anchor_source,
+        "review_anchor_time": last_time.isoformat(),
         "review_due_time": due.isoformat(),
         "current_market_cursor": cursor.isoformat(),
         "period_trade_stats": _stats(history),
@@ -826,7 +896,15 @@ def advance_walk_forward(
             packet.update(sequence=sequence, state_hash=state_hash)
             return packet
 
-        periodic = _periodic_review_due(events, int(review_interval_months))
+        definition = (readback.get("manifest") or {}).get("definition") or {}
+        initial_review_anchor = _initial_periodic_review_anchor(
+            reports, definition, events
+        )
+        periodic = _periodic_review_due(
+            events,
+            int(review_interval_months),
+            initial_anchor=initial_review_anchor,
+        )
         if periodic is not None:
             periodic.update(
                 contract=ORCHESTRATOR_CONTRACT,
@@ -836,6 +914,11 @@ def advance_walk_forward(
             )
             return periodic
 
+        next_review_time = _next_periodic_review_time(
+            events,
+            int(review_interval_months),
+            initial_anchor=initial_review_anchor,
+        )
         scan = get_next_walk_forward_candidate(
             control, reports,
             experiment_id=experiment_id,
@@ -843,8 +926,33 @@ def advance_walk_forward(
             expected_sequence=sequence,
             expected_state_hash=state_hash,
             max_scan_rows=max_scan_rows,
+            stop_before_time=(
+                next_review_time.isoformat()
+                if next_review_time is not None
+                else None
+            ),
         )
         status = scan.get("status")
+        if status == "TIME_BOUNDARY_DUE_FIRST":
+            boundary_time = _utc_timestamp(
+                scan.get("boundary_time"), "periodic review scan boundary"
+            )
+            checkpoint = store.append_event(
+                experiment_id,
+                "CHECKPOINT_CREATED",
+                {
+                    "checkpoint_type": "PERIODIC_REVIEW_BOUNDARY_V1",
+                    "review_due_time": boundary_time.isoformat(),
+                },
+                _operation(operation_id, f"periodic-boundary-{step}"),
+                sequence,
+                state_hash,
+                effective_market_time=boundary_time.isoformat(),
+                source="DETERMINISTIC_ORCHESTRATOR",
+            )
+            sequence = int(checkpoint["sequence"])
+            state_hash = str(checkpoint["state_hash"])
+            continue
         if status == "CANDIDATE_CAPTURED":
             return {
                 "contract": ORCHESTRATOR_CONTRACT,

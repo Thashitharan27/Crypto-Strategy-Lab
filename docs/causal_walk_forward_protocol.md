@@ -556,6 +556,10 @@ Review:
 
 Do not use a quarterly review as an excuse to retroactively restructure history.
 
+New experiments default to an immutable `periodic_review_policy.initial_anchor = REFERENCE_PERIOD_START`. Until the first periodic review is recorded, the reference period start is therefore the deterministic review anchor. Once a periodic review is recorded, that review time becomes the next anchor.
+
+Experiments may explicitly use `MANUAL` as the initial-anchor policy when automatic first-review scheduling is not appropriate.
+
 Migrated/older experiments with no valid review anchor must not invent a historical review boundary.
 
 ### 18.2 Monthly live continuation

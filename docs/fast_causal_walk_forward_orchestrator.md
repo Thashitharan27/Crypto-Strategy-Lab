@@ -133,9 +133,11 @@ When the next reference winner resolves before a prospective candidate, `advance
 
 ## Periodic review
 
-If the event stream already contains a prior periodic/quarterly `REVIEW_COMPLETED` event, `advance_walk_forward` checks the configured interval (default 3 months) and stops at `PERIODIC_REVIEW_REQUIRED` when the market cursor reaches the next review boundary.
+New experiments store an immutable `periodic_review_policy.initial_anchor` policy. The default is `REFERENCE_PERIOD_START`, so before the first review exists, `advance_walk_forward` derives the anchor from the immutable reference period start and stops at `PERIODIC_REVIEW_REQUIRED` once the market cursor reaches the configured interval (default 3 months).
 
-Migrated experiments with no prior periodic review anchor are not forced into a guessed boundary.
+After a periodic/quarterly `REVIEW_COMPLETED` event exists, that review time becomes the anchor for the next interval.
+
+`MANUAL` initial-anchor policy disables automatic scheduling of the first review. Migrated experiments with no prior periodic review remain protected from an invented historical boundary even if a new default policy is present.
 
 ## Low-level recovery actions
 
