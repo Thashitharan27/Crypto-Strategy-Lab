@@ -201,21 +201,22 @@ def validate_loss_methodology(
         raise ValueError(
             "loss_diagnosis must be one of: " + ", ".join(sorted(LOSS_DIAGNOSES))
         )
+    if not diagnosis:
+        raise ValueError(
+            "every prospective loss review requires loss_diagnosis; use "
+            "NO_CLEAR_CAUSAL_LESSON when no repeatable mechanism is supported"
+        )
+    if diagnosis != "NO_CLEAR_CAUSAL_LESSON" and not mechanism:
+        raise ValueError(
+            "a specific loss_diagnosis requires a concrete failure_mechanism"
+        )
     if not canonical:
         return {
             "research_policy_contract": RESEARCH_POLICY_CONTRACT,
-            "loss_diagnosis": diagnosis or None,
+            "loss_diagnosis": diagnosis,
             "failure_mechanism": mechanism or None,
         }
 
-    if not diagnosis:
-        raise ValueError(
-            "rule-authoring loss review requires loss_diagnosis before ENTRY/VETO/FLIP changes"
-        )
-    if not mechanism:
-        raise ValueError(
-            "rule-authoring loss review requires a concrete failure_mechanism"
-        )
     if diagnosis == "NO_CLEAR_CAUSAL_LESSON":
         raise ValueError(
             "NO_CLEAR_CAUSAL_LESSON cannot author a rule; record NO_CHANGE instead"
