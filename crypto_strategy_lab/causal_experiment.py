@@ -651,8 +651,16 @@ class CausalExperimentStore:
                 net_r = float(payload.get("net_r", 0.0))
             except (TypeError, ValueError) as exc:
                 raise ValueError("TRADE_RESOLVED payload.net_r must be numeric") from exc
+            net_pnl_raw = payload.get("net_pnl")
+            if net_pnl_raw in (None, ""):
+                before_raw = payload.get("equity_before")
+                after_raw = payload.get("equity_after")
+                if before_raw not in (None, "") and after_raw not in (None, ""):
+                    net_pnl_raw = float(after_raw) - float(before_raw)
+                else:
+                    net_pnl_raw = 0.0
             try:
-                net_pnl = float(payload.get("net_pnl", 0.0))
+                net_pnl = float(net_pnl_raw)
             except (TypeError, ValueError) as exc:
                 raise ValueError("TRADE_RESOLVED payload.net_pnl must be numeric") from exc
 
@@ -737,6 +745,11 @@ class CausalExperimentStore:
         )
         rows: list[dict[str, Any]] = []
         carry_equity = initial_equity
+        prior_months = sorted(month for month in aggregates if month < selected_start)
+        if prior_months:
+            prior_close = aggregates[prior_months[-1]].get("closing_equity")
+            if prior_close not in (None, ""):
+                carry_equity = float(prior_close)
 
         for month in month_range(selected_start, selected_end):
             source = aggregates.get(month)
