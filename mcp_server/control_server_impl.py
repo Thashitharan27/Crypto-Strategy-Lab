@@ -31,6 +31,10 @@ from crypto_strategy_lab.walk_forward_orchestrator import (
     resolve_walk_forward_trade as _resolve_walk_forward_trade,
     submit_walk_forward_decision as _submit_walk_forward_decision,
 )
+from crypto_strategy_lab.walk_forward_rule_analytics import (
+    summarize_walk_forward_periodic_review as _summarize_walk_forward_periodic_review,
+    summarize_walk_forward_rule_performance as _summarize_walk_forward_rule_performance,
+)
 from mcp_server.server import BacktestReports
 
 
@@ -87,6 +91,8 @@ CAUSAL_EXPERIMENT_TOOLS = (
     "create_walk_forward_experiment",
     "read_walk_forward_experiment",
     "summarize_walk_forward_monthly",
+    "summarize_walk_forward_rule_performance",
+    "summarize_walk_forward_periodic_review",
     "list_walk_forward_experiments",
     "append_walk_forward_experiment_event",
     "get_next_walk_forward_candidate",
@@ -329,6 +335,52 @@ def create_control_server(
             start_month,
             end_month,
         )
+
+    @server.tool()
+    def summarize_walk_forward_rule_performance(
+        experiment_id: str,
+        family: str = "ALL",
+        start_time: str | None = None,
+        end_time: str | None = None,
+        active_only: bool = False,
+        include_versions: bool = True,
+        include_overlap: bool = True,
+        include_veto_effectiveness: bool = True,
+    ) -> dict[str, Any]:
+        """Summarize version-aware ENTRY/VETO/FLIP performance from the verified causal chain."""
+        try:
+            return _summarize_walk_forward_rule_performance(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                family=family,
+                start_time=start_time,
+                end_time=end_time,
+                active_only=active_only,
+                include_versions=include_versions,
+                include_overlap=include_overlap,
+                include_veto_effectiveness=include_veto_effectiveness,
+            )
+        except Exception as exc:
+            return _connection_safe_error("summarize_walk_forward_rule_performance", exc)
+
+    @server.tool()
+    def summarize_walk_forward_periodic_review(
+        experiment_id: str,
+        review_interval_months: int = 3,
+        include_veto_effectiveness: bool = True,
+    ) -> dict[str, Any]:
+        """Build a read-only periodic review packet without recording any review or rule change."""
+        try:
+            return _summarize_walk_forward_periodic_review(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                review_interval_months=review_interval_months,
+                include_veto_effectiveness=include_veto_effectiveness,
+            )
+        except Exception as exc:
+            return _connection_safe_error("summarize_walk_forward_periodic_review", exc)
 
     @server.tool()
     def list_walk_forward_experiments() -> list[dict[str, Any]]:

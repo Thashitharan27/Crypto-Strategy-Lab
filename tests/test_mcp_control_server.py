@@ -220,6 +220,8 @@ def test_unified_server_keeps_expected_tool_groups_stable():
         "create_walk_forward_experiment",
         "read_walk_forward_experiment",
         "summarize_walk_forward_monthly",
+        "summarize_walk_forward_rule_performance",
+        "summarize_walk_forward_periodic_review",
         "list_walk_forward_experiments",
         "append_walk_forward_experiment_event",
         "get_next_walk_forward_candidate",
