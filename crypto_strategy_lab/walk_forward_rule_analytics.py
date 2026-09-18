@@ -563,13 +563,16 @@ def _open_trade_intervals(
         if not candidate_id:
             continue
         if event.get("event_type") == "CANDIDATE_CONTEXT_CAPTURED":
-            raw = payload.get("decision_available_at") or payload.get("entry_time") or event.get("effective_market_time")
+            # Candidate selection stops as soon as capture is durable, so the
+            # busy interval starts at capture/entry market time rather than at
+            # the later ChatGPT decision-availability timestamp.
+            raw = event.get("effective_market_time") or payload.get("entry_time")
             if raw not in (None, ""):
-                captures[candidate_id] = _utc(raw, "candidate decision time")
-        elif event.get("event_type") == "TRADE_RESOLVED":
+                captures[candidate_id] = _utc(raw, "candidate capture market time")
+        elif event.get("event_type") in {"TRADE_RESOLVED", "FEATURE_CONTEXT_INVALID"}:
             raw = event.get("effective_market_time")
             if raw not in (None, ""):
-                ends[candidate_id] = _utc(raw, "trade resolution effective_market_time")
+                ends[candidate_id] = _utc(raw, "candidate terminal effective_market_time")
 
     raw_intervals = []
     for candidate_id, start in captures.items():
