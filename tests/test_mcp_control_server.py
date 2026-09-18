@@ -188,6 +188,7 @@ def test_control_server_registers_unified_research_and_bounded_control_tools():
 
 def test_unified_server_keeps_expected_tool_groups_stable():
     assert set(CONTROL_TOOLS) == {
+        "mcp_health_status",
         "control_info",
         "list_configs",
         "load_config",
