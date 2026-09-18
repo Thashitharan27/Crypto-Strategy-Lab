@@ -312,6 +312,30 @@ def test_missing_opposite_side_outcome_leaves_decision_frozen(tmp_path):
     assert not any(e["event_type"] == "OUTCOME_REVEALED" for e in events)
 
 
+def test_advance_stops_at_first_periodic_boundary_before_candidate_capture(tmp_path):
+    control, reports, store, head = _write_reference(tmp_path)
+    reports.manifest["request"]["start"] = "2024-10-02T00:00:00Z"
+
+    result = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:first-periodic",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+    )
+
+    assert result["status"] == "PERIODIC_REVIEW_REQUIRED"
+    assert result["review_anchor_source"] == "REFERENCE_PERIOD_START"
+    assert result["review_due_time"] == "2025-01-02T00:00:00+00:00"
+    events = store.read(EXPERIMENT_ID, recent_events=10)["recent_events"]
+    assert events[-1]["event_type"] == "CHECKPOINT_CREATED"
+    assert events[-1]["payload"]["checkpoint_type"] == "PERIODIC_REVIEW_BOUNDARY_V1"
+    assert not any(
+        event["event_type"] == "CANDIDATE_CONTEXT_CAPTURED" for event in events
+    )
+
+
 def test_submit_loss_returns_review_and_review_then_advances(tmp_path):
     control, reports, store, head = _write_reference(tmp_path)
     first = advance_walk_forward(
