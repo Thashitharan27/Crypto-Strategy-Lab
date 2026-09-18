@@ -85,6 +85,7 @@ WALK_FORWARD_STATE_TOOLS = (
 CAUSAL_EXPERIMENT_TOOLS = (
     "create_walk_forward_experiment",
     "read_walk_forward_experiment",
+    "summarize_walk_forward_monthly",
     "list_walk_forward_experiments",
     "append_walk_forward_experiment_event",
     "get_next_walk_forward_candidate",
