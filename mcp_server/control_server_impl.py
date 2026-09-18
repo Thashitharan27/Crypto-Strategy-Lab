@@ -313,6 +313,21 @@ def create_control_server(
         return control.read_walk_forward_experiment(experiment_id, recent_events)
 
     @server.tool()
+    def summarize_walk_forward_monthly(
+        experiment_id: str,
+        ledger: str = "RESEARCH",
+        start_month: str | None = None,
+        end_month: str | None = None,
+    ) -> dict[str, Any]:
+        """Summarize all resolved walk-forward trades by calendar month."""
+        return control.summarize_walk_forward_monthly(
+            experiment_id,
+            ledger,
+            start_month,
+            end_month,
+        )
+
+    @server.tool()
     def list_walk_forward_experiments() -> list[dict[str, Any]]:
         """List causal experiments and current heads."""
         return control.list_walk_forward_experiments()
