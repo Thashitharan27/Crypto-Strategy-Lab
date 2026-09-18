@@ -361,6 +361,22 @@ def test_veto_effectiveness_replays_only_causally_blocked_idle_opportunities(tmp
     assert result["veto_overlap"]["unique_selected_blocked_opportunities"] == 2
 
 
+def test_periodic_anchor_respects_manual_policy_and_migration():
+    definition = {
+        "periodic_review_policy": {"initial_anchor": "MANUAL"},
+        "reference_provenance": {"period_start": "2020-01-01T00:00:00+00:00"},
+    }
+    assert analytics._initial_periodic_anchor(definition, []) is None
+
+    definition["periodic_review_policy"]["initial_anchor"] = "REFERENCE_PERIOD_START"
+    assert analytics._initial_periodic_anchor(definition, []) == pd.Timestamp(
+        "2020-01-01T00:00:00Z"
+    )
+    assert analytics._initial_periodic_anchor(
+        definition, [{"event_type": "MIGRATION_RECORDED"}]
+    ) is None
+
+
 def test_veto_busy_interval_starts_at_capture_and_closes_on_invalidation():
     events = [
         {
