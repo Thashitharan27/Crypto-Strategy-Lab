@@ -162,6 +162,7 @@ def test_health_exposes_in_flight_call_until_local_function_returns(tmp_path):
     assert active["experiment_id"] == "EXP_3"
     assert active["operation_id"] == "slow-op"
     assert active["still_running"] is True
+    assert active["elapsed_ms_so_far"] >= 0
 
     release.set()
     thread.join(timeout=2)
