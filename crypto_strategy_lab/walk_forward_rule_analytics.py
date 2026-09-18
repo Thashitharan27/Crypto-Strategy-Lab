@@ -198,6 +198,7 @@ def _last_periodic_review(events: list[dict[str, Any]]) -> dict[str, Any] | None
 def _initial_periodic_anchor(
     definition: dict[str, Any],
     events: list[dict[str, Any]],
+    reports: Any | None = None,
 ) -> pd.Timestamp | None:
     # Match the orchestrator's PR #263 semantics: migrated experiments and
     # experiments without an explicit REFERENCE_PERIOD_START policy remain
@@ -211,6 +212,12 @@ def _initial_periodic_anchor(
         return None
     provenance = definition.get("reference_provenance") or {}
     raw = provenance.get("period_start") if isinstance(provenance, dict) else None
+    if not raw and reports is not None:
+        reference_run = str(definition.get("reference_run", "")).strip()
+        if reference_run:
+            manifest = reports.get_run_manifest(reference_run)
+            request = manifest.get("request") or {}
+            raw = request.get("start")
     return _optional_utc(raw, "reference period_start")
 
 
@@ -1394,7 +1401,7 @@ def summarize_walk_forward_periodic_review(
     )
 
     definition = (readback.get("manifest") or {}).get("definition") or {}
-    initial_anchor = _initial_periodic_anchor(definition, events)
+    initial_anchor = _initial_periodic_anchor(definition, events, reports)
     anchor = last_review_time or initial_anchor
     due_time = (
         anchor + pd.DateOffset(months=review_interval_months)
