@@ -85,6 +85,7 @@ Only one MCP-started backtest runs concurrently by default. This reduces acciden
 
 ### Backtest control and Strategy Builder workspace
 
+- `mcp_health_status` — lightweight process health plus bounded recent/in-flight tool diagnostics
 - `control_info`
 - `list_configs`
 - `load_config`
@@ -123,6 +124,44 @@ Only one MCP-started backtest runs concurrently by default. This reduces acciden
 - `compare_runs`
 
 There is no arbitrary command tool and no live-trading/order tool.
+
+## MCP request lifecycle diagnostics
+
+The unified endpoint instruments every registered MCP tool call with bounded, metadata-only lifecycle logging. The instrumentation does **not** change the tool schema and does not mutate walk-forward state.
+
+Each local call writes a start/end pair similar to:
+
+```text
+MCP_CALL start call_id=... tool=continue_walk_forward_autonomous experiment_id=... operation_id=... expected_sequence=3 expected_hash=51770990...
+MCP_CALL end call_id=... tool=continue_walk_forward_autonomous elapsed_ms=... success=True before_sequence=3 after_sequence=7 after_hash=... status=...
+```
+
+Only operational identifiers are captured: tool name, generated call ID, experiment/run/state identifiers, operation ID, expected sequence/hash, result sequence/hash/status, elapsed time, and error type. Payloads such as SQL, reasoning, notes, configs, rule bodies, or credentials are not recorded.
+
+Call:
+
+```text
+mcp_health_status(recent_calls=10)
+```
+
+for a lightweight diagnostic snapshot. It returns:
+
+- MCP process PID, uptime, and startup time;
+- the local repository commit when readable from `.git`;
+- registered tool count;
+- currently in-flight calls;
+- a bounded tail of locally completed calls.
+
+This is intentionally independent of experiment reads. It is safe to use when an autonomous call timed out because it does not scan EVE data or mutate a causal chain.
+
+Interpret timeout recovery as follows:
+
+1. **No matching recent or in-flight call** — the command likely never reached this MCP process.
+2. **Matching in-flight call** — it reached the MCP and is still executing locally; do not blindly replay a mutating operation.
+3. **Matching completed call with result sequence/hash** — the MCP finished locally. If ChatGPT still reported a timeout, treat the problem as transport/request-lifecycle loss and re-read the authoritative experiment head before retrying.
+4. **Matching failed call** — use its error type/message together with the normal connection-safe response/recovery rules.
+
+The recent diagnostic buffer is process-local and bounded; it resets whenever the MCP server restarts. The normal append-only walk-forward event stream remains authoritative for causal state.
 
 ## Strategy Builder rule-group model
 
