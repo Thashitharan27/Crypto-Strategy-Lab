@@ -294,3 +294,32 @@ def test_review_batch_in_autonomous_mode_resumes_without_interactive_checkpoint(
     assert observed["expected_sequence"] == 11
     assert observed["expected_state_hash"] == "h11"
     assert observed["max_scan_slices"] == 5
+
+
+def test_autonomous_loop_stops_if_deterministic_status_makes_no_progress(monkeypatch):
+    monkeypatch.setattr(
+        orchestrator,
+        "advance_walk_forward",
+        lambda *args, **kwargs: {
+            "contract": "causal_walk_forward_orchestrator_v1",
+            "status": "TRANSITION_LIMIT_REACHED",
+            "experiment_id": "BTCUSDT_15M_WF_TEST",
+            "sequence": 7,
+            "state_hash": "h7",
+        },
+    )
+
+    result = orchestrator.continue_walk_forward_autonomous(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        operation_id="auto:no-progress",
+        expected_sequence=7,
+        expected_state_hash="h7",
+    )
+
+    assert result["autonomous"]["continue_without_user"] is False
+    assert (
+        result["autonomous"]["stop_reason"]
+        == "INSPECTION_REQUIRED:DETERMINISTIC_NO_PROGRESS"
+    )
