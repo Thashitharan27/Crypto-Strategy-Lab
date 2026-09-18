@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import duckdb
 import pandas as pd
 import pytest
 
@@ -29,6 +30,15 @@ class _Reports:
     def resolve_run(self, run: str) -> Path:
         assert run == "REFERENCE_RUN"
         return self.run_dir
+
+
+def _write_parquet(path: Path, frame: pd.DataFrame) -> None:
+    escaped = str(path).replace("'", "''")
+    with duckdb.connect(":memory:") as connection:
+        connection.register("test_frame", frame)
+        connection.execute(
+            f"COPY test_frame TO '{escaped}' (FORMAT PARQUET)"
+        )
 
 
 def _definition() -> dict:
@@ -290,40 +300,46 @@ def test_veto_effectiveness_replays_only_causally_blocked_idle_opportunities(tmp
     run_dir.mkdir()
     samples_path = run_dir / "research_sampling_trades.parquet"
     context_path = run_dir / "feature_context.parquet"
-    pd.DataFrame(
-        [
-            {
-                "research_signal_index": 1,
-                "research_sample_id": "sample-1",
-                "strategy_profile_key": "bull_long",
-                "side": "LONG",
-                "entry_time": "2020-01-02T00:00:00+00:00",
-                "pair_net_r": -1.0,
-            },
-            {
-                "research_signal_index": 2,
-                "research_sample_id": "sample-2",
-                "strategy_profile_key": "bull_long",
-                "side": "LONG",
-                "entry_time": "2020-01-02T01:00:00+00:00",
-                "pair_net_r": 3.0,
-            },
-        ]
-    ).to_parquet(samples_path, index=False)
-    pd.DataFrame(
-        [
-            {
-                "strategy_index": 1,
-                "decision_available_at": "2020-01-02T00:00:00+00:00",
-                "adx": 35.0,
-            },
-            {
-                "strategy_index": 2,
-                "decision_available_at": "2020-01-02T01:00:00+00:00",
-                "adx": 40.0,
-            },
-        ]
-    ).to_parquet(context_path, index=False)
+    _write_parquet(
+        samples_path,
+        pd.DataFrame(
+            [
+                {
+                    "research_signal_index": 1,
+                    "research_sample_id": "sample-1",
+                    "strategy_profile_key": "bull_long",
+                    "side": "LONG",
+                    "entry_time": "2020-01-02T00:00:00+00:00",
+                    "pair_net_r": -1.0,
+                },
+                {
+                    "research_signal_index": 2,
+                    "research_sample_id": "sample-2",
+                    "strategy_profile_key": "bull_long",
+                    "side": "LONG",
+                    "entry_time": "2020-01-02T01:00:00+00:00",
+                    "pair_net_r": 3.0,
+                },
+            ]
+        ),
+    )
+    _write_parquet(
+        context_path,
+        pd.DataFrame(
+            [
+                {
+                    "strategy_index": 1,
+                    "decision_available_at": "2020-01-02T00:00:00+00:00",
+                    "adx": 35.0,
+                },
+                {
+                    "strategy_index": 2,
+                    "decision_available_at": "2020-01-02T01:00:00+00:00",
+                    "adx": 40.0,
+                },
+            ]
+        ),
+    )
 
     manifest = {
         "research": {"strategy_research_sampling": {"mode": "EVERY_VIABLE_ENTRY"}},
@@ -364,6 +380,7 @@ def test_veto_effectiveness_replays_only_causally_blocked_idle_opportunities(tmp
 def test_periodic_anchor_respects_manual_policy_and_migration():
     definition = {
         "periodic_review_policy": {"initial_anchor": "MANUAL"},
+        "reference_run": "REFERENCE_RUN",
         "reference_provenance": {"period_start": "2020-01-01T00:00:00+00:00"},
     }
     assert analytics._initial_periodic_anchor(definition, []) is None
