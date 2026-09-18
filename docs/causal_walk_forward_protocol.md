@@ -623,18 +623,23 @@ This ordering is more important than reducing tool calls.
 
 ---
 
-## 21. Accelerated MCP scanning
+## 21. Accelerated and autonomous MCP scanning
 
-The preferred high-level workflow is:
+Interactive/debug workflow:
 
 ```text
 read_walk_forward_experiment
 advance_walk_forward
 ```
 
-If `advance_walk_forward` returns a deterministic scan checkpoint, immediately continue from the returned sequence/hash. A scan checkpoint is not a judgment point.
+Long-running research workflow:
 
-Typical judgment boundaries are:
+```text
+read_walk_forward_experiment
+continue_walk_forward_autonomous
+```
+
+`continue_walk_forward_autonomous` may consume several bounded deterministic scan checkpoints inside one MCP request. It must never generate ChatGPT research judgment. Typical judgment boundaries remain:
 
 ```text
 CANDIDATE_DECISION_REQUIRED
@@ -644,7 +649,14 @@ LOSS_REVIEW_REQUIRED
 PERIODIC_REVIEW_REQUIRED
 ```
 
-After the judgment is recorded, `auto_advance=true` may continue deterministic work until the next judgment boundary/checkpoint.
+For these packets, ChatGPT performs the same full judgment as interactive mode, persists it immediately, and should use `autonomous_mode=true` on the decision/review action so deterministic continuation resumes without a user checkpoint.
+
+Autonomous results explicitly separate user involvement from ChatGPT judgment:
+
+- `autonomous.continue_without_user=true` means keep working in the same ChatGPT response;
+- `assistant_judgment_required=true` means reason over the full packet before continuing;
+- `user_input_required=false` means do not ask the user merely because a causal judgment boundary was reached;
+- `AUTONOMOUS_CONTINUE` means only that the current MCP request reached its bounded transport/runtime budget; immediately resume from the returned sequence/hash.
 
 Bounded scan cursors must preserve exact ordering such as:
 
@@ -653,6 +665,8 @@ Bounded scan cursors must preserve exact ordering such as:
 ```
 
 A rule/teacher/trade/review mutation invalidates an older cursor when necessary so chronology is recomputed from the new authoritative state.
+
+Conversation context is never authoritative. Every judgment and deterministic checkpoint must be persisted before progressing. If the ChatGPT turn becomes large enough to threaten reasoning quality, finish/persist the current judgment, stop at a verified sequence/hash, report a `SAFE_STOP_CONTEXT_BUDGET`, and resume in a fresh turn by reading the authoritative experiment head. Routine scan checkpoints must not be shown as user-facing snapshots.
 
 ---
 
