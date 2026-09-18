@@ -42,7 +42,9 @@ from crypto_strategy_lab.strategy_rule_model import (
     infer_direction_mode,
     infer_market_permissions,
     is_categorical_evidence,
+    is_context_timeframe_evidence,
     is_support_resistance_evidence,
+    mtf_sr_reaction_preset_rules,
     new_rule,
     normalize_rule,
     normalize_rules,
@@ -83,6 +85,20 @@ EVIDENCE_LABELS = {
     "RSI": "RSI",
     "BB_WIDTH": "BB Width (decimal)",
     "CLOSE_LOCATION": "Close Location",
+    "CANDLE_BODY_ATR": "Candle Body (ATR)",
+    "CANDLE_RANGE_ATR": "Candle Range (ATR)",
+    "BODY_TO_RANGE_RATIO": "Candle Body / Range",
+    "LOWER_WICK_RATIO": "Lower Wick / Range",
+    "UPPER_WICK_RATIO": "Upper Wick / Range",
+    "RANGE_CONTRACTION_RATIO": "Range / Previous Range",
+    "BODY_CONTRACTION_RATIO": "Body / Previous Body",
+    "CANDLE_CLOSE_LOCATION": "Candle Close Location",
+    "BULLISH_ENGULFING": "Bullish Engulfing",
+    "BEARISH_ENGULFING": "Bearish Engulfing",
+    "BULLISH_PIN_BAR": "Bullish Pin Bar",
+    "BEARISH_PIN_BAR": "Bearish Pin Bar",
+    "BULLISH_REVERSAL_TRIGGER": "Bullish Reversal Trigger (Engulfing / Pin)",
+    "BEARISH_REVERSAL_TRIGGER": "Bearish Reversal Trigger (Engulfing / Pin)",
     "MOMENTUM": "Momentum Return",
     "VWAP_DISTANCE": "VWAP Distance (ATR)",
     "MR_TRADE_STRETCH_ATR": "MR — Trade-Direction Stretch (ATR)",
@@ -113,6 +129,12 @@ EVIDENCE_LABELS = {
     "SR_RESISTANCE_TEST_COUNT": "S/R — Resistance Test Count",
     "SR_BARS_SINCE_SUPPORT_TEST": "S/R — Bars Since Support Test",
     "SR_BARS_SINCE_RESISTANCE_TEST": "S/R — Bars Since Resistance Test",
+    "SR_APPROACH_MOMENTUM_STATE": "S/R — Approach Momentum State",
+    "SR_ROLE_REVERSAL_STATE": "S/R — Break / Retest State",
+    "SR_ZONE_PENETRATION_ATR": "S/R — Zone Penetration (ATR)",
+    "SR_ZONE_REJECTION_ATR": "S/R — Zone Rejection (ATR)",
+    "SR_BREAKOUT_BODY_ATR": "S/R — Breakout Body (ATR)",
+    "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR": "S/R — Close Beyond Zone (ATR)",
     "OI_CHANGE_PCT_5M": "OI Change 5m (decimal)",
     "OI_CHANGE_PCT_1H": "OI Change 1h (decimal)",
     "OI_CHANGE_PCT_24H": "OI Change 24h (decimal)",
@@ -175,6 +197,18 @@ EVIDENCE_GROUPS = (
             "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
             "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
             "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
+        ),
+    ),
+    (
+        "Multi-Timeframe Price Action",
+        (
+            "CANDLE_BODY_ATR", "CANDLE_RANGE_ATR", "BODY_TO_RANGE_RATIO",
+            "LOWER_WICK_RATIO", "UPPER_WICK_RATIO",
+            "RANGE_CONTRACTION_RATIO", "BODY_CONTRACTION_RATIO",
+            "CANDLE_CLOSE_LOCATION",
+            "BULLISH_ENGULFING", "BEARISH_ENGULFING",
+            "BULLISH_PIN_BAR", "BEARISH_PIN_BAR",
+            "BULLISH_REVERSAL_TRIGGER", "BEARISH_REVERSAL_TRIGGER",
         ),
     ),
     (
@@ -268,6 +302,12 @@ EVIDENCE_GROUPS = (
             "SR_RESISTANCE_TEST_COUNT",
             "SR_BARS_SINCE_SUPPORT_TEST",
             "SR_BARS_SINCE_RESISTANCE_TEST",
+            "SR_APPROACH_MOMENTUM_STATE",
+            "SR_ROLE_REVERSAL_STATE",
+            "SR_ZONE_PENETRATION_ATR",
+            "SR_ZONE_REJECTION_ATR",
+            "SR_BREAKOUT_BODY_ATR",
+            "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR",
         ),
     ),
 )
@@ -309,6 +349,28 @@ EVIDENCE_MENU_TREE = (
                 (
                     "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
                     "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
+                ),
+            ),
+            (
+                "Price Action",
+                (
+                    (
+                        "Candle Geometry",
+                        (
+                            "CANDLE_BODY_ATR", "CANDLE_RANGE_ATR", "BODY_TO_RANGE_RATIO",
+                            "LOWER_WICK_RATIO", "UPPER_WICK_RATIO",
+                            "RANGE_CONTRACTION_RATIO", "BODY_CONTRACTION_RATIO",
+                            "CANDLE_CLOSE_LOCATION",
+                        ),
+                    ),
+                    (
+                        "Reversal Triggers",
+                        (
+                            "BULLISH_ENGULFING", "BEARISH_ENGULFING",
+                            "BULLISH_PIN_BAR", "BEARISH_PIN_BAR",
+                            "BULLISH_REVERSAL_TRIGGER", "BEARISH_REVERSAL_TRIGGER",
+                        ),
+                    ),
                 ),
             ),
         ),
@@ -409,6 +471,12 @@ EVIDENCE_MENU_TREE = (
                     "SR_RESISTANCE_TEST_COUNT",
                     "SR_BARS_SINCE_SUPPORT_TEST",
                     "SR_BARS_SINCE_RESISTANCE_TEST",
+                    "SR_APPROACH_MOMENTUM_STATE",
+                    "SR_ROLE_REVERSAL_STATE",
+                    "SR_ZONE_PENETRATION_ATR",
+                    "SR_ZONE_REJECTION_ATR",
+                    "SR_BREAKOUT_BODY_ATR",
+                    "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR",
                 ),
             ),
         ),
@@ -430,6 +498,7 @@ DIRECTION_LABELS = {
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
+    "MTF_SR_REACTION": "MTF S/R Reaction — 4H / 1H / Entry TF",
 }
 SR_TIMEFRAME_OPTIONS = (
     (None, "Configured S/R (legacy)"),
@@ -793,9 +862,9 @@ class RuleTable(QWidget):
         )
         sr_timeframe.setMinimumWidth(105)
         sr_timeframe.setToolTip(
-            "S/R structure timeframe for this condition. Each timeframe is calculated independently."
+            "Causal context timeframe for this condition. Higher-timeframe candles/structure use only fully completed bars."
         )
-        sr_timeframe.setVisible(is_support_resistance_evidence(rule["evidence"]))
+        sr_timeframe.setVisible(is_context_timeframe_evidence(rule["evidence"]))
 
         operator = self._operator(rule["evidence"], rule["operator"])
         operator.setMinimumWidth(90)
@@ -1090,7 +1159,7 @@ class RuleTable(QWidget):
         default = new_rule(kind=self.kind, evidence=evidence_name)
         sr_timeframe = row["sr_timeframe"]
         was_sr = sr_timeframe.isVisible()
-        if is_support_resistance_evidence(evidence_name):
+        if is_context_timeframe_evidence(evidence_name):
             sr_timeframe.setVisible(True)
             if not was_sr and sr_timeframe.currentData() is None:
                 index = sr_timeframe.findData(default["sr_timeframe_minutes"])
@@ -1136,7 +1205,7 @@ class RuleTable(QWidget):
         else:
             value = f"{value_widget.value():g}"
 
-        if is_support_resistance_evidence(row["evidence"].currentData()):
+        if is_context_timeframe_evidence(row["evidence"].currentData()):
             timeframe = row["sr_timeframe"].currentText()
             evidence = f"{evidence} [{timeframe}]"
         text = f"{evidence} {operator} {value}"
@@ -1206,7 +1275,7 @@ class RuleTable(QWidget):
                         ),
                         "sr_timeframe_minutes": (
                             sr_timeframe.currentData()
-                            if is_support_resistance_evidence(evidence_name)
+                            if is_context_timeframe_evidence(evidence_name)
                             else None
                         ),
                         "regime": group["regime"].currentData(),
@@ -1429,6 +1498,13 @@ class RuleStrategyBuilder(QWidget):
         direction_form.addRow("Signal strategy", self.direction_mode)
         direction_layout.addLayout(direction_form)
 
+        self.mtf_sr_preset_button = QPushButton("Load MTF S/R starter groups")
+        self.mtf_sr_preset_button.setToolTip(
+            "Replace the current Entry groups with editable 4H bounce and 4H break/retest starter groups using 1H deceleration and strategy-timeframe reversal confirmation."
+        )
+        self.mtf_sr_preset_button.clicked.connect(self._load_mtf_sr_preset)
+        direction_layout.addWidget(self.mtf_sr_preset_button)
+
         permission = QGridLayout()
         permission.addWidget(QLabel("Market state"), 0, 0)
         permission.addWidget(QLabel("LONG"), 0, 1)
@@ -1517,7 +1593,7 @@ class RuleStrategyBuilder(QWidget):
         self.enable_mr.setChecked(True)
         research_layout.addWidget(self.enable_mr)
         self.research_status = QLabel(
-            "S/R · OI · Funding · Positioning/Basis · Taker Flow are rule-ready. Detailed Trade Flow · Order Book remain Analyze Only until dedicated rule dependencies are added."
+            "S/R · Multi-TF Price Action · OI · Funding · Positioning/Basis · Taker Flow are rule-ready. Detailed Trade Flow · Order Book remain Analyze Only until dedicated rule dependencies are added."
         )
         self.research_status.setWordWrap(True)
         self.research_status.setStyleSheet("color:#52606d")
@@ -1592,6 +1668,14 @@ class RuleStrategyBuilder(QWidget):
             table.changed.connect(self._notify)
         self._notify()
 
+    def _load_mtf_sr_preset(self) -> None:
+        index = self.direction_mode.findData("MTF_SR_REACTION")
+        if index >= 0:
+            self.direction_mode.setCurrentIndex(index)
+        self.required_rules.set_rules(mtf_sr_reaction_preset_rules())
+        self.rule_tabs.setCurrentIndex(0)
+        self._notify()
+
     def _toggle_direction_section(self, expanded: bool) -> None:
         self.direction_box.setVisible(expanded)
         self.direction_toggle.setArrowType(
@@ -1599,6 +1683,9 @@ class RuleStrategyBuilder(QWidget):
         )
 
     def _notify(self):
+        self.mtf_sr_preset_button.setVisible(
+            self.direction_mode.currentData() == "MTF_SR_REACTION"
+        )
         self.refresh_summary()
         self.changed.emit()
 

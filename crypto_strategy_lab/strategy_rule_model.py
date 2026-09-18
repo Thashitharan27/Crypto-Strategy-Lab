@@ -18,13 +18,18 @@ from crypto_strategy_lab.data_lake_config import (
     StrategyProfileConfig,
 )
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, RULE_INDICATORS
+from crypto_strategy_lab.mtf_sr_reaction import (
+    MTF_SR_REACTION_MODE,
+    MTF_SR_REACTION_RULE_INDICATORS,
+    PRICE_ACTION_RULE_INDICATORS,
+)
 
 # Direction selection and trade permission are intentionally separate concepts.
 # DI remains the raw directional control. DMI_TREND keeps the same +DI/-DI side
 # selection but adds a deliberately simple, non-optimized trend confirmation
 # baseline at compile time. LONG/SHORT eligibility still belongs to the market
 # permission grid below.
-SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK")
+SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", MTF_SR_REACTION_MODE)
 # Backward-compatible internal name retained while the UI moves to "Signal Strategy".
 DIRECTION_MODES = SIGNAL_STRATEGIES
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
@@ -42,6 +47,21 @@ CATEGORICAL_RULE_VALUES = {
     "PRICE_VS_EMA_STACK": ("ABOVE_ALL_EMAS", "AMONG_EMAS", "BELOW_ALL_EMAS"),
     "MACD_CROSS_STATE": ("BULLISH", "BEARISH", "NONE"),
     "MACD_ZERO_STATE": ("ABOVE_ZERO", "BELOW_ZERO", "AT_ZERO"),
+    "BULLISH_ENGULFING": _BOOL_VALUES,
+    "BEARISH_ENGULFING": _BOOL_VALUES,
+    "BULLISH_PIN_BAR": _BOOL_VALUES,
+    "BEARISH_PIN_BAR": _BOOL_VALUES,
+    "BULLISH_REVERSAL_TRIGGER": _BOOL_VALUES,
+    "BEARISH_REVERSAL_TRIGGER": _BOOL_VALUES,
+    "SR_APPROACH_MOMENTUM_STATE": ("DECELERATING", "NEUTRAL", "IMPULSIVE"),
+    "SR_ROLE_REVERSAL_STATE": (
+        "NONE",
+        "BREAKOUT_CONFIRMED",
+        "RETEST_APPROACHING",
+        "RETESTING_FROM_BREAK_SIDE",
+        "RETEST_HELD",
+        "RETEST_FAILED",
+    ),
     "MR_MOTION": ("TOWARD_MEAN", "AWAY_FROM_MEAN", "FLAT"),
     "MR_BB_LOCATION": (
         "BELOW_LOWER_BAND", "LOWER_HALF", "AT_MEAN", "UPPER_HALF", "ABOVE_UPPER_BAND"
@@ -104,6 +124,23 @@ CATEGORICAL_VALUE_CODES = {
     "PRICE_VS_EMA_STACK": {"ABOVE_ALL_EMAS": 1.0, "AMONG_EMAS": 2.0, "BELOW_ALL_EMAS": 3.0},
     "MACD_CROSS_STATE": {"BULLISH": 1.0, "BEARISH": 2.0, "NONE": 3.0},
     "MACD_ZERO_STATE": {"ABOVE_ZERO": 1.0, "BELOW_ZERO": 2.0, "AT_ZERO": 3.0},
+    "BULLISH_ENGULFING": {"TRUE": 1.0, "FALSE": 0.0},
+    "BEARISH_ENGULFING": {"TRUE": 1.0, "FALSE": 0.0},
+    "BULLISH_PIN_BAR": {"TRUE": 1.0, "FALSE": 0.0},
+    "BEARISH_PIN_BAR": {"TRUE": 1.0, "FALSE": 0.0},
+    "BULLISH_REVERSAL_TRIGGER": {"TRUE": 1.0, "FALSE": 0.0},
+    "BEARISH_REVERSAL_TRIGGER": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_APPROACH_MOMENTUM_STATE": {
+        "DECELERATING": 1.0, "NEUTRAL": 2.0, "IMPULSIVE": 3.0,
+    },
+    "SR_ROLE_REVERSAL_STATE": {
+        "NONE": 1.0,
+        "BREAKOUT_CONFIRMED": 2.0,
+        "RETEST_APPROACHING": 3.0,
+        "RETESTING_FROM_BREAK_SIDE": 4.0,
+        "RETEST_HELD": 5.0,
+        "RETEST_FAILED": 6.0,
+    },
     "MR_MOTION": {"TOWARD_MEAN": 1.0, "AWAY_FROM_MEAN": 2.0, "FLAT": 3.0},
     "MR_BB_LOCATION": {
         "BELOW_LOWER_BAND": 1.0, "LOWER_HALF": 2.0, "AT_MEAN": 3.0,
@@ -175,6 +212,9 @@ CATEGORICAL_RULE_PRESETS = {
         "ANY_BELOW_MEAN": ("STRONGLY_BELOW_MEAN", "BELOW_MEAN"),
         "ANY_ABOVE_MEAN": ("ABOVE_MEAN", "STRONGLY_ABOVE_MEAN"),
     },
+    "SR_ROLE_REVERSAL_STATE": {
+        "VALID_RETEST": ("RETESTING_FROM_BREAK_SIDE", "RETEST_HELD"),
+    },
 }
 CATEGORICAL_RULE_VALUE_OPTIONS = {
     "MR_STATE": (
@@ -186,6 +226,15 @@ CATEGORICAL_RULE_VALUE_OPTIONS = {
         "STRONGLY_ABOVE_MEAN",
         "ANY_ABOVE_MEAN",
     ),
+    "SR_ROLE_REVERSAL_STATE": (
+        "NONE",
+        "BREAKOUT_CONFIRMED",
+        "RETEST_APPROACHING",
+        "RETESTING_FROM_BREAK_SIDE",
+        "VALID_RETEST",
+        "RETEST_HELD",
+        "RETEST_FAILED",
+    ),
 }
 MEAN_REVERSION_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("MR_")
@@ -193,7 +242,8 @@ MEAN_REVERSION_RULE_EVIDENCE = frozenset(
 SUPPORT_RESISTANCE_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("SR_")
 )
-# Researcher-authored S/R rules can select one causal structure context without
+PRICE_ACTION_RULE_EVIDENCE = frozenset(PRICE_ACTION_RULE_INDICATORS)
+# Researcher-authored S/R and price-action rules can select one causal context without
 # changing the canonical indicator ID. 0 means the strategy timeframe; None is
 # reserved for legacy rules that intentionally use FeatureConfig.sr_timeframe_minutes.
 SR_RULE_TIMEFRAMES = (0, 60, 240, 1440)
@@ -230,6 +280,14 @@ def uses_mean_reversion_rules(*rule_groups) -> bool:
 
 def is_support_resistance_evidence(evidence: str) -> bool:
     return str(evidence).upper() in SUPPORT_RESISTANCE_RULE_EVIDENCE
+
+
+def is_price_action_evidence(evidence: str) -> bool:
+    return str(evidence).upper() in PRICE_ACTION_RULE_EVIDENCE
+
+
+def is_context_timeframe_evidence(evidence: str) -> bool:
+    return is_support_resistance_evidence(evidence) or is_price_action_evidence(evidence)
 
 
 def uses_support_resistance_rules(*rule_groups) -> bool:
@@ -285,7 +343,7 @@ def new_rule(
         "regime": str(regime).upper(),
         "side": str(side).upper(),
     }
-    if is_support_resistance_evidence(evidence):
+    if is_context_timeframe_evidence(evidence):
         rule["sr_timeframe_minutes"] = 0
     return rule
 
@@ -344,7 +402,7 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
     if value["side"] not in ("ALL", *SIDES):
         raise ValueError(f"unsupported strategy rule side scope: {value['side']}")
 
-    if is_support_resistance_evidence(value["evidence"]):
+    if is_context_timeframe_evidence(value["evidence"]):
         if not had_sr_timeframe:
             # Preserve the configured S/R timeframe for historical authored rules.
             value["sr_timeframe_minutes"] = None
@@ -357,12 +415,12 @@ def normalize_rule(rule: dict, *, expected_kind: str | None = None) -> dict:
                     numeric_timeframe = float(raw_timeframe)
                     normalized_timeframe = int(numeric_timeframe)
                 except (TypeError, ValueError, OverflowError) as exc:
-                    raise ValueError("S/R rule timeframe must be Strategy TF, 1h, 4h or 1d") from exc
+                    raise ValueError("rule context timeframe must be Strategy TF, 1h, 4h or 1d") from exc
                 if (
                     numeric_timeframe != normalized_timeframe
                     or normalized_timeframe not in SR_RULE_TIMEFRAMES
                 ):
-                    raise ValueError("S/R rule timeframe must be Strategy TF, 1h, 4h or 1d")
+                    raise ValueError("rule context timeframe must be Strategy TF, 1h, 4h or 1d")
                 value["sr_timeframe_minutes"] = normalized_timeframe
     else:
         value.pop("sr_timeframe_minutes", None)
@@ -572,7 +630,7 @@ def _native_rule(rule: dict, *, required: bool) -> dict:
         f"{_META_PREFIX}regime": rule["regime"],
         f"{_META_PREFIX}side": rule["side"],
     }
-    if is_support_resistance_evidence(rule["evidence"]):
+    if is_context_timeframe_evidence(rule["evidence"]):
         native[f"{_META_PREFIX}sr_timeframe_minutes"] = rule.get(
             "sr_timeframe_minutes"
         )
@@ -668,6 +726,88 @@ def _ema_9_20_pullback_native_rules() -> tuple[dict, ...]:
     )
 
 
+def _mtf_sr_reaction_native_rules() -> tuple[dict, ...]:
+    """Persist the MTF S/R signal choice without hiding its editable filters."""
+    return (
+        {
+            "action": "REJECT",
+            "indicator": "BULLISH_REVERSAL_TRIGGER",
+            "condition": "OUTSIDE",
+            "minimum": LOW,
+            "maximum": HIGH,
+            f"{_META_PREFIX}kind": "REQUIRED",
+            _DMI_TREND_MODE_MARKER: MTF_SR_REACTION_MODE,
+            _DMI_TREND_RULE_MARKER: "MTF_SR_REACTION_SIGNAL",
+        },
+    )
+
+
+def mtf_sr_reaction_preset_rules(minimum_room_atr: float = 1.5) -> tuple[dict, ...]:
+    """Return editable starter Entry Groups for bounce and break/retest theses."""
+    room = float(minimum_room_atr)
+    if room < 0:
+        raise ValueError("minimum_room_atr cannot be negative")
+
+    groups = (
+        (
+            "4H Support Bounce — Long", "LONG",
+            (
+                ("SR_NEAR_SUPPORT", "IS", "TRUE", 240),
+                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
+                ("BULLISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
+                ("SR_ROOM_IN_DIRECTION_ATR", "GTE", room, 240),
+            ),
+        ),
+        (
+            "4H Resistance Break + Retest — Long", "LONG",
+            (
+                ("SR_ROLE_REVERSAL_STATE", "IS", "VALID_RETEST", 240),
+                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
+                ("BULLISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
+                ("SR_ROOM_IN_DIRECTION_ATR", "GTE", room, 240),
+            ),
+        ),
+        (
+            "4H Resistance Bounce — Short", "SHORT",
+            (
+                ("SR_NEAR_RESISTANCE", "IS", "TRUE", 240),
+                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
+                ("BEARISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
+                ("SR_ROOM_IN_DIRECTION_ATR", "GTE", room, 240),
+            ),
+        ),
+        (
+            "4H Support Break + Retest — Short", "SHORT",
+            (
+                ("SR_ROLE_REVERSAL_STATE", "IS", "VALID_RETEST", 240),
+                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
+                ("BEARISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
+                ("SR_ROOM_IN_DIRECTION_ATR", "GTE", room, 240),
+            ),
+        ),
+    )
+
+    result = []
+    for group_name, side, conditions in groups:
+        group_id = uuid4().hex
+        for evidence, operator, raw_value, timeframe in conditions:
+            rule = new_rule(
+                kind="REQUIRED",
+                evidence=evidence,
+                group_id=group_id,
+                group_name=group_name,
+                regime="ALL",
+                side=side,
+            )
+            rule["operator"] = operator
+            rule["value"] = raw_value
+            if operator not in CATEGORICAL_RULE_OPERATORS:
+                rule["value2"] = 0.0
+            rule["sr_timeframe_minutes"] = timeframe
+            result.append(normalize_rule(rule, expected_kind="REQUIRED"))
+    return tuple(result)
+
+
 def compile_profiles(
     *,
     direction_mode: str,
@@ -707,6 +847,8 @@ def compile_profiles(
             native_rules = list(_macd_pullback_native_rules())
         elif mode == "EMA_9_20_PULLBACK":
             native_rules = list(_ema_9_20_pullback_native_rules())
+        elif mode == MTF_SR_REACTION_MODE:
+            native_rules = list(_mtf_sr_reaction_native_rules())
         else:
             native_rules = []
         for rule in required:

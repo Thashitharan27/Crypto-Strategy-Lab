@@ -699,7 +699,10 @@ class MainWindow(LegacyMainWindow):
                 features = replace(features, mean_reversion_track_atr_distance=True)
             if mr_evidence & {"MR_MOTION", "MR_DISTANCE_CHANGE_ATR"}:
                 features = replace(features, mean_reversion_track_motion=True)
-        if uses_support_resistance_rules(required_rules, veto_rules, flip_rules):
+        if (
+            authored.get("direction_mode") == "MTF_SR_REACTION"
+            or uses_support_resistance_rules(required_rules, veto_rules, flip_rules)
+        ):
             features = replace(features, enable_support_resistance_analysis=True)
 
         base_execution = self.base_execution_form.value(

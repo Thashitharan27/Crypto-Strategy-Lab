@@ -12,10 +12,13 @@ def _rules_require_support_resistance(window) -> bool:
     if builder is None:
         return False
     try:
-        return uses_support_resistance_rules(
-            builder.required_rules.rules(),
-            builder.veto_rules.rules(),
-            builder.flip_rules.rules(),
+        return (
+            str(builder.direction_mode.currentData() or "").upper() == "MTF_SR_REACTION"
+            or uses_support_resistance_rules(
+                builder.required_rules.rules(),
+                builder.veto_rules.rules(),
+                builder.flip_rules.rules(),
+            )
         )
     except (AttributeError, TypeError, ValueError):
         return False

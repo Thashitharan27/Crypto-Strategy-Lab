@@ -15,6 +15,10 @@ from crypto_strategy_lab.data_lake_production_engine import (
     DataLakeProductionBacktestEngine,
 )
 from crypto_strategy_lab.ema_pullback import Ema920PullbackMixin
+from crypto_strategy_lab.mtf_sr_reaction import (
+    MTF_SR_REACTION_RULE_INDICATORS,
+    MtfSrReactionMixin,
+)
 from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_VALUE_CODES
 
 
@@ -153,7 +157,7 @@ _MR_RULE_INDICATORS = frozenset(
 )
 
 
-class RuleAwareDataLakeProductionBacktestEngine(Ema920PullbackMixin, DataLakeProductionBacktestEngine):
+class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920PullbackMixin, DataLakeProductionBacktestEngine):
     """Current native runtime with prepared research evidence available to rules."""
 
     @classmethod
@@ -178,6 +182,7 @@ class RuleAwareDataLakeProductionBacktestEngine(Ema920PullbackMixin, DataLakePro
         if sr_block is None:
             return engine
         engine.research_features["support_resistance"] = sr_block
+        engine._configure_mtf_sr_reaction_context()
         existing = set(engine.research_output_columns)
         sr_columns = tuple(column for column in sr_block.values if column not in existing)
         engine.research_output_columns = (*engine.research_output_columns, *sr_columns)
@@ -443,6 +448,24 @@ class RuleAwareDataLakeProductionBacktestEngine(Ema920PullbackMixin, DataLakePro
             return CATEGORICAL_VALUE_CODES[indicator].get(key, np.nan)
         raise KeyError(indicator)
 
+    def _prepared_mtf_sr_reaction_value(
+        self, i, direction, indicator, timeframe_minutes=0
+    ):
+        raw = self._mtf_price_action_value(
+            i, direction, indicator, timeframe_minutes
+        )
+        if indicator in CATEGORICAL_VALUE_CODES:
+            if isinstance(raw, (bool, np.bool_)):
+                key = "TRUE" if bool(raw) else "FALSE"
+            else:
+                key = str(getattr(raw, "value", raw)).upper()
+            return CATEGORICAL_VALUE_CODES[indicator].get(key, np.nan)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return np.nan
+        return value if np.isfinite(value) else np.nan
+
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
         if indicator == "ADX_CHANGE":
             if i <= 0 or not hasattr(self, "adx_values"):
@@ -463,6 +486,8 @@ class RuleAwareDataLakeProductionBacktestEngine(Ema920PullbackMixin, DataLakePro
             return self._prepared_pressure_value(i, direction, indicator)
         if indicator in _MR_RULE_INDICATORS:
             return self._prepared_mean_reversion_value(i, direction, indicator)
+        if indicator in MTF_SR_REACTION_RULE_INDICATORS:
+            return self._prepared_mtf_sr_reaction_value(i, direction, indicator, 0)
         if indicator in _SR_RULE_INDICATORS:
             return self._prepared_sr_value(i, direction, indicator)
         if indicator in _RESEARCH_RULE_INDICATORS:
@@ -479,7 +504,11 @@ class RuleAwareDataLakeProductionBacktestEngine(Ema920PullbackMixin, DataLakePro
         """
         indicator = rule["indicator"]
         sr_timeframe = rule.get("_builder_sr_timeframe_minutes")
-        if indicator in _SR_RULE_INDICATORS and sr_timeframe is not None:
+        if indicator in MTF_SR_REACTION_RULE_INDICATORS and sr_timeframe is not None:
+            value = self._prepared_mtf_sr_reaction_value(
+                i, direction, indicator, sr_timeframe
+            )
+        elif indicator in _SR_RULE_INDICATORS and sr_timeframe is not None:
             value = self._prepared_sr_value_for_timeframe(
                 i, direction, indicator, sr_timeframe
             )

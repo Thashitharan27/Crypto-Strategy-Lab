@@ -661,10 +661,13 @@ class ResearchFeaturesPanel(QWidget):
 
     def _sync_sr_requirement(self, *_args) -> None:
         try:
-            required = uses_support_resistance_rules(
-                self.builder.required_rules.rules(),
-                self.builder.veto_rules.rules(),
-                self.builder.flip_rules.rules(),
+            required = (
+                self.builder.direction_mode.currentData() == "MTF_SR_REACTION"
+                or uses_support_resistance_rules(
+                    self.builder.required_rules.rules(),
+                    self.builder.veto_rules.rules(),
+                    self.builder.flip_rules.rules(),
+                )
             )
         except (AttributeError, TypeError, ValueError):
             required = False
