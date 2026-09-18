@@ -361,6 +361,38 @@ def test_veto_effectiveness_replays_only_causally_blocked_idle_opportunities(tmp
     assert result["veto_overlap"]["unique_selected_blocked_opportunities"] == 2
 
 
+def test_veto_busy_interval_starts_at_capture_and_closes_on_invalidation():
+    events = [
+        {
+            "event_type": "CANDIDATE_CONTEXT_CAPTURED",
+            "effective_market_time": "2020-01-02T00:00:00+00:00",
+            "payload": {
+                "candidate_id": "candidate-x",
+                "entry_time": "2020-01-02T00:00:00+00:00",
+                "decision_available_at": "2020-01-02T00:15:00+00:00",
+            },
+        },
+        {
+            "event_type": "FEATURE_CONTEXT_INVALID",
+            "effective_market_time": "2020-01-02T00:05:00+00:00",
+            "payload": {"candidate_id": "candidate-x"},
+        },
+    ]
+
+    starts, ends = analytics._open_trade_intervals(
+        events, pd.Timestamp("2020-01-03T00:00:00Z")
+    )
+
+    assert starts == [pd.Timestamp("2020-01-02T00:00:00Z")]
+    assert ends == [pd.Timestamp("2020-01-02T00:05:00Z")]
+    assert analytics._inside_interval(
+        pd.Timestamp("2020-01-02T00:03:00Z"), starts, ends
+    )
+    assert not analytics._inside_interval(
+        pd.Timestamp("2020-01-02T00:06:00Z"), starts, ends
+    )
+
+
 def test_periodic_summary_compares_equal_length_recent_periods_without_mutation(tmp_path):
     control = _Control(tmp_path)
     store = CausalExperimentStore(tmp_path / "walk_forward_experiments")
