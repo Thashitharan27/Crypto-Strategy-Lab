@@ -419,6 +419,9 @@ def test_veto_busy_interval_starts_at_capture_and_closes_on_invalidation():
         pd.Timestamp("2020-01-02T00:03:00Z"), starts, ends
     )
     assert not analytics._inside_interval(
+        pd.Timestamp("2020-01-02T00:05:00Z"), starts, ends
+    )
+    assert not analytics._inside_interval(
         pd.Timestamp("2020-01-02T00:06:00Z"), starts, ends
     )
 
