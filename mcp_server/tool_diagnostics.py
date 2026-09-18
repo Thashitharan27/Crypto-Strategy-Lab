@@ -206,7 +206,10 @@ class ToolDiagnostics:
                         **metadata,
                     }
                     with self._lock:
-                        self._in_flight[call_id] = deepcopy(start_record)
+                        self._in_flight[call_id] = {
+                            **deepcopy(start_record),
+                            "_started_perf": started_perf,
+                        }
                     self._log_start(start_record)
 
                     result: Any = None
@@ -286,7 +289,13 @@ class ToolDiagnostics:
             recent = []
 
         for record in in_flight:
+            started_perf = record.pop("_started_perf", None)
             record["still_running"] = True
+            if isinstance(started_perf, (int, float)):
+                record["elapsed_ms_so_far"] = round(
+                    (time.perf_counter() - float(started_perf)) * 1000.0,
+                    3,
+                )
 
         commit = _git_head(self.project_root)
         return {
