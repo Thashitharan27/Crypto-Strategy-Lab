@@ -622,7 +622,9 @@ def _inside_interval(
     ends: list[pd.Timestamp],
 ) -> bool:
     index = bisect_right(starts, when) - 1
-    return index >= 0 and starts[index] <= when <= ends[index]
+    # WAIT_UNTIL_CLOSED releases the scanner at the exact exit timestamp, so
+    # the busy interval is [entry, exit), not [entry, exit].
+    return index >= 0 and starts[index] <= when < ends[index]
 
 
 def _active_rules_at(
