@@ -12,7 +12,9 @@ from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
 from crypto_strategy_lab.walk_forward_orchestrator import (
+    DEFAULT_AUTONOMOUS_SCAN_SLICES,
     advance_walk_forward,
+    continue_walk_forward_autonomous,
     _decorate_teacher_loss_packet,
 )
 from crypto_strategy_lab.walk_forward_rule_validation import (
@@ -61,6 +63,8 @@ def _advance_after_batch(
     operation_id: str,
     batch: dict[str, Any],
     review_interval_months: int,
+    autonomous_mode: bool = False,
+    max_scan_slices: int = DEFAULT_AUTONOMOUS_SCAN_SLICES,
 ) -> dict[str, Any]:
     sequence = int(batch["sequence"])
     state_hash = str(batch["state_hash"])
@@ -68,6 +72,19 @@ def _advance_after_batch(
         current = _impl._store(control).read(experiment_id, recent_events=0)
         sequence = int(current["sequence"])
         state_hash = str(current["state_hash"])
+    if autonomous_mode:
+        return _with_rule_schema(
+            continue_walk_forward_autonomous(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                operation_id=_impl._operation(operation_id, "autonomous"),
+                expected_sequence=sequence,
+                expected_state_hash=state_hash,
+                review_interval_months=review_interval_months,
+                max_scan_slices=max_scan_slices,
+            )
+        )
     return _with_rule_schema(
         advance_walk_forward(
             control,
@@ -96,6 +113,8 @@ def record_walk_forward_review(
     rule_events: list[dict[str, Any]] | None = None,
     auto_advance: bool = True,
     review_interval_months: int = 3,
+    autonomous_mode: bool = False,
+    max_scan_slices: int = DEFAULT_AUTONOMOUS_SCAN_SLICES,
 ) -> dict[str, Any]:
     """Validate first, then atomically record a loss/periodic review and rules."""
     store = _impl._store(control)
@@ -186,6 +205,8 @@ def record_walk_forward_review(
         operation_id=operation_id,
         batch=batch,
         review_interval_months=review_interval_months,
+        autonomous_mode=autonomous_mode,
+        max_scan_slices=max_scan_slices,
     )
 
 
@@ -203,6 +224,8 @@ def record_walk_forward_teacher_review(
     rule_events: list[dict[str, Any]] | None = None,
     auto_advance: bool = True,
     review_interval_months: int = 3,
+    autonomous_mode: bool = False,
+    max_scan_slices: int = DEFAULT_AUTONOMOUS_SCAN_SLICES,
 ) -> dict[str, Any]:
     """Atomically record a teacher winner ENTRY review or enabled 1R loss FLIP review."""
     store = _impl._store(control)
@@ -322,4 +345,6 @@ def record_walk_forward_teacher_review(
         operation_id=operation_id,
         batch=batch,
         review_interval_months=review_interval_months,
+        autonomous_mode=autonomous_mode,
+        max_scan_slices=max_scan_slices,
     )
