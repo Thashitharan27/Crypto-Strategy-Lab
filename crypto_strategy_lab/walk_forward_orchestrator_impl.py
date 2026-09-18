@@ -650,7 +650,41 @@ def build_loss_review_packet(
     }
 
 
-def _periodic_review_due(events: list[dict[str, Any]], months: int) -> dict[str, Any] | None:
+def _initial_periodic_review_anchor(
+    reports: Any,
+    definition: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> pd.Timestamp | None:
+    if any(event.get("event_type") == "MIGRATION_RECORDED" for event in events):
+        return None
+
+    policy = definition.get("periodic_review_policy") or {}
+    if not isinstance(policy, dict):
+        return None
+    anchor_mode = str(policy.get("initial_anchor", "")).strip().upper()
+    if anchor_mode != "REFERENCE_PERIOD_START":
+        return None
+
+    provenance = definition.get("reference_provenance") or {}
+    raw = provenance.get("period_start") if isinstance(provenance, dict) else None
+    if not raw:
+        reference_run = str(definition.get("reference_run", "")).strip()
+        if not reference_run:
+            return None
+        manifest = reports.get_run_manifest(reference_run)
+        request = manifest.get("request") or {}
+        raw = request.get("start")
+    if not raw:
+        return None
+    return _utc_timestamp(raw, "initial periodic review anchor")
+
+
+def _periodic_review_due(
+    events: list[dict[str, Any]],
+    months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> dict[str, Any] | None:
     periodic = []
     for event in events:
         if event.get("event_type") != "REVIEW_COMPLETED":
@@ -661,15 +695,24 @@ def _periodic_review_due(events: list[dict[str, Any]], months: int) -> dict[str,
             raw = event.get("effective_market_time")
             if raw:
                 periodic.append((event, _utc_timestamp(raw, "review effective_market_time")))
-    if not periodic:
-        return None
-    last_event, last_time = periodic[-1]
+
+    if periodic:
+        last_event, last_time = periodic[-1]
+        anchor_source = "REVIEW_COMPLETED"
+    else:
+        if initial_anchor is None:
+            return None
+        last_event = None
+        last_time = initial_anchor
+        anchor_source = "REFERENCE_PERIOD_START"
+
     cursor = _max_event_time(events)
     if cursor is None:
         return None
     due = last_time + pd.DateOffset(months=int(months))
     if cursor < due:
         return None
+
     history = []
     for event in events:
         if event.get("event_type") != "TRADE_RESOLVED":
@@ -680,11 +723,14 @@ def _periodic_review_due(events: list[dict[str, Any]], months: int) -> dict[str,
         when = _utc_timestamp(raw, "trade resolution time")
         if last_time < when <= cursor:
             history.append(event.get("payload") or {})
+
     return {
         "status": "PERIODIC_REVIEW_REQUIRED",
         "review_interval_months": int(months),
-        "previous_review_sequence": last_event["sequence"],
-        "previous_review_time": last_time.isoformat(),
+        "previous_review_sequence": last_event["sequence"] if last_event is not None else None,
+        "previous_review_time": last_time.isoformat() if last_event is not None else None,
+        "review_anchor_source": anchor_source,
+        "review_anchor_time": last_time.isoformat(),
         "review_due_time": due.isoformat(),
         "current_market_cursor": cursor.isoformat(),
         "period_trade_stats": _stats(history),
@@ -826,7 +872,12 @@ def advance_walk_forward(
             packet.update(sequence=sequence, state_hash=state_hash)
             return packet
 
-        periodic = _periodic_review_due(events, int(review_interval_months))
+        definition = (readback.get("manifest") or {}).get("definition") or {}
+        periodic = _periodic_review_due(
+            events,
+            int(review_interval_months),
+            initial_anchor=_initial_periodic_review_anchor(reports, definition, events),
+        )
         if periodic is not None:
             periodic.update(
                 contract=ORCHESTRATOR_CONTRACT,
