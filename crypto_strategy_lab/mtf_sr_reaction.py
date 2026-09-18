@@ -315,6 +315,17 @@ class MtfSrReactionMixin:
         return number if np.isfinite(number) else None
 
     @staticmethod
+    def _text(value) -> str:
+        if value is None or value is pd.NA:
+            return ""
+        try:
+            if bool(pd.isna(value)):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        return str(getattr(value, "value", value)).strip().upper()
+
+    @staticmethod
     def _truth(value) -> bool:
         if isinstance(value, (bool, np.bool_)):
             return bool(value)
@@ -393,10 +404,9 @@ class MtfSrReactionMixin:
                 )
 
                 for i in range(len(self.close)):
-                    structure_state = str(
+                    structure_state = self._text(
                         self._mtf_sr_raw(i, direction, structure_field, requested)
-                        or ""
-                    ).upper()
+                    )
                     zone_low = self._finite(
                         self._mtf_sr_raw(i, direction, zone_low_field, requested)
                     )
@@ -568,12 +578,12 @@ class MtfSrReactionMixin:
                 i, "SHORT", "BEARISH_REVERSAL_TRIGGER", strategy_minutes
             )
         )
-        long_state = str(
-            self._mtf_sr_raw(i, "LONG", "support_state", 240) or ""
-        ).upper()
-        short_state = str(
-            self._mtf_sr_raw(i, "SHORT", "resistance_state", 240) or ""
-        ).upper()
+        long_state = self._text(
+            self._mtf_sr_raw(i, "LONG", "support_state", 240)
+        )
+        short_state = self._text(
+            self._mtf_sr_raw(i, "SHORT", "resistance_state", 240)
+        )
         long_location = (
             long_state in {"SUPPORT_TESTING", "SUPPORT_HELD"}
             or self._truth(self._mtf_sr_raw(i, "LONG", "near_support", 240))
@@ -584,18 +594,16 @@ class MtfSrReactionMixin:
             or self._truth(self._mtf_sr_raw(i, "SHORT", "near_resistance", 240))
             or self._truth(self._mtf_sr_raw(i, "SHORT", "inside_resistance_zone", 240))
         )
-        long_role = str(
+        long_role = self._text(
             self._mtf_price_action_value(
                 i, "LONG", "SR_ROLE_REVERSAL_STATE", 240
             )
-            or ""
-        ).upper()
-        short_role = str(
+        )
+        short_role = self._text(
             self._mtf_price_action_value(
                 i, "SHORT", "SR_ROLE_REVERSAL_STATE", 240
             )
-            or ""
-        ).upper()
+        )
         valid_retests = {"RETESTING_FROM_BREAK_SIDE", "RETEST_HELD"}
 
         long_candidate = bullish and (
