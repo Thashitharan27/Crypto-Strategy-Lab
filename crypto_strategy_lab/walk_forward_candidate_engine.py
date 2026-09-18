@@ -42,6 +42,7 @@ _TEACHER_POLICY_CONTEXT = threading.local()
 def _clear_scan_context() -> None:
     _SCAN_CONTEXT.active = False
     _SCAN_CONTEXT.teacher_time = None
+    _SCAN_CONTEXT.stop_before_time = None
     _SCAN_CONTEXT.scan_key = None
     _SCAN_CONTEXT.last_stream = None
 
@@ -136,6 +137,7 @@ class _StreamingCandidateRows:
         chunk_rows: int = CANDIDATE_FETCH_CHUNK_ROWS,
         *,
         teacher_time: pd.Timestamp | None = None,
+        stop_before_time: pd.Timestamp | None = None,
         scan_key: dict[str, Any] | None = None,
     ) -> None:
         self.samples_path = Path(samples_path)
@@ -144,9 +146,11 @@ class _StreamingCandidateRows:
         self.limit = int(limit)
         self.chunk_rows = int(chunk_rows)
         self.teacher_time = teacher_time
+        self.stop_before_time = stop_before_time
         self.scan_key = scan_key
         self.rows_yielded = 0
         self.teacher_boundary_reached = False
+        self.time_boundary_reached = False
         self.limit_exhausted_before_teacher = False
         self.last_cursor: dict[str, Any] | None = None
 
@@ -237,7 +241,23 @@ class _StreamingCandidateRows:
                     if pd.isna(raw_decision_time):
                         raw_decision_time = series.get("entry_time")
                     decision_time = _as_utc(raw_decision_time)
-                    if self.teacher_time is not None and decision_time >= self.teacher_time:
+                    teacher_due = (
+                        self.teacher_time is not None
+                        and decision_time >= self.teacher_time
+                    )
+                    time_due = (
+                        self.stop_before_time is not None
+                        and decision_time >= self.stop_before_time
+                    )
+                    if time_due and (
+                        not teacher_due
+                        or self.teacher_time is None
+                        or self.stop_before_time <= self.teacher_time
+                    ):
+                        self.time_boundary_reached = True
+                        stop = True
+                        break
+                    if teacher_due:
                         self.teacher_boundary_reached = True
                         stop = True
                         break
@@ -272,6 +292,11 @@ def _candidate_rows(
             if getattr(_SCAN_CONTEXT, "active", False)
             else None
         ),
+        stop_before_time=(
+            getattr(_SCAN_CONTEXT, "stop_before_time", None)
+            if getattr(_SCAN_CONTEXT, "active", False)
+            else None
+        ),
         scan_key=(
             getattr(_SCAN_CONTEXT, "scan_key", None)
             if getattr(_SCAN_CONTEXT, "active", False)
@@ -287,6 +312,7 @@ def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
     """Run the proven scanner with bounded teacher-aware resumable delivery."""
     policy_marker = object()
     requested_policy = kwargs.pop("teacher_loss_flip_enabled", policy_marker)
+    requested_stop_before = kwargs.pop("stop_before_time", None)
     policy = (
         teacher_loss_flip_policy(bool(requested_policy))
         if requested_policy is not policy_marker
@@ -295,6 +321,11 @@ def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
     with policy:
         _clear_scan_context()
         _SCAN_CONTEXT.active = True
+        _SCAN_CONTEXT.stop_before_time = (
+            _as_utc(requested_stop_before)
+            if requested_stop_before is not None
+            else None
+        )
         try:
             result = _ORIGINAL_GET_NEXT_CANDIDATE(*args, **kwargs)
             stream = getattr(_SCAN_CONTEXT, "last_stream", None)
@@ -304,8 +335,31 @@ def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
             scan = dict(result.get("scan") or {})
             scan["bounded_scan_rows"] = int(stream.limit)
             scan["teacher_boundary_reached"] = bool(stream.teacher_boundary_reached)
+            scan["time_boundary_reached"] = bool(stream.time_boundary_reached)
             if stream.last_cursor is not None:
                 scan["scan_cursor"] = dict(stream.last_cursor)
+
+            if stream.time_boundary_reached:
+                experiment_id = str(
+                    result.get("experiment_id") or kwargs.get("experiment_id") or ""
+                )
+                expected_sequence = int(
+                    kwargs.get("expected_sequence", result.get("sequence"))
+                )
+                expected_state_hash = str(
+                    kwargs.get("expected_state_hash", result.get("state_hash"))
+                )
+                return {
+                    "contract": result.get("contract", CANDIDATE_CONTEXT_CONTRACT),
+                    "status": "TIME_BOUNDARY_DUE_FIRST",
+                    "experiment_id": experiment_id,
+                    "sequence": expected_sequence,
+                    "state_hash": expected_state_hash,
+                    "boundary_time": _SCAN_CONTEXT.stop_before_time.isoformat(),
+                    "candidate_not_captured": True,
+                    "scan": scan,
+                    "outcome_exposed": False,
+                }
 
             if (
                 result.get("status") == "TEACHER_DUE_FIRST"
