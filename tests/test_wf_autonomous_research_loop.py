@@ -176,3 +176,73 @@ def test_autonomous_scan_slice_budget_is_bounded(value):
             expected_state_hash="h1",
             max_scan_slices=value,
         )
+
+
+def test_submit_win_in_autonomous_mode_resumes_without_interactive_checkpoint(monkeypatch):
+    observed = {}
+
+    monkeypatch.setattr(
+        orchestrator,
+        "freeze_and_reveal_walk_forward_view",
+        lambda *args, **kwargs: {
+            "sequence": 2,
+            "state_hash": "h2",
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator._impl,
+        "resolve_walk_forward_trade",
+        lambda *args, **kwargs: {
+            "sequence": 3,
+            "state_hash": "h3",
+            "settlement": {"result": "WIN"},
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_decision_research_fields",
+        lambda *args, **kwargs: {},
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "advance_walk_forward",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("interactive advance should not be used")
+        ),
+    )
+
+    def fake_autonomous(*args, **kwargs):
+        observed.update(kwargs)
+        return {
+            "status": "CANDIDATE_DECISION_REQUIRED",
+            "sequence": 4,
+            "state_hash": "h4",
+            "autonomous": {"continue_without_user": True},
+        }
+
+    monkeypatch.setattr(
+        orchestrator,
+        "continue_walk_forward_autonomous",
+        fake_autonomous,
+    )
+
+    result = orchestrator.submit_walk_forward_view(
+        None,
+        None,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        candidate_id="42-long",
+        candidate_token="token",
+        confidence_pct=70,
+        reasoning="Causal entry-time evidence supports LONG.",
+        operation_id="decision:auto",
+        expected_sequence=1,
+        expected_state_hash="h1",
+        chatgpt_view="LONG",
+        autonomous_mode=True,
+        max_scan_slices=6,
+    )
+
+    assert result["status"] == "CANDIDATE_DECISION_REQUIRED"
+    assert observed["expected_sequence"] == 3
+    assert observed["expected_state_hash"] == "h3"
+    assert observed["max_scan_slices"] == 6
