@@ -217,6 +217,15 @@ class MtfSrReactionMixin:
             return
 
         strategy_minutes = int(self.config.strategy_timeframe_minutes)
+        mode_enabled = any(
+            str(rule.get("_strategy_direction_mode", "")).upper() == MTF_SR_REACTION_MODE
+            for profile in self.config.strategy_profiles.values()
+            for rule in getattr(profile, "entry_rules", ())
+        )
+        if mode_enabled and (strategy_minutes >= 60 or 60 % strategy_minutes):
+            raise ValueError(
+                "MTF_SR_REACTION requires an entry timeframe below 1h that divides evenly into 1h"
+            )
         strategy = candle_evidence_arrays(
             self.open, self.high, self.low, self.close, self.atr_values
         )
@@ -264,7 +273,8 @@ class MtfSrReactionMixin:
             for name, values in raw.items():
                 values = np.asarray(values)
                 if values.dtype == bool:
-                    target = np.zeros(len(self.close), dtype=bool)
+                    # Missing completed HTF candles are unavailable evidence, not False.
+                    target = np.full(len(self.close), None, dtype=object)
                 else:
                     target = np.full(len(self.close), np.nan, dtype=float)
                 target[valid] = values[indices[valid]]
@@ -491,7 +501,15 @@ class MtfSrReactionMixin:
         if indicator in _NUMERIC_CANDLE_FIELDS:
             return values[_NUMERIC_CANDLE_FIELDS[indicator]][i]
         if indicator in _BOOLEAN_CANDLE_FIELDS:
-            return bool(values[_BOOLEAN_CANDLE_FIELDS[indicator]][i])
+            raw = values[_BOOLEAN_CANDLE_FIELDS[indicator]][i]
+            if raw is None or raw is pd.NA:
+                return None
+            try:
+                if bool(pd.isna(raw)):
+                    return None
+            except (TypeError, ValueError):
+                pass
+            return bool(raw)
         if indicator == "SR_APPROACH_MOMENTUM_STATE":
             return self._approach_momentum_state(i, direction, requested)
         if indicator == "SR_ROLE_REVERSAL_STATE":
@@ -664,7 +682,10 @@ class MtfSrReactionMixin:
             for indicator, field in _NUMERIC_CANDLE_FIELDS.items():
                 row[f"mtf_{label}_{field}"] = values[field][i]
             for indicator, field in _BOOLEAN_CANDLE_FIELDS.items():
-                row[f"mtf_{label}_{field}"] = bool(values[field][i])
+                raw = values[field][i]
+                row[f"mtf_{label}_{field}"] = (
+                    np.nan if raw is None or raw is pd.NA else bool(raw)
+                )
             for direction in ("LONG", "SHORT"):
                 prefix = f"mtf_{label}_{direction.lower()}"
                 row[f"{prefix}_sr_approach_momentum_state"] = (
