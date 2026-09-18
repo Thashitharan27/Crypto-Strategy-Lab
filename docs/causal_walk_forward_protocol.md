@@ -1,7 +1,7 @@
 # Canonical Causal Walk-Forward Experiment Protocol
 
 **Status:** Canonical master specification  
-**Last consolidated:** 2026-09-17
+**Last consolidated:** 2026-09-18
 
 This document is the authoritative human-readable specification for causal walk-forward research in Crypto Strategy Lab. It defines how historical teacher/reference evidence, prospective walk-forward trades, ChatGPT research judgment, rule learning, equity, reviews, recovery, and later shadow/live continuation must interact.
 
@@ -333,6 +333,19 @@ Teacher winners never change walk-forward equity.
 
 If an ENTRY already covers the structure sufficiently, recording `NO_CHANGE` is valid. Do not manufacture a new rule for every winner.
 
+The machine-enforced research policy contract is:
+
+```text
+causal_walk_forward_entry_veto_method_v1
+```
+
+When a teacher winner authors `ENTRY_LEARNED` or `ENTRY_REFINED`, the review must also record:
+
+- `setup_thesis`: the positive reusable reason the setup deserves to exist;
+- `entry_family`: one of `CONTINUATION`, `PULLBACK`, `BREAKOUT`, `REVERSAL`, or `RANGE_REVERSION`.
+
+Winning alone is not a sufficient thesis. In particular, a successful `BREAKOUT` must remain distinguishable from ordinary continuation/pullback logic so it does not weaken normal opposing-S/R room requirements.
+
 ---
 
 ## 11. Optional teacher-loss FLIP learning
@@ -490,6 +503,26 @@ Possible outcomes include:
 
 Do **not** force a VETO for every loss.
 
+Every prospective loss review must classify `loss_diagnosis` as exactly one of:
+
+```text
+ENTRY_TOO_BROAD
+EXCEPTIONAL_CONTRADICTION
+DIRECTION_THESIS_WRONG
+NO_CLEAR_CAUSAL_LESSON
+```
+
+If a specific mechanism is claimed, record it in `failure_mechanism`. The machine writer enforces:
+
+- `ENTRY_REFINED` from a loss requires `ENTRY_TOO_BROAD`;
+- `VETO_LEARNED` from a loss requires `EXCEPTIONAL_CONTRADICTION`;
+- `FLIP_LEARNED` from a loss requires `DIRECTION_THESIS_WRONG`;
+- `NO_CLEAR_CAUSAL_LESSON` cannot author a rule and should normally record `NO_CHANGE`.
+
+Before adding a new VETO, compare the current mechanism with prior losses of the matched ENTRY. If the same weakness is recurring, prefer ENTRY refinement/consolidation over accumulating another narrow VETO.
+
+For multi-R targets such as TP3, opposing higher-timeframe support/resistance room is an ENTRY-quality dimension. Strong DI, momentum, or flow does not automatically compensate for insufficient travel room.
+
 A valid setup that simply failed remains a legitimate loss and stays in equity.
 
 Any new rule becomes effective only after the source loss resolves/review completes and cannot remove the loss that taught it.
@@ -555,6 +588,13 @@ Review:
 - whether recent evidence suggests a rule should remain, be refined, or simply continue gathering evidence.
 
 Do not use a quarterly review as an excuse to retroactively restructure history.
+
+The periodic boundary automatically assembles the version-aware rule-performance analytics before ChatGPT records the review. Periodic interpretation should prioritize simplification, consolidation, repeated failure families, VETO effectiveness, overlap/redundancy, and sample sufficiency rather than creating many micro-rules.
+
+If the periodic review authors rule events, it must record:
+
+- `periodic_rule_action`: `CONSOLIDATE_OR_REFINE`, `STRUCTURAL_NEW_RULE`, or `RETIRE_OR_PROMOTE`;
+- `periodic_rationale`: the strategic reason the change belongs at the periodic level.
 
 New experiments default to an immutable `periodic_review_policy.initial_anchor = REFERENCE_PERIOD_START`. Until the first periodic review is recorded, the reference period start is therefore the deterministic review anchor. Once a periodic review is recorded, that review time becomes the next anchor.
 
@@ -712,7 +752,12 @@ If reveal succeeded but settlement transport failed, settlement must be idempote
 - teacher equity isolation;
 - current-equity settlement;
 - chronological scan checkpoints;
-- safe recovery from frozen/revealed states.
+- safe recovery from frozen/revealed states;
+- the versioned ENTRY/VETO research-policy contract;
+- mandatory prospective-loss diagnosis;
+- rule-type/diagnosis compatibility;
+- teacher ENTRY thesis/family requirements;
+- periodic rule-authoring rationale requirements.
 
 ### ChatGPT/human research judgment remains responsible for
 
