@@ -78,6 +78,16 @@ def native_simulator_config(
         for name, value in asdict(component).items():
             if name != "profiles" and name in values:
                 values[name] = value
+    if bool(getattr(feature_config, "enable_support_resistance_analysis", False)):
+        effective_sr_minutes = int(
+            getattr(feature_config, "sr_timeframe_minutes", 0)
+            or data_config.strategy_timeframe_minutes
+        )
+        resolved_sr = feature_config.sr_detection_parameters(effective_sr_minutes)
+        values["sr_pivot_left"] = int(resolved_sr["sr_pivot_left"])
+        values["sr_pivot_right"] = int(resolved_sr["sr_pivot_right"])
+        values["sr_lookback_bars"] = int(resolved_sr["sr_lookback_bars"])
+
     values["strategy_profiles"] = {
         key: asdict(
             StrategyProfile(
