@@ -78,7 +78,7 @@ class BacktestConfig:
     sr_zone_padding_atr: float = 0.10
     sr_zone_max_cluster_span_atr: float = 0.50
     sr_min_rejection_atr: float = 0.50
-    sr_near_distance_atr: float = 0.75
+    sr_near_distance_atr: float = 0.50
     enable_sr_hold_confirmation: bool = True
     sr_hold_confirmation_bars: int = 3
     sr_hold_confirmation_atr: float = 0.25
