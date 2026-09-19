@@ -118,38 +118,88 @@ class TestSwingDetector:
 class TestSRZoneMerger:
     """Tests for zone merging logic."""
     
-    def test_single_level_no_merge(self):
-        """Single level stays unchanged."""
-        merger = SRZoneMerger(zone_width_atr=1.0)
+    def test_single_level_becomes_padded_zone(self):
+        """One confirmed pivot is a real zone rather than a zero-width line."""
+        merger = SRZoneMerger(
+            zone_width_atr=1.0,
+            zone_padding_atr=0.25,
+            max_cluster_span_atr=1.0,
+        )
         level = SRLevel(
             price=100.0,
             level_type=SRLevelType.SUPPORT,
             bar_index=10,
             first_touch_index=10,
         )
-        
-        merged = merger.merge_levels([level], atr=1.0)
+
+        merged = merger.merge_levels([level], atr=10.0)
         assert len(merged) == 1
         assert merged[0].price == 100.0
-        assert merged[0].zone_bottom == 100.0
-        assert merged[0].zone_top == 100.0
+        assert merged[0].zone_bottom == pytest.approx(97.5)
+        assert merged[0].zone_top == pytest.approx(102.5)
     
     def test_nearby_levels_merged(self):
         """Levels within zone_width_atr merged into zone."""
-        merger = SRZoneMerger(zone_width_atr=1.0)
-        atr = 10.0  # zone_width = 1.0 * 10 = 10
-        
+        merger = SRZoneMerger(
+            zone_width_atr=1.0,
+            zone_padding_atr=0.25,
+            max_cluster_span_atr=1.0,
+        )
+        atr = 10.0  # merge distance = 10; padding = 2.5
+
         levels = [
             SRLevel(100.0, SRLevelType.SUPPORT, 5, 5),
             SRLevel(105.0, SRLevelType.SUPPORT, 10, 10),  # 5 away, within 10
         ]
-        
+
         merged = merger.merge_levels(levels, atr)
         assert len(merged) == 1, "Expected 1 merged zone"
-        assert merged[0].zone_bottom == 100.0
-        assert merged[0].zone_top == 105.0
+        assert merged[0].zone_bottom == pytest.approx(97.5)
+        assert merged[0].zone_top == pytest.approx(107.5)
         assert merged[0].touch_count == 2
     
+    def test_adjacent_pivot_chaining_is_capped_by_raw_cluster_span(self):
+        """Adjacent pivots cannot chain into an arbitrarily wide S/R zone."""
+        merger = SRZoneMerger(
+            zone_width_atr=0.5,
+            zone_padding_atr=0.25,
+            max_cluster_span_atr=1.0,
+        )
+        atr = 100.0
+        levels = [
+            SRLevel(9800.0, SRLevelType.RESISTANCE, 5, 5),
+            SRLevel(9845.0, SRLevelType.RESISTANCE, 10, 10),
+            SRLevel(9890.0, SRLevelType.RESISTANCE, 15, 15),
+            SRLevel(9935.0, SRLevelType.RESISTANCE, 20, 20),
+        ]
+
+        merged = merger.merge_levels(levels, atr)
+
+        assert len(merged) == 2
+        assert merged[0].source_bar_indices == (5, 10, 15)
+        assert merged[0].zone_bottom == pytest.approx(9775.0)
+        assert merged[0].zone_top == pytest.approx(9915.0)
+        assert merged[1].source_bar_indices == (20,)
+        assert merged[1].zone_bottom == pytest.approx(9910.0)
+        assert merged[1].zone_top == pytest.approx(9960.0)
+
+    def test_padded_zone_is_nearest_structure_while_price_is_inside(self):
+        merger = SRZoneMerger(
+            zone_width_atr=0.5,
+            zone_padding_atr=0.25,
+            max_cluster_span_atr=1.0,
+        )
+        detector = SupportResistanceDetector()
+        support = merger.merge_levels(
+            [SRLevel(100.0, SRLevelType.SUPPORT, 5, 5)], atr=10.0
+        )[0]
+        resistance = merger.merge_levels(
+            [SRLevel(100.0, SRLevelType.RESISTANCE, 6, 6)], atr=10.0
+        )[0]
+
+        assert detector._nearest_level([support], 99.0, below=True) is support
+        assert detector._nearest_level([resistance], 101.0, below=False) is resistance
+
     def test_far_levels_separate(self):
         """Levels far apart remain separate zones."""
         merger = SRZoneMerger(zone_width_atr=1.0)
