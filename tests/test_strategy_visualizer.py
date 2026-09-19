@@ -361,6 +361,76 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
 
 
 
+def test_sr_overlay_never_connects_distinct_zone_identities():
+    times = pd.date_range("2026-01-01", periods=6, freq="15min", tz="UTC")
+    context = pd.DataFrame(
+        {
+            "strategy_candle_open_time": times,
+            "sr_4h_long_support_zone_low": [90.0] * 6,
+            "sr_4h_long_support_zone_high": [92.0] * 6,
+            "sr_4h_long_nearest_support_bar_index": [10] * 6,
+            "sr_4h_long_resistance_zone_low": [110.0, 110.0, 110.0, 130.0, 130.0, 130.0],
+            "sr_4h_long_resistance_zone_high": [112.0, 112.0, 112.0, 132.0, 132.0, 132.0],
+            "sr_4h_long_nearest_resistance_bar_index": [20, 20, 20, 35, 35, 35],
+        }
+    )
+
+    overlays = CompletedRunVisualizer._sr_overlay(
+        context, "4h", times[0]
+    )
+    resistance_high = [
+        item
+        for item in overlays
+        if item["name"] == "4H Resistance high"
+    ]
+
+    assert len(resistance_high) == 2
+    assert [item["zoneIdentity"] for item in resistance_high] == [
+        ["pivot", 20],
+        ["pivot", 35],
+    ]
+    assert {
+        point["value"]
+        for point in resistance_high[0]["data"]
+    } == {112.0}
+    assert {
+        point["value"]
+        for point in resistance_high[1]["data"]
+    } == {132.0}
+    assert max(
+        point["time"] for point in resistance_high[0]["data"]
+    ) < min(
+        point["time"] for point in resistance_high[1]["data"]
+    )
+
+
+def test_sr_overlay_legacy_fallback_still_breaks_when_zone_boundaries_change():
+    times = pd.date_range("2026-01-01", periods=4, freq="15min", tz="UTC")
+    context = pd.DataFrame(
+        {
+            "strategy_candle_open_time": times,
+            "sr_4h_long_support_zone_low": [90.0] * 4,
+            "sr_4h_long_support_zone_high": [92.0] * 4,
+            "sr_4h_long_resistance_zone_low": [110.0, 110.0, 130.0, 130.0],
+            "sr_4h_long_resistance_zone_high": [112.0, 112.0, 132.0, 132.0],
+        }
+    )
+
+    overlays = CompletedRunVisualizer._sr_overlay(
+        context, "4h", times[0]
+    )
+    resistance_high = [
+        item
+        for item in overlays
+        if item["name"] == "4H Resistance high"
+    ]
+    assert len(resistance_high) == 2
+    assert all(
+        len({point["value"] for point in item["data"]}) == 1
+        for item in resistance_high
+    )
+
+
 def test_rule_inspector_reads_exact_decision_time_trace(tmp_path):
     service, run_dir, manifest, _market = _fixture(tmp_path)
     model = CompletedRunVisualizer.load(service, run_dir, manifest)
