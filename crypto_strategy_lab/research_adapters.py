@@ -336,6 +336,11 @@ def _strategy_rule_trace_frame(rows) -> pd.DataFrame:
         result[column] = pd.to_datetime(result[column], utc=True).dt.tz_localize(None)
     result["strategy_index"] = pd.to_numeric(result["strategy_index"], errors="raise").astype("int64")
     result["condition_order"] = pd.to_numeric(result["condition_order"], errors="raise").astype("int64")
+    for column in ("expected_value", "expected_value2"):
+        result[column] = result[column].map(
+            lambda value: None if value is None or pd.isna(value) else str(value)
+        ).astype("string")
+    result["actual_value"] = pd.to_numeric(result["actual_value"], errors="coerce")
     for column in ("group_enabled", "group_matched", "evidence_available", "condition_passed", "filter_passed"):
         result[column] = result[column].astype(bool)
     return result.sort_values(
