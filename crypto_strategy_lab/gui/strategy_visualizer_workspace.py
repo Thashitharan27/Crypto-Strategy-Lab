@@ -4,7 +4,9 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+import pandas as pd
+
+from PySide6.QtCore import QObject, Qt, QUrl, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -33,11 +36,23 @@ from crypto_strategy_lab.strategy_visualizer import (
 )
 
 try:
+    from PySide6.QtWebChannel import QWebChannel
     from PySide6.QtWebEngineCore import QWebEngineSettings
     from PySide6.QtWebEngineWidgets import QWebEngineView
 except ImportError:  # pragma: no cover - depends on local Qt packaging.
+    QWebChannel = None
     QWebEngineSettings = None
     QWebEngineView = None
+
+
+class _StrategyChartBridge(QObject):
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self.callback = callback
+
+    @Slot(str)
+    def selectCandle(self, timestamp: str) -> None:
+        self.callback(timestamp)
 
 
 class StrategyVisualizerWorkspace(QWidget):
@@ -49,6 +64,8 @@ class StrategyVisualizerWorkspace(QWidget):
         self.model: CompletedRunVisualizer | None = None
         self._base_payload = None
         self._browser = None
+        self._web_channel = None
+        self._chart_bridge = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -142,18 +159,46 @@ class StrategyVisualizerWorkspace(QWidget):
         chart_layout.addWidget(self.chart_placeholder)
         splitter.addWidget(self.chart_holder)
 
-        inspector = QGroupBox("Selected Trade")
+        inspector = QGroupBox("Inspector")
         inspector_layout = QVBoxLayout(inspector)
+        self.inspector_tabs = QTabWidget()
+
+        trade_tab = QWidget()
+        trade_layout = QVBoxLayout(trade_tab)
+        trade_layout.setContentsMargins(0, 0, 0, 0)
         self.trade_table = QTableWidget(0, 2)
         self.trade_table.setHorizontalHeaderLabels(("Field", "Value"))
         self.trade_table.verticalHeader().setVisible(False)
         self.trade_table.horizontalHeader().setStretchLastSection(True)
         self.trade_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.trade_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        inspector_layout.addWidget(self.trade_table)
+        trade_layout.addWidget(self.trade_table)
+        self.inspector_tabs.addTab(trade_tab, "Trade")
+
+        rules_tab = QWidget()
+        rules_layout = QVBoxLayout(rules_tab)
+        rules_layout.setContentsMargins(0, 0, 0, 0)
+        self.rule_summary = QLabel(
+            "Click a decision candle to inspect exact ENTRY / VETO / FLIP conditions."
+        )
+        self.rule_summary.setWordWrap(True)
+        self.rule_summary.setStyleSheet("color:#52606d")
+        rules_layout.addWidget(self.rule_summary)
+        self.rule_table = QTableWidget(0, 8)
+        self.rule_table.setHorizontalHeaderLabels(
+            ("Type", "Group", "Group Result", "Evidence", "TF", "Actual", "Required", "Condition")
+        )
+        self.rule_table.verticalHeader().setVisible(False)
+        self.rule_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.rule_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.rule_table.horizontalHeader().setStretchLastSection(True)
+        rules_layout.addWidget(self.rule_table, 1)
+        self.inspector_tabs.addTab(rules_tab, "Strategy Inspector")
+
+        inspector_layout.addWidget(self.inspector_tabs)
         note = QLabel(
-            "Click a candle on the chart for OHLC plus the causal evidence snapshot "
-            "available at that candle. Rule-by-rule ENTRY/VETO/FLIP pass/fail is Phase 2."
+            "Rule values are captured at decision time by the production engine. "
+            "Older completed runs without rule_trace.parquet are not reconstructed."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#52606d")
@@ -200,6 +245,13 @@ class StrategyVisualizerWorkspace(QWidget):
                 "to enable Strategy Visualizer."
             )
         browser = QWebEngineView(self.chart_holder)
+        if QWebChannel is not None:
+            self._web_channel = QWebChannel(browser.page())
+            self._chart_bridge = _StrategyChartBridge(
+                self._candle_selected_from_chart, browser
+            )
+            self._web_channel.registerObject("strategyBridge", self._chart_bridge)
+            browser.page().setWebChannel(self._web_channel)
         if QWebEngineSettings is not None:
             try:
                 browser.settings().setAttribute(
@@ -314,6 +366,7 @@ class StrategyVisualizerWorkspace(QWidget):
             self._populate_trade_inspector(
                 self._base_payload.get("selectedTrade") or {}
             )
+            self._show_selected_trade_rule_trace()
             self._render_chart()
             count = len(self._base_payload.get("candles") or ())
             verified = (self._base_payload.get("run") or {}).get("sourceVerified")
@@ -332,6 +385,72 @@ class StrategyVisualizerWorkspace(QWidget):
         except Exception as exc:
             self.status.setText(f"Could not render chart: {exc}")
             QMessageBox.critical(self, "Strategy Visualizer", str(exc))
+
+    def _show_selected_trade_rule_trace(self):
+        if self.model is None:
+            self._populate_rule_inspector(None)
+            return
+        timestamp = self.model.selected_trade_candle_time(
+            self._current_trade_index()
+        )
+        if timestamp is None:
+            self._populate_rule_inspector(
+                {
+                    "status": "NOT_EVALUATED",
+                    "message": "Selected trade has no persisted signal-candle timestamp.",
+                    "rows": [],
+                }
+            )
+            return
+        self._populate_rule_inspector(self.model.rule_inspector_at(timestamp))
+
+    def _candle_selected_from_chart(self, timestamp):
+        if self.model is None:
+            return
+        try:
+            seconds = int(float(timestamp))
+            value = pd.Timestamp(seconds, unit="s", tz="UTC")
+            self._populate_rule_inspector(self.model.rule_inspector_at(value))
+            self.inspector_tabs.setCurrentIndex(1)
+        except Exception as exc:
+            self.rule_summary.setText(f"Could not inspect candle: {exc}")
+
+    def _populate_rule_inspector(self, trace):
+        trace = trace or {
+            "status": "NOT_EVALUATED",
+            "message": "No rule trace selected.",
+            "rows": [],
+        }
+        rows = list(trace.get("rows") or ())
+        self.rule_table.setRowCount(len(rows))
+        for row_number, item in enumerate(rows):
+            values = (
+                item.get("type", ""),
+                item.get("group", ""),
+                item.get("groupStatus", ""),
+                item.get("evidence", ""),
+                item.get("timeframe", ""),
+                item.get("actual", ""),
+                item.get("requirement", ""),
+                item.get("conditionStatus", ""),
+            )
+            for column, value in enumerate(values):
+                self.rule_table.setItem(
+                    row_number, column, QTableWidgetItem(str(value))
+                )
+        self.rule_table.resizeColumnsToContents()
+        self.rule_table.horizontalHeader().setStretchLastSection(True)
+
+        status = str(trace.get("status") or "")
+        if status == "AVAILABLE":
+            outcome = "PASSED" if trace.get("filterPassed") else "REJECTED"
+            self.rule_summary.setText(
+                f"{trace.get('timestamp', '')} · {trace.get('regime', '')} "
+                f"{trace.get('side', '')} · {trace.get('profile', '')} · "
+                f"{outcome}\n{trace.get('filterReason', '')}"
+            )
+        else:
+            self.rule_summary.setText(str(trace.get("message") or status))
 
     def _overlay_enabled(self, overlay):
         kind = overlay.get("kind")
