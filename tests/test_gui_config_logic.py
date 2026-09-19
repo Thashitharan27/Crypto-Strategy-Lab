@@ -124,13 +124,14 @@ def test_standard_analysis_preset_is_default():
     assert values["create_standard_charts"] is True
 
 
-def test_new_gui_defaults_to_btc_structural_regime():
+def test_new_gui_defaults_to_asset_return_regime_and_tighter_sr_near_distance():
     from crypto_strategy_lab.gui.config_logic import default_gui_config
 
     values = default_gui_config()
-    assert values["market_regime_method"] == "BTC_STRUCTURAL"
-    assert values["structural_regime_sma_days"] == 200
-    assert values["structural_regime_slope_lookback_days"] == 30
+    assert values["market_regime_method"] == "ASSET_RETURN"
+    assert values["bull_regime_lookback_days"] == 90
+    assert values["bull_regime_return_threshold"] == pytest.approx(0.20)
+    assert values["sr_near_distance_atr"] == pytest.approx(0.50)
 
 
 def test_configurable_timeframes_are_passed_to_backtest_config(tmp_path):

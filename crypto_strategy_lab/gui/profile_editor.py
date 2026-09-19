@@ -14,11 +14,11 @@ class StrategyProfilesWidget(QWidget):
         super().__init__(); self.profiles=default_profiles(); self.current="bull_long"; self._loading=False
         root=QVBoxLayout(self); top=QHBoxLayout(); self.mode=QComboBox(); self.mode.addItem("Combined shared account","COMBINED_SHARED_CAPITAL"); self.mode.addItem("Each profile separately","ISOLATED_PROFILES"); self.mode.addItem("Combined + separate comparison","BOTH"); top.addWidget(QLabel("Test mode")); top.addWidget(self.mode); top.addStretch(); root.addLayout(top)
         definition=QGroupBox("Market Regime Definition"); definition_form=QFormLayout(definition)
-        self.regime_method=QComboBox(); self.regime_method.addItem("BTC structural trend (market-wide)","BTC_STRUCTURAL"); self.regime_method.addItem("Selected asset structural trend","ASSET_STRUCTURAL"); self.regime_method.addItem("Asset trailing return","ASSET_RETURN")
+        self.regime_method=QComboBox(); self.regime_method.addItem("BTC structural trend (market-wide)","BTC_STRUCTURAL"); self.regime_method.addItem("Selected asset structural trend","ASSET_STRUCTURAL"); self.regime_method.addItem("Asset trailing return","ASSET_RETURN"); self.regime_method.setCurrentIndex(self.regime_method.findData("ASSET_RETURN"))
         self.structural_sma_days=QSpinBox(); self.structural_sma_days.setRange(2,3650); self.structural_sma_days.setSuffix(" days"); self.structural_sma_days.setValue(200)
         self.structural_slope_days=QSpinBox(); self.structural_slope_days.setRange(1,3650); self.structural_slope_days.setSuffix(" days"); self.structural_slope_days.setValue(30)
-        self.regime_lookback=QSpinBox(); self.regime_lookback.setRange(1,3650); self.regime_lookback.setSuffix(" days")
-        self.bull_threshold=QDoubleSpinBox(); self.bull_threshold.setRange(-99.99,10000); self.bull_threshold.setSuffix(" %"); self.bull_threshold.setDecimals(2)
+        self.regime_lookback=QSpinBox(); self.regime_lookback.setRange(1,3650); self.regime_lookback.setSuffix(" days"); self.regime_lookback.setValue(90)
+        self.bull_threshold=QDoubleSpinBox(); self.bull_threshold.setRange(-99.99,10000); self.bull_threshold.setSuffix(" %"); self.bull_threshold.setDecimals(2); self.bull_threshold.setValue(20.0)
         self.adx_period=QSpinBox(); self.adx_period.setRange(1,1000); self.bb_period=QSpinBox(); self.bb_period.setRange(2,1000); self.bb_stddevs=QDoubleSpinBox(); self.bb_stddevs.setRange(.01,20); self.bb_stddevs.setDecimals(2)
         for label,widget in (("Regime method",self.regime_method),("Trend average",self.structural_sma_days),("Average slope",self.structural_slope_days),("Return lookback",self.regime_lookback),("Bull/Bear threshold magnitude",self.bull_threshold),("ADX period",self.adx_period),("Bollinger period",self.bb_period),("Bollinger deviations",self.bb_stddevs)): definition_form.addRow(label,widget)
         self.definition_form=definition_form
