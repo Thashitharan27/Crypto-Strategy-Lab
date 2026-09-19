@@ -51,6 +51,7 @@ class SRLevel:
     first_touch_index: int  # earliest touch
     touch_count: int = 1
     confirmed_at_index: Optional[int] = None  # after pivot_right delay
+    anchor_atr: Optional[float] = None  # ATR known when the pivot became usable
     zone_bottom: Optional[float] = None
     zone_top: Optional[float] = None
     source_bar_indices: tuple[int, ...] = ()
@@ -243,7 +244,7 @@ class SwingDetector:
 
 
 class SRZoneMerger:
-    """Merges confirmed pivots and expands them into ATR-sized price zones."""
+    """Build stable zones from confirmed pivots using pivot-anchored volatility."""
 
     def __init__(
         self,
@@ -254,45 +255,77 @@ class SRZoneMerger:
         """
         Args:
             zone_width_atr:
-                Maximum adjacent-pivot distance used to merge nearby pivots.
-                Retained under its historical config name for compatibility.
+                Maximum adjacent-pivot distance, measured against the smaller
+                confirmation-time ATR of the two pivots being compared.
             zone_padding_atr:
-                Padding added below and above every raw pivot cluster. This gives
-                a single confirmed pivot a real price zone instead of a zero-width
-                line.
+                Symmetric padding applied to each pivot using that pivot's own
+                confirmation-time ATR.
             max_cluster_span_atr:
-                Maximum raw price span from the first to last pivot in one cluster.
-                This prevents adjacent-pivot chaining from creating an arbitrarily
-                wide zone.
+                Maximum raw first-to-last pivot span, measured against the
+                smallest confirmation-time ATR inside the proposed cluster.
         """
         self.zone_width_atr = max(0.0, float(zone_width_atr))
         self.zone_padding_atr = max(0.0, float(zone_padding_atr))
         self.max_cluster_span_atr = max(0.0, float(max_cluster_span_atr))
 
+    @staticmethod
+    def _anchored_atr(level: SRLevel, fallback_atr: float | None) -> float:
+        """Return a stable ATR for one pivot, with fallback only for legacy callers."""
+        anchor = level.anchor_atr
+        if anchor is not None:
+            try:
+                anchor_value = float(anchor)
+            except (TypeError, ValueError):
+                anchor_value = float("nan")
+            if np.isfinite(anchor_value) and anchor_value > 0:
+                return anchor_value
+        try:
+            fallback = float(fallback_atr)
+        except (TypeError, ValueError):
+            fallback = float("nan")
+        return fallback if np.isfinite(fallback) and fallback > 0 else float("nan")
+
     def merge_levels(
-        self, levels: list[SRLevel], atr: float
+        self, levels: list[SRLevel], atr: float | None = None
     ) -> list[SRLevel]:
-        """Merge nearby confirmed pivots, cap raw cluster span, then pad the zone."""
+        """Merge pivots deterministically from stored confirmation-time ATRs.
+
+        The optional atr argument exists only for backward-compatible direct
+        callers/tests that construct SRLevel objects without anchor_atr.
+        Runtime-detected pivots always carry their own anchor, so changing current
+        ATR cannot move, resize, merge, or split historical zones.
+        """
         if not levels:
             return []
 
-        if not np.isfinite(atr) or atr <= 0:
-            return levels
-
         sorted_levels = sorted(levels, key=lambda x: x.price)
-        merged = []
+        merged: list[SRLevel] = []
         current_zone = [sorted_levels[0]]
 
-        merge_distance = self.zone_width_atr * atr
-        maximum_span = self.max_cluster_span_atr * atr
-
         for level in sorted_levels[1:]:
-            adjacent_distance = abs(level.price - current_zone[-1].price)
+            previous = current_zone[-1]
+            previous_atr = self._anchored_atr(previous, atr)
+            candidate_atr = self._anchored_atr(level, atr)
+            pair_reference = min(previous_atr, candidate_atr)
+            proposed_atrs = [
+                self._anchored_atr(item, atr) for item in (*current_zone, level)
+            ]
+            finite_atrs = [
+                value for value in proposed_atrs if np.isfinite(value) and value > 0
+            ]
+            cluster_reference = min(finite_atrs) if finite_atrs else float("nan")
+
+            adjacent_distance = abs(level.price - previous.price)
             raw_cluster_span = level.price - current_zone[0].price
-            if (
-                adjacent_distance <= merge_distance
-                and raw_cluster_span <= maximum_span
-            ):
+            within_adjacent = (
+                np.isfinite(pair_reference)
+                and adjacent_distance <= self.zone_width_atr * pair_reference
+            )
+            within_span = (
+                np.isfinite(cluster_reference)
+                and raw_cluster_span <= self.max_cluster_span_atr * cluster_reference
+            )
+            if within_adjacent and within_span:
                 current_zone.append(level)
             else:
                 merged.append(self._finalize_zone(current_zone, atr))
@@ -301,29 +334,51 @@ class SRZoneMerger:
         merged.append(self._finalize_zone(current_zone, atr))
         return merged
 
-    def _finalize_zone(self, zone_levels: list[SRLevel], atr: float) -> SRLevel:
-        """Create one padded zone from the raw pivot prices in a cluster."""
-        prices = [l.price for l in zone_levels]
+    def _finalize_zone(
+        self, zone_levels: list[SRLevel], fallback_atr: float | None
+    ) -> SRLevel:
+        """Create a fixed zone from pivot prices plus each pivot's anchored padding."""
+        prices = [float(level.price) for level in zone_levels]
         level_type = zone_levels[0].level_type
 
-        # Preserve the historical representative price semantics. Support uses
-        # the lowest raw pivot; resistance uses the highest raw pivot.
         if level_type == SRLevelType.SUPPORT:
             zone_price = min(prices)
         else:
             zone_price = max(prices)
 
+        anchored_atrs = [
+            self._anchored_atr(level, fallback_atr) for level in zone_levels
+        ]
+        lower_edges = []
+        upper_edges = []
+        for level, anchor in zip(zone_levels, anchored_atrs):
+            padding = self.zone_padding_atr * anchor if np.isfinite(anchor) else 0.0
+            lower_edges.append(float(level.price) - padding)
+            upper_edges.append(float(level.price) + padding)
+
+        finite_anchors = [
+            value for value in anchored_atrs if np.isfinite(value) and value > 0
+        ]
+        representative_anchor = min(finite_anchors) if finite_anchors else None
         result = SRLevel(
             price=zone_price,
             level_type=level_type,
-            bar_index=max(l.bar_index for l in zone_levels),
-            first_touch_index=min(l.first_touch_index for l in zone_levels),
-            touch_count=sum(l.touch_count for l in zone_levels),
-            source_bar_indices=tuple(l.bar_index for l in zone_levels),
+            bar_index=max(level.bar_index for level in zone_levels),
+            first_touch_index=min(level.first_touch_index for level in zone_levels),
+            touch_count=sum(level.touch_count for level in zone_levels),
+            confirmed_at_index=max(
+                (
+                    level.confirmed_at_index
+                    if level.confirmed_at_index is not None
+                    else level.bar_index
+                )
+                for level in zone_levels
+            ),
+            anchor_atr=representative_anchor,
+            source_bar_indices=tuple(level.bar_index for level in zone_levels),
         )
-        padding = self.zone_padding_atr * atr
-        result.zone_bottom = min(prices) - padding
-        result.zone_top = max(prices) + padding
+        result.zone_bottom = min(lower_edges)
+        result.zone_top = max(upper_edges)
         return result
 
 
@@ -487,6 +542,13 @@ class SupportResistanceDetector:
                             bar_index=candidate_index,
                             first_touch_index=candidate_index,
                             confirmed_at_index=current_index,
+                            anchor_atr=(
+                                float(atr_values[current_index])
+                                if current_index < len(atr_values)
+                                and np.isfinite(atr_values[current_index])
+                                and float(atr_values[current_index]) > 0
+                                else None
+                            ),
                         ),
                     )
                 if self._is_swing_low(low, candidate_index):
@@ -498,6 +560,13 @@ class SupportResistanceDetector:
                             bar_index=candidate_index,
                             first_touch_index=candidate_index,
                             confirmed_at_index=current_index,
+                            anchor_atr=(
+                                float(atr_values[current_index])
+                                if current_index < len(atr_values)
+                                and np.isfinite(atr_values[current_index])
+                                and float(atr_values[current_index]) > 0
+                                else None
+                            ),
                         ),
                     )
             self._expire_levels(current_index)
