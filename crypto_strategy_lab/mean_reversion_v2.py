@@ -12,11 +12,43 @@ import pandas as pd
 from crypto_strategy_lab.mean_reversion import ema
 
 
+AUTO_TIMEFRAME_MEAN_TYPE = "AUTO_TIMEFRAME"
+_VALID_MEAN_TYPES = {"SMA", "EMA", AUTO_TIMEFRAME_MEAN_TYPE}
+
+
+def normalize_mean_type(mean_type: str) -> str:
+    """Return the canonical requested MR mean mode."""
+    kind = str(mean_type).strip().upper()
+    if kind in {"AUTO", "TIMEFRAME_AUTO"}:
+        kind = AUTO_TIMEFRAME_MEAN_TYPE
+    if kind not in _VALID_MEAN_TYPES:
+        raise ValueError("mean_reversion_mean_type must be AUTO_TIMEFRAME, SMA or EMA")
+    return kind
+
+
+def resolve_mean_type(mean_type: str, strategy_timeframe_minutes: int) -> str:
+    """Resolve AUTO_TIMEFRAME to the concrete mean used for calculation.
+
+    Intraday execution/context timeframes below 4h use EMA for a more current
+    equilibrium. Structural timeframes from 4h upward use SMA for a steadier
+    multi-session reference.
+    """
+    requested = normalize_mean_type(mean_type)
+    minutes = int(strategy_timeframe_minutes)
+    if minutes <= 0:
+        raise ValueError("strategy_timeframe_minutes must be positive")
+    if requested == AUTO_TIMEFRAME_MEAN_TYPE:
+        return "EMA" if minutes < 240 else "SMA"
+    return requested
+
+
 def moving_mean(values, period: int, mean_type: str = "SMA") -> np.ndarray:
     """Return a causal SMA or EMA with a full-period warm-up."""
     if period <= 0:
         raise ValueError("mean reversion period must be positive")
-    kind = str(mean_type).upper()
+    kind = normalize_mean_type(mean_type)
+    if kind == AUTO_TIMEFRAME_MEAN_TYPE:
+        raise ValueError("AUTO_TIMEFRAME must be resolved before moving_mean is calculated")
     values = np.asarray(values, dtype=float)
     if kind == "EMA":
         return ema(values, period)
