@@ -20,6 +20,7 @@ from crypto_strategy_lab.data import DatasetKind
 from crypto_strategy_lab.data.timing import interval_to_timedelta
 from crypto_strategy_lab.data.source_identity import SourceSignature
 from crypto_strategy_lab.gui.completed_run_research import research_seed_from_manifest
+from crypto_strategy_lab.research_warmup import expand_strategy_request
 from crypto_strategy_lab.strategy_rule_model import (
     CATEGORICAL_VALUE_CODES,
     is_context_timeframe_evidence,
@@ -331,8 +332,33 @@ class CompletedRunVisualizer:
             DatasetKind.KLINES, identities
         ).cache_identity()
         request = seed.request.to_data_request((DatasetKind.KLINES,))
+
+        # Completed-run provenance records every source partition selected by the
+        # real research load. ResearchRunner expands the strategy-history start
+        # for causal indicator/S/R warm-up before that selection, so verification
+        # must reconstruct the same expanded request rather than compare only the
+        # user-visible research range.
+        earliest_start = None
+        catalog = getattr(service.store, "catalog", None)
+        if catalog is not None and hasattr(catalog, "coverage"):
+            try:
+                coverage = catalog.coverage(
+                    service.store.raw_root,
+                    market=request.market,
+                    dataset=DatasetKind.KLINES,
+                    symbol=request.symbol,
+                    interval=request.strategy_interval,
+                )
+                earliest_start = coverage.first_period
+            except Exception:
+                earliest_start = None
+        source_request = expand_strategy_request(
+            request,
+            seed.config,
+            earliest_start=earliest_start,
+        )
         current = service.store.canonical_source_identity(
-            request, DatasetKind.KLINES, interval=interval
+            source_request, DatasetKind.KLINES, interval=interval
         ).cache_identity()
         if current != expected:
             raise ValueError(
