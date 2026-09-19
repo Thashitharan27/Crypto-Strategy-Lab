@@ -1586,6 +1586,7 @@ class CompletedRunVisualizer:
             raise ValueError("no canonical strategy candles are available for this chart window")
         context = self._feature_context(visible_start, visible_end)
         signals = self._signals(visible_start, visible_end)
+        zone_inventory = self._sr_zone_inventory(visible_start, visible_end)
 
         visible = market[
             (market["period_start"] >= visible_start)
@@ -1605,7 +1606,43 @@ class CompletedRunVisualizer:
         entry_snapshot = self.selected_trade_candle_time(trade_index)
         sr_zones: list[dict[str, Any]] = []
         sr_events: list[dict[str, Any]] = []
-        if not context.empty:
+        if not zone_inventory.empty:
+            sr_zones = self._inventory_sr_zones(
+                zone_inventory,
+                visible_start=visible_start,
+                visible_end=visible_end,
+                entry_snapshot=entry_snapshot,
+            )
+            sr_events = self._inventory_sr_lifecycle_events(zone_inventory)
+            if not context.empty:
+                # Broken zones are retired from the active inventory immediately.
+                # Preserve causal BREAK markers from the nearest-context lifecycle.
+                for label in SR_TIMEFRAMES:
+                    sr_events.extend(
+                        event
+                        for event in self._sr_lifecycle_events(
+                            context, label, visible_start
+                        )
+                        if event.get("event") == "break"
+                    )
+            sr_events = sorted(
+                {
+                    (
+                        int(event["time"]),
+                        str(event.get("timeframe")),
+                        str(event.get("structure")),
+                        str(event.get("event")),
+                    ): event
+                    for event in sr_events
+                }.values(),
+                key=lambda item: (
+                    int(item["time"]),
+                    str(item.get("timeframe")),
+                    str(item.get("structure")),
+                ),
+            )
+        elif not context.empty:
+            # Legacy completed runs contain nearest-zone context only.
             for label in SR_TIMEFRAMES:
                 sr_zones.extend(
                     self._sr_zones(
@@ -1626,6 +1663,7 @@ class CompletedRunVisualizer:
                 "end": _utc(request.period_end).isoformat(),
                 "sourceVerified": self.source_verified,
                 "ruleTraceAvailable": self.rule_trace_path is not None,
+                "srZoneInventoryAvailable": self.sr_zones_path is not None,
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": self.selected_trade_summary(trade_index),
