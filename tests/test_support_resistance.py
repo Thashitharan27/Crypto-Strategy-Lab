@@ -116,105 +116,135 @@ class TestSwingDetector:
 
 
 class TestSRZoneMerger:
-    """Tests for zone merging logic."""
-    
-    def test_single_level_becomes_padded_zone(self):
-        """One confirmed pivot is a real zone rather than a zero-width line."""
+    """Tests for v6 rejection-zone merging."""
+
+    def test_single_rejection_zone_preserves_candle_geometry(self):
         merger = SRZoneMerger(
-            zone_width_atr=1.0,
-            zone_padding_atr=0.25,
-            max_cluster_span_atr=1.0,
+            zone_width_atr=0.15,
+            zone_padding_atr=0.10,
+            max_cluster_span_atr=0.50,
         )
         level = SRLevel(
             price=100.0,
-            level_type=SRLevelType.SUPPORT,
+            level_type=SRLevelType.RESISTANCE,
             bar_index=10,
             first_touch_index=10,
+            confirmed_at_index=12,
+            anchor_atr=10.0,
+            zone_bottom=98.5,
+            zone_top=100.0,
+            source_bar_indices=(10,),
         )
 
-        merged = merger.merge_levels([level], atr=10.0)
+        merged = merger.merge_levels([level], atr=50.0)
+
         assert len(merged) == 1
-        assert merged[0].price == 100.0
-        assert merged[0].zone_bottom == pytest.approx(97.5)
-        assert merged[0].zone_top == pytest.approx(102.5)
-    
-    def test_nearby_levels_merged(self):
-        """Levels within zone_width_atr merged into zone."""
+        assert merged[0].zone_bottom == pytest.approx(98.5)
+        assert merged[0].zone_top == pytest.approx(100.0)
+
+    def test_nearby_rejection_zones_merge_by_edge_gap(self):
         merger = SRZoneMerger(
-            zone_width_atr=1.0,
-            zone_padding_atr=0.25,
-            max_cluster_span_atr=1.0,
-        )
-        atr = 10.0  # merge distance = 10; padding = 2.5
-
-        levels = [
-            SRLevel(100.0, SRLevelType.SUPPORT, 5, 5),
-            SRLevel(105.0, SRLevelType.SUPPORT, 10, 10),  # 5 away, within 10
-        ]
-
-        merged = merger.merge_levels(levels, atr)
-        assert len(merged) == 1, "Expected 1 merged zone"
-        assert merged[0].zone_bottom == pytest.approx(97.5)
-        assert merged[0].zone_top == pytest.approx(107.5)
-        assert merged[0].touch_count == 2
-    
-    def test_adjacent_pivot_chaining_is_capped_by_raw_cluster_span(self):
-        """Adjacent pivots cannot chain into an arbitrarily wide S/R zone."""
-        merger = SRZoneMerger(
-            zone_width_atr=0.5,
-            zone_padding_atr=0.25,
-            max_cluster_span_atr=1.0,
-        )
-        atr = 100.0
-        levels = [
-            SRLevel(9800.0, SRLevelType.RESISTANCE, 5, 5),
-            SRLevel(9845.0, SRLevelType.RESISTANCE, 10, 10),
-            SRLevel(9890.0, SRLevelType.RESISTANCE, 15, 15),
-            SRLevel(9935.0, SRLevelType.RESISTANCE, 20, 20),
-        ]
-
-        merged = merger.merge_levels(levels, atr)
-
-        assert len(merged) == 2
-        assert merged[0].source_bar_indices == (5, 10, 15)
-        assert merged[0].zone_bottom == pytest.approx(9775.0)
-        assert merged[0].zone_top == pytest.approx(9915.0)
-        assert merged[1].source_bar_indices == (20,)
-        assert merged[1].zone_bottom == pytest.approx(9910.0)
-        assert merged[1].zone_top == pytest.approx(9960.0)
-
-    def test_padded_zone_is_nearest_structure_while_price_is_inside(self):
-        merger = SRZoneMerger(
-            zone_width_atr=0.5,
-            zone_padding_atr=0.25,
-            max_cluster_span_atr=1.0,
-        )
-        detector = SupportResistanceDetector()
-        support = merger.merge_levels(
-            [SRLevel(100.0, SRLevelType.SUPPORT, 5, 5)], atr=10.0
-        )[0]
-        resistance = merger.merge_levels(
-            [SRLevel(100.0, SRLevelType.RESISTANCE, 6, 6)], atr=10.0
-        )[0]
-
-        assert detector._nearest_level([support], 99.0, below=True) is support
-        assert detector._nearest_level([resistance], 101.0, below=False) is resistance
-
-    def test_anchored_zone_geometry_ignores_later_current_atr(self):
-        """Current volatility cannot resize or regroup already-confirmed pivots."""
-        merger = SRZoneMerger(
-            zone_width_atr=0.5,
-            zone_padding_atr=0.25,
-            max_cluster_span_atr=1.0,
+            zone_width_atr=0.20,
+            zone_padding_atr=0.10,
+            max_cluster_span_atr=0.50,
         )
         levels = [
             SRLevel(
                 100.0, SRLevelType.RESISTANCE, 5, 5,
                 confirmed_at_index=7, anchor_atr=10.0,
+                zone_bottom=99.0, zone_top=100.0,
+                source_bar_indices=(5,),
+            ),
+            SRLevel(
+                103.0, SRLevelType.RESISTANCE, 10, 10,
+                confirmed_at_index=12, anchor_atr=10.0,
+                zone_bottom=101.0, zone_top=103.0,
+                source_bar_indices=(10,),
+            ),
+        ]
+
+        merged = merger.merge_levels(levels, atr=100.0)
+
+        assert len(merged) == 1
+        assert merged[0].zone_bottom == pytest.approx(99.0)
+        assert merged[0].zone_top == pytest.approx(103.0)
+        assert merged[0].source_bar_indices == (5, 10)
+
+    def test_zone_chaining_is_capped_by_maximum_cluster_width(self):
+        merger = SRZoneMerger(
+            zone_width_atr=0.25,
+            zone_padding_atr=0.10,
+            max_cluster_span_atr=1.0,
+        )
+        levels = [
+            SRLevel(
+                9820.0, SRLevelType.RESISTANCE, 5, 5,
+                confirmed_at_index=7, anchor_atr=100.0,
+                zone_bottom=9800.0, zone_top=9820.0,
+                source_bar_indices=(5,),
+            ),
+            SRLevel(
+                9860.0, SRLevelType.RESISTANCE, 10, 10,
+                confirmed_at_index=12, anchor_atr=100.0,
+                zone_bottom=9840.0, zone_top=9860.0,
+                source_bar_indices=(10,),
+            ),
+            SRLevel(
+                9900.0, SRLevelType.RESISTANCE, 15, 15,
+                confirmed_at_index=17, anchor_atr=100.0,
+                zone_bottom=9880.0, zone_top=9900.0,
+                source_bar_indices=(15,),
+            ),
+            SRLevel(
+                9940.0, SRLevelType.RESISTANCE, 20, 20,
+                confirmed_at_index=22, anchor_atr=100.0,
+                zone_bottom=9920.0, zone_top=9940.0,
+                source_bar_indices=(20,),
+            ),
+        ]
+
+        merged = merger.merge_levels(levels, atr=500.0)
+
+        assert len(merged) == 2
+        assert merged[0].source_bar_indices == (5, 10, 15)
+        assert merged[0].zone_bottom == pytest.approx(9800.0)
+        assert merged[0].zone_top == pytest.approx(9900.0)
+        assert merged[1].source_bar_indices == (20,)
+
+    def test_zone_is_nearest_structure_while_price_is_inside(self):
+        detector = SupportResistanceDetector()
+        support = SRLevel(
+            100.0, SRLevelType.SUPPORT, 5, 5,
+            confirmed_at_index=7, anchor_atr=10.0,
+            zone_bottom=100.0, zone_top=102.0,
+        )
+        resistance = SRLevel(
+            110.0, SRLevelType.RESISTANCE, 6, 6,
+            confirmed_at_index=8, anchor_atr=10.0,
+            zone_bottom=108.0, zone_top=110.0,
+        )
+
+        assert detector._nearest_level([support], 101.0, below=True) is support
+        assert detector._nearest_level([resistance], 109.0, below=False) is resistance
+
+    def test_anchored_rejection_zone_geometry_ignores_later_current_atr(self):
+        merger = SRZoneMerger(
+            zone_width_atr=0.20,
+            zone_padding_atr=0.10,
+            max_cluster_span_atr=0.60,
+        )
+        levels = [
+            SRLevel(
+                100.0, SRLevelType.RESISTANCE, 5, 5,
+                confirmed_at_index=7, anchor_atr=10.0,
+                zone_bottom=98.0, zone_top=100.0,
+                source_bar_indices=(5,),
             ),
             SRLevel(
                 104.0, SRLevelType.RESISTANCE, 10, 10,
                 confirmed_at_index=12, anchor_atr=12.0,
+                zone_bottom=102.0, zone_top=104.0,
+                source_bar_indices=(10,),
             ),
         ]
 
@@ -222,48 +252,62 @@ class TestSRZoneMerger:
         high_vol_now = merger.merge_levels(levels, atr=100.0)
 
         assert len(low_vol_now) == len(high_vol_now) == 1
-        assert low_vol_now[0].source_bar_indices == high_vol_now[0].source_bar_indices
-        assert low_vol_now[0].zone_bottom == pytest.approx(97.5)
-        assert low_vol_now[0].zone_top == pytest.approx(107.0)
-        assert high_vol_now[0].zone_bottom == pytest.approx(97.5)
-        assert high_vol_now[0].zone_top == pytest.approx(107.0)
+        assert low_vol_now[0].zone_bottom == pytest.approx(98.0)
+        assert low_vol_now[0].zone_top == pytest.approx(104.0)
+        assert high_vol_now[0].zone_bottom == pytest.approx(98.0)
+        assert high_vol_now[0].zone_top == pytest.approx(104.0)
 
-    def test_far_levels_separate(self):
-        """Levels far apart remain separate zones."""
-        merger = SRZoneMerger(zone_width_atr=1.0)
-        atr = 10.0  # zone_width = 10
-        
+    def test_far_zones_remain_separate(self):
+        merger = SRZoneMerger(
+            zone_width_atr=0.15,
+            zone_padding_atr=0.10,
+            max_cluster_span_atr=0.50,
+        )
         levels = [
-            SRLevel(100.0, SRLevelType.SUPPORT, 5, 5),
-            SRLevel(120.0, SRLevelType.SUPPORT, 10, 10),  # 20 away, > 10
+            SRLevel(
+                100.0, SRLevelType.SUPPORT, 5, 5,
+                confirmed_at_index=7, anchor_atr=10.0,
+                zone_bottom=100.0, zone_top=101.0,
+            ),
+            SRLevel(
+                120.0, SRLevelType.SUPPORT, 10, 10,
+                confirmed_at_index=12, anchor_atr=10.0,
+                zone_bottom=120.0, zone_top=121.0,
+            ),
         ]
-        
-        merged = merger.merge_levels(levels, atr)
-        assert len(merged) == 2, "Expected 2 separate zones"
-    
-    def test_support_zone_uses_min_price(self):
-        """Support zone price is minimum of group."""
-        merger = SRZoneMerger(zone_width_atr=2.0)
+        assert len(merger.merge_levels(levels, atr=10.0)) == 2
+
+    def test_support_zone_uses_lowest_pivot_as_representative_price(self):
+        merger = SRZoneMerger(zone_width_atr=1.0, max_cluster_span_atr=2.0)
         levels = [
-            SRLevel(105.0, SRLevelType.SUPPORT, 10, 10),
-            SRLevel(100.0, SRLevelType.SUPPORT, 5, 5),
+            SRLevel(
+                105.0, SRLevelType.SUPPORT, 10, 10,
+                anchor_atr=10.0, zone_bottom=105.0, zone_top=106.0,
+            ),
+            SRLevel(
+                100.0, SRLevelType.SUPPORT, 5, 5,
+                anchor_atr=10.0, zone_bottom=100.0, zone_top=101.0,
+            ),
         ]
-        
         merged = merger.merge_levels(levels, atr=10.0)
         assert len(merged) == 1
-        assert merged[0].price == 100.0, "Support zone should use minimum"
-    
-    def test_resistance_zone_uses_max_price(self):
-        """Resistance zone price is maximum of group."""
-        merger = SRZoneMerger(zone_width_atr=2.0)
+        assert merged[0].price == 100.0
+
+    def test_resistance_zone_uses_highest_pivot_as_representative_price(self):
+        merger = SRZoneMerger(zone_width_atr=1.0, max_cluster_span_atr=2.0)
         levels = [
-            SRLevel(100.0, SRLevelType.RESISTANCE, 5, 5),
-            SRLevel(105.0, SRLevelType.RESISTANCE, 10, 10),
+            SRLevel(
+                100.0, SRLevelType.RESISTANCE, 5, 5,
+                anchor_atr=10.0, zone_bottom=99.0, zone_top=100.0,
+            ),
+            SRLevel(
+                105.0, SRLevelType.RESISTANCE, 10, 10,
+                anchor_atr=10.0, zone_bottom=104.0, zone_top=105.0,
+            ),
         ]
-        
         merged = merger.merge_levels(levels, atr=10.0)
         assert len(merged) == 1
-        assert merged[0].price == 105.0, "Resistance zone should use maximum"
+        assert merged[0].price == 105.0
 
 
 class TestSupportResistanceFiltering:
@@ -475,12 +519,12 @@ class TestSupportResistanceDetector:
         low_now = evaluate(atr_low_now)
         high_now = evaluate(atr_high_now)
 
-        assert low_now.resistance_zone_low == pytest.approx(13.25)
-        assert low_now.resistance_zone_high == pytest.approx(16.75)
-        assert high_now.resistance_zone_low == pytest.approx(13.25)
-        assert high_now.resistance_zone_high == pytest.approx(16.75)
-        assert low_now.nearest_resistance_distance_price == pytest.approx(1.25)
-        assert high_now.nearest_resistance_distance_price == pytest.approx(1.25)
+        assert low_now.resistance_zone_low == pytest.approx(12.0)
+        assert low_now.resistance_zone_high == pytest.approx(15.0)
+        assert high_now.resistance_zone_low == pytest.approx(12.0)
+        assert high_now.resistance_zone_high == pytest.approx(15.0)
+        assert low_now.nearest_resistance_distance_price == pytest.approx(0.0)
+        assert high_now.nearest_resistance_distance_price == pytest.approx(0.0)
         assert low_now.nearest_resistance_distance_atr != pytest.approx(
             high_now.nearest_resistance_distance_atr
         )
@@ -795,39 +839,82 @@ class TestSupportResistanceDetector:
         # Should return default (no errors)
         assert context.price_location == LocationClassification.NO_STRUCTURE
 
-    def test_incremental_levels_match_legacy_swing_scan(self):
-        """Incremental active levels match the original causal scan."""
-        rng = np.random.default_rng(42)
-        close = 100.0 + np.cumsum(rng.normal(0.0, 0.5, 120))
-        high = close + rng.uniform(0.1, 1.0, len(close))
-        low = close - rng.uniform(0.1, 1.0, len(close))
-        opens = close.copy()
-        atrs = np.full(len(close), 1.5)
-        detector = SupportResistanceDetector(pivot_left=3, pivot_right=2, lookback_bars=40)
+    def test_weak_swing_is_not_promoted_without_meaningful_rejection(self):
+        detector = SupportResistanceDetector(
+            pivot_left=1,
+            pivot_right=1,
+            lookback_bars=20,
+            min_rejection_atr=0.75,
+        )
+        open_ = np.array([100.0, 100.0, 100.0, 100.0, 100.0])
+        high = np.array([101.0, 102.0, 101.0, 101.0, 101.0])
+        low = np.array([99.0, 99.5, 99.0, 99.0, 99.0])
+        close = np.array([100.0, 100.5, 100.4, 100.3, 100.2])
+        atr = np.ones(5)
 
-        for index in range(len(close)):
-            context = detector.analyze_price_location(index, opens, high, low, close, atrs, "LONG")
-            high_indices = detector.swing_detector.detect_swing_highs(high, index)
-            low_indices = detector.swing_detector.detect_swing_lows(low, index)
-            start = max(0, index - detector.lookback_bars)
-            expected_highs = [
-                SRLevel(float(high[i]), SRLevelType.RESISTANCE, i, i)
-                for i in high_indices if i >= start
-            ]
-            expected_lows = [
-                SRLevel(float(low[i]), SRLevelType.SUPPORT, i, i)
-                for i in low_indices if i >= start
-            ]
-            expected_resistance = detector.zone_merger.merge_levels(expected_highs, atrs[index])
-            expected_support = detector.zone_merger.merge_levels(expected_lows, atrs[index])
-            expected_nearest_support = detector._nearest_level(expected_support, close[index], below=True)
-            expected_nearest_resistance = detector._nearest_level(expected_resistance, close[index], below=False)
-            assert context.nearest_support_bar_index == (
-                expected_nearest_support.bar_index if expected_nearest_support else None
-            )
-            assert context.nearest_resistance_bar_index == (
-                expected_nearest_resistance.bar_index if expected_nearest_resistance else None
-            )
+        detector.analyze_price_location(
+            4, open_, high, low, close, atr, "LONG"
+        )
+
+        assert detector._confirmed_highs == []
+
+    def test_pivot_zone_uses_wick_to_body_geometry_with_atr_caps(self):
+        detector = SupportResistanceDetector(
+            pivot_left=1,
+            pivot_right=1,
+            lookback_bars=20,
+            zone_padding_atr=0.10,
+            max_cluster_span_atr=0.50,
+            min_rejection_atr=0.25,
+        )
+        open_ = np.array([100.0, 108.0, 103.0, 102.0])
+        high = np.array([101.0, 112.0, 104.0, 103.0])
+        low = np.array([99.0, 107.0, 101.0, 101.0])
+        close = np.array([100.0, 109.0, 102.0, 102.0])
+        atr = np.full(4, 10.0)
+
+        detector.analyze_price_location(
+            3, open_, high, low, close, atr, "LONG"
+        )
+
+        assert detector._confirmed_highs
+        zone = detector._confirmed_highs[0]
+        # Raw rejection area is body-top 109 -> wick high 112.
+        assert zone.zone_bottom == pytest.approx(109.0)
+        assert zone.zone_top == pytest.approx(112.0)
+        assert zone.validation_rejection_atr >= 0.25
+
+    def test_broken_support_is_retired_but_break_state_is_preserved(self):
+        detector = SupportResistanceDetector(
+            pivot_left=1,
+            pivot_right=1,
+            lookback_bars=30,
+            min_rejection_atr=0.25,
+            break_tolerance_atr=0.10,
+        )
+        open_ = np.array([105, 100, 105, 105, 99, 98, 97], dtype=float)
+        high = np.array([106, 101, 106, 106, 100, 99, 98], dtype=float)
+        low = np.array([104, 98, 104, 104, 97, 96, 95], dtype=float)
+        close = np.array([105, 100, 105, 105, 97, 96, 96], dtype=float)
+        atr = np.full(len(close), 2.0)
+
+        before = detector.analyze_price_location(
+            3, open_, high, low, close, atr, "LONG"
+        )
+        assert before.nearest_support_price is not None
+
+        broken = detector.analyze_price_location(
+            4, open_, high, low, close, atr, "LONG"
+        )
+        assert broken.support_state == "SUPPORT_BROKEN"
+        assert broken.nearest_support_price is None
+
+        later = detector.analyze_price_location(
+            6, open_, high, low, close, atr, "LONG"
+        )
+        assert later.nearest_support_price is None
+        assert later.support_state == "SUPPORT_BROKEN"
+
 
     def test_context_cache_and_directional_derivation(self):
         """Repeated requests reuse structural work and only derive direction-specific fields."""
