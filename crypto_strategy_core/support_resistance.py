@@ -846,13 +846,16 @@ class SupportResistanceDetector:
         return {"state": state_value, "tested": bool(state.get("test_count", 0)), "held": state_value == held_value, "rejection_atr": state.get("rejection_atr", np.nan), "test_count": int(state.get("test_count", 0)), "bars_since_test": index - last_test if last_test is not None else None, "last_test_index": last_test}
 
     def _interaction_metrics_for_active_state(self, index: int, support: bool, wanted_state: str, atr: float) -> dict:
+        current_levels = self._confirmed_lows if support else self._confirmed_highs
+        current_sources = {int(level.bar_index) for level in current_levels}
         matches = [
             state
-            for (kind, _sources), state in self._interaction_state.items()
+            for (kind, sources), state in self._interaction_state.items()
             if kind == (
                 SRLevelType.SUPPORT.value if support else SRLevelType.RESISTANCE.value
             )
             and state.get("state") == wanted_state
+            and any(int(source) in current_sources for source in sources)
         ]
         if not matches:
             return self._interaction_metrics(None, index, support)
