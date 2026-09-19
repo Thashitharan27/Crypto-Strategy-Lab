@@ -205,23 +205,23 @@ def test_ai_snapshot_uses_trade_relative_sr_v2_and_adds_structure():
     assert "enabled" not in enriched["directional_context"]["SHORT"]["trade_contract"]
 
     long_1h = sr["long"]["timeframes"]["1h"]
-    assert long_1h["SR_ENTRY_RELATION"] == "NEAR_FAVORABLE_STRUCTURE"
-    assert long_1h["SR_FAVORABLE_STRUCTURE_STATE"] == "HELD"
-    assert long_1h["SR_OPPOSING_DISTANCE_NATIVE_ATR"] == 3.0
-    assert long_1h["SR_OPPOSING_DISTANCE_STRATEGY_ATR"] == 6.0
-    assert long_1h["SR_OPPOSING_ROOM_R"] == 6.0
-    assert long_1h["SR_OPPOSING_ROOM_TARGET_MULTIPLE"] == 2.0
-    assert long_1h["SR_TARGET_PATH"] == "TARGET_BEFORE_OPPOSING_ZONE"
+    assert long_1h["entry_relation"] == "NEAR_FAVORABLE_STRUCTURE"
+    assert long_1h["favorable_structure_state"] == "HELD"
+    assert long_1h["opposing_distance_native_atr"] == 3.0
+    assert long_1h["opposing_distance_strategy_atr"] == 6.0
+    assert long_1h["opposing_room_r"] == 6.0
+    assert long_1h["opposing_room_target_multiple"] == 2.0
+    assert long_1h["target_path"] == "TARGET_BEFORE_OPPOSING_ZONE"
 
     long_4h = sr["long"]["timeframes"]["4h"]
-    assert long_4h["SR_OPPOSING_DISTANCE_NATIVE_ATR"] == 1.0
-    assert long_4h["SR_OPPOSING_DISTANCE_STRATEGY_ATR"] == 6.0
+    assert long_4h["opposing_distance_native_atr"] == 1.0
+    assert long_4h["opposing_distance_strategy_atr"] == 6.0
 
     short_1d = sr["short"]["timeframes"]["1d"]
-    assert short_1d["SR_ENTRY_RELATION"] == "NEAR_FAVORABLE_STRUCTURE"
-    assert short_1d["SR_FAVORABLE_STRUCTURE_STATE"] == "HELD"
-    assert short_1d["SR_OPPOSING_DISTANCE_NATIVE_ATR"] == 0.5
-    assert short_1d["SR_OPPOSING_DISTANCE_STRATEGY_ATR"] == 6.0
+    assert short_1d["entry_relation"] == "NEAR_FAVORABLE_STRUCTURE"
+    assert short_1d["favorable_structure_state"] == "HELD"
+    assert short_1d["opposing_distance_native_atr"] == 0.5
+    assert short_1d["opposing_distance_strategy_atr"] == 6.0
 
     assert enriched["confirmed_market_structure"]["market_structure_direction"] == "LONG"
 
