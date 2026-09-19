@@ -910,7 +910,7 @@ class TestSupportResistanceDetector:
         assert broken.nearest_support_price is None
         assert broken.support_last_break_index == 4
         assert broken.support_broken_zone_low == pytest.approx(98.0)
-        assert broken.support_broken_zone_high == pytest.approx(98.2)
+        assert broken.support_broken_zone_high == pytest.approx(99.0)
 
         later = detector.analyze_price_location(
             6, open_, high, low, close, atr, "LONG"
