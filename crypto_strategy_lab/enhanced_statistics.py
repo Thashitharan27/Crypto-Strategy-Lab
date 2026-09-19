@@ -56,7 +56,10 @@ def mean_reversion_analysis_v2(trades: pd.DataFrame) -> pd.DataFrame:
     frame["BB Location"] = frame.get("mean_reversion_bb_location", pd.Series("UNKNOWN", index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
     frame["RSI State"] = frame.get("mean_reversion_rsi_state", pd.Series("UNKNOWN", index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
     frame["BB Re-entry"] = frame.get("bb_reentry", frame.get("mean_reversion_reentry_confirmation", pd.Series("NONE", index=frame.index))).fillna("NONE").astype(str).str.upper()
-    frame["Mean Type"] = frame.get("mean_reversion_mean_type", pd.Series("UNKNOWN", index=frame.index)).fillna("UNKNOWN").astype(str).str.upper()
+    frame["Mean Type"] = frame.get(
+        "mean_reversion_effective_mean_type",
+        frame.get("mean_reversion_mean_type", pd.Series("UNKNOWN", index=frame.index)),
+    ).fillna("UNKNOWN").astype(str).str.upper()
     frame["Confirmed MR"] = frame.get("mr_signal", pd.Series("NO_SIGNAL", index=frame.index)).fillna("NO_SIGNAL").astype(str).str.upper()
     frame["Confirmed Direction"] = frame.get("mr_signal_direction", pd.Series("NONE", index=frame.index)).fillna("NONE").astype(str).str.upper()
     frame["Confirmed Alignment"] = frame.get("mr_trade_alignment", pd.Series("NO_SIGNAL", index=frame.index)).fillna("NO_SIGNAL").astype(str).str.upper()
