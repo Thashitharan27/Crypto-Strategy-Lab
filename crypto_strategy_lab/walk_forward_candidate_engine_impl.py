@@ -710,7 +710,14 @@ def _rule_decision(
     }
 
 
-def _safe_context(row: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def _safe_context(
+    row: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    direction: str | None = None,
+    profile: str | None = None,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     trade = {}
     for name in _SAFE_TRADE_ENTRY_COLUMNS:
         if name in row:
@@ -718,16 +725,65 @@ def _safe_context(row: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
             if value is not None:
                 trade[name] = value
     feature = {}
+    raw_sr_prefixes = ("sr_strategy_", "sr_1h_", "sr_4h_", "sr_1d_")
     for name, raw in context.items():
+        if str(name).startswith(raw_sr_prefixes):
+            continue
         value = _json_safe(raw)
         if value is not None:
             feature[str(name)] = value
-    return {
+
+    result = {
         "trade_entry_context": trade,
         # PreparedBacktestFrame validates that every value in this artifact is
         # available no later than the decision candle completes.
         "feature_context": feature,
     }
+    if direction in {"LONG", "SHORT"} and profile and isinstance(config, dict):
+        timeframe_context = {}
+        for label, timeframe in (
+            ("STRATEGY_TF", 0),
+            ("1H", 60),
+            ("4H", 240),
+            ("1D", 1440),
+        ):
+            derived = _wf_trade_relative_sr(
+                row,
+                direction,
+                profile,
+                {"sr_timeframe_minutes": timeframe},
+                config,
+            )
+            if derived is None:
+                continue
+            timeframe_context[label] = {
+                key.removeprefix("SR_").lower(): _json_safe(value)
+                for key, value in derived.items()
+                if _json_safe(value) is not None
+            }
+        result["support_resistance_trade_context_v2"] = {
+            "direction": direction,
+            "strategy_timeframe_minutes": (config.get("data") or {}).get(
+                "strategy_timeframe_minutes"
+            ),
+            "unit_definitions": {
+                "selected_tf_atr": (
+                    "ATR calculated on the selected S/R timeframe; values from "
+                    "different S/R timeframes are not directly comparable."
+                ),
+                "strategy_tf_atr": "ATR calculated on the strategy/entry timeframe.",
+                "room_r": (
+                    "absolute distance to opposing zone edge divided by the "
+                    "configured stop distance; 1.0 means one full trade R."
+                ),
+                "room_target_multiple": (
+                    "absolute distance to opposing zone edge divided by the planned "
+                    "final target distance; 1.0 means the target reaches the zone edge."
+                ),
+            },
+            "timeframes": timeframe_context,
+        }
+    return result
 
 
 def _next_teacher(
@@ -880,7 +936,13 @@ def get_next_walk_forward_candidate(
         if CausalExperimentStore._candidate_state(events, candidate_id) != "UNSEEN":
             suffix = hashlib.sha256(f"{sample_id}:{profile}".encode()).hexdigest()[:8]
             candidate_id = f"{candidate_id}-{suffix}"
-        safe = _safe_context(row, feature_context)
+        safe = _safe_context(
+            row,
+            feature_context,
+            direction=source_side,
+            profile=profile,
+            config=config,
+        )
         core = {
             "contract": CANDIDATE_CONTEXT_CONTRACT,
             "experiment_id": experiment_id,
