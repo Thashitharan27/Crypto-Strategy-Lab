@@ -218,12 +218,12 @@ def test_planned_trade_distances_follow_runtime_final_target_contract():
 
     staircase = {
         "partial_stop_enabled": False,
-        "stop_loss_multiple": 1.0,
+        "stop_loss_multiple": 1.5,
         "partial_profit_enabled": False,
         "reward_risk_ratio": 3.0,
         "r_step_trailing_enabled": True,
         "r_step_maximum_r": 5.0,
     }
     stop, target = planned_trade_distances(staircase, 100.0)
-    assert stop == 100.0
-    assert target == 500.0
+    assert stop == 150.0
+    assert target == 750.0
