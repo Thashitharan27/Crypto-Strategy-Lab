@@ -238,6 +238,12 @@ CATEGORICAL_VALUE_CODES = {
 # keep their original meaning. Presets must map to contiguous native codes so
 # the mature min/max rule engine can evaluate them without special runtime logic.
 CATEGORICAL_RULE_PRESETS = {
+    "SR_ENTRY_RELATION": {
+        "FAVORABLE_ENTRY_AREA": (
+            "INSIDE_FAVORABLE_ZONE",
+            "NEAR_FAVORABLE_STRUCTURE",
+        ),
+    },
     "MR_STATE": {
         "ANY_BELOW_MEAN": ("STRONGLY_BELOW_MEAN", "BELOW_MEAN"),
         "ANY_ABOVE_MEAN": ("ABOVE_MEAN", "STRONGLY_ABOVE_MEAN"),
@@ -247,6 +253,18 @@ CATEGORICAL_RULE_PRESETS = {
     },
 }
 CATEGORICAL_RULE_VALUE_OPTIONS = {
+    "SR_ENTRY_RELATION": (
+        "INSIDE_FAVORABLE_ZONE",
+        "NEAR_FAVORABLE_STRUCTURE",
+        "FAVORABLE_ENTRY_AREA",
+        "BETWEEN_STRUCTURES",
+        "NEAR_OPPOSING_STRUCTURE",
+        "INSIDE_OPPOSING_ZONE",
+        "SQUEEZED_BETWEEN_STRUCTURES",
+        "FAVORABLE_STRUCTURE_ONLY",
+        "OPPOSING_STRUCTURE_ONLY",
+        "NO_STRUCTURE",
+    ),
     "MR_STATE": (
         "STRONGLY_BELOW_MEAN",
         "BELOW_MEAN",
@@ -772,47 +790,44 @@ def _mtf_sr_reaction_native_rules() -> tuple[dict, ...]:
     )
 
 
-def mtf_sr_reaction_preset_rules(minimum_room_atr: float = 1.5) -> tuple[dict, ...]:
-    """Return editable starter Entry Groups for bounce and break/retest theses."""
-    room = float(minimum_room_atr)
-    if room < 0:
-        raise ValueError("minimum_room_atr cannot be negative")
+def mtf_sr_reaction_preset_rules() -> tuple[dict, ...]:
+    """Return editable starter groups using trade-relative S/R semantics."""
 
     groups = (
         (
-            "4H Support Bounce — Long", "LONG",
+            "4H Favorable Structure Bounce — Long", "LONG",
             (
-                ("SR_NEAR_SUPPORT", "IS", "TRUE", 240),
+                ("SR_ENTRY_RELATION", "IS", "FAVORABLE_ENTRY_AREA", 240),
                 ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
                 ("BULLISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
-                ("SR_ROOM_IN_DIRECTION_ATR", "GTE", room, 240),
+                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", 240),
             ),
         ),
         (
-            "4H Resistance Break + Retest — Long", "LONG",
+            "4H Break + Retest — Long", "LONG",
             (
                 ("SR_ROLE_REVERSAL_STATE", "IS", "VALID_RETEST", 240),
                 ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
                 ("BULLISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
-                ("SR_ROOM_IN_DIRECTION_ATR", "GTE", room, 240),
+                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", 240),
             ),
         ),
         (
-            "4H Resistance Bounce — Short", "SHORT",
+            "4H Favorable Structure Bounce — Short", "SHORT",
             (
-                ("SR_NEAR_RESISTANCE", "IS", "TRUE", 240),
+                ("SR_ENTRY_RELATION", "IS", "FAVORABLE_ENTRY_AREA", 240),
                 ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
                 ("BEARISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
-                ("SR_ROOM_IN_DIRECTION_ATR", "GTE", room, 240),
+                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", 240),
             ),
         ),
         (
-            "4H Support Break + Retest — Short", "SHORT",
+            "4H Break + Retest — Short", "SHORT",
             (
                 ("SR_ROLE_REVERSAL_STATE", "IS", "VALID_RETEST", 240),
                 ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
                 ("BEARISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
-                ("SR_ROOM_IN_DIRECTION_ATR", "GTE", room, 240),
+                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", 240),
             ),
         ),
     )
