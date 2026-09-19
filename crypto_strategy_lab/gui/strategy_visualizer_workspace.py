@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -147,8 +148,8 @@ class StrategyVisualizerWorkspace(QWidget):
         self.trade_table.setHorizontalHeaderLabels(("Field", "Value"))
         self.trade_table.verticalHeader().setVisible(False)
         self.trade_table.horizontalHeader().setStretchLastSection(True)
-        self.trade_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.trade_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.trade_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.trade_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         inspector_layout.addWidget(self.trade_table)
         note = QLabel(
             "Click a candle on the chart for OHLC plus the causal evidence snapshot "
