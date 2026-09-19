@@ -315,9 +315,17 @@ class StrategyVisualizerWorkspace(QWidget):
             )
             self._render_chart()
             count = len(self._base_payload.get("candles") or ())
+            verified = (self._base_payload.get("run") or {}).get("sourceVerified")
+            provenance = (
+                "Candle source provenance matches the completed run. "
+                if verified is True
+                else "Legacy run: candle source provenance could not be independently verified. "
+                if verified is None
+                else ""
+            )
             self.status.setText(
-                f"Showing {count:,} canonical strategy candles. "
-                "S/R, VWAP and Bollinger values come from the run's causal feature context; "
+                f"Showing {count:,} canonical strategy candles. " + provenance
+                + "S/R, VWAP and Bollinger values come from the run's causal feature context; "
                 "EMA lines are display-only overlays."
             )
         except Exception as exc:
