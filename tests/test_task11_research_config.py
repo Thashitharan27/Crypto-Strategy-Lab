@@ -54,14 +54,15 @@ def test_v3_rejects_fractional_values_for_integer_fields():
         )
 
 
-def test_v3_defaults_preserve_pre_split_data_lake_semantics():
+def test_v3_defaults_match_current_research_defaults():
     config = ResearchRunConfig()
     assert config.data.strategy_timeframe_minutes == 15
     assert config.data.intrabar_timeframe_minutes == 1
     assert config.data.intrabar_missing_policy == "ERROR"
-    assert config.features.market_regime_method == "BTC_STRUCTURAL"
+    assert config.features.market_regime_method == "ASSET_RETURN"
     assert config.features.bull_regime_lookback_days == 90
     assert config.features.bull_regime_return_threshold == pytest.approx(0.20)
+    assert config.features.sr_near_distance_atr == pytest.approx(0.50)
     assert config.strategy.enable_di_direction_selection is True
     assert config.strategy.enable_di_pressure_analysis is True
     assert config.strategy.enable_mean_reversion_analysis is True
