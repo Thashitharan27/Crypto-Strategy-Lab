@@ -69,6 +69,8 @@ class SupportResistanceFeatureProvider:
             "sr_1d_pivot_right": ParameterDefinition(int, 0),
             "sr_1d_lookback_bars": ParameterDefinition(int, 0),
             "sr_zone_width_atr": ParameterDefinition(float, 0.5),
+            "sr_zone_padding_atr": ParameterDefinition(float, 0.25),
+            "sr_zone_max_cluster_span_atr": ParameterDefinition(float, 1.0),
             "sr_near_distance_atr": ParameterDefinition(float, 0.75),
             "enable_sr_hold_confirmation": ParameterDefinition(bool, True),
             "sr_hold_confirmation_bars": ParameterDefinition(int, 3),
@@ -144,6 +146,8 @@ class SupportResistanceFeatureProvider:
         detector_config = {
             **resolved_detection,
             "zone_width_atr": float(parameters.get("sr_zone_width_atr", 0.5)),
+            "zone_padding_atr": float(parameters.get("sr_zone_padding_atr", 0.25)),
+            "max_cluster_span_atr": float(parameters.get("sr_zone_max_cluster_span_atr", 1.0)),
             "near_distance_atr": float(parameters.get("sr_near_distance_atr", 0.75)),
             "enable_hold_confirmation": bool(parameters.get("enable_sr_hold_confirmation", True)),
             "hold_confirmation_bars": int(parameters.get("sr_hold_confirmation_bars", 3)),
