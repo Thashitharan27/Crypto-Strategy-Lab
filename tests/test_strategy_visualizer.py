@@ -239,10 +239,62 @@ def _fixture(tmp_path: Path):
     signals_path = artifacts / "signals.parquet"
     context_path = artifacts / "feature_context.parquet"
     rule_trace_path = artifacts / "rule_trace.parquet"
+    sr_zones_path = artifacts / "sr_zones.parquet"
+    zone_rows = []
+    for strategy_index, timestamp in enumerate(times):
+        for zone_id, structure, low_value, high_value, nearest in (
+            ("SUPPORT:10", "SUPPORT", 112.0, 113.0, True),
+            ("SUPPORT:5", "SUPPORT", 106.0, 107.0, False),
+            ("RESISTANCE:20", "RESISTANCE", 124.0, 125.0, True),
+            ("RESISTANCE:25", "RESISTANCE", 130.0, 131.0, False),
+        ):
+            zone_rows.append(
+                {
+                    "strategy_index": strategy_index,
+                    "strategy_candle_open_time": timestamp,
+                    "decision_available_at": timestamp + pd.Timedelta(minutes=15),
+                    "sr_timeframe": "4h",
+                    "sr_timeframe_minutes": 240,
+                    "sr_completed_candle_time": timestamp.floor("4h"),
+                    "zone_id": zone_id,
+                    "structure": structure,
+                    "zone_low": low_value,
+                    "zone_high": high_value,
+                    "anchor_price": low_value,
+                    "pivot_bar_index": int(zone_id.split(":")[1]),
+                    "confirmed_at_index": int(zone_id.split(":")[1]) + 2,
+                    "source_bar_indices_json": json.dumps(
+                        [int(zone_id.split(":")[1])]
+                    ),
+                    "source_count": 1,
+                    "touch_count": 2 if nearest else 1,
+                    "validation_rejection_atr": 0.8 if nearest else 0.5,
+                    "state": (
+                        "SUPPORT_HELD"
+                        if structure == "SUPPORT" and nearest
+                        else "APPROACHING_SUPPORT"
+                        if structure == "SUPPORT"
+                        else "APPROACHING_RESISTANCE"
+                    ),
+                    "tested": bool(nearest),
+                    "held": bool(nearest and structure == "SUPPORT"),
+                    "rejection_atr": 0.7 if nearest else None,
+                    "test_count": 2 if nearest else 0,
+                    "bars_since_test": 2 if nearest else None,
+                    "last_test_index": strategy_index - 2 if nearest else None,
+                    "distance_price": abs(float(close[strategy_index]) - low_value),
+                    "distance_atr": abs(float(close[strategy_index]) - low_value) / 8.0,
+                    "near": bool(nearest),
+                    "inside": False,
+                    "nearest": bool(nearest),
+                }
+            )
+    sr_zones = pd.DataFrame(zone_rows)
     _write_parquet(trades_path, trades)
     _write_parquet(signals_path, signals)
     _write_parquet(context_path, context)
     _write_parquet(rule_trace_path, rule_trace)
+    _write_parquet(sr_zones_path, sr_zones)
 
     config = ResearchRunConfig(
         data=DataConfig(
@@ -277,6 +329,7 @@ def _fixture(tmp_path: Path):
             "trades": {"path": "artifacts/trades.parquet"},
             "signals": {"path": "artifacts/signals.parquet"},
             "feature_context": {"path": "artifacts/feature_context.parquet"},
+            "sr_zones": {"path": "artifacts/sr_zones.parquet"},
             "rule_trace": {"path": "artifacts/rule_trace.parquet"},
         },
     }
@@ -369,6 +422,7 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
 
     assert payload["run"]["symbol"] == "BTCUSDT"
     assert payload["run"]["timeframe"] == "15m"
+    assert payload["run"]["srZoneInventoryAvailable"] is True
     assert 60 <= len(payload["candles"]) <= 120
     assert payload["selectedTrade"]["Side"] == "LONG"
     assert payload["selectedTrade"]["Stop"] < payload["selectedTrade"]["Entry"]
@@ -383,7 +437,10 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
 
     zone_names = {item["name"] for item in payload["srZones"]}
     assert {"4H Support", "4H Resistance"} <= zone_names
-    assert any(zone["activeAtEntry"] for zone in payload["srZones"])
+    assert len(payload["srZones"]) >= 4
+    assert all(zone.get("inventoryFull") for zone in payload["srZones"])
+    assert sum(zone["activeAtEntry"] for zone in payload["srZones"]) >= 4
+    assert sum(zone["nearestAtEntry"] for zone in payload["srZones"]) == 2
     assert payload["selectedTradeCandleTime"] is not None
     assert payload["srEvents"]
 
@@ -480,6 +537,11 @@ def test_sr_inspector_reads_persisted_multitimeframe_context(tmp_path):
     assert four_hour["roomShortNativeAtr"] == 1.5
     assert four_hour["structureConflict"] is False
     assert four_hour["completedCandleTime"].endswith("+00:00")
+    assert snapshot["zoneInventoryAvailable"] is True
+    zones = [item for item in snapshot["zones"] if item["key"] == "4h"]
+    assert len(zones) == 4
+    assert sum(item["nearest"] for item in zones) == 2
+    assert {item["structure"] for item in zones} == {"SUPPORT", "RESISTANCE"}
 
 
 def test_sr_lifecycle_events_come_from_persisted_test_and_hold_transitions(tmp_path):
@@ -519,6 +581,23 @@ def test_rule_inspector_reads_exact_decision_time_trace(tmp_path):
     assert veto["actual"] == "NEAR_MEAN"
     assert veto["requirement"] == "is ABOVE_MEAN"
     assert veto["conditionStatus"] == "FAIL"
+
+
+def test_visualizer_falls_back_to_nearest_context_without_zone_inventory(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    manifest["artifacts"].pop("sr_zones")
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+
+    payload = model.build_payload(trade_index=0, visible_candles=120)
+
+    assert payload["run"]["srZoneInventoryAvailable"] is False
+    assert payload["srZones"]
+    assert all(not zone.get("inventoryFull", False) for zone in payload["srZones"])
+    snapshot = model.sr_inspector_at(
+        pd.Timestamp("2026-01-04 03:00:00+00:00")
+    )
+    assert snapshot["zoneInventoryAvailable"] is False
+    assert snapshot["zones"] == []
 
 
 def test_legacy_run_does_not_reverse_engineer_missing_rule_trace(tmp_path):
