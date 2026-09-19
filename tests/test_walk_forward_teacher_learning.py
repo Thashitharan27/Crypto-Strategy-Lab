@@ -71,6 +71,7 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
             }
         },
         "artifacts": {"trades": _catalog(trades_path, run_dir)},
+        "research": {"strategy_research_sampling": {"mode": "WALK_FORWARD"}},
     }
     return manifest, run_dir
 
@@ -90,7 +91,7 @@ def _events_through_pair_3() -> list[dict]:
     ]
 
 
-def test_one_r_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path):
+def test_paired_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path):
     manifest, run_dir = _reference(tmp_path, 1.0)
 
     teacher = next_teacher_for_learning(
@@ -108,7 +109,7 @@ def test_one_r_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path)
     assert boundary["teacher_learning_mode"] == TEACHER_LOSS_FLIP_MODE
 
 
-def test_one_r_default_remains_historical_winner_only_behavior(tmp_path):
+def test_default_remains_winner_only_when_loss_learning_is_disabled(tmp_path):
     manifest, run_dir = _reference(tmp_path, 1.0)
 
     teacher = next_teacher_for_learning(manifest, run_dir, _events_through_pair_3())
@@ -119,7 +120,7 @@ def test_one_r_default_remains_historical_winner_only_behavior(tmp_path):
     assert boundary["result"] == "WIN"
 
 
-def test_non_one_r_teacher_loss_is_skipped_even_when_opted_in(tmp_path):
+def test_three_r_teacher_loss_is_valid_paired_flip_evidence(tmp_path):
     manifest, run_dir = _reference(tmp_path, 3.0)
 
     teacher = next_teacher_for_learning(
@@ -131,8 +132,9 @@ def test_non_one_r_teacher_loss_is_skipped_even_when_opted_in(tmp_path):
 
     assert teacher is not None
     boundary, _resolved_at = teacher
-    assert boundary["pair_id"] == 5
-    assert boundary["result"] == "WIN"
+    assert boundary["pair_id"] == 4
+    assert boundary["result"] == "LOSS"
+    assert boundary["teacher_learning_mode"] == TEACHER_LOSS_FLIP_MODE
 
 
 def test_teacher_loss_packet_requires_verified_opposite_side_win(monkeypatch):
@@ -171,6 +173,7 @@ def test_teacher_loss_packet_requires_verified_opposite_side_win(monkeypatch):
             "trade_entry_context": {
                 "research_sample_id": "sample-4-long",
                 "research_signal_index": 44,
+                "walk_forward_candidate_id": "wf-44-long",
                 "entry_time": "2025-01-03T00:00:00Z",
             }
         },
