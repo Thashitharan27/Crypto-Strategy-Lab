@@ -135,6 +135,24 @@ EVIDENCE_LABELS = {
     "SR_ZONE_REJECTION_ATR": "S/R — Zone Rejection (ATR)",
     "SR_BREAKOUT_BODY_ATR": "S/R — Breakout Body (ATR)",
     "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR": "S/R — Close Beyond Zone (ATR)",
+    "SR_ENTRY_RELATION": "S/R — Entry Relation",
+    "SR_FAVORABLE_STRUCTURE_STATE": "S/R — Favorable Structure State",
+    "SR_OPPOSING_STRUCTURE_STATE": "S/R — Opposing Structure State",
+    "SR_FAVORABLE_HELD": "S/R — Favorable Structure Held",
+    "SR_OPPOSING_HELD": "S/R — Opposing Structure Held",
+    "SR_TARGET_PATH": "S/R — Target Path vs Opposing Structure",
+    "SR_FAVORABLE_DISTANCE_NATIVE_ATR": "S/R — Favorable Distance (Selected-TF ATR)",
+    "SR_OPPOSING_DISTANCE_NATIVE_ATR": "S/R — Opposing Room (Selected-TF ATR)",
+    "SR_FAVORABLE_DISTANCE_STRATEGY_ATR": "S/R — Favorable Distance (Strategy-TF ATR)",
+    "SR_OPPOSING_DISTANCE_STRATEGY_ATR": "S/R — Opposing Room (Strategy-TF ATR)",
+    "SR_OPPOSING_ROOM_R": "S/R — Opposing Room (R)",
+    "SR_OPPOSING_ROOM_TARGET_MULTIPLE": "S/R — Opposing Room / Planned Target",
+    "SR_FAVORABLE_REJECTION_NATIVE_ATR": "S/R — Favorable Rejection (Selected-TF ATR)",
+    "SR_OPPOSING_REJECTION_NATIVE_ATR": "S/R — Opposing Rejection (Selected-TF ATR)",
+    "SR_FAVORABLE_TEST_COUNT": "S/R — Favorable Structure Test Count",
+    "SR_OPPOSING_TEST_COUNT": "S/R — Opposing Structure Test Count",
+    "SR_BARS_SINCE_FAVORABLE_TEST": "S/R — Bars Since Favorable Test",
+    "SR_BARS_SINCE_OPPOSING_TEST": "S/R — Bars Since Opposing Test",
     "OI_CHANGE_PCT_5M": "OI Change 5m (decimal)",
     "OI_CHANGE_PCT_1H": "OI Change 1h (decimal)",
     "OI_CHANGE_PCT_24H": "OI Change 24h (decimal)",
@@ -166,6 +184,34 @@ EVIDENCE_LABELS = {
     "TAKER_DELTA_PCT_1H": "Taker Delta 1h (decimal)",
     "TAKER_FLOW_PERSISTENCE": "Taker Flow Persistence (0–1)",
 }
+LEGACY_SR_AUTHORING_EVIDENCE = frozenset(
+    {
+        "SR_TRADE_LOCATION_RATING",
+        "SR_ROOM_IN_DIRECTION_ATR",
+        "SR_NEAR_SUPPORT",
+        "SR_NEAR_RESISTANCE",
+        "SR_INSIDE_SUPPORT_ZONE",
+        "SR_INSIDE_RESISTANCE_ZONE",
+        "SR_SUPPORT_STATE",
+        "SR_RESISTANCE_STATE",
+        "SR_SUPPORT_HELD",
+        "SR_RESISTANCE_HELD",
+        "SR_SUPPORT_DISTANCE_ATR",
+        "SR_RESISTANCE_DISTANCE_ATR",
+        "SR_SUPPORT_REJECTION_ATR",
+        "SR_RESISTANCE_REJECTION_ATR",
+        "SR_SUPPORT_TEST_COUNT",
+        "SR_RESISTANCE_TEST_COUNT",
+        "SR_BARS_SINCE_SUPPORT_TEST",
+        "SR_BARS_SINCE_RESISTANCE_TEST",
+    }
+)
+AUTHORABLE_RULE_INDICATORS = tuple(
+    indicator
+    for indicator in RULE_INDICATORS
+    if indicator not in LEGACY_SR_AUTHORING_EVIDENCE
+)
+
 EVIDENCE_GROUPS = (
     (
         "Directional / DI",
@@ -187,8 +233,7 @@ EVIDENCE_GROUPS = (
             "EMA_9_SLOPE_ATR", "EMA_20_SLOPE_ATR",
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
-            "EMA_STACK_STATE",
-            "PRICE_VS_EMA_STACK",
+            "EMA_STACK_STATE", "PRICE_VS_EMA_STACK",
         ),
     ),
     (
@@ -197,11 +242,6 @@ EVIDENCE_GROUPS = (
             "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
             "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
             "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
-        ),
-    ),
-    (
-        "Multi-Timeframe Price Action",
-        (
             "CANDLE_BODY_ATR", "CANDLE_RANGE_ATR", "BODY_TO_RANGE_RATIO",
             "LOWER_WICK_RATIO", "UPPER_WICK_RATIO",
             "RANGE_CONTRACTION_RATIO", "BODY_CONTRACTION_RATIO",
@@ -214,94 +254,73 @@ EVIDENCE_GROUPS = (
     (
         "Mean Reversion",
         (
-            "MR_TRADE_STRETCH_ATR",
-            "MR_DISTANCE_ATR",
-            "MR_MOTION",
-            "MR_BB_ZSCORE",
-            "MR_BB_LOCATION",
-            "MR_SIGNAL",
-            "MR_TRADE_ALIGNMENT",
-            "MR_STRENGTH",
-            "MR_STATE",
+            "MR_TRADE_STRETCH_ATR", "MR_DISTANCE_ATR", "MR_MOTION",
+            "MR_BB_ZSCORE", "MR_BB_LOCATION", "MR_SIGNAL",
+            "MR_TRADE_ALIGNMENT", "MR_STRENGTH", "MR_STATE",
             "MR_DISTANCE_CHANGE_ATR",
         ),
     ),
     (
         "Futures — Open Interest & Positioning",
         (
-            "PRICE_OI_STATE",
-            "OI_VS_PRICE_STATE_1H",
-            "OI_CHANGE_PCT_5M",
-            "OI_CHANGE_PCT_1H",
-            "OI_CHANGE_PCT_24H",
-            "OI_ZSCORE_7D",
-            "PRICE_CHANGE_PCT_1H",
-            "TOP_TRADER_ACCOUNT_BIAS",
-            "TOP_TRADER_POSITION_BIAS",
-            "GLOBAL_LONG_SHORT_ACCOUNT_BIAS",
-            "TAKER_LONG_SHORT_VOLUME_BIAS",
+            "PRICE_OI_STATE", "OI_VS_PRICE_STATE_1H",
+            "OI_CHANGE_PCT_5M", "OI_CHANGE_PCT_1H", "OI_CHANGE_PCT_24H",
+            "OI_ZSCORE_7D", "PRICE_CHANGE_PCT_1H",
+            "TOP_TRADER_ACCOUNT_BIAS", "TOP_TRADER_POSITION_BIAS",
+            "GLOBAL_LONG_SHORT_ACCOUNT_BIAS", "TAKER_LONG_SHORT_VOLUME_BIAS",
         ),
     ),
     (
         "Futures — Funding",
         (
-            "FUNDING_BIAS",
-            "FUNDING_RATE_BPS",
-            "FUNDING_24H_SUM_BPS",
-            "FUNDING_CHANGE_BPS",
-            "FUNDING_3_EVENT_MEAN_BPS",
-            "FUNDING_ZSCORE_7D",
-            "FUNDING_EXTREME_POSITIVE",
+            "FUNDING_BIAS", "FUNDING_RATE_BPS", "FUNDING_24H_SUM_BPS",
+            "FUNDING_CHANGE_BPS", "FUNDING_3_EVENT_MEAN_BPS",
+            "FUNDING_ZSCORE_7D", "FUNDING_EXTREME_POSITIVE",
             "FUNDING_EXTREME_NEGATIVE",
         ),
     ),
     (
         "Futures — Basis / Premium",
         (
-            "MARK_INDEX_BASIS_STATE",
-            "MARK_INDEX_BASIS_BPS",
-            "MARK_INDEX_BASIS_ZSCORE_7D",
-            "TRADE_MARK_BASIS_BPS",
-            "TRADE_INDEX_BASIS_BPS",
-            "PREMIUM_INDEX_ZSCORE_7D",
+            "MARK_INDEX_BASIS_STATE", "MARK_INDEX_BASIS_BPS",
+            "MARK_INDEX_BASIS_ZSCORE_7D", "TRADE_MARK_BASIS_BPS",
+            "TRADE_INDEX_BASIS_BPS", "PREMIUM_INDEX_ZSCORE_7D",
         ),
     ),
     (
         "Futures — Taker Flow",
         (
-            "TAKER_BUY_SELL_RATIO",
-            "TAKER_DELTA_PCT",
-            "TAKER_DELTA_PCT_15M",
-            "TAKER_DELTA_PCT_1H",
+            "TAKER_BUY_SELL_RATIO", "TAKER_DELTA_PCT",
+            "TAKER_DELTA_PCT_15M", "TAKER_DELTA_PCT_1H",
             "TAKER_FLOW_PERSISTENCE",
         ),
     ),
     (
-        "Support & Resistance",
+        "Support & Resistance — Trade Context",
         (
-            "SR_TRADE_LOCATION_RATING",
-            "SR_ROOM_IN_DIRECTION_ATR",
-            "SR_NEAR_SUPPORT",
-            "SR_NEAR_RESISTANCE",
-            "SR_INSIDE_SUPPORT_ZONE",
-            "SR_INSIDE_RESISTANCE_ZONE",
+            "SR_ENTRY_RELATION",
+            "SR_TARGET_PATH",
+            "SR_FAVORABLE_STRUCTURE_STATE",
+            "SR_OPPOSING_STRUCTURE_STATE",
+            "SR_FAVORABLE_HELD",
+            "SR_OPPOSING_HELD",
+            "SR_FAVORABLE_DISTANCE_NATIVE_ATR",
+            "SR_OPPOSING_DISTANCE_NATIVE_ATR",
+            "SR_FAVORABLE_DISTANCE_STRATEGY_ATR",
+            "SR_OPPOSING_DISTANCE_STRATEGY_ATR",
+            "SR_OPPOSING_ROOM_R",
+            "SR_OPPOSING_ROOM_TARGET_MULTIPLE",
+            "SR_FAVORABLE_REJECTION_NATIVE_ATR",
+            "SR_OPPOSING_REJECTION_NATIVE_ATR",
+            "SR_FAVORABLE_TEST_COUNT",
+            "SR_OPPOSING_TEST_COUNT",
+            "SR_BARS_SINCE_FAVORABLE_TEST",
+            "SR_BARS_SINCE_OPPOSING_TEST",
         ),
     ),
     (
-        "Support & Resistance — Advanced",
+        "Support & Resistance — Reaction / Breakout",
         (
-            "SR_SUPPORT_STATE",
-            "SR_RESISTANCE_STATE",
-            "SR_SUPPORT_HELD",
-            "SR_RESISTANCE_HELD",
-            "SR_SUPPORT_DISTANCE_ATR",
-            "SR_RESISTANCE_DISTANCE_ATR",
-            "SR_SUPPORT_REJECTION_ATR",
-            "SR_RESISTANCE_REJECTION_ATR",
-            "SR_SUPPORT_TEST_COUNT",
-            "SR_RESISTANCE_TEST_COUNT",
-            "SR_BARS_SINCE_SUPPORT_TEST",
-            "SR_BARS_SINCE_RESISTANCE_TEST",
             "SR_APPROACH_MOMENTUM_STATE",
             "SR_ROLE_REVERSAL_STATE",
             "SR_ZONE_PENETRATION_ATR",
@@ -312,6 +331,7 @@ EVIDENCE_GROUPS = (
     ),
 )
 
+
 # Category-first menu structure. Leaves are evidence IDs; nested tuples are
 # (submenu label, children). Keeping EVIDENCE_GROUPS above preserves the flat
 # research grouping used elsewhere while the popup remains compact.
@@ -319,13 +339,9 @@ EVIDENCE_MENU_TREE = (
     (
         "Directional / DI",
         (
-            "DIRECTIONAL_DI",
-            "DIRECTIONAL_DI_RATIO",
-            "DI_SPREAD",
-            "DI_PRESSURE_STATE",
-            "DIRECTIONAL_DI_CHANGE",
-            "OPPOSING_DI_CHANGE",
-            "DI_SPREAD_CHANGE",
+            "DIRECTIONAL_DI", "DIRECTIONAL_DI_RATIO", "DI_SPREAD",
+            "DI_PRESSURE_STATE", "DIRECTIONAL_DI_CHANGE",
+            "OPPOSING_DI_CHANGE", "DI_SPREAD_CHANGE",
         ),
     ),
     (
@@ -336,152 +352,107 @@ EVIDENCE_MENU_TREE = (
             "EMA_9_SLOPE_ATR", "EMA_20_SLOPE_ATR",
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
-            "EMA_STACK_STATE",
-            "PRICE_VS_EMA_STACK",
+            "EMA_STACK_STATE", "PRICE_VS_EMA_STACK",
         ),
     ),
     (
         "Momentum & Price",
         (
             "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
-            (
-                "MACD",
-                (
-                    "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
-                    "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
-                ),
-            ),
-            (
-                "Price Action",
-                (
-                    (
-                        "Candle Geometry",
-                        (
-                            "CANDLE_BODY_ATR", "CANDLE_RANGE_ATR", "BODY_TO_RANGE_RATIO",
-                            "LOWER_WICK_RATIO", "UPPER_WICK_RATIO",
-                            "RANGE_CONTRACTION_RATIO", "BODY_CONTRACTION_RATIO",
-                            "CANDLE_CLOSE_LOCATION",
-                        ),
-                    ),
-                    (
-                        "Reversal Triggers",
-                        (
-                            "BULLISH_ENGULFING", "BEARISH_ENGULFING",
-                            "BULLISH_PIN_BAR", "BEARISH_PIN_BAR",
-                            "BULLISH_REVERSAL_TRIGGER", "BEARISH_REVERSAL_TRIGGER",
-                        ),
-                    ),
-                ),
-            ),
+            ("MACD", (
+                "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
+                "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
+            )),
+            ("Price Action", (
+                ("Candle Geometry", (
+                    "CANDLE_BODY_ATR", "CANDLE_RANGE_ATR", "BODY_TO_RANGE_RATIO",
+                    "LOWER_WICK_RATIO", "UPPER_WICK_RATIO",
+                    "RANGE_CONTRACTION_RATIO", "BODY_CONTRACTION_RATIO",
+                    "CANDLE_CLOSE_LOCATION",
+                )),
+                ("Reversal Triggers", (
+                    "BULLISH_ENGULFING", "BEARISH_ENGULFING",
+                    "BULLISH_PIN_BAR", "BEARISH_PIN_BAR",
+                    "BULLISH_REVERSAL_TRIGGER", "BEARISH_REVERSAL_TRIGGER",
+                )),
+            )),
         ),
     ),
     (
         "Mean Reversion",
         (
-            (
-                "Entry Location",
-                ("MR_TRADE_STRETCH_ATR", "MR_DISTANCE_ATR", "MR_MOTION"),
-            ),
-            (
-                "Confirmation",
-                ("MR_BB_ZSCORE", "MR_BB_LOCATION", "MR_SIGNAL", "MR_TRADE_ALIGNMENT"),
-            ),
-            (
-                "Advanced",
-                ("MR_STRENGTH", "MR_STATE", "MR_DISTANCE_CHANGE_ATR"),
-            ),
+            ("Entry Location", ("MR_TRADE_STRETCH_ATR", "MR_DISTANCE_ATR", "MR_MOTION")),
+            ("Confirmation", ("MR_BB_ZSCORE", "MR_BB_LOCATION", "MR_SIGNAL", "MR_TRADE_ALIGNMENT")),
+            ("Advanced", ("MR_STRENGTH", "MR_STATE", "MR_DISTANCE_CHANGE_ATR")),
         ),
     ),
     (
         "Futures",
         (
-            (
-                "Open Interest & Positioning",
-                (
-                    "PRICE_OI_STATE",
-                    "OI_VS_PRICE_STATE_1H",
-                    "OI_CHANGE_PCT_5M",
-                    "OI_CHANGE_PCT_1H",
-                    "OI_CHANGE_PCT_24H",
-                    "OI_ZSCORE_7D",
-                    "PRICE_CHANGE_PCT_1H",
-                    "TOP_TRADER_ACCOUNT_BIAS",
-                    "TOP_TRADER_POSITION_BIAS",
-                    "GLOBAL_LONG_SHORT_ACCOUNT_BIAS",
-                    "TAKER_LONG_SHORT_VOLUME_BIAS",
-                ),
-            ),
-            (
-                "Funding",
-                (
-                    "FUNDING_BIAS",
-                    "FUNDING_RATE_BPS",
-                    "FUNDING_24H_SUM_BPS",
-                    "FUNDING_CHANGE_BPS",
-                    "FUNDING_3_EVENT_MEAN_BPS",
-                    "FUNDING_ZSCORE_7D",
-                    "FUNDING_EXTREME_POSITIVE",
-                    "FUNDING_EXTREME_NEGATIVE",
-                ),
-            ),
-            (
-                "Basis / Premium",
-                (
-                    "MARK_INDEX_BASIS_STATE",
-                    "MARK_INDEX_BASIS_BPS",
-                    "MARK_INDEX_BASIS_ZSCORE_7D",
-                    "TRADE_MARK_BASIS_BPS",
-                    "TRADE_INDEX_BASIS_BPS",
-                    "PREMIUM_INDEX_ZSCORE_7D",
-                ),
-            ),
-            (
-                "Taker Flow",
-                (
-                    "TAKER_BUY_SELL_RATIO",
-                    "TAKER_DELTA_PCT",
-                    "TAKER_DELTA_PCT_15M",
-                    "TAKER_DELTA_PCT_1H",
-                    "TAKER_FLOW_PERSISTENCE",
-                ),
-            ),
+            ("Open Interest & Positioning", (
+                "PRICE_OI_STATE", "OI_VS_PRICE_STATE_1H",
+                "OI_CHANGE_PCT_5M", "OI_CHANGE_PCT_1H", "OI_CHANGE_PCT_24H",
+                "OI_ZSCORE_7D", "PRICE_CHANGE_PCT_1H",
+                "TOP_TRADER_ACCOUNT_BIAS", "TOP_TRADER_POSITION_BIAS",
+                "GLOBAL_LONG_SHORT_ACCOUNT_BIAS", "TAKER_LONG_SHORT_VOLUME_BIAS",
+            )),
+            ("Funding", (
+                "FUNDING_BIAS", "FUNDING_RATE_BPS", "FUNDING_24H_SUM_BPS",
+                "FUNDING_CHANGE_BPS", "FUNDING_3_EVENT_MEAN_BPS",
+                "FUNDING_ZSCORE_7D", "FUNDING_EXTREME_POSITIVE",
+                "FUNDING_EXTREME_NEGATIVE",
+            )),
+            ("Basis / Premium", (
+                "MARK_INDEX_BASIS_STATE", "MARK_INDEX_BASIS_BPS",
+                "MARK_INDEX_BASIS_ZSCORE_7D", "TRADE_MARK_BASIS_BPS",
+                "TRADE_INDEX_BASIS_BPS", "PREMIUM_INDEX_ZSCORE_7D",
+            )),
+            ("Taker Flow", (
+                "TAKER_BUY_SELL_RATIO", "TAKER_DELTA_PCT",
+                "TAKER_DELTA_PCT_15M", "TAKER_DELTA_PCT_1H",
+                "TAKER_FLOW_PERSISTENCE",
+            )),
         ),
     ),
     (
         "Support & Resistance",
         (
-            "SR_TRADE_LOCATION_RATING",
-            "SR_ROOM_IN_DIRECTION_ATR",
-            "SR_NEAR_SUPPORT",
-            "SR_NEAR_RESISTANCE",
-            "SR_INSIDE_SUPPORT_ZONE",
-            "SR_INSIDE_RESISTANCE_ZONE",
-            (
-                "Advanced S/R",
-                (
-                    "SR_SUPPORT_STATE",
-                    "SR_RESISTANCE_STATE",
-                    "SR_SUPPORT_HELD",
-                    "SR_RESISTANCE_HELD",
-                    "SR_SUPPORT_DISTANCE_ATR",
-                    "SR_RESISTANCE_DISTANCE_ATR",
-                    "SR_SUPPORT_REJECTION_ATR",
-                    "SR_RESISTANCE_REJECTION_ATR",
-                    "SR_SUPPORT_TEST_COUNT",
-                    "SR_RESISTANCE_TEST_COUNT",
-                    "SR_BARS_SINCE_SUPPORT_TEST",
-                    "SR_BARS_SINCE_RESISTANCE_TEST",
-                    "SR_APPROACH_MOMENTUM_STATE",
-                    "SR_ROLE_REVERSAL_STATE",
-                    "SR_ZONE_PENETRATION_ATR",
-                    "SR_ZONE_REJECTION_ATR",
-                    "SR_BREAKOUT_BODY_ATR",
-                    "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR",
-                ),
-            ),
+            ("Trade Context", (
+                "SR_ENTRY_RELATION",
+                "SR_TARGET_PATH",
+                "SR_OPPOSING_ROOM_R",
+                "SR_OPPOSING_ROOM_TARGET_MULTIPLE",
+            )),
+            ("Favorable Structure", (
+                "SR_FAVORABLE_STRUCTURE_STATE",
+                "SR_FAVORABLE_HELD",
+                "SR_FAVORABLE_DISTANCE_NATIVE_ATR",
+                "SR_FAVORABLE_DISTANCE_STRATEGY_ATR",
+                "SR_FAVORABLE_REJECTION_NATIVE_ATR",
+                "SR_FAVORABLE_TEST_COUNT",
+                "SR_BARS_SINCE_FAVORABLE_TEST",
+            )),
+            ("Opposing Structure", (
+                "SR_OPPOSING_STRUCTURE_STATE",
+                "SR_OPPOSING_HELD",
+                "SR_OPPOSING_DISTANCE_NATIVE_ATR",
+                "SR_OPPOSING_DISTANCE_STRATEGY_ATR",
+                "SR_OPPOSING_REJECTION_NATIVE_ATR",
+                "SR_OPPOSING_TEST_COUNT",
+                "SR_BARS_SINCE_OPPOSING_TEST",
+            )),
+            ("Reaction / Breakout", (
+                "SR_APPROACH_MOMENTUM_STATE",
+                "SR_ROLE_REVERSAL_STATE",
+                "SR_ZONE_PENETRATION_ATR",
+                "SR_ZONE_REJECTION_ATR",
+                "SR_BREAKOUT_BODY_ATR",
+                "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR",
+            )),
         ),
     ),
 )
+
 
 OPERATOR_LABELS = {
     "GT": ">",
@@ -535,7 +506,11 @@ class EvidenceComboBox(QComboBox):
 
     def __init__(self, current: str | None = None, parent=None):
         super().__init__(parent)
-        for evidence in RULE_INDICATORS:
+        choices = list(AUTHORABLE_RULE_INDICATORS)
+        if current in RULE_INDICATORS and current not in choices:
+            choices.append(current)
+        self._authoring_choices = tuple(choices)
+        for evidence in self._authoring_choices:
             self.addItem(EVIDENCE_LABELS.get(evidence, evidence), evidence)
         index = self.findData(current)
         self.setCurrentIndex(max(index, 0))
@@ -557,7 +532,7 @@ class EvidenceComboBox(QComboBox):
         search_section = menu.addSection("Search Results")
         search_section.setVisible(False)
         search_actions = []
-        for evidence in RULE_INDICATORS:
+        for evidence in self._authoring_choices:
             label = EVIDENCE_LABELS.get(evidence, evidence)
             action = menu.addAction(label)
             action.setCheckable(True)
@@ -603,7 +578,7 @@ class EvidenceComboBox(QComboBox):
             category_actions.append(submenu.menuAction())
 
         uncategorized = tuple(
-            evidence for evidence in RULE_INDICATORS if evidence not in tree_ids
+            evidence for evidence in self._authoring_choices if evidence not in tree_ids
         )
         if uncategorized:
             submenu = menu.addMenu("Other")
