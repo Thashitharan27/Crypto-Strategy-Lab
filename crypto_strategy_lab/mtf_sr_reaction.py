@@ -46,6 +46,55 @@ MTF_SR_REACTION_RULE_INDICATORS = frozenset(
     (*PRICE_ACTION_RULE_INDICATORS, *MTF_SR_DERIVED_RULE_INDICATORS)
 )
 
+
+def mtf_sr_reaction_timeframe_plan(strategy_minutes: int) -> dict[str, int]:
+    """Return the causal structure/approach hierarchy for the strategy timeframe.
+
+    The highest prepared S/R context is 1D, so the strategy timeframe itself must
+    stay below 1D. Lower-timeframe strategies retain the original 4H/1H/entry
+    hierarchy, while 1H+ strategies collapse approach evidence onto Strategy TF.
+    """
+    strategy = int(strategy_minutes)
+    if strategy <= 0:
+        raise ValueError("strategy timeframe must be positive")
+
+    if strategy < 60:
+        if 60 % strategy:
+            raise ValueError(
+                "MTF_SR_REACTION below 1h requires a strategy timeframe that divides evenly into 1h"
+            )
+        return {
+            "strategy_minutes": strategy,
+            "structure_minutes": 240,
+            "approach_minutes": 60,
+        }
+
+    if strategy < 240:
+        if 240 % strategy:
+            raise ValueError(
+                "MTF_SR_REACTION from 1h to below 4h requires a strategy timeframe that divides evenly into 4h"
+            )
+        return {
+            "strategy_minutes": strategy,
+            "structure_minutes": 240,
+            "approach_minutes": strategy,
+        }
+
+    if strategy < 1440:
+        if 1440 % strategy:
+            raise ValueError(
+                "MTF_SR_REACTION from 4h to below 1d requires a strategy timeframe that divides evenly into 1d"
+            )
+        return {
+            "strategy_minutes": strategy,
+            "structure_minutes": 1440,
+            "approach_minutes": strategy,
+        }
+
+    raise ValueError(
+        "MTF_SR_REACTION requires a strategy timeframe below 1d because 1d is the highest prepared structure context"
+    )
+
 _NUMERIC_CANDLE_FIELDS = {
     "CANDLE_BODY_ATR": "body_atr",
     "CANDLE_RANGE_ATR": "range_atr",
@@ -222,10 +271,8 @@ class MtfSrReactionMixin:
             for profile in self.config.strategy_profiles.values()
             for rule in getattr(profile, "entry_rules", ())
         )
-        if mode_enabled and (strategy_minutes >= 60 or 60 % strategy_minutes):
-            raise ValueError(
-                "MTF_SR_REACTION requires an entry timeframe below 1h that divides evenly into 1h"
-            )
+        if mode_enabled:
+            mtf_sr_reaction_timeframe_plan(strategy_minutes)
         strategy = candle_evidence_arrays(
             self.open, self.high, self.low, self.close, self.atr_values
         )
@@ -583,7 +630,12 @@ class MtfSrReactionMixin:
 
     def _mtf_sr_signal_direction(self, i: int):
         strategy_minutes = int(self.config.strategy_timeframe_minutes)
-        if 240 not in self.mtf_price_action or strategy_minutes not in self.mtf_price_action:
+        plan = mtf_sr_reaction_timeframe_plan(strategy_minutes)
+        structure_minutes = int(plan["structure_minutes"])
+        if (
+            structure_minutes not in self.mtf_price_action
+            or strategy_minutes not in self.mtf_price_action
+        ):
             return None
 
         bullish = bool(
@@ -597,29 +649,41 @@ class MtfSrReactionMixin:
             )
         )
         long_state = self._text(
-            self._mtf_sr_raw(i, "LONG", "support_state", 240)
+            self._mtf_sr_raw(i, "LONG", "support_state", structure_minutes)
         )
         short_state = self._text(
-            self._mtf_sr_raw(i, "SHORT", "resistance_state", 240)
+            self._mtf_sr_raw(i, "SHORT", "resistance_state", structure_minutes)
         )
         long_location = (
             long_state in {"SUPPORT_TESTING", "SUPPORT_HELD"}
-            or self._truth(self._mtf_sr_raw(i, "LONG", "near_support", 240))
-            or self._truth(self._mtf_sr_raw(i, "LONG", "inside_support_zone", 240))
+            or self._truth(
+                self._mtf_sr_raw(i, "LONG", "near_support", structure_minutes)
+            )
+            or self._truth(
+                self._mtf_sr_raw(
+                    i, "LONG", "inside_support_zone", structure_minutes
+                )
+            )
         )
         short_location = (
             short_state in {"RESISTANCE_TESTING", "RESISTANCE_HELD"}
-            or self._truth(self._mtf_sr_raw(i, "SHORT", "near_resistance", 240))
-            or self._truth(self._mtf_sr_raw(i, "SHORT", "inside_resistance_zone", 240))
+            or self._truth(
+                self._mtf_sr_raw(i, "SHORT", "near_resistance", structure_minutes)
+            )
+            or self._truth(
+                self._mtf_sr_raw(
+                    i, "SHORT", "inside_resistance_zone", structure_minutes
+                )
+            )
         )
         long_role = self._text(
             self._mtf_price_action_value(
-                i, "LONG", "SR_ROLE_REVERSAL_STATE", 240
+                i, "LONG", "SR_ROLE_REVERSAL_STATE", structure_minutes
             )
         )
         short_role = self._text(
             self._mtf_price_action_value(
-                i, "SHORT", "SR_ROLE_REVERSAL_STATE", 240
+                i, "SHORT", "SR_ROLE_REVERSAL_STATE", structure_minutes
             )
         )
         valid_retests = {"RETESTING_FROM_BREAK_SIDE", "RETEST_HELD"}
