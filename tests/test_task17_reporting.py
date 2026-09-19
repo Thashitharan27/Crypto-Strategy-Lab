@@ -12,9 +12,10 @@ from crypto_strategy_lab.data.schemas import ArchiveRecord, DatasetKind, MarketK
 from crypto_strategy_lab.data.source_identity import canonical_partition_identity
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
 from crypto_strategy_lab.feature_research import _trade_fingerprint, _write_parquet_atomic
-from crypto_strategy_lab.research_adapters import _signal_frame
+from crypto_strategy_lab.research_adapters import _signal_frame, _strategy_rule_trace_frame
 from crypto_strategy_lab.research_reporting import (
     _validate_research_artifacts,
+    _validate_rule_trace_artifact,
     _validate_signal_artifact,
 )
 from crypto_strategy_lab.run_manifest import (
@@ -242,6 +243,57 @@ def test_signal_frame_uses_same_run_rejections_and_exact_causal_rows(tmp_path: P
     _write_parquet_atomic(signals, signals_path)
     _write_parquet_atomic(context, context_path)
     _validate_signal_artifact(signals_path, context_path, trade_rows=1)
+
+
+
+def test_rule_trace_artifact_requires_exact_prepared_candle_attachment(tmp_path: Path):
+    _trades, context = _research_frames()
+    trace = _strategy_rule_trace_frame(
+        [
+            {
+                "strategy_index": 1,
+                "strategy_candle_open_time": context.loc[1, "strategy_candle_open_time"],
+                "decision_available_at": context.loc[1, "decision_available_at"],
+                "market_regime": "BULL",
+                "source_side": "LONG",
+                "strategy_profile_key": "bull_long",
+                "signal_strategy": "DI",
+                "rule_kind": "REQUIRED",
+                "group_id": "entry-1",
+                "group_name": "Trend entry",
+                "group_enabled": True,
+                "group_evaluated": True,
+                "group_matched": True,
+                "condition_id": "adx-1",
+                "condition_order": 1,
+                "condition_evaluated": True,
+                "evidence": "ADX",
+                "timeframe_minutes": None,
+                "operator": "GTE",
+                "expected_value": 20.0,
+                "expected_value2": 0.0,
+                "actual_value": 24.0,
+                "evidence_available": True,
+                "condition_passed": True,
+                "filter_passed": True,
+                "filter_reason": "passed",
+            }
+        ]
+    )
+    trace_path = tmp_path / "rule_trace.parquet"
+    context_path = tmp_path / "context.parquet"
+    _write_parquet_atomic(trace, trace_path)
+    _write_parquet_atomic(context, context_path)
+    _validate_rule_trace_artifact(trace_path, context_path)
+
+    broken = trace.copy()
+    broken.loc[0, "strategy_candle_open_time"] = (
+        pd.Timestamp(broken.loc[0, "strategy_candle_open_time"])
+        + pd.Timedelta(minutes=1)
+    )
+    _write_parquet_atomic(broken, trace_path)
+    with pytest.raises(ValueError, match="causal attachment"):
+        _validate_rule_trace_artifact(trace_path, context_path)
 
 
 def test_signal_frame_refuses_nearest_timestamp_reconstruction():

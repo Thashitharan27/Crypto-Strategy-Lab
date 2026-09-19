@@ -27,6 +27,7 @@ RESEARCH_ARTIFACTS = (
     ("summary", "Summary JSON"),
     ("trades", "Trades Parquet"),
     ("signals", "Signals Parquet"),
+    ("rule_trace", "Rule Trace"),
     ("feature_context", "Feature Context"),
     ("data_quality", "Data Quality"),
     ("source_archives", "Source Provenance"),

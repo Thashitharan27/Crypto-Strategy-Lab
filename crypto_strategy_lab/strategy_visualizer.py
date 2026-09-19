@@ -20,6 +20,10 @@ from crypto_strategy_lab.data import DatasetKind
 from crypto_strategy_lab.data.timing import interval_to_timedelta
 from crypto_strategy_lab.data.source_identity import SourceSignature
 from crypto_strategy_lab.gui.completed_run_research import research_seed_from_manifest
+from crypto_strategy_lab.strategy_rule_model import (
+    CATEGORICAL_VALUE_CODES,
+    is_context_timeframe_evidence,
+)
 
 
 LIGHTWEIGHT_CHARTS_VERSION = "5.2.1"
@@ -161,6 +165,53 @@ def _trade_side(row: Mapping[str, Any]) -> str:
     return side if side in {"LONG", "SHORT"} else side or "UNKNOWN"
 
 
+def _rule_actual_display(evidence: str, value: Any, available: bool) -> str:
+    if not available:
+        return "MISSING"
+    numeric = _finite(value)
+    codes = CATEGORICAL_VALUE_CODES.get(str(evidence).upper())
+    if codes and numeric is not None:
+        for label, code in codes.items():
+            if abs(float(code) - numeric) < 1e-9:
+                return str(label)
+    if numeric is not None:
+        return f"{numeric:.6g}"
+    return str(value)
+
+
+def _rule_requirement(operator: Any, first: Any, second: Any) -> str:
+    op = str(operator or "").upper()
+    left = "" if first is None or pd.isna(first) else str(first)
+    right = "" if second is None or pd.isna(second) else str(second)
+    if op == "GT":
+        return f"> {left}"
+    if op == "GTE":
+        return f">= {left}"
+    if op == "LT":
+        return f"< {left}"
+    if op == "LTE":
+        return f"<= {left}"
+    if op == "BETWEEN":
+        return f"{left} to {right}"
+    if op == "OUTSIDE":
+        return f"outside {left} to {right}"
+    if op == "IS":
+        return f"is {left}"
+    if op == "IS_NOT":
+        return f"is not {left}"
+    return " ".join(part for part in (op, left, right) if part)
+
+
+def _rule_timeframe_label(evidence: str, value: Any) -> str:
+    if value is None or pd.isna(value):
+        return "Configured S/R TF" if is_context_timeframe_evidence(evidence) else "Strategy TF"
+    minutes = int(float(value))
+    return {0: "Strategy TF", 60: "1H", 240: "4H", 1440: "1D"}.get(
+        minutes, f"{minutes}m"
+    )
+
+
+
 def trade_stop_target(row: Mapping[str, Any]) -> tuple[float | None, float | None]:
     """Return the best immutable entry-stop / target representation available."""
     side = _trade_side(row).lower()
@@ -194,6 +245,7 @@ class CompletedRunVisualizer:
     trades_path: Path
     signals_path: Path | None
     context_path: Path | None
+    rule_trace_path: Path | None
     source_archives_path: Path | None
     source_verified: bool | None
     seed: Any
@@ -218,6 +270,9 @@ class CompletedRunVisualizer:
         context_path = cls._optional_artifact(
             completed, run_dir, manifest, "feature_context"
         )
+        rule_trace_path = cls._optional_artifact(
+            completed, run_dir, manifest, "rule_trace"
+        )
         source_archives_path = cls._optional_artifact(
             completed, run_dir, manifest, "source_archives"
         )
@@ -240,6 +295,7 @@ class CompletedRunVisualizer:
             trades_path=trades_path,
             signals_path=signals_path,
             context_path=context_path,
+            rule_trace_path=rule_trace_path,
             source_archives_path=source_archives_path,
             source_verified=source_verified,
             seed=seed,
@@ -299,6 +355,117 @@ class CompletedRunVisualizer:
             if name in frame.columns:
                 return name
         raise ValueError("completed trades do not contain an entry timestamp")
+
+    def selected_trade_candle_time(self, index: int | None) -> pd.Timestamp | None:
+        if index is None or not self.trade_count:
+            return None
+        row = self._trade_row(index)
+        value = _first_value(
+            row,
+            (
+                "research_signal_candle_open_time",
+                "signal_candle_time",
+                "strategy_candle_open_time",
+            ),
+        )
+        return _utc(value) if value is not None else None
+
+    def rule_inspector_at(self, timestamp: Any) -> dict[str, Any]:
+        """Return exact decision-time authored rule observations for one candle."""
+        target = _utc(timestamp)
+        if self.rule_trace_path is None:
+            return {
+                "status": "LEGACY_UNAVAILABLE",
+                "timestamp": target.isoformat(),
+                "message": (
+                    "This completed run predates rule_trace.parquet. Re-run the same "
+                    "configuration to capture exact ENTRY/VETO/FLIP condition traces."
+                ),
+                "rows": [],
+            }
+        escaped = str(self.rule_trace_path).replace("'", "''")
+        with duckdb.connect(":memory:") as connection:
+            frame = connection.execute(
+                f"SELECT * FROM read_parquet('{escaped}') "
+                "WHERE CAST(strategy_candle_open_time AS TIMESTAMPTZ)=? "
+                "ORDER BY rule_kind, group_id, condition_order",
+                [target.to_pydatetime()],
+            ).df()
+        if frame.empty:
+            return {
+                "status": "NOT_EVALUATED",
+                "timestamp": target.isoformat(),
+                "message": (
+                    "No authored rule evaluation was recorded on this candle. The "
+                    "strategy may have been in an active trade, outside its entry "
+                    "cadence, or without a valid signal/profile context."
+                ),
+                "rows": [],
+            }
+
+        first = frame.iloc[0]
+        rows = []
+        for _, raw in frame.iterrows():
+            evidence = str(raw.get("evidence") or "")
+            kind = str(raw.get("rule_kind") or "").upper()
+            enabled = bool(raw.get("group_enabled"))
+            group_evaluated = bool(raw.get("group_evaluated"))
+            matched = bool(raw.get("group_matched"))
+            if not enabled:
+                group_status = "MUTED"
+            elif not group_evaluated:
+                group_status = "NOT REACHED"
+            elif kind == "REQUIRED":
+                group_status = "MATCHED" if matched else "FAILED"
+            else:
+                group_status = "TRIGGERED" if matched else "CLEAR"
+            condition_evaluated = bool(raw.get("condition_evaluated"))
+            available = bool(raw.get("evidence_available"))
+            condition_passed = bool(raw.get("condition_passed"))
+            rows.append(
+                {
+                    "type": "ENTRY" if kind == "REQUIRED" else kind,
+                    "group": str(raw.get("group_name") or raw.get("group_id") or ""),
+                    "groupStatus": group_status,
+                    "evidence": evidence,
+                    "timeframe": _rule_timeframe_label(
+                        evidence, raw.get("timeframe_minutes")
+                    ),
+                    "actual": (
+                        _rule_actual_display(evidence, raw.get("actual_value"), available)
+                        if condition_evaluated else "—"
+                    ),
+                    "requirement": _rule_requirement(
+                        raw.get("operator"),
+                        raw.get("expected_value"),
+                        raw.get("expected_value2"),
+                    ),
+                    "conditionStatus": (
+                        "NOT REACHED"
+                        if not condition_evaluated
+                        else "MISSING"
+                        if not available
+                        else "PASS"
+                        if condition_passed
+                        else "FAIL"
+                    ),
+                    "conditionPassed": condition_passed,
+                    "groupMatched": matched,
+                    "groupEnabled": enabled,
+                }
+            )
+        return {
+            "status": "AVAILABLE",
+            "timestamp": target.isoformat(),
+            "profile": _json_value(first.get("strategy_profile_key")),
+            "side": _json_value(first.get("source_side")),
+            "regime": _json_value(first.get("market_regime")),
+            "signalStrategy": _json_value(first.get("signal_strategy")),
+            "filterPassed": bool(first.get("filter_passed")),
+            "filterReason": _json_value(first.get("filter_reason")),
+            "message": "",
+            "rows": rows,
+        }
 
     @property
     def trade_count(self) -> int:
@@ -717,6 +884,7 @@ class CompletedRunVisualizer:
                 "start": _utc(request.period_start).isoformat(),
                 "end": _utc(request.period_end).isoformat(),
                 "sourceVerified": self.source_verified,
+                "ruleTraceAvailable": self.rule_trace_path is not None,
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": self.selected_trade_summary(trade_index),
@@ -752,6 +920,7 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
 #error{{position:absolute;inset:20px;display:none;place-items:center;text-align:center;color:#ffb4b4}}
 </style>
 <script src="{LIGHTWEIGHT_CHARTS_URL}"></script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 </head>
 <body>
 <div id="root">
@@ -774,6 +943,12 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
     error.style.display='grid';
     error.textContent='Chart library could not be loaded. Check internet access and reopen Strategy Visualizer.';
     return;
+  }}
+  let strategyBridge = null;
+  if (window.qt && window.qt.webChannelTransport && window.QWebChannel) {{
+    new QWebChannel(window.qt.webChannelTransport, channel => {{
+      strategyBridge = channel.objects.strategyBridge || null;
+    }});
   }}
   const LC = window.LightweightCharts;
   const chart = LC.createChart(document.getElementById('chart'), {{
@@ -838,6 +1013,8 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
   chart.subscribeClick(param => {{
     if (!param || !param.time) return;
     showAt(param.time, param.seriesData.get(candle));
+    if (strategyBridge && strategyBridge.selectCandle)
+      strategyBridge.selectCandle(String(param.time));
   }});
   chart.subscribeCrosshairMove(param => {{
     if (!param || !param.time || !param.seriesData.has(candle)) return;

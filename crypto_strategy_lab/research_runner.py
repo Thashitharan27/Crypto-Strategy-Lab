@@ -15,7 +15,7 @@ from .data.quality import DataQualityReport
 from .prepared_backtest import from_data_lake_bundle, intrabar_from_data_lake_bundle
 from .prepared_cache import bundle_prepared_identity
 from .progress import emit_progress
-from .research_adapters import prepared_policy_config
+from .research_adapters import _strategy_rule_trace_frame, prepared_policy_config
 from .research_warmup import expand_strategy_request
 
 
@@ -59,6 +59,7 @@ class ResearchRunResult:
     prepared_rows: int
     stage_timings: Mapping[str, float]
     signals: pd.DataFrame | None = None
+    rule_trace: pd.DataFrame | None = None
     telemetry: pd.DataFrame | None = None
     output_dir: Path | None = None
     data_quality: DataQualityReport | None = None
@@ -360,6 +361,9 @@ class ResearchRunner:
             prepared_rows=len(prepared),
             stage_timings=timings,
             signals=getattr(self.simulator, "last_signals", None),
+            rule_trace=_strategy_rule_trace_frame(
+                getattr(self.simulator, "last_rule_trace", None)
+            ),
             telemetry=getattr(self.simulator, "last_telemetry", None),
             data_quality=getattr(bundle, "data_quality", None),
         )

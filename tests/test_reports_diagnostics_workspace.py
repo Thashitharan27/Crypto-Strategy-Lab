@@ -101,6 +101,7 @@ def test_run_output_page_documents_the_exact_clean_artifact_set():
             "artifacts/trades.parquet",
             "artifacts/feature_context.parquet",
             "artifacts/signals.parquet",
+            "artifacts/rule_trace.parquet",
             "provenance/source_archives.parquet",
             "run_manifest.json",
         ):

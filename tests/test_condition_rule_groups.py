@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.rule_native_engine import (
@@ -227,6 +228,105 @@ def test_bull_long_mr_state_and_motion_veto_only_rejects_the_intersection():
     )
     assert not rejected
     assert detail is None
+
+
+
+def _trace_engine():
+    engine = object.__new__(RuleAwareDataLakeProductionBacktestEngine)
+    engine.times = np.array([np.datetime64("2026-01-01T00:00:00")])
+    engine.entry_delta = pd.Timedelta(minutes=15)
+    engine.adx_values = np.array([24.0], dtype=float)
+    engine.di_spread = np.array([10.0], dtype=float)
+    engine.strategy_rule_trace_rows = []
+    engine._strategy_rule_trace_keys = set()
+    engine._strategy_rule_trace_active = None
+    engine.signal_strategy_mode = "DI"
+    return engine
+
+
+def test_rule_trace_observes_runtime_short_circuit_without_re_evaluating_later_conditions():
+    entry_group = "entry-trend"
+    required_adx = new_rule(
+        kind="REQUIRED", evidence="ADX", group_id=entry_group,
+        group_name="Trend entry", regime="BULL", side="LONG",
+    )
+    required_adx.update(operator="GTE", value=20.0)
+    required_spread = new_rule(
+        kind="REQUIRED", evidence="DI_SPREAD", group_id=entry_group,
+        group_name="Trend entry", regime="BULL", side="LONG",
+    )
+    required_spread.update(operator="GTE", value=5.0)
+
+    veto_group = "veto-overheat"
+    veto_adx = new_rule(
+        kind="VETO", evidence="ADX", group_id=veto_group,
+        group_name="Overheated", regime="BULL", side="LONG",
+    )
+    veto_adx.update(operator="GTE", value=40.0)
+    veto_spread = new_rule(
+        kind="VETO", evidence="DI_SPREAD", group_id=veto_group,
+        group_name="Overheated", regime="BULL", side="LONG",
+    )
+    veto_spread.update(operator="GTE", value=5.0)
+
+    profiles, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(required_adx, required_spread),
+        veto_rules=(veto_adx, veto_spread),
+    )
+    profile = profiles["bull_long"]
+    engine = _trace_engine()
+    engine._begin_strategy_rule_trace(0, "BULL", "LONG", "bull_long", profile)
+    rejected, _detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", profile, "REJECT", profile.reject_rule_match_mode
+    )
+    assert not rejected
+    engine._finish_strategy_rule_trace(True, "passed")
+
+    rows = engine.strategy_rule_trace_rows
+    entry = [row for row in rows if row["rule_kind"] == "REQUIRED"]
+    veto = [row for row in rows if row["rule_kind"] == "VETO"]
+    assert len(entry) == 2 and all(row["condition_evaluated"] for row in entry)
+    assert all(row["condition_passed"] for row in entry)
+    assert all(row["group_matched"] for row in entry)
+
+    assert len(veto) == 2
+    assert veto[0]["condition_evaluated"] is True
+    assert veto[0]["condition_passed"] is False
+    assert veto[1]["condition_evaluated"] is False
+    assert veto[0]["group_evaluated"] is True
+    assert veto[0]["group_matched"] is False
+
+
+def test_rule_trace_marks_missing_required_evidence_as_evaluated_failure():
+    rule = new_rule(
+        kind="REQUIRED", evidence="ADX", group_id="entry-adx",
+        group_name="ADX entry", regime="BULL", side="LONG",
+    )
+    rule.update(operator="GTE", value=20.0)
+    profiles, _execution = compile_profiles(
+        direction_mode="DI",
+        market_permissions=MARKET_PERMISSIONS,
+        required_rules=(rule,),
+    )
+    profile = profiles["bull_long"]
+    engine = _trace_engine()
+    engine.adx_values[0] = np.nan
+
+    engine._begin_strategy_rule_trace(0, "BULL", "LONG", "bull_long", profile)
+    rejected, _detail = engine._strategy_profile_rule_action_result(
+        0, "LONG", profile, "REJECT", profile.reject_rule_match_mode
+    )
+    assert rejected
+    engine._finish_strategy_rule_trace(False, "missing ADX")
+
+    row = engine.strategy_rule_trace_rows[0]
+    assert row["condition_evaluated"] is True
+    assert row["evidence_available"] is False
+    assert row["condition_passed"] is False
+    assert row["group_evaluated"] is True
+    assert row["group_matched"] is False
 
 
 def test_muted_required_group_does_not_reject_clean_baseline():

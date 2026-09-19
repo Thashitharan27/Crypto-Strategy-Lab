@@ -237,6 +237,7 @@ class ReportsDiagnosticsWorkspace(QWidget):
             "• artifacts/trades.parquet — authoritative completed portfolio strategy trades\n"
             "• artifacts/feature_context.parquet — causal feature/research state for every strategy row\n"
             "• artifacts/signals.parquet — entered and rejected portfolio decisions\n"
+            "• artifacts/rule_trace.parquet — exact decision-time ENTRY/VETO/FLIP condition trace\n"
             "• artifacts/research_sampling_trades.parquet — optional strategy-valid overlapping samples\n"
             "• artifacts/research_sampling_episodes.parquet — correlation-cluster/episode outcomes\n"
             "• research_sampling_context.csv — DI/ADX/regime/MR/funding/OI sample breakdowns\n"
