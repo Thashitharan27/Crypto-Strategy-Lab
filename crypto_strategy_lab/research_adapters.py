@@ -272,6 +272,77 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
     ).reset_index(drop=True)
 
 
+RULE_TRACE_COLUMNS = (
+    "strategy_index",
+    "strategy_candle_open_time",
+    "decision_available_at",
+    "market_regime",
+    "source_side",
+    "strategy_profile_key",
+    "signal_strategy",
+    "rule_kind",
+    "group_id",
+    "group_name",
+    "group_enabled",
+    "group_matched",
+    "condition_id",
+    "condition_order",
+    "evidence",
+    "timeframe_minutes",
+    "operator",
+    "expected_value",
+    "expected_value2",
+    "actual_value",
+    "evidence_available",
+    "condition_passed",
+    "filter_passed",
+    "filter_reason",
+)
+
+
+def _strategy_rule_trace_frame(rows) -> pd.DataFrame:
+    """Normalize passive decision-time rule telemetry for immutable reporting."""
+    result = pd.DataFrame(list(rows or ()), columns=RULE_TRACE_COLUMNS)
+    if result.empty:
+        return pd.DataFrame(
+            {
+                "strategy_index": pd.Series(dtype="int64"),
+                "strategy_candle_open_time": pd.Series(dtype="datetime64[ns]"),
+                "decision_available_at": pd.Series(dtype="datetime64[ns]"),
+                "market_regime": pd.Series(dtype="string"),
+                "source_side": pd.Series(dtype="string"),
+                "strategy_profile_key": pd.Series(dtype="string"),
+                "signal_strategy": pd.Series(dtype="string"),
+                "rule_kind": pd.Series(dtype="string"),
+                "group_id": pd.Series(dtype="string"),
+                "group_name": pd.Series(dtype="string"),
+                "group_enabled": pd.Series(dtype="bool"),
+                "group_matched": pd.Series(dtype="bool"),
+                "condition_id": pd.Series(dtype="string"),
+                "condition_order": pd.Series(dtype="int64"),
+                "evidence": pd.Series(dtype="string"),
+                "timeframe_minutes": pd.Series(dtype="float64"),
+                "operator": pd.Series(dtype="string"),
+                "expected_value": pd.Series(dtype="string"),
+                "expected_value2": pd.Series(dtype="string"),
+                "actual_value": pd.Series(dtype="float64"),
+                "evidence_available": pd.Series(dtype="bool"),
+                "condition_passed": pd.Series(dtype="bool"),
+                "filter_passed": pd.Series(dtype="bool"),
+                "filter_reason": pd.Series(dtype="string"),
+            }
+        )
+    for column in ("strategy_candle_open_time", "decision_available_at"):
+        result[column] = pd.to_datetime(result[column], utc=True).dt.tz_localize(None)
+    result["strategy_index"] = pd.to_numeric(result["strategy_index"], errors="raise").astype("int64")
+    result["condition_order"] = pd.to_numeric(result["condition_order"], errors="raise").astype("int64")
+    for column in ("group_enabled", "group_matched", "evidence_available", "condition_passed", "filter_passed"):
+        result[column] = result[column].astype(bool)
+    return result.sort_values(
+        ["strategy_index", "rule_kind", "group_id", "condition_order"], kind="stable"
+    ).reset_index(drop=True)
+
+
 def _release_canonicalized_rejection_metadata(trades: pd.DataFrame) -> None:
     """Drop the legacy duplicate once engine-owned rejection records are retained.
 
@@ -312,6 +383,7 @@ class NativeSimulator:
         self.last_bayesian_seconds = 0.0
         self.last_adapter_cleanup_seconds = 0.0
         self.last_signals: pd.DataFrame | None = None
+        self.last_rule_trace: pd.DataFrame | None = None
         self.last_telemetry: pd.DataFrame | None = None
 
     def run(
@@ -336,6 +408,7 @@ class NativeSimulator:
         self.last_bayesian_seconds = 0.0
         self.last_adapter_cleanup_seconds = 0.0
         self.last_signals = None
+        self.last_rule_trace = None
         self.last_telemetry = None
 
         def run_stage(label, action):
@@ -385,6 +458,12 @@ class NativeSimulator:
             "signal capture",
             lambda: _signal_frame(prepared, trades, skipped_signals),
         )
+        self.last_rule_trace = run_stage(
+            "strategy rule trace capture",
+            lambda: _strategy_rule_trace_frame(
+                getattr(engine, "strategy_rule_trace_rows", ())
+            ),
+        )
         self.last_signal_capture_seconds = time.perf_counter() - started
 
         # Bayesian scoring is downstream-only. It uses only completed outcomes
@@ -404,6 +483,9 @@ class NativeSimulator:
             clear_rejections = getattr(skipped_signals, "clear", None)
             if clear_rejections is not None:
                 clear_rejections()
+            rule_trace_rows = getattr(engine, "strategy_rule_trace_rows", None)
+            if rule_trace_rows is not None:
+                rule_trace_rows.clear()
             telemetry_rows = getattr(engine, "telemetry_rows", ())
             if telemetry_rows:
                 self.last_telemetry = pd.DataFrame(telemetry_rows)
