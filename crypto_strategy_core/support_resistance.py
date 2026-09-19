@@ -106,6 +106,12 @@ class SRContext:
     support_zone_high: Optional[float] = None
     resistance_zone_low: Optional[float] = None
     resistance_zone_high: Optional[float] = None
+    support_last_break_index: Optional[int] = None
+    resistance_last_break_index: Optional[int] = None
+    support_broken_zone_low: Optional[float] = None
+    support_broken_zone_high: Optional[float] = None
+    resistance_broken_zone_low: Optional[float] = None
+    resistance_broken_zone_high: Optional[float] = None
 
 
 def _positive_integral(value, name: str) -> int:
@@ -641,7 +647,17 @@ class SupportResistanceDetector:
         break_price = low[index] if self.break_basis == "WICK" else close[index]
         broken = (break_price < level.zone_bottom - atr * self.break_tolerance_atr) if support else (break_price > level.zone_top + atr * self.break_tolerance_atr)
         if broken:
-            state.update(state=SRInteractionState.SUPPORT_BROKEN.value if support else SRInteractionState.RESISTANCE_BROKEN.value, pending_test_index=None)
+            state.update(
+                state=(
+                    SRInteractionState.SUPPORT_BROKEN.value
+                    if support
+                    else SRInteractionState.RESISTANCE_BROKEN.value
+                ),
+                pending_test_index=None,
+                broken_index=index,
+                broken_zone_low=float(level.zone_bottom),
+                broken_zone_high=float(level.zone_top),
+            )
             return
         tested = low[index] <= level.zone_top and high[index] >= level.zone_bottom
         if tested:
@@ -790,6 +806,8 @@ class SupportResistanceDetector:
         if nearest_resistance is None:
             resistance_metrics = self._interaction_metrics_for_active_state(index, False, SRInteractionState.RESISTANCE_BROKEN.value, current_atr)
         confirmation_rating = self._confirmation_rating(direction, support_metrics["state"], resistance_metrics["state"])
+        broken_support = self._latest_broken_zone(True)
+        broken_resistance = self._latest_broken_zone(False)
         
         context = SRContext(
             nearest_support_price=nearest_support.price if nearest_support else None,
@@ -831,6 +849,12 @@ class SupportResistanceDetector:
             support_zone_high=nearest_support.zone_top if nearest_support else None,
             resistance_zone_low=nearest_resistance.zone_bottom if nearest_resistance else None,
             resistance_zone_high=nearest_resistance.zone_top if nearest_resistance else None,
+            support_last_break_index=broken_support["index"],
+            resistance_last_break_index=broken_resistance["index"],
+            support_broken_zone_low=broken_support["low"],
+            support_broken_zone_high=broken_support["high"],
+            resistance_broken_zone_low=broken_resistance["low"],
+            resistance_broken_zone_high=broken_resistance["high"],
         )
         self._context_cache[cache_key] = context
         return context
@@ -881,6 +905,42 @@ class SupportResistanceDetector:
             "bars_since_test": index - last_test if last_test is not None else None,
             "last_test_index": last_test,
         }
+
+    def _latest_broken_zone(self, support: bool) -> dict:
+        current_levels = self._confirmed_lows if support else self._confirmed_highs
+        current_sources = {int(level.bar_index) for level in current_levels}
+        broken_state = (
+            SRInteractionState.SUPPORT_BROKEN.value
+            if support
+            else SRInteractionState.RESISTANCE_BROKEN.value
+        )
+        candidates = []
+        for (kind, sources), state in self._interaction_state.items():
+            if kind != (
+                SRLevelType.SUPPORT.value
+                if support
+                else SRLevelType.RESISTANCE.value
+            ):
+                continue
+            if state.get("state") != broken_state:
+                continue
+            if not any(int(source) in current_sources for source in sources):
+                continue
+            broken_index = state.get("broken_index")
+            low = state.get("broken_zone_low")
+            high = state.get("broken_zone_high")
+            if broken_index is None or low is None or high is None:
+                continue
+            candidates.append(
+                {
+                    "index": int(broken_index),
+                    "low": float(low),
+                    "high": float(high),
+                }
+            )
+        if not candidates:
+            return {"index": None, "low": None, "high": None}
+        return max(candidates, key=lambda item: item["index"])
 
     def _confirmation_rating(self, direction: str, support_state: str, resistance_state: str) -> str:
         held = SRInteractionState.SUPPORT_HELD.value if direction == "LONG" else SRInteractionState.RESISTANCE_HELD.value
