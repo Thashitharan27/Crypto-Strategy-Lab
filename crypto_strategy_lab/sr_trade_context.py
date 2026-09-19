@@ -179,6 +179,10 @@ def _field(raw: Mapping[str, Any], structure: str, suffix: str) -> Any:
     return raw.get(f"{structure}_{suffix}")
 
 
+def _inside(raw: Mapping[str, Any], structure: str) -> bool:
+    return _boolean(raw.get(f"inside_{structure}_zone"))
+
+
 def _structure_exists(raw: Mapping[str, Any], structure: str) -> bool:
     low = _finite(_field(raw, structure, "zone_low"))
     high = _finite(_field(raw, structure, "zone_high"))
@@ -187,8 +191,8 @@ def _structure_exists(raw: Mapping[str, Any], structure: str) -> bool:
 
 
 def _entry_relation(raw: Mapping[str, Any], favorable: str, opposing: str) -> str:
-    favorable_inside = _boolean(_field(raw, favorable, "inside_zone"))
-    opposing_inside = _boolean(_field(raw, opposing, "inside_zone"))
+    favorable_inside = _inside(raw, favorable)
+    opposing_inside = _inside(raw, opposing)
     favorable_near = _boolean(raw.get(f"near_{favorable}"))
     opposing_near = _boolean(raw.get(f"near_{opposing}"))
     favorable_exists = _structure_exists(raw, favorable)
@@ -226,7 +230,7 @@ def _target_path(
     target = _finite(target_distance)
     if low is None or high is None:
         return "NO_OPPOSING_STRUCTURE"
-    if _boolean(_field(raw, opposing, "inside_zone")):
+    if _inside(raw, opposing):
         return "ALREADY_AT_OPPOSING_STRUCTURE"
     if price is None or target is None or target <= 0:
         return "NO_OPPOSING_STRUCTURE"
