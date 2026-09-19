@@ -218,6 +218,65 @@ def _validate_signal_artifact(
             raise ValueError("entered signal count does not match completed trades")
 
 
+def _validate_rule_trace_artifact(
+    trace_path: Path, context_path: Path
+) -> None:
+    """Verify decision-time rule observations are attached to exact prepared rows."""
+    required = {
+        "strategy_index",
+        "strategy_candle_open_time",
+        "decision_available_at",
+        "market_regime",
+        "source_side",
+        "strategy_profile_key",
+        "rule_kind",
+        "group_id",
+        "group_name",
+        "group_enabled",
+        "group_matched",
+        "condition_id",
+        "condition_order",
+        "evidence",
+        "operator",
+        "actual_value",
+        "evidence_available",
+        "condition_passed",
+        "filter_passed",
+        "filter_reason",
+    }
+    with duckdb.connect() as con:
+        columns = {
+            row[0]
+            for row in con.execute(
+                "DESCRIBE SELECT * FROM read_parquet(?)", [str(trace_path)]
+            ).fetchall()
+        }
+        missing = required - columns
+        if missing:
+            raise ValueError(
+                f"rule trace artifact missing required columns: {sorted(missing)}"
+            )
+        bad = con.execute(
+            """
+            SELECT count(*)
+            FROM read_parquet(?) r
+            LEFT JOIN read_parquet(?) c ON r.strategy_index=c.strategy_index
+            WHERE c.strategy_index IS NULL
+               OR r.strategy_candle_open_time
+                    IS DISTINCT FROM c.strategy_candle_open_time
+               OR r.decision_available_at
+                    IS DISTINCT FROM c.decision_available_at
+               OR upper(cast(r.rule_kind AS VARCHAR)) NOT IN ('REQUIRED','VETO','FLIP')
+               OR r.condition_order < 1
+               OR trim(cast(r.group_id AS VARCHAR)) = ''
+               OR trim(cast(r.condition_id AS VARCHAR)) = ''
+            """,
+            [str(trace_path), str(context_path)],
+        ).fetchone()[0]
+        if bad:
+            raise ValueError("rule trace artifact causal attachment is invalid")
+
+
 def _build_human_workbook(
     summary: dict[str, Any],
     report_config: Any,
@@ -289,6 +348,16 @@ class CsvManifestReporter:
         signals_path = artifacts_dir / "signals.parquet"
         _write_parquet_atomic(signals, signals_path)
         _validate_signal_artifact(signals_path, context_path, len(result.trades))
+
+        rule_trace = getattr(result, "rule_trace", None)
+        if rule_trace is None:
+            raise ValueError(
+                "native run did not expose decision-time strategy rule trace"
+            )
+        rule_trace = pd.DataFrame(rule_trace)
+        rule_trace_path = artifacts_dir / "rule_trace.parquet"
+        _write_parquet_atomic(rule_trace, rule_trace_path)
+        _validate_rule_trace_artifact(rule_trace_path, context_path)
 
         source_rows, source_digest = selected_source_snapshot(
             context.selected_source_records
@@ -399,6 +468,14 @@ class CsvManifestReporter:
                 run_dir,
                 "parquet",
                 len(signals),
+                collection_status="COLLECTED",
+            ),
+            "rule_trace": _catalog_entry(
+                rule_trace_path,
+                run_dir,
+                "parquet",
+                len(rule_trace),
+                schema_version=1,
                 collection_status="COLLECTED",
             ),
             "source_archives": _catalog_entry(
