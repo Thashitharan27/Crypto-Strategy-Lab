@@ -529,11 +529,22 @@ class CompletedRunVisualizer:
                 result[str(_unix_seconds(timestamp))] = facts
         return result
 
+    @staticmethod
+    def _snap_to_candle(timestamp: Any, market: pd.DataFrame) -> int:
+        target = _utc(timestamp)
+        times = pd.DatetimeIndex(pd.to_datetime(market["period_start"], utc=True))
+        if times.empty:
+            return _unix_seconds(target)
+        index = int(np.searchsorted(times.asi8, target.value, side="right") - 1)
+        index = max(0, min(index, len(times) - 1))
+        return _unix_seconds(times[index])
+
     def _markers(
         self,
         signals: pd.DataFrame,
         trade_index: int | None,
         show_rejections: bool,
+        market: pd.DataFrame,
     ) -> list[dict[str, Any]]:
         markers: list[dict[str, Any]] = []
         if not signals.empty:
@@ -576,7 +587,7 @@ class CompletedRunVisualizer:
                 )
                 markers.append(
                     {
-                        "time": _unix_seconds(exit_time),
+                        "time": self._snap_to_candle(exit_time, market),
                         "position": "aboveBar" if side == "LONG" else "belowBar",
                         "shape": "square",
                         "text": f"EXIT · {reason or ''}".strip(),
@@ -654,7 +665,7 @@ class CompletedRunVisualizer:
             "selectedTrade": self.selected_trade_summary(trade_index),
             "candles": candles,
             "overlays": self._overlays(market, context, visible_start),
-            "markers": self._markers(signals, trade_index, show_rejections),
+            "markers": self._markers(signals, trade_index, show_rejections, visible),
             "priceLines": self._price_lines(trade_index),
             "candleContext": self._context_by_time(context, visible_start),
             "visibleStart": _unix_seconds(visible_start),
@@ -730,7 +741,9 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
     sr: {{ lineWidth: 1, color:'#9da8b5', lineStyle:2 }},
   }};
   for (const overlay of payload.overlays || []) {{
-    const style = seriesStyles[overlay.kind] || seriesStyles.sr;
+    const style = {{...(seriesStyles[overlay.kind] || seriesStyles.sr)}};
+    if (overlay.kind === 'sr' && overlay.name.includes('Support')) style.color='#4baa7b';
+    if (overlay.kind === 'sr' && overlay.name.includes('Resistance')) style.color='#ce6a6a';
     const line = chart.addSeries(LC.LineSeries, {{
       ...style, title: overlay.name, priceLineVisible:false, lastValueVisible:false,
       crosshairMarkerVisible:false,
