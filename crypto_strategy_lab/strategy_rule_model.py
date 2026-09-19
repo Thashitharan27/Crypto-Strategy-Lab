@@ -28,6 +28,7 @@ from crypto_strategy_lab.mtf_sr_reaction import (
     MTF_SR_REACTION_MODE,
     MTF_SR_REACTION_RULE_INDICATORS,
     PRICE_ACTION_RULE_INDICATORS,
+    mtf_sr_reaction_timeframe_plan,
 )
 
 # Direction selection and trade permission are intentionally separate concepts.
@@ -790,44 +791,63 @@ def _mtf_sr_reaction_native_rules() -> tuple[dict, ...]:
     )
 
 
-def mtf_sr_reaction_preset_rules() -> tuple[dict, ...]:
-    """Return editable starter groups using trade-relative S/R semantics."""
+def _timeframe_short_label(minutes: int) -> str:
+    value = int(minutes)
+    if value == 1440:
+        return "1D"
+    if value % 60 == 0:
+        return f"{value // 60}H"
+    return f"{value}m"
+
+
+def mtf_sr_reaction_preset_rules(
+    strategy_timeframe_minutes: int = 15,
+) -> tuple[dict, ...]:
+    """Return editable starter groups adapted to the strategy timeframe."""
+    plan = mtf_sr_reaction_timeframe_plan(strategy_timeframe_minutes)
+    strategy_minutes = int(plan["strategy_minutes"])
+    structure_minutes = int(plan["structure_minutes"])
+    approach_minutes = int(plan["approach_minutes"])
+    approach_rule_minutes = (
+        0 if approach_minutes == strategy_minutes else approach_minutes
+    )
+    structure_label = _timeframe_short_label(structure_minutes)
 
     groups = (
         (
-            "4H Favorable Structure Bounce — Long", "LONG",
+            f"{structure_label} Favorable Structure Bounce — Long", "LONG",
             (
-                ("SR_ENTRY_RELATION", "IS", "FAVORABLE_ENTRY_AREA", 240),
-                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
+                ("SR_ENTRY_RELATION", "IS", "FAVORABLE_ENTRY_AREA", structure_minutes),
+                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", approach_rule_minutes),
                 ("BULLISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
-                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", 240),
+                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", structure_minutes),
             ),
         ),
         (
-            "4H Break + Retest — Long", "LONG",
+            f"{structure_label} Break + Retest — Long", "LONG",
             (
-                ("SR_ROLE_REVERSAL_STATE", "IS", "VALID_RETEST", 240),
-                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
+                ("SR_ROLE_REVERSAL_STATE", "IS", "VALID_RETEST", structure_minutes),
+                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", approach_rule_minutes),
                 ("BULLISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
-                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", 240),
+                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", structure_minutes),
             ),
         ),
         (
-            "4H Favorable Structure Bounce — Short", "SHORT",
+            f"{structure_label} Favorable Structure Bounce — Short", "SHORT",
             (
-                ("SR_ENTRY_RELATION", "IS", "FAVORABLE_ENTRY_AREA", 240),
-                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
+                ("SR_ENTRY_RELATION", "IS", "FAVORABLE_ENTRY_AREA", structure_minutes),
+                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", approach_rule_minutes),
                 ("BEARISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
-                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", 240),
+                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", structure_minutes),
             ),
         ),
         (
-            "4H Break + Retest — Short", "SHORT",
+            f"{structure_label} Break + Retest — Short", "SHORT",
             (
-                ("SR_ROLE_REVERSAL_STATE", "IS", "VALID_RETEST", 240),
-                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", 60),
+                ("SR_ROLE_REVERSAL_STATE", "IS", "VALID_RETEST", structure_minutes),
+                ("SR_APPROACH_MOMENTUM_STATE", "IS", "DECELERATING", approach_rule_minutes),
                 ("BEARISH_REVERSAL_TRIGGER", "IS", "TRUE", 0),
-                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", 240),
+                ("SR_TARGET_PATH", "IS", "TARGET_BEFORE_OPPOSING_ZONE", structure_minutes),
             ),
         ),
     )
