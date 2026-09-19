@@ -117,6 +117,7 @@ def prepared(frame: pd.DataFrame, cfg: EnhancedBacktestConfig | None = None):
         "sr_pivot_left": cfg.sr_pivot_left,
         "sr_pivot_right": cfg.sr_pivot_right,
         "sr_lookback_bars": cfg.sr_lookback_bars,
+        "sr_4h_lookback_bars": cfg.sr_lookback_bars,
         "sr_zone_width_atr": cfg.sr_zone_width_atr,
         "sr_zone_padding_atr": cfg.sr_zone_padding_atr,
         "sr_zone_max_cluster_span_atr": cfg.sr_zone_max_cluster_span_atr,
