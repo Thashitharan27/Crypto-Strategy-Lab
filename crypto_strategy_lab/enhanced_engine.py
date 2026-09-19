@@ -304,7 +304,8 @@ class EnhancedBacktestEngine(BacktestEngine):
         """Include enhanced MR and S/R source telemetry in trade_list.csv."""
         row = super()._build_result_row(p, row_kind, positions)
         fields = (
-            "mean_reversion_mean_type", "mean_reversion_bb_stddevs", "mean_reversion_rsi_period",
+            "mean_reversion_mean_type", "mean_reversion_effective_mean_type",
+            "mean_reversion_bb_stddevs", "mean_reversion_rsi_period",
             "mean_reversion_rsi_oversold", "mean_reversion_rsi_overbought", "mean_reversion_require_reentry",
             "mean_reversion_bb_upper", "mean_reversion_bb_lower", "mean_reversion_bb_sigma",
             "mean_reversion_bb_zscore", "mean_reversion_bb_location", "mean_reversion_rsi",
