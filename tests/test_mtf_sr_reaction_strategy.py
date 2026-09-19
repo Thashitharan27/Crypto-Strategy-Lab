@@ -6,6 +6,7 @@ from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.gui.rule_strategy_builder import DIRECTION_LABELS, EVIDENCE_LABELS
 from crypto_strategy_lab.mtf_sr_reaction import (
     MTF_SR_REACTION_MODE,
+    MtfSrReactionMixin,
     candle_evidence_arrays,
     mtf_sr_reaction_timeframe_plan,
 )
@@ -184,6 +185,44 @@ def test_mtf_sr_starter_preset_uses_daily_structure_for_4h_strategy():
     }
 
 
+
+
+def test_one_hour_runtime_feature_setup_no_longer_raises_old_entry_tf_error():
+    class Base:
+        def _configure_signal_features(self):
+            return None
+
+    class Engine(MtfSrReactionMixin, Base):
+        pass
+
+    engine = Engine.__new__(Engine)
+    engine.config = SimpleNamespace(
+        strategy_timeframe_minutes=60,
+        atr_period=14,
+        strategy_profiles={
+            "bull_long": SimpleNamespace(
+                entry_rules=(
+                    {"_strategy_direction_mode": MTF_SR_REACTION_MODE},
+                )
+            )
+        },
+    )
+    periods = 96
+    engine.times = np.array(
+        np.datetime64("2026-01-01T00:00")
+        + np.arange(periods) * np.timedelta64(1, "h")
+    )
+    engine.open = np.linspace(100.0, 120.0, periods)
+    engine.close = engine.open + 0.25
+    engine.high = engine.close + 0.5
+    engine.low = engine.open - 0.5
+    engine.atr_values = np.full(periods, 2.0)
+
+    engine._configure_signal_features()
+
+    assert 60 in engine.mtf_price_action
+    assert 240 in engine.mtf_price_action
+    assert 1440 in engine.mtf_price_action
 
 
 def test_candle_evidence_detects_engulfing_and_pin_bar_causally():
