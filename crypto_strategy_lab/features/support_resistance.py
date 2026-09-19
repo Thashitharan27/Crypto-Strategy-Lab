@@ -26,7 +26,7 @@ from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 SUPPORT_RESISTANCE_FEATURE_NAME = "support_resistance"
-SUPPORT_RESISTANCE_FEATURE_VERSION = "4"
+SUPPORT_RESISTANCE_FEATURE_VERSION = "5"
 
 
 def _optional_float(value):
