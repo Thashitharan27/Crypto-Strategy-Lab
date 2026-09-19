@@ -498,6 +498,8 @@ class CompletedRunVisualizer:
         candidates = [f"sr_{label}_{suffix}"]
         if label == "strategy":
             candidates.append(suffix)
+            if suffix == "completed_candle_time":
+                candidates.append("sr_completed_candle_time")
         return _first_value(row, tuple(candidates))
 
     @classmethod
@@ -1066,7 +1068,7 @@ class CompletedRunVisualizer:
                 frame, label, f"long_{structure}_last_break_index"
             )
             previous_by_identity: dict[tuple, dict[str, Any]] = {}
-            previous_break = None
+            previous_break = object()
 
             for index, raw in frame.iterrows():
                 timestamp = times.iloc[index]
@@ -1088,9 +1090,11 @@ class CompletedRunVisualizer:
                     _json_value(raw.get(break_column)) if break_column else None
                 )
                 if break_value is not None and break_value != previous_break:
-                    if previous_break is not None:
+                    if index > 0:
                         event = "BREAK"
                     previous_break = break_value
+                elif break_value is None and index == 0:
+                    previous_break = None
 
                 if identity is not None:
                     previous = previous_by_identity.get(identity)
@@ -1491,8 +1495,17 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
     zoneLabelLayer.replaceChildren();
     const labels = [];
     for (const zone of payload.srZones || []) {{
-      const x1 = xForTime(zone.start, true);
-      const x2 = xForTime(zone.end, false);
+      const frozenEntryZone = (
+        review.mode === 'review'
+        && review.snapshot === 'entry'
+        && Boolean(zone.activeAtEntry)
+      );
+      const drawStart = frozenEntryZone
+        ? Math.max(Number(zone.start), Number(payload.selectedTradeCandleTime || zone.start))
+        : zone.start;
+      const drawEnd = frozenEntryZone ? payload.visibleEnd : zone.end;
+      const x1 = xForTime(drawStart, true);
+      const x2 = xForTime(drawEnd, false);
       const yHigh = candle.priceToCoordinate(Number(zone.high));
       const yLow = candle.priceToCoordinate(Number(zone.low));
       if ([x1,x2,yHigh,yLow].some(v => v === null || v === undefined || !Number.isFinite(Number(v)))) continue;
