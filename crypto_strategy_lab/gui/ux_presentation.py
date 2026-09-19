@@ -79,6 +79,10 @@ FIELDS = {
         unit=" × ATR",
         decimals=2,
     ),
+    "mean_reversion_mean_type": FieldPresentation(
+        "Mean Type",
+        "Auto uses EMA below 4h and SMA from 4h upward; force SMA or EMA only for a deliberate comparison.",
+    ),
     "tie_policy": FieldPresentation("Same-bar Resolution"),
 }
 
