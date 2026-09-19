@@ -44,7 +44,7 @@ from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_RULE_PRESETS
 from crypto_strategy_lab.walk_forward_materialization import materialize_walk_forward_strategy
 
 
-CANDIDATE_CONTEXT_CONTRACT = "causal_walk_forward_candidate_context_v2"
+CANDIDATE_CONTEXT_CONTRACT = "causal_walk_forward_candidate_context_v1"
 MAX_SCAN_ROWS = 250_000
 
 # Engine-computed values that are known at entry and are useful to ChatGPT's
