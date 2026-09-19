@@ -825,7 +825,13 @@ def _teacher_review_packet(
         packet["current_rule_coverage"] = _rule_decision(
             row, profile, side, groups, snapshot["materialized_config"]
         )
-    packet["entry_context"] = _safe_context(row, context)
+    packet["entry_context"] = _safe_context(
+        row,
+        context,
+        direction=side,
+        profile=profile,
+        config=snapshot["materialized_config"],
+    )
     return packet
 
 
