@@ -14,6 +14,7 @@ from crypto_strategy_core.candles import (
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data.timing import interval_to_timedelta
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
 from crypto_strategy_lab.mean_reversion import (
     classify_motion,
@@ -29,6 +30,8 @@ from crypto_strategy_lab.mean_reversion_v2 import (
     classify_rsi_state,
     classify_signal,
     moving_mean,
+    normalize_mean_type,
+    resolve_mean_type,
     signal_direction,
 )
 
@@ -37,7 +40,7 @@ from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 PRODUCTION_CONTEXT_FEATURE_NAME = "production_market_context"
-PRODUCTION_CONTEXT_FEATURE_VERSION = "2"
+PRODUCTION_CONTEXT_FEATURE_VERSION = "3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +56,7 @@ class ProductionContextFeatureProvider:
             "bb_period": ParameterDefinition(int, 20),
             "bb_stddevs": ParameterDefinition(float, 2.0),
             "mean_reversion_period": ParameterDefinition(int, 20),
-            "mean_reversion_mean_type": ParameterDefinition(lambda value: str(value).upper(), "SMA"),
+            "mean_reversion_mean_type": ParameterDefinition(normalize_mean_type, "AUTO_TIMEFRAME"),
             "mean_reversion_bb_stddevs": ParameterDefinition(float, 2.0),
             "mean_reversion_rsi_period": ParameterDefinition(int, 14),
             "mean_reversion_rsi_oversold": ParameterDefinition(float, 30.0),
@@ -134,7 +137,11 @@ class ProductionContextFeatureProvider:
         bb_period = int(parameters.get("bb_period", 20))
         bb_stddevs = float(parameters.get("bb_stddevs", 2.0))
         mean_period = int(parameters.get("mean_reversion_period", 20))
-        mean_type = str(parameters.get("mean_reversion_mean_type", "SMA")).upper()
+        requested_mean_type = normalize_mean_type(
+            parameters.get("mean_reversion_mean_type", "AUTO_TIMEFRAME")
+        )
+        strategy_minutes = int(interval_to_timedelta(request.strategy_interval).total_seconds() // 60)
+        mean_type = resolve_mean_type(requested_mean_type, strategy_minutes)
         mr_stddevs = float(parameters.get("mean_reversion_bb_stddevs", 2.0))
         rsi_period = int(parameters.get("mean_reversion_rsi_period", 14))
         oversold = float(parameters.get("mean_reversion_rsi_oversold", 30.0))
@@ -142,8 +149,6 @@ class ProductionContextFeatureProvider:
         require_reentry = bool(parameters.get("mean_reversion_require_reentry", True))
         if bb_period <= 0 or bb_stddevs <= 0 or mean_period <= 0 or mr_stddevs <= 0 or rsi_period <= 0:
             raise ValueError("Production context periods/deviations must be positive")
-        if mean_type not in {"SMA", "EMA"}:
-            raise ValueError("mean_reversion_mean_type must be SMA or EMA")
         if not 0 <= oversold < overbought <= 100:
             raise ValueError("MR RSI thresholds must satisfy 0 <= oversold < overbought <= 100")
 
@@ -292,7 +297,9 @@ class ProductionContextFeatureProvider:
                 "bb_period": bb_period,
                 "bb_stddevs": bb_stddevs,
                 "mean_reversion_period": mean_period,
-                "mean_reversion_mean_type": mean_type,
+                "mean_reversion_mean_type": requested_mean_type,
+                "mean_reversion_effective_mean_type": mean_type,
+                "strategy_timeframe_minutes": strategy_minutes,
                 "mean_reversion_bb_stddevs": mr_stddevs,
                 "mean_reversion_rsi_period": rsi_period,
                 "mean_reversion_rsi_oversold": oversold,
