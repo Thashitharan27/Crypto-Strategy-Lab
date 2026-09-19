@@ -215,6 +215,10 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                     "technical_feature_version": directional.attrs.get("feature_version"),
                     "context_feature_name": context.attrs.get("feature_name"),
                     "context_feature_version": context.attrs.get("feature_version"),
+                    "mean_reversion_mean_type": context.attrs.get("mean_reversion_mean_type"),
+                    "mean_reversion_effective_mean_type": context.attrs.get(
+                        "mean_reversion_effective_mean_type"
+                    ),
                     "support_resistance_feature_name": sr.attrs.get("feature_name") if sr is not None else None,
                     "support_resistance_feature_version": sr.attrs.get("feature_version") if sr is not None else None,
                     "state_transition_daily_feature_version": daily_state.attrs.get("feature_version") if daily_state is not None else None,
@@ -237,6 +241,9 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
                 bb_stddevs=context.attrs.get("bb_stddevs"),
                 mean_reversion_period=context.attrs.get("mean_reversion_period"),
                 mean_reversion_mean_type=context.attrs.get("mean_reversion_mean_type"),
+                mean_reversion_effective_mean_type=context.attrs.get(
+                    "mean_reversion_effective_mean_type"
+                ),
                 mean_reversion_bb_stddevs=context.attrs.get("mean_reversion_bb_stddevs"),
                 mean_reversion_rsi_period=context.attrs.get("mean_reversion_rsi_period"),
                 mean_reversion_rsi_oversold=context.attrs.get("mean_reversion_rsi_oversold"),
