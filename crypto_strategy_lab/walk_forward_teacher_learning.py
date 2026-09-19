@@ -1,10 +1,10 @@
 """Teacher chronology helpers for causal walk-forward learning.
 
-Historically teacher/reference trades only surfaced winners because their only
-purpose was ENTRY learning. For symmetric 1:1 setups, resolved teacher losses
-can also be useful causal evidence for FLIP learning. This module preserves the
-historical winner-only behavior unless the caller explicitly enables teacher
-loss FLIP learning, and even then admits losses only for immutable 1.0R profiles.
+Teacher/reference trades normally surface winners for ENTRY learning. Paired
+walk-forward reference runs also persist the exact opposite-side execution
+outcome for each source candidate, so resolved teacher losses can be reviewed as
+FLIP evidence at any configured R:R without inferring the opposite result. Loss
+review remains opt-in through the causal teacher-loss policy.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from crypto_strategy_lab.run_manifest import artifact_path
 
 
 TEACHER_WIN_MODE = "ENTRY_FROM_WINNER"
-TEACHER_LOSS_FLIP_MODE = "FLIP_FROM_LOSS_1R"
+TEACHER_LOSS_FLIP_MODE = "FLIP_FROM_LOSS_PAIRED"
 
 
 def _execution_profiles(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -46,9 +46,12 @@ def _profile_reward_risk_ratio(manifest: dict[str, Any], profile: str) -> float 
 def profile_supports_teacher_loss_flip(
     manifest: dict[str, Any], profile: str
 ) -> bool:
-    """Return True only for an immutable profile with a symmetric 1.0R target."""
-    ratio = _profile_reward_risk_ratio(manifest, profile)
-    return ratio is not None and abs(ratio - 1.0) <= 1e-12
+    """Return True when the immutable paired WF run contains this execution profile."""
+    if _candidate_impl._sampling_mode(manifest) != "WALK_FORWARD":
+        return False
+    profiles = _execution_profiles(manifest)
+    values = profiles.get(str(profile).lower())
+    return isinstance(values, dict) and bool(values)
 
 
 def _eligible_loss_profiles(manifest: dict[str, Any]) -> list[str]:
@@ -81,12 +84,11 @@ def next_teacher_for_learning(
     """Return the next causal teacher boundary.
 
     Winners always remain eligible for ENTRY review. When ``include_losses`` is
-    false (the default), behavior is intentionally identical to the historical
-    winner-only workflow. When enabled, losses are additionally eligible only
-    for profiles whose immutable reference configuration uses a 1.0R target.
-    Break-even rows remain non-teaching. Already-recorded teacher pair ids are
-    excluded explicitly so multiple trades sharing one resolution timestamp are
-    not skipped.
+    false, only winners teach. When enabled for a paired WALK_FORWARD reference,
+    losses are also eligible because their opposite-side outcome was simulated
+    immutably at reference-run creation time. Break-even rows remain non-teaching.
+    Already-recorded teacher pair ids are excluded explicitly so multiple trades
+    sharing one resolution timestamp are not skipped.
     """
     if "trades" not in (manifest.get("artifacts") or {}):
         return None
@@ -117,8 +119,8 @@ def next_teacher_for_learning(
             )
             params: list[Any] = list(eligible_loss_profiles)
         else:
-            # This is both the historical default and the safe fallback when the
-            # exact teacher profile cannot be proven to use a symmetric 1R target.
+            # Safe fallback: without a paired immutable reference/profile, losses
+            # cannot be used as FLIP evidence.
             where = "pair_net_r > 0"
             params = []
 
