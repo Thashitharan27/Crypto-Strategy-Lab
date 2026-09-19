@@ -1275,6 +1275,8 @@ class CompletedRunVisualizer:
                         ),
                         "activeAtEntry": active_at_entry,
                         "activeAtEnd": end == len(frame),
+                        "nearestAtEntry": active_at_entry,
+                        "nearestAtEnd": end == len(frame),
                         "nearAtEnd": bool(final_row.get(near_column))
                         if near_column
                         else False,
@@ -1786,6 +1788,15 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
       ? Boolean(zone.activeAtEntry)
       : Boolean(zone.activeAtEnd);
   }}
+  function nearestForReference(zone) {{
+    if (review.snapshot === 'entry')
+      return zone.nearestAtEntry === undefined
+        ? Boolean(zone.activeAtEntry)
+        : Boolean(zone.nearestAtEntry);
+    return zone.nearestAtEnd === undefined
+      ? Boolean(zone.activeAtEnd)
+      : Boolean(zone.nearestAtEnd);
+  }}
   function xForTime(time, startSide) {{
     const direct = chart.timeScale().timeToCoordinate(time);
     if (direct !== null && direct !== undefined) return direct;
@@ -1822,10 +1833,11 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
       if ([x1,x2,yHigh,yLow].some(v => v === null || v === undefined || !Number.isFinite(Number(v)))) continue;
 
       const active = activeForReference(zone);
+      const nearest = nearestForReference(zone);
       const snapshotDim = review.mode === 'review' && review.snapshot === 'entry' && !active;
       const baseAlpha = review.mode === 'review'
-        ? (active ? 0.20 : snapshotDim ? 0.025 : 0.085)
-        : (active ? 0.11 : 0.045);
+        ? (nearest ? 0.24 : active ? 0.11 : snapshotDim ? 0.018 : 0.045)
+        : (nearest ? 0.13 : active ? 0.07 : 0.035);
       const support = zone.structure === 'support';
       const fill = support
         ? `rgba(53, 180, 119, ${{baseAlpha}})`
@@ -1845,7 +1857,7 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
       band.style.borderBottom = '1px solid ' + border;
       zoneLayer.appendChild(band);
 
-      if (active) {{
+      if (nearest) {{
         const state = review.snapshot === 'entry'
           ? zone.stateAtEntry
           : zone.stateEnd;
