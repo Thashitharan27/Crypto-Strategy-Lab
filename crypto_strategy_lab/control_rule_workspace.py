@@ -65,7 +65,7 @@ SIGNAL_STRATEGIES = {
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
-    "MTF_SR_REACTION": "MTF S/R Reaction — 4H / 1H / Entry TF",
+    "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
 }
 
 # Kept in this pure-Python module so the control server does not need to import

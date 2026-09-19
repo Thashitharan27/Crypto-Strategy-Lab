@@ -72,6 +72,12 @@ class MainWindow(LegacyMainWindow):
 
         self._pending_run_snapshot = None
         self.rule_builder = RuleStrategyBuilder()
+        self.rule_builder.set_strategy_timeframe_provider(
+            lambda: timeframe_minutes(self.strategy_tf.currentData())
+        )
+        self.strategy_tf.currentIndexChanged.connect(
+            self.rule_builder._refresh_mtf_sr_preset_context
+        )
         self.base_execution_form = DataclassForm(
             ExecutionProfileConfig(), groups=EXECUTION_PROFILE_GROUPS
         )

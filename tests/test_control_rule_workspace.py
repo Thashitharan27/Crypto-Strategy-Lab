@@ -43,6 +43,9 @@ def test_capabilities_use_gui_labels_and_human_categorical_values():
     assert {
         item["id"]: item["display_name"] for item in caps["market_regime_methods"]
     }["ASSET_RETURN"] == "Asset trailing return"
+    assert {
+        item["id"]: item["display_name"] for item in caps["signal_strategies"]
+    }["MTF_SR_REACTION"] == "MTF S/R Reaction — Adaptive HTF / Entry TF"
 
 
 def test_three_bull_long_veto_groups_round_trip_without_numeric_codes():

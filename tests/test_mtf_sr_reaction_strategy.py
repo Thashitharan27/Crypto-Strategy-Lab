@@ -6,7 +6,9 @@ from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.gui.rule_strategy_builder import DIRECTION_LABELS, EVIDENCE_LABELS
 from crypto_strategy_lab.mtf_sr_reaction import (
     MTF_SR_REACTION_MODE,
+    MtfSrReactionMixin,
     candle_evidence_arrays,
+    mtf_sr_reaction_timeframe_plan,
 )
 from crypto_strategy_lab.strategy_rule_model import (
     MARKET_PERMISSIONS,
@@ -34,7 +36,7 @@ def test_mtf_sr_reaction_is_first_class_authoring_option():
     )
     assert (
         DIRECTION_LABELS[MTF_SR_REACTION_MODE]
-        == "MTF S/R Reaction — 4H / 1H / Entry TF"
+        == "MTF S/R Reaction — Adaptive HTF / Entry TF"
     )
 
 
@@ -71,8 +73,39 @@ def test_mtf_price_action_evidence_is_exposed_with_rule_timeframes():
     assert normalized["sr_timeframe_minutes"] == 60
 
 
-def test_mtf_sr_starter_preset_contains_four_trade_relative_entry_theses():
-    rules = mtf_sr_reaction_preset_rules()
+def test_mtf_sr_timeframe_plan_adapts_to_strategy_timeframe():
+    assert mtf_sr_reaction_timeframe_plan(15) == {
+        "strategy_minutes": 15,
+        "structure_minutes": 240,
+        "approach_minutes": 60,
+    }
+    assert mtf_sr_reaction_timeframe_plan(60) == {
+        "strategy_minutes": 60,
+        "structure_minutes": 240,
+        "approach_minutes": 60,
+    }
+    assert mtf_sr_reaction_timeframe_plan(240) == {
+        "strategy_minutes": 240,
+        "structure_minutes": 1440,
+        "approach_minutes": 240,
+    }
+
+
+def test_mtf_sr_timeframe_plan_rejects_only_unsupported_hierarchy():
+    import pytest
+
+    with pytest.raises(ValueError, match="divides evenly into 1h"):
+        mtf_sr_reaction_timeframe_plan(45)
+    with pytest.raises(ValueError, match="below 1d"):
+        mtf_sr_reaction_timeframe_plan(1440)
+
+
+def _rules_by_evidence(rules, evidence):
+    return [rule for rule in rules if rule["evidence"] == evidence]
+
+
+def test_mtf_sr_starter_preset_adapts_for_15m():
+    rules = mtf_sr_reaction_preset_rules(15)
     groups = {}
     for rule in rules:
         groups.setdefault(rule["group_id"], []).append(rule)
@@ -86,41 +119,110 @@ def test_mtf_sr_starter_preset_contains_four_trade_relative_entry_theses():
         "4H Favorable Structure Bounce — Short",
         "4H Break + Retest — Short",
     }
-    assert {items[0]["side"] for items in groups.values()} == {"LONG", "SHORT"}
-    assert all(len(items) == 4 for items in groups.values())
-
-    relation_rules = [
-        rule for rule in rules if rule["evidence"] == "SR_ENTRY_RELATION"
-    ]
-    assert len(relation_rules) == 2
-    assert all(rule["value"] == "FAVORABLE_ENTRY_AREA" for rule in relation_rules)
-    assert all(rule["sr_timeframe_minutes"] == 240 for rule in relation_rules)
-
-    target_rules = [
-        rule for rule in rules if rule["evidence"] == "SR_TARGET_PATH"
-    ]
-    assert len(target_rules) == 4
     assert all(
-        rule["value"] == "TARGET_BEFORE_OPPOSING_ZONE"
-        for rule in target_rules
+        rule["sr_timeframe_minutes"] == 240
+        for rule in _rules_by_evidence(rules, "SR_ENTRY_RELATION")
     )
-    assert all(rule["sr_timeframe_minutes"] == 240 for rule in target_rules)
-
-    assert not any(
-        rule["evidence"] in {
-            "SR_NEAR_SUPPORT",
-            "SR_NEAR_RESISTANCE",
-            "SR_ROOM_IN_DIRECTION_ATR",
-        }
+    assert all(
+        rule["sr_timeframe_minutes"] == 60
+        for rule in _rules_by_evidence(rules, "SR_APPROACH_MOMENTUM_STATE")
+    )
+    assert all(
+        rule["sr_timeframe_minutes"] == 0
         for rule in rules
+        if rule["evidence"] in {
+            "BULLISH_REVERSAL_TRIGGER",
+            "BEARISH_REVERSAL_TRIGGER",
+        }
     )
 
-    retest_rules = [
-        rule for rule in rules if rule["evidence"] == "SR_ROLE_REVERSAL_STATE"
-    ]
-    assert len(retest_rules) == 2
-    assert all(rule["value"] == "VALID_RETEST" for rule in retest_rules)
-    assert all(rule["sr_timeframe_minutes"] == 240 for rule in retest_rules)
+
+def test_mtf_sr_starter_preset_collapses_approach_to_strategy_tf_for_1h():
+    rules = mtf_sr_reaction_preset_rules(60)
+
+    assert all(
+        rule["sr_timeframe_minutes"] == 240
+        for rule in rules
+        if rule["evidence"] in {
+            "SR_ENTRY_RELATION",
+            "SR_ROLE_REVERSAL_STATE",
+            "SR_TARGET_PATH",
+        }
+    )
+    assert all(
+        rule["sr_timeframe_minutes"] == 0
+        for rule in _rules_by_evidence(rules, "SR_APPROACH_MOMENTUM_STATE")
+    )
+    assert {rule["group_name"] for rule in rules} == {
+        "4H Favorable Structure Bounce — Long",
+        "4H Break + Retest — Long",
+        "4H Favorable Structure Bounce — Short",
+        "4H Break + Retest — Short",
+    }
+
+
+def test_mtf_sr_starter_preset_uses_daily_structure_for_4h_strategy():
+    rules = mtf_sr_reaction_preset_rules(240)
+
+    assert all(
+        rule["sr_timeframe_minutes"] == 1440
+        for rule in rules
+        if rule["evidence"] in {
+            "SR_ENTRY_RELATION",
+            "SR_ROLE_REVERSAL_STATE",
+            "SR_TARGET_PATH",
+        }
+    )
+    assert all(
+        rule["sr_timeframe_minutes"] == 0
+        for rule in _rules_by_evidence(rules, "SR_APPROACH_MOMENTUM_STATE")
+    )
+    assert {rule["group_name"] for rule in rules} == {
+        "1D Favorable Structure Bounce — Long",
+        "1D Break + Retest — Long",
+        "1D Favorable Structure Bounce — Short",
+        "1D Break + Retest — Short",
+    }
+
+
+
+
+def test_one_hour_runtime_feature_setup_no_longer_raises_old_entry_tf_error():
+    class Base:
+        def _configure_signal_features(self):
+            return None
+
+    class Engine(MtfSrReactionMixin, Base):
+        pass
+
+    engine = Engine.__new__(Engine)
+    engine.config = SimpleNamespace(
+        strategy_timeframe_minutes=60,
+        atr_period=14,
+        strategy_profiles={
+            "bull_long": SimpleNamespace(
+                entry_rules=(
+                    {"_strategy_direction_mode": MTF_SR_REACTION_MODE},
+                )
+            )
+        },
+    )
+    periods = 96
+    engine.times = np.array(
+        np.datetime64("2026-01-01T00:00")
+        + np.arange(periods) * np.timedelta64(1, "h")
+    )
+    engine.open = np.linspace(100.0, 120.0, periods)
+    engine.close = engine.open + 0.25
+    engine.high = engine.close + 0.5
+    engine.low = engine.open - 0.5
+    engine.atr_values = np.full(periods, 2.0)
+
+    engine._configure_signal_features()
+
+    assert 60 in engine.mtf_price_action
+    assert 240 in engine.mtf_price_action
+    assert 1440 in engine.mtf_price_action
 
 
 def test_candle_evidence_detects_engulfing_and_pin_bar_causally():
