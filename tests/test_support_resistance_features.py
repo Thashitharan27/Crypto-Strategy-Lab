@@ -245,6 +245,26 @@ def test_cached_reader_reconstructs_exact_detector_context() -> None:
             assert_context_equal(direct, cached)
 
 
+def test_prepared_reader_derives_structure_conflict_for_v6_artifacts() -> None:
+    frame = canonical_klines(180)
+    _, sr, _ = prepared(frame)
+    legacy = sr.drop(
+        columns=["long_structure_conflict", "short_structure_conflict"]
+    )
+    reader = PreparedSupportResistanceContextReader(legacy)
+
+    for index in range(len(legacy)):
+        for direction in ("LONG", "SHORT"):
+            prefix = direction.lower()
+            context = reader.analyze_price_location(
+                index, None, None, None, None, None, direction
+            )
+            assert context.structure_conflict == bool(
+                legacy.loc[index, f"{prefix}_near_support"]
+                and legacy.loc[index, f"{prefix}_near_resistance"]
+            )
+
+
 def test_future_mutation_cannot_change_past_support_resistance() -> None:
     frame = canonical_klines()
     _, before, _ = prepared(frame)
