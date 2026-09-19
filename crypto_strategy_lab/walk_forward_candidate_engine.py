@@ -163,13 +163,15 @@ class _StreamingCandidateRows:
                 "strategy_profile_key",
                 "side",
                 "entry_time",
+                "walk_forward_candidate_id",
+                "walk_forward_candidate_source",
             }
             required_context = {"strategy_index", "decision_available_at"}
             missing_samples = required_samples - set(sample_columns)
             missing_context = required_context - set(context_columns)
             if missing_samples:
                 raise ValueError(
-                    "Every Viable Entry artifact is missing candidate identity columns: "
+                    "Walk Forward paired artifact is missing candidate identity columns: "
                     + ", ".join(sorted(missing_samples))
                 )
             if missing_context:
@@ -211,6 +213,14 @@ class _StreamingCandidateRows:
             elif self.market_cursor is not None:
                 where = "WHERE CAST(t.entry_time AS TIMESTAMPTZ) >= ?"
                 params.append(self.market_cursor.to_pydatetime())
+
+            source_filter = (
+                "COALESCE(CAST(t.walk_forward_candidate_source AS BOOLEAN), FALSE)"
+            )
+            if where:
+                where = where.replace("WHERE", f"WHERE {source_filter} AND", 1)
+            else:
+                where = f"WHERE {source_filter}"
 
             sql = f"""
                 SELECT t.*, {', '.join(context_select)}, prev.adx AS __wf_prev_adx
