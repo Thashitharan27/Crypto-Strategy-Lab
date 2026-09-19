@@ -4,7 +4,7 @@
 
 ## Source of candidates
 
-The immutable reference run must contain research sampling in `EVERY_VIABLE_ENTRY` mode. The scanner uses:
+The immutable reference run must contain research sampling in `WALK_FORWARD` mode. Each viable source opportunity has an immutable LONG/SHORT pair, and the scanner consumes only rows with `walk_forward_candidate_source=true`. The scanner uses:
 
 - `artifacts/research_sampling_trades.parquet` as the historical opportunity stream;
 - `artifacts/feature_context.parquet` as the exact causal feature snapshot;
@@ -43,7 +43,7 @@ Profiles without an active causal ENTRY group are disabled by the materialized s
 
 ## Outcome firewall
 
-The Every Viable Entry row contains both entry context and resolved outcome columns. The scanner never returns the arbitrary row.
+Each paired Walk Forward row contains entry context and resolved outcome columns. The scanner never returns an arbitrary outcome row, and counterfactual rows are never candidate sources.
 
 The captured payload contains only:
 
