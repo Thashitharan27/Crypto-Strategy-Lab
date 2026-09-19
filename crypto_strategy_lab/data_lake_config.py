@@ -71,7 +71,7 @@ class FeatureConfig:
     sr_zone_padding_atr: float = 0.10  # minimum wick/body zone width
     sr_zone_max_cluster_span_atr: float = 0.50  # maximum zone/cluster width
     sr_min_rejection_atr: float = 0.50
-    sr_near_distance_atr: float = 0.75
+    sr_near_distance_atr: float = 0.50
     # Retained in the native config for old files/API compatibility. The GUI no
     # longer exposes this switch and normal research keeps confirmation enabled.
     enable_sr_hold_confirmation: bool = True
@@ -79,7 +79,7 @@ class FeatureConfig:
     sr_hold_confirmation_atr: float = 0.25
     sr_break_tolerance_atr: float = 0.25
     sr_break_basis: str = "CLOSE"
-    market_regime_method: str = "BTC_STRUCTURAL"
+    market_regime_method: str = "ASSET_RETURN"
     structural_regime_sma_days: int = 200
     structural_regime_slope_lookback_days: int = 30
     bull_regime_lookback_days: int = 90
