@@ -493,6 +493,152 @@ class CompletedRunVisualizer:
             "rows": rows,
         }
 
+    @staticmethod
+    def _sr_value(row: Mapping[str, Any], label: str, suffix: str) -> Any:
+        candidates = [f"sr_{label}_{suffix}"]
+        if label == "strategy":
+            candidates.append(suffix)
+        return _first_value(row, tuple(candidates))
+
+    @classmethod
+    def _sr_inspector_block(
+        cls, row: Mapping[str, Any], label: str
+    ) -> dict[str, Any] | None:
+        def long(field: str):
+            return cls._sr_value(row, label, f"long_{field}")
+
+        def short(field: str):
+            return cls._sr_value(row, label, f"short_{field}")
+
+        support_low = _finite(long("support_zone_low"))
+        support_high = _finite(long("support_zone_high"))
+        resistance_low = _finite(long("resistance_zone_low"))
+        resistance_high = _finite(long("resistance_zone_high"))
+        support_state = _json_value(long("support_state"))
+        resistance_state = _json_value(long("resistance_state"))
+        if (
+            support_low is None
+            and support_high is None
+            and resistance_low is None
+            and resistance_high is None
+            and support_state is None
+            and resistance_state is None
+        ):
+            return None
+
+        strategy_atr = _finite(row.get("atr"))
+
+        def strategy_atr_distance(price_distance: Any) -> float | None:
+            distance = _finite(price_distance)
+            if distance is None or strategy_atr is None or strategy_atr <= 0:
+                return None
+            return distance / strategy_atr
+
+        conflict_raw = long("structure_conflict")
+        if conflict_raw is None:
+            conflict = bool(long("near_support")) and bool(long("near_resistance"))
+        else:
+            conflict = bool(conflict_raw)
+
+        completed = cls._sr_value(row, label, "completed_candle_time")
+        return {
+            "key": label,
+            "timeframe": SR_TIMEFRAMES[label],
+            "supportZoneLow": support_low,
+            "supportZoneHigh": support_high,
+            "supportState": support_state,
+            "supportDistanceNativeAtr": _finite(long("nearest_support_distance_atr")),
+            "supportDistanceStrategyAtr": strategy_atr_distance(
+                long("nearest_support_distance_price")
+            ),
+            "supportNear": bool(long("near_support")),
+            "supportInside": bool(long("inside_support_zone")),
+            "supportTested": bool(long("support_tested")),
+            "supportHeld": bool(long("support_held")),
+            "supportTests": _json_value(long("support_test_count")),
+            "supportRejectionAtr": _finite(long("support_rejection_atr")),
+            "supportBarsSinceTest": _json_value(long("bars_since_support_test")),
+            "supportPivotIndex": _json_value(long("nearest_support_bar_index")),
+            "supportLastBreakIndex": _json_value(long("support_last_break_index")),
+            "supportBrokenZoneLow": _finite(long("support_broken_zone_low")),
+            "supportBrokenZoneHigh": _finite(long("support_broken_zone_high")),
+            "resistanceZoneLow": resistance_low,
+            "resistanceZoneHigh": resistance_high,
+            "resistanceState": resistance_state,
+            "resistanceDistanceNativeAtr": _finite(
+                long("nearest_resistance_distance_atr")
+            ),
+            "resistanceDistanceStrategyAtr": strategy_atr_distance(
+                long("nearest_resistance_distance_price")
+            ),
+            "resistanceNear": bool(long("near_resistance")),
+            "resistanceInside": bool(long("inside_resistance_zone")),
+            "resistanceTested": bool(long("resistance_tested")),
+            "resistanceHeld": bool(long("resistance_held")),
+            "resistanceTests": _json_value(long("resistance_test_count")),
+            "resistanceRejectionAtr": _finite(long("resistance_rejection_atr")),
+            "resistanceBarsSinceTest": _json_value(
+                long("bars_since_resistance_test")
+            ),
+            "resistancePivotIndex": _json_value(
+                long("nearest_resistance_bar_index")
+            ),
+            "resistanceLastBreakIndex": _json_value(
+                long("resistance_last_break_index")
+            ),
+            "resistanceBrokenZoneLow": _finite(
+                long("resistance_broken_zone_low")
+            ),
+            "resistanceBrokenZoneHigh": _finite(
+                long("resistance_broken_zone_high")
+            ),
+            "roomLongNativeAtr": _finite(long("room_in_direction_atr")),
+            "roomShortNativeAtr": _finite(short("room_in_direction_atr")),
+            "structureConflict": conflict,
+            "confirmationRating": _json_value(long("confirmation_rating")),
+            "completedCandleTime": (
+                _utc(completed).isoformat() if completed is not None else None
+            ),
+        }
+
+    def sr_inspector_at(self, timestamp: Any) -> dict[str, Any]:
+        """Return persisted S/R evidence for one exact strategy candle."""
+        target = _utc(timestamp)
+        if self.context_path is None:
+            return {
+                "status": "LEGACY_UNAVAILABLE",
+                "timestamp": target.isoformat(),
+                "message": "This completed run does not contain feature_context.parquet.",
+                "timeframes": [],
+            }
+        escaped = str(self.context_path).replace("'", "''")
+        with duckdb.connect(":memory:") as connection:
+            frame = connection.execute(
+                f"SELECT * FROM read_parquet('{escaped}') "
+                "WHERE CAST(strategy_candle_open_time AS TIMESTAMPTZ)=? LIMIT 1",
+                [target.to_pydatetime()],
+            ).df()
+        if frame.empty:
+            return {
+                "status": "NOT_AVAILABLE",
+                "timestamp": target.isoformat(),
+                "message": "No persisted S/R feature context exists on this candle.",
+                "timeframes": [],
+            }
+
+        row = frame.iloc[0].to_dict()
+        blocks = [
+            block
+            for label in SR_TIMEFRAMES
+            if (block := self._sr_inspector_block(row, label)) is not None
+        ]
+        return {
+            "status": "AVAILABLE" if blocks else "NOT_AVAILABLE",
+            "timestamp": target.isoformat(),
+            "message": "" if blocks else "No persisted S/R context exists on this candle.",
+            "timeframes": blocks,
+        }
+
     @property
     def trade_count(self) -> int:
         return len(self.trades)
@@ -677,81 +823,117 @@ class CompletedRunVisualizer:
         return frame
 
     @staticmethod
-    def _sr_overlay(
-        context: pd.DataFrame, label: str, visible_start: pd.Timestamp
-    ) -> list[dict[str, Any]]:
-        """Render persisted nearest S/R as discrete structural lifespans.
+    def _sr_frame_column(
+        frame: pd.DataFrame, label: str, suffix: str
+    ) -> str | None:
+        preferred = f"sr_{label}_{suffix}"
+        if preferred in frame.columns:
+            return preferred
+        if label == "strategy" and suffix in frame.columns:
+            return suffix
+        return None
 
-        The completed-run artifact stores the selected nearest support/resistance
-        on every strategy candle. Those values are *discrete zone selections*,
-        not a continuous indicator. Connecting different selections with one line
-        creates false diagonal/zig-zag S/R paths, so each contiguous selected zone
-        is emitted as its own horizontal segment.
-        """
+    @classmethod
+    def _sr_zone_identity(
+        cls,
+        frame: pd.DataFrame,
+        row: Mapping[str, Any],
+        id_column: str | None,
+        low_column: str,
+        high_column: str,
+    ):
+        identity = row.get(id_column) if id_column else None
+        try:
+            if identity is not None and not pd.isna(identity):
+                return ("pivot", int(identity))
+        except (TypeError, ValueError):
+            pass
+        low = _finite(row.get(low_column))
+        high = _finite(row.get(high_column))
+        if low is None or high is None:
+            return None
+        return ("zone", round(low, 12), round(high, 12))
+
+    @classmethod
+    def _sr_zones(
+        cls,
+        context: pd.DataFrame,
+        label: str,
+        visible_start: pd.Timestamp,
+        entry_snapshot: pd.Timestamp | None = None,
+    ) -> list[dict[str, Any]]:
+        """Emit persisted S/R as shaded structural lifespans, never zig-zag lines."""
         if context.empty:
             return []
-
-        prefix = f"sr_{label}_"
         frame = context.loc[
             context["strategy_candle_open_time"] >= visible_start
         ].copy()
         if frame.empty:
             return []
-        frame = frame.sort_values("strategy_candle_open_time", kind="stable").reset_index(drop=True)
-        times = pd.to_datetime(
-            frame["strategy_candle_open_time"], utc=True, errors="coerce"
+        frame = frame.sort_values(
+            "strategy_candle_open_time", kind="stable"
+        ).reset_index(drop=True)
+        times = pd.DatetimeIndex(
+            pd.to_datetime(frame["strategy_candle_open_time"], utc=True, errors="coerce")
         )
-
-        overlays: list[dict[str, Any]] = []
-        specs = (
-            (
-                "Support",
-                f"{prefix}long_support_zone_low",
-                f"{prefix}long_support_zone_high",
-                f"{prefix}long_nearest_support_bar_index",
-            ),
-            (
-                "Resistance",
-                f"{prefix}long_resistance_zone_low",
-                f"{prefix}long_resistance_zone_high",
-                f"{prefix}long_nearest_resistance_bar_index",
-            ),
+        if times.empty:
+            return []
+        interval = (
+            pd.Timedelta(int(np.median(np.diff(times.asi8))), unit="ns")
+            if len(times) > 1
+            else pd.Timedelta(minutes=1)
         )
+        entry = _utc(entry_snapshot) if entry_snapshot is not None else None
 
-        def identity_at(row, id_column, low_column, high_column):
-            identity = row.get(id_column) if id_column in frame.columns else None
-            try:
-                if identity is not None and not pd.isna(identity):
-                    return ("pivot", int(identity))
-            except (TypeError, ValueError):
-                pass
-            low = _finite(row.get(low_column))
-            high = _finite(row.get(high_column))
-            if low is None or high is None:
-                return None
-            # Legacy runs may not have pivot identity. Use exact persisted zone
-            # boundaries as a stable fallback; never infer/recompute structure.
-            return ("zone", round(low, 12), round(high, 12))
-
-        for structure, low_column, high_column, id_column in specs:
-            if low_column not in frame.columns or high_column not in frame.columns:
+        zones: list[dict[str, Any]] = []
+        for structure in ("support", "resistance"):
+            low_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_zone_low"
+            )
+            high_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_zone_high"
+            )
+            if not low_column or not high_column:
                 continue
+            id_column = cls._sr_frame_column(
+                frame, label, f"long_nearest_{structure}_bar_index"
+            )
+            state_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_state"
+            )
+            near_column = cls._sr_frame_column(
+                frame, label, f"long_near_{structure}"
+            )
+            inside_column = cls._sr_frame_column(
+                frame, label, f"long_inside_{structure}_zone"
+            )
+            tests_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_test_count"
+            )
+            rejection_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_rejection_atr"
+            )
+            conflict_column = cls._sr_frame_column(
+                frame, label, "long_structure_conflict"
+            )
 
-            start = 0
-            while start < len(frame):
-                row = frame.iloc[start]
-                identity = identity_at(row, id_column, low_column, high_column)
+            cursor = 0
+            while cursor < len(frame):
+                row = frame.iloc[cursor]
+                identity = cls._sr_zone_identity(
+                    frame, row, id_column, low_column, high_column
+                )
                 low = _finite(row.get(low_column))
                 high = _finite(row.get(high_column))
                 if identity is None or low is None or high is None:
-                    start += 1
+                    cursor += 1
                     continue
 
-                end = start + 1
+                end = cursor + 1
                 while end < len(frame):
                     next_row = frame.iloc[end]
-                    next_identity = identity_at(
-                        next_row, id_column, low_column, high_column
+                    next_identity = cls._sr_zone_identity(
+                        frame, next_row, id_column, low_column, high_column
                     )
                     next_low = _finite(next_row.get(low_column))
                     next_high = _finite(next_row.get(high_column))
@@ -765,38 +947,191 @@ class CompletedRunVisualizer:
                         break
                     end += 1
 
-                segment_times = list(times.iloc[start:end])
-                # A one-candle structural selection still needs a visible
-                # horizontal lifespan. Extend only to the next persisted candle;
-                # because each zone is a separate series, this never connects to
-                # the next zone at a different price.
-                if len(segment_times) == 1 and end < len(frame):
-                    segment_times.append(times.iloc[end])
-                if segment_times:
-                    for boundary, value in (("low", low), ("high", high)):
-                        data = [
-                            {"time": _unix_seconds(timestamp), "value": float(value)}
-                            for timestamp in segment_times
-                            if not pd.isna(timestamp)
-                        ]
-                        if data:
-                            overlays.append(
-                                {
-                                    "name": (
-                                        f"{SR_TIMEFRAMES[label]} {structure} "
-                                        f"{boundary}"
-                                    ),
-                                    "kind": "sr",
-                                    "timeframe": label,
-                                    "structure": structure.lower(),
-                                    "boundary": boundary,
-                                    "zoneIdentity": list(identity),
-                                    "data": data,
-                                }
+                start_time = times[cursor]
+                end_time = times[end] if end < len(times) else times[-1] + interval
+                final_row = frame.iloc[end - 1]
+                entry_row = None
+                active_at_entry = False
+                if entry is not None and start_time <= entry < end_time:
+                    active_at_entry = True
+                    eligible = [
+                        i
+                        for i in range(cursor, end)
+                        if times[i] <= entry
+                    ]
+                    if eligible:
+                        entry_row = frame.iloc[eligible[-1]]
+                conflict = (
+                    bool(final_row.get(conflict_column))
+                    if conflict_column
+                    else bool(final_row.get(near_column))
+                    and bool(
+                        final_row.get(
+                            cls._sr_frame_column(
+                                frame,
+                                label,
+                                "long_near_resistance"
+                                if structure == "support"
+                                else "long_near_support",
                             )
-                start = end
+                        )
+                    )
+                )
+                zones.append(
+                    {
+                        "name": f"{SR_TIMEFRAMES[label]} {structure.title()}",
+                        "kind": "sr-zone",
+                        "timeframe": label,
+                        "structure": structure,
+                        "zoneIdentity": list(identity),
+                        "start": _unix_seconds(start_time),
+                        "end": _unix_seconds(end_time),
+                        "low": low,
+                        "high": high,
+                        "stateEnd": (
+                            _json_value(final_row.get(state_column))
+                            if state_column
+                            else None
+                        ),
+                        "stateAtEntry": (
+                            _json_value(entry_row.get(state_column))
+                            if entry_row is not None and state_column
+                            else None
+                        ),
+                        "activeAtEntry": active_at_entry,
+                        "activeAtEnd": end == len(frame),
+                        "nearAtEnd": bool(final_row.get(near_column))
+                        if near_column
+                        else False,
+                        "insideAtEnd": bool(final_row.get(inside_column))
+                        if inside_column
+                        else False,
+                        "testCountEnd": _json_value(final_row.get(tests_column))
+                        if tests_column
+                        else None,
+                        "rejectionAtrEnd": _finite(final_row.get(rejection_column))
+                        if rejection_column
+                        else None,
+                        "structureConflictEnd": conflict,
+                    }
+                )
+                cursor = end
+        return zones
 
-        return overlays
+    @classmethod
+    def _sr_lifecycle_events(
+        cls,
+        context: pd.DataFrame,
+        label: str,
+        visible_start: pd.Timestamp,
+    ) -> list[dict[str, Any]]:
+        """Derive display-only lifecycle markers from persisted state transitions."""
+        if context.empty:
+            return []
+        frame = context.loc[
+            context["strategy_candle_open_time"] >= visible_start
+        ].copy()
+        if frame.empty:
+            return []
+        frame = frame.sort_values(
+            "strategy_candle_open_time", kind="stable"
+        ).reset_index(drop=True)
+        times = pd.to_datetime(
+            frame["strategy_candle_open_time"], utc=True, errors="coerce"
+        )
+        events: list[dict[str, Any]] = []
+
+        for structure in ("support", "resistance"):
+            low_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_zone_low"
+            )
+            high_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_zone_high"
+            )
+            if not low_column or not high_column:
+                continue
+            id_column = cls._sr_frame_column(
+                frame, label, f"long_nearest_{structure}_bar_index"
+            )
+            state_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_state"
+            )
+            test_count_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_test_count"
+            )
+            held_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_held"
+            )
+            break_column = cls._sr_frame_column(
+                frame, label, f"long_{structure}_last_break_index"
+            )
+            previous_by_identity: dict[tuple, dict[str, Any]] = {}
+            previous_break = None
+
+            for index, raw in frame.iterrows():
+                timestamp = times.iloc[index]
+                if pd.isna(timestamp):
+                    continue
+                identity = cls._sr_zone_identity(
+                    frame, raw, id_column, low_column, high_column
+                )
+                event = None
+                state = _json_value(raw.get(state_column)) if state_column else None
+                test_count = (
+                    _finite(raw.get(test_count_column))
+                    if test_count_column
+                    else None
+                )
+                held = bool(raw.get(held_column)) if held_column else False
+
+                break_value = (
+                    _json_value(raw.get(break_column)) if break_column else None
+                )
+                if break_value is not None and break_value != previous_break:
+                    if previous_break is not None:
+                        event = "BREAK"
+                    previous_break = break_value
+
+                if identity is not None:
+                    previous = previous_by_identity.get(identity)
+                    if previous is not None and event is None:
+                        if held and not previous["held"]:
+                            event = "HELD"
+                        elif (
+                            test_count is not None
+                            and previous["test_count"] is not None
+                            and test_count > previous["test_count"]
+                        ):
+                            event = "TEST"
+                        elif (
+                            state is not None
+                            and state != previous["state"]
+                            and str(state).endswith("_TESTING")
+                        ):
+                            event = "TEST"
+                    previous_by_identity[identity] = {
+                        "held": held,
+                        "test_count": test_count,
+                        "state": state,
+                    }
+
+                if event is not None:
+                    events.append(
+                        {
+                            "time": _unix_seconds(timestamp),
+                            "position": (
+                                "belowBar" if structure == "support" else "aboveBar"
+                            ),
+                            "shape": "circle" if event == "TEST" else "square",
+                            "text": f"{SR_TIMEFRAMES[label]} {structure[0].upper()} {event}",
+                            "kind": "sr-event",
+                            "event": event.lower(),
+                            "timeframe": label,
+                            "structure": structure,
+                        }
+                    )
+        events.sort(key=lambda item: (item["time"], item["timeframe"], item["structure"]))
+        return events
 
     def _overlays(
         self,
@@ -837,8 +1172,6 @@ class CompletedRunVisualizer:
                     data = _line_points(times[mask], context.loc[mask, column])
                     if data:
                         overlays.append({"name": name, "kind": kind, "data": data})
-            for label in SR_TIMEFRAMES:
-                overlays.extend(self._sr_overlay(context, label, visible_start))
         return overlays
 
     @staticmethod
@@ -992,6 +1325,20 @@ class CompletedRunVisualizer:
                     "close": float(row["close"]),
                 }
             )
+        entry_snapshot = self.selected_trade_candle_time(trade_index)
+        sr_zones: list[dict[str, Any]] = []
+        sr_events: list[dict[str, Any]] = []
+        if not context.empty:
+            for label in SR_TIMEFRAMES:
+                sr_zones.extend(
+                    self._sr_zones(
+                        context, label, visible_start, entry_snapshot=entry_snapshot
+                    )
+                )
+                sr_events.extend(
+                    self._sr_lifecycle_events(context, label, visible_start)
+                )
+
         request = self.seed.request
         return {
             "run": {
@@ -1005,8 +1352,13 @@ class CompletedRunVisualizer:
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": self.selected_trade_summary(trade_index),
+            "selectedTradeCandleTime": (
+                _unix_seconds(entry_snapshot) if entry_snapshot is not None else None
+            ),
             "candles": candles,
             "overlays": self._overlays(market, context, visible_start),
+            "srZones": sr_zones,
+            "srEvents": sr_events,
             "markers": self._markers(signals, trade_index, show_rejections, visible),
             "priceLines": self._price_lines(trade_index),
             "candleContext": self._context_by_time(context, visible_start),
