@@ -59,6 +59,7 @@ class ResearchRunResult:
     prepared_rows: int
     stage_timings: Mapping[str, float]
     signals: pd.DataFrame | None = None
+    rule_trace: pd.DataFrame | None = None
     telemetry: pd.DataFrame | None = None
     output_dir: Path | None = None
     data_quality: DataQualityReport | None = None
@@ -360,6 +361,7 @@ class ResearchRunner:
             prepared_rows=len(prepared),
             stage_timings=timings,
             signals=getattr(self.simulator, "last_signals", None),
+            rule_trace=getattr(self.simulator, "last_rule_trace", None),
             telemetry=getattr(self.simulator, "last_telemetry", None),
             data_quality=getattr(bundle, "data_quality", None),
         )
