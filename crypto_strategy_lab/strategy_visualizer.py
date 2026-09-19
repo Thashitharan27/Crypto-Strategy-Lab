@@ -246,6 +246,7 @@ class CompletedRunVisualizer:
     trades_path: Path
     signals_path: Path | None
     context_path: Path | None
+    sr_zones_path: Path | None
     rule_trace_path: Path | None
     source_archives_path: Path | None
     source_verified: bool | None
@@ -270,6 +271,9 @@ class CompletedRunVisualizer:
         signals_path = cls._optional_artifact(completed, run_dir, manifest, "signals")
         context_path = cls._optional_artifact(
             completed, run_dir, manifest, "feature_context"
+        )
+        sr_zones_path = cls._optional_artifact(
+            completed, run_dir, manifest, "sr_zones"
         )
         rule_trace_path = cls._optional_artifact(
             completed, run_dir, manifest, "rule_trace"
@@ -296,6 +300,7 @@ class CompletedRunVisualizer:
             trades_path=trades_path,
             signals_path=signals_path,
             context_path=context_path,
+            sr_zones_path=sr_zones_path,
             rule_trace_path=rule_trace_path,
             source_archives_path=source_archives_path,
             source_verified=source_verified,
