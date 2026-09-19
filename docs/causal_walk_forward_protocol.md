@@ -71,7 +71,7 @@ A typical immutable definition should freeze at least:
   "strategy_timeframe": "4h",
   "intrabar_timeframe": "1m",
   "strategy": "DI_DIRECTION",
-  "research_sampling": "EVERY_VIABLE_ENTRY",
+  "research_sampling": "WALK_FORWARD",
   "stop_loss": {"type": "ATR", "multiple": 1.0},
   "take_profit": {"type": "R", "multiple": 1.0},
   "regime_method": "ASSET_RETURN",
@@ -152,17 +152,28 @@ The completed reference run provides the chronological evidence stream and immut
 
 It must not be modified as learning progresses.
 
-### 5.2 Every Viable Entry (EVE)
+### 5.2 Paired Walk Forward sampling
 
-For standardized research, `EVERY_VIABLE_ENTRY` is the preferred candidate source because it exposes entry-time opportunity/context independently of the currently learned rule set.
+Canonical walk-forward reference runs use `WALK_FORWARD` sampling.
 
-The normal outcome firewall uses the unique immutable EVE outcome for the actual executable side whenever that row exists.
+The source strategy first determines whether a timestamp is a viable candidate. For each retained candidate the reference run then persists exactly two immutable execution outcomes:
 
-### 5.3 Immutable 1m intrabar data
+- the strategy-selected source side;
+- the opposite LONG/SHORT counterfactual side.
 
-1m data is an execution oracle only when required by the frozen experiment definition and verified against the immutable reference-run source provenance.
+The two rows share one `walk_forward_candidate_id`. Only the source row may enter the candidate scanner. The opposite row is outcome data and must remain hidden until the causal boundary permits it.
 
-It may be used for narrowly defined deterministic replay when no appropriate opposite-side EVE row exists. Replay must never become a general substitute for missing or ambiguous data.
+Both rows use the native execution engine, including the configured directional execution profile, stop/target contract, partials, break-even, trailing, timeout, fees, slippage, intrabar resolution and S/R execution semantics. The opposite row bypasses entry-selection rules only; otherwise the source candidate could disappear merely because the opposite profile would not itself have generated an entry.
+
+A candidate is published only when both sides have resolved. A right-censored opposite row causes the whole pair to be omitted from the immutable WF sample population.
+
+### 5.3 Every Viable Entry (EVE)
+
+`EVERY_VIABLE_ENTRY` remains a resilience-research mode, but it is not the canonical source for new causal walk-forward experiments. New WF experiments fail closed if their reference run is not `WALK_FORWARD`.
+
+### 5.4 Immutable 1m intrabar data
+
+1m data remains the execution source used by the native backtest engine and reference-run provenance. New canonical walk-forward outcome lookup does not need to synthesize a missing opposite side because the paired reference artifact already contains both sides.
 
 ---
 
@@ -350,21 +361,24 @@ Winning alone is not a sufficient thesis. In particular, a successful `BREAKOUT`
 
 ## 11. Optional teacher-loss FLIP learning
 
-Historically, teacher chronology was winner-only because teacher evidence was used only for ENTRY learning. That behavior remains the default for compatibility.
+Teacher chronology is winner-only unless teacher-loss FLIP learning is explicitly enabled.
 
-Teacher-loss FLIP learning is an **explicit opt-in** behavior and must not silently activate in older experiments.
-
-### Eligibility
-
-A teacher loss may enter FLIP review only when the immutable execution profile uses a symmetric **1:1 R:R** target.
-
-Reason: for 1:1, an opposite-side replay is meaningful as a potential directional inversion test. For asymmetric targets such as TP3, a source-side `-1R` does not imply the opposite side would have achieved `+3R`.
+With a paired `WALK_FORWARD` reference, a teacher loss may supply FLIP evidence at any configured R:R because the opposite trade was independently simulated; the system never mirrors or infers an opposite result from the source loss.
 
 Teacher-loss mode:
 
 ```text
-FLIP_FROM_LOSS_1R
+FLIP_FROM_LOSS_PAIRED
 ```
+
+### Causal availability
+
+A paired teacher loss does **not** become reviewable merely when the source teacher trade closes. Its FLIP evidence becomes causally available only after both:
+
+- the source teacher trade has resolved; and
+- the paired opposite-side observation has resolved.
+
+The teacher-loss review boundary is therefore the later of those two immutable resolution times. This is essential for asymmetric targets such as TP3: a source-side `-1R` can occur long before the opposite side has either reached +3R or otherwise exited.
 
 ### Allowed review decisions
 
@@ -382,82 +396,51 @@ FLIP_LEARNED
 
 - a valid FLIP rule event;
 - prior causal support rather than automatic one-loss inversion;
-- verified opposite-side immutable 1R evidence showing that the opposite side actually won.
+- a causally available immutable paired opposite-side outcome supporting the rule.
 
-The preferred behavior for an isolated first teacher loss is usually evidence collection (`FLIP_EVIDENCE`) or `NO_CHANGE`, not immediate FLIP activation.
+The preferred behavior for an isolated first teacher loss remains evidence collection (`FLIP_EVIDENCE`) or `NO_CHANGE`, not automatic FLIP activation.
 
-### Teacher losses never affect equity
-
-Even when a teacher loss supplies FLIP evidence, it remains a teacher event and never calls prospective settlement.
+Teacher losses remain learning evidence only and never change walk-forward equity.
 
 ---
 
 ## 12. Opposite-side verification for teacher losses
 
-For an eligible 1R teacher loss, opposite-side verification follows this order:
+For a paired teacher loss, the reference artifact itself is the verification source:
 
-1. Look for a unique immutable opposite-side EVE outcome at the same signal.
-2. If one exists, use it.
-3. If it does not exist, replay the opposite trade from immutable 1m intrabar data.
+1. identify the source `walk_forward_candidate_id`;
+2. read the independently simulated opposite row only when its resolution is causally due;
+3. use its actual result and net R; never infer it from the source trade.
 
-Teacher-loss replay must use:
+For example, with TP3:
 
-- same teacher entry boundary;
-- same raw entry semantics;
-- same ATR at entry;
-- same 1 ATR / 1R stop/target contract;
-- actual opposite side;
-- same fees/slippage;
-- same immutable execution configuration;
-- verified reference-run 1m provenance;
-- configured same-bar tie policy;
-- **no candles after the teacher loss's own resolution time**.
+```text
+source LONG closes at -1R
+opposite SHORT is only +1R at that moment
+opposite SHORT later reaches +3R
+```
 
-That final rule is essential. Teacher review may not inspect later data just to learn whether the hypothetical opposite trade eventually worked.
-
-If the opposite hypothetical has not resolved by the teacher's causal boundary, return it as unresolved/unavailable rather than leaking future information.
+The FLIP evidence becomes available only at the later SHORT resolution time. No future candles or later outcome fields may influence an earlier teacher review.
 
 ---
 
-## 13. Prospective FLIP execution and opposite-side replay
+## 13. Prospective FLIP execution
 
 If an already-active FLIP changes a prospective candidate's executable side, that flipped side is the real walk-forward trade.
 
-Normal path:
+Canonical path:
 
 ```text
-source EVE LONG
+source paired row LONG
 active FLIP -> strategy_action SHORT
-unique SHORT EVE outcome exists
-=> reveal/settle immutable SHORT EVE outcome
+same walk_forward_candidate_id + SHORT row
+=> reveal/settle immutable SHORT outcome
 ```
 
-Fallback path when the opposite EVE row does not exist:
+The opposite outcome is not replayed, mirrored, or approximated. This works for 1:1, 1:3 and other execution configurations because both sides were independently run through the native execution engine when the reference run was created.
 
-```text
-source EVE LONG
-active FLIP -> strategy_action SHORT
-no unique SHORT EVE outcome
-=> replay the actual SHORT trade from immutable 1m intrabar data
-=> reveal replay result
-=> settle that replay result against WF equity
-```
+If the exact paired row cannot be resolved uniquely, the candidate remains frozen/unresolved and equity remains unchanged. A malformed or incomplete paired reference artifact is an integrity error, not a reason to guess an outcome.
 
-The prospective replay fallback is allowed only when all of the following are true:
-
-- a causal FLIP rule was already active and matched before entry;
-- `strategy_action` is exactly the inverse of `source_side`;
-- the immutable setup is simple fixed symmetric 1:1;
-- the stop is exactly 1 ATR under the replay contract;
-- 1m intrabar execution is part of the immutable reference configuration;
-- same fees/slippage are used;
-- same-bar handling is the immutable configured policy (current standardized prospective replay requires pessimistic handling);
-- local 1m source identities match reference-run provenance;
-- the replay resolves within immutable reference-run coverage.
-
-This replay is not teacher evidence. It is the **actual prospective execution outcome** created by an already-learned strategy rule, so its result is eligible for normal RESEARCH equity settlement.
-
-If replay cannot be proven safely, the candidate remains frozen/unresolved and equity must remain unchanged.
 
 ---
 
@@ -554,7 +537,7 @@ Use these evidence roles consistently:
 
 Primary purpose: teach or refine ENTRY structure.
 
-### Teacher loss in enabled 1R mode
+### Teacher loss in enabled paired mode
 
 Primary purpose: collect/validate possible FLIP evidence. It does not teach a VETO from retrospective teacher losses and does not alter equity.
 
@@ -903,7 +886,7 @@ process earliest causally due teacher/review/candidate event
         |
         +--> teacher winner -> ENTRY review only -> no equity change
         |
-        +--> enabled 1R teacher loss -> FLIP evidence review -> no equity change
+        +--> enabled paired teacher loss -> FLIP evidence review -> no equity change
         |
         +--> prospective candidate
                |
@@ -920,9 +903,9 @@ process earliest causally due teacher/review/candidate event
           DECISION_FROZEN
                |
                v
-          reveal immutable executable-side outcome
-             EVE first
-             active-FLIP 1m replay fallback when required
+          reveal exact paired executable-side outcome
+             same walk_forward_candidate_id
+             no opposite-side inference/replay
                |
                v
           settle current-equity RESEARCH trade
