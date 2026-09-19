@@ -264,7 +264,12 @@ class PreparedSupportResistanceContextReader:
     @staticmethod
     def _context_from_row(row, prefix: str) -> SRContext:
         def value(field: str):
-            return row[f"{prefix}_{field}"]
+            key = f"{prefix}_{field}"
+            if field == "structure_conflict" and key not in row:
+                return bool(row[f"{prefix}_near_support"]) and bool(
+                    row[f"{prefix}_near_resistance"]
+                )
+            return row[key]
 
         return SRContext(
             nearest_support_price=_optional_float(value("nearest_support_price")),
