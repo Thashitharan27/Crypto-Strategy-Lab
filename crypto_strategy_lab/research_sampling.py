@@ -289,6 +289,7 @@ def _paired_walk_forward_samples(
     counter_engine.research_forced_side_by_index = opposite_by_index
     counter_raw = counter_engine.run()
     counter_stats = counter_engine.research_exit_optimization_stats()
+    _release_research_rejection_metadata(counter_raw)
     counter = _resolved_samples(counter_raw)
 
     if not counter.empty:
@@ -366,7 +367,7 @@ def _paired_walk_forward_samples(
             + frame["side"].astype(str).str.lower()
         )
         frame["research_episode_id"] = (
-            base_episode.to_numpy()
+            pd.Series(base_episode.to_numpy(), index=frame.index, dtype="string")
             + "-"
             + frame["side"].astype(str).str.lower()
         )
@@ -467,10 +468,16 @@ def generate_strategy_research_samples(
         )
 
     selected.attrs["research_sampling"] = {
-        "version": RESEARCH_SAMPLING_VERSION,
+        "version": (
+            WALK_FORWARD_SAMPLING_VERSION
+            if normalized_mode == WALK_FORWARD_SAMPLING_MODE
+            else RESEARCH_SAMPLING_VERSION
+        ),
         "enabled": True,
         "mode": normalized_mode,
-        "interval_candles": interval,
+        "interval_candles": (
+            1 if normalized_mode == WALK_FORWARD_SAMPLING_MODE else interval
+        ),
         "strategy_timeframe_minutes": int(native_config.strategy_timeframe_minutes),
         "overlap_allowed": True,
         "independent_equity": True,
