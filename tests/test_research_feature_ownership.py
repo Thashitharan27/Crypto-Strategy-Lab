@@ -76,7 +76,7 @@ def test_research_features_are_reorganized_without_replacing_authoritative_form(
         # same FeatureConfig values.
         result = window.feature_form.value(FeatureConfig())
         assert result.atr_period == 14
-        assert result.market_regime_method == "BTC_STRUCTURAL"
+        assert result.market_regime_method == "ASSET_RETURN"
         assert result.trade_flow_enabled is False
         assert result.order_book_enabled is False
 
