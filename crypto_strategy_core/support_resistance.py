@@ -421,7 +421,7 @@ class SupportResistanceDetector:
         zone_padding_atr: float = 0.10,
         max_cluster_span_atr: float = 0.50,
         min_rejection_atr: float = 0.50,
-        near_distance_atr: float = 0.75,
+        near_distance_atr: float = 0.50,
         enable_hold_confirmation: bool = True,
         hold_confirmation_bars: int = 3,
         hold_confirmation_atr: float = 0.25,
