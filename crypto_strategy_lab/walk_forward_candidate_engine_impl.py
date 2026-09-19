@@ -475,6 +475,12 @@ def _wf_trade_relative_sr(
     stop_distance, target_distance = planned_trade_distances(
         _wf_profile_contract(config, profile), risk_unit
     )
+    execution = config.get("execution") or {}
+    if str(execution.get("risk_mode", "ATR")).upper() == "SR_STRUCTURE":
+        stop_distance = None
+        target_distance = None
+    if str(execution.get("sr_take_profit_mode", "FIXED_R")).upper() != "FIXED_R":
+        target_distance = None
     return derive_trade_sr_context(
         direction=direction,
         raw=raw,
