@@ -8,7 +8,11 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_lab.data import DatasetKind
+from crypto_strategy_lab.data.source_identity import SourceSignature
 from crypto_strategy_lab.data_lake_config import DataConfig, ResearchRunConfig
+from crypto_strategy_lab.gui.completed_run_research import research_seed_from_manifest
+from crypto_strategy_lab.research_warmup import strategy_warmup_period
 from crypto_strategy_lab.strategy_visualizer import (
     CompletedRunVisualizer,
     LIGHTWEIGHT_CHARTS_VERSION,
@@ -262,6 +266,59 @@ def _fixture(tmp_path: Path):
 
     service = SimpleNamespace(completed_runs=CompletedRuns(), store=Store())
     return service, run_dir, manifest, market
+
+
+
+def test_market_source_verification_uses_same_causal_warmup_window(tmp_path):
+    _service, _run_dir, manifest, _market = _fixture(tmp_path)
+    seed = research_seed_from_manifest(manifest)
+
+    identities = ["warmup-partition-a", "visible-partition-b"]
+    source_path = tmp_path / "source_archives.parquet"
+    _write_parquet(
+        source_path,
+        pd.DataFrame(
+            {
+                "dataset": ["klines", "klines"],
+                "interval": ["15m", "15m"],
+                "canonical_partition_identity": identities,
+            }
+        ),
+    )
+    expected_signature = SourceSignature.from_canonical_identities(
+        DatasetKind.KLINES, identities
+    )
+    requested_start = pd.Timestamp(seed.request.period_start)
+    earliest_start = requested_start - pd.Timedelta(days=365)
+
+    class Catalog:
+        @staticmethod
+        def coverage(*_args, **_kwargs):
+            return SimpleNamespace(first_period=earliest_start.to_pydatetime())
+
+    class Store:
+        raw_root = tmp_path
+        catalog = Catalog()
+
+        def __init__(self):
+            self.seen_request = None
+
+        def canonical_source_identity(self, request, dataset, *, interval=None):
+            self.seen_request = request
+            assert dataset == DatasetKind.KLINES
+            assert interval == "15m"
+            return expected_signature
+
+    store = Store()
+    service = SimpleNamespace(store=store)
+
+    assert (
+        CompletedRunVisualizer._verify_market_source(service, seed, source_path)
+        is True
+    )
+    expected_start = requested_start - strategy_warmup_period(seed.config)
+    assert pd.Timestamp(store.seen_request.start) == expected_start
+    assert pd.Timestamp(store.seen_request.start) < requested_start
 
 
 def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
