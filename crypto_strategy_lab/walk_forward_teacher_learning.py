@@ -106,6 +106,10 @@ def next_teacher_for_learning(
         required = {"pair_id", "pair_net_r", "exit_time"}
         if required - trade_columns:
             return None
+        if allow_paired_losses and not {
+            "side", "strategy_profile_key", "entry_time"
+        }.issubset(trade_columns):
+            allow_paired_losses = False
 
         optional = [
             name
