@@ -296,7 +296,10 @@ def _empty_sr_zone_frame() -> pd.DataFrame:
         "decision_available_at",
         "sr_completed_candle_time",
     ):
-        result[name] = pd.Series(dtype="datetime64[ns, UTC]")
+        # Completed-run artifacts store canonical UTC instants as UTC-naive
+        # datetime64[ns]. This matches feature_context.parquet and avoids
+        # session-timezone-dependent TIMESTAMP/TIMESTAMPTZ comparisons.
+        result[name] = pd.Series(dtype="datetime64[ns]")
     return result.loc[:, SR_ZONE_ARTIFACT_COLUMNS]
 
 
@@ -406,7 +409,8 @@ def _sr_zone_inventory_frame(
         "decision_available_at",
         "sr_completed_candle_time",
     ):
-        frame[name] = pd.to_datetime(frame[name], utc=True, errors="coerce")
+        parsed = pd.to_datetime(frame[name], utc=True, errors="coerce")
+        frame[name] = parsed.dt.tz_convert("UTC").dt.tz_localize(None)
     for name in (
         "zone_low",
         "zone_high",
