@@ -82,7 +82,12 @@ def _samples(include_short: bool = False) -> pd.DataFrame:
         {
             "research_sample_id": "10-LONG-e1",
             "research_signal_index": 10,
-            "research_sampling_mode": "EVERY_VIABLE_ENTRY",
+            "research_sampling_mode": "WALK_FORWARD",
+            "walk_forward_candidate_id": "wf-10-long",
+            "walk_forward_candidate_source": True,
+            "walk_forward_counterfactual": False,
+            "walk_forward_source_side": "LONG",
+            "walk_forward_source_profile_key": "bull_long",
             "strategy_profile_key": "bull_long",
             "side": "LONG",
             "entry_time": "2025-01-02T00:00:00Z",
@@ -99,7 +104,12 @@ def _samples(include_short: bool = False) -> pd.DataFrame:
         {
             "research_sample_id": "11-LONG-e1",
             "research_signal_index": 11,
-            "research_sampling_mode": "EVERY_VIABLE_ENTRY",
+            "research_sampling_mode": "WALK_FORWARD",
+            "walk_forward_candidate_id": "wf-11-long",
+            "walk_forward_candidate_source": True,
+            "walk_forward_counterfactual": False,
+            "walk_forward_source_side": "LONG",
+            "walk_forward_source_profile_key": "bull_long",
             "strategy_profile_key": "bull_long",
             "side": "LONG",
             "entry_time": "2025-01-03T00:00:00Z",
@@ -119,7 +129,12 @@ def _samples(include_short: bool = False) -> pd.DataFrame:
             {
                 "research_sample_id": "10-SHORT-e2",
                 "research_signal_index": 10,
-                "research_sampling_mode": "EVERY_VIABLE_ENTRY",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-10-long",
+                "walk_forward_candidate_source": False,
+                "walk_forward_counterfactual": True,
+                "walk_forward_source_side": "LONG",
+                "walk_forward_source_profile_key": "bull_long",
                 "strategy_profile_key": "bull_short",
                 "side": "SHORT",
                 "entry_time": "2025-01-02T00:00:00Z",
@@ -215,7 +230,7 @@ def _write_reference(
         "request": {"symbol": "BTCUSDT"},
         "config": _config(),
         "artifacts": artifact_map,
-        "research": {"strategy_research_sampling": {"mode": "EVERY_VIABLE_ENTRY"}},
+        "research": {"strategy_research_sampling": {"mode": "WALK_FORWARD"}},
     }
     control = SimpleNamespace(project_root=project, output_root=output)
     reports = FakeReports(run_dir, manifest)
