@@ -134,7 +134,9 @@ class MainWindow(BaseMainWindow):
         mean_mode.setWordWrap(True)
 
         self.mean_reversion_mean_type = QComboBox()
-        self.mean_reversion_mean_type.addItems(["SMA", "EMA"])
+        self.mean_reversion_mean_type.addItem("Auto — Timeframe Based (Recommended)", "AUTO_TIMEFRAME")
+        self.mean_reversion_mean_type.addItem("SMA — Always", "SMA")
+        self.mean_reversion_mean_type.addItem("EMA — Always", "EMA")
         self.mean_reversion_bb_stddevs = QDoubleSpinBox()
         self.mean_reversion_bb_stddevs.setRange(0.1, 10.0)
         self.mean_reversion_bb_stddevs.setDecimals(2)
@@ -157,7 +159,9 @@ class MainWindow(BaseMainWindow):
         self.mean_reversion_period.setToolTip(
             "Lookback used for the selected moving mean and the Bollinger rolling standard deviation."
         )
-        self.mean_reversion_mean_type.setToolTip("SMA is the default textbook mean; EMA remains available for comparison.")
+        self.mean_reversion_mean_type.setToolTip(
+            "Auto uses EMA below 4h and SMA from 4h upward. SMA/EMA can be forced for comparison."
+        )
         self.mean_reversion_bb_stddevs.setToolTip("Bollinger Band width in population standard deviations around the selected mean.")
         self.mean_reversion_rsi_period.setToolTip("Wilder RSI lookback used to identify momentum exhaustion.")
         self.mean_reversion_rsi_oversold.setToolTip("RSI at or below this value arms a potential LONG mean-reversion setup.")
@@ -225,7 +229,7 @@ class MainWindow(BaseMainWindow):
                 "di_pressure_allow_expanding": self.di_pressure_allow_expanding.isChecked(),
                 "di_pressure_allow_contracting": self.di_pressure_allow_contracting.isChecked(),
                 "di_pressure_allow_mixed": self.di_pressure_allow_mixed.isChecked(),
-                "mean_reversion_mean_type": self.mean_reversion_mean_type.currentText(),
+                "mean_reversion_mean_type": self.mean_reversion_mean_type.currentData(),
                 "mean_reversion_bb_stddevs": self.mean_reversion_bb_stddevs.value(),
                 "mean_reversion_rsi_period": self.mean_reversion_rsi_period.value(),
                 "mean_reversion_rsi_oversold": self.mean_reversion_rsi_oversold.value(),
@@ -249,7 +253,9 @@ class MainWindow(BaseMainWindow):
         self.di_pressure_allow_expanding.setChecked(bool(merged["di_pressure_allow_expanding"]))
         self.di_pressure_allow_contracting.setChecked(bool(merged["di_pressure_allow_contracting"]))
         self.di_pressure_allow_mixed.setChecked(bool(merged["di_pressure_allow_mixed"]))
-        self.mean_reversion_mean_type.setCurrentText(str(merged["mean_reversion_mean_type"]).upper())
+        mean_type = str(merged["mean_reversion_mean_type"]).upper()
+        index = self.mean_reversion_mean_type.findData(mean_type)
+        self.mean_reversion_mean_type.setCurrentIndex(index if index >= 0 else 0)
         self.mean_reversion_bb_stddevs.setValue(float(merged["mean_reversion_bb_stddevs"]))
         self.mean_reversion_rsi_period.setValue(int(merged["mean_reversion_rsi_period"]))
         self.mean_reversion_rsi_oversold.setValue(float(merged["mean_reversion_rsi_oversold"]))

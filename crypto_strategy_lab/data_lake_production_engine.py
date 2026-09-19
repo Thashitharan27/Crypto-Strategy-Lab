@@ -21,6 +21,7 @@ from crypto_strategy_lab.features.support_resistance import (
 from crypto_strategy_lab.sr_dynamic_tp_engine import SRDynamicTPBacktestEngine
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
 from crypto_strategy_lab.prepared_backtest import PreparedBacktestFrame, IntrabarExecutionData
+from crypto_strategy_lab.mean_reversion_v2 import normalize_mean_type, resolve_mean_type
 from zoneinfo import ZoneInfo
 
 
@@ -162,6 +163,13 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         self.data = None
         self.intrabar_data = intrabar
         self.config = config
+        self.mean_reversion_requested_mean_type = normalize_mean_type(
+            getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")
+        )
+        self.mean_reversion_effective_mean_type = resolve_mean_type(
+            self.mean_reversion_requested_mean_type,
+            int(config.strategy_timeframe_minutes),
+        )
         self.progress_callback = progress_callback
         self.progress_interval = max(1, int(progress_interval))
         self.times = prepared.timestamp
@@ -328,7 +336,14 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             "bb_period": int(config.bb_period),
             "bb_stddevs": float(config.bb_stddevs),
             "mean_reversion_period": int(config.mean_reversion_period),
-            "mean_reversion_mean_type": str(getattr(config, "mean_reversion_mean_type", "SMA")).upper(),
+            "mean_reversion_mean_type": normalize_mean_type(
+                getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")
+            ),
+            "mean_reversion_effective_mean_type": resolve_mean_type(
+                getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME"),
+                int(config.strategy_timeframe_minutes),
+            ),
+            "strategy_timeframe_minutes": int(config.strategy_timeframe_minutes),
             "mean_reversion_bb_stddevs": float(getattr(config, "mean_reversion_bb_stddevs", 2.0)),
             "mean_reversion_rsi_period": int(getattr(config, "mean_reversion_rsi_period", 14)),
             "mean_reversion_rsi_oversold": float(getattr(config, "mean_reversion_rsi_oversold", 30.0)),
@@ -365,7 +380,10 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         short_reentry = context["mean_reversion_short_reentry"].to_numpy(bool)
 
         expected_period = int(config.mean_reversion_period)
-        expected_mean_type = str(getattr(config, "mean_reversion_mean_type", "SMA")).upper()
+        expected_mean_type = resolve_mean_type(
+            getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME"),
+            int(config.strategy_timeframe_minutes),
+        )
         expected_stddevs = float(getattr(config, "mean_reversion_bb_stddevs", 2.0))
         expected_rsi_period = int(getattr(config, "mean_reversion_rsi_period", 14))
         expected_oversold = float(getattr(config, "mean_reversion_rsi_oversold", 30.0))
@@ -431,7 +449,17 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         distance_alignment = result.get("mean_reversion_alignment", "UNKNOWN")
         result.update(
             {
-                "mean_reversion_mean_type": str(getattr(config, "mean_reversion_mean_type", "EMA")).upper(),
+                "mean_reversion_mean_type": getattr(
+                    self, "mean_reversion_requested_mean_type",
+                    normalize_mean_type(getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
+                ),
+                "mean_reversion_effective_mean_type": getattr(
+                    self, "mean_reversion_effective_mean_type",
+                    resolve_mean_type(
+                        getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME"),
+                        int(config.strategy_timeframe_minutes),
+                    ),
+                ),
                 "mean_reversion_bb_stddevs": float(getattr(config, "mean_reversion_bb_stddevs", 2.0)),
                 "mean_reversion_rsi_period": int(getattr(config, "mean_reversion_rsi_period", 14)),
                 "mean_reversion_rsi_oversold": float(getattr(config, "mean_reversion_rsi_oversold", 30.0)),

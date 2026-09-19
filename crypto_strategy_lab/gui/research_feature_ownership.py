@@ -286,6 +286,13 @@ class ResearchFeaturesPanel(QWidget):
                 "mean_reversion_track_motion",
             ),
         )
+        self.mr_mean_summary = QLabel()
+        self.mr_mean_summary.setWordWrap(True)
+        self.mr_mean_summary.setStyleSheet(
+            "color:#334e68; background:#f7f9fb; padding:7px 9px; "
+            "border:1px solid #d9e2ec; margin:2px 8px 4px 8px"
+        )
+        self.mr_card.layout().insertWidget(1, self.mr_mean_summary)
         layout.addWidget(self.mr_card)
 
         self.sr_enable = self.widgets["enable_support_resistance_analysis"]
@@ -518,7 +525,7 @@ class ResearchFeaturesPanel(QWidget):
         strategy_tf = getattr(self.window, "strategy_tf", None)
         if strategy_tf is not None and hasattr(strategy_tf, "currentIndexChanged"):
             strategy_tf.currentIndexChanged.connect(
-                lambda _index: self._refresh_sr_timeframe_summary()
+                lambda _index: self.refresh_visibility()
             )
         self.sr_enable.toggled.connect(lambda _checked: self.refresh_visibility())
         self.trade_enable.toggled.connect(lambda _checked: self.refresh_visibility())
@@ -582,6 +589,29 @@ class ResearchFeaturesPanel(QWidget):
         }
         minutes = known.get(text)
         return minutes, (text if minutes is not None else "Strategy TF")
+
+    def _refresh_mr_mean_summary(self) -> None:
+        minutes, label = self._strategy_timeframe_context()
+        requested = self.widgets["mean_reversion_mean_type"].currentData()
+        period_widget = self.widgets["mean_reversion_period"]
+        period = int(period_widget.value()) if hasattr(period_widget, "value") else 20
+        if requested == "AUTO_TIMEFRAME":
+            if minutes is None:
+                text = (
+                    "Effective mean: automatic. EMA is used below 4h; "
+                    "SMA is used from 4h upward."
+                )
+            else:
+                effective = "EMA" if minutes < 240 else "SMA"
+                text = (
+                    f"Effective mean: {effective} {period} for {label}. "
+                    "Auto uses EMA below 4h and SMA from 4h upward."
+                )
+        else:
+            text = (
+                f"Effective mean: {requested} {period} (forced for every strategy timeframe)."
+            )
+        self.mr_mean_summary.setText(text)
 
     def _refresh_sr_timeframe_summary(self) -> None:
         minutes, label = self._strategy_timeframe_context()
@@ -701,6 +731,7 @@ class ResearchFeaturesPanel(QWidget):
         self.refresh_visibility()
 
     def refresh_visibility(self, *_args) -> None:
+        self._refresh_mr_mean_summary()
         self._refresh_sr_timeframe_summary()
         method = self.widgets["market_regime_method"].currentData()
         structural = method in {"BTC_STRUCTURAL", "ASSET_STRUCTURAL"}

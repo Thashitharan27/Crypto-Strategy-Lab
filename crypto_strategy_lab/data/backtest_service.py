@@ -711,7 +711,7 @@ def load_backtest_bundle(
     bb_period: int = 20,
     bb_stddevs: float = 2.0,
     mean_reversion_period: int = 20,
-    mean_reversion_mean_type: str = "SMA",
+    mean_reversion_mean_type: str = "AUTO_TIMEFRAME",
     mean_reversion_bb_stddevs: float = 2.0,
     mean_reversion_rsi_period: int = 14,
     mean_reversion_rsi_oversold: float = 30.0,

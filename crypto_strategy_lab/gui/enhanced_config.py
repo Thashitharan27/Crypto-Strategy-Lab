@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from crypto_strategy_lab.config import BacktestConfig
+from crypto_strategy_lab.mean_reversion_v2 import normalize_mean_type
 from crypto_strategy_lab.gui.config_logic import (
     DEFAULT_GUI_CONFIG,
     build_backtest_config,
@@ -22,7 +23,7 @@ DI_PRESSURE_FILTER_DEFAULTS: dict[str, Any] = {
 }
 
 MEAN_REVERSION_V2_DEFAULTS: dict[str, Any] = {
-    "mean_reversion_mean_type": "SMA",
+    "mean_reversion_mean_type": "AUTO_TIMEFRAME",
     "mean_reversion_bb_stddevs": 2.0,
     "mean_reversion_rsi_period": 14,
     "mean_reversion_rsi_oversold": 30.0,
@@ -68,7 +69,7 @@ class EnhancedBacktestConfig(BacktestConfig):
     di_pressure_allow_expanding: bool = True
     di_pressure_allow_contracting: bool = True
     di_pressure_allow_mixed: bool = True
-    mean_reversion_mean_type: str = "SMA"
+    mean_reversion_mean_type: str = "AUTO_TIMEFRAME"
     mean_reversion_bb_stddevs: float = 2.0
     mean_reversion_rsi_period: int = 14
     mean_reversion_rsi_oversold: float = 30.0
@@ -99,10 +100,8 @@ class EnhancedBacktestConfig(BacktestConfig):
         ):
             raise ValueError("At least one DI pressure state must be allowed when DI pressure analysis is enabled")
 
-        mean_type = str(self.mean_reversion_mean_type).upper()
+        mean_type = normalize_mean_type(self.mean_reversion_mean_type)
         object.__setattr__(self, "mean_reversion_mean_type", mean_type)
-        if mean_type not in ("SMA", "EMA"):
-            raise ValueError("mean_reversion_mean_type must be SMA or EMA")
         if self.mean_reversion_bb_stddevs <= 0:
             raise ValueError("mean_reversion_bb_stddevs must be positive")
         if self.mean_reversion_rsi_period <= 0:

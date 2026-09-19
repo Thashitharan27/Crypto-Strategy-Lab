@@ -15,6 +15,7 @@ def test_data_lake_defaults_to_asset_return_regime_and_tighter_sr_near_distance(
     assert config.features.bull_regime_lookback_days == 90
     assert config.features.bull_regime_return_threshold == 0.20
     assert config.features.sr_near_distance_atr == 0.50
+    assert config.features.mean_reversion_mean_type == "AUTO_TIMEFRAME"
 
 
 def test_data_lake_config_does_not_require_csv_paths() -> None:

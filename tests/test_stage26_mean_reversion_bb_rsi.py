@@ -15,12 +15,13 @@ from crypto_strategy_lab.mean_reversion_v2 import (
     bollinger_reentry_flags,
     classify_signal,
     moving_mean,
+    resolve_mean_type,
 )
 
 
 def test_v2_defaults_match_research_design():
     values = enhanced_default_gui_config()
-    assert values["mean_reversion_mean_type"] == "SMA"
+    assert values["mean_reversion_mean_type"] == "AUTO_TIMEFRAME"
     assert values["mean_reversion_period"] == 20
     assert values["mean_reversion_bb_stddevs"] == 2.0
     assert values["mean_reversion_rsi_period"] == 14
@@ -28,9 +29,19 @@ def test_v2_defaults_match_research_design():
     assert values["mean_reversion_rsi_overbought"] == 70.0
     assert values["mean_reversion_require_reentry"] is True
     cfg = build_enhanced_backtest_config(values, require_paths=False)
-    assert cfg.mean_reversion_mean_type == "SMA"
+    assert cfg.mean_reversion_mean_type == "AUTO_TIMEFRAME"
     assert cfg.mean_reversion_bb_stddevs == 2.0
     assert cfg.mean_reversion_rsi_period == 14
+
+
+def test_auto_mean_resolves_by_strategy_timeframe():
+    assert resolve_mean_type("AUTO_TIMEFRAME", 15) == "EMA"
+    assert resolve_mean_type("AUTO_TIMEFRAME", 60) == "EMA"
+    assert resolve_mean_type("AUTO_TIMEFRAME", 120) == "EMA"
+    assert resolve_mean_type("AUTO_TIMEFRAME", 240) == "SMA"
+    assert resolve_mean_type("AUTO_TIMEFRAME", 1440) == "SMA"
+    assert resolve_mean_type("EMA", 1440) == "EMA"
+    assert resolve_mean_type("SMA", 15) == "SMA"
 
 
 def test_moving_mean_supports_causal_sma_and_ema():
@@ -102,6 +113,8 @@ def test_enhanced_engine_records_signal_without_changing_di_direction():
     assert snapshot["mean_reversion_signal"] == "STRONG_LONG"
     assert snapshot["mean_reversion_alignment"] == "FAVORS_REVERSION"
     assert snapshot["mean_reversion_reentry_confirmation"] == "LONG"
+    assert snapshot["mean_reversion_mean_type"] == "AUTO_TIMEFRAME"
+    assert snapshot["mean_reversion_effective_mean_type"] == "EMA"
     assert snapshot["bb_reentry"] == "LONG"
     assert snapshot["mr_signal"] == "CONFIRMED"
     assert snapshot["mr_signal_direction"] == "LONG"

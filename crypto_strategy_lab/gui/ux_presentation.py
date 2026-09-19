@@ -79,6 +79,10 @@ FIELDS = {
         unit=" × ATR",
         decimals=2,
     ),
+    "mean_reversion_mean_type": FieldPresentation(
+        "Mean Type",
+        "Auto uses EMA below 4h and SMA from 4h upward; force SMA or EMA only for a deliberate comparison.",
+    ),
     "tie_policy": FieldPresentation("Same-bar Resolution"),
 }
 
@@ -93,6 +97,11 @@ ENUM_LABELS = {
     "strategy_profile_run_mode": {"COMBINED_SHARED_CAPITAL": "Combined — Shared Account", "ISOLATED_PROFILES": "Each Profile Independently", "BOTH": "Combined + Independent Comparison"},
     "tie_policy": {"PESSIMISTIC": "Conservative — Stop First", "OPTIMISTIC": "Optimistic — Target First", "INTRABAR": "Resolve Using Intrabar Data"},
     "market_regime_method": {"BTC_STRUCTURAL": "BTC Structural Trend", "ASSET_STRUCTURAL": "Selected Asset Structural Trend", "ASSET_RETURN": "Selected Asset Trailing Return"},
+    "mean_reversion_mean_type": {
+        "AUTO_TIMEFRAME": "Auto — Timeframe Based (Recommended)",
+        "SMA": "SMA — Always",
+        "EMA": "EMA — Always",
+    },
     "sr_filter_mode": {"ANALYSIS_ONLY": "Analysis Only — Do Not Block Trades", "APPLY_ENTRY_RULES": "Use S/R Entry Filters"},
     "risk_mode": {"ATR": "ATR Volatility", "PERCENT": "Percent of Price", "FIXED": "Fixed Price Distance", "SR_STRUCTURE": "S/R Structural Stop"},
     "trade_flow_source": {"AGG_TRADES": "Aggregate Trades", "TRADES": "Trades"},

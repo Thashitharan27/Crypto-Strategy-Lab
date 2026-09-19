@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, get_type_hints
 
+from crypto_strategy_lab.mean_reversion_v2 import normalize_mean_type
+
 
 CONFIG_VERSION = 3
 GUI_COMPAT_CONFIG_VERSION = 2
@@ -37,7 +39,7 @@ class FeatureConfig:
     bb_period: int = 20
     bb_stddevs: float = 2.0
     mean_reversion_period: int = 20
-    mean_reversion_mean_type: str = "SMA"
+    mean_reversion_mean_type: str = "AUTO_TIMEFRAME"
     mean_reversion_bb_stddevs: float = 2.0
     mean_reversion_rsi_period: int = 14
     mean_reversion_rsi_oversold: float = 30.0
@@ -100,6 +102,13 @@ class FeatureConfig:
     funding_zscore_min_samples: int = 6
     funding_extreme_zscore: float = 2.0
     basis_zscore_window_days: float = 7.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "mean_reversion_mean_type",
+            normalize_mean_type(self.mean_reversion_mean_type),
+        )
 
     def sr_detection_parameters(self, timeframe_minutes: int) -> dict[str, int]:
         """Resolve causal pivot settings and a timeframe-aware structural horizon."""
