@@ -133,34 +133,40 @@ def _generic_state(raw: Any) -> str:
     return "NO_STRUCTURE"
 
 
+def _profile_value(profile: Any, name: str, default: Any = None) -> Any:
+    if isinstance(profile, Mapping):
+        return profile.get(name, default)
+    return getattr(profile, name, default)
+
+
 def planned_trade_distances(profile: Any, risk_unit: Any) -> tuple[float | None, float | None]:
     """Return the configured 1R stop distance and final planned target distance."""
     unit = _finite(risk_unit)
     if unit is None or unit <= 0 or profile is None:
         return None, None
 
-    partial_stop = bool(getattr(profile, "partial_stop_enabled", False))
+    partial_stop = bool(_profile_value(profile, "partial_stop_enabled", False))
     stop_multiple = (
-        _finite(getattr(profile, "sl2_r", None))
+        _finite(_profile_value(profile, "sl2_r", None))
         if partial_stop
-        else _finite(getattr(profile, "stop_loss_multiple", None))
+        else _finite(_profile_value(profile, "stop_loss_multiple", None))
     )
     if stop_multiple is None or stop_multiple <= 0:
         return None, None
     stop_distance = unit * stop_multiple
 
-    if bool(getattr(profile, "r_step_trailing_enabled", False)):
-        maximum_r = _finite(getattr(profile, "r_step_maximum_r", None))
+    if bool(_profile_value(profile, "r_step_trailing_enabled", False)):
+        maximum_r = _finite(_profile_value(profile, "r_step_maximum_r", None))
         if maximum_r is not None and maximum_r > 0:
             return stop_distance, unit * maximum_r
 
-    if bool(getattr(profile, "partial_profit_enabled", False)):
-        tp2_r = _finite(getattr(profile, "tp2_r", None))
+    if bool(_profile_value(profile, "partial_profit_enabled", False)):
+        tp2_r = _finite(_profile_value(profile, "tp2_r", None))
         if tp2_r is None or tp2_r <= 0:
             return stop_distance, None
         return stop_distance, stop_distance * tp2_r
 
-    reward_risk = _finite(getattr(profile, "reward_risk_ratio", None))
+    reward_risk = _finite(_profile_value(profile, "reward_risk_ratio", None))
     if reward_risk is None or reward_risk <= 0:
         return stop_distance, None
     return stop_distance, stop_distance * reward_risk
