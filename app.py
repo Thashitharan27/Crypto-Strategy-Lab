@@ -29,6 +29,9 @@ from crypto_strategy_lab.gui.review_run_install import apply_review_run_workspac
 from crypto_strategy_lab.gui.results_dashboard_install import (
     apply_results_dashboard_workspace,
 )
+from crypto_strategy_lab.gui.strategy_visualizer_install import (
+    apply_strategy_visualizer_workspace,
+)
 from crypto_strategy_lab.gui.data_library_install import (
     apply_data_library_workspace,
 )
@@ -94,6 +97,7 @@ def main() -> int:
         install_run_progress(window)
         apply_review_run_workspace(window)
         apply_results_dashboard_workspace(window)
+        apply_strategy_visualizer_workspace(window)
         apply_data_library_workspace(window)
         apply_validation_gap_diagnostics(window)
         apply_portfolio_replay_workspace(window)

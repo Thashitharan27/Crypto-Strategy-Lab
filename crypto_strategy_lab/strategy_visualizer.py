@@ -1,0 +1,867 @@
+"""Read-only completed-run visualization model for Strategy Visualizer.
+
+This module never re-runs strategy logic. It reads the immutable completed-run
+artifacts plus the canonical market-data slice used by the workstation and
+builds a bounded JSON payload for the desktop chart.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from pathlib import Path
+import json
+import math
+from typing import Any, Mapping
+
+import duckdb
+import numpy as np
+import pandas as pd
+
+from crypto_strategy_lab.data import DatasetKind
+from crypto_strategy_lab.data.timing import interval_to_timedelta
+from crypto_strategy_lab.data.source_identity import SourceSignature
+from crypto_strategy_lab.gui.completed_run_research import research_seed_from_manifest
+
+
+LIGHTWEIGHT_CHARTS_VERSION = "5.2.1"
+LIGHTWEIGHT_CHARTS_URL = (
+    "https://cdn.jsdelivr.net/npm/lightweight-charts@"
+    f"{LIGHTWEIGHT_CHARTS_VERSION}/dist/lightweight-charts.standalone.production.js"
+)
+
+DEFAULT_VISIBLE_CANDLES = 240
+EMA_WARMUP_BARS = 220
+MIN_VISIBLE_CANDLES = 60
+MAX_VISIBLE_CANDLES = 1000
+
+SR_TIMEFRAMES = {
+    "strategy": "Strategy TF",
+    "1h": "1H",
+    "4h": "4H",
+    "1d": "1D",
+}
+
+_CONTEXT_INSPECTOR_FIELDS = (
+    ("adx", "ADX"),
+    ("plus_di", "+DI"),
+    ("minus_di", "-DI"),
+    ("di_spread", "DI Spread"),
+    ("di_ratio", "DI Ratio"),
+    ("session_vwap", "VWAP"),
+    ("market_regime", "Regime"),
+    ("mean_reversion_state", "MR State"),
+    ("mean_reversion_motion", "MR Motion"),
+    ("sr_strategy_long_support_state", "Strategy Support"),
+    ("sr_strategy_long_resistance_state", "Strategy Resistance"),
+    ("sr_1h_long_support_state", "1H Support"),
+    ("sr_1h_long_resistance_state", "1H Resistance"),
+    ("sr_4h_long_support_state", "4H Support"),
+    ("sr_4h_long_resistance_state", "4H Resistance"),
+    ("sr_1d_long_support_state", "1D Support"),
+    ("sr_1d_long_resistance_state", "1D Resistance"),
+)
+
+
+def _utc(value: Any) -> pd.Timestamp:
+    timestamp = pd.Timestamp(value)
+    if pd.isna(timestamp):
+        raise ValueError("timestamp is missing")
+    return (
+        timestamp.tz_localize("UTC")
+        if timestamp.tzinfo is None
+        else timestamp.tz_convert("UTC")
+    )
+
+
+def _finite(value: Any) -> float | None:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _json_value(value: Any) -> Any:
+    if value is None or value is pd.NA:
+        return None
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        return _finite(value)
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    try:
+        if bool(pd.isna(value)):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(getattr(value, "value", value))
+
+
+def _unix_seconds(value: Any) -> int:
+    return int(_utc(value).timestamp())
+
+
+def _first_value(row: Mapping[str, Any], names: tuple[str, ...]) -> Any:
+    for name in names:
+        if name not in row:
+            continue
+        value = row[name]
+        if value is None or value is pd.NA:
+            continue
+        try:
+            if bool(pd.isna(value)):
+                continue
+        except (TypeError, ValueError):
+            pass
+        return value
+    return None
+
+
+def _ema(values: pd.Series, period: int) -> np.ndarray:
+    """Display-only EMA using the same causal formula as the native engine."""
+    numeric = pd.to_numeric(values, errors="coerce")
+    return (
+        numeric.ewm(span=period, adjust=False, min_periods=period)
+        .mean()
+        .to_numpy(float)
+    )
+
+
+def _line_points(times: pd.Series, values: Any) -> list[dict[str, Any]]:
+    numeric = pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(float)
+    result: list[dict[str, Any]] = []
+    for timestamp, value in zip(times, numeric):
+        if math.isfinite(float(value)):
+            result.append({"time": _unix_seconds(timestamp), "value": float(value)})
+    return result
+
+
+def _categorical_context(row: Mapping[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for column, label in _CONTEXT_INSPECTOR_FIELDS:
+        if column not in row:
+            continue
+        value = _json_value(row[column])
+        if value is not None:
+            result[label] = value
+    return result
+
+
+def _trade_result_label(row: Mapping[str, Any]) -> str:
+    net_r = _finite(row.get("pair_net_r"))
+    if net_r is None:
+        return ""
+    return f"{net_r:+.3f}R"
+
+
+def _trade_side(row: Mapping[str, Any]) -> str:
+    side = str(row.get("side") or row.get("trade_direction") or "").upper()
+    return side if side in {"LONG", "SHORT"} else side or "UNKNOWN"
+
+
+def trade_stop_target(row: Mapping[str, Any]) -> tuple[float | None, float | None]:
+    """Return the best immutable entry-stop / target representation available."""
+    side = _trade_side(row).lower()
+    stop = _first_value(
+        row,
+        (
+            "initial_stop_price",
+            f"{side}_original_sl",
+            f"{side}_sl_price",
+            f"{side}_original_stop",
+            f"{side}_sl",
+        ),
+    )
+    target = _first_value(
+        row,
+        (
+            "initial_target_price",
+            f"{side}_tp",
+            f"{side}_tp2_price",
+            f"{side}_tp1_price",
+        ),
+    )
+    return _finite(stop), _finite(target)
+
+
+@dataclass
+class CompletedRunVisualizer:
+    service: Any
+    run_dir: Path
+    manifest: dict[str, Any]
+    trades_path: Path
+    signals_path: Path | None
+    context_path: Path | None
+    source_archives_path: Path | None
+    source_verified: bool | None
+    seed: Any
+    trades: pd.DataFrame
+
+    @classmethod
+    def load(
+        cls,
+        service: Any,
+        run_dir: Path,
+        manifest: Mapping[str, Any] | None = None,
+    ) -> "CompletedRunVisualizer":
+        run_dir = Path(run_dir)
+        if manifest is None:
+            manifest, _summary = service.completed_runs.read(run_dir)
+        manifest = dict(manifest)
+        seed = research_seed_from_manifest(manifest)
+
+        completed = service.completed_runs
+        trades_path = completed.artifact_path(run_dir, manifest, "trades")
+        signals_path = cls._optional_artifact(completed, run_dir, manifest, "signals")
+        context_path = cls._optional_artifact(
+            completed, run_dir, manifest, "feature_context"
+        )
+        source_archives_path = cls._optional_artifact(
+            completed, run_dir, manifest, "source_archives"
+        )
+        source_verified = cls._verify_market_source(
+            service, seed, source_archives_path
+        )
+        trades = cls._read_parquet(trades_path)
+        if not trades.empty:
+            timestamp_column = cls._trade_timestamp_column(trades)
+            trades[timestamp_column] = pd.to_datetime(
+                trades[timestamp_column], utc=True, errors="coerce"
+            )
+            trades = trades.sort_values(timestamp_column, kind="stable").reset_index(
+                drop=True
+            )
+        return cls(
+            service=service,
+            run_dir=run_dir,
+            manifest=manifest,
+            trades_path=trades_path,
+            signals_path=signals_path,
+            context_path=context_path,
+            source_archives_path=source_archives_path,
+            source_verified=source_verified,
+            seed=seed,
+            trades=trades,
+        )
+
+    @staticmethod
+    def _optional_artifact(completed, run_dir, manifest, name):
+        if name not in (manifest.get("artifacts") or {}):
+            return None
+        return completed.artifact_path(run_dir, manifest, name)
+
+    @staticmethod
+    def _verify_market_source(service, seed, source_path: Path | None) -> bool | None:
+        """Verify chart OHLC resolves to the same canonical partitions as the run."""
+        if source_path is None:
+            return None
+        escaped = str(source_path).replace("'", "''")
+        interval = str(seed.request.strategy_timeframe)
+        with duckdb.connect(":memory:") as connection:
+            rows = connection.execute(
+                f"SELECT canonical_partition_identity FROM read_parquet('{escaped}') "
+                "WHERE lower(CAST(dataset AS VARCHAR)) = 'klines' "
+                "AND CAST(interval AS VARCHAR) = ?",
+                [interval],
+            ).fetchall()
+        identities = [str(row[0]) for row in rows if row and row[0]]
+        if not identities:
+            raise ValueError(
+                "completed run provenance does not contain its strategy-candle source identities"
+            )
+        expected = SourceSignature.from_canonical_identities(
+            DatasetKind.KLINES, identities
+        ).cache_identity()
+        request = seed.request.to_data_request((DatasetKind.KLINES,))
+        current = service.store.canonical_source_identity(
+            request, DatasetKind.KLINES, interval=interval
+        ).cache_identity()
+        if current != expected:
+            raise ValueError(
+                "current canonical candle source does not match the completed run provenance; "
+                "the underlying archive set was changed or repaired after this run"
+            )
+        return True
+
+    @staticmethod
+    def _read_parquet(path: Path) -> pd.DataFrame:
+        escaped = str(path).replace("'", "''")
+        with duckdb.connect(":memory:") as connection:
+            return connection.execute(
+                f"SELECT * FROM read_parquet('{escaped}')"
+            ).df()
+
+    @staticmethod
+    def _trade_timestamp_column(frame: pd.DataFrame) -> str:
+        for name in ("entry_time", "strategy_entry_time", "actual_entry_timestamp"):
+            if name in frame.columns:
+                return name
+        raise ValueError("completed trades do not contain an entry timestamp")
+
+    @property
+    def trade_count(self) -> int:
+        return len(self.trades)
+
+    def trade_label(self, index: int) -> str:
+        row = self._trade_row(index)
+        pair_id = _json_value(row.get("pair_id")) or index + 1
+        entry = _utc(
+            _first_value(
+                row,
+                ("entry_time", "strategy_entry_time", "actual_entry_timestamp"),
+            )
+        )
+        return (
+            f"{index + 1}/{self.trade_count} · #{pair_id} · {_trade_side(row)} · "
+            f"{_trade_result_label(row)} · {entry:%Y-%m-%d %H:%M}"
+        )
+
+    def _trade_row(self, index: int) -> dict[str, Any]:
+        if not 0 <= int(index) < self.trade_count:
+            raise IndexError("trade index is out of range")
+        return self.trades.iloc[int(index)].to_dict()
+
+    def selected_trade_summary(self, index: int | None) -> dict[str, Any]:
+        if index is None or self.trade_count == 0:
+            return {}
+        row = self._trade_row(index)
+        side = _trade_side(row)
+        stop, target = trade_stop_target(row)
+        entry = _finite(
+            _first_value(row, ("entry_price", "actual_entry_price", "strategy_entry_price"))
+        )
+        exit_price = _finite(
+            _first_value(row, (f"{side.lower()}_exit_price", "exit_price"))
+        )
+        exit_reason = _first_value(
+            row,
+            (f"{side.lower()}_final_exit_reason", f"{side.lower()}_exit_reason", "exit_reason"),
+        )
+        summary = {
+            "Pair": _json_value(row.get("pair_id")),
+            "Side": side,
+            "Profile": _json_value(row.get("strategy_profile_key")),
+            "Signal Strategy": _json_value(row.get("signal_strategy")),
+            "Entry Time": _json_value(
+                _first_value(row, ("entry_time", "strategy_entry_time"))
+            ),
+            "Entry": entry,
+            "Stop": stop,
+            "Target": target,
+            "Exit Time": _json_value(row.get("exit_time")),
+            "Exit": exit_price,
+            "Exit Reason": _json_value(exit_reason),
+            "Net R": _finite(row.get("pair_net_r")),
+            "Net P&L": _finite(row.get("pair_net_pnl")),
+            "Entry Filter": _json_value(row.get("entry_filter_reason")),
+            "Regime": _json_value(row.get("market_regime")),
+            "ADX": _finite(row.get("adx")),
+            "+DI": _finite(row.get("plus_di")),
+            "-DI": _finite(row.get("minus_di")),
+            "DI Ratio": _finite(row.get("di_ratio")),
+        }
+        return {key: value for key, value in summary.items() if value is not None}
+
+    def _center_time(self, trade_index: int | None) -> pd.Timestamp:
+        if trade_index is not None and self.trade_count:
+            row = self._trade_row(trade_index)
+            return _utc(
+                _first_value(
+                    row,
+                    ("entry_time", "strategy_entry_time", "actual_entry_timestamp"),
+                )
+            )
+        interval = pd.Timedelta(
+            interval_to_timedelta(self.seed.request.strategy_timeframe)
+        )
+        return _utc(self.seed.request.period_end) - interval
+
+    def _window_bounds(
+        self, trade_index: int | None, visible_candles: int
+    ) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+        visible = max(
+            MIN_VISIBLE_CANDLES,
+            min(MAX_VISIBLE_CANDLES, int(visible_candles)),
+        )
+        interval = pd.Timedelta(
+            interval_to_timedelta(self.seed.request.strategy_timeframe)
+        )
+        center = self._center_time(trade_index)
+        before = visible // 2
+        after = visible - before
+        run_start = _utc(self.seed.request.period_start)
+        run_end = _utc(self.seed.request.period_end)
+        visible_start = max(run_start, center - before * interval)
+        visible_end = min(run_end, center + after * interval)
+        calculation_start = max(
+            run_start, visible_start - EMA_WARMUP_BARS * interval
+        )
+        return calculation_start, visible_start, visible_end
+
+    def _market_frame(
+        self,
+        calculation_start: pd.Timestamp,
+        visible_end: pd.Timestamp,
+    ) -> pd.DataFrame:
+        base_request = self.seed.request.to_data_request((DatasetKind.KLINES,))
+        request = replace(
+            base_request,
+            start=calculation_start.to_pydatetime(),
+            end=visible_end.to_pydatetime(),
+            datasets=(DatasetKind.KLINES,),
+        )
+        frame = self.service.store.load_dataset(
+            request,
+            DatasetKind.KLINES,
+            interval=self.seed.request.strategy_timeframe,
+        )
+        if frame.empty:
+            return frame
+        frame = frame.copy()
+        frame["period_start"] = pd.to_datetime(
+            frame["period_start"], utc=True, errors="raise"
+        )
+        return frame.sort_values("period_start", kind="stable").reset_index(drop=True)
+
+    @staticmethod
+    def _query_time_window(
+        path: Path | None,
+        timestamp_column: str,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+    ) -> pd.DataFrame:
+        if path is None:
+            return pd.DataFrame()
+        escaped = str(path).replace("'", "''")
+        escaped_column = '"' + timestamp_column.replace('"', '""') + '"'
+        with duckdb.connect(":memory:") as connection:
+            columns = {
+                row[0]
+                for row in connection.execute(
+                    f"DESCRIBE SELECT * FROM read_parquet('{escaped}')"
+                ).fetchall()
+            }
+            if timestamp_column not in columns:
+                return pd.DataFrame()
+            query = (
+                f"SELECT * FROM read_parquet('{escaped}') "
+                f"WHERE CAST({escaped_column} AS TIMESTAMPTZ) >= ? "
+                f"AND CAST({escaped_column} AS TIMESTAMPTZ) < ? "
+                f"ORDER BY CAST({escaped_column} AS TIMESTAMPTZ)"
+            )
+            return connection.execute(
+                query, [start.to_pydatetime(), end.to_pydatetime()]
+            ).df()
+
+    def _feature_context(
+        self, start: pd.Timestamp, end: pd.Timestamp
+    ) -> pd.DataFrame:
+        frame = self._query_time_window(
+            self.context_path,
+            "strategy_candle_open_time",
+            start,
+            end,
+        )
+        if not frame.empty:
+            frame["strategy_candle_open_time"] = pd.to_datetime(
+                frame["strategy_candle_open_time"], utc=True, errors="coerce"
+            )
+        return frame
+
+    def _signals(self, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+        frame = self._query_time_window(
+            self.signals_path,
+            "candle_open_time",
+            start,
+            end,
+        )
+        if not frame.empty:
+            frame["candle_open_time"] = pd.to_datetime(
+                frame["candle_open_time"], utc=True, errors="coerce"
+            )
+        return frame
+
+    @staticmethod
+    def _sr_overlay(
+        context: pd.DataFrame, label: str, visible_start: pd.Timestamp
+    ) -> list[dict[str, Any]]:
+        if context.empty:
+            return []
+        prefix = f"sr_{label}_"
+        specs = (
+            ("Support low", f"{prefix}long_support_zone_low"),
+            ("Support high", f"{prefix}long_support_zone_high"),
+            ("Resistance low", f"{prefix}long_resistance_zone_low"),
+            ("Resistance high", f"{prefix}long_resistance_zone_high"),
+        )
+        times = context["strategy_candle_open_time"]
+        mask = times >= visible_start
+        overlays = []
+        for name, column in specs:
+            if column not in context.columns:
+                continue
+            data = _line_points(times[mask], context.loc[mask, column])
+            if data:
+                overlays.append(
+                    {
+                        "name": f"{SR_TIMEFRAMES[label]} {name}",
+                        "kind": "sr",
+                        "timeframe": label,
+                        "data": data,
+                    }
+                )
+        return overlays
+
+    def _overlays(
+        self,
+        market: pd.DataFrame,
+        context: pd.DataFrame,
+        visible_start: pd.Timestamp,
+    ) -> list[dict[str, Any]]:
+        overlays: list[dict[str, Any]] = []
+        if market.empty:
+            return overlays
+        market_times = market["period_start"]
+        visible_mask = market_times >= visible_start
+        visible_times = market_times[visible_mask]
+
+        for period in (50, 100, 200):
+            values = _ema(market["close"], period)
+            data = _line_points(visible_times, values[visible_mask.to_numpy()])
+            if data:
+                overlays.append(
+                    {
+                        "name": f"EMA {period}",
+                        "kind": "ema",
+                        "period": period,
+                        "data": data,
+                    }
+                )
+
+        if not context.empty:
+            times = context["strategy_candle_open_time"]
+            mask = times >= visible_start
+            for column, name, kind in (
+                ("session_vwap", "VWAP", "vwap"),
+                ("bb_middle", "BB Middle", "bb"),
+                ("bb_upper", "BB Upper", "bb"),
+                ("bb_lower", "BB Lower", "bb"),
+            ):
+                if column in context.columns:
+                    data = _line_points(times[mask], context.loc[mask, column])
+                    if data:
+                        overlays.append({"name": name, "kind": kind, "data": data})
+            for label in SR_TIMEFRAMES:
+                overlays.extend(self._sr_overlay(context, label, visible_start))
+        return overlays
+
+    @staticmethod
+    def _context_by_time(
+        context: pd.DataFrame, visible_start: pd.Timestamp
+    ) -> dict[str, dict[str, Any]]:
+        if context.empty:
+            return {}
+        result: dict[str, dict[str, Any]] = {}
+        for _, row in context.iterrows():
+            timestamp = _utc(row["strategy_candle_open_time"])
+            if timestamp < visible_start:
+                continue
+            facts = _categorical_context(row)
+            if facts:
+                result[str(_unix_seconds(timestamp))] = facts
+        return result
+
+    @staticmethod
+    def _snap_to_candle(timestamp: Any, market: pd.DataFrame) -> int | None:
+        target = _utc(timestamp)
+        times = pd.DatetimeIndex(pd.to_datetime(market["period_start"], utc=True))
+        if times.empty:
+            return None
+        if target < times[0]:
+            return None
+        interval_ns = (
+            int(np.median(np.diff(times.asi8)))
+            if len(times) > 1
+            else int(pd.Timedelta(minutes=1).value)
+        )
+        if target.value >= times[-1].value + max(1, interval_ns):
+            return None
+        index = int(np.searchsorted(times.asi8, target.value, side="right") - 1)
+        index = max(0, min(index, len(times) - 1))
+        return _unix_seconds(times[index])
+
+    def _markers(
+        self,
+        signals: pd.DataFrame,
+        trade_index: int | None,
+        show_rejections: bool,
+        market: pd.DataFrame,
+    ) -> list[dict[str, Any]]:
+        markers: list[dict[str, Any]] = []
+        if not signals.empty:
+            for _, row in signals.iterrows():
+                decision = str(row.get("decision") or "").upper()
+                if decision == "REJECT" and not show_rejections:
+                    continue
+                side = str(row.get("side") or "").upper()
+                marker = {
+                    "time": _unix_seconds(row["candle_open_time"]),
+                    "position": "belowBar" if side == "LONG" else "aboveBar",
+                    "shape": (
+                        "arrowUp"
+                        if decision == "ENTER" and side == "LONG"
+                        else "arrowDown"
+                        if decision == "ENTER" and side == "SHORT"
+                        else "circle"
+                    ),
+                    "text": (
+                        "ENTRY"
+                        if decision == "ENTER"
+                        else f"REJECT · {str(row.get('reason_code') or '')[:48]}"
+                    ),
+                    "kind": decision.lower(),
+                }
+                markers.append(marker)
+
+        if trade_index is not None and self.trade_count:
+            row = self._trade_row(trade_index)
+            side = _trade_side(row)
+            exit_time = row.get("exit_time")
+            if exit_time is not None and not pd.isna(exit_time):
+                reason = _first_value(
+                    row,
+                    (
+                        f"{side.lower()}_final_exit_reason",
+                        f"{side.lower()}_exit_reason",
+                        "exit_reason",
+                    ),
+                )
+                snapped = self._snap_to_candle(exit_time, market)
+                if snapped is not None:
+                    markers.append(
+                        {
+                            "time": snapped,
+                            "position": "aboveBar" if side == "LONG" else "belowBar",
+                            "shape": "square",
+                            "text": f"EXIT · {reason or ''}".strip(),
+                            "kind": "exit",
+                        }
+                    )
+        markers.sort(key=lambda item: (int(item["time"]), str(item.get("kind", ""))))
+        return markers
+
+    def _price_lines(self, trade_index: int | None) -> list[dict[str, Any]]:
+        if trade_index is None or not self.trade_count:
+            return []
+        row = self._trade_row(trade_index)
+        stop, target = trade_stop_target(row)
+        entry = _finite(
+            _first_value(row, ("entry_price", "actual_entry_price", "strategy_entry_price"))
+        )
+        result = []
+        for title, value, kind in (
+            ("Entry", entry, "entry"),
+            ("Stop", stop, "stop"),
+            ("Target", target, "target"),
+        ):
+            if value is not None:
+                result.append({"title": title, "price": value, "kind": kind})
+        return result
+
+    def build_payload(
+        self,
+        *,
+        trade_index: int | None = None,
+        visible_candles: int = DEFAULT_VISIBLE_CANDLES,
+        show_rejections: bool = False,
+    ) -> dict[str, Any]:
+        if self.trade_count:
+            if trade_index is None:
+                trade_index = 0
+            trade_index = max(0, min(self.trade_count - 1, int(trade_index)))
+        else:
+            trade_index = None
+
+        calculation_start, visible_start, visible_end = self._window_bounds(
+            trade_index, visible_candles
+        )
+        market = self._market_frame(calculation_start, visible_end)
+        if market.empty:
+            raise ValueError("no canonical strategy candles are available for this chart window")
+        context = self._feature_context(visible_start, visible_end)
+        signals = self._signals(visible_start, visible_end)
+
+        visible = market[
+            (market["period_start"] >= visible_start)
+            & (market["period_start"] < visible_end)
+        ].copy()
+        candles = []
+        for _, row in visible.iterrows():
+            candles.append(
+                {
+                    "time": _unix_seconds(row["period_start"]),
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                }
+            )
+        request = self.seed.request
+        return {
+            "run": {
+                "runId": str(self.manifest.get("run_id") or self.run_dir.name),
+                "symbol": request.symbol,
+                "timeframe": request.strategy_timeframe,
+                "start": _utc(request.period_start).isoformat(),
+                "end": _utc(request.period_end).isoformat(),
+                "sourceVerified": self.source_verified,
+            },
+            "selectedTradeIndex": trade_index,
+            "selectedTrade": self.selected_trade_summary(trade_index),
+            "candles": candles,
+            "overlays": self._overlays(market, context, visible_start),
+            "markers": self._markers(signals, trade_index, show_rejections, visible),
+            "priceLines": self._price_lines(trade_index),
+            "candleContext": self._context_by_time(context, visible_start),
+            "visibleStart": _unix_seconds(visible_start),
+            "visibleEnd": _unix_seconds(visible_end),
+        }
+
+
+def build_visualizer_html(payload: Mapping[str, Any]) -> str:
+    """Build one self-contained chart page around a bounded run payload."""
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace(
+        "</", "<\\/"
+    )
+    return f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif;overflow:hidden}}
+#root{{height:100%;display:grid;grid-template-rows:1fr auto;min-height:0}}
+#chart-wrap{{position:relative;min-height:0}}
+#chart{{position:absolute;inset:0}}
+#readout{{position:absolute;left:10px;top:8px;z-index:5;pointer-events:none;background:rgba(15,23,32,.82);border:1px solid #334155;border-radius:5px;padding:7px 9px;font-size:12px;line-height:1.45;max-width:64%;white-space:normal}}
+#facts{{font-size:11px;color:#b8c2cc;margin-top:3px}}
+#footer{{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:5px 9px;border-top:1px solid #263241;color:#8f9baa;font-size:11px}}
+#footer a{{color:#a9c8ff;text-decoration:none}}
+#error{{position:absolute;inset:20px;display:none;place-items:center;text-align:center;color:#ffb4b4}}
+</style>
+<script src="{LIGHTWEIGHT_CHARTS_URL}"></script>
+</head>
+<body>
+<div id="root">
+  <div id="chart-wrap">
+    <div id="chart"></div>
+    <div id="readout">Click a candle to inspect causal evidence.</div>
+    <div id="error"></div>
+  </div>
+  <div id="footer">
+    <span>Completed-run view · no strategy re-evaluation</span>
+    <span>Charting by <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™</a></span>
+  </div>
+</div>
+<script>
+(() => {{
+  const payload = {encoded};
+  const error = document.getElementById('error');
+  const readout = document.getElementById('readout');
+  if (!window.LightweightCharts) {{
+    error.style.display='grid';
+    error.textContent='Chart library could not be loaded. Check internet access and reopen Strategy Visualizer.';
+    return;
+  }}
+  const LC = window.LightweightCharts;
+  const chart = LC.createChart(document.getElementById('chart'), {{
+    autoSize: true,
+    attributionLogo: true,
+    layout: {{ background: {{ type: 'solid', color: '#0f1720' }}, textColor: '#b8c2cc' }},
+    grid: {{ vertLines: {{ color: '#1d2937' }}, horzLines: {{ color: '#1d2937' }} }},
+    rightPriceScale: {{ borderColor: '#334155' }},
+    timeScale: {{ borderColor: '#334155', timeVisible: true, secondsVisible: false, rightOffset: 10 }},
+    crosshair: {{ mode: 0 }},
+  }});
+  const candle = chart.addSeries(LC.CandlestickSeries, {{
+    upColor:'#22a06b', downColor:'#d84a4a', borderVisible:false,
+    wickUpColor:'#22a06b', wickDownColor:'#d84a4a',
+  }});
+  candle.setData(payload.candles || []);
+
+  const seriesStyles = {{
+    ema: {{ lineWidth: 1, color:'#8fb4ff' }},
+    vwap: {{ lineWidth: 1, color:'#d5a94b' }},
+    bb: {{ lineWidth: 1, color:'#8a94a3', lineStyle:2 }},
+    sr: {{ lineWidth: 1, color:'#9da8b5', lineStyle:2 }},
+  }};
+  for (const overlay of payload.overlays || []) {{
+    const style = {{...(seriesStyles[overlay.kind] || seriesStyles.sr)}};
+    if (overlay.kind === 'sr' && overlay.name.includes('Support')) style.color='#4baa7b';
+    if (overlay.kind === 'sr' && overlay.name.includes('Resistance')) style.color='#ce6a6a';
+    const line = chart.addSeries(LC.LineSeries, {{
+      ...style, title: overlay.name, priceLineVisible:false, lastValueVisible:false,
+      crosshairMarkerVisible:false,
+    }});
+    line.setData(overlay.data || []);
+  }}
+
+  if (LC.createSeriesMarkers) {{
+    const markers=(payload.markers || []).map(m => ({{
+      time:m.time, position:m.position, shape:m.shape, text:m.text,
+      color: m.kind==='entry' ? '#6fd3a4' : m.kind==='exit' ? '#ffd166' : '#9aa5b1',
+    }}));
+    LC.createSeriesMarkers(candle, markers);
+  }}
+  for (const line of payload.priceLines || []) {{
+    const color=line.kind==='entry' ? '#7db7ff' : line.kind==='stop' ? '#f08a8a' : '#79d39d';
+    candle.createPriceLine({{
+      price:line.price, color, lineWidth:2, lineStyle:2,
+      axisLabelVisible:true, title:line.title,
+    }});
+  }}
+
+  function fmt(n) {{
+    return Number.isFinite(Number(n)) ? Number(n).toLocaleString(undefined, {{maximumFractionDigits:4}}) : '—';
+  }}
+  function showAt(time, bar) {{
+    if (!time) return;
+    const fact = (payload.candleContext || {{}})[String(time)] || {{}};
+    const parts = Object.entries(fact).map(([k,v]) => k + ': ' + v);
+    const ohlc = bar ? 'O ' + fmt(bar.open) + '  H ' + fmt(bar.high) + '  L ' + fmt(bar.low) + '  C ' + fmt(bar.close) : '';
+    const stamp = new Date(Number(time)*1000).toISOString().replace('T',' ').slice(0,16) + ' UTC';
+    readout.innerHTML = '<b>' + stamp + '</b>' + (ohlc ? '<br>' + ohlc : '') +
+      (parts.length ? '<div id="facts">' + parts.join(' · ') + '</div>' : '');
+  }}
+  chart.subscribeClick(param => {{
+    if (!param || !param.time) return;
+    showAt(param.time, param.seriesData.get(candle));
+  }});
+  chart.subscribeCrosshairMove(param => {{
+    if (!param || !param.time || !param.seriesData.has(candle)) return;
+    if (param.sourceEvent && param.sourceEvent.type === 'mousemove')
+      showAt(param.time, param.seriesData.get(candle));
+  }});
+  chart.timeScale().fitContent();
+  if (payload.visibleStart && payload.visibleEnd) {{
+    chart.timeScale().setVisibleRange({{ from: payload.visibleStart, to: payload.visibleEnd }});
+  }}
+}})();
+</script>
+</body>
+</html>"""
+
+
+__all__ = [
+    "CompletedRunVisualizer",
+    "DEFAULT_VISIBLE_CANDLES",
+    "LIGHTWEIGHT_CHARTS_URL",
+    "LIGHTWEIGHT_CHARTS_VERSION",
+    "MAX_VISIBLE_CANDLES",
+    "MIN_VISIBLE_CANDLES",
+    "SR_TIMEFRAMES",
+    "build_visualizer_html",
+    "trade_stop_target",
+]
