@@ -608,6 +608,65 @@ class CompletedRunVisualizer:
             ),
         }
 
+    def _sr_zone_rows_at(self, timestamp: Any) -> list[dict[str, Any]]:
+        if self.sr_zones_path is None:
+            return []
+        target = _utc(timestamp)
+        escaped = str(self.sr_zones_path).replace("'", "''")
+        with duckdb.connect(":memory:") as connection:
+            frame = connection.execute(
+                f"SELECT * FROM read_parquet('{escaped}') "
+                "WHERE CAST(strategy_candle_open_time AS TIMESTAMPTZ)=? "
+                "ORDER BY sr_timeframe_minutes, structure, zone_low, zone_id",
+                [target.to_pydatetime()],
+            ).df()
+        if frame.empty:
+            return []
+
+        result: list[dict[str, Any]] = []
+        for _, raw in frame.iterrows():
+            label = str(raw.get("sr_timeframe") or "")
+            result.append(
+                {
+                    "key": label,
+                    "timeframe": SR_TIMEFRAMES.get(label, label),
+                    "zoneId": str(raw.get("zone_id") or ""),
+                    "structure": str(raw.get("structure") or "").upper(),
+                    "zoneLow": _finite(raw.get("zone_low")),
+                    "zoneHigh": _finite(raw.get("zone_high")),
+                    "state": _json_value(raw.get("state")),
+                    "nearest": bool(raw.get("nearest")),
+                    "near": bool(raw.get("near")),
+                    "inside": bool(raw.get("inside")),
+                    "tested": bool(raw.get("tested")),
+                    "held": bool(raw.get("held")),
+                    "testCount": _json_value(raw.get("test_count")),
+                    "touchCount": _json_value(raw.get("touch_count")),
+                    "sourceCount": _json_value(raw.get("source_count")),
+                    "validationRejectionAtr": _finite(
+                        raw.get("validation_rejection_atr")
+                    ),
+                    "rejectionAtr": _finite(raw.get("rejection_atr")),
+                    "distanceNativeAtr": _finite(raw.get("distance_atr")),
+                    "distancePrice": _finite(raw.get("distance_price")),
+                    "pivotIndex": _json_value(raw.get("pivot_bar_index")),
+                    "confirmedAtIndex": _json_value(raw.get("confirmed_at_index")),
+                    "barsSinceTest": _json_value(raw.get("bars_since_test")),
+                    "lastTestIndex": _json_value(raw.get("last_test_index")),
+                    "sourceBarIndices": _json_value(
+                        raw.get("source_bar_indices_json")
+                    ),
+                    "completedCandleTime": (
+                        _utc(raw.get("sr_completed_candle_time")).isoformat()
+                        if raw.get("sr_completed_candle_time") is not None
+                        and not pd.isna(raw.get("sr_completed_candle_time"))
+                        else None
+                    ),
+                }
+            )
+        return result
+
+
     def sr_inspector_at(self, timestamp: Any) -> dict[str, Any]:
         """Return persisted S/R evidence for one exact strategy candle."""
         target = _utc(timestamp)
@@ -639,11 +698,14 @@ class CompletedRunVisualizer:
             for label in SR_TIMEFRAMES
             if (block := self._sr_inspector_block(row, label)) is not None
         ]
+        zones = self._sr_zone_rows_at(target)
         return {
             "status": "AVAILABLE" if blocks else "NOT_AVAILABLE",
             "timestamp": target.isoformat(),
             "message": "" if blocks else "No persisted S/R context exists on this candle.",
             "timeframes": blocks,
+            "zones": zones,
+            "zoneInventoryAvailable": self.sr_zones_path is not None,
         }
 
     @property
