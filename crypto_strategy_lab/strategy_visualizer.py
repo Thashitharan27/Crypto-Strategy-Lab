@@ -723,7 +723,6 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
   }});
   candle.setData(payload.candles || []);
 
-  const visible = new Set(['ema-50','ema-100','ema-200','vwap','bb','sr-4h']);
   const seriesStyles = {{
     ema: {{ lineWidth: 1, color:'#8fb4ff' }},
     vwap: {{ lineWidth: 1, color:'#d5a94b' }},
@@ -731,9 +730,6 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
     sr: {{ lineWidth: 1, color:'#9da8b5', lineStyle:2 }},
   }};
   for (const overlay of payload.overlays || []) {{
-    const key = overlay.kind === 'ema' ? 'ema-' + overlay.period :
-      overlay.kind === 'sr' ? 'sr-' + overlay.timeframe : overlay.kind;
-    if (!visible.has(key)) continue;
     const style = seriesStyles[overlay.kind] || seriesStyles.sr;
     const line = chart.addSeries(LC.LineSeries, {{
       ...style, title: overlay.name, priceLineVisible:false, lastValueVisible:false,
