@@ -200,6 +200,34 @@ class TestSRZoneMerger:
         assert detector._nearest_level([support], 99.0, below=True) is support
         assert detector._nearest_level([resistance], 101.0, below=False) is resistance
 
+    def test_anchored_zone_geometry_ignores_later_current_atr(self):
+        """Current volatility cannot resize or regroup already-confirmed pivots."""
+        merger = SRZoneMerger(
+            zone_width_atr=0.5,
+            zone_padding_atr=0.25,
+            max_cluster_span_atr=1.0,
+        )
+        levels = [
+            SRLevel(
+                100.0, SRLevelType.RESISTANCE, 5, 5,
+                confirmed_at_index=7, anchor_atr=10.0,
+            ),
+            SRLevel(
+                104.0, SRLevelType.RESISTANCE, 10, 10,
+                confirmed_at_index=12, anchor_atr=12.0,
+            ),
+        ]
+
+        low_vol_now = merger.merge_levels(levels, atr=5.0)
+        high_vol_now = merger.merge_levels(levels, atr=100.0)
+
+        assert len(low_vol_now) == len(high_vol_now) == 1
+        assert low_vol_now[0].source_bar_indices == high_vol_now[0].source_bar_indices
+        assert low_vol_now[0].zone_bottom == pytest.approx(97.5)
+        assert low_vol_now[0].zone_top == pytest.approx(107.0)
+        assert high_vol_now[0].zone_bottom == pytest.approx(97.5)
+        assert high_vol_now[0].zone_top == pytest.approx(107.0)
+
     def test_far_levels_separate(self):
         """Levels far apart remain separate zones."""
         merger = SRZoneMerger(zone_width_atr=1.0)
@@ -416,6 +444,47 @@ class TestSupportResistanceDetector:
         assert context.price_location == LocationClassification.NO_STRUCTURE
         assert context.trade_location_rating == TradeLocationRating.NEUTRAL_LOCATION
     
+    def test_confirmed_pivot_geometry_uses_confirmation_atr_not_later_atr(self):
+        """A historical zone stays fixed while distance-in-ATR remains current."""
+        opens = np.array([9.0, 12.0, 11.0, 11.5], dtype=np.float64)
+        highs = np.array([10.0, 15.0, 10.0, 12.0], dtype=np.float64)
+        lows = np.array([8.0, 9.0, 8.5, 9.5], dtype=np.float64)
+        closes = np.array([9.0, 12.0, 9.5, 12.0], dtype=np.float64)
+        # Pivot at index 1 becomes confirmed at index 2, where ATR is 7.
+        atr_low_now = np.array([1.0, 2.0, 7.0, 20.0], dtype=np.float64)
+        atr_high_now = np.array([1.0, 2.0, 7.0, 200.0], dtype=np.float64)
+
+        def evaluate(atrs):
+            detector = SupportResistanceDetector(
+                pivot_left=1,
+                pivot_right=1,
+                lookback_bars=20,
+                zone_width_atr=0.5,
+                zone_padding_atr=0.25,
+                max_cluster_span_atr=1.0,
+            )
+            context = detector.analyze_price_location(
+                3, opens, highs, lows, closes, atrs, "LONG"
+            )
+            assert detector._confirmed_highs
+            pivot = detector._confirmed_highs[0]
+            assert pivot.confirmed_at_index == 2
+            assert pivot.anchor_atr == pytest.approx(7.0)
+            return context
+
+        low_now = evaluate(atr_low_now)
+        high_now = evaluate(atr_high_now)
+
+        assert low_now.resistance_zone_low == pytest.approx(13.25)
+        assert low_now.resistance_zone_high == pytest.approx(16.75)
+        assert high_now.resistance_zone_low == pytest.approx(13.25)
+        assert high_now.resistance_zone_high == pytest.approx(16.75)
+        assert low_now.nearest_resistance_distance_price == pytest.approx(1.25)
+        assert high_now.nearest_resistance_distance_price == pytest.approx(1.25)
+        assert low_now.nearest_resistance_distance_atr != pytest.approx(
+            high_now.nearest_resistance_distance_atr
+        )
+
     def test_long_near_support_good_location(self):
         """Long trade near support classified as GOOD_LOCATION."""
         detector = SupportResistanceDetector(
