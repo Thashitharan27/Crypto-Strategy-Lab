@@ -83,85 +83,180 @@ def next_teacher_for_learning(
 ) -> tuple[dict[str, Any], Any] | None:
     """Return the next causal teacher boundary.
 
-    Winners always remain eligible for ENTRY review. When ``include_losses`` is
-    false, only winners teach. When enabled for a paired WALK_FORWARD reference,
-    losses are also eligible because their opposite-side outcome was simulated
-    immutably at reference-run creation time. Break-even rows remain non-teaching.
-    Already-recorded teacher pair ids are excluded explicitly so multiple trades
-    sharing one resolution timestamp are not skipped.
+    Winners become reviewable at their own immutable trade exit. Paired teacher
+    losses become reviewable only after BOTH the source teacher trade and its
+    immutable opposite-side WALK_FORWARD row have resolved. That delayed boundary
+    allows arbitrary R:R FLIP evidence without reading future information at the
+    source loss timestamp.
     """
     if "trades" not in (manifest.get("artifacts") or {}):
         return None
 
-    path = artifact_path(run_dir, manifest, "trades", verify=True)
+    trades_path = artifact_path(run_dir, manifest, "trades", verify=True)
     last = _candidate_impl._last_teacher_time(events)
     reviewed_pairs = _reviewed_teacher_pair_ids(events)
+    allow_paired_losses = (
+        bool(include_losses)
+        and _candidate_impl._sampling_mode(manifest) == "WALK_FORWARD"
+        and "research_sampling_trades" in (manifest.get("artifacts") or {})
+    )
 
     with duckdb.connect(":memory:") as connection:
-        columns = set(_candidate_impl._columns(connection, path))
+        trade_columns = set(_candidate_impl._columns(connection, trades_path))
         required = {"pair_id", "pair_net_r", "exit_time"}
-        if required - columns:
+        if required - trade_columns:
             return None
 
         optional = [
             name
             for name in ("trade_id", "side", "strategy_profile_key", "entry_time")
-            if name in columns
+            if name in trade_columns
         ]
-        selection = ["pair_id", *optional, "pair_net_r", "exit_time"]
+        selection = [f't."{name}"' for name in ["pair_id", *optional, "pair_net_r"]]
 
-        eligible_loss_profiles = _eligible_loss_profiles(manifest) if include_losses else []
-        if "strategy_profile_key" in columns and eligible_loss_profiles:
-            placeholders = ", ".join("?" for _ in eligible_loss_profiles)
-            where = (
-                "(pair_net_r > 0 OR (pair_net_r < 0 AND "
-                f"LOWER(CAST(strategy_profile_key AS VARCHAR)) IN ({placeholders})))"
+        if allow_paired_losses:
+            samples_path = artifact_path(
+                run_dir, manifest, "research_sampling_trades", verify=True
             )
-            params: list[Any] = list(eligible_loss_profiles)
+            sample_columns = set(_candidate_impl._columns(connection, samples_path))
+            required_pair = {
+                "walk_forward_candidate_id",
+                "walk_forward_candidate_source",
+                "side",
+                "strategy_profile_key",
+                "entry_time",
+                "exit_time",
+            }
+            if required_pair - sample_columns:
+                allow_paired_losses = False
+
+        if allow_paired_losses:
+            # One validated WALK_FORWARD candidate has exactly one source row and
+            # one opposite row. The loss becomes causally knowable for FLIP review
+            # at the later of the teacher exit and opposite-side exit.
+            sql = f"""
+                WITH source_rows AS (
+                    SELECT
+                        CAST(walk_forward_candidate_id AS VARCHAR) AS candidate_id,
+                        CAST(entry_time AS TIMESTAMPTZ) AS entry_time,
+                        UPPER(CAST(side AS VARCHAR)) AS side,
+                        LOWER(CAST(strategy_profile_key AS VARCHAR)) AS profile
+                    FROM read_parquet('{_candidate_impl._quote(samples_path)}')
+                    WHERE COALESCE(
+                        CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
+                    )
+                ),
+                opposite_rows AS (
+                    SELECT
+                        CAST(walk_forward_candidate_id AS VARCHAR) AS candidate_id,
+                        UPPER(CAST(side AS VARCHAR)) AS side,
+                        CAST(exit_time AS TIMESTAMPTZ) AS exit_time
+                    FROM read_parquet('{_candidate_impl._quote(samples_path)}')
+                )
+                SELECT
+                    {", ".join(selection)},
+                    CAST(t.exit_time AS TIMESTAMPTZ) AS source_exit_time,
+                    CASE
+                        WHEN t.pair_net_r > 0
+                            THEN CAST(t.exit_time AS TIMESTAMPTZ)
+                        ELSE GREATEST(
+                            CAST(t.exit_time AS TIMESTAMPTZ),
+                            o.exit_time
+                        )
+                    END AS learning_resolution_time,
+                    s.candidate_id AS walk_forward_candidate_id,
+                    o.exit_time AS opposite_exit_time
+                FROM read_parquet('{_candidate_impl._quote(trades_path)}') t
+                LEFT JOIN source_rows s
+                  ON CAST(t.entry_time AS TIMESTAMPTZ)=s.entry_time
+                 AND UPPER(CAST(t.side AS VARCHAR))=s.side
+                 AND LOWER(CAST(t.strategy_profile_key AS VARCHAR))=s.profile
+                LEFT JOIN opposite_rows o
+                  ON o.candidate_id=s.candidate_id
+                 AND o.side<>s.side
+                WHERE (
+                    t.pair_net_r > 0
+                    OR (
+                        t.pair_net_r < 0
+                        AND s.candidate_id IS NOT NULL
+                        AND o.exit_time IS NOT NULL
+                    )
+                )
+                ORDER BY learning_resolution_time, CAST(t.pair_id AS VARCHAR)
+            """
         else:
-            # Safe fallback: without a paired immutable reference/profile, losses
-            # cannot be used as FLIP evidence.
-            where = "pair_net_r > 0"
-            params = []
+            sql = f"""
+                SELECT
+                    {", ".join(selection)},
+                    CAST(t.exit_time AS TIMESTAMPTZ) AS source_exit_time,
+                    CAST(t.exit_time AS TIMESTAMPTZ) AS learning_resolution_time,
+                    NULL::VARCHAR AS walk_forward_candidate_id,
+                    NULL::TIMESTAMPTZ AS opposite_exit_time
+                FROM read_parquet('{_candidate_impl._quote(trades_path)}') t
+                WHERE t.pair_net_r > 0
+                ORDER BY learning_resolution_time, CAST(t.pair_id AS VARCHAR)
+            """
 
-        if last is not None:
-            # >= plus explicit pair-id de-duplication preserves teachers sharing
-            # the same resolution timestamp.
-            where += " AND CAST(exit_time AS TIMESTAMPTZ) >= ?"
-            params.append(last.to_pydatetime())
-
-        rows = connection.execute(
-            f"SELECT {', '.join(selection)} FROM read_parquet('{_candidate_impl._quote(path)}') "
-            f"WHERE {where} "
-            "ORDER BY CAST(exit_time AS TIMESTAMPTZ), CAST(pair_id AS VARCHAR)",
-            params,
-        ).fetchall()
+        rows = connection.execute(sql).fetchall()
+        names = [
+            "pair_id",
+            *optional,
+            "pair_net_r",
+            "source_exit_time",
+            "learning_resolution_time",
+            "walk_forward_candidate_id",
+            "opposite_exit_time",
+        ]
 
     for row in rows:
-        values = dict(zip(selection, row))
+        values = dict(zip(names, row))
         pair_id = str(values.get("pair_id"))
         if pair_id in reviewed_pairs:
             continue
 
+        resolution = _candidate_impl._utc_timestamp(
+            values["learning_resolution_time"], "teacher learning_resolution_time"
+        )
+        if last is not None and resolution < last:
+            continue
+
         net_r = float(values.get("pair_net_r"))
         result = "WIN" if net_r > 0 else ("LOSS" if net_r < 0 else "BREAKEVEN")
+        if result == "BREAKEVEN":
+            continue
         if result == "LOSS":
             profile = str(values.get("strategy_profile_key") or "").lower()
-            if not include_losses or not profile_supports_teacher_loss_flip(manifest, profile):
+            if (
+                not allow_paired_losses
+                or not profile_supports_teacher_loss_flip(manifest, profile)
+                or not values.get("walk_forward_candidate_id")
+            ):
                 continue
 
-        resolved = _candidate_impl._utc_timestamp(
-            values.pop("exit_time"), "teacher exit_time"
-        )
         boundary = {
             key: _candidate_impl._json_safe(value)
             for key, value in values.items()
+            if key not in {
+                "learning_resolution_time",
+                "source_exit_time",
+                "opposite_exit_time",
+            }
         }
         boundary["result"] = result
-        boundary["resolution_time"] = resolved.isoformat()
+        boundary["resolution_time"] = resolution.isoformat()
+        boundary["source_trade_resolution_time"] = _candidate_impl._utc_timestamp(
+            values["source_exit_time"], "teacher source_exit_time"
+        ).isoformat()
+        if values.get("opposite_exit_time") is not None:
+            boundary["paired_opposite_resolution_time"] = (
+                _candidate_impl._utc_timestamp(
+                    values["opposite_exit_time"], "teacher opposite_exit_time"
+                ).isoformat()
+            )
         boundary["teacher_learning_mode"] = (
             TEACHER_WIN_MODE if result == "WIN" else TEACHER_LOSS_FLIP_MODE
         )
-        return boundary, resolved
+        return boundary, resolution
 
     return None
+
