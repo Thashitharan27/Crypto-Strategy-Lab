@@ -18,6 +18,12 @@ from crypto_strategy_lab.data_lake_config import (
     StrategyProfileConfig,
 )
 from crypto_strategy_lab.strategy_profiles import PROFILE_KEYS, RULE_INDICATORS
+from crypto_strategy_lab.sr_trade_context import (
+    ENTRY_RELATION_VALUES,
+    GENERIC_STRUCTURE_STATE_VALUES,
+    TARGET_PATH_VALUES,
+)
+
 from crypto_strategy_lab.mtf_sr_reaction import (
     MTF_SR_REACTION_MODE,
     MTF_SR_REACTION_RULE_INDICATORS,
@@ -99,6 +105,12 @@ CATEGORICAL_RULE_VALUES = {
         "NEUTRAL_LOCATION",
         "BAD_LOCATION",
     ),
+    "SR_ENTRY_RELATION": ENTRY_RELATION_VALUES,
+    "SR_FAVORABLE_STRUCTURE_STATE": GENERIC_STRUCTURE_STATE_VALUES,
+    "SR_OPPOSING_STRUCTURE_STATE": GENERIC_STRUCTURE_STATE_VALUES,
+    "SR_FAVORABLE_HELD": _BOOL_VALUES,
+    "SR_OPPOSING_HELD": _BOOL_VALUES,
+    "SR_TARGET_PATH": TARGET_PATH_VALUES,
     "PRICE_OI_STATE": (
         "PRICE_UP_OI_UP",
         "PRICE_UP_OI_DOWN",
@@ -182,6 +194,24 @@ CATEGORICAL_VALUE_CODES = {
         "GOOD_LOCATION": 1.0,
         "NEUTRAL_LOCATION": 2.0,
         "BAD_LOCATION": 3.0,
+    },
+    "SR_ENTRY_RELATION": {
+        value: float(index)
+        for index, value in enumerate(ENTRY_RELATION_VALUES, 1)
+    },
+    "SR_FAVORABLE_STRUCTURE_STATE": {
+        value: float(index)
+        for index, value in enumerate(GENERIC_STRUCTURE_STATE_VALUES, 1)
+    },
+    "SR_OPPOSING_STRUCTURE_STATE": {
+        value: float(index)
+        for index, value in enumerate(GENERIC_STRUCTURE_STATE_VALUES, 1)
+    },
+    "SR_FAVORABLE_HELD": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_OPPOSING_HELD": {"TRUE": 1.0, "FALSE": 0.0},
+    "SR_TARGET_PATH": {
+        value: float(index)
+        for index, value in enumerate(TARGET_PATH_VALUES, 1)
     },
     "PRICE_OI_STATE": {
         "PRICE_UP_OI_UP": 1.0,
