@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pandas.testing as pdt
@@ -80,8 +82,8 @@ def config() -> EnhancedBacktestConfig:
     )
 
 
-def prepared(frame: pd.DataFrame):
-    cfg = config()
+def prepared(frame: pd.DataFrame, cfg: EnhancedBacktestConfig | None = None):
+    cfg = cfg or config()
     request = request_for(frame)
     directional = CoreDirectionalFeatureProvider().compute(
         request,
@@ -162,7 +164,7 @@ def test_production_context_matches_mature_enhanced_engine_arrays_and_snapshots(
         lake.mean_reversion_short_reentry,
         legacy.mean_reversion_short_reentry,
     )
-    assert lake.context_feature_source == "production_market_context@2"
+    assert lake.context_feature_source == "production_market_context@3"
 
     snapshot_fields = (
         "mean_price",
@@ -207,6 +209,22 @@ def test_production_context_matches_mature_enhanced_engine_arrays_and_snapshots(
                     assert a == b, (index, field, a, b)
             for field, column in prepared_snapshot_columns.items():
                 assert context.iloc[index][column] == left[field], (index, field)
+
+
+def test_auto_mean_records_requested_and_effective_type() -> None:
+    frame = canonical_klines()
+    auto_cfg = replace(config(), mean_reversion_mean_type="AUTO_TIMEFRAME")
+    _, auto_context = prepared(frame, auto_cfg)
+    _, sma_context = prepared(frame, config())
+
+    assert auto_context.attrs["mean_reversion_mean_type"] == "AUTO_TIMEFRAME"
+    assert auto_context.attrs["mean_reversion_effective_mean_type"] == "SMA"
+    assert auto_context.attrs["strategy_timeframe_minutes"] == 240
+    np.testing.assert_allclose(
+        auto_context["mean_reversion_mean"],
+        sma_context["mean_reversion_mean"],
+        equal_nan=True,
+    )
 
 
 def test_future_mutation_cannot_change_past_production_context() -> None:
@@ -269,4 +287,4 @@ def test_prepared_production_context_skips_legacy_bb_and_mr_v2_math(monkeypatch)
         technical_features=directional,
         context_features=context,
     )
-    assert engine.context_feature_source == "production_market_context@2"
+    assert engine.context_feature_source == "production_market_context@3"
