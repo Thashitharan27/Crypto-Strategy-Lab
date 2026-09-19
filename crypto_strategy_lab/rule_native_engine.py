@@ -517,9 +517,11 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
             )
         if not np.isfinite(value):
             matched = str(rule.get("_builder_kind", "")).upper() == "REQUIRED"
+            self._trace_strategy_rule_observation(rule, value, matched)
             return value, matched
         inside = float(rule["minimum"]) <= value <= float(rule["maximum"])
         matched = inside if rule.get("condition", "INSIDE") == "INSIDE" else not inside
+        self._trace_strategy_rule_observation(rule, value, bool(matched))
         return value, bool(matched)
 
     def _strategy_profile_entry_rule_matches(self, i, direction, profile, rule):
