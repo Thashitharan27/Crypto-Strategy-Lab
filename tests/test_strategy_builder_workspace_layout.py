@@ -211,3 +211,74 @@ def test_new_condition_inherits_muted_group_state():
     finally:
         builder.close()
         app.processEvents()
+
+
+def test_mtf_sr_starter_button_uses_current_strategy_timeframe_provider():
+    app, builder, _widgets = _builder()
+    try:
+        builder.set_strategy_timeframe_provider(lambda: 60)
+        index = builder.direction_mode.findData("MTF_SR_REACTION")
+        builder.direction_mode.setCurrentIndex(index)
+
+        assert "4H structure" in builder.mtf_sr_preset_button.toolTip()
+        assert "Strategy TF approach/reaction" in builder.mtf_sr_preset_button.toolTip()
+
+        builder._load_mtf_sr_preset()
+        rules = builder.required_rules.rules()
+
+        assert rules
+        assert all(
+            rule["sr_timeframe_minutes"] == 240
+            for rule in rules
+            if rule["evidence"] in {
+                "SR_ENTRY_RELATION",
+                "SR_ROLE_REVERSAL_STATE",
+                "SR_TARGET_PATH",
+            }
+        )
+        assert all(
+            rule["sr_timeframe_minutes"] == 0
+            for rule in rules
+            if rule["evidence"] == "SR_APPROACH_MOMENTUM_STATE"
+        )
+        assert all(
+            rule["group_name"].startswith("4H ")
+            for rule in rules
+        )
+    finally:
+        builder.close()
+        app.processEvents()
+
+
+def test_mtf_sr_starter_button_switches_to_daily_structure_for_4h_strategy():
+    app, builder, _widgets = _builder()
+    try:
+        builder.set_strategy_timeframe_provider(lambda: 240)
+        index = builder.direction_mode.findData("MTF_SR_REACTION")
+        builder.direction_mode.setCurrentIndex(index)
+
+        assert "1D structure" in builder.mtf_sr_preset_button.toolTip()
+        builder._load_mtf_sr_preset()
+        rules = builder.required_rules.rules()
+
+        assert all(
+            rule["sr_timeframe_minutes"] == 1440
+            for rule in rules
+            if rule["evidence"] in {
+                "SR_ENTRY_RELATION",
+                "SR_ROLE_REVERSAL_STATE",
+                "SR_TARGET_PATH",
+            }
+        )
+        assert all(
+            rule["sr_timeframe_minutes"] == 0
+            for rule in rules
+            if rule["evidence"] == "SR_APPROACH_MOMENTUM_STATE"
+        )
+        assert all(
+            rule["group_name"].startswith("1D ")
+            for rule in rules
+        )
+    finally:
+        builder.close()
+        app.processEvents()
