@@ -197,6 +197,10 @@ def _validate_sr_zone_artifact(
         "nearest",
     }
     with duckdb.connect() as con:
+        # All completed-run timestamp contracts represent canonical UTC
+        # instants. Force DuckDB to UTC so validation never depends on the host
+        # machine timezone when an older/mixed TIMESTAMPTZ artifact is read.
+        con.execute("SET TimeZone='UTC'")
         columns = {
             row[0]
             for row in con.execute(
@@ -216,33 +220,55 @@ def _validate_sr_zone_artifact(
         if not rows:
             return
 
-        bad = con.execute(
-            """
-            SELECT count(*)
-            FROM read_parquet(?) z
-            LEFT JOIN read_parquet(?) c ON z.strategy_index=c.strategy_index
-            WHERE c.strategy_index IS NULL
-               OR z.strategy_candle_open_time
-                    IS DISTINCT FROM c.strategy_candle_open_time
-               OR z.decision_available_at
-                    IS DISTINCT FROM c.decision_available_at
-               OR (
-                    z.sr_completed_candle_time IS NOT NULL
-                    AND z.sr_completed_candle_time > z.decision_available_at
-               )
-               OR upper(cast(z.structure AS VARCHAR))
-                    NOT IN ('SUPPORT','RESISTANCE')
-               OR lower(cast(z.sr_timeframe AS VARCHAR))
-                    NOT IN ('strategy','1h','4h','1d')
-               OR trim(cast(z.zone_id AS VARCHAR)) = ''
-               OR z.zone_low > z.zone_high
-               OR z.source_count < 1
-               OR z.test_count < 0
-            """,
-            [str(zones_path), str(context_path)],
-        ).fetchone()[0]
-        if bad:
-            raise ValueError("S/R zone artifact causal/schema validation failed")
+        predicates = (
+            ("missing_strategy_row", "c.strategy_index IS NULL"),
+            (
+                "strategy_candle_time_mismatch",
+                "z.strategy_candle_open_time IS DISTINCT FROM c.strategy_candle_open_time",
+            ),
+            (
+                "decision_time_mismatch",
+                "z.decision_available_at IS DISTINCT FROM c.decision_available_at",
+            ),
+            (
+                "future_sr_completed_candle",
+                "z.sr_completed_candle_time IS NOT NULL "
+                "AND z.sr_completed_candle_time > z.decision_available_at",
+            ),
+            (
+                "invalid_structure",
+                "upper(cast(z.structure AS VARCHAR)) "
+                "NOT IN ('SUPPORT','RESISTANCE')",
+            ),
+            (
+                "invalid_timeframe",
+                "lower(cast(z.sr_timeframe AS VARCHAR)) "
+                "NOT IN ('strategy','1h','4h','1d')",
+            ),
+            ("empty_zone_id", "trim(cast(z.zone_id AS VARCHAR)) = ''"),
+            ("inverted_zone", "z.zone_low > z.zone_high"),
+            ("invalid_source_count", "z.source_count < 1"),
+            ("invalid_test_count", "z.test_count < 0"),
+        )
+        failures = []
+        for label, predicate in predicates:
+            count = con.execute(
+                f"""
+                SELECT count(*)
+                FROM read_parquet(?) z
+                LEFT JOIN read_parquet(?) c
+                  ON z.strategy_index=c.strategy_index
+                WHERE {predicate}
+                """,
+                [str(zones_path), str(context_path)],
+            ).fetchone()[0]
+            if count:
+                failures.append(f"{label}={int(count)}")
+        if failures:
+            raise ValueError(
+                "S/R zone artifact causal/schema validation failed: "
+                + ", ".join(failures)
+            )
 
         duplicates = con.execute(
             """
