@@ -74,6 +74,7 @@ TARGET_PATH_VALUES = (
     "OPPOSING_ZONE_BEFORE_TARGET",
     "ALREADY_AT_OPPOSING_STRUCTURE",
     "NO_OPPOSING_STRUCTURE",
+    "TARGET_CONTRACT_UNAVAILABLE",
 )
 
 RAW_SR_FIELDS = (
@@ -239,7 +240,7 @@ def _target_path(
     if _inside(raw, opposing):
         return "ALREADY_AT_OPPOSING_STRUCTURE"
     if price is None or target is None or target <= 0:
-        return "NO_OPPOSING_STRUCTURE"
+        return "TARGET_CONTRACT_UNAVAILABLE"
 
     target_price = price + target if str(direction).upper() == "LONG" else price - target
     if str(direction).upper() == "LONG":
