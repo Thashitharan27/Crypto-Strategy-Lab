@@ -314,7 +314,15 @@ def _sr_zone_inventory_frame(
         ("1d", 1440),
     )
     records: list[dict[str, Any]] = []
-    consumed: list[str] = []
+    # The unprefixed primary provider also carries an inventory snapshot, but
+    # independent sr_strategy / sr_1h / sr_4h / sr_1d blocks are authoritative
+    # for this audit artifact. Drop the raw primary copy to avoid duplicating a
+    # potentially higher-timeframe primary context in feature_context.
+    consumed: list[str] = (
+        ["zone_inventory_json"]
+        if "zone_inventory_json" in feature_context.columns
+        else []
+    )
 
     for label, minutes in specs:
         inventory_column = f"sr_{label}_zone_inventory_json"
