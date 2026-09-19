@@ -77,6 +77,7 @@ def test_research_features_are_reorganized_without_replacing_authoritative_form(
         result = window.feature_form.value(FeatureConfig())
         assert result.atr_period == 14
         assert result.market_regime_method == "ASSET_RETURN"
+        assert result.mean_reversion_mean_type == "AUTO_TIMEFRAME"
         assert result.trade_flow_enabled is False
         assert result.order_book_enabled is False
 
@@ -84,6 +85,36 @@ def test_research_features_are_reorganized_without_replacing_authoritative_form(
         original_panel = window.research_features_panel
         apply_research_feature_ownership(window)
         assert window.research_features_panel is original_panel
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_mr_auto_mean_summary_tracks_strategy_timeframe_and_manual_override():
+    app, window, _scroll = _window()
+    try:
+        apply_research_feature_ownership(window)
+        panel = window.research_features_panel
+        mean_type = panel.widgets["mean_reversion_mean_type"]
+
+        assert mean_type.currentData() == "AUTO_TIMEFRAME"
+        assert "EMA 20 for 15m" in panel.mr_mean_summary.text()
+
+        window.strategy_tf.setCurrentIndex(window.strategy_tf.findData("1h"))
+        panel.refresh_visibility()
+        assert "EMA 20 for 1h" in panel.mr_mean_summary.text()
+
+        window.strategy_tf.setCurrentIndex(window.strategy_tf.findData("4h"))
+        panel.refresh_visibility()
+        assert "SMA 20 for 4h" in panel.mr_mean_summary.text()
+
+        window.strategy_tf.setCurrentIndex(window.strategy_tf.findData("1d"))
+        panel.refresh_visibility()
+        assert "SMA 20 for 1d" in panel.mr_mean_summary.text()
+
+        mean_type.setCurrentIndex(mean_type.findData("EMA"))
+        panel.refresh_visibility()
+        assert "EMA 20 (forced for every strategy timeframe)" in panel.mr_mean_summary.text()
     finally:
         window.close()
         app.processEvents()
