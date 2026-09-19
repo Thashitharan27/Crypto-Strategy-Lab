@@ -935,7 +935,6 @@ class CompletedRunVisualizer:
             interval_to_timedelta(self.seed.request.strategy_timeframe)
         )
         entry = _utc(entry_snapshot) if entry_snapshot is not None else None
-        max_visible_index = int(frame["strategy_index"].max())
         zones: list[dict[str, Any]] = []
 
         group_columns = [
@@ -980,10 +979,7 @@ class CompletedRunVisualizer:
                     ]
                     if not eligible.empty:
                         entry_row = eligible.iloc[-1]
-                active_at_end = bool(
-                    int(last["strategy_index"]) == max_visible_index
-                    or end_time >= visible_end
-                )
+                active_at_end = bool(end_time >= visible_end)
 
                 zones.append(
                     {
@@ -1056,7 +1052,13 @@ class CompletedRunVisualizer:
                 continue
             prior_test = None
             prior_held = False
+            prior_index = None
             for _, row in group.iterrows():
+                current_index = int(row.get("strategy_index"))
+                if prior_index is not None and current_index != prior_index + 1:
+                    prior_test = None
+                    prior_held = False
+                prior_index = current_index
                 test_count = int(row.get("test_count") or 0)
                 held = bool(row.get("held"))
                 event = None
