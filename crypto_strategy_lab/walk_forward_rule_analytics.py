@@ -3,8 +3,8 @@
 The authoritative JSONL chain remains the source of truth.  These helpers verify
 that chain before reporting, reconstruct rule versions at each captured candidate,
 and optionally replay causally blocked VETO opportunities against immutable
-Every Viable Entry (EVE) artifacts.  Nothing in this module appends events or
-changes strategy state.
+paired Walk Forward LONG/SHORT artifacts. Nothing in this module appends events
+or changes strategy state.
 """
 from __future__ import annotations
 
@@ -659,13 +659,15 @@ def _iter_reference_rows(
             "side",
             "entry_time",
             "pair_net_r",
+            "walk_forward_candidate_id",
+            "walk_forward_candidate_source",
         }
         required_context = {"strategy_index", "decision_available_at"}
         missing_samples = required_samples - set(sample_columns)
         missing_context = required_context - set(context_columns)
         if missing_samples:
             raise ValueError(
-                "Every Viable Entry artifact is missing VETO replay columns: "
+                "Walk Forward paired artifact is missing VETO replay columns: "
                 + ", ".join(sorted(missing_samples))
             )
         if missing_context:
@@ -685,7 +687,8 @@ def _iter_reference_rows(
               ON CAST(t.research_signal_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)
             LEFT JOIN read_parquet('{candidate_impl._quote(context_path)}') prev
               ON CAST(prev.strategy_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)-1
-            WHERE CAST(t.entry_time AS TIMESTAMPTZ) >= ?
+            WHERE COALESCE(CAST(t.walk_forward_candidate_source AS BOOLEAN), FALSE)
+              AND CAST(t.entry_time AS TIMESTAMPTZ) >= ?
               AND CAST(t.entry_time AS TIMESTAMPTZ) <= ?
             ORDER BY CAST(t.entry_time AS TIMESTAMPTZ),
                      CAST(t.research_signal_index AS BIGINT),
@@ -702,28 +705,22 @@ def _iter_reference_rows(
                 yield series
 
 
-def _opposite_eve_net_r(
+def _opposite_paired_net_r(
     connection: duckdb.DuckDBPyConnection,
     samples_path: Path,
     *,
-    signal_index: int,
-    source_profile: str,
+    candidate_id: str,
     target_side: str,
 ) -> float | None:
-    regime = source_profile.rsplit("_", 1)[0] if "_" in source_profile else ""
-    target_profile = f"{regime}_{target_side.lower()}" if regime else ""
-    if not target_profile:
-        return None
     rows = connection.execute(
         f"""
         SELECT pair_net_r
         FROM read_parquet('{candidate_impl._quote(samples_path)}')
-        WHERE CAST(research_signal_index AS BIGINT)=?
+        WHERE CAST(walk_forward_candidate_id AS VARCHAR)=?
           AND UPPER(CAST(side AS VARCHAR))=?
-          AND LOWER(CAST(strategy_profile_key AS VARCHAR))=?
         LIMIT 3
         """,
-        [int(signal_index), target_side, target_profile],
+        [str(candidate_id), target_side],
     ).fetchall()
     if len(rows) != 1 or rows[0][0] is None:
         return None
@@ -753,8 +750,10 @@ def _replay_veto_blocks(
     if not reference_run:
         raise ValueError("experiment definition has no reference_run for VETO replay")
     manifest = reports.get_run_manifest(reference_run)
-    if candidate_impl._sampling_mode(manifest) != "EVERY_VIABLE_ENTRY":
-        raise ValueError("VETO effectiveness requires an EVERY_VIABLE_ENTRY reference run")
+    if candidate_impl._sampling_mode(manifest) != "WALK_FORWARD":
+        raise ValueError(
+            "VETO effectiveness requires a WALK_FORWARD paired reference run"
+        )
     base_config = manifest.get("config")
     if not isinstance(base_config, dict):
         raise ValueError("reference run manifest does not contain a normalized config snapshot")
@@ -854,12 +853,16 @@ def _replay_veto_blocks(
                 raw_r = row.get("pair_net_r")
                 hypothetical_r = float(raw_r) if raw_r is not None and not pd.isna(raw_r) else None
             else:
-                hypothetical_r = _opposite_eve_net_r(
-                    opposite_connection,
-                    samples_path,
-                    signal_index=signal_index,
-                    source_profile=profile,
-                    target_side=target_side,
+                pair_id = str(row.get("walk_forward_candidate_id") or "").strip()
+                hypothetical_r = (
+                    _opposite_paired_net_r(
+                        opposite_connection,
+                        samples_path,
+                        candidate_id=pair_id,
+                        target_side=target_side,
+                    )
+                    if pair_id
+                    else None
                 )
                 if hypothetical_r is None:
                     unresolved_flips += 1
