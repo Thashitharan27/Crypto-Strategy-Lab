@@ -34,6 +34,12 @@ def test_capabilities_use_gui_labels_and_human_categorical_values():
     assert "ABOVE_MEAN" in caps["indicators"]["MR_STATE"]["values"]
     assert "STRONGLY_ABOVE_MEAN" in caps["indicators"]["MR_STATE"]["values"]
     assert caps["indicators"]["MR_STATE"]["conditions"] == ["EQUALS", "NOT_EQUALS"]
+    assert caps["indicators"]["SR_OPPOSING_ROOM_TARGET_MULTIPLE"]["display_name"] == (
+        "S/R — Opposing Room / Planned Target"
+    )
+    assert caps["indicators"]["SR_ENTRY_RELATION"]["values"]
+    assert "SR_TRADE_LOCATION_RATING" not in caps["indicators"]
+    assert "SR_ROOM_IN_DIRECTION_ATR" not in caps["indicators"]
     assert {
         item["id"]: item["display_name"] for item in caps["market_regime_methods"]
     }["ASSET_RETURN"] == "Asset trailing return"
