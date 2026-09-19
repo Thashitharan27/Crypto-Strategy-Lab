@@ -63,6 +63,7 @@ def test_v3_defaults_match_current_research_defaults():
     assert config.features.bull_regime_lookback_days == 90
     assert config.features.bull_regime_return_threshold == pytest.approx(0.20)
     assert config.features.sr_near_distance_atr == pytest.approx(0.50)
+    assert config.features.mean_reversion_mean_type == "AUTO_TIMEFRAME"
     assert config.strategy.enable_di_direction_selection is True
     assert config.strategy.enable_di_pressure_analysis is True
     assert config.strategy.enable_mean_reversion_analysis is True
