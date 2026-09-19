@@ -318,7 +318,7 @@ class ResearchFeaturesPanel(QWidget):
         detection.addWidget(QLabel("Context"), 0, 0)
         detection.addWidget(QLabel("Pivot left"), 0, 1)
         detection.addWidget(QLabel("Pivot right"), 0, 2)
-        detection.addWidget(QLabel("Lookback bars"), 0, 3)
+        detection.addWidget(QLabel("Structural horizon (bars)"), 0, 3)
         detection_rows = (
             ("Shared fallback", "sr_pivot_left", "sr_pivot_right", "sr_lookback_bars", False),
             ("15m", "sr_15m_pivot_left", "sr_15m_pivot_right", "sr_15m_lookback_bars", True),
@@ -334,10 +334,19 @@ class ResearchFeaturesPanel(QWidget):
                 widget = self.widgets[name]
                 if override and hasattr(widget, "setSpecialValueText"):
                     widget.setMinimum(0)
-                    widget.setSpecialValueText("Shared")
+                    widget.setSpecialValueText(
+                        "Auto" if name.endswith("lookback_bars") else "Shared"
+                    )
                     widget.setToolTip(
-                        "0 uses the automatic timeframe-aware horizon. Set a positive value only "
-                        "when research justifies a custom structural horizon."
+                        (
+                            "0/Auto uses the timeframe-aware structural horizon. Set a positive "
+                            "bar count only when research justifies a custom horizon."
+                        )
+                        if name.endswith("lookback_bars")
+                        else (
+                            "0/Shared inherits the common pivot-confirmation setting. "
+                            "Set a positive value only for a deliberate timeframe override."
+                        )
                     )
                 detection.addWidget(widget, row, column)
         detection_note = QLabel(
