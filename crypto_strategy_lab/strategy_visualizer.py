@@ -1504,11 +1504,11 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
         : (active ? 0.11 : 0.045);
       const support = zone.structure === 'support';
       const fill = support
-        ? `rgba(53, 180, 119, ${baseAlpha})`
-        : `rgba(220, 90, 90, ${baseAlpha})`;
+        ? `rgba(53, 180, 119, ${{baseAlpha}})`
+        : `rgba(220, 90, 90, ${{baseAlpha}})`;
       const border = support
-        ? `rgba(86, 214, 151, ${Math.min(.75, baseAlpha + .28)})`
-        : `rgba(238, 120, 120, ${Math.min(.75, baseAlpha + .28)})`;
+        ? `rgba(86, 214, 151, ${{Math.min(.75, baseAlpha + .28)}})`
+        : `rgba(238, 120, 120, ${{Math.min(.75, baseAlpha + .28)}})`;
 
       const band = document.createElement('div');
       band.className = 'zone-band';
