@@ -61,7 +61,7 @@ class BacktestEngine:
         self.atr_values=atr(self.high,self.low,self.close,self.config.atr_period); self.adx_values,self.plus_di_values,self.minus_di_values=adx(self.high,self.low,self.close,self.config.adx_period); self.bb_middle,self.bb_upper,self.bb_lower,self.bb_width,self.bb_width_pct=bollinger_bands(self.close,self.config.bb_period,self.config.bb_stddevs); self.bb_width_1=lag(self.bb_width,1); self.bb_width_3=lag(self.bb_width,3); self.bb_width_5=lag(self.bb_width,5); self.bb_width_change=self.bb_width-self.bb_width_5; self.bb_width_change_pct=np.divide(self.bb_width_change,self.bb_width_5,out=np.full(len(self.bb_width),np.nan,float),where=np.isfinite(self.bb_width_5)&(self.bb_width_5!=0)); self.di_spread=np.abs(self.plus_di_values-self.minus_di_values); self.di_spread_1=lag(self.di_spread,1); self.di_spread_3=lag(self.di_spread,3); self.di_spread_5=lag(self.di_spread,5); self.di_spread_change=self.di_spread-self.di_spread_5; mx=np.maximum(self.plus_di_values,self.minus_di_values); mn=np.minimum(self.plus_di_values,self.minus_di_values); self.di_ratio=np.divide(mx,mn,out=np.full(len(mx),np.nan,float),where=np.isfinite(mn)&(mn!=0)); self.bull_regime_return_values=self._trailing_return_array(config.bull_regime_lookback_days); self.market_regime_values=self._market_regime_array(); self.atr_pct_values=np.divide(self.atr_values,self.close,out=np.full(len(self.close),np.nan,float),where=np.isfinite(self.atr_values)&(self.close!=0)); candle_range=self.high-self.low; self.close_location_values=np.divide(self.close-self.low,candle_range,out=np.full(len(self.close),np.nan,float),where=np.isfinite(candle_range)&(candle_range!=0)); self.risk=self._risk_array()
         self._configure_signal_features()
         self.signal_strategy_mode=self._infer_signal_strategy_mode()
-        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.strategy_rule_trace_rows=[]; self._strategy_rule_trace_keys=set(); self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_next_open_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.strategy_rule_trace_rows=[]; self._strategy_rule_trace_keys=set(); self._strategy_rule_trace_active=None; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_next_open_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
         self.mean_reversion_mean=ema(self.close,config.mean_reversion_period)
@@ -567,9 +567,10 @@ class BacktestEngine:
                 return False,"Strategy profile classification indicator warm-up incomplete"
             return False,"Signal strategy direction unavailable"
         regime,direction,key,profile=context
+        self._begin_strategy_rule_trace(i,regime,direction,key,profile)
         if not profile.enabled:
             reason=f"Strategy profile {key} is disabled"
-            self._record_strategy_rule_trace(i,regime,direction,key,profile,False,reason)
+            self._finish_strategy_rule_trace(False,reason)
             return False,reason
         if profile.entry_rules:
             rejected,reject_detail=self._strategy_profile_rule_action_result(
@@ -578,7 +579,7 @@ class BacktestEngine:
             if rejected:
                 suffix=f": {reject_detail}" if reject_detail else ""
                 reason=f"Strategy profile {key} rejected by entry rules{suffix}"
-                self._record_strategy_rule_trace(i,regime,direction,key,profile,False,reason)
+                self._finish_strategy_rule_trace(False,reason)
                 return False,reason
             flipped,flip_detail=self._strategy_profile_rule_action_result(
                 i,direction,profile,"FLIP",profile.flip_rule_match_mode
@@ -586,10 +587,10 @@ class BacktestEngine:
             action="will be flipped" if flipped else "will trade in its normal direction"
             detail=f" ({flip_detail})" if flipped and flip_detail else ""
             reason=f"Strategy profile {key} passed; flip rules {'matched' if flipped else 'did not match'}{detail}: entry {action}"
-            self._record_strategy_rule_trace(i,regime,direction,key,profile,True,reason)
+            self._finish_strategy_rule_trace(True,reason)
             return True,reason
         reason=f"Strategy profile {key} passed"
-        self._record_strategy_rule_trace(i,regime,direction,key,profile,True,reason)
+        self._finish_strategy_rule_trace(True,reason)
         return True,reason
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
@@ -643,9 +644,13 @@ class BacktestEngine:
 
     def _strategy_profile_entry_rule_observation(self, i, direction, profile, rule):
         value=self._strategy_profile_rule_value(i,direction,profile,rule["indicator"])
-        if not np.isfinite(value): return value,False
+        if not np.isfinite(value):
+            matched=False
+            self._trace_strategy_rule_observation(rule,value,matched)
+            return value,matched
         inside=float(rule["minimum"]) <= value <= float(rule["maximum"])
         matched=inside if rule.get("condition","INSIDE")=="INSIDE" else not inside
+        self._trace_strategy_rule_observation(rule,value,bool(matched))
         return value,bool(matched)
 
     def _strategy_profile_entry_rule_matches(self, i, direction, profile, rule):
@@ -654,25 +659,18 @@ class BacktestEngine:
         )
         return matched
 
-    def _record_strategy_rule_trace(self,i,regime,direction,profile_key_value,profile,filter_passed,filter_reason):
-        """Capture researcher-authored rule evidence at the exact decision row.
-
-        This is passive audit telemetry. It does not alter rule ordering, group
-        matching, direction, fills, or exits. One profile/strategy row is stored
-        at most once even if NEXT_CANDLE_OPEN rechecks the same decision.
-        """
+    def _begin_strategy_rule_trace(self,i,regime,direction,profile_key_value,profile):
         trace_rows=getattr(self,"strategy_rule_trace_rows",None)
         trace_keys=getattr(self,"_strategy_rule_trace_keys",None)
         if trace_rows is None or trace_keys is None:
+            self._strategy_rule_trace_active=None
             return
         trace_key=(int(i),str(profile_key_value))
         if trace_key in trace_keys:
+            self._strategy_rule_trace_active=None
             return
         trace_keys.add(trace_key)
-
-        grouped={}
-        labels={}
-        enabled={}
+        conditions=[]
         for number,rule in enumerate(getattr(profile,"entry_rules",())):
             if "_builder_id" not in rule:
                 continue
@@ -680,52 +678,87 @@ class BacktestEngine:
             if kind not in {"REQUIRED","VETO","FLIP"}:
                 continue
             group_id=self._strategy_profile_builder_group_key(rule,number,kind)
-            group_key=(kind,group_id)
-            grouped.setdefault(group_key,[]).append((number,rule))
-            label=str(rule.get("_builder_group_name","") or "").strip()
-            if label:
-                labels[group_key]=label
-            enabled[group_key]=self._strategy_profile_builder_group_enabled(rule)
+            label=str(rule.get("_builder_group_name","") or "").strip() or group_id
+            conditions.append({
+                "number":number,
+                "rule":rule,
+                "kind":kind,
+                "group_id":group_id,
+                "group_name":label,
+                "group_enabled":self._strategy_profile_builder_group_enabled(rule),
+                "evaluated":False,
+                "actual_value":np.nan,
+                "evidence_available":False,
+                "condition_passed":False,
+            })
+        self._strategy_rule_trace_active={
+            "i":int(i),
+            "regime":str(regime),
+            "direction":str(direction),
+            "profile_key":str(profile_key_value),
+            "conditions":conditions,
+        }
 
-        for (kind,group_id),numbered_rules in grouped.items():
-            observations=[]
-            for condition_order,(number,rule) in enumerate(numbered_rules,1):
-                value,native_match=self._strategy_profile_entry_rule_observation(
-                    i,direction,profile,rule
-                )
-                available=bool(np.isfinite(value))
-                # REQUIRED native rules are the inverse reject condition. VETO
-                # and FLIP native matches are the authored positive condition.
-                condition_passed=(not native_match) if kind=="REQUIRED" else bool(native_match)
-                observations.append((condition_order,number,rule,value,available,condition_passed))
-            group_matched=all(item[5] for item in observations)
-            group_name=labels.get((kind,group_id),group_id)
-            group_enabled=bool(enabled.get((kind,group_id),True))
-            for condition_order,number,rule,value,available,condition_passed in observations:
-                timeframe=rule.get("_builder_sr_timeframe_minutes")
-                trace_rows.append({
-                    "strategy_index":int(i),
-                    "strategy_candle_open_time":pd.Timestamp(self.times[i]),
-                    "decision_available_at":self._entry_time(i),
-                    "market_regime":str(regime),
-                    "source_side":str(direction),
-                    "strategy_profile_key":str(profile_key_value),
+    def _trace_strategy_rule_observation(self,rule,value,native_match):
+        active=getattr(self,"_strategy_rule_trace_active",None)
+        if not active or "_builder_id" not in rule:
+            return
+        condition_id=str(rule.get("_builder_id",""))
+        for item in active["conditions"]:
+            if str(item["rule"].get("_builder_id",""))!=condition_id:
+                continue
+            available=bool(np.isfinite(value))
+            kind=item["kind"]
+            item["evaluated"]=True
+            item["actual_value"]=float(value) if available else np.nan
+            item["evidence_available"]=available
+            item["condition_passed"]=(not bool(native_match)) if kind=="REQUIRED" else bool(native_match)
+            return
+
+    def _finish_strategy_rule_trace(self,filter_passed,filter_reason):
+        active=getattr(self,"_strategy_rule_trace_active",None)
+        self._strategy_rule_trace_active=None
+        if not active:
+            return
+        grouped={}
+        for item in active["conditions"]:
+            grouped.setdefault((item["kind"],item["group_id"]),[]).append(item)
+        for (kind,group_id),items in grouped.items():
+            enabled=bool(items[0]["group_enabled"])
+            evaluated_items=[item for item in items if item["evaluated"]]
+            any_failed=any(not item["condition_passed"] for item in evaluated_items)
+            all_passed=bool(evaluated_items) and len(evaluated_items)==len(items) and all(
+                item["condition_passed"] for item in evaluated_items
+            )
+            group_evaluated=bool(evaluated_items) and (any_failed or all_passed)
+            group_matched=bool(all_passed)
+            for condition_order,item in enumerate(items,1):
+                rule=item["rule"]
+                self.strategy_rule_trace_rows.append({
+                    "strategy_index":active["i"],
+                    "strategy_candle_open_time":pd.Timestamp(self.times[active["i"]]),
+                    "decision_available_at":self._entry_time(active["i"]),
+                    "market_regime":active["regime"],
+                    "source_side":active["direction"],
+                    "strategy_profile_key":active["profile_key"],
                     "signal_strategy":str(getattr(self,"signal_strategy_mode","DI")),
                     "rule_kind":kind,
                     "group_id":str(group_id),
-                    "group_name":str(group_name),
-                    "group_enabled":group_enabled,
-                    "group_matched":bool(group_matched),
+                    "group_name":str(item["group_name"]),
+                    "group_enabled":enabled,
+                    "group_evaluated":group_evaluated,
+                    "group_matched":group_matched,
                     "condition_id":str(rule.get("_builder_id","")),
                     "condition_order":int(condition_order),
+                    "condition_evaluated":bool(item["evaluated"]),
                     "evidence":str(rule.get("indicator","")),
-                    "timeframe_minutes":timeframe,
+                    "timeframe_minutes":rule.get("_builder_sr_timeframe_minutes"),
                     "operator":str(rule.get("_builder_operator","")),
                     "expected_value":rule.get("_builder_value"),
                     "expected_value2":rule.get("_builder_value2"),
-                    "actual_value":float(value) if available else np.nan,
-                    "evidence_available":available,
-                    "condition_passed":bool(condition_passed),
+                    "actual_value":item["actual_value"],
+                    "evidence_available":bool(item["evidence_available"]),
+                    "condition_passed":bool(item["condition_passed"]),
                     "filter_passed":bool(filter_passed),
                     "filter_reason":str(filter_reason),
                 })
