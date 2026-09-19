@@ -680,31 +680,122 @@ class CompletedRunVisualizer:
     def _sr_overlay(
         context: pd.DataFrame, label: str, visible_start: pd.Timestamp
     ) -> list[dict[str, Any]]:
+        """Render persisted nearest S/R as discrete structural lifespans.
+
+        The completed-run artifact stores the selected nearest support/resistance
+        on every strategy candle. Those values are *discrete zone selections*,
+        not a continuous indicator. Connecting different selections with one line
+        creates false diagonal/zig-zag S/R paths, so each contiguous selected zone
+        is emitted as its own horizontal segment.
+        """
         if context.empty:
             return []
+
         prefix = f"sr_{label}_"
-        specs = (
-            ("Support low", f"{prefix}long_support_zone_low"),
-            ("Support high", f"{prefix}long_support_zone_high"),
-            ("Resistance low", f"{prefix}long_resistance_zone_low"),
-            ("Resistance high", f"{prefix}long_resistance_zone_high"),
+        frame = context.loc[
+            context["strategy_candle_open_time"] >= visible_start
+        ].copy()
+        if frame.empty:
+            return []
+        frame = frame.sort_values("strategy_candle_open_time", kind="stable").reset_index(drop=True)
+        times = pd.to_datetime(
+            frame["strategy_candle_open_time"], utc=True, errors="coerce"
         )
-        times = context["strategy_candle_open_time"]
-        mask = times >= visible_start
-        overlays = []
-        for name, column in specs:
-            if column not in context.columns:
+
+        overlays: list[dict[str, Any]] = []
+        specs = (
+            (
+                "Support",
+                f"{prefix}long_support_zone_low",
+                f"{prefix}long_support_zone_high",
+                f"{prefix}long_nearest_support_bar_index",
+            ),
+            (
+                "Resistance",
+                f"{prefix}long_resistance_zone_low",
+                f"{prefix}long_resistance_zone_high",
+                f"{prefix}long_nearest_resistance_bar_index",
+            ),
+        )
+
+        def identity_at(row, id_column, low_column, high_column):
+            identity = row.get(id_column) if id_column in frame.columns else None
+            try:
+                if identity is not None and not pd.isna(identity):
+                    return ("pivot", int(identity))
+            except (TypeError, ValueError):
+                pass
+            low = _finite(row.get(low_column))
+            high = _finite(row.get(high_column))
+            if low is None or high is None:
+                return None
+            # Legacy runs may not have pivot identity. Use exact persisted zone
+            # boundaries as a stable fallback; never infer/recompute structure.
+            return ("zone", round(low, 12), round(high, 12))
+
+        for structure, low_column, high_column, id_column in specs:
+            if low_column not in frame.columns or high_column not in frame.columns:
                 continue
-            data = _line_points(times[mask], context.loc[mask, column])
-            if data:
-                overlays.append(
-                    {
-                        "name": f"{SR_TIMEFRAMES[label]} {name}",
-                        "kind": "sr",
-                        "timeframe": label,
-                        "data": data,
-                    }
-                )
+
+            start = 0
+            while start < len(frame):
+                row = frame.iloc[start]
+                identity = identity_at(row, id_column, low_column, high_column)
+                low = _finite(row.get(low_column))
+                high = _finite(row.get(high_column))
+                if identity is None or low is None or high is None:
+                    start += 1
+                    continue
+
+                end = start + 1
+                while end < len(frame):
+                    next_row = frame.iloc[end]
+                    next_identity = identity_at(
+                        next_row, id_column, low_column, high_column
+                    )
+                    next_low = _finite(next_row.get(low_column))
+                    next_high = _finite(next_row.get(high_column))
+                    if (
+                        next_identity != identity
+                        or next_low is None
+                        or next_high is None
+                        or abs(next_low - low) > 1e-9
+                        or abs(next_high - high) > 1e-9
+                    ):
+                        break
+                    end += 1
+
+                segment_times = list(times.iloc[start:end])
+                # A one-candle structural selection still needs a visible
+                # horizontal lifespan. Extend only to the next persisted candle;
+                # because each zone is a separate series, this never connects to
+                # the next zone at a different price.
+                if len(segment_times) == 1 and end < len(frame):
+                    segment_times.append(times.iloc[end])
+                if segment_times:
+                    for boundary, value in (("low", low), ("high", high)):
+                        data = [
+                            {"time": _unix_seconds(timestamp), "value": float(value)}
+                            for timestamp in segment_times
+                            if not pd.isna(timestamp)
+                        ]
+                        if data:
+                            overlays.append(
+                                {
+                                    "name": (
+                                        f"{SR_TIMEFRAMES[label]} {structure} "
+                                        f"{boundary}"
+                                    ),
+                                    "kind": "sr",
+                                    "timeframe": label,
+                                    "structure": structure.lower(),
+                                    "boundary": boundary,
+                                    "zoneIdentity": list(identity),
+                                    "data": data,
+                                }
+                            )
+                start = end
+
         return overlays
 
     def _overlays(
