@@ -21,7 +21,7 @@ from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.data.timing import interval_to_timedelta
 
-from .base import FeatureDefinition, ParameterDefinition
+from .base import FeatureDefinition, OutputField, ParameterDefinition
 from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
@@ -88,6 +88,9 @@ class SupportResistanceFeatureProvider:
             "sr_completed_candle_time",
             "zone_inventory_json",
         ),
+        output_schema={
+            "zone_inventory_json": OutputField("string", nullable=False),
+        },
         warmup_bars=10,
         availability_rule="confirmed_pivots_through_latest_completed_configured_sr_candle",
     )
