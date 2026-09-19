@@ -109,6 +109,7 @@ def _fixture(tmp_path: Path):
             "strategy_candle_open_time": times,
             "decision_available_at": times + pd.Timedelta(minutes=15),
             "close": close,
+            "atr": np.full(len(times), 2.0),
             "adx": np.full(len(times), 24.0),
             "plus_di": np.full(len(times), 31.0),
             "minus_di": np.full(len(times), 18.0),
@@ -125,12 +126,45 @@ def _fixture(tmp_path: Path):
             "mean_reversion_motion": np.full(
                 len(times), "TOWARD_MEAN", dtype=object
             ),
-            "sr_4h_long_support_zone_low": close - 4.0,
-            "sr_4h_long_support_zone_high": close - 3.0,
-            "sr_4h_long_resistance_zone_low": close + 5.0,
-            "sr_4h_long_resistance_zone_high": close + 6.0,
-            "sr_4h_long_support_state": np.full(
-                len(times), "SUPPORT_HELD", dtype=object
+            "sr_4h_completed_candle_time": times.floor("4h"),
+            "sr_4h_long_support_zone_low": np.full(len(times), 112.0),
+            "sr_4h_long_support_zone_high": np.full(len(times), 113.0),
+            "sr_4h_long_resistance_zone_low": np.full(len(times), 124.0),
+            "sr_4h_long_resistance_zone_high": np.full(len(times), 125.0),
+            "sr_4h_long_nearest_support_bar_index": np.full(len(times), 10),
+            "sr_4h_long_nearest_resistance_bar_index": np.full(len(times), 20),
+            "sr_4h_long_nearest_support_distance_atr": np.full(len(times), 1.5),
+            "sr_4h_long_nearest_resistance_distance_atr": np.full(len(times), 2.0),
+            "sr_4h_long_nearest_support_distance_price": np.full(len(times), 3.0),
+            "sr_4h_long_nearest_resistance_distance_price": np.full(len(times), 4.0),
+            "sr_4h_long_near_support": np.zeros(len(times), dtype=bool),
+            "sr_4h_long_near_resistance": np.zeros(len(times), dtype=bool),
+            "sr_4h_long_inside_support_zone": np.zeros(len(times), dtype=bool),
+            "sr_4h_long_inside_resistance_zone": np.zeros(len(times), dtype=bool),
+            "sr_4h_long_structure_conflict": np.zeros(len(times), dtype=bool),
+            "sr_4h_long_support_test_count": np.where(
+                np.arange(len(times)) >= 300, 2, 1
+            ),
+            "sr_4h_long_resistance_test_count": np.ones(len(times)),
+            "sr_4h_long_support_rejection_atr": np.full(len(times), 0.75),
+            "sr_4h_long_resistance_rejection_atr": np.full(len(times), 0.40),
+            "sr_4h_long_bars_since_support_test": np.full(len(times), 3),
+            "sr_4h_long_bars_since_resistance_test": np.full(len(times), 8),
+            "sr_4h_long_support_held": np.arange(len(times)) >= 301,
+            "sr_4h_long_resistance_held": np.zeros(len(times), dtype=bool),
+            "sr_4h_long_confirmation_rating": np.full(
+                len(times), "STRONG", dtype=object
+            ),
+            "sr_4h_long_room_in_direction_atr": np.full(len(times), 2.0),
+            "sr_4h_short_room_in_direction_atr": np.full(len(times), 1.5),
+            "sr_4h_long_support_state": np.where(
+                np.arange(len(times)) >= 301,
+                "SUPPORT_HELD",
+                np.where(
+                    np.arange(len(times)) >= 300,
+                    "SUPPORT_TESTING",
+                    "APPROACHING_SUPPORT",
+                ),
             ),
             "sr_4h_long_resistance_state": np.full(
                 len(times), "APPROACHING_RESISTANCE", dtype=object
@@ -345,8 +379,13 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
 
     overlay_names = {item["name"] for item in payload["overlays"]}
     assert {"EMA 50", "EMA 100", "EMA 200", "VWAP"} <= overlay_names
-    assert "4H Support low" in overlay_names
-    assert "4H Resistance high" in overlay_names
+    assert not any(item.get("kind") == "sr" for item in payload["overlays"])
+
+    zone_names = {item["name"] for item in payload["srZones"]}
+    assert {"4H Support", "4H Resistance"} <= zone_names
+    assert any(zone["activeAtEntry"] for zone in payload["srZones"])
+    assert payload["selectedTradeCandleTime"] is not None
+    assert payload["srEvents"]
 
     assert any(marker["kind"] == "enter" for marker in payload["markers"])
     assert not any(marker["kind"] == "reject" for marker in payload["markers"])
@@ -361,7 +400,7 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
 
 
 
-def test_sr_overlay_never_connects_distinct_zone_identities():
+def test_sr_zones_never_connect_distinct_zone_identities():
     times = pd.date_range("2026-01-01", periods=6, freq="15min", tz="UTC")
     context = pd.DataFrame(
         {
@@ -375,36 +414,26 @@ def test_sr_overlay_never_connects_distinct_zone_identities():
         }
     )
 
-    overlays = CompletedRunVisualizer._sr_overlay(
+    overlays = CompletedRunVisualizer._sr_zones(
         context, "4h", times[0]
     )
-    resistance_high = [
+    resistance = [
         item
         for item in overlays
-        if item["name"] == "4H Resistance high"
+        if item["name"] == "4H Resistance"
     ]
 
-    assert len(resistance_high) == 2
-    assert [item["zoneIdentity"] for item in resistance_high] == [
+    assert len(resistance) == 2
+    assert [item["zoneIdentity"] for item in resistance] == [
         ["pivot", 20],
         ["pivot", 35],
     ]
-    assert {
-        point["value"]
-        for point in resistance_high[0]["data"]
-    } == {112.0}
-    assert {
-        point["value"]
-        for point in resistance_high[1]["data"]
-    } == {132.0}
-    assert max(
-        point["time"] for point in resistance_high[0]["data"]
-    ) < min(
-        point["time"] for point in resistance_high[1]["data"]
-    )
+    assert (resistance[0]["low"], resistance[0]["high"]) == (110.0, 112.0)
+    assert (resistance[1]["low"], resistance[1]["high"]) == (130.0, 132.0)
+    assert resistance[0]["end"] <= resistance[1]["start"]
 
 
-def test_sr_overlay_legacy_fallback_still_breaks_when_zone_boundaries_change():
+def test_sr_zones_legacy_fallback_still_breaks_when_zone_boundaries_change():
     times = pd.date_range("2026-01-01", periods=4, freq="15min", tz="UTC")
     context = pd.DataFrame(
         {
@@ -416,19 +445,55 @@ def test_sr_overlay_legacy_fallback_still_breaks_when_zone_boundaries_change():
         }
     )
 
-    overlays = CompletedRunVisualizer._sr_overlay(
+    overlays = CompletedRunVisualizer._sr_zones(
         context, "4h", times[0]
     )
-    resistance_high = [
+    resistance = [
         item
         for item in overlays
-        if item["name"] == "4H Resistance high"
+        if item["name"] == "4H Resistance"
     ]
-    assert len(resistance_high) == 2
-    assert all(
-        len({point["value"] for point in item["data"]}) == 1
-        for item in resistance_high
+    assert len(resistance) == 2
+    assert [(item["low"], item["high"]) for item in resistance] == [
+        (110.0, 112.0),
+        (130.0, 132.0),
+    ]
+
+
+def test_sr_inspector_reads_persisted_multitimeframe_context(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+
+    snapshot = model.sr_inspector_at(pd.Timestamp("2026-01-04 03:00:00+00:00"))
+
+    assert snapshot["status"] == "AVAILABLE"
+    four_hour = next(
+        item for item in snapshot["timeframes"] if item["key"] == "4h"
     )
+    assert four_hour["supportZoneLow"] == 112.0
+    assert four_hour["supportZoneHigh"] == 113.0
+    assert four_hour["resistanceZoneLow"] == 124.0
+    assert four_hour["supportDistanceNativeAtr"] == 1.5
+    assert four_hour["supportDistanceStrategyAtr"] == 1.5
+    assert four_hour["resistanceDistanceStrategyAtr"] == 2.0
+    assert four_hour["roomLongNativeAtr"] == 2.0
+    assert four_hour["roomShortNativeAtr"] == 1.5
+    assert four_hour["structureConflict"] is False
+    assert four_hour["completedCandleTime"].endswith("+00:00")
+
+
+def test_sr_lifecycle_events_come_from_persisted_test_and_hold_transitions(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    payload = model.build_payload(trade_index=0, visible_candles=120)
+
+    four_hour = [
+        event
+        for event in payload["srEvents"]
+        if event["timeframe"] == "4h" and event["structure"] == "support"
+    ]
+    assert any(event["event"] == "test" for event in four_hour)
+    assert any(event["event"] == "held" for event in four_hour)
 
 
 def test_rule_inspector_reads_exact_decision_time_trace(tmp_path):
@@ -516,6 +581,10 @@ def test_visualizer_html_pins_lightweight_charts_and_preserves_attribution():
     assert "no strategy re-evaluation" in html
     assert "qtwebchannel/qwebchannel.js" in html
     assert "strategyBridge.selectCandle" in html
+    assert 'id="zone-layer"' in html
+    assert "priceToCoordinate" in html
+    assert "timeToCoordinate" in html
+    assert "S/R SNAPSHOT" in html
 
 
 def test_active_app_composes_strategy_visualizer():

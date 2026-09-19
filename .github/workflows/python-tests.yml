@@ -42,6 +42,8 @@ jobs:
           tests/test_strategy_builder_profile_ownership.py
           tests/test_task18_gui_architecture.py
           tests/test_stage10_stage1_gui_shim_removed.py
+          tests/test_strategy_visualizer.py
+          tests/test_strategy_visualizer_workspace.py
 
   strategy-profile-safety:
     runs-on: ubuntu-latest

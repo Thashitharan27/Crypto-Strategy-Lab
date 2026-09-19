@@ -66,6 +66,7 @@ class StrategyVisualizerWorkspace(QWidget):
         self._browser = None
         self._web_channel = None
         self._chart_bridge = None
+        self._inspected_candle_time = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -141,6 +142,45 @@ class StrategyVisualizerWorkspace(QWidget):
         )
         self.show_rejections.toggled.connect(self._reload_payload)
         grid.addWidget(self.show_rejections, 2, 5, 1, 2)
+
+        self.view_mode = QComboBox()
+        self.view_mode.addItem("Normal", "normal")
+        self.view_mode.addItem("S/R Review", "sr-review")
+        self.view_mode.currentIndexChanged.connect(self._sr_review_controls_changed)
+
+        self.sr_review_timeframe = QComboBox()
+        self.sr_review_timeframe.addItem("Strategy TF", "strategy")
+        self.sr_review_timeframe.addItem("1H", "1h")
+        self.sr_review_timeframe.addItem("4H", "4h")
+        self.sr_review_timeframe.addItem("1D", "1d")
+        self.sr_review_timeframe.addItem("Compare", "compare")
+        self.sr_review_timeframe.currentIndexChanged.connect(
+            self._sr_review_controls_changed
+        )
+
+        self.sr_review_snapshot = QComboBox()
+        self.sr_review_snapshot.addItem("Live through chart", "live")
+        self.sr_review_snapshot.addItem("Entry snapshot", "entry")
+        self.sr_review_snapshot.currentIndexChanged.connect(
+            self._sr_review_controls_changed
+        )
+
+        self.sr_review_details = QComboBox()
+        self.sr_review_details.addItem("Zones", "zones")
+        self.sr_review_details.addItem("Lifecycle", "lifecycle")
+        self.sr_review_details.addItem("All", "all")
+        self.sr_review_details.currentIndexChanged.connect(
+            self._sr_review_controls_changed
+        )
+
+        grid.addWidget(QLabel("View"), 3, 0)
+        grid.addWidget(self.view_mode, 3, 1)
+        grid.addWidget(QLabel("S/R TF"), 3, 2)
+        grid.addWidget(self.sr_review_timeframe, 3, 3)
+        grid.addWidget(QLabel("Snapshot"), 3, 4)
+        grid.addWidget(self.sr_review_snapshot, 3, 5)
+        grid.addWidget(QLabel("Details"), 3, 6)
+        grid.addWidget(self.sr_review_details, 3, 7, 1, 2)
         grid.setColumnStretch(2, 1)
         outer.addWidget(controls)
 
@@ -195,6 +235,24 @@ class StrategyVisualizerWorkspace(QWidget):
         rules_layout.addWidget(self.rule_table, 1)
         self.inspector_tabs.addTab(rules_tab, "Strategy Inspector")
 
+        sr_tab = QWidget()
+        sr_layout = QVBoxLayout(sr_tab)
+        sr_layout.setContentsMargins(0, 0, 0, 0)
+        self.sr_summary = QLabel(
+            "Click a candle to inspect the exact persisted S/R context."
+        )
+        self.sr_summary.setWordWrap(True)
+        self.sr_summary.setStyleSheet("color:#52606d")
+        sr_layout.addWidget(self.sr_summary)
+        self.sr_table = QTableWidget(0, 3)
+        self.sr_table.setHorizontalHeaderLabels(("TF", "Field", "Value"))
+        self.sr_table.verticalHeader().setVisible(False)
+        self.sr_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.sr_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.sr_table.horizontalHeader().setStretchLastSection(True)
+        sr_layout.addWidget(self.sr_table, 1)
+        self.inspector_tabs.addTab(sr_tab, "S/R Inspector")
+
         inspector_layout.addWidget(self.inspector_tabs)
         note = QLabel(
             "Rule values are captured at decision time by the production engine. "
@@ -214,6 +272,7 @@ class StrategyVisualizerWorkspace(QWidget):
         outer.addWidget(self.status)
 
         self._set_navigation_enabled(False)
+        self._update_sr_review_controls()
         self.refresh_available_run()
 
     def showEvent(self, event):
@@ -338,6 +397,135 @@ class StrategyVisualizerWorkspace(QWidget):
         value = self.trade_selector.currentData()
         return int(value) if value is not None else 0
 
+    def _update_sr_review_controls(self):
+        review = self.view_mode.currentData() == "sr-review"
+        for control in (
+            self.sr_review_timeframe,
+            self.sr_review_snapshot,
+            self.sr_review_details,
+        ):
+            control.setEnabled(review)
+
+    def _sr_review_controls_changed(self, *_args):
+        self._update_sr_review_controls()
+        if self._inspected_candle_time is not None and self.model is not None:
+            self._populate_sr_inspector(
+                self.model.sr_inspector_at(self._inspected_candle_time)
+            )
+        self._render_chart()
+
+    def _selected_sr_timeframes(self):
+        if self.view_mode.currentData() == "sr-review":
+            selected = str(self.sr_review_timeframe.currentData() or "strategy")
+            return {"strategy", "1h", "4h", "1d"} if selected == "compare" else {selected}
+        return {
+            key.removeprefix("sr-")
+            for key, check in self.overlay_checks.items()
+            if key.startswith("sr-") and check.isChecked()
+        }
+
+    def _show_selected_trade_sr(self):
+        if self.model is None:
+            self._populate_sr_inspector(None)
+            return
+        timestamp = self.model.selected_trade_candle_time(
+            self._current_trade_index()
+        )
+        if timestamp is None:
+            self._populate_sr_inspector(
+                {
+                    "status": "NOT_AVAILABLE",
+                    "message": "Selected trade has no persisted signal-candle timestamp.",
+                    "timeframes": [],
+                }
+            )
+            return
+        self._inspected_candle_time = timestamp
+        self._populate_sr_inspector(self.model.sr_inspector_at(timestamp))
+
+    @staticmethod
+    def _sr_zone_text(low, high):
+        if low is None or high is None:
+            return "—"
+        return f"{float(low):,.2f} – {float(high):,.2f}"
+
+    @staticmethod
+    def _sr_value_text(value):
+        if value is None:
+            return "—"
+        if isinstance(value, bool):
+            return "Yes" if value else "No"
+        if isinstance(value, float):
+            return f"{value:,.4g}"
+        return str(value)
+
+    def _populate_sr_inspector(self, snapshot):
+        snapshot = snapshot or {
+            "status": "NOT_AVAILABLE",
+            "message": "No S/R candle selected.",
+            "timeframes": [],
+        }
+        available = list(snapshot.get("timeframes") or ())
+        selected = self._selected_sr_timeframes()
+        blocks = [
+            item
+            for item in available
+            if str(item.get("key") or "") in selected
+        ]
+        rows = []
+        for item in blocks:
+            tf = str(item.get("timeframe") or "")
+            rows.extend(
+                [
+                    (tf, "Support zone", self._sr_zone_text(item.get("supportZoneLow"), item.get("supportZoneHigh"))),
+                    (tf, "Support state", item.get("supportState")),
+                    (tf, "Support distance · native ATR", item.get("supportDistanceNativeAtr")),
+                    (tf, "Support distance · strategy ATR", item.get("supportDistanceStrategyAtr")),
+                    (tf, "Support near / inside", f"{'Yes' if item.get('supportNear') else 'No'} / {'Yes' if item.get('supportInside') else 'No'}"),
+                    (tf, "Support tests / rejection", f"{self._sr_value_text(item.get('supportTests'))} / {self._sr_value_text(item.get('supportRejectionAtr'))} ATR"),
+                    (tf, "Support bars since test", item.get("supportBarsSinceTest")),
+                    (tf, "Support pivot / last break", f"{self._sr_value_text(item.get('supportPivotIndex'))} / {self._sr_value_text(item.get('supportLastBreakIndex'))}"),
+                    (tf, "Last broken support zone", self._sr_zone_text(item.get("supportBrokenZoneLow"), item.get("supportBrokenZoneHigh"))),
+                    (tf, "Resistance zone", self._sr_zone_text(item.get("resistanceZoneLow"), item.get("resistanceZoneHigh"))),
+                    (tf, "Resistance state", item.get("resistanceState")),
+                    (tf, "Resistance distance · native ATR", item.get("resistanceDistanceNativeAtr")),
+                    (tf, "Resistance distance · strategy ATR", item.get("resistanceDistanceStrategyAtr")),
+                    (tf, "Resistance near / inside", f"{'Yes' if item.get('resistanceNear') else 'No'} / {'Yes' if item.get('resistanceInside') else 'No'}"),
+                    (tf, "Resistance tests / rejection", f"{self._sr_value_text(item.get('resistanceTests'))} / {self._sr_value_text(item.get('resistanceRejectionAtr'))} ATR"),
+                    (tf, "Resistance bars since test", item.get("resistanceBarsSinceTest")),
+                    (tf, "Resistance pivot / last break", f"{self._sr_value_text(item.get('resistancePivotIndex'))} / {self._sr_value_text(item.get('resistanceLastBreakIndex'))}"),
+                    (tf, "Last broken resistance zone", self._sr_zone_text(item.get("resistanceBrokenZoneLow"), item.get("resistanceBrokenZoneHigh"))),
+                    (tf, "Room LONG / SHORT · native ATR", f"{self._sr_value_text(item.get('roomLongNativeAtr'))} / {self._sr_value_text(item.get('roomShortNativeAtr'))}"),
+                    (tf, "Structure conflict", item.get("structureConflict")),
+                    (tf, "Confirmation", item.get("confirmationRating")),
+                    (tf, "S/R completed candle", item.get("completedCandleTime")),
+                ]
+            )
+
+        self.sr_table.setRowCount(len(rows))
+        for row_number, (tf, field, value) in enumerate(rows):
+            for column, raw in enumerate((tf, field, self._sr_value_text(value))):
+                self.sr_table.setItem(
+                    row_number, column, QTableWidgetItem(str(raw))
+                )
+        self.sr_table.resizeColumnsToContents()
+        self.sr_table.horizontalHeader().setStretchLastSection(True)
+
+        status = str(snapshot.get("status") or "")
+        if status == "AVAILABLE":
+            suffix = (
+                " · Compare"
+                if self.sr_review_timeframe.currentData() == "compare"
+                and self.view_mode.currentData() == "sr-review"
+                else ""
+            )
+            self.sr_summary.setText(
+                f"{snapshot.get('timestamp', '')}{suffix} · "
+                f"{len(blocks)} persisted S/R context(s)"
+            )
+        else:
+            self.sr_summary.setText(str(snapshot.get("message") or status))
+
     def _step_trade(self, offset: int):
         if self.model is None or not self.model.trade_count:
             return
@@ -367,6 +555,7 @@ class StrategyVisualizerWorkspace(QWidget):
                 self._base_payload.get("selectedTrade") or {}
             )
             self._show_selected_trade_rule_trace()
+            self._show_selected_trade_sr()
             self._render_chart()
             count = len(self._base_payload.get("candles") or ())
             verified = (self._base_payload.get("run") or {}).get("sourceVerified")
@@ -410,10 +599,15 @@ class StrategyVisualizerWorkspace(QWidget):
         try:
             seconds = int(float(timestamp))
             value = pd.Timestamp(seconds, unit="s", tz="UTC")
+            self._inspected_candle_time = value
             self._populate_rule_inspector(self.model.rule_inspector_at(value))
-            self.inspector_tabs.setCurrentIndex(1)
+            self._populate_sr_inspector(self.model.sr_inspector_at(value))
+            self.inspector_tabs.setCurrentIndex(
+                2 if self.view_mode.currentData() == "sr-review" else 1
+            )
         except Exception as exc:
             self.rule_summary.setText(f"Could not inspect candle: {exc}")
+            self.sr_summary.setText(f"Could not inspect S/R: {exc}")
 
     def _populate_rule_inspector(self, trace):
         trace = trace or {
@@ -472,11 +666,52 @@ class StrategyVisualizerWorkspace(QWidget):
         try:
             browser = self._ensure_browser()
             payload = deepcopy(self._base_payload)
-            payload["overlays"] = [
-                overlay
-                for overlay in payload.get("overlays", ())
-                if self._overlay_enabled(overlay)
+            review = self.view_mode.currentData() == "sr-review"
+            selected_timeframes = self._selected_sr_timeframes()
+
+            if review:
+                payload["overlays"] = []
+                # Trade price lines can force the candle scale far away from the
+                # local structure. The trade inspector still shows the exact
+                # entry/stop/target values while S/R Review keeps price local.
+                payload["priceLines"] = []
+            else:
+                payload["overlays"] = [
+                    overlay
+                    for overlay in payload.get("overlays", ())
+                    if self._overlay_enabled(overlay)
+                ]
+
+            payload["srZones"] = [
+                zone
+                for zone in payload.get("srZones", ())
+                if zone.get("timeframe") in selected_timeframes
             ]
+            details = (
+                str(self.sr_review_details.currentData() or "zones")
+                if review
+                else "zones"
+            )
+            if review and details == "lifecycle":
+                payload["srZones"] = []
+            payload["srEvents"] = [
+                event
+                for event in payload.get("srEvents", ())
+                if review
+                and details in {"lifecycle", "all"}
+                and event.get("timeframe") in selected_timeframes
+            ]
+            payload["srReview"] = {
+                "mode": "review" if review else "normal",
+                "snapshot": (
+                    str(self.sr_review_snapshot.currentData() or "live")
+                    if review
+                    else "live"
+                ),
+                "details": details,
+                "timeframes": sorted(selected_timeframes),
+                "tradeLevelsHiddenForScale": bool(review),
+            }
             browser.setHtml(
                 build_visualizer_html(payload),
                 QUrl("https://cdn.jsdelivr.net/"),
