@@ -794,6 +794,8 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
             "pivot_right": int(config.sr_pivot_right),
             "lookback_bars": int(config.sr_lookback_bars),
             "zone_width_atr": float(config.sr_zone_width_atr),
+            "zone_padding_atr": float(getattr(config, "sr_zone_padding_atr", 0.25)),
+            "max_cluster_span_atr": float(getattr(config, "sr_zone_max_cluster_span_atr", 1.0)),
             "near_distance_atr": float(config.sr_near_distance_atr),
             "enable_hold_confirmation": bool(config.enable_sr_hold_confirmation),
             "hold_confirmation_bars": int(config.sr_hold_confirmation_bars),
