@@ -94,6 +94,8 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             sr_pivot_right=self.config.sr_pivot_right,
             sr_lookback_bars=self.config.sr_lookback_bars,
             sr_zone_width_atr=self.config.sr_zone_width_atr,
+            sr_zone_padding_atr=getattr(self.config, "sr_zone_padding_atr", 0.25),
+            sr_zone_max_cluster_span_atr=getattr(self.config, "sr_zone_max_cluster_span_atr", 1.0),
             sr_near_distance_atr=self.config.sr_near_distance_atr,
             enable_sr_hold_confirmation=self.config.enable_sr_hold_confirmation,
             sr_hold_confirmation_bars=self.config.sr_hold_confirmation_bars,
