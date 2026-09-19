@@ -181,6 +181,38 @@ def test_feature_config_uses_timeframe_aware_structural_horizons() -> None:
     assert overridden.sr_detection_parameters(240)["sr_lookback_bars"] == 300
 
 
+def test_prepared_sr_exports_explicit_structure_conflict() -> None:
+    frame = canonical_klines(180)
+    _, sr, _ = prepared(frame)
+
+    for direction in ("long", "short"):
+        expected = (
+            sr[f"{direction}_near_support"].astype(bool)
+            & sr[f"{direction}_near_resistance"].astype(bool)
+        )
+        pdt.assert_series_equal(
+            sr[f"{direction}_structure_conflict"].astype(bool),
+            expected,
+            check_names=False,
+        )
+
+
+def test_prepared_sr_completion_timestamp_is_utc_normalized_for_artifacts() -> None:
+    frame = canonical_klines(180)
+    _, sr, _ = prepared(frame)
+
+    assert str(sr["sr_completed_candle_time"].dtype) == "datetime64[ns]"
+    completed = sr["sr_completed_candle_time"].dropna()
+    assert not completed.empty
+
+    available_utc = (
+        pd.to_datetime(sr.loc[completed.index, "available_at"], utc=True)
+        .dt.tz_convert("UTC")
+        .dt.tz_localize(None)
+    )
+    assert bool((completed <= available_utc).all())
+
+
 def test_cached_reader_reconstructs_exact_detector_context() -> None:
     frame = canonical_klines()
     directional, sr, parameters = prepared(frame)
@@ -240,7 +272,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 
     assert isinstance(engine, SRDynamicTPBacktestEngine)
     assert isinstance(engine.sr_detector, PreparedSupportResistanceContextReader)
-    assert engine.support_resistance_feature_source == "support_resistance@6"
+    assert engine.support_resistance_feature_source == "support_resistance@7"
     assert engine.sr_uses_higher_timeframe is False
 
     index = 75
