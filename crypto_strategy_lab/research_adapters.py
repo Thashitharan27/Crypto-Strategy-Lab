@@ -284,9 +284,11 @@ RULE_TRACE_COLUMNS = (
     "group_id",
     "group_name",
     "group_enabled",
+    "group_evaluated",
     "group_matched",
     "condition_id",
     "condition_order",
+    "condition_evaluated",
     "evidence",
     "timeframe_minutes",
     "operator",
@@ -320,9 +322,11 @@ def _strategy_rule_trace_frame(rows) -> pd.DataFrame:
                 "group_id": pd.Series(dtype="string"),
                 "group_name": pd.Series(dtype="string"),
                 "group_enabled": pd.Series(dtype="bool"),
+                "group_evaluated": pd.Series(dtype="bool"),
                 "group_matched": pd.Series(dtype="bool"),
                 "condition_id": pd.Series(dtype="string"),
                 "condition_order": pd.Series(dtype="int64"),
+                "condition_evaluated": pd.Series(dtype="bool"),
                 "evidence": pd.Series(dtype="string"),
                 "timeframe_minutes": pd.Series(dtype="float64"),
                 "operator": pd.Series(dtype="string"),
@@ -344,7 +348,7 @@ def _strategy_rule_trace_frame(rows) -> pd.DataFrame:
             lambda value: None if value is None or pd.isna(value) else str(value)
         ).astype("string")
     result["actual_value"] = pd.to_numeric(result["actual_value"], errors="coerce")
-    for column in ("group_enabled", "group_matched", "evidence_available", "condition_passed", "filter_passed"):
+    for column in ("group_enabled", "group_evaluated", "group_matched", "condition_evaluated", "evidence_available", "condition_passed", "filter_passed"):
         result[column] = result[column].astype(bool)
     return result.sort_values(
         ["strategy_index", "rule_kind", "group_id", "condition_order"], kind="stable"
