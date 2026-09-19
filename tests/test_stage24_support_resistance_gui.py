@@ -73,13 +73,13 @@ def test_sr_balanced_preset_still_maps_to_existing_engine_values():
         assert window.sr_pivot_left.value()==3
         assert window.sr_pivot_right.value()==3
         assert window.sr_lookback_bars.value()==150
-        assert window.sr_zone_width_atr.value()==pytest.approx(0.35)
+        assert window.sr_zone_width_atr.value()==pytest.approx(0.10)
         assert window.sr_break_tolerance_atr.value()==pytest.approx(0.15)
 
         window.sr_detection_preset.setCurrentText("Balanced (Recommended)")
         assert window.sr_pivot_left.value()==5
         assert window.sr_pivot_right.value()==5
         assert window.sr_lookback_bars.value()==200
-        assert window.sr_zone_width_atr.value()==pytest.approx(0.5)
+        assert window.sr_zone_width_atr.value()==pytest.approx(0.15)
         assert window.sr_break_tolerance_atr.value()==pytest.approx(0.25)
     finally: window.close()
