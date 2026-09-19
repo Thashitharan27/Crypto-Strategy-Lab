@@ -71,8 +71,8 @@ def test_mtf_price_action_evidence_is_exposed_with_rule_timeframes():
     assert normalized["sr_timeframe_minutes"] == 60
 
 
-def test_mtf_sr_starter_preset_contains_four_editable_entry_theses():
-    rules = mtf_sr_reaction_preset_rules(minimum_room_atr=2.0)
+def test_mtf_sr_starter_preset_contains_four_trade_relative_entry_theses():
+    rules = mtf_sr_reaction_preset_rules()
     groups = {}
     for rule in rules:
         groups.setdefault(rule["group_id"], []).append(rule)
@@ -81,20 +81,39 @@ def test_mtf_sr_starter_preset_contains_four_editable_entry_theses():
     assert len(rules) == 16
     names = {items[0]["group_name"] for items in groups.values()}
     assert names == {
-        "4H Support Bounce — Long",
-        "4H Resistance Break + Retest — Long",
-        "4H Resistance Bounce — Short",
-        "4H Support Break + Retest — Short",
+        "4H Favorable Structure Bounce — Long",
+        "4H Break + Retest — Long",
+        "4H Favorable Structure Bounce — Short",
+        "4H Break + Retest — Short",
     }
     assert {items[0]["side"] for items in groups.values()} == {"LONG", "SHORT"}
     assert all(len(items) == 4 for items in groups.values())
 
-    room_rules = [
-        rule for rule in rules if rule["evidence"] == "SR_ROOM_IN_DIRECTION_ATR"
+    relation_rules = [
+        rule for rule in rules if rule["evidence"] == "SR_ENTRY_RELATION"
     ]
-    assert len(room_rules) == 4
-    assert all(rule["value"] == 2.0 for rule in room_rules)
-    assert all(rule["sr_timeframe_minutes"] == 240 for rule in room_rules)
+    assert len(relation_rules) == 2
+    assert all(rule["value"] == "FAVORABLE_ENTRY_AREA" for rule in relation_rules)
+    assert all(rule["sr_timeframe_minutes"] == 240 for rule in relation_rules)
+
+    target_rules = [
+        rule for rule in rules if rule["evidence"] == "SR_TARGET_PATH"
+    ]
+    assert len(target_rules) == 4
+    assert all(
+        rule["value"] == "TARGET_BEFORE_OPPOSING_ZONE"
+        for rule in target_rules
+    )
+    assert all(rule["sr_timeframe_minutes"] == 240 for rule in target_rules)
+
+    assert not any(
+        rule["evidence"] in {
+            "SR_NEAR_SUPPORT",
+            "SR_NEAR_RESISTANCE",
+            "SR_ROOM_IN_DIRECTION_ATR",
+        }
+        for rule in rules
+    )
 
     retest_rules = [
         rule for rule in rules if rule["evidence"] == "SR_ROLE_REVERSAL_STATE"
