@@ -32,7 +32,7 @@ Family-level statistics can still aggregate the full ENTRY_006 history across al
 
 ## VETO effectiveness
 
-Vetoed opportunities are intentionally not persisted as resolved WF trades. To measure VETO quality without mutating the ledger, the analytics action performs a read-only causal replay against the immutable Every Viable Entry reference artifacts.
+Vetoed opportunities are intentionally not persisted as resolved WF trades. To measure VETO quality without mutating the ledger, the analytics action performs a read-only causal replay against the immutable paired Walk Forward reference artifacts.
 
 The replay:
 
@@ -41,8 +41,8 @@ The replay:
 3. requires an active ENTRY match before treating a row as a blockable opportunity;
 4. excludes periods where WAIT_UNTIL_CLOSED had an open WF trade;
 5. respects overlapping VETOs;
-6. respects an active FLIP when a unique opposite-side EVE outcome exists;
-7. reports an unresolved FLIP counterfactual rather than guessing when the opposite outcome is unavailable.
+6. respects an active FLIP by selecting the opposite row from the same immutable `walk_forward_candidate_id`;
+7. reports an integrity issue rather than guessing if an exact paired opposite outcome is unavailable.
 
 For every VETO/version it reports blocked opportunities, resolved/unresolved counterfactuals, losses avoided, wins blocked, precision, hypothetical net R, net R saved, VETO-only opportunities, shared VETO opportunities, and the same time windows used by ENTRY analytics.
 
