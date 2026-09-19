@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 
@@ -124,3 +126,68 @@ def test_shared_sr_requires_chronological_strategy_rows() -> None:
         assert "chronological" in str(exc)
     else:
         raise AssertionError("descending S/R timestamps must fail closed")
+
+def test_shared_sr_zone_inventory_is_causal_and_contains_all_active_zones() -> None:
+    times, decisions, open_, high, low, close, atr_values = _series(120)
+    rows = support_resistance_evidence_series(
+        times,
+        decisions,
+        open_,
+        high,
+        low,
+        close,
+        atr_values,
+        strategy_minutes=60,
+        pivot_left=2,
+        pivot_right=2,
+        lookback_bars=80,
+        min_rejection_atr=0.0,
+        include_zone_inventory=True,
+    )
+
+    parsed = [json.loads(row["zone_inventory_json"]) for row in rows]
+    assert any(len(zones) >= 2 for zones in parsed)
+    for zones in parsed:
+        ids = [zone["zone_id"] for zone in zones]
+        assert len(ids) == len(set(ids))
+        for structure in ("SUPPORT", "RESISTANCE"):
+            nearest = [
+                zone
+                for zone in zones
+                if zone["structure"] == structure and zone["nearest"]
+            ]
+            assert len(nearest) <= 1
+
+    cutoff = 70
+    changed_open = open_.copy()
+    changed_high = high.copy()
+    changed_low = low.copy()
+    changed_close = close.copy()
+    changed_open[cutoff + 1 :] *= 1.7
+    changed_high[cutoff + 1 :] *= 1.7
+    changed_low[cutoff + 1 :] *= 1.7
+    changed_close[cutoff + 1 :] *= 1.7
+    changed_atr = np.asarray(
+        atr(changed_high, changed_low, changed_close, 14), dtype=float
+    )
+    mutated = support_resistance_evidence_series(
+        times,
+        decisions,
+        changed_open,
+        changed_high,
+        changed_low,
+        changed_close,
+        changed_atr,
+        strategy_minutes=60,
+        pivot_left=2,
+        pivot_right=2,
+        lookback_bars=80,
+        min_rejection_atr=0.0,
+        include_zone_inventory=True,
+    )
+    assert [
+        row["zone_inventory_json"] for row in rows[: cutoff + 1]
+    ] == [
+        row["zone_inventory_json"] for row in mutated[: cutoff + 1]
+    ]
+
