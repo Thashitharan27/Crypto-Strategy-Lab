@@ -646,6 +646,8 @@ def _normalize_gui_v2(values: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Unknown Data Lake GUI settings: " + ", ".join(unknown))
     merged = {key: value for key, value in _gui_defaults().items() if key in DATA_LAKE_CONFIG_FIELDS}
     merged.update(values)
+    from crypto_strategy_lab.gui.config_logic import _migrate_legacy_sr_geometry
+    merged = _migrate_legacy_sr_geometry(merged)
     if int(merged.get("config_version", -1)) != GUI_COMPAT_CONFIG_VERSION:
         raise ValueError("Data Lake GUI compatibility configuration version 2 is required")
     merged["strategy_profiles"] = profiles_to_dict(normalize_profiles(merged["strategy_profiles"]))
