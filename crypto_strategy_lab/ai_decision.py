@@ -30,8 +30,8 @@ from crypto_strategy_lab.strategy_profiles import profile_key
 OPENAI_DECISION_MODE = "OPENAI_DECISION"
 AI_MODEL = "gpt-5.6-sol"
 AI_REASONING_EFFORT = "medium"
-AI_PROMPT_VERSION = "direction_v1"
-AI_SNAPSHOT_VERSION = 1
+AI_PROMPT_VERSION = "direction_v2_sr_trade_context"
+AI_SNAPSHOT_VERSION = 2
 AI_RECENT_BARS = 12
 AI_CACHE_MODE_ENV = "CRYPTO_STRATEGY_AI_MODE"
 AI_CACHE_PATH_ENV = "CRYPTO_STRATEGY_AI_CACHE"
@@ -81,6 +81,14 @@ Evaluate LONG and SHORT independently from only the supplied snapshot. Never use
 future information and never invent unavailable evidence. The snapshot may show
 conflicting evidence; weigh trend, market structure, momentum, mean reversion,
 flow, positioning, and multi-timeframe support/resistance together.
+
+Support/resistance is supplied as trade-relative context. "native ATR" means the
+ATR of that S/R timeframe and MUST NOT be compared numerically across 1h/4h/1d.
+"strategy ATR" uses the entry timeframe. "room R" is distance to opposing
+structure divided by the configured full stop distance. "room target multiple"
+is distance to opposing structure divided by the planned final target distance.
+Use ENTRY_RELATION and TARGET_PATH literally; do not reinterpret them as generic
+good/bad labels.
 
 You MUST choose LONG or SHORT. There is no abstain/no-trade option. Return integer
 LONG and SHORT confidence scores that sum to exactly 100 and never return a
