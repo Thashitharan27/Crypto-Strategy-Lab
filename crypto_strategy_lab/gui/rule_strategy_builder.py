@@ -1687,6 +1687,14 @@ class RuleStrategyBuilder(QWidget):
             else self._tf_short_label(plan["approach_minutes"])
         )
         entry = self._tf_short_label(strategy_minutes)
+        hierarchy = (
+            f"{structure} → {entry} Reaction/Entry"
+            if plan["approach_minutes"] == strategy_minutes
+            else f"{structure} → {approach} → {entry}"
+        )
+        self.mtf_sr_preset_button.setText(
+            f"Load MTF S/R starter groups — {hierarchy}"
+        )
         self.mtf_sr_preset_button.setToolTip(
             "Replace the current Entry groups with adaptive starter groups for "
             f"{structure} structure → {approach} approach/reaction → "
