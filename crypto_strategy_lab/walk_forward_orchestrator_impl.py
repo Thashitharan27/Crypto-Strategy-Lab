@@ -5,8 +5,8 @@ ChatGPT judgment remains mandatory for direction decisions, teacher learning,
 loss review, and periodic review.
 
 The critical outcome firewall is structural: ``freeze_and_reveal`` appends and
-fsyncs DECISION_FROZEN before it opens the outcome-bearing Every Viable Entry
-artifact.  A crash after freezing is recoverable; retrying resumes from the
+fsyncs DECISION_FROZEN before it opens the outcome-bearing paired Walk Forward
+artifact. A crash after freezing is recoverable; retrying resumes from the
 already-frozen decision and can never replace it.
 """
 from __future__ import annotations
@@ -821,7 +821,7 @@ def _teacher_review_packet(
         return packet
     manifest = reports.get_run_manifest(reference_run)
     run_dir = reports.resolve_run(reference_run)
-    if _sampling_mode(manifest) != "EVERY_VIABLE_ENTRY":
+    if _sampling_mode(manifest) != "WALK_FORWARD":
         return packet
     samples_path = _artifact(manifest, run_dir, "research_sampling_trades")
     context_path = _artifact(manifest, run_dir, "feature_context")
