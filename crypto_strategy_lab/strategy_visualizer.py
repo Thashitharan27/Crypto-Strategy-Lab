@@ -945,11 +945,11 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
     return;
   }}
   let strategyBridge = null;
-  if (window.qt && window.qt.webChannelTransport && window.QWebChannel) {
-    new QWebChannel(window.qt.webChannelTransport, channel => {
+  if (window.qt && window.qt.webChannelTransport && window.QWebChannel) {{
+    new QWebChannel(window.qt.webChannelTransport, channel => {{
       strategyBridge = channel.objects.strategyBridge || null;
-    });
-  }
+    }});
+  }}
   const LC = window.LightweightCharts;
   const chart = LC.createChart(document.getElementById('chart'), {{
     autoSize: true,
