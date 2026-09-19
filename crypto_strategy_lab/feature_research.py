@@ -274,6 +274,14 @@ def _empty_sr_zone_frame() -> pd.DataFrame:
     for name in ("tested", "held", "near", "inside", "nearest"):
         result[name] = pd.Series(dtype="bool")
     for name in (
+        "sr_timeframe",
+        "zone_id",
+        "structure",
+        "source_bar_indices_json",
+        "state",
+    ):
+        result[name] = pd.Series(dtype="string")
+    for name in (
         "pivot_bar_index",
         "confirmed_at_index",
         "source_count",
