@@ -409,13 +409,17 @@ class CompletedRunVisualizer:
             evidence = str(raw.get("evidence") or "")
             kind = str(raw.get("rule_kind") or "").upper()
             enabled = bool(raw.get("group_enabled"))
+            group_evaluated = bool(raw.get("group_evaluated"))
             matched = bool(raw.get("group_matched"))
             if not enabled:
                 group_status = "MUTED"
+            elif not group_evaluated:
+                group_status = "NOT REACHED"
             elif kind == "REQUIRED":
                 group_status = "MATCHED" if matched else "FAILED"
             else:
                 group_status = "TRIGGERED" if matched else "CLEAR"
+            condition_evaluated = bool(raw.get("condition_evaluated"))
             available = bool(raw.get("evidence_available"))
             condition_passed = bool(raw.get("condition_passed"))
             rows.append(
@@ -427,8 +431,9 @@ class CompletedRunVisualizer:
                     "timeframe": _rule_timeframe_label(
                         evidence, raw.get("timeframe_minutes")
                     ),
-                    "actual": _rule_actual_display(
-                        evidence, raw.get("actual_value"), available
+                    "actual": (
+                        _rule_actual_display(evidence, raw.get("actual_value"), available)
+                        if condition_evaluated else "—"
                     ),
                     "requirement": _rule_requirement(
                         raw.get("operator"),
@@ -436,7 +441,13 @@ class CompletedRunVisualizer:
                         raw.get("expected_value2"),
                     ),
                     "conditionStatus": (
-                        "MISSING" if not available else "PASS" if condition_passed else "FAIL"
+                        "NOT REACHED"
+                        if not condition_evaluated
+                        else "MISSING"
+                        if not available
+                        else "PASS"
+                        if condition_passed
+                        else "FAIL"
                     ),
                     "conditionPassed": condition_passed,
                     "groupMatched": matched,
