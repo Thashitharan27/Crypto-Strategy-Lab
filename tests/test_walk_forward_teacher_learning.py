@@ -61,6 +61,40 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
             },
         ]
     ).to_parquet(trades_path, index=False)
+    samples_path = artifacts / "research_sampling_trades.parquet"
+    opposite_exit = (
+        "2025-01-03T03:30:00Z"
+        if reward_risk_ratio == 1.0
+        else "2025-01-03T06:00:00Z"
+    )
+    pd.DataFrame(
+        [
+            {
+                "research_signal_index": 44,
+                "research_sample_id": "wf-44-long-long",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-44-long",
+                "walk_forward_candidate_source": True,
+                "strategy_profile_key": "bull_long",
+                "side": "LONG",
+                "entry_time": "2025-01-03T00:00:00Z",
+                "exit_time": "2025-01-03T04:00:00Z",
+                "pair_net_r": -1.119,
+            },
+            {
+                "research_signal_index": 44,
+                "research_sample_id": "wf-44-long-short",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-44-long",
+                "walk_forward_candidate_source": False,
+                "strategy_profile_key": "bull_short",
+                "side": "SHORT",
+                "entry_time": "2025-01-03T00:00:00Z",
+                "exit_time": opposite_exit,
+                "pair_net_r": 2.85 if reward_risk_ratio == 3.0 else 0.98,
+            },
+        ]
+    ).to_parquet(samples_path, index=False)
     manifest = {
         "config": {
             "execution": {
@@ -70,7 +104,11 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
                 }
             }
         },
-        "artifacts": {"trades": _catalog(trades_path, run_dir)},
+        "artifacts": {
+            "trades": _catalog(trades_path, run_dir),
+            "research_sampling_trades": _catalog(samples_path, run_dir),
+        },
+        "research": {"strategy_research_sampling": {"mode": "WALK_FORWARD"}},
     }
     return manifest, run_dir
 
@@ -90,7 +128,7 @@ def _events_through_pair_3() -> list[dict]:
     ]
 
 
-def test_one_r_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path):
+def test_paired_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path):
     manifest, run_dir = _reference(tmp_path, 1.0)
 
     teacher = next_teacher_for_learning(
@@ -106,9 +144,10 @@ def test_one_r_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path)
     assert boundary["result"] == "LOSS"
     assert boundary["pair_net_r"] == -1.119
     assert boundary["teacher_learning_mode"] == TEACHER_LOSS_FLIP_MODE
+    assert _resolved_at == pd.Timestamp("2025-01-03T04:00:00Z")
 
 
-def test_one_r_default_remains_historical_winner_only_behavior(tmp_path):
+def test_default_remains_winner_only_when_loss_learning_is_disabled(tmp_path):
     manifest, run_dir = _reference(tmp_path, 1.0)
 
     teacher = next_teacher_for_learning(manifest, run_dir, _events_through_pair_3())
@@ -119,7 +158,7 @@ def test_one_r_default_remains_historical_winner_only_behavior(tmp_path):
     assert boundary["result"] == "WIN"
 
 
-def test_non_one_r_teacher_loss_is_skipped_even_when_opted_in(tmp_path):
+def test_three_r_teacher_loss_is_valid_paired_flip_evidence(tmp_path):
     manifest, run_dir = _reference(tmp_path, 3.0)
 
     teacher = next_teacher_for_learning(
@@ -131,8 +170,11 @@ def test_non_one_r_teacher_loss_is_skipped_even_when_opted_in(tmp_path):
 
     assert teacher is not None
     boundary, _resolved_at = teacher
-    assert boundary["pair_id"] == 5
-    assert boundary["result"] == "WIN"
+    assert boundary["pair_id"] == 4
+    assert boundary["result"] == "LOSS"
+    assert boundary["teacher_learning_mode"] == TEACHER_LOSS_FLIP_MODE
+    assert _resolved_at == pd.Timestamp("2025-01-03T06:00:00Z")
+    assert boundary["paired_opposite_resolution_time"] == "2025-01-03T06:00:00+00:00"
 
 
 def test_teacher_loss_packet_requires_verified_opposite_side_win(monkeypatch):
@@ -171,6 +213,7 @@ def test_teacher_loss_packet_requires_verified_opposite_side_win(monkeypatch):
             "trade_entry_context": {
                 "research_sample_id": "sample-4-long",
                 "research_signal_index": 44,
+                "walk_forward_candidate_id": "wf-44-long",
                 "entry_time": "2025-01-03T00:00:00Z",
             }
         },

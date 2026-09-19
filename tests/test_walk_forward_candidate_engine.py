@@ -109,7 +109,7 @@ def _write_reference(
         "artifacts": artifact_map,
         "research": {
             "strategy_research_sampling": {
-                "mode": "EVERY_VIABLE_ENTRY",
+                "mode": "WALK_FORWARD",
                 "selected_rows": len(samples),
             }
         },
@@ -143,12 +143,12 @@ def _append_rule(store, head, event_type, rule_id, family, conditions, operation
 
 
 def _samples() -> pd.DataFrame:
-    return pd.DataFrame(
+    frame = pd.DataFrame(
         [
             {
                 "research_sample_id": "s10",
                 "research_signal_index": 10,
-                "research_sampling_mode": "EVERY_VIABLE_ENTRY",
+                "research_sampling_mode": "WALK_FORWARD",
                 "strategy_profile_key": "bull_long",
                 "side": "LONG",
                 "entry_time": "2025-01-02T00:00:00Z",
@@ -164,7 +164,7 @@ def _samples() -> pd.DataFrame:
             {
                 "research_sample_id": "s11",
                 "research_signal_index": 11,
-                "research_sampling_mode": "EVERY_VIABLE_ENTRY",
+                "research_sampling_mode": "WALK_FORWARD",
                 "strategy_profile_key": "bull_long",
                 "side": "LONG",
                 "entry_time": "2025-01-03T00:00:00Z",
@@ -180,7 +180,7 @@ def _samples() -> pd.DataFrame:
             {
                 "research_sample_id": "s12",
                 "research_signal_index": 12,
-                "research_sampling_mode": "EVERY_VIABLE_ENTRY",
+                "research_sampling_mode": "WALK_FORWARD",
                 "strategy_profile_key": "bull_long",
                 "side": "LONG",
                 "entry_time": "2025-01-04T00:00:00Z",
@@ -195,6 +195,15 @@ def _samples() -> pd.DataFrame:
             },
         ]
     )
+
+    frame["walk_forward_candidate_id"] = (
+        "wf-" + frame["research_signal_index"].astype(str) + "-long"
+    )
+    frame["walk_forward_candidate_source"] = True
+    frame["walk_forward_counterfactual"] = False
+    frame["walk_forward_source_side"] = "LONG"
+    frame["walk_forward_source_profile_key"] = "bull_long"
+    return frame
 
 
 def _context() -> pd.DataFrame:

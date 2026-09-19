@@ -93,7 +93,7 @@ The server also caps one autonomous MCP request to a small number of 4,096-row s
 
 ## Bounded scan checkpoints
 
-Large 15m Every Viable Entry histories can exceed the secure-tunnel response lifetime if one MCP request scans the entire remaining reference run. The accelerated orchestrator therefore scans at most 4,096 candidate rows per request.
+Large 15m paired Walk Forward source-candidate histories can exceed the secure-tunnel response lifetime if one MCP request scans the entire remaining reference run. The accelerated orchestrator therefore scans at most 4,096 candidate rows per request.
 
 If that bounded slice contains no candidate or earlier teacher boundary, the orchestrator appends a `CHECKPOINT_CREATED` event with checkpoint type `CANDIDATE_SCAN_CURSOR_V1` and returns `SCAN_CHECKPOINTED`. The cursor stores the exact deterministic sort key:
 
@@ -117,15 +117,15 @@ The order is strict:
 ENTRY/VETO/FLIP evaluation -> strategy_action
 CANDIDATE_CONTEXT_CAPTURED
   -> DECISION_FROZEN(strategy_action, chatgpt_view, confidence, reasoning)
-  -> open outcome-bearing EVE artifact for strategy_action
+  -> open exact paired outcome row for strategy_action
   -> OUTCOME_REVEALED
 ```
 
 The outcome artifact is not opened until the frozen view event is durable. A retry after a transport/process interruption reuses the already-frozen evidence and cannot replace it.
 
-ChatGPT disagreement never requires opposite-side EVE data for normal progression. If `strategy_action=LONG` and `chatgpt_view=SHORT`, the resolver reads the exact LONG sample. A missing SHORT sample therefore cannot block a valid LONG walk-forward trade.
+ChatGPT disagreement never changes execution. If `strategy_action=LONG` and `chatgpt_view=SHORT`, the resolver reads the exact LONG row from the candidate's immutable pair.
 
-Opposite-side EVE data is required only when the executable `strategy_action` itself is opposite the source sample, for example because an active causal FLIP rule changed LONG to SHORT. The tool never infers or mirrors an opposite TP3 result.
+If an active causal FLIP changes the executable side, the resolver selects the opposite row with the same `walk_forward_candidate_id`. Both sides were independently simulated when the reference run was created, so TP3 and other asymmetric outcomes are never inferred or mirrored.
 
 ## Deterministic settlement
 
@@ -137,7 +137,7 @@ net_pnl     = risk_amount * immutable_pair_net_r
 equity_after = equity_before + net_pnl
 ```
 
-Research-sample absolute P&L is not reused because Every Viable Entry observations run on independent fixed research equity. Net R is the portable outcome used to compound the causal walk-forward ledger.
+Research-sample absolute P&L is not reused because paired Walk Forward observations run on independent fixed research equity. Net R is the portable outcome used to compound the causal walk-forward ledger.
 
 Teacher trades never call settlement and therefore never change walk-forward equity.
 
@@ -158,7 +158,7 @@ Because ChatGPT's view is separately frozen before outcome, later analysis can m
 
 ## Teacher review packet
 
-When the next reference winner resolves before a prospective candidate, `advance_walk_forward` returns `TEACHER_REVIEW_REQUIRED` instead of scanning past it. The packet includes the teacher boundary, active rule versions/counts, and when the exact EVE context is available, entry-time context plus current-rule coverage.
+When the next reference winner resolves before a prospective candidate, `advance_walk_forward` returns `TEACHER_REVIEW_REQUIRED` instead of scanning past it. The packet includes the teacher boundary, active rule versions/counts, and when the exact paired source context is available, entry-time context plus current-rule coverage.
 
 `record_walk_forward_teacher_review` records the teacher event and can append ENTRY learning/refinement in the same guarded operation chain. Teacher evidence is learning-only and does not affect equity.
 

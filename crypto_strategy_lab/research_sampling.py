@@ -20,9 +20,12 @@ from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBa
 
 
 RESEARCH_SAMPLING_VERSION = "STRATEGY_OPPORTUNITY_V1"
+WALK_FORWARD_SAMPLING_VERSION = "WALK_FORWARD_PAIRED_V1"
+WALK_FORWARD_SAMPLING_MODE = "WALK_FORWARD"
 RESEARCH_SAMPLING_MODES = {
     "PORTFOLIO",
     "EVERY_VIABLE_ENTRY",
+    WALK_FORWARD_SAMPLING_MODE,
     "FIXED_INTERVAL",
     "EPISODE_FIRST",
 }
@@ -195,13 +198,204 @@ def _select_sampling_mode(
         raise ValueError("research sampling interval must be positive")
     if mode == "PORTFOLIO":
         return viable.iloc[0:0].copy()
-    if mode == "EVERY_VIABLE_ENTRY":
+    if mode in {"EVERY_VIABLE_ENTRY", WALK_FORWARD_SAMPLING_MODE}:
         return viable.copy().reset_index(drop=True)
     if mode == "EPISODE_FIRST":
         return viable.loc[viable["research_episode_entry_number"].eq(1)].copy().reset_index(drop=True)
     return viable.loc[
         (viable["research_episode_entry_number"] - 1).mod(interval).eq(0)
     ].copy().reset_index(drop=True)
+
+
+class WalkForwardCounterfactualSamplingEngine(StrategyResearchSamplingEngine):
+    """Evaluate exactly one opposite-side outcome for each source candidate."""
+
+    research_forced_side_by_index: dict[int, str] = {}
+
+    def _selected_direction(self, i):
+        return self.research_forced_side_by_index.get(int(i))
+
+    def _should_enter(self, i):
+        direction = self._selected_direction(i)
+        if direction not in {"LONG", "SHORT"}:
+            return False
+        if not np.isfinite(self.risk[i]) or self.risk[i] <= 0:
+            return False
+        if not self._in_trading_window(i):
+            return False
+        return self._profile_context(i) is not None
+
+    def _entry_filter_result(self, i, execution_i=None):
+        # The source strategy already proved that this timestamp is a viable WF
+        # candidate. The paired row is a counterfactual execution label, so the
+        # opposite profile's Entry/Veto/FLIP rules must not suppress it.
+        self._pending_sr_context = None
+        return True, "Walk-forward paired counterfactual outcome"
+
+
+def walk_forward_counterfactual_config(native_config, prepared_rows: int):
+    """Enable both direction profiles while removing only entry-selection rules."""
+    profiles = {
+        key: replace(
+            profile,
+            enabled=True,
+            flip_direction=False,
+            entry_rules=(),
+        )
+        for key, profile in native_config.strategy_profiles.items()
+    }
+    return replace(
+        research_native_config(native_config, prepared_rows),
+        strategy_profiles=profiles,
+    )
+
+
+def _paired_walk_forward_samples(
+    prepared,
+    intrabar,
+    native_config,
+    source: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict]:
+    """Return complete immutable LONG+SHORT outcome pairs for each viable source."""
+    if source.empty:
+        return source.copy(), {
+            "walk_forward_candidates": 0,
+            "walk_forward_paired_rows": 0,
+            "walk_forward_incomplete_pairs_censored": 0,
+        }
+
+    signal_index = pd.to_numeric(
+        source["research_signal_index"], errors="raise"
+    ).astype("int64")
+    if signal_index.duplicated().any():
+        duplicates = signal_index.loc[signal_index.duplicated()].astype(str).tolist()[:5]
+        raise ValueError(
+            "walk-forward source candidates must be unique by research_signal_index; "
+            f"duplicates: {', '.join(duplicates)}"
+        )
+
+    source_side = source["side"].astype(str).str.upper()
+    if bool((~source_side.isin(["LONG", "SHORT"])).any()):
+        raise ValueError("walk-forward source candidate has an unsupported side")
+
+    opposite_by_index = {
+        int(index): ("SHORT" if side == "LONG" else "LONG")
+        for index, side in zip(signal_index, source_side)
+    }
+    counter_config = walk_forward_counterfactual_config(native_config, len(prepared))
+    counter_engine = WalkForwardCounterfactualSamplingEngine.from_prepared(
+        prepared, intrabar, counter_config
+    )
+    counter_engine.research_forced_side_by_index = opposite_by_index
+    counter_raw = counter_engine.run()
+    counter_stats = counter_engine.research_exit_optimization_stats()
+    _release_research_rejection_metadata(counter_raw)
+    counter = _resolved_samples(counter_raw)
+
+    if not counter.empty:
+        counter_index = pd.to_numeric(
+            counter["research_signal_index"], errors="raise"
+        ).astype("int64")
+        if counter_index.duplicated().any():
+            raise ValueError(
+                "walk-forward counterfactual engine produced duplicate signal outcomes"
+            )
+        counter = counter.assign(_wf_signal_index=counter_index).set_index(
+            "_wf_signal_index", drop=True
+        )
+    else:
+        counter = pd.DataFrame(index=pd.Index([], name="_wf_signal_index"))
+
+    source = source.copy().reset_index(drop=True)
+    source["_wf_signal_index"] = signal_index.to_numpy()
+    complete = source["_wf_signal_index"].isin(counter.index)
+    dropped = int((~complete).sum())
+    source = source.loc[complete].copy().reset_index(drop=True)
+    if source.empty:
+        empty = source.drop(columns=["_wf_signal_index"], errors="ignore")
+        return empty, {
+            "walk_forward_candidates": 0,
+            "walk_forward_paired_rows": 0,
+            "walk_forward_incomplete_pairs_censored": dropped,
+            **{
+                f"walk_forward_counterfactual_{key}": value
+                for key, value in counter_stats.items()
+            },
+        }
+
+    ordered_indices = source["_wf_signal_index"].astype("int64").tolist()
+    opposite = counter.loc[ordered_indices].copy().reset_index(drop=True)
+    source = source.reset_index(drop=True)
+
+    original_sample_id = source.get(
+        "research_sample_id",
+        source["_wf_signal_index"].astype(str),
+    ).astype(str)
+    base_episode = source["research_episode_id"].astype(str)
+    source_side = source["side"].astype(str).str.upper()
+    source_profile = source["strategy_profile_key"].astype(str)
+    candidate_id = (
+        "wf-"
+        + source["_wf_signal_index"].astype("int64").astype(str)
+        + "-"
+        + source_side.str.lower()
+    )
+
+    opposite["research_episode_entry_number"] = source[
+        "research_episode_entry_number"
+    ].to_numpy()
+    opposite["research_episode_viable_entries"] = source[
+        "research_episode_viable_entries"
+    ].to_numpy()
+
+    for frame, is_source in ((source, True), (opposite, False)):
+        frame["walk_forward_candidate_id"] = candidate_id.to_numpy()
+        frame["walk_forward_candidate_source"] = bool(is_source)
+        frame["walk_forward_counterfactual"] = not bool(is_source)
+        frame["walk_forward_source_side"] = source_side.to_numpy()
+        frame["walk_forward_source_profile_key"] = source_profile.to_numpy()
+        frame["walk_forward_source_sample_id"] = original_sample_id.to_numpy()
+        frame["research_sampling_version"] = WALK_FORWARD_SAMPLING_VERSION
+        frame["research_sampling_mode"] = WALK_FORWARD_SAMPLING_MODE
+        frame["research_sampling_interval_candles"] = 1
+        frame["research_sampling_overlap_allowed"] = True
+        frame["research_sampling_independent_equity"] = True
+        frame["research_sampling_population"] = "WALK_FORWARD_PAIRED"
+        frame["research_sample_id"] = (
+            frame["walk_forward_candidate_id"].astype(str)
+            + "-"
+            + frame["side"].astype(str).str.lower()
+        )
+        frame["research_episode_id"] = (
+            pd.Series(base_episode.to_numpy(), index=frame.index, dtype="string")
+            + "-"
+            + frame["side"].astype(str).str.lower()
+        )
+
+    source = source.drop(columns=["_wf_signal_index"], errors="ignore")
+    paired = pd.concat([source, opposite], ignore_index=True, sort=False)
+    paired["_wf_source_sort"] = paired["walk_forward_candidate_source"].map(
+        {True: 0, False: 1}
+    )
+    paired = (
+        paired.sort_values(
+            ["entry_time", "research_signal_index", "_wf_source_sort"],
+            kind="stable",
+        )
+        .drop(columns=["_wf_source_sort"])
+        .reset_index(drop=True)
+    )
+    return paired, {
+        "walk_forward_candidates": int(len(source)),
+        "walk_forward_paired_rows": int(len(paired)),
+        "walk_forward_incomplete_pairs_censored": dropped,
+        "walk_forward_pair_contract": WALK_FORWARD_SAMPLING_VERSION,
+        "walk_forward_both_sides_immutable": True,
+        **{
+            f"walk_forward_counterfactual_{key}": value
+            for key, value in counter_stats.items()
+        },
+    }
 
 
 def generate_strategy_research_samples(
@@ -248,9 +442,17 @@ def generate_strategy_research_samples(
 
     started = time.perf_counter()
     selected = _select_sampling_mode(resolved, normalized_mode, interval)
+    walk_forward_metadata = {}
+    if normalized_mode == WALK_FORWARD_SAMPLING_MODE:
+        selected, walk_forward_metadata = _paired_walk_forward_samples(
+            prepared,
+            intrabar,
+            native_config,
+            selected,
+        )
     selection_seconds = time.perf_counter() - started
 
-    if not selected.empty:
+    if not selected.empty and normalized_mode != WALK_FORWARD_SAMPLING_MODE:
         selected["research_sampling_version"] = RESEARCH_SAMPLING_VERSION
         selected["research_sampling_mode"] = normalized_mode
         selected["research_sampling_interval_candles"] = interval
@@ -266,10 +468,16 @@ def generate_strategy_research_samples(
         )
 
     selected.attrs["research_sampling"] = {
-        "version": RESEARCH_SAMPLING_VERSION,
+        "version": (
+            WALK_FORWARD_SAMPLING_VERSION
+            if normalized_mode == WALK_FORWARD_SAMPLING_MODE
+            else RESEARCH_SAMPLING_VERSION
+        ),
         "enabled": True,
         "mode": normalized_mode,
-        "interval_candles": interval,
+        "interval_candles": (
+            1 if normalized_mode == WALK_FORWARD_SAMPLING_MODE else interval
+        ),
         "strategy_timeframe_minutes": int(native_config.strategy_timeframe_minutes),
         "overlap_allowed": True,
         "independent_equity": True,
@@ -288,6 +496,7 @@ def generate_strategy_research_samples(
         "viable_episodes": viable_episode_count,
         "end_of_data_samples_censored": int(len(raw) - len(resolved)),
         "bayesian_cluster_key": "research_episode_id",
+        **walk_forward_metadata,
     }
     return selected
 

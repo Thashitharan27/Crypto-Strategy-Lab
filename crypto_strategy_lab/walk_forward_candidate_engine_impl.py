@@ -53,6 +53,8 @@ MAX_SCAN_ROWS = 250_000
 _SAFE_TRADE_ENTRY_COLUMNS = (
     "research_sample_id", "research_signal_index", "research_episode_id",
     "research_episode_entry_number", "strategy_profile_key", "side",
+    "walk_forward_candidate_id", "walk_forward_candidate_source",
+    "walk_forward_source_side", "walk_forward_source_profile_key",
     "trade_direction", "signal_strategy", "entry_timing_mode",
     "signal_candle_time", "signal_available_at", "signal_close_price",
     "entry_time", "entry_price", "strategy_entry_time", "strategy_entry_price",
@@ -299,13 +301,16 @@ def _candidate_rows(
     with duckdb.connect(":memory:") as connection:
         sample_columns = _columns(connection, samples_path)
         context_columns = _columns(connection, context_path)
-        required_samples = {"research_signal_index", "strategy_profile_key", "side", "entry_time"}
+        required_samples = {
+            "research_signal_index", "strategy_profile_key", "side", "entry_time",
+            "walk_forward_candidate_id", "walk_forward_candidate_source",
+        }
         required_context = {"strategy_index", "decision_available_at"}
         missing_samples = required_samples - set(sample_columns)
         missing_context = required_context - set(context_columns)
         if missing_samples:
             raise ValueError(
-                "Every Viable Entry artifact is missing candidate identity columns: "
+                "Walk Forward paired artifact is missing candidate identity columns: "
                 + ", ".join(sorted(missing_samples))
             )
         if missing_context:
@@ -318,13 +323,16 @@ def _candidate_rows(
             escaped = name.replace('"', '""')
             alias = ("__ctx_" + name).replace('"', '')
             context_select.append(f'c."{escaped}" AS "{alias}"')
-        where = ""
+        conditions = [
+            "COALESCE(CAST(t.walk_forward_candidate_source AS BOOLEAN), FALSE)"
+        ]
         params: list[Any] = []
         if cursor is not None:
             # >= is intentional. Seen identities are removed later, preserving a
             # second opportunity at the same timestamp as the previous event.
-            where = "WHERE CAST(t.entry_time AS TIMESTAMPTZ) >= ?"
+            conditions.append("CAST(t.entry_time AS TIMESTAMPTZ) >= ?")
             params.append(cursor.to_pydatetime())
+        where = "WHERE " + " AND ".join(conditions)
         sql = f"""
             SELECT t.*, {', '.join(context_select)}, prev.adx AS __wf_prev_adx
             FROM read_parquet('{_quote(samples_path)}') t
@@ -851,7 +859,7 @@ def get_next_walk_forward_candidate(
     expected_state_hash: str,
     max_scan_rows: int = MAX_SCAN_ROWS,
 ) -> dict[str, Any]:
-    """Apply current causal rules to EVE and atomically capture the first match."""
+    """Apply current causal rules to paired WF source rows and capture the first match."""
     if isinstance(max_scan_rows, bool) or not isinstance(max_scan_rows, int):
         raise ValueError("max_scan_rows must be an integer")
     if not 1 <= max_scan_rows <= MAX_SCAN_ROWS:
@@ -886,9 +894,10 @@ def get_next_walk_forward_candidate(
         raise ValueError("experiment definition has no reference_run")
     reference_manifest = reports.get_run_manifest(reference_run)
     run_dir = reports.resolve_run(reference_run)
-    if _sampling_mode(reference_manifest) != "EVERY_VIABLE_ENTRY":
+    if _sampling_mode(reference_manifest) != "WALK_FORWARD":
         raise ValueError(
-            "reference run must contain EVERY_VIABLE_ENTRY research sampling for deterministic candidate selection"
+            "reference run must use WALK_FORWARD paired LONG+SHORT research sampling "
+            "for deterministic candidate selection"
         )
     samples_path = _artifact(reference_manifest, run_dir, "research_sampling_trades")
     context_path = _artifact(reference_manifest, run_dir, "feature_context")
@@ -957,6 +966,9 @@ def get_next_walk_forward_candidate(
             "strategy_snapshot_sha256": snapshot["snapshot_sha256"],
             "reference_run": reference_run,
             "reference_sample_id": sample_id or None,
+            "reference_walk_forward_candidate_id": (
+                _json_safe(row.get("walk_forward_candidate_id")) or None
+            ),
             "research_signal_index": signal_index,
             "candidate_id": candidate_id,
             "strategy_profile_key": profile,

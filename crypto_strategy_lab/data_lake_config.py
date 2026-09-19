@@ -520,7 +520,7 @@ class ResearchRunConfig:
         if min(execution.maker_fee, execution.taker_fee, execution.slippage) < 0:
             raise ValueError("fees/slippage must be non-negative")
         if reporting.research_sampling_mode not in {
-            "PORTFOLIO", "EVERY_VIABLE_ENTRY", "FIXED_INTERVAL", "EPISODE_FIRST"
+            "PORTFOLIO", "EVERY_VIABLE_ENTRY", "WALK_FORWARD", "FIXED_INTERVAL", "EPISODE_FIRST"
         }:
             raise ValueError("invalid research sampling mode")
         if reporting.research_sampling_interval_candles <= 0:

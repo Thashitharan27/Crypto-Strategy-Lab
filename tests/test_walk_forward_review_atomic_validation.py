@@ -72,7 +72,7 @@ def _environment(tmp_path: Path):
         "request": {"symbol": "BTCUSDT"},
         "config": _config(),
         "artifacts": {},
-        "research": {"strategy_research_sampling": {"mode": "EVERY_VIABLE_ENTRY"}},
+        "research": {"strategy_research_sampling": {"mode": "WALK_FORWARD"}},
     }
     control = SimpleNamespace(project_root=project, output_root=output)
     reports = FakeReports(run_dir, manifest)

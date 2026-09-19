@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 from crypto_strategy_lab.walk_forward_candidate_engine import get_next_walk_forward_candidate
 from mcp_server import control_server
 
@@ -16,7 +18,7 @@ def _legacy_test_module():
     return module
 
 
-def test_frozen_active_flip_resumes_with_immutable_replay_without_refreeze(
+def test_incomplete_paired_flip_fails_closed_without_replay(
     tmp_path, monkeypatch
 ):
     helpers = _legacy_test_module()
@@ -79,59 +81,38 @@ def test_frozen_active_flip_resumes_with_immutable_replay_without_refreeze(
         source="CHATGPT_FROZEN_VIEW",
     )
 
-    observed = {}
+    def should_not_replay(*args, **kwargs):
+        raise AssertionError("paired WALK_FORWARD integrity failures must not replay 1m")
 
-    def replay(control_arg, reports_arg, *, reference_run, candidate, strategy_action):
-        observed["reference_run"] = reference_run
-        observed["candidate_id"] = candidate["candidate_id"]
-        observed["strategy_action"] = strategy_action
-        return {
-            "result": "WIN",
-            "net_r": 0.99,
-            "gross_r": 1.0,
-            "fee_r": 0.01,
-            "side": "SHORT",
-            "exit_time": "2025-01-02T04:00:00+00:00",
-            "exit_reason": "TP",
-            "source": "IMMUTABLE_1M_INTRABAR_REPLAY",
-            "replay_reason": "ACTIVE_CAUSAL_FLIP_WITHOUT_UNIQUE_OPPOSITE_EVE",
-        }
-
-    monkeypatch.setattr(control_server, "_replay_flipped_candidate_one_r", replay)
-
-    result = control_server._impl._submit_walk_forward_decision(
-        control,
-        reports,
-        experiment_id=helpers.EXPERIMENT_ID,
-        candidate_id=captured["candidate_id"],
-        candidate_token=captured["candidate_token"],
-        chatgpt_view="SHORT",
-        confidence_pct=66,
-        reasoning=reasoning,
-        operation_id="decision:prospective-flip:resume",
-        expected_sequence=frozen["sequence"],
-        expected_state_hash=frozen["state_hash"],
-        auto_advance=False,
+    monkeypatch.setattr(
+        control_server, "_replay_flipped_candidate_one_r", should_not_replay
     )
 
-    assert observed == {
-        "reference_run": helpers.REFERENCE_RUN,
-        "candidate_id": captured["candidate_id"],
-        "strategy_action": "SHORT",
-    }
-    assert result["status"] == "TRADE_SETTLED"
-    assert result["strategy_action"] == "SHORT"
-    assert result["chatgpt_view"] == "SHORT"
-    assert result["settlement"]["final_action"] == "SHORT"
-    assert result["settlement"]["net_r"] == 0.99
-    assert result["settlement"]["equity_after"] == 1009.9
+    with pytest.raises(ValueError, match="paired Walk Forward outcome"):
+        control_server._impl._submit_walk_forward_decision(
+            control,
+            reports,
+            experiment_id=helpers.EXPERIMENT_ID,
+            candidate_id=captured["candidate_id"],
+            candidate_token=captured["candidate_token"],
+            chatgpt_view="SHORT",
+            confidence_pct=66,
+            reasoning=reasoning,
+            operation_id="decision:prospective-flip:resume",
+            expected_sequence=frozen["sequence"],
+            expected_state_hash=frozen["state_hash"],
+            auto_advance=False,
+        )
 
-    events = store.read(helpers.EXPERIMENT_ID, recent_events=100)["recent_events"]
-    frozen_events = [event for event in events if event["event_type"] == "DECISION_FROZEN"]
-    revealed_events = [event for event in events if event["event_type"] == "OUTCOME_REVEALED"]
-    assert len(frozen_events) == 1
-    assert frozen_events[0]["payload"]["chatgpt_confidence_pct"] == 66
-    assert frozen_events[0]["payload"]["chatgpt_view"] == "SHORT"
-    assert len(revealed_events) == 1
-    assert revealed_events[0]["payload"]["strategy_action"] == "SHORT"
-    assert revealed_events[0]["payload"]["outcome"]["source"] == "IMMUTABLE_1M_INTRABAR_REPLAY"
+    readback = store.read(helpers.EXPERIMENT_ID, recent_events=100)
+    assert (
+        readback["derived_state"]["candidate_states"][captured["candidate_id"]]
+        == "DECISION_FROZEN"
+    )
+    revealed_events = [
+        event
+        for event in readback["recent_events"]
+        if event["event_type"] == "OUTCOME_REVEALED"
+    ]
+    assert revealed_events == []
+

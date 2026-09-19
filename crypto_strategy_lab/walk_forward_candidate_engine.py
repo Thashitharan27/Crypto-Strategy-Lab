@@ -10,7 +10,7 @@ semantics and outcome firewall unchanged while making large scans bounded:
 * accelerated callers can resume a scan from an exact (time, signal, side)
   checkpoint without skipping same-timestamp opportunities;
 * teacher losses are considered only inside an explicit teacher-loss FLIP
-  policy, and the underlying selector still requires an immutable 1.0R profile.
+  policy, and paired losses become due only after both immutable sides resolve.
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def _teacher_loss_flip_enabled() -> bool:
 
 @contextmanager
 def teacher_loss_flip_policy(enabled: bool):
-    """Temporarily select whether 1R teacher losses participate in chronology."""
+    """Temporarily select whether paired teacher losses participate in chronology."""
     marker = object()
     previous = getattr(_TEACHER_POLICY_CONTEXT, "enabled", marker)
     _TEACHER_POLICY_CONTEXT.enabled = bool(enabled)
@@ -163,13 +163,15 @@ class _StreamingCandidateRows:
                 "strategy_profile_key",
                 "side",
                 "entry_time",
+                "walk_forward_candidate_id",
+                "walk_forward_candidate_source",
             }
             required_context = {"strategy_index", "decision_available_at"}
             missing_samples = required_samples - set(sample_columns)
             missing_context = required_context - set(context_columns)
             if missing_samples:
                 raise ValueError(
-                    "Every Viable Entry artifact is missing candidate identity columns: "
+                    "Walk Forward paired artifact is missing candidate identity columns: "
                     + ", ".join(sorted(missing_samples))
                 )
             if missing_context:
@@ -211,6 +213,14 @@ class _StreamingCandidateRows:
             elif self.market_cursor is not None:
                 where = "WHERE CAST(t.entry_time AS TIMESTAMPTZ) >= ?"
                 params.append(self.market_cursor.to_pydatetime())
+
+            source_filter = (
+                "COALESCE(CAST(t.walk_forward_candidate_source AS BOOLEAN), FALSE)"
+            )
+            if where:
+                where = where.replace("WHERE", f"WHERE {source_filter} AND", 1)
+            else:
+                where = f"WHERE {source_filter}"
 
             sql = f"""
                 SELECT t.*, {', '.join(context_select)}, prev.adx AS __wf_prev_adx

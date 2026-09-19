@@ -10,8 +10,8 @@ workflow behavior:
   an exact causal scan cursor when that budget is exhausted without a candidate;
 * MCP judgment semantics separate the executable ``strategy_action`` determined
   by ENTRY/VETO/FLIP rules from ChatGPT's independent ``chatgpt_view``;
-* resolved teacher losses from immutable 1.0R profiles are surfaced as FLIP
-  review packets without ever touching walk-forward equity.
+* resolved teacher losses from immutable paired WALK_FORWARD references are
+  surfaced as FLIP review packets without ever touching walk-forward equity.
 
 For new MCP decisions, ChatGPT's view is research evidence only. It never changes
 the side used for TP/SL outcome lookup or walk-forward equity unless an active
@@ -274,8 +274,8 @@ def _reveal_strategy_action_candidate(
             "captured candidate and immutable experiment definition have no reference_run"
         )
 
-    # OUTCOME FIREWALL: the outcome-bearing EVE artifact is opened only after
-    # DECISION_FROZEN is durable, but the lookup side is always strategy_action.
+    # OUTCOME FIREWALL: the paired LONG/SHORT artifact is opened only after
+    # DECISION_FROZEN is durable, and only strategy_action's row is returned.
     outcome = _impl._outcome_row_after_decision(
         reports, reference_run, candidate, strategy_action
     )
@@ -581,9 +581,9 @@ def _decorate_teacher_loss_packet(
     teacher["result"] = "LOSS"
     updated["status"] = "TEACHER_LOSS_REVIEW_REQUIRED"
     updated["review_rule"] = (
-        "This resolved 1:1 teacher loss is FLIP evidence only. Teacher evidence never changes "
+        "This resolved teacher loss is FLIP evidence only. Teacher evidence never changes "
         "walk-forward equity. Use NO_CHANGE or FLIP_EVIDENCE unless repeated prior causal "
-        "evidence and a verified opposite-side 1R win justify FLIP_LEARNED."
+        "evidence and the immutable paired opposite-side outcome justify FLIP_LEARNED."
     )
 
     side = str(teacher.get("side", "")).upper()
@@ -615,6 +615,9 @@ def _decorate_teacher_loss_packet(
         "research_signal_index": int(signal_index),
         "source_side": side,
         "reference_sample_id": trade_context.get("research_sample_id"),
+        "reference_walk_forward_candidate_id": trade_context.get(
+            "walk_forward_candidate_id"
+        ),
         "strategy_profile_key": profile,
         "entry_time": teacher.get("entry_time") or trade_context.get("entry_time"),
     }

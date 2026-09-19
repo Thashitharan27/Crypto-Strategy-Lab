@@ -5,8 +5,8 @@ ChatGPT judgment remains mandatory for direction decisions, teacher learning,
 loss review, and periodic review.
 
 The critical outcome firewall is structural: ``freeze_and_reveal`` appends and
-fsyncs DECISION_FROZEN before it opens the outcome-bearing Every Viable Entry
-artifact.  A crash after freezing is recoverable; retrying resumes from the
+fsyncs DECISION_FROZEN before it opens the outcome-bearing paired Walk Forward
+artifact. A crash after freezing is recoverable; retrying resumes from the
 already-frozen decision and can never replace it.
 """
 from __future__ import annotations
@@ -53,6 +53,9 @@ SETTLEMENT_CONTRACT = "causal_walk_forward_settlement_v1"
 _OUTCOME_FIELDS = (
     "research_sample_id",
     "research_signal_index",
+    "walk_forward_candidate_id",
+    "walk_forward_candidate_source",
+    "walk_forward_source_side",
     "strategy_profile_key",
     "side",
     "entry_time",
@@ -174,13 +177,16 @@ def _outcome_row_after_decision(
 ) -> dict[str, Any]:
     """Read the exact frozen-side outcome. Call only after DECISION_FROZEN is durable."""
     manifest = reports.get_run_manifest(reference_run)
-    if _sampling_mode(manifest) != "EVERY_VIABLE_ENTRY":
-        raise ValueError("reference run is not an EVERY_VIABLE_ENTRY research run")
+    if _sampling_mode(manifest) != "WALK_FORWARD":
+        raise ValueError("reference run is not a WALK_FORWARD paired research run")
     run_dir = reports.resolve_run(reference_run)
     path = _artifact(manifest, run_dir, "research_sampling_trades")
     signal_index = int(candidate["research_signal_index"])
     source_side = str(candidate.get("source_side", "")).upper()
     sample_id = str(candidate.get("reference_sample_id") or "").strip()
+    paired_candidate_id = str(
+        candidate.get("reference_walk_forward_candidate_id") or ""
+    ).strip()
     source_profile = str(candidate.get("strategy_profile_key", "")).lower()
     regime = source_profile.rsplit("_", 1)[0] if "_" in source_profile else ""
     target_profile = f"{regime}_{frozen_side.lower()}" if regime else ""
@@ -189,24 +195,36 @@ def _outcome_row_after_decision(
         columns = [str(row[0]) for row in connection.execute(
             f"DESCRIBE SELECT * FROM read_parquet('{_quote(path)}')"
         ).fetchall()]
-        required = {"research_signal_index", "side", "pair_net_r", "exit_time"}
+        required = {
+            "research_signal_index", "side", "pair_net_r", "exit_time",
+            "walk_forward_candidate_id",
+        }
         missing = sorted(required - set(columns))
         if missing:
             raise ValueError(
-                "Every Viable Entry artifact cannot resolve a frozen decision; missing: "
+                "Walk Forward paired artifact cannot resolve a frozen decision; missing: "
                 + ", ".join(missing)
             )
         selected = [name for name in _OUTCOME_FIELDS if name in columns]
         escaped = ", ".join(f'"{name.replace(chr(34), chr(34) * 2)}"' for name in selected)
-        where = "CAST(research_signal_index AS BIGINT)=? AND UPPER(CAST(side AS VARCHAR))=?"
-        params: list[Any] = [signal_index, frozen_side]
-        if frozen_side == source_side and sample_id and "research_sample_id" in columns:
-            where += " AND CAST(research_sample_id AS VARCHAR)=?"
-            params.append(sample_id)
-        elif target_profile and "strategy_profile_key" in columns:
-            # Prefer the exact opposite/selected profile when both sides exist at one signal.
-            where += " AND LOWER(CAST(strategy_profile_key AS VARCHAR))=?"
-            params.append(target_profile)
+        if paired_candidate_id:
+            where = (
+                "CAST(walk_forward_candidate_id AS VARCHAR)=? "
+                "AND UPPER(CAST(side AS VARCHAR))=?"
+            )
+            params: list[Any] = [paired_candidate_id, frozen_side]
+        else:
+            where = (
+                "CAST(research_signal_index AS BIGINT)=? "
+                "AND UPPER(CAST(side AS VARCHAR))=?"
+            )
+            params = [signal_index, frozen_side]
+            if frozen_side == source_side and sample_id and "research_sample_id" in columns:
+                where += " AND CAST(research_sample_id AS VARCHAR)=?"
+                params.append(sample_id)
+            elif target_profile and "strategy_profile_key" in columns:
+                where += " AND LOWER(CAST(strategy_profile_key AS VARCHAR))=?"
+                params.append(target_profile)
         rows = connection.execute(
             f"SELECT {escaped} FROM read_parquet('{_quote(path)}') WHERE {where} LIMIT 3",
             params,
@@ -215,10 +233,10 @@ def _outcome_row_after_decision(
     if len(rows) != 1:
         if frozen_side != source_side:
             raise ValueError(
-                "the frozen side has no unique immutable Every Viable Entry outcome at this signal; "
+                "the frozen side has no unique immutable paired Walk Forward outcome; "
                 "decision remains frozen and no outcome was revealed"
             )
-        raise ValueError("captured candidate has no unique immutable Every Viable Entry outcome")
+        raise ValueError("captured candidate has no unique immutable paired Walk Forward outcome")
     values = dict(zip(selected, rows[0]))
     if "entry_time" in values and candidate.get("entry_time"):
         actual = _utc_timestamp(values["entry_time"], "outcome entry_time")
@@ -803,7 +821,7 @@ def _teacher_review_packet(
         return packet
     manifest = reports.get_run_manifest(reference_run)
     run_dir = reports.resolve_run(reference_run)
-    if _sampling_mode(manifest) != "EVERY_VIABLE_ENTRY":
+    if _sampling_mode(manifest) != "WALK_FORWARD":
         return packet
     samples_path = _artifact(manifest, run_dir, "research_sampling_trades")
     context_path = _artifact(manifest, run_dir, "feature_context")

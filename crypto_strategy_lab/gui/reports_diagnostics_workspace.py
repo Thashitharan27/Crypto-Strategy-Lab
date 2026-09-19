@@ -84,14 +84,18 @@ class ReportsDiagnosticsWorkspace(QWidget):
             "Every Viable Entry — resilience", "EVERY_VIABLE_ENTRY"
         )
         self.research_sampling_mode.addItem(
+            "Walk Forward — paired LONG + SHORT", "WALK_FORWARD"
+        )
+        self.research_sampling_mode.addItem(
             "Fixed Interval — every N viable candles", "FIXED_INTERVAL"
         )
         self.research_sampling_mode.addItem(
             "Episode First — first viable entry only", "EPISODE_FIRST"
         )
         self.research_sampling_mode.setToolTip(
-            "Portfolio keeps normal capital/open-trade constraints. Research modes run a "
-            "separate strategy-valid sample population with overlapping independent trades."
+            "Portfolio keeps normal capital/open-trade constraints. Every Viable Entry "
+            "records the strategy-selected side. Walk Forward records one immutable LONG and "
+            "SHORT outcome for every strategy-viable candidate."
         )
         self.research_sampling_mode.currentIndexChanged.connect(
             self._research_sampling_mode_changed
@@ -115,13 +119,14 @@ class ReportsDiagnosticsWorkspace(QWidget):
         form.addRow("Fixed Interval", self.research_sampling_interval)
 
         note = QLabel(
-            "Research modes do not replace the normal portfolio result. They open a separate "
-            "synthetic trade whenever the configured strategy is viable, preserve the same "
-            "Entry/Veto rules and SL/TP/timeout/intrabar execution, and ignore only portfolio "
-            "overlap, combined exposure and compounding. Samples are grouped into uninterrupted "
-            "episodes so repeated entries from one market move are not presented as independent "
-            "confirmations. Equity curve, drawdown, exposure and compounded return are explicitly "
-            "invalid for this research population."
+            "Research modes do not replace the normal portfolio result. Every Viable Entry "
+            "keeps the configured strategy side. Walk Forward first finds the same strategy-valid "
+            "candidate, then records both LONG and SHORT with native SL/TP/timeout/intrabar, fees "
+            "and slippage. The opposite row bypasses entry-selection rules only; it still uses the "
+            "matching regime/direction execution profile. Only complete two-sided pairs are kept, "
+            "so 1:3 and other asymmetric outcomes never infer the opposite result from the source "
+            "trade. Equity curve, drawdown, exposure and compounded return are invalid for these "
+            "independent research observations."
         )
         note.setWordWrap(True)
         note.setStyleSheet(

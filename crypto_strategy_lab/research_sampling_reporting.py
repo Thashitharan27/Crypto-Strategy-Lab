@@ -14,6 +14,7 @@ from crypto_strategy_lab.research_adapters import native_simulator_config
 from crypto_strategy_lab.research_reporting import _catalog_entry
 from crypto_strategy_lab.research_sampling import (
     RESEARCH_SAMPLING_MODES,
+    WALK_FORWARD_SAMPLING_MODE,
     build_context_breakdown,
     build_episode_table,
     build_sampling_summary,
@@ -43,6 +44,11 @@ def _stable_samples(samples: pd.DataFrame) -> pd.DataFrame:
         "exit_time": pd.Series(dtype="datetime64[ns]"),
         "pair_net_r": pd.Series(dtype="float64"),
         "pair_net_pnl": pd.Series(dtype="float64"),
+        "walk_forward_candidate_id": pd.Series(dtype="string"),
+        "walk_forward_candidate_source": pd.Series(dtype="bool"),
+        "walk_forward_counterfactual": pd.Series(dtype="bool"),
+        "walk_forward_source_side": pd.Series(dtype="string"),
+        "walk_forward_source_profile_key": pd.Series(dtype="string"),
     })
 
 
@@ -65,6 +71,45 @@ def _validate_samples(samples: pd.DataFrame) -> None:
         raise ValueError("research sampling artifact contains exit-before-entry rows")
     if set(samples["side"].astype(str).str.upper()) - {"LONG", "SHORT"}:
         raise ValueError("research sampling artifact contains an unsupported direction")
+
+    modes = set(samples["research_sampling_mode"].astype(str).str.upper())
+    if WALK_FORWARD_SAMPLING_MODE in modes:
+        required_pair = {
+            "walk_forward_candidate_id",
+            "walk_forward_candidate_source",
+            "walk_forward_counterfactual",
+            "walk_forward_source_side",
+            "walk_forward_source_profile_key",
+        }
+        missing_pair = sorted(required_pair - set(samples.columns))
+        if missing_pair:
+            raise ValueError(
+                "walk-forward sampling artifact is missing paired outcome columns: "
+                + ", ".join(missing_pair)
+            )
+        if modes != {WALK_FORWARD_SAMPLING_MODE}:
+            raise ValueError("walk-forward sampling artifact mixes sampling modes")
+
+        grouped = samples.groupby("walk_forward_candidate_id", sort=False)
+        counts = grouped.size()
+        if not counts.eq(2).all():
+            raise ValueError("walk-forward sampling requires exactly two rows per candidate")
+        sides = grouped["side"].agg(
+            lambda values: set(values.astype(str).str.upper())
+        )
+        if not sides.map(lambda value: value == {"LONG", "SHORT"}).all():
+            raise ValueError("walk-forward sampling candidate is missing LONG or SHORT")
+        source_counts = grouped["walk_forward_candidate_source"].sum()
+        if not source_counts.eq(1).all():
+            raise ValueError(
+                "walk-forward sampling requires exactly one source row per candidate"
+            )
+        source_rows = samples.loc[samples["walk_forward_candidate_source"].astype(bool)]
+        if not (
+            source_rows["side"].astype(str).str.upper()
+            == source_rows["walk_forward_source_side"].astype(str).str.upper()
+        ).all():
+            raise ValueError("walk-forward source row does not match its source side")
 
 
 def _episode_reporting_context(
@@ -212,13 +257,18 @@ def append_research_sampling_artifacts(result, context) -> None:
 
     manifest_path = run_dir / "run_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    sample_population = (
+        "WALK_FORWARD_PAIRED"
+        if mode == WALK_FORWARD_SAMPLING_MODE
+        else "STRATEGY_VIABLE"
+    )
     manifest["artifacts"]["research_sampling_trades"] = _catalog_entry(
         samples_path,
         run_dir,
         "parquet",
         len(samples),
         collection_status="COLLECTED",
-        research_population="STRATEGY_VIABLE",
+        research_population=sample_population,
     )
     manifest["artifacts"]["research_sampling_episodes"] = _catalog_entry(
         episodes_path,
