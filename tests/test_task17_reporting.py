@@ -257,6 +257,16 @@ def test_sr_zone_artifact_requires_exact_causal_attachment(tmp_path: Path):
             }
         ]
     )
+    # Simulate the v8.0 mixed physical timestamp representation: the
+    # feature-context contract is UTC-naive TIMESTAMP while zone rows are
+    # TIMESTAMPTZ. Validation must remain host-timezone independent.
+    for column in (
+        "strategy_candle_open_time",
+        "decision_available_at",
+        "sr_completed_candle_time",
+    ):
+        zones[column] = pd.to_datetime(zones[column], utc=True)
+
     context_path = tmp_path / "context.parquet"
     zones_path = tmp_path / "sr_zones.parquet"
     _write_parquet_atomic(context, context_path)
@@ -268,7 +278,9 @@ def test_sr_zone_artifact_requires_exact_causal_attachment(tmp_path: Path):
         future.loc[0, "decision_available_at"] + pd.Timedelta(minutes=1)
     )
     _write_parquet_atomic(future, zones_path)
-    with pytest.raises(ValueError, match="causal/schema"):
+    with pytest.raises(
+        ValueError, match="future_sr_completed_candle=1"
+    ):
         _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
 
 
