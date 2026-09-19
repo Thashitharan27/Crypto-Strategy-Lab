@@ -891,6 +891,212 @@ class CompletedRunVisualizer:
             )
         return frame
 
+    def _sr_zone_inventory(
+        self, start: pd.Timestamp, end: pd.Timestamp
+    ) -> pd.DataFrame:
+        frame = self._query_time_window(
+            self.sr_zones_path,
+            "strategy_candle_open_time",
+            start,
+            end,
+        )
+        if not frame.empty:
+            frame["strategy_candle_open_time"] = pd.to_datetime(
+                frame["strategy_candle_open_time"], utc=True, errors="coerce"
+            )
+            if "sr_completed_candle_time" in frame.columns:
+                frame["sr_completed_candle_time"] = pd.to_datetime(
+                    frame["sr_completed_candle_time"], utc=True, errors="coerce"
+                )
+        return frame
+
+    def _inventory_sr_zones(
+        self,
+        inventory: pd.DataFrame,
+        *,
+        visible_start: pd.Timestamp,
+        visible_end: pd.Timestamp,
+        entry_snapshot: pd.Timestamp | None,
+    ) -> list[dict[str, Any]]:
+        """Compact full per-candle inventory into visual zone lifespans."""
+        if inventory.empty:
+            return []
+        frame = inventory.copy()
+        frame = frame.loc[
+            frame["strategy_candle_open_time"] >= visible_start
+        ].sort_values(
+            ["sr_timeframe_minutes", "zone_id", "strategy_index"],
+            kind="stable",
+        )
+        if frame.empty:
+            return []
+
+        interval = pd.Timedelta(
+            interval_to_timedelta(self.seed.request.strategy_timeframe)
+        )
+        entry = _utc(entry_snapshot) if entry_snapshot is not None else None
+        max_visible_index = int(frame["strategy_index"].max())
+        zones: list[dict[str, Any]] = []
+
+        group_columns = [
+            "sr_timeframe",
+            "zone_id",
+            "structure",
+            "zone_low",
+            "zone_high",
+        ]
+        for keys, group in frame.groupby(group_columns, sort=False, dropna=False):
+            label, zone_id, structure, zone_low, zone_high = keys
+            if label not in SR_TIMEFRAMES:
+                continue
+            group = group.sort_values("strategy_index", kind="stable").reset_index(
+                drop=True
+            )
+            cursor = 0
+            while cursor < len(group):
+                end = cursor + 1
+                while end < len(group):
+                    prior_index = int(group.iloc[end - 1]["strategy_index"])
+                    next_index = int(group.iloc[end]["strategy_index"])
+                    if next_index != prior_index + 1:
+                        break
+                    end += 1
+
+                segment = group.iloc[cursor:end]
+                first = segment.iloc[0]
+                last = segment.iloc[-1]
+                start_time = _utc(first["strategy_candle_open_time"])
+                end_time = _utc(last["strategy_candle_open_time"]) + interval
+                active_at_entry = bool(
+                    entry is not None and start_time <= entry < end_time
+                )
+                entry_row = None
+                if active_at_entry:
+                    eligible = segment.loc[
+                        pd.to_datetime(
+                            segment["strategy_candle_open_time"], utc=True
+                        )
+                        <= entry
+                    ]
+                    if not eligible.empty:
+                        entry_row = eligible.iloc[-1]
+                active_at_end = bool(
+                    int(last["strategy_index"]) == max_visible_index
+                    or end_time >= visible_end
+                )
+
+                zones.append(
+                    {
+                        "name": (
+                            f"{SR_TIMEFRAMES[str(label)]} "
+                            f"{str(structure).title()}"
+                        ),
+                        "kind": "sr-zone",
+                        "timeframe": str(label),
+                        "structure": str(structure).lower(),
+                        "zoneIdentity": ["inventory", str(zone_id)],
+                        "start": _unix_seconds(start_time),
+                        "end": _unix_seconds(min(end_time, visible_end)),
+                        "low": float(zone_low),
+                        "high": float(zone_high),
+                        "stateEnd": _json_value(last.get("state")),
+                        "stateAtEntry": (
+                            _json_value(entry_row.get("state"))
+                            if entry_row is not None
+                            else None
+                        ),
+                        "activeAtEntry": active_at_entry,
+                        "activeAtEnd": active_at_end,
+                        "nearestAtEntry": (
+                            bool(entry_row.get("nearest"))
+                            if entry_row is not None
+                            else False
+                        ),
+                        "nearestAtEnd": (
+                            bool(last.get("nearest")) if active_at_end else False
+                        ),
+                        "nearAtEnd": bool(last.get("near")),
+                        "insideAtEnd": bool(last.get("inside")),
+                        "testCountEnd": _json_value(last.get("test_count")),
+                        "touchCountEnd": _json_value(last.get("touch_count")),
+                        "sourceCountEnd": _json_value(last.get("source_count")),
+                        "validationRejectionAtrEnd": _finite(
+                            last.get("validation_rejection_atr")
+                        ),
+                        "rejectionAtrEnd": _finite(last.get("rejection_atr")),
+                        "inventoryFull": True,
+                    }
+                )
+                cursor = end
+
+        zones.sort(
+            key=lambda item: (
+                item["timeframe"],
+                item["structure"],
+                item["start"],
+                item["low"],
+            )
+        )
+        return zones
+
+    @staticmethod
+    def _inventory_sr_lifecycle_events(
+        inventory: pd.DataFrame,
+    ) -> list[dict[str, Any]]:
+        """Show TEST/HELD transitions for every persisted active zone."""
+        if inventory.empty:
+            return []
+        events: list[dict[str, Any]] = []
+        grouped = inventory.sort_values(
+            ["sr_timeframe_minutes", "zone_id", "strategy_index"],
+            kind="stable",
+        ).groupby(["sr_timeframe", "zone_id", "structure"], sort=False)
+        for (label, _zone_id, structure), group in grouped:
+            if label not in SR_TIMEFRAMES:
+                continue
+            prior_test = None
+            prior_held = False
+            for _, row in group.iterrows():
+                test_count = int(row.get("test_count") or 0)
+                held = bool(row.get("held"))
+                event = None
+                if prior_test is not None and test_count > prior_test:
+                    event = "TEST"
+                if held and not prior_held:
+                    event = "HELD"
+                prior_test = test_count
+                prior_held = held
+                if event is None:
+                    continue
+                events.append(
+                    {
+                        "time": _unix_seconds(row["strategy_candle_open_time"]),
+                        "position": (
+                            "belowBar"
+                            if str(structure).upper() == "SUPPORT"
+                            else "aboveBar"
+                        ),
+                        "shape": "circle" if event == "TEST" else "square",
+                        "text": (
+                            f"{SR_TIMEFRAMES[str(label)]} "
+                            f"{str(structure)[0].upper()} {event}"
+                        ),
+                        "kind": "sr-event",
+                        "event": event.lower(),
+                        "timeframe": str(label),
+                        "structure": str(structure).lower(),
+                    }
+                )
+        events.sort(
+            key=lambda item: (
+                int(item["time"]),
+                item["timeframe"],
+                item["structure"],
+            )
+        )
+        return events
+
+
     @staticmethod
     def _sr_frame_column(
         frame: pd.DataFrame, label: str, suffix: str
