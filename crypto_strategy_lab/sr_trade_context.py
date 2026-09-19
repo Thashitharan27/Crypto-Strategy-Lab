@@ -159,7 +159,7 @@ def planned_trade_distances(profile: Any, risk_unit: Any) -> tuple[float | None,
     if bool(_profile_value(profile, "r_step_trailing_enabled", False)):
         maximum_r = _finite(_profile_value(profile, "r_step_maximum_r", None))
         if maximum_r is not None and maximum_r > 0:
-            return stop_distance, unit * maximum_r
+            return stop_distance, stop_distance * maximum_r
 
     if bool(_profile_value(profile, "partial_profit_enabled", False)):
         tp2_r = _finite(_profile_value(profile, "tp2_r", None))
