@@ -82,7 +82,7 @@ class DataLakeGuiBacktestWorker(BacktestWorker):
             bb_period=self.config.bb_period,
             bb_stddevs=self.config.bb_stddevs,
             mean_reversion_period=self.config.mean_reversion_period,
-            mean_reversion_mean_type=getattr(self.config, "mean_reversion_mean_type", "SMA"),
+            mean_reversion_mean_type=getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME"),
             mean_reversion_bb_stddevs=getattr(self.config, "mean_reversion_bb_stddevs", 2.0),
             mean_reversion_rsi_period=getattr(self.config, "mean_reversion_rsi_period", 14),
             mean_reversion_rsi_oversold=getattr(self.config, "mean_reversion_rsi_oversold", 30.0),
