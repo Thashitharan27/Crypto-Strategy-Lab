@@ -13,6 +13,7 @@ from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBa
 from crypto_strategy_lab.prepared_backtest import IntrabarExecutionData
 from crypto_strategy_lab.research_adapters import native_simulator_config
 from crypto_strategy_lab.research_sampling import (
+    WALK_FORWARD_SAMPLING_MODE,
     StrategyResearchSamplingEngine,
     _annotate_episodes,
     _resolved_samples,
@@ -24,6 +25,7 @@ from crypto_strategy_lab.research_sampling import (
 )
 from crypto_strategy_lab.research_sampling_reporting import (
     _episode_reporting_context,
+    _validate_samples,
     research_sampling_enabled,
 )
 from crypto_strategy_lab.trade import ExitReason, Position, Side, TradePair
@@ -152,6 +154,14 @@ def test_research_sampling_config_is_strict_and_persistent():
     configured.validate()
     assert configured.to_dict()["reporting"]["research_sampling_mode"] == "FIXED_INTERVAL"
     assert research_sampling_enabled(configured.reporting)
+
+    paired = replace(
+        run,
+        reporting=replace(run.reporting, research_sampling_mode=WALK_FORWARD_SAMPLING_MODE),
+    )
+    paired.validate()
+    assert paired.to_dict()["reporting"]["research_sampling_mode"] == "WALK_FORWARD"
+    assert research_sampling_enabled(paired.reporting)
 
     with pytest.raises(ValueError, match="invalid research sampling mode"):
         replace(run, reporting=replace(run.reporting, research_sampling_mode="UNKNOWN")).validate()
@@ -292,6 +302,52 @@ def test_sampling_modes_are_episode_anchored_not_global_index_anchored():
     assert every["research_signal_index"].tolist() == [10, 11, 12, 13, 15]
     assert fixed["research_signal_index"].tolist() == [10, 12, 13, 15]
     assert first["research_signal_index"].tolist() == [10, 13, 15]
+
+
+
+def test_walk_forward_sampling_selection_uses_every_viable_source_candidate():
+    viable = _annotate_episodes(_viable_rows())
+    selected = _select_sampling_mode(viable, WALK_FORWARD_SAMPLING_MODE, 99)
+    assert selected["research_signal_index"].tolist() == [10, 11, 12, 13, 15]
+
+
+def test_walk_forward_artifact_validation_requires_complete_long_short_pairs():
+    rows = pd.DataFrame(
+        [
+            {
+                "research_sample_id": "wf-10-long-long",
+                "research_signal_index": 10,
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-10-long",
+                "walk_forward_candidate_source": True,
+                "walk_forward_counterfactual": False,
+                "walk_forward_source_side": "LONG",
+                "walk_forward_source_profile_key": "bull_long",
+                "strategy_profile_key": "bull_long",
+                "side": "LONG",
+                "entry_time": "2026-01-01T00:00:00Z",
+                "pair_net_r": -1.0,
+            },
+            {
+                "research_sample_id": "wf-10-long-short",
+                "research_signal_index": 10,
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-10-long",
+                "walk_forward_candidate_source": False,
+                "walk_forward_counterfactual": True,
+                "walk_forward_source_side": "LONG",
+                "walk_forward_source_profile_key": "bull_long",
+                "strategy_profile_key": "bull_short",
+                "side": "SHORT",
+                "entry_time": "2026-01-01T00:00:00Z",
+                "pair_net_r": 2.95,
+            },
+        ]
+    )
+    _validate_samples(rows)
+
+    with pytest.raises(ValueError, match="exactly two rows per candidate"):
+        _validate_samples(rows.iloc[[0]].copy())
 
 
 def test_end_of_data_is_censored_before_outcome_reporting():
