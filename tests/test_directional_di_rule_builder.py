@@ -1,7 +1,9 @@
 from crypto_strategy_lab.gui.rule_strategy_builder import (
+    AUTHORABLE_RULE_INDICATORS,
     EVIDENCE_GROUPS,
     EVIDENCE_LABELS,
     EVIDENCE_MENU_TREE,
+    LEGACY_SR_AUTHORING_EVIDENCE,
     _evidence_menu_paths,
 )
 from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS
@@ -36,28 +38,33 @@ def test_evidence_picker_uses_compact_top_level_categories():
     )
 
 
-def test_every_rule_evidence_has_a_searchable_category_path():
+def test_every_authorable_evidence_has_a_searchable_category_path():
     paths = _evidence_menu_paths()
-    assert set(paths) == set(RULE_INDICATORS)
+    assert set(paths) == set(AUTHORABLE_RULE_INDICATORS)
+    assert set(LEGACY_SR_AUTHORING_EVIDENCE).isdisjoint(paths)
+    assert set(AUTHORABLE_RULE_INDICATORS) <= set(RULE_INDICATORS)
     assert paths["MR_TRADE_STRETCH_ATR"] == ("Mean Reversion", "Entry Location")
     assert paths["MR_SIGNAL"] == ("Mean Reversion", "Confirmation")
     assert paths["MR_STATE"] == ("Mean Reversion", "Advanced")
     assert paths["FUNDING_RATE_BPS"] == ("Futures", "Funding")
     assert paths["OI_CHANGE_PCT_1H"] == ("Futures", "Open Interest & Positioning")
-    assert paths["SR_SUPPORT_STATE"] == (
+    assert paths["SR_ENTRY_RELATION"] == (
         "Support & Resistance",
-        "Advanced S/R",
+        "Trade Context",
     )
-    assert paths["SR_RESISTANCE_TEST_COUNT"] == (
+    assert paths["SR_OPPOSING_ROOM_TARGET_MULTIPLE"] == (
         "Support & Resistance",
-        "Advanced S/R",
+        "Trade Context",
     )
-    assert paths["SR_BARS_SINCE_SUPPORT_TEST"] == (
+    assert paths["SR_FAVORABLE_STRUCTURE_STATE"] == (
         "Support & Resistance",
-        "Advanced S/R",
+        "Favorable Structure",
     )
-    assert EVIDENCE_LABELS["SR_SUPPORT_TEST_COUNT"] == "S/R — Support Test Count"
+    assert paths["SR_OPPOSING_TEST_COUNT"] == (
+        "Support & Resistance",
+        "Opposing Structure",
+    )
     assert (
-        EVIDENCE_LABELS["SR_BARS_SINCE_RESISTANCE_TEST"]
-        == "S/R — Bars Since Resistance Test"
+        EVIDENCE_LABELS["SR_OPPOSING_ROOM_TARGET_MULTIPLE"]
+        == "S/R — Opposing Room / Planned Target"
     )

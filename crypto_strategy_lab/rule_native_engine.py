@@ -19,6 +19,13 @@ from crypto_strategy_lab.mtf_sr_reaction import (
     MTF_SR_REACTION_RULE_INDICATORS,
     MtfSrReactionMixin,
 )
+from crypto_strategy_lab.sr_trade_context import (
+    RAW_SR_FIELDS,
+    SR_TRADE_CATEGORICAL_INDICATORS,
+    SR_TRADE_RULE_INDICATORS,
+    derive_trade_sr_context,
+    planned_trade_distances,
+)
 from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_VALUE_CODES
 
 
@@ -46,7 +53,9 @@ _SR_NUMERIC_FIELDS = {
     "SR_BARS_SINCE_SUPPORT_TEST": "bars_since_support_test",
     "SR_BARS_SINCE_RESISTANCE_TEST": "bars_since_resistance_test",
 }
-_SR_RULE_INDICATORS = frozenset((*_SR_CATEGORICAL_FIELDS, *_SR_NUMERIC_FIELDS))
+_SR_RULE_INDICATORS = frozenset(
+    (*_SR_CATEGORICAL_FIELDS, *_SR_NUMERIC_FIELDS, *SR_TRADE_RULE_INDICATORS)
+)
 _SR_RESEARCH_CONTEXTS = {
     0: ("support_resistance_strategy", "sr_strategy"),
     60: ("support_resistance_1h", "sr_1h"),
@@ -357,8 +366,75 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
             return value if np.isfinite(value) else np.nan
         raise KeyError(indicator)
 
+    def _prepared_sr_raw_context_for_timeframe(
+        self, i, direction, timeframe_minutes
+    ):
+        if direction not in {"LONG", "SHORT"}:
+            return None
+        config = getattr(self, "config", None)
+        if config is None or not bool(
+            getattr(config, "enable_support_resistance_analysis", False)
+        ):
+            return None
+        try:
+            requested = int(timeframe_minutes)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        strategy_minutes = int(getattr(config, "strategy_timeframe_minutes", 0))
+        context_key = 0 if requested in {0, strategy_minutes} else requested
+        block_info = _SR_RESEARCH_CONTEXTS.get(context_key)
+        if block_info is None:
+            return None
+        feature_name, prefix = block_info
+        result = {}
+        for field in RAW_SR_FIELDS:
+            result[field] = self._prepared_research_raw_value(
+                i,
+                feature_name,
+                f"{prefix}_{direction.lower()}_{field}",
+            )
+        return result
+
+    def _prepared_sr_trade_value_for_timeframe(
+        self, i, direction, profile, indicator, timeframe_minutes
+    ):
+        raw = self._prepared_sr_raw_context_for_timeframe(
+            i, direction, timeframe_minutes
+        )
+        if raw is None:
+            return np.nan
+        strategy_atr = float(self.atr_values[i]) if i < len(self.atr_values) else np.nan
+        reference_price = float(self.close[i]) if i < len(self.close) else np.nan
+        risk_unit = float(self.risk[i]) if i < len(self.risk) else np.nan
+        stop_distance, target_distance = planned_trade_distances(profile, risk_unit)
+        risk_mode = getattr(getattr(self.config, "risk_mode", None), "value", getattr(self.config, "risk_mode", ""))
+        if str(risk_mode).upper() == "SR_STRUCTURE":
+            stop_distance = None
+            target_distance = None
+        if str(getattr(self.config, "sr_take_profit_mode", "FIXED_R")).upper() != "FIXED_R":
+            target_distance = None
+        derived = derive_trade_sr_context(
+            direction=direction,
+            raw=raw,
+            strategy_atr=strategy_atr,
+            reference_price=reference_price,
+            stop_distance=stop_distance,
+            target_distance=target_distance,
+        )
+        value = derived.get(indicator)
+        if indicator in SR_TRADE_CATEGORICAL_INDICATORS:
+            if value is None:
+                return np.nan
+            key = str(value).upper()
+            return CATEGORICAL_VALUE_CODES[indicator].get(key, np.nan)
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return np.nan
+        return numeric if np.isfinite(numeric) else np.nan
+
     def _prepared_sr_value_for_timeframe(
-        self, i, direction, indicator, timeframe_minutes
+        self, i, direction, indicator, timeframe_minutes, profile=None
     ):
         """Read one explicitly selected independent S/R context."""
         if direction not in {"LONG", "SHORT"}:
@@ -379,6 +455,10 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
         if block_info is None:
             return np.nan
         feature_name, prefix = block_info
+        if indicator in SR_TRADE_RULE_INDICATORS:
+            return self._prepared_sr_trade_value_for_timeframe(
+                i, direction, profile, indicator, timeframe_minutes
+            )
         field = (
             _SR_CATEGORICAL_FIELDS.get(indicator)
             or _SR_NUMERIC_FIELDS.get(indicator)
@@ -488,6 +568,10 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
             return self._prepared_mean_reversion_value(i, direction, indicator)
         if indicator in MTF_SR_REACTION_RULE_INDICATORS:
             return self._prepared_mtf_sr_reaction_value(i, direction, indicator, 0)
+        if indicator in SR_TRADE_RULE_INDICATORS:
+            return self._prepared_sr_trade_value_for_timeframe(
+                i, direction, profile, indicator, 0
+            )
         if indicator in _SR_RULE_INDICATORS:
             return self._prepared_sr_value(i, direction, indicator)
         if indicator in _RESEARCH_RULE_INDICATORS:
@@ -509,7 +593,7 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
             )
         elif indicator in _SR_RULE_INDICATORS and sr_timeframe is not None:
             value = self._prepared_sr_value_for_timeframe(
-                i, direction, indicator, sr_timeframe
+                i, direction, indicator, sr_timeframe, profile=profile
             )
         else:
             value = self._strategy_profile_rule_value(

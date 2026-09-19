@@ -85,10 +85,10 @@ def test_evidence_picker_groups_every_current_indicator_once_and_preserves_ids()
     _app, window = _window()
     try:
         from crypto_strategy_lab.gui.rule_strategy_builder import (
+            AUTHORABLE_RULE_INDICATORS,
             EVIDENCE_GROUPS,
             EvidenceComboBox,
         )
-        from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS
 
         grouped = [
             evidence
@@ -96,16 +96,22 @@ def test_evidence_picker_groups_every_current_indicator_once_and_preserves_ids()
             for evidence in evidence_ids
         ]
         assert len(grouped) == len(set(grouped))
-        assert set(grouped) == set(RULE_INDICATORS)
+        assert set(grouped) == set(AUTHORABLE_RULE_INDICATORS)
 
-        rule = new_rule(kind="REQUIRED", evidence="SR_ROOM_IN_DIRECTION_ATR")
+        rule = new_rule(
+            kind="REQUIRED",
+            evidence="SR_OPPOSING_ROOM_TARGET_MULTIPLE",
+        )
         table = window.rule_builder.required_rules
         table.set_rules((rule,))
         picker = table.cellWidget(0, 1)
         assert isinstance(picker, EvidenceComboBox)
-        assert picker.currentData() == "SR_ROOM_IN_DIRECTION_ATR"
+        assert picker.currentData() == "SR_OPPOSING_ROOM_TARGET_MULTIPLE"
         assert picker.findData("DI_SPREAD") >= 0
-        assert picker.findData("SR_TRADE_LOCATION_RATING") >= 0
+        assert picker.findData("SR_ENTRY_RELATION") >= 0
+        assert picker.findData("SR_TARGET_PATH") >= 0
+        assert picker.findData("SR_TRADE_LOCATION_RATING") == -1
+        assert picker.findData("SR_ROOM_IN_DIRECTION_ATR") == -1
     finally:
         window.close()
 
@@ -406,5 +412,43 @@ def test_add_condition_reuses_selected_group_and_new_items_appear_at_top():
         assert table.group_count() == 2
         assert rules[0]["group_id"] != first_group
         assert {rule["group_id"] for rule in rules[1:]} == {first_group}
+    finally:
+        window.close()
+
+
+def test_redesigned_sr_filters_are_trade_relative_and_categorical_where_expected():
+    _app, window = _window()
+    try:
+        from PySide6.QtWidgets import QComboBox
+        from crypto_strategy_lab.gui.rule_strategy_builder import EVIDENCE_LABELS
+
+        assert EVIDENCE_LABELS["SR_OPPOSING_ROOM_TARGET_MULTIPLE"] == (
+            "S/R — Opposing Room / Planned Target"
+        )
+        assert EVIDENCE_LABELS["SR_OPPOSING_DISTANCE_NATIVE_ATR"] == (
+            "S/R — Opposing Room (Selected-TF ATR)"
+        )
+        assert EVIDENCE_LABELS["SR_OPPOSING_DISTANCE_STRATEGY_ATR"] == (
+            "S/R — Opposing Room (Strategy-TF ATR)"
+        )
+
+        relation = new_rule(kind="REQUIRED", evidence="SR_ENTRY_RELATION")
+        relation.update(operator="IS", value="NEAR_FAVORABLE_STRUCTURE")
+        table = window.rule_builder.required_rules
+        table.set_rules((relation,))
+        assert isinstance(table.cellWidget(0, 3), QComboBox)
+        assert table.cellWidget(0, 3).currentData() == "NEAR_FAVORABLE_STRUCTURE"
+
+        target_path = new_rule(kind="VETO", evidence="SR_TARGET_PATH")
+        target_path.update(
+            operator="IS",
+            value="OPPOSING_ZONE_BEFORE_TARGET",
+        )
+        window.rule_builder.veto_rules.set_rules((target_path,))
+        assert isinstance(window.rule_builder.veto_rules.cellWidget(0, 3), QComboBox)
+        assert (
+            window.rule_builder.veto_rules.cellWidget(0, 3).currentData()
+            == "OPPOSING_ZONE_BEFORE_TARGET"
+        )
     finally:
         window.close()

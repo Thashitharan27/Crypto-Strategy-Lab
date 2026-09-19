@@ -152,6 +152,24 @@ EVIDENCE_LABELS = {
     "SR_ZONE_REJECTION_ATR": "S/R — Zone Rejection (ATR)",
     "SR_BREAKOUT_BODY_ATR": "S/R — Breakout Body (ATR)",
     "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR": "S/R — Close Beyond Zone (ATR)",
+    "SR_ENTRY_RELATION": "S/R — Entry Relation",
+    "SR_FAVORABLE_STRUCTURE_STATE": "S/R — Favorable Structure State",
+    "SR_OPPOSING_STRUCTURE_STATE": "S/R — Opposing Structure State",
+    "SR_FAVORABLE_HELD": "S/R — Favorable Structure Held",
+    "SR_OPPOSING_HELD": "S/R — Opposing Structure Held",
+    "SR_TARGET_PATH": "S/R — Target Path vs Opposing Structure",
+    "SR_FAVORABLE_DISTANCE_NATIVE_ATR": "S/R — Favorable Distance (Selected-TF ATR)",
+    "SR_OPPOSING_DISTANCE_NATIVE_ATR": "S/R — Opposing Room (Selected-TF ATR)",
+    "SR_FAVORABLE_DISTANCE_STRATEGY_ATR": "S/R — Favorable Distance (Strategy-TF ATR)",
+    "SR_OPPOSING_DISTANCE_STRATEGY_ATR": "S/R — Opposing Room (Strategy-TF ATR)",
+    "SR_OPPOSING_ROOM_R": "S/R — Opposing Room (R)",
+    "SR_OPPOSING_ROOM_TARGET_MULTIPLE": "S/R — Opposing Room / Planned Target",
+    "SR_FAVORABLE_REJECTION_NATIVE_ATR": "S/R — Favorable Rejection (Selected-TF ATR)",
+    "SR_OPPOSING_REJECTION_NATIVE_ATR": "S/R — Opposing Rejection (Selected-TF ATR)",
+    "SR_FAVORABLE_TEST_COUNT": "S/R — Favorable Structure Test Count",
+    "SR_OPPOSING_TEST_COUNT": "S/R — Opposing Structure Test Count",
+    "SR_BARS_SINCE_FAVORABLE_TEST": "S/R — Bars Since Favorable Test",
+    "SR_BARS_SINCE_OPPOSING_TEST": "S/R — Bars Since Opposing Test",
     "OI_CHANGE_PCT_5M": "OI Change 5m (decimal)",
     "OI_CHANGE_PCT_1H": "OI Change 1h (decimal)",
     "OI_CHANGE_PCT_24H": "OI Change 24h (decimal)",
@@ -183,6 +201,34 @@ EVIDENCE_LABELS = {
     "TAKER_DELTA_PCT_1H": "Taker Delta 1h (decimal)",
     "TAKER_FLOW_PERSISTENCE": "Taker Flow Persistence (0–1)",
 }
+
+LEGACY_SR_AUTHORING_EVIDENCE = frozenset(
+    {
+        "SR_TRADE_LOCATION_RATING",
+        "SR_ROOM_IN_DIRECTION_ATR",
+        "SR_NEAR_SUPPORT",
+        "SR_NEAR_RESISTANCE",
+        "SR_INSIDE_SUPPORT_ZONE",
+        "SR_INSIDE_RESISTANCE_ZONE",
+        "SR_SUPPORT_STATE",
+        "SR_RESISTANCE_STATE",
+        "SR_SUPPORT_HELD",
+        "SR_RESISTANCE_HELD",
+        "SR_SUPPORT_DISTANCE_ATR",
+        "SR_RESISTANCE_DISTANCE_ATR",
+        "SR_SUPPORT_REJECTION_ATR",
+        "SR_RESISTANCE_REJECTION_ATR",
+        "SR_SUPPORT_TEST_COUNT",
+        "SR_RESISTANCE_TEST_COUNT",
+        "SR_BARS_SINCE_SUPPORT_TEST",
+        "SR_BARS_SINCE_RESISTANCE_TEST",
+    }
+)
+AUTHORABLE_RULE_INDICATORS = tuple(
+    indicator
+    for indicator in RULE_INDICATORS
+    if indicator not in LEGACY_SR_AUTHORING_EVIDENCE
+)
 
 SR_TIMEFRAME_LABELS = {
     None: "CONFIGURED",
@@ -319,7 +365,7 @@ def _sr_timeframe(value: Any) -> int | None:
 
 def strategy_capabilities() -> dict[str, Any]:
     indicators: dict[str, Any] = {}
-    for indicator in RULE_INDICATORS:
+    for indicator in AUTHORABLE_RULE_INDICATORS:
         categorical = is_categorical_evidence(indicator)
         indicators[indicator] = {
             "display_name": EVIDENCE_LABELS.get(indicator, _humanize(indicator)),

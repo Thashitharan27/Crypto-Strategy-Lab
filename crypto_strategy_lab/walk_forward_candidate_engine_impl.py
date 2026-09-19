@@ -34,6 +34,12 @@ from crypto_strategy_lab.rule_native_engine import (
     _SR_NUMERIC_FIELDS,
 )
 from crypto_strategy_lab.run_manifest import artifact_path, canonical_sha256
+from crypto_strategy_lab.sr_trade_context import (
+    RAW_SR_FIELDS,
+    SR_TRADE_RULE_INDICATORS,
+    derive_trade_sr_context,
+    planned_trade_distances,
+)
 from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_RULE_PRESETS
 from crypto_strategy_lab.walk_forward_materialization import materialize_walk_forward_strategy
 
@@ -425,6 +431,66 @@ def _mtf_label(config: dict[str, Any], condition: dict[str, Any]) -> str | None:
     return {60: "1h", 240: "4h", 1440: "1d"}.get(requested)
 
 
+def _wf_profile_contract(config: dict[str, Any], profile: str) -> dict[str, Any]:
+    execution = config.get("execution") or {}
+    profiles = execution.get("profiles") or {}
+    value = profiles.get(profile) or {}
+    return value if isinstance(value, dict) else {}
+
+
+def _wf_risk_unit(row: dict[str, Any], config: dict[str, Any]) -> float:
+    execution = config.get("execution") or {}
+    mode = str(execution.get("risk_mode", "ATR")).upper()
+    close = _number(_present(row, "signal_close_price", "close", "strategy_entry_price"))
+    atr = _number(_present(row, "atr", "atr_at_entry"))
+    if mode == "FIXED":
+        return _number(execution.get("fixed_r"))
+    if mode == "PERCENT":
+        percent = _number(execution.get("percent_r"))
+        return close * percent if math.isfinite(close) and math.isfinite(percent) else math.nan
+    multiplier = _number(execution.get("atr_multiplier", 1.0))
+    return atr * multiplier if math.isfinite(atr) and math.isfinite(multiplier) else math.nan
+
+
+def _wf_trade_relative_sr(
+    row: dict[str, Any],
+    direction: str,
+    profile: str,
+    condition: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any] | None:
+    prefix = _sr_prefix(config, condition)
+    if prefix is None:
+        return None
+    side = str(direction).lower()
+    raw = {
+        field: _present(row, f"{prefix}_{side}_{field}")
+        for field in RAW_SR_FIELDS
+    }
+    strategy_atr = _number(_present(row, "atr", "atr_at_entry"))
+    reference_price = _number(
+        _present(row, "signal_close_price", "close", "strategy_entry_price")
+    )
+    risk_unit = _wf_risk_unit(row, config)
+    stop_distance, target_distance = planned_trade_distances(
+        _wf_profile_contract(config, profile), risk_unit
+    )
+    execution = config.get("execution") or {}
+    if str(execution.get("risk_mode", "ATR")).upper() == "SR_STRUCTURE":
+        stop_distance = None
+        target_distance = None
+    if str(execution.get("sr_take_profit_mode", "FIXED_R")).upper() != "FIXED_R":
+        target_distance = None
+    return derive_trade_sr_context(
+        direction=direction,
+        raw=raw,
+        strategy_atr=strategy_atr,
+        reference_price=reference_price,
+        stop_distance=stop_distance,
+        target_distance=target_distance,
+    )
+
+
 def _evidence(
     row: dict[str, Any],
     direction: str,
@@ -512,6 +578,9 @@ def _evidence(
         else:
             return None
         return "FAVORS_REVERSION" if direction == expected else "AGAINST_REVERSION"
+    if indicator in SR_TRADE_RULE_INDICATORS:
+        derived = _wf_trade_relative_sr(row, direction, profile, condition, config)
+        return None if derived is None else derived.get(indicator)
     if indicator in _SR_CATEGORICAL_FIELDS or indicator in _SR_NUMERIC_FIELDS:
         prefix = _sr_prefix(config, condition)
         field = _SR_CATEGORICAL_FIELDS.get(indicator) or _SR_NUMERIC_FIELDS.get(indicator)
@@ -647,7 +716,14 @@ def _rule_decision(
     }
 
 
-def _safe_context(row: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def _safe_context(
+    row: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    direction: str | None = None,
+    profile: str | None = None,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     trade = {}
     for name in _SAFE_TRADE_ENTRY_COLUMNS:
         if name in row:
@@ -655,16 +731,65 @@ def _safe_context(row: dict[str, Any], context: dict[str, Any]) -> dict[str, Any
             if value is not None:
                 trade[name] = value
     feature = {}
+    raw_sr_prefixes = ("sr_strategy_", "sr_1h_", "sr_4h_", "sr_1d_")
     for name, raw in context.items():
+        if str(name).startswith(raw_sr_prefixes):
+            continue
         value = _json_safe(raw)
         if value is not None:
             feature[str(name)] = value
-    return {
+
+    result = {
         "trade_entry_context": trade,
         # PreparedBacktestFrame validates that every value in this artifact is
         # available no later than the decision candle completes.
         "feature_context": feature,
     }
+    if direction in {"LONG", "SHORT"} and profile and isinstance(config, dict):
+        timeframe_context = {}
+        for label, timeframe in (
+            ("STRATEGY_TF", 0),
+            ("1H", 60),
+            ("4H", 240),
+            ("1D", 1440),
+        ):
+            derived = _wf_trade_relative_sr(
+                row,
+                direction,
+                profile,
+                {"sr_timeframe_minutes": timeframe},
+                config,
+            )
+            if derived is None:
+                continue
+            timeframe_context[label] = {
+                key.removeprefix("SR_").lower(): _json_safe(value)
+                for key, value in derived.items()
+                if _json_safe(value) is not None
+            }
+        result["support_resistance_trade_context_v2"] = {
+            "direction": direction,
+            "strategy_timeframe_minutes": (config.get("data") or {}).get(
+                "strategy_timeframe_minutes"
+            ),
+            "unit_definitions": {
+                "selected_tf_atr": (
+                    "ATR calculated on the selected S/R timeframe; values from "
+                    "different S/R timeframes are not directly comparable."
+                ),
+                "strategy_tf_atr": "ATR calculated on the strategy/entry timeframe.",
+                "room_r": (
+                    "absolute distance to opposing zone edge divided by the "
+                    "configured stop distance; 1.0 means one full trade R."
+                ),
+                "room_target_multiple": (
+                    "absolute distance to opposing zone edge divided by the planned "
+                    "final target distance; 1.0 means the target reaches the zone edge."
+                ),
+            },
+            "timeframes": timeframe_context,
+        }
+    return result
 
 
 def _next_teacher(
@@ -817,7 +942,13 @@ def get_next_walk_forward_candidate(
         if CausalExperimentStore._candidate_state(events, candidate_id) != "UNSEEN":
             suffix = hashlib.sha256(f"{sample_id}:{profile}".encode()).hexdigest()[:8]
             candidate_id = f"{candidate_id}-{suffix}"
-        safe = _safe_context(row, feature_context)
+        safe = _safe_context(
+            row,
+            feature_context,
+            direction=source_side,
+            profile=profile,
+            config=config,
+        )
         core = {
             "contract": CANDIDATE_CONTEXT_CONTRACT,
             "experiment_id": experiment_id,

@@ -24,14 +24,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_lab.sr_trade_context import RAW_SR_FIELDS
 from crypto_strategy_lab.strategy_profiles import profile_key
 
 
 OPENAI_DECISION_MODE = "OPENAI_DECISION"
 AI_MODEL = "gpt-5.6-sol"
 AI_REASONING_EFFORT = "medium"
-AI_PROMPT_VERSION = "direction_v1"
-AI_SNAPSHOT_VERSION = 1
+AI_PROMPT_VERSION = "direction_v2_sr_trade_context"
+AI_SNAPSHOT_VERSION = 2
 AI_RECENT_BARS = 12
 AI_CACHE_MODE_ENV = "CRYPTO_STRATEGY_AI_MODE"
 AI_CACHE_PATH_ENV = "CRYPTO_STRATEGY_AI_CACHE"
@@ -81,6 +82,14 @@ Evaluate LONG and SHORT independently from only the supplied snapshot. Never use
 future information and never invent unavailable evidence. The snapshot may show
 conflicting evidence; weigh trend, market structure, momentum, mean reversion,
 flow, positioning, and multi-timeframe support/resistance together.
+
+Support/resistance is supplied as trade-relative context. "native ATR" means the
+ATR of that S/R timeframe and MUST NOT be compared numerically across 1h/4h/1d.
+"strategy ATR" uses the entry timeframe. "room R" is distance to opposing
+structure divided by the configured full stop distance. "room target multiple"
+is distance to opposing structure divided by the planned final target distance.
+Use ENTRY_RELATION and TARGET_PATH literally; do not reinterpret them as generic
+good/bad labels.
 
 You MUST choose LONG or SHORT. There is no abstain/no-trade option. Return integer
 LONG and SHORT confidence scores that sum to exactly 100 and never return a
@@ -468,27 +477,10 @@ class OpenAIDecisionMixin:
             return None
         if context is None:
             return None
-        fields = (
-            "near_support",
-            "near_resistance",
-            "inside_support_zone",
-            "inside_resistance_zone",
-            "support_state",
-            "resistance_state",
-            "support_held",
-            "resistance_held",
-            "trade_location_rating",
-            "room_in_direction_atr",
-            "nearest_support_distance_atr",
-            "nearest_resistance_distance_atr",
-            "support_rejection_atr",
-            "resistance_rejection_atr",
-            "support_test_count",
-            "resistance_test_count",
-            "bars_since_support_test",
-            "bars_since_resistance_test",
-        )
-        return {field: _json_safe(getattr(context, field, None)) for field in fields}
+        return {
+            field: _json_safe(getattr(context, field, None))
+            for field in RAW_SR_FIELDS
+        }
 
     def _ai_pressure_snapshot(self, i: int, side: str) -> dict[str, Any]:
         try:

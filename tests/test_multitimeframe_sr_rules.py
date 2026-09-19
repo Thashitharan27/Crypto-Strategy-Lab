@@ -15,7 +15,11 @@ from crypto_strategy_lab.data.backtest_service import (
 from crypto_strategy_lab.rule_native_engine import (
     RuleAwareDataLakeProductionBacktestEngine,
 )
-from crypto_strategy_lab.strategy_rule_model import new_rule, normalize_rule
+from crypto_strategy_lab.strategy_rule_model import (
+    CATEGORICAL_VALUE_CODES,
+    new_rule,
+    normalize_rule,
+)
 
 
 def _sr_frame(room: float) -> pd.DataFrame:
@@ -189,3 +193,145 @@ def test_rule_runtime_reads_selected_sr_timeframe_without_combining_contexts() -
         0, "LONG", "SR_SUPPORT_STATE", 240
     )
     assert support_testing != support_held
+
+
+def test_trade_relative_sr_rule_uses_selected_timeframe_geometry_and_strategy_contract() -> None:
+    engine = RuleAwareDataLakeProductionBacktestEngine.__new__(
+        RuleAwareDataLakeProductionBacktestEngine
+    )
+    engine.config = SimpleNamespace(
+        enable_support_resistance_analysis=True,
+        strategy_timeframe_minutes=15,
+        risk_mode="ATR",
+        sr_take_profit_mode="FIXED_R",
+    )
+    engine.atr_values = np.array([100.0])
+    engine.close = np.array([1000.0])
+    engine.risk = np.array([100.0])
+    engine.research_features = {
+        "support_resistance_4h": SimpleNamespace(
+            values={
+                "sr_4h_long_nearest_support_price": np.array([800.0]),
+                "sr_4h_long_nearest_support_distance_atr": np.array([0.5]),
+                "sr_4h_long_nearest_support_distance_price": np.array([200.0]),
+                "sr_4h_long_nearest_resistance_price": np.array([1600.0]),
+                "sr_4h_long_nearest_resistance_distance_atr": np.array([0.75]),
+                "sr_4h_long_nearest_resistance_distance_price": np.array([600.0]),
+                "sr_4h_long_near_support": np.array([True]),
+                "sr_4h_long_near_resistance": np.array([False]),
+                "sr_4h_long_inside_support_zone": np.array([False]),
+                "sr_4h_long_inside_resistance_zone": np.array([False]),
+                "sr_4h_long_support_state": np.array(["SUPPORT_HELD"]),
+                "sr_4h_long_resistance_state": np.array(["APPROACHING_RESISTANCE"]),
+                "sr_4h_long_support_held": np.array([True]),
+                "sr_4h_long_resistance_held": np.array([False]),
+                "sr_4h_long_support_zone_low": np.array([750.0]),
+                "sr_4h_long_support_zone_high": np.array([850.0]),
+                "sr_4h_long_resistance_zone_low": np.array([1600.0]),
+                "sr_4h_long_resistance_zone_high": np.array([1700.0]),
+            }
+        )
+    }
+    profile = SimpleNamespace(
+        partial_stop_enabled=False,
+        stop_loss_multiple=1.0,
+        partial_profit_enabled=False,
+        reward_risk_ratio=3.0,
+        r_step_trailing_enabled=False,
+    )
+
+    assert engine._prepared_sr_value_for_timeframe(
+        0,
+        "LONG",
+        "SR_OPPOSING_DISTANCE_NATIVE_ATR",
+        240,
+        profile=profile,
+    ) == pytest.approx(0.75)
+    assert engine._prepared_sr_value_for_timeframe(
+        0,
+        "LONG",
+        "SR_OPPOSING_DISTANCE_STRATEGY_ATR",
+        240,
+        profile=profile,
+    ) == pytest.approx(6.0)
+    assert engine._prepared_sr_value_for_timeframe(
+        0,
+        "LONG",
+        "SR_OPPOSING_ROOM_R",
+        240,
+        profile=profile,
+    ) == pytest.approx(6.0)
+    assert engine._prepared_sr_value_for_timeframe(
+        0,
+        "LONG",
+        "SR_OPPOSING_ROOM_TARGET_MULTIPLE",
+        240,
+        profile=profile,
+    ) == pytest.approx(2.0)
+
+    relation = engine._prepared_sr_value_for_timeframe(
+        0,
+        "LONG",
+        "SR_ENTRY_RELATION",
+        240,
+        profile=profile,
+    )
+    assert relation == CATEGORICAL_VALUE_CODES["SR_ENTRY_RELATION"][
+        "NEAR_FAVORABLE_STRUCTURE"
+    ]
+
+
+def test_trade_relative_sr_target_metrics_fail_closed_for_dynamic_execution() -> None:
+    engine = RuleAwareDataLakeProductionBacktestEngine.__new__(
+        RuleAwareDataLakeProductionBacktestEngine
+    )
+    engine.config = SimpleNamespace(
+        enable_support_resistance_analysis=True,
+        strategy_timeframe_minutes=15,
+        risk_mode="ATR",
+        sr_take_profit_mode="SR_CAPPED_R",
+    )
+    engine.atr_values = np.array([100.0])
+    engine.close = np.array([1000.0])
+    engine.risk = np.array([100.0])
+    engine.research_features = {
+        "support_resistance_4h": SimpleNamespace(
+            values={
+                "sr_4h_long_nearest_resistance_price": np.array([1600.0]),
+                "sr_4h_long_nearest_resistance_distance_atr": np.array([0.75]),
+                "sr_4h_long_nearest_resistance_distance_price": np.array([600.0]),
+                "sr_4h_long_near_support": np.array([False]),
+                "sr_4h_long_near_resistance": np.array([False]),
+                "sr_4h_long_inside_support_zone": np.array([False]),
+                "sr_4h_long_inside_resistance_zone": np.array([False]),
+                "sr_4h_long_resistance_zone_low": np.array([1600.0]),
+                "sr_4h_long_resistance_zone_high": np.array([1700.0]),
+            }
+        )
+    }
+    profile = SimpleNamespace(
+        partial_stop_enabled=False,
+        stop_loss_multiple=1.0,
+        partial_profit_enabled=False,
+        reward_risk_ratio=3.0,
+        r_step_trailing_enabled=False,
+    )
+
+    value = engine._prepared_sr_value_for_timeframe(
+        0,
+        "LONG",
+        "SR_OPPOSING_ROOM_TARGET_MULTIPLE",
+        240,
+        profile=profile,
+    )
+    assert np.isnan(value)
+    target_path = engine._prepared_sr_value_for_timeframe(
+        0,
+        "LONG",
+        "SR_TARGET_PATH",
+        240,
+        profile=profile,
+    )
+    assert target_path == CATEGORICAL_VALUE_CODES["SR_TARGET_PATH"][
+        "TARGET_CONTRACT_UNAVAILABLE"
+    ]

@@ -7,6 +7,10 @@ from typing import Any
 
 from crypto_strategy_core.support_resistance_evidence import SR_CONTEXT_FIELDS
 from crypto_strategy_lab.ai_decision import _json_safe
+from crypto_strategy_lab.sr_trade_context import (
+    derive_trade_sr_context,
+    planned_trade_distances,
+)
 
 
 _HTF_SR_CONTEXTS = (
@@ -53,6 +57,87 @@ def higher_timeframe_sr_snapshot(engine, i: int) -> dict[str, Any]:
         result[label] = {
             "long": long_context,
             "short": short_context,
+        }
+    return result
+
+
+def _semantic_sr_context(engine, i: int, side: str, raw: dict[str, Any] | None):
+    if raw is None:
+        return None
+    regime_values = getattr(engine, "market_regime_values", ())
+    try:
+        regime = str(regime_values[i]).upper()
+    except (IndexError, TypeError):
+        regime = ""
+    profile = None
+    resolver = getattr(engine, "_ai_profile", None)
+    if resolver is not None and regime:
+        try:
+            profile = resolver(regime, side)
+        except Exception:
+            profile = None
+    try:
+        risk_unit = float(engine.risk[i])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        risk_unit = None
+    stop_distance, target_distance = planned_trade_distances(profile, risk_unit)
+
+    config = getattr(engine, "config", None)
+    risk_mode = getattr(getattr(config, "risk_mode", None), "value", getattr(config, "risk_mode", ""))
+    if str(risk_mode).upper() == "SR_STRUCTURE":
+        stop_distance = None
+        target_distance = None
+    if str(getattr(config, "sr_take_profit_mode", "FIXED_R")).upper() != "FIXED_R":
+        target_distance = None
+
+    try:
+        strategy_atr = float(engine.atr_values[i])
+        reference_price = float(engine.close[i])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        strategy_atr = None
+        reference_price = None
+    return derive_trade_sr_context(
+        direction=side,
+        raw=raw,
+        strategy_atr=strategy_atr,
+        reference_price=reference_price,
+        stop_distance=stop_distance,
+        target_distance=target_distance,
+    )
+
+
+def trade_relative_sr_snapshot(engine, i: int, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Return one unambiguous S/R contract for LONG and SHORT."""
+    raw_htf = higher_timeframe_sr_snapshot(engine, i)
+    directional = snapshot.get("directional_context") or {}
+    result: dict[str, Any] = {}
+    for side in ("LONG", "SHORT"):
+        side_context = directional.get(side) or {}
+        raw_strategy = side_context.get("support_resistance")
+        timeframes = {}
+        strategy = _semantic_sr_context(engine, i, side, raw_strategy)
+        if strategy is not None:
+            timeframes["strategy_tf"] = strategy
+        for label in ("1h", "4h", "1d"):
+            raw = (raw_htf.get(label) or {}).get(side.lower())
+            derived = _semantic_sr_context(engine, i, side, raw)
+            if derived is not None:
+                timeframes[label] = derived
+        result[side.lower()] = {
+            "unit_definitions": {
+                "selected_tf_atr": "ATR of the selected S/R timeframe.",
+                "strategy_tf_atr": "ATR of the strategy/entry timeframe.",
+                "room_r": "Distance to opposing zone edge / configured full stop distance.",
+                "room_target_multiple": "Distance to opposing zone edge / planned final target distance.",
+            },
+            "timeframes": {
+                label: {
+                    key.removeprefix("SR_").lower(): _json_safe(value)
+                    for key, value in values.items()
+                    if _json_safe(value) is not None
+                }
+                for label, values in timeframes.items()
+            },
         }
     return result
 
@@ -105,9 +190,16 @@ def enrich_ai_snapshot(engine, i: int, snapshot: dict[str, Any]) -> dict[str, An
     result = dict(snapshot)
     _remove_permission_hints(result)
     result["symbol"] = snapshot_symbol(engine)
-    result["higher_timeframe_support_resistance"] = higher_timeframe_sr_snapshot(
-        engine, i
+    result["support_resistance_trade_context_v2"] = trade_relative_sr_snapshot(
+        engine, i, result
     )
+    directional = result.get("directional_context")
+    if isinstance(directional, dict):
+        for side in ("LONG", "SHORT"):
+            side_context = directional.get(side)
+            if isinstance(side_context, dict):
+                side_context.pop("support_resistance", None)
+    result.pop("higher_timeframe_support_resistance", None)
     result["confirmed_market_structure"] = confirmed_market_structure_snapshot(
         engine, i
     )
