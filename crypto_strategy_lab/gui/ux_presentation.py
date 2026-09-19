@@ -49,6 +49,30 @@ FIELDS = {
         "Primary S/R Timeframe",
         "Backward-compatible primary S/R context. Individual S/R rules can independently choose Strategy TF, 1h, 4h or 1d.",
     ),
+    "sr_zone_width_atr": FieldPresentation(
+        "Pivot Merge Distance",
+        "Merge adjacent confirmed pivots when their price gap is within this ATR distance.",
+        unit=" × ATR",
+        decimals=2,
+    ),
+    "sr_zone_padding_atr": FieldPresentation(
+        "Zone Padding",
+        "Extend every raw pivot cluster above and below by this ATR distance, so even one pivot forms a real zone.",
+        unit=" × ATR",
+        decimals=2,
+    ),
+    "sr_zone_max_cluster_span_atr": FieldPresentation(
+        "Maximum Raw Cluster Span",
+        "Maximum first-to-last pivot span allowed inside one cluster before padding. Prevents chaining from creating oversized zones.",
+        unit=" × ATR",
+        decimals=2,
+    ),
+    "sr_near_distance_atr": FieldPresentation(
+        "Near-Zone Distance",
+        "Distance from the padded zone edge that counts as near support/resistance.",
+        unit=" × ATR",
+        decimals=2,
+    ),
     "tie_policy": FieldPresentation("Same-bar Resolution"),
 }
 
