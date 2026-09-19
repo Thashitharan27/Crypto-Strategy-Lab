@@ -313,14 +313,25 @@ class SRZoneMerger:
             previous = current_zone[-1]
             previous_atr = self._anchored_atr(previous, atr)
             candidate_atr = self._anchored_atr(level, atr)
-            pair_reference = min(previous_atr, candidate_atr)
+            pair_reference = (
+                min(previous_atr, candidate_atr)
+                if np.isfinite(previous_atr)
+                and previous_atr > 0
+                and np.isfinite(candidate_atr)
+                and candidate_atr > 0
+                else float("nan")
+            )
             proposed_atrs = [
                 self._anchored_atr(item, atr) for item in (*current_zone, level)
             ]
             finite_atrs = [
                 value for value in proposed_atrs if np.isfinite(value) and value > 0
             ]
-            cluster_reference = min(finite_atrs) if finite_atrs else float("nan")
+            cluster_reference = (
+                min(finite_atrs)
+                if len(finite_atrs) == len(proposed_atrs)
+                else float("nan")
+            )
 
             adjacent_distance = abs(level.price - previous.price)
             raw_cluster_span = level.price - current_zone[0].price
