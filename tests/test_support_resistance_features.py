@@ -8,6 +8,7 @@ import pandas.testing as pdt
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data_lake_config import FeatureConfig, ResearchRunConfig
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.features.support_resistance import (
     PreparedSupportResistanceContextReader,
@@ -144,6 +145,23 @@ def assert_context_equal(left: SRContext, right: SRContext) -> None:
             assert np.isclose(float(a), float(b)), field.name
         else:
             assert a == b, field.name
+
+
+def test_feature_config_publishes_padded_zone_geometry_parameters() -> None:
+    features = FeatureConfig(
+        enable_support_resistance_analysis=True,
+        sr_zone_width_atr=0.45,
+        sr_zone_padding_atr=0.22,
+        sr_zone_max_cluster_span_atr=0.95,
+    )
+    ResearchRunConfig(features=features).validate()
+    params = features.registry_parameters(
+        strategy_timeframe_minutes=15
+    )["support_resistance"]
+
+    assert params["sr_zone_width_atr"] == 0.45
+    assert params["sr_zone_padding_atr"] == 0.22
+    assert params["sr_zone_max_cluster_span_atr"] == 0.95
 
 
 def test_cached_reader_reconstructs_exact_detector_context() -> None:
