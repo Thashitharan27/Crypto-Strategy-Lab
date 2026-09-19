@@ -48,6 +48,7 @@ def _fixture(tmp_path: Path):
                 "side": "LONG",
                 "entry_time": trade_time,
                 "strategy_entry_time": trade_time,
+                "research_signal_candle_open_time": trade_time,
                 "entry_price": float(close[300]),
                 "strategy_entry_price": float(close[300]),
                 "exit_time": exit_time,
@@ -133,14 +134,73 @@ def _fixture(tmp_path: Path):
         }
     )
 
+    rule_trace = pd.DataFrame(
+        [
+            {
+                "strategy_index": 300,
+                "strategy_candle_open_time": trade_time,
+                "decision_available_at": times[301],
+                "market_regime": "BULL",
+                "source_side": "LONG",
+                "strategy_profile_key": "bull_long",
+                "signal_strategy": "MTF_SR_REACTION",
+                "rule_kind": "REQUIRED",
+                "group_id": "entry-1",
+                "group_name": "4H Support Bounce — Long",
+                "group_enabled": True,
+                "group_matched": True,
+                "condition_id": "entry-adx",
+                "condition_order": 1,
+                "evidence": "ADX",
+                "timeframe_minutes": None,
+                "operator": "GTE",
+                "expected_value": "20.0",
+                "expected_value2": "0.0",
+                "actual_value": 24.0,
+                "evidence_available": True,
+                "condition_passed": True,
+                "filter_passed": True,
+                "filter_reason": "Strategy profile bull_long passed",
+            },
+            {
+                "strategy_index": 300,
+                "strategy_candle_open_time": trade_time,
+                "decision_available_at": times[301],
+                "market_regime": "BULL",
+                "source_side": "LONG",
+                "strategy_profile_key": "bull_long",
+                "signal_strategy": "MTF_SR_REACTION",
+                "rule_kind": "VETO",
+                "group_id": "veto-1",
+                "group_name": "Weak momentum veto",
+                "group_enabled": True,
+                "group_matched": False,
+                "condition_id": "veto-state",
+                "condition_order": 1,
+                "evidence": "MR_STATE",
+                "timeframe_minutes": None,
+                "operator": "IS",
+                "expected_value": "ABOVE_MEAN",
+                "expected_value2": None,
+                "actual_value": 3.0,
+                "evidence_available": True,
+                "condition_passed": False,
+                "filter_passed": True,
+                "filter_reason": "Strategy profile bull_long passed",
+            },
+        ]
+    )
+
     run_dir = tmp_path / "BTCUSDT_15m_run"
     artifacts = run_dir / "artifacts"
     trades_path = artifacts / "trades.parquet"
     signals_path = artifacts / "signals.parquet"
     context_path = artifacts / "feature_context.parquet"
+    rule_trace_path = artifacts / "rule_trace.parquet"
     _write_parquet(trades_path, trades)
     _write_parquet(signals_path, signals)
     _write_parquet(context_path, context)
+    _write_parquet(rule_trace_path, rule_trace)
 
     config = ResearchRunConfig(
         data=DataConfig(
@@ -175,6 +235,7 @@ def _fixture(tmp_path: Path):
             "trades": {"path": "artifacts/trades.parquet"},
             "signals": {"path": "artifacts/signals.parquet"},
             "feature_context": {"path": "artifacts/feature_context.parquet"},
+            "rule_trace": {"path": "artifacts/rule_trace.parquet"},
         },
     }
 
@@ -238,6 +299,44 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
     assert pd.Timestamp(request.start) > pd.Timestamp(manifest["request"]["start"])
 
 
+
+def test_rule_inspector_reads_exact_decision_time_trace(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+
+    trace = model.rule_inspector_at(pd.Timestamp("2026-01-04 03:00:00+00:00"))
+
+    assert trace["status"] == "AVAILABLE"
+    assert trace["profile"] == "bull_long"
+    assert trace["side"] == "LONG"
+    assert trace["filterPassed"] is True
+    assert len(trace["rows"]) == 2
+
+    entry = next(row for row in trace["rows"] if row["type"] == "ENTRY")
+    assert entry["groupStatus"] == "MATCHED"
+    assert entry["actual"] == "24"
+    assert entry["requirement"] == ">= 20.0"
+    assert entry["conditionStatus"] == "PASS"
+
+    veto = next(row for row in trace["rows"] if row["type"] == "VETO")
+    assert veto["groupStatus"] == "CLEAR"
+    assert veto["actual"] == "NEAR_MEAN"
+    assert veto["requirement"] == "is ABOVE_MEAN"
+    assert veto["conditionStatus"] == "FAIL"
+
+
+def test_legacy_run_does_not_reverse_engineer_missing_rule_trace(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    manifest["artifacts"].pop("rule_trace")
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+
+    trace = model.rule_inspector_at(pd.Timestamp("2026-01-04 03:00:00+00:00"))
+
+    assert trace["status"] == "LEGACY_UNAVAILABLE"
+    assert "Re-run" in trace["message"]
+    assert trace["rows"] == []
+
+
 def test_rejected_signal_markers_are_explicit_opt_in(tmp_path):
     service, run_dir, manifest, _market = _fixture(tmp_path)
     model = CompletedRunVisualizer.load(service, run_dir, manifest)
@@ -284,6 +383,8 @@ def test_visualizer_html_pins_lightweight_charts_and_preserves_attribution():
     assert "attributionLogo: true" in html
     assert "tradingview.com" in html
     assert "no strategy re-evaluation" in html
+    assert "qtwebchannel/qwebchannel.js" in html
+    assert "strategyBridge.selectCandle" in html
 
 
 def test_active_app_composes_strategy_visualizer():
