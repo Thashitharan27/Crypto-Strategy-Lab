@@ -307,6 +307,11 @@ def test_veto_effectiveness_replays_only_causally_blocked_idle_opportunities(tmp
                 {
                     "research_signal_index": 1,
                     "research_sample_id": "sample-1",
+                    "walk_forward_candidate_id": "wf-1-long",
+                    "walk_forward_candidate_source": True,
+                    "walk_forward_counterfactual": False,
+                    "walk_forward_source_side": "LONG",
+                    "walk_forward_source_profile_key": "bull_long",
                     "strategy_profile_key": "bull_long",
                     "side": "LONG",
                     "entry_time": "2020-01-02T00:00:00+00:00",
@@ -315,6 +320,11 @@ def test_veto_effectiveness_replays_only_causally_blocked_idle_opportunities(tmp
                 {
                     "research_signal_index": 2,
                     "research_sample_id": "sample-2",
+                    "walk_forward_candidate_id": "wf-2-long",
+                    "walk_forward_candidate_source": True,
+                    "walk_forward_counterfactual": False,
+                    "walk_forward_source_side": "LONG",
+                    "walk_forward_source_profile_key": "bull_long",
                     "strategy_profile_key": "bull_long",
                     "side": "LONG",
                     "entry_time": "2020-01-02T01:00:00+00:00",
@@ -342,7 +352,7 @@ def test_veto_effectiveness_replays_only_causally_blocked_idle_opportunities(tmp
     )
 
     manifest = {
-        "research": {"strategy_research_sampling": {"mode": "EVERY_VIABLE_ENTRY"}},
+        "research": {"strategy_research_sampling": {"mode": "WALK_FORWARD"}},
         "config": {
             "strategy": {"profiles": {"bull_long": {"enabled": True}}},
             "features": {},
