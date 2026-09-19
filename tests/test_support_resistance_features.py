@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import fields, replace
+import json
 
 import numpy as np
 import pandas as pd
@@ -181,6 +182,31 @@ def test_feature_config_uses_timeframe_aware_structural_horizons() -> None:
     assert overridden.sr_detection_parameters(240)["sr_lookback_bars"] == 300
 
 
+def test_prepared_sr_exports_full_active_zone_inventory_json() -> None:
+    frame = canonical_klines(180)
+    _, sr, _ = prepared(frame)
+
+    assert "zone_inventory_json" in sr.columns
+    populated = [
+        (index, json.loads(value))
+        for index, value in enumerate(sr["zone_inventory_json"])
+        if value and value != "[]"
+    ]
+    assert populated
+
+    _index, zones = populated[-1]
+    assert all(zone["structure"] in {"SUPPORT", "RESISTANCE"} for zone in zones)
+    assert all(float(zone["zone_low"]) <= float(zone["zone_high"]) for zone in zones)
+    assert all(int(zone["source_count"]) >= 1 for zone in zones)
+    for structure in ("SUPPORT", "RESISTANCE"):
+        nearest = [
+            zone
+            for zone in zones
+            if zone["structure"] == structure and zone["nearest"]
+        ]
+        assert len(nearest) <= 1
+
+
 def test_prepared_sr_exports_explicit_structure_conflict() -> None:
     frame = canonical_klines(180)
     _, sr, _ = prepared(frame)
@@ -292,7 +318,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 
     assert isinstance(engine, SRDynamicTPBacktestEngine)
     assert isinstance(engine.sr_detector, PreparedSupportResistanceContextReader)
-    assert engine.support_resistance_feature_source == "support_resistance@7"
+    assert engine.support_resistance_feature_source == "support_resistance@8"
     assert engine.sr_uses_higher_timeframe is False
 
     index = 75
