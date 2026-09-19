@@ -75,6 +75,7 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
             sr_bars = (
                 lookback_bars
                 + max(pivot_left, pivot_right)
+                + int(features.atr_period)
                 + (
                     int(features.sr_hold_confirmation_bars)
                     if bool(features.enable_sr_hold_confirmation)

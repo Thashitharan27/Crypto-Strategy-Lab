@@ -62,19 +62,20 @@ FRIENDLY_LABELS = {
     "sr_lookback_bars": "Lookback bars",
     "sr_15m_pivot_left": "15m pivot left",
     "sr_15m_pivot_right": "15m pivot right",
-    "sr_15m_lookback_bars": "15m lookback",
+    "sr_15m_lookback_bars": "15m structural horizon",
     "sr_1h_pivot_left": "1h pivot left",
     "sr_1h_pivot_right": "1h pivot right",
-    "sr_1h_lookback_bars": "1h lookback",
+    "sr_1h_lookback_bars": "1h structural horizon",
     "sr_4h_pivot_left": "4h pivot left",
     "sr_4h_pivot_right": "4h pivot right",
-    "sr_4h_lookback_bars": "4h lookback",
+    "sr_4h_lookback_bars": "4h structural horizon",
     "sr_1d_pivot_left": "1d pivot left",
     "sr_1d_pivot_right": "1d pivot right",
-    "sr_1d_lookback_bars": "1d lookback",
-    "sr_zone_width_atr": "Pivot merge distance",
-    "sr_zone_padding_atr": "Zone padding",
-    "sr_zone_max_cluster_span_atr": "Maximum raw cluster span",
+    "sr_1d_lookback_bars": "1d structural horizon",
+    "sr_zone_width_atr": "Zone merge gap",
+    "sr_zone_padding_atr": "Minimum zone width",
+    "sr_zone_max_cluster_span_atr": "Maximum zone width",
+    "sr_min_rejection_atr": "Minimum pivot rejection",
     "sr_near_distance_atr": "Near-zone distance",
     "enable_sr_hold_confirmation": "Confirm level hold",
     "sr_hold_confirmation_bars": "Hold confirmation bars",
@@ -317,7 +318,7 @@ class ResearchFeaturesPanel(QWidget):
         detection.addWidget(QLabel("Context"), 0, 0)
         detection.addWidget(QLabel("Pivot left"), 0, 1)
         detection.addWidget(QLabel("Pivot right"), 0, 2)
-        detection.addWidget(QLabel("Lookback bars"), 0, 3)
+        detection.addWidget(QLabel("Structural horizon (bars)"), 0, 3)
         detection_rows = (
             ("Shared fallback", "sr_pivot_left", "sr_pivot_right", "sr_lookback_bars", False),
             ("15m", "sr_15m_pivot_left", "sr_15m_pivot_right", "sr_15m_lookback_bars", True),
@@ -333,16 +334,25 @@ class ResearchFeaturesPanel(QWidget):
                 widget = self.widgets[name]
                 if override and hasattr(widget, "setSpecialValueText"):
                     widget.setMinimum(0)
-                    widget.setSpecialValueText("Shared")
+                    widget.setSpecialValueText(
+                        "Auto" if name.endswith("lookback_bars") else "Shared"
+                    )
                     widget.setToolTip(
-                        "0/Shared inherits the shared fallback. Set a positive value only when "
-                        "this timeframe needs a different structural horizon."
+                        (
+                            "0/Auto uses the timeframe-aware structural horizon. Set a positive "
+                            "bar count only when research justifies a custom horizon."
+                        )
+                        if name.endswith("lookback_bars")
+                        else (
+                            "0/Shared inherits the common pivot-confirmation setting. "
+                            "Set a positive value only for a deliberate timeframe override."
+                        )
                     )
                 detection.addWidget(widget, row, column)
         detection_note = QLabel(
-            "Bar counts are timeframe-specific: 5 confirmation bars means 75 minutes on 15m, "
-            "5 hours on 1h, 20 hours on 4h and 5 days on 1d. Leave an override on Shared "
-            "until research justifies changing it."
+            "Default structural horizons are ~7 days on 15m, 30 days on 1h, 90 days on 4h "
+            "and 1 year on 1d. Pivot confirmation remains causal and timeframe-specific. "
+            "A zero horizon override uses the automatic default."
         )
         detection_note.setWordWrap(True)
         detection_note.setStyleSheet("color:#52606d")
@@ -362,6 +372,7 @@ class ResearchFeaturesPanel(QWidget):
                 "sr_zone_width_atr",
                 "sr_zone_padding_atr",
                 "sr_zone_max_cluster_span_atr",
+                "sr_min_rejection_atr",
                 "sr_near_distance_atr",
                 "sr_hold_confirmation_bars",
                 "sr_hold_confirmation_atr",

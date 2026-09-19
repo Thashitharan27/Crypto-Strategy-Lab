@@ -26,7 +26,7 @@ from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 SUPPORT_RESISTANCE_FEATURE_NAME = "support_resistance"
-SUPPORT_RESISTANCE_FEATURE_VERSION = "5"
+SUPPORT_RESISTANCE_FEATURE_VERSION = "6"
 
 
 def _optional_float(value):
@@ -58,19 +58,20 @@ class SupportResistanceFeatureProvider:
             "sr_lookback_bars": ParameterDefinition(int, 200),
             "sr_15m_pivot_left": ParameterDefinition(int, 0),
             "sr_15m_pivot_right": ParameterDefinition(int, 0),
-            "sr_15m_lookback_bars": ParameterDefinition(int, 0),
+            "sr_15m_lookback_bars": ParameterDefinition(int, 672),
             "sr_1h_pivot_left": ParameterDefinition(int, 0),
             "sr_1h_pivot_right": ParameterDefinition(int, 0),
-            "sr_1h_lookback_bars": ParameterDefinition(int, 0),
+            "sr_1h_lookback_bars": ParameterDefinition(int, 720),
             "sr_4h_pivot_left": ParameterDefinition(int, 0),
             "sr_4h_pivot_right": ParameterDefinition(int, 0),
-            "sr_4h_lookback_bars": ParameterDefinition(int, 0),
+            "sr_4h_lookback_bars": ParameterDefinition(int, 540),
             "sr_1d_pivot_left": ParameterDefinition(int, 0),
             "sr_1d_pivot_right": ParameterDefinition(int, 0),
-            "sr_1d_lookback_bars": ParameterDefinition(int, 0),
-            "sr_zone_width_atr": ParameterDefinition(float, 0.5),
-            "sr_zone_padding_atr": ParameterDefinition(float, 0.25),
-            "sr_zone_max_cluster_span_atr": ParameterDefinition(float, 1.0),
+            "sr_1d_lookback_bars": ParameterDefinition(int, 365),
+            "sr_zone_width_atr": ParameterDefinition(float, 0.15),
+            "sr_zone_padding_atr": ParameterDefinition(float, 0.10),
+            "sr_zone_max_cluster_span_atr": ParameterDefinition(float, 0.50),
+            "sr_min_rejection_atr": ParameterDefinition(float, 0.50),
             "sr_near_distance_atr": ParameterDefinition(float, 0.75),
             "enable_sr_hold_confirmation": ParameterDefinition(bool, True),
             "sr_hold_confirmation_bars": ParameterDefinition(int, 3),
@@ -134,20 +135,29 @@ class SupportResistanceFeatureProvider:
         )
         resolved_detection = dict(shared_detection)
         if timeframe_label is not None:
+            automatic_horizon = {
+                "15m": 672,
+                "1h": 720,
+                "4h": 540,
+                "1d": 365,
+            }[timeframe_label]
             for key in ("pivot_left", "pivot_right", "lookback_bars"):
                 override = int(parameters.get(f"sr_{timeframe_label}_{key}", 0) or 0)
                 if override < 0:
                     raise ValueError(
-                        f"sr_{timeframe_label}_{key} must be zero (inherit) or positive"
+                        f"sr_{timeframe_label}_{key} must be zero (automatic/inherit) or positive"
                     )
-                if override:
+                if key == "lookback_bars":
+                    resolved_detection[key] = override or automatic_horizon
+                elif override:
                     resolved_detection[key] = override
 
         detector_config = {
             **resolved_detection,
-            "zone_width_atr": float(parameters.get("sr_zone_width_atr", 0.5)),
-            "zone_padding_atr": float(parameters.get("sr_zone_padding_atr", 0.25)),
-            "max_cluster_span_atr": float(parameters.get("sr_zone_max_cluster_span_atr", 1.0)),
+            "zone_width_atr": float(parameters.get("sr_zone_width_atr", 0.15)),
+            "zone_padding_atr": float(parameters.get("sr_zone_padding_atr", 0.10)),
+            "max_cluster_span_atr": float(parameters.get("sr_zone_max_cluster_span_atr", 0.50)),
+            "min_rejection_atr": float(parameters.get("sr_min_rejection_atr", 0.50)),
             "near_distance_atr": float(parameters.get("sr_near_distance_atr", 0.75)),
             "enable_hold_confirmation": bool(parameters.get("enable_sr_hold_confirmation", True)),
             "hold_confirmation_bars": int(parameters.get("sr_hold_confirmation_bars", 3)),
@@ -179,6 +189,32 @@ class SupportResistanceFeatureProvider:
             **detector_config,
         )
         output = pd.DataFrame(rows)
+        categorical_fields = {
+            "price_location",
+            "trade_location_rating",
+            "support_state",
+            "resistance_state",
+            "confirmation_rating",
+        }
+        boolean_fields = {
+            "near_support",
+            "near_resistance",
+            "inside_support_zone",
+            "inside_resistance_zone",
+            "support_tested",
+            "resistance_tested",
+            "support_held",
+            "resistance_held",
+        }
+        numeric_fields = set(_SR_FIELDS) - categorical_fields - boolean_fields
+        for direction in ("long", "short"):
+            for field in numeric_fields:
+                column = f"{direction}_{field}"
+                if column in output:
+                    # All-None structural columns are valid when v6 rejects every
+                    # weak pivot in a bounded fixture. Keep their logical schema
+                    # numeric rather than letting pandas infer object dtype.
+                    output[column] = pd.to_numeric(output[column], errors="coerce")
         output.insert(0, "available_at", pd.to_datetime(available, utc=True))
         output.insert(0, "timestamp", source_times)
         output["sr_completed_candle_time"] = pd.to_datetime(
@@ -256,6 +292,12 @@ class PreparedSupportResistanceContextReader:
             support_zone_high=_optional_float(value("support_zone_high")),
             resistance_zone_low=_optional_float(value("resistance_zone_low")),
             resistance_zone_high=_optional_float(value("resistance_zone_high")),
+            support_last_break_index=_optional_int(value("support_last_break_index")),
+            resistance_last_break_index=_optional_int(value("resistance_last_break_index")),
+            support_broken_zone_low=_optional_float(value("support_broken_zone_low")),
+            support_broken_zone_high=_optional_float(value("support_broken_zone_high")),
+            resistance_broken_zone_low=_optional_float(value("resistance_broken_zone_low")),
+            resistance_broken_zone_high=_optional_float(value("resistance_broken_zone_high")),
         )
 
     def analyze_price_location(

@@ -32,6 +32,9 @@ SR_CONTEXT_FIELDS = (
     "support_last_test_index", "resistance_last_test_index", "confirmation_rating",
     "support_zone_low", "support_zone_high", "resistance_zone_low",
     "resistance_zone_high",
+    "support_last_break_index", "resistance_last_break_index",
+    "support_broken_zone_low", "support_broken_zone_high",
+    "resistance_broken_zone_low", "resistance_broken_zone_high",
 )
 
 
@@ -61,9 +64,10 @@ def support_resistance_evidence_series(
     pivot_left: int = 5,
     pivot_right: int = 5,
     lookback_bars: int = 200,
-    zone_width_atr: float = 0.5,
-    zone_padding_atr: float = 0.25,
-    max_cluster_span_atr: float = 1.0,
+    zone_width_atr: float = 0.15,
+    zone_padding_atr: float = 0.10,
+    max_cluster_span_atr: float = 0.50,
+    min_rejection_atr: float = 0.50,
     near_distance_atr: float = 0.75,
     enable_hold_confirmation: bool = True,
     hold_confirmation_bars: int = 3,
@@ -113,6 +117,7 @@ def support_resistance_evidence_series(
         zone_width_atr=float(zone_width_atr),
         zone_padding_atr=float(zone_padding_atr),
         max_cluster_span_atr=float(max_cluster_span_atr),
+        min_rejection_atr=float(min_rejection_atr),
         near_distance_atr=float(near_distance_atr),
         enable_hold_confirmation=bool(enable_hold_confirmation),
         hold_confirmation_bars=int(hold_confirmation_bars),

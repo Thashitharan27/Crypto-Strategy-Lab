@@ -68,7 +68,8 @@ def test_support_resistance_warmup_uses_its_configured_timeframe() -> None:
             sr_pivot_right=5,
         ),
     )
-    assert strategy_warmup_period(config) == pd.Timedelta(days=210, hours=8)
+    # v6 1D structure uses a one-year horizon plus pivot/ATR/hold warm-up.
+    assert strategy_warmup_period(config) == pd.Timedelta(days=392, hours=8)
 
 
 def test_multitimeframe_sr_warmup_covers_highest_independent_context() -> None:
@@ -89,9 +90,35 @@ def test_multitimeframe_sr_warmup_covers_highest_independent_context() -> None:
             sr_pivot_right=5,
         ),
     )
-    # 1d is the highest independent context for a 15m strategy, so 210 S/R
-    # candles plus the normal two strategy-bar safety margin are available.
-    assert strategy_warmup_period(config) >= pd.Timedelta(days=210)
+    # 1d is the highest independent context for a 15m strategy. v6 warms a
+    # full one-year structural horizon plus pivot confirmation, ATR anchoring,
+    # hold confirmation, and the normal strategy-bar safety margin.
+    assert strategy_warmup_period(config) >= pd.Timedelta(days=392)
+
+
+def test_v6_sr_warmup_covers_each_timeframe_structural_horizon() -> None:
+    base = ResearchRunConfig()
+    config = replace(
+        base,
+        data=replace(
+            base.data,
+            strategy_timeframe_minutes=15,
+            intrabar_timeframe_minutes=1,
+        ),
+        features=replace(
+            base.features,
+            enable_support_resistance_analysis=True,
+        ),
+    )
+
+    duration = strategy_warmup_period(config)
+
+    # Daily is the deepest prepared context and therefore governs this run.
+    assert duration >= pd.Timedelta(days=392)
+    assert config.features.sr_detection_parameters(15)["sr_lookback_bars"] == 672
+    assert config.features.sr_detection_parameters(60)["sr_lookback_bars"] == 720
+    assert config.features.sr_detection_parameters(240)["sr_lookback_bars"] == 540
+    assert config.features.sr_detection_parameters(1440)["sr_lookback_bars"] == 365
 
 
 def test_expanded_strategy_request_clamps_to_available_history() -> None:

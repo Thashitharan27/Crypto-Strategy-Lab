@@ -82,6 +82,7 @@ def config() -> EnhancedBacktestConfig:
         sr_zone_width_atr=0.4,
         sr_zone_padding_atr=0.2,
         sr_zone_max_cluster_span_atr=0.9,
+        sr_min_rejection_atr=0.35,
         sr_near_distance_atr=0.8,
         enable_sr_hold_confirmation=True,
         sr_hold_confirmation_bars=3,
@@ -116,9 +117,11 @@ def prepared(frame: pd.DataFrame, cfg: EnhancedBacktestConfig | None = None):
         "sr_pivot_left": cfg.sr_pivot_left,
         "sr_pivot_right": cfg.sr_pivot_right,
         "sr_lookback_bars": cfg.sr_lookback_bars,
+        "sr_4h_lookback_bars": cfg.sr_lookback_bars,
         "sr_zone_width_atr": cfg.sr_zone_width_atr,
         "sr_zone_padding_atr": cfg.sr_zone_padding_atr,
         "sr_zone_max_cluster_span_atr": cfg.sr_zone_max_cluster_span_atr,
+        "sr_min_rejection_atr": cfg.sr_min_rejection_atr,
         "sr_near_distance_atr": cfg.sr_near_distance_atr,
         "enable_sr_hold_confirmation": cfg.enable_sr_hold_confirmation,
         "sr_hold_confirmation_bars": cfg.sr_hold_confirmation_bars,
@@ -147,12 +150,13 @@ def assert_context_equal(left: SRContext, right: SRContext) -> None:
             assert a == b, field.name
 
 
-def test_feature_config_publishes_padded_zone_geometry_parameters() -> None:
+def test_feature_config_publishes_rejection_zone_geometry_parameters() -> None:
     features = FeatureConfig(
         enable_support_resistance_analysis=True,
         sr_zone_width_atr=0.45,
         sr_zone_padding_atr=0.22,
         sr_zone_max_cluster_span_atr=0.95,
+        sr_min_rejection_atr=0.55,
     )
     ResearchRunConfig(features=features).validate()
     params = features.registry_parameters(
@@ -162,6 +166,19 @@ def test_feature_config_publishes_padded_zone_geometry_parameters() -> None:
     assert params["sr_zone_width_atr"] == 0.45
     assert params["sr_zone_padding_atr"] == 0.22
     assert params["sr_zone_max_cluster_span_atr"] == 0.95
+    assert params["sr_min_rejection_atr"] == 0.55
+
+
+def test_feature_config_uses_timeframe_aware_structural_horizons() -> None:
+    features = FeatureConfig(enable_support_resistance_analysis=True)
+
+    assert features.sr_detection_parameters(15)["sr_lookback_bars"] == 672
+    assert features.sr_detection_parameters(60)["sr_lookback_bars"] == 720
+    assert features.sr_detection_parameters(240)["sr_lookback_bars"] == 540
+    assert features.sr_detection_parameters(1440)["sr_lookback_bars"] == 365
+
+    overridden = replace(features, sr_4h_lookback_bars=300)
+    assert overridden.sr_detection_parameters(240)["sr_lookback_bars"] == 300
 
 
 def test_cached_reader_reconstructs_exact_detector_context() -> None:
@@ -175,6 +192,7 @@ def test_cached_reader_reconstructs_exact_detector_context() -> None:
         zone_width_atr=parameters["sr_zone_width_atr"],
         zone_padding_atr=parameters["sr_zone_padding_atr"],
         max_cluster_span_atr=parameters["sr_zone_max_cluster_span_atr"],
+        min_rejection_atr=parameters["sr_min_rejection_atr"],
         near_distance_atr=parameters["sr_near_distance_atr"],
         enable_hold_confirmation=parameters["enable_sr_hold_confirmation"],
         hold_confirmation_bars=parameters["sr_hold_confirmation_bars"],
@@ -222,7 +240,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 
     assert isinstance(engine, SRDynamicTPBacktestEngine)
     assert isinstance(engine.sr_detector, PreparedSupportResistanceContextReader)
-    assert engine.support_resistance_feature_source == "support_resistance@5"
+    assert engine.support_resistance_feature_source == "support_resistance@6"
     assert engine.sr_uses_higher_timeframe is False
 
     index = 75

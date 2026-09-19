@@ -76,8 +76,16 @@ class _ResearchSRFastPathMixin:
             if candidate is not None:
                 candidates.append(candidate)
 
+        broken_states = {
+            SRInteractionState.SUPPORT_BROKEN.value,
+            SRInteractionState.RESISTANCE_BROKEN.value,
+        }
+        candidates = [
+            candidate
+            for candidate in candidates
+            if candidate[1].get("state") not in broken_states
+        ]
         if candidates:
-            # Match the dict insertion-order scan used by the legacy detector.
             _, existing_state = min(candidates, key=lambda item: item[0])
             state = dict(existing_state)
         else:
@@ -130,11 +138,18 @@ class _ResearchSRFastPathMixin:
 
     def _cached_zones(self, side: str, index: int, atr: float):
         self._ensure_research_fast_state()
-        levels = self._confirmed_lows if side == "support" else self._confirmed_highs
-        # Zone geometry is now a pure function of active pivot identities plus
-        # their confirmation-time ATR anchors. Reuse it across candles until a
-        # pivot is confirmed/expired; current ATR only affects distance/hold/break
-        # metrics and must not invalidate the structural zone cache.
+        level_type = (
+            SRLevelType.SUPPORT if side == "support" else SRLevelType.RESISTANCE
+        )
+        raw_levels = (
+            self._confirmed_lows if side == "support" else self._confirmed_highs
+        )
+        retired = self._retired_sources(level_type)
+        levels = [
+            level for level in raw_levels if level.bar_index not in retired
+        ]
+        # Geometry is fixed at pivot confirmation. Cache until active pivot
+        # membership changes, including retirement after a decisive break.
         key = tuple(
             (
                 int(level.bar_index),
@@ -165,16 +180,11 @@ class _ResearchSRFastPathMixin:
         wanted_state: str,
         atr: float,
     ) -> dict:
-        zones = (
-            self._find_support_levels(None, None, index, atr)
-            if support
-            else self._find_resistance_levels(None, None, index, atr)
+        # Broken zones are deliberately retired from active-zone caches, so use
+        # the authoritative lifecycle-state lookup for break/retest evidence.
+        return super()._interaction_metrics_for_active_state(
+            index, support, wanted_state, atr
         )
-        for level in zones:
-            state = self._interaction_state.get(self._zone_key(level), {})
-            if state.get("state") == wanted_state:
-                return self._interaction_metrics(level, index, support)
-        return self._interaction_metrics(None, index, support)
 
 
 class ResearchSupportResistanceDetector(

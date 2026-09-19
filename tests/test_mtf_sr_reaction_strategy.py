@@ -225,6 +225,71 @@ def test_one_hour_runtime_feature_setup_no_longer_raises_old_entry_tf_error():
     assert 1440 in engine.mtf_price_action
 
 
+def test_role_reversal_tracks_retired_broken_zone_not_new_nearest_structure():
+    class Engine(MtfSrReactionMixin):
+        pass
+
+    engine = Engine.__new__(Engine)
+    engine.config = SimpleNamespace(
+        strategy_timeframe_minutes=15,
+        enable_support_resistance_analysis=True,
+        strategy_profiles={
+            "bull_long": SimpleNamespace(
+                entry_rules=(
+                    {
+                        "_strategy_direction_mode": MTF_SR_REACTION_MODE,
+                        "indicator": "SR_ROLE_REVERSAL_STATE",
+                    },
+                )
+            )
+        },
+    )
+    size = 6
+    engine.close = np.array([99.0, 101.0, 103.0, 102.5, 102.5, 104.0])
+    engine.low = np.array([98.5, 100.0, 102.5, 102.3, 101.5, 103.0])
+    engine.high = np.array([99.5, 102.0, 103.5, 103.0, 103.0, 104.5])
+    engine.atr_values = np.ones(size)
+    engine.mtf_price_action = {240: {}}
+    engine.research_features = {"support_resistance_4h": object()}
+    engine.mtf_role_reversal = {}
+
+    values = {
+        "sr_4h_long_resistance_state": np.array(
+            ["APPROACHING_RESISTANCE"] * size, dtype=object
+        ),
+        # The nearest active resistance changes immediately after the break.
+        "sr_4h_long_resistance_zone_low": np.array(
+            [100.0, 100.0, 110.0, 110.0, 110.0, 110.0]
+        ),
+        "sr_4h_long_resistance_zone_high": np.array(
+            [102.0, 102.0, 112.0, 112.0, 112.0, 112.0]
+        ),
+        "sr_4h_long_resistance_last_break_index": np.array(
+            [np.nan, np.nan, 5.0, 5.0, 5.0, 5.0]
+        ),
+        "sr_4h_long_resistance_broken_zone_low": np.array(
+            [np.nan, np.nan, 100.0, 100.0, 100.0, 100.0]
+        ),
+        "sr_4h_long_resistance_broken_zone_high": np.array(
+            [np.nan, np.nan, 102.0, 102.0, 102.0, 102.0]
+        ),
+        # SHORT-side fields are absent on purpose; the routine should simply
+        # leave that side without a v6 break event.
+    }
+
+    def raw_value(i, _feature_name, column):
+        series = values.get(column)
+        return None if series is None else series[i]
+
+    engine._prepared_research_raw_value = raw_value
+    engine._configure_mtf_sr_reaction_context()
+
+    states = engine.mtf_role_reversal[(240, "LONG")]
+    assert states[2] == "BREAKOUT_CONFIRMED"
+    assert states[3] == "RETEST_APPROACHING"
+    assert states[4] == "RETEST_HELD"
+
+
 def test_candle_evidence_detects_engulfing_and_pin_bar_causally():
     open_ = np.array([10.0, 8.9, 10.0])
     high = np.array([10.2, 10.3, 10.2])

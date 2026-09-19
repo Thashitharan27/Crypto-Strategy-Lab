@@ -66,9 +66,10 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "sr_pivot_left": 5,
     "sr_pivot_right": 5,
     "sr_lookback_bars": 200,
-    "sr_zone_width_atr": 0.5,
-    "sr_zone_padding_atr": 0.25,
-    "sr_zone_max_cluster_span_atr": 1.0,
+    "sr_zone_width_atr": 0.15,
+    "sr_zone_padding_atr": 0.10,
+    "sr_zone_max_cluster_span_atr": 0.50,
+    "sr_min_rejection_atr": 0.50,
     "sr_near_distance_atr": 0.75,
     "enable_sr_hold_confirmation": True,
     "sr_hold_confirmation_bars": 3,
@@ -216,9 +217,10 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
     if values["sr_filter_mode"] not in ("ANALYSIS_ONLY", "APPLY_ENTRY_RULES"):
         errors.append("Invalid support/resistance usage mode.")
     for key, label in (
-        ("sr_zone_width_atr", "S/R pivot merge distance"),
-        ("sr_zone_padding_atr", "S/R zone padding"),
-        ("sr_zone_max_cluster_span_atr", "S/R maximum cluster span"),
+        ("sr_zone_width_atr", "S/R zone merge gap"),
+        ("sr_zone_padding_atr", "S/R minimum zone width"),
+        ("sr_zone_max_cluster_span_atr", "S/R maximum zone width"),
+        ("sr_min_rejection_atr", "S/R minimum pivot rejection"),
         ("sr_near_distance_atr", "S/R near-zone distance"),
     ):
         try:
@@ -265,6 +267,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         sr_lookback_bars=int(merged["sr_lookback_bars"]), sr_zone_width_atr=float(merged["sr_zone_width_atr"]),
         sr_zone_padding_atr=float(merged["sr_zone_padding_atr"]),
         sr_zone_max_cluster_span_atr=float(merged["sr_zone_max_cluster_span_atr"]),
+        sr_min_rejection_atr=float(merged["sr_min_rejection_atr"]),
         sr_near_distance_atr=float(merged["sr_near_distance_atr"]),
         enable_sr_hold_confirmation=bool(merged["enable_sr_hold_confirmation"]),
         sr_hold_confirmation_bars=int(merged["sr_hold_confirmation_bars"]),

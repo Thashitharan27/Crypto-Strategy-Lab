@@ -1,4 +1,4 @@
-"""Support and resistance level detection with ATR-based zones and no look-ahead bias."""
+"""Causal support/resistance zones built from confirmed rejection structure."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -52,6 +52,7 @@ class SRLevel:
     touch_count: int = 1
     confirmed_at_index: Optional[int] = None  # after pivot_right delay
     anchor_atr: Optional[float] = None  # ATR known when the pivot became usable
+    validation_rejection_atr: float = float("nan")
     zone_bottom: Optional[float] = None
     zone_top: Optional[float] = None
     source_bar_indices: tuple[int, ...] = ()
@@ -105,6 +106,12 @@ class SRContext:
     support_zone_high: Optional[float] = None
     resistance_zone_low: Optional[float] = None
     resistance_zone_high: Optional[float] = None
+    support_last_break_index: Optional[int] = None
+    resistance_last_break_index: Optional[int] = None
+    support_broken_zone_low: Optional[float] = None
+    support_broken_zone_high: Optional[float] = None
+    resistance_broken_zone_low: Optional[float] = None
+    resistance_broken_zone_high: Optional[float] = None
 
 
 def _positive_integral(value, name: str) -> int:
@@ -244,25 +251,25 @@ class SwingDetector:
 
 
 class SRZoneMerger:
-    """Build stable zones from confirmed pivots using pivot-anchored volatility."""
+    """Merge already-defined rejection zones without rewriting their geometry."""
 
     def __init__(
         self,
-        zone_width_atr: float = 0.5,
-        zone_padding_atr: float = 0.25,
-        max_cluster_span_atr: float = 1.0,
+        zone_width_atr: float = 0.15,
+        zone_padding_atr: float = 0.10,
+        max_cluster_span_atr: float = 0.50,
     ):
         """
-        Args:
-            zone_width_atr:
-                Maximum adjacent-pivot distance, measured against the smaller
-                confirmation-time ATR of the two pivots being compared.
-            zone_padding_atr:
-                Symmetric padding applied to each pivot using that pivot's own
-                confirmation-time ATR.
-            max_cluster_span_atr:
-                Maximum raw first-to-last pivot span, measured against the
-                smallest confirmation-time ATR inside the proposed cluster.
+        Historical config names are retained at the storage/API boundary.
+
+        zone_width_atr:
+            Maximum edge-to-edge gap allowed when two confirmed rejection zones
+            are merged.
+        zone_padding_atr:
+            Minimum single-zone width in ATR units. Runtime pivots already carry
+            concrete wick/body bounds; this value is only a legacy fallback here.
+        max_cluster_span_atr:
+            Maximum merged-zone span in ATR units.
         """
         self.zone_width_atr = max(0.0, float(zone_width_atr))
         self.zone_padding_atr = max(0.0, float(zone_padding_atr))
@@ -270,20 +277,14 @@ class SRZoneMerger:
 
     @staticmethod
     def _anchored_atr(level: SRLevel, fallback_atr: float | None) -> float:
-        """Return a stable ATR for one pivot, with fallback only for legacy callers."""
         anchor = level.anchor_atr
         if anchor is not None:
             try:
-                anchor_value = float(anchor)
+                value = float(anchor)
             except (TypeError, ValueError):
-                anchor_value = float("nan")
-            if np.isfinite(anchor_value) and anchor_value > 0:
-                return anchor_value
-        # Runtime-created pivots always carry confirmed_at_index. If ATR was not
-        # available at confirmation, keep that pivot unpadded/unmerged rather than
-        # allowing future ATR to rewrite its historical geometry. The fallback is
-        # only for legacy/direct callers that construct levels without confirmation
-        # metadata.
+                value = float("nan")
+            if np.isfinite(value) and value > 0:
+                return value
         if level.confirmed_at_index is not None:
             return float("nan")
         try:
@@ -292,58 +293,61 @@ class SRZoneMerger:
             fallback = float("nan")
         return fallback if np.isfinite(fallback) and fallback > 0 else float("nan")
 
+    def _bounds(
+        self, level: SRLevel, fallback_atr: float | None
+    ) -> tuple[float, float]:
+        low = float(level.zone_bottom if level.zone_bottom is not None else level.price)
+        high = float(level.zone_top if level.zone_top is not None else level.price)
+        if high < low:
+            low, high = high, low
+        if high > low:
+            return low, high
+
+        anchor = self._anchored_atr(level, fallback_atr)
+        if np.isfinite(anchor) and anchor > 0 and self.zone_padding_atr > 0:
+            half = 0.5 * self.zone_padding_atr * anchor
+            return float(level.price) - half, float(level.price) + half
+        return low, high
+
     def merge_levels(
         self, levels: list[SRLevel], atr: float | None = None
     ) -> list[SRLevel]:
-        """Merge pivots deterministically from stored confirmation-time ATRs.
-
-        The optional atr argument exists only for backward-compatible direct
-        callers/tests that construct SRLevel objects without anchor_atr.
-        Runtime-detected pivots always carry their own anchor, so changing current
-        ATR cannot move, resize, merge, or split historical zones.
-        """
         if not levels:
             return []
 
-        sorted_levels = sorted(levels, key=lambda x: x.price)
+        sorted_levels = sorted(
+            levels,
+            key=lambda item: self._bounds(item, atr)[0],
+        )
         merged: list[SRLevel] = []
         current_zone = [sorted_levels[0]]
 
         for level in sorted_levels[1:]:
-            previous = current_zone[-1]
-            previous_atr = self._anchored_atr(previous, atr)
-            candidate_atr = self._anchored_atr(level, atr)
-            pair_reference = (
-                min(previous_atr, candidate_atr)
-                if np.isfinite(previous_atr)
-                and previous_atr > 0
-                and np.isfinite(candidate_atr)
-                and candidate_atr > 0
-                else float("nan")
-            )
-            proposed_atrs = [
-                self._anchored_atr(item, atr) for item in (*current_zone, level)
-            ]
-            finite_atrs = [
-                value for value in proposed_atrs if np.isfinite(value) and value > 0
-            ]
-            cluster_reference = (
-                min(finite_atrs)
-                if len(finite_atrs) == len(proposed_atrs)
-                else float("nan")
-            )
+            current_low = min(self._bounds(item, atr)[0] for item in current_zone)
+            current_high = max(self._bounds(item, atr)[1] for item in current_zone)
+            next_low, next_high = self._bounds(level, atr)
 
-            adjacent_distance = abs(level.price - previous.price)
-            raw_cluster_span = level.price - current_zone[0].price
-            within_adjacent = (
-                np.isfinite(pair_reference)
-                and adjacent_distance <= self.zone_width_atr * pair_reference
+            anchors = [
+                self._anchored_atr(item, atr)
+                for item in (*current_zone, level)
+            ]
+            finite = [value for value in anchors if np.isfinite(value) and value > 0]
+            reference_atr = min(finite) if len(finite) == len(anchors) else float("nan")
+
+            edge_gap = max(0.0, next_low - current_high)
+            proposed_low = min(current_low, next_low)
+            proposed_high = max(current_high, next_high)
+            proposed_span = proposed_high - proposed_low
+
+            within_gap = (
+                np.isfinite(reference_atr)
+                and edge_gap <= self.zone_width_atr * reference_atr
             )
             within_span = (
-                np.isfinite(cluster_reference)
-                and raw_cluster_span <= self.max_cluster_span_atr * cluster_reference
+                np.isfinite(reference_atr)
+                and proposed_span <= self.max_cluster_span_atr * reference_atr
             )
-            if within_adjacent and within_span:
+            if within_gap and within_span:
                 current_zone.append(level)
             else:
                 merged.append(self._finalize_zone(current_zone, atr))
@@ -355,31 +359,17 @@ class SRZoneMerger:
     def _finalize_zone(
         self, zone_levels: list[SRLevel], fallback_atr: float | None
     ) -> SRLevel:
-        """Create a fixed zone from pivot prices plus each pivot's anchored padding."""
-        prices = [float(level.price) for level in zone_levels]
         level_type = zone_levels[0].level_type
-
-        if level_type == SRLevelType.SUPPORT:
-            zone_price = min(prices)
-        else:
-            zone_price = max(prices)
-
-        anchored_atrs = [
+        prices = [float(level.price) for level in zone_levels]
+        lows = [self._bounds(level, fallback_atr)[0] for level in zone_levels]
+        highs = [self._bounds(level, fallback_atr)[1] for level in zone_levels]
+        anchors = [
             self._anchored_atr(level, fallback_atr) for level in zone_levels
         ]
-        lower_edges = []
-        upper_edges = []
-        for level, anchor in zip(zone_levels, anchored_atrs):
-            padding = self.zone_padding_atr * anchor if np.isfinite(anchor) else 0.0
-            lower_edges.append(float(level.price) - padding)
-            upper_edges.append(float(level.price) + padding)
+        finite_anchors = [value for value in anchors if np.isfinite(value) and value > 0]
 
-        finite_anchors = [
-            value for value in anchored_atrs if np.isfinite(value) and value > 0
-        ]
-        representative_anchor = min(finite_anchors) if finite_anchors else None
         result = SRLevel(
-            price=zone_price,
+            price=min(prices) if level_type == SRLevelType.SUPPORT else max(prices),
             level_type=level_type,
             bar_index=max(level.bar_index for level in zone_levels),
             first_touch_index=min(level.first_touch_index for level in zone_levels),
@@ -392,11 +382,29 @@ class SRZoneMerger:
                 )
                 for level in zone_levels
             ),
-            anchor_atr=representative_anchor,
-            source_bar_indices=tuple(level.bar_index for level in zone_levels),
+            anchor_atr=min(finite_anchors) if finite_anchors else None,
+            validation_rejection_atr=max(
+                (
+                    float(level.validation_rejection_atr)
+                    for level in zone_levels
+                    if np.isfinite(level.validation_rejection_atr)
+                ),
+                default=float("nan"),
+            ),
+            source_bar_indices=tuple(
+                sorted(
+                    {
+                        source
+                        for level in zone_levels
+                        for source in (
+                            level.source_bar_indices or (level.bar_index,)
+                        )
+                    }
+                )
+            ),
         )
-        result.zone_bottom = min(lower_edges)
-        result.zone_top = max(upper_edges)
+        result.zone_bottom = min(lows)
+        result.zone_top = max(highs)
         return result
 
 
@@ -408,9 +416,10 @@ class SupportResistanceDetector:
         pivot_left: int = 5,
         pivot_right: int = 5,
         lookback_bars: int = 200,
-        zone_width_atr: float = 0.5,
-        zone_padding_atr: float = 0.25,
-        max_cluster_span_atr: float = 1.0,
+        zone_width_atr: float = 0.15,
+        zone_padding_atr: float = 0.10,
+        max_cluster_span_atr: float = 0.50,
+        min_rejection_atr: float = 0.50,
         near_distance_atr: float = 0.75,
         enable_hold_confirmation: bool = True,
         hold_confirmation_bars: int = 3,
@@ -423,9 +432,10 @@ class SupportResistanceDetector:
             pivot_left: bars to left for swing detection
             pivot_right: bars to right for swing detection (delays level availability)
             lookback_bars: how many historical bars to scan for levels
-            zone_width_atr: merge adjacent pivots within this ATR distance
-            zone_padding_atr: pad each raw pivot cluster above/below by this ATR distance
-            max_cluster_span_atr: cap the raw pivot span of one merged cluster
+            zone_width_atr: merge rejection zones whose edges are within this ATR distance
+            zone_padding_atr: minimum rejection-zone width in ATR units
+            max_cluster_span_atr: maximum rejection/merged-zone width in ATR units
+            min_rejection_atr: minimum causal displacement required to validate a pivot
             near_distance_atr: distance to be considered "near" a level
         """
         self.swing_detector = SwingDetector(
@@ -440,6 +450,7 @@ class SupportResistanceDetector:
         self.zone_width_atr = float(zone_width_atr)
         self.zone_padding_atr = float(zone_padding_atr)
         self.max_cluster_span_atr = float(max_cluster_span_atr)
+        self.min_rejection_atr = max(0.0, float(min_rejection_atr))
         self.near_distance_atr = near_distance_atr
         self.enable_hold_confirmation = bool(enable_hold_confirmation)
         self.hold_confirmation_bars = _positive_integral(
@@ -483,6 +494,114 @@ class SupportResistanceDetector:
             low[index] <= np.min(left) and low[index] < np.min(right)
         )
 
+    def _pivot_zone_bounds(
+        self,
+        *,
+        support: bool,
+        pivot_index: int,
+        open_prices: NDArray,
+        high: NDArray,
+        low: NDArray,
+        close: NDArray,
+        anchor_atr: float,
+    ) -> tuple[float, float]:
+        """Build a rejection zone from the pivot candle wick/body geometry."""
+        open_ = float(open_prices[pivot_index])
+        close_ = float(close[pivot_index])
+        minimum_width = self.zone_padding_atr * anchor_atr
+        maximum_width = self.max_cluster_span_atr * anchor_atr
+        if maximum_width < minimum_width:
+            maximum_width = minimum_width
+
+        if support:
+            bottom = float(low[pivot_index])
+            raw_top = float(min(open_, close_))
+            width = max(0.0, raw_top - bottom)
+            width = min(max(width, minimum_width), maximum_width)
+            return bottom, bottom + width
+
+        top = float(high[pivot_index])
+        raw_bottom = float(max(open_, close_))
+        width = max(0.0, top - raw_bottom)
+        width = min(max(width, minimum_width), maximum_width)
+        return top - width, top
+
+    @staticmethod
+    def _pivot_rejection_atr(
+        *,
+        support: bool,
+        pivot_index: int,
+        confirmation_index: int,
+        close: NDArray,
+        zone_bottom: float,
+        zone_top: float,
+        anchor_atr: float,
+    ) -> float:
+        if not np.isfinite(anchor_atr) or anchor_atr <= 0:
+            return float("nan")
+        start = min(pivot_index + 1, confirmation_index)
+        window = np.asarray(close[start:confirmation_index + 1], dtype=float)
+        window = window[np.isfinite(window)]
+        if not len(window):
+            return 0.0
+        if support:
+            displacement = max(0.0, float(np.max(window)) - zone_top)
+        else:
+            displacement = max(0.0, zone_bottom - float(np.min(window)))
+        return displacement / anchor_atr
+
+    def _make_confirmed_level(
+        self,
+        *,
+        support: bool,
+        pivot_index: int,
+        confirmation_index: int,
+        open_prices: NDArray,
+        high: NDArray,
+        low: NDArray,
+        close: NDArray,
+        atr_values: NDArray,
+    ) -> Optional[SRLevel]:
+        if confirmation_index >= len(atr_values):
+            return None
+        anchor_atr = float(atr_values[confirmation_index])
+        if not np.isfinite(anchor_atr) or anchor_atr <= 0:
+            return None
+
+        zone_bottom, zone_top = self._pivot_zone_bounds(
+            support=support,
+            pivot_index=pivot_index,
+            open_prices=open_prices,
+            high=high,
+            low=low,
+            close=close,
+            anchor_atr=anchor_atr,
+        )
+        rejection = self._pivot_rejection_atr(
+            support=support,
+            pivot_index=pivot_index,
+            confirmation_index=confirmation_index,
+            close=close,
+            zone_bottom=zone_bottom,
+            zone_top=zone_top,
+            anchor_atr=anchor_atr,
+        )
+        if not np.isfinite(rejection) or rejection < self.min_rejection_atr:
+            return None
+
+        return SRLevel(
+            price=float(low[pivot_index] if support else high[pivot_index]),
+            level_type=SRLevelType.SUPPORT if support else SRLevelType.RESISTANCE,
+            bar_index=pivot_index,
+            first_touch_index=pivot_index,
+            confirmed_at_index=confirmation_index,
+            anchor_atr=anchor_atr,
+            validation_rejection_atr=rejection,
+            zone_bottom=zone_bottom,
+            zone_top=zone_top,
+            source_bar_indices=(pivot_index,),
+        )
+
     def _append_confirmed_level(self, levels: list[SRLevel], level: SRLevel) -> None:
         if levels and level.bar_index - levels[-1].bar_index < self.swing_detector.min_bars_between:
             return
@@ -503,7 +622,15 @@ class SupportResistanceDetector:
         if state is None:
             level_sources = set(key[1])
             for existing_key, existing_state in self._interaction_state.items():
-                if existing_key[0] == key[0] and level_sources.intersection(existing_key[1]):
+                if (
+                    existing_key[0] == key[0]
+                    and level_sources.intersection(existing_key[1])
+                    and existing_state.get("state")
+                    not in {
+                        SRInteractionState.SUPPORT_BROKEN.value,
+                        SRInteractionState.RESISTANCE_BROKEN.value,
+                    }
+                ):
                     state = dict(existing_state)
                     self._interaction_state[key] = state
                     break
@@ -520,7 +647,17 @@ class SupportResistanceDetector:
         break_price = low[index] if self.break_basis == "WICK" else close[index]
         broken = (break_price < level.zone_bottom - atr * self.break_tolerance_atr) if support else (break_price > level.zone_top + atr * self.break_tolerance_atr)
         if broken:
-            state.update(state=SRInteractionState.SUPPORT_BROKEN.value if support else SRInteractionState.RESISTANCE_BROKEN.value, pending_test_index=None)
+            state.update(
+                state=(
+                    SRInteractionState.SUPPORT_BROKEN.value
+                    if support
+                    else SRInteractionState.RESISTANCE_BROKEN.value
+                ),
+                pending_test_index=None,
+                broken_index=index,
+                broken_zone_low=float(level.zone_bottom),
+                broken_zone_high=float(level.zone_top),
+            )
             return
         tested = low[index] <= level.zone_top and high[index] >= level.zone_bottom
         if tested:
@@ -552,41 +689,31 @@ class SupportResistanceDetector:
             candidate_index = current_index - self.swing_detector.pivot_right
             if candidate_index >= self.swing_detector.pivot_left:
                 if self._is_swing_high(high, candidate_index):
-                    self._append_confirmed_level(
-                        self._confirmed_highs,
-                        SRLevel(
-                            price=float(high[candidate_index]),
-                            level_type=SRLevelType.RESISTANCE,
-                            bar_index=candidate_index,
-                            first_touch_index=candidate_index,
-                            confirmed_at_index=current_index,
-                            anchor_atr=(
-                                float(atr_values[current_index])
-                                if current_index < len(atr_values)
-                                and np.isfinite(atr_values[current_index])
-                                and float(atr_values[current_index]) > 0
-                                else None
-                            ),
-                        ),
+                    level = self._make_confirmed_level(
+                        support=False,
+                        pivot_index=candidate_index,
+                        confirmation_index=current_index,
+                        open_prices=open_prices,
+                        high=high,
+                        low=low,
+                        close=close,
+                        atr_values=atr_values,
                     )
+                    if level is not None:
+                        self._append_confirmed_level(self._confirmed_highs, level)
                 if self._is_swing_low(low, candidate_index):
-                    self._append_confirmed_level(
-                        self._confirmed_lows,
-                        SRLevel(
-                            price=float(low[candidate_index]),
-                            level_type=SRLevelType.SUPPORT,
-                            bar_index=candidate_index,
-                            first_touch_index=candidate_index,
-                            confirmed_at_index=current_index,
-                            anchor_atr=(
-                                float(atr_values[current_index])
-                                if current_index < len(atr_values)
-                                and np.isfinite(atr_values[current_index])
-                                and float(atr_values[current_index]) > 0
-                                else None
-                            ),
-                        ),
+                    level = self._make_confirmed_level(
+                        support=True,
+                        pivot_index=candidate_index,
+                        confirmation_index=current_index,
+                        open_prices=open_prices,
+                        high=high,
+                        low=low,
+                        close=close,
+                        atr_values=atr_values,
                     )
+                    if level is not None:
+                        self._append_confirmed_level(self._confirmed_lows, level)
             self._expire_levels(current_index)
             current_atr = float(atr_values[current_index]) if current_index < len(atr_values) else np.nan
             for zone in self._find_support_levels(high, low, current_index, current_atr):
@@ -679,6 +806,8 @@ class SupportResistanceDetector:
         if nearest_resistance is None:
             resistance_metrics = self._interaction_metrics_for_active_state(index, False, SRInteractionState.RESISTANCE_BROKEN.value, current_atr)
         confirmation_rating = self._confirmation_rating(direction, support_metrics["state"], resistance_metrics["state"])
+        broken_support = self._latest_broken_zone(True)
+        broken_resistance = self._latest_broken_zone(False)
         
         context = SRContext(
             nearest_support_price=nearest_support.price if nearest_support else None,
@@ -720,6 +849,12 @@ class SupportResistanceDetector:
             support_zone_high=nearest_support.zone_top if nearest_support else None,
             resistance_zone_low=nearest_resistance.zone_bottom if nearest_resistance else None,
             resistance_zone_high=nearest_resistance.zone_top if nearest_resistance else None,
+            support_last_break_index=broken_support["index"],
+            resistance_last_break_index=broken_resistance["index"],
+            support_broken_zone_low=broken_support["low"],
+            support_broken_zone_high=broken_support["high"],
+            resistance_broken_zone_low=broken_resistance["low"],
+            resistance_broken_zone_high=broken_resistance["high"],
         )
         self._context_cache[cache_key] = context
         return context
@@ -735,13 +870,77 @@ class SupportResistanceDetector:
         return {"state": state_value, "tested": bool(state.get("test_count", 0)), "held": state_value == held_value, "rejection_atr": state.get("rejection_atr", np.nan), "test_count": int(state.get("test_count", 0)), "bars_since_test": index - last_test if last_test is not None else None, "last_test_index": last_test}
 
     def _interaction_metrics_for_active_state(self, index: int, support: bool, wanted_state: str, atr: float) -> dict:
-        levels = self._confirmed_lows if support else self._confirmed_highs
-        zones = self.zone_merger.merge_levels(levels, atr) if levels else []
-        for level in zones:
-            state = self._interaction_state.get(self._zone_key(level), {})
-            if state.get("state") == wanted_state:
-                return self._interaction_metrics(level, index, support)
-        return self._interaction_metrics(None, index, support)
+        current_levels = self._confirmed_lows if support else self._confirmed_highs
+        current_sources = {int(level.bar_index) for level in current_levels}
+        matches = [
+            state
+            for (kind, sources), state in self._interaction_state.items()
+            if kind == (
+                SRLevelType.SUPPORT.value if support else SRLevelType.RESISTANCE.value
+            )
+            and state.get("state") == wanted_state
+            and any(int(source) in current_sources for source in sources)
+        ]
+        if not matches:
+            return self._interaction_metrics(None, index, support)
+        state = max(
+            matches,
+            key=lambda item: (
+                item.get("held_index") or -1,
+                item.get("last_test_index") or -1,
+            ),
+        )
+        last_test = state.get("last_test_index")
+        held_value = (
+            SRInteractionState.SUPPORT_HELD.value
+            if support
+            else SRInteractionState.RESISTANCE_HELD.value
+        )
+        return {
+            "state": wanted_state,
+            "tested": bool(state.get("test_count", 0)),
+            "held": wanted_state == held_value,
+            "rejection_atr": state.get("rejection_atr", np.nan),
+            "test_count": int(state.get("test_count", 0)),
+            "bars_since_test": index - last_test if last_test is not None else None,
+            "last_test_index": last_test,
+        }
+
+    def _latest_broken_zone(self, support: bool) -> dict:
+        current_levels = self._confirmed_lows if support else self._confirmed_highs
+        current_sources = {int(level.bar_index) for level in current_levels}
+        broken_state = (
+            SRInteractionState.SUPPORT_BROKEN.value
+            if support
+            else SRInteractionState.RESISTANCE_BROKEN.value
+        )
+        candidates = []
+        for (kind, sources), state in self._interaction_state.items():
+            if kind != (
+                SRLevelType.SUPPORT.value
+                if support
+                else SRLevelType.RESISTANCE.value
+            ):
+                continue
+            if state.get("state") != broken_state:
+                continue
+            if not any(int(source) in current_sources for source in sources):
+                continue
+            broken_index = state.get("broken_index")
+            low = state.get("broken_zone_low")
+            high = state.get("broken_zone_high")
+            if broken_index is None or low is None or high is None:
+                continue
+            candidates.append(
+                {
+                    "index": int(broken_index),
+                    "low": float(low),
+                    "high": float(high),
+                }
+            )
+        if not candidates:
+            return {"index": None, "low": None, "high": None}
+        return max(candidates, key=lambda item: item["index"])
 
     def _confirmation_rating(self, direction: str, support_state: str, resistance_state: str) -> str:
         held = SRInteractionState.SUPPORT_HELD.value if direction == "LONG" else SRInteractionState.RESISTANCE_HELD.value
@@ -755,17 +954,52 @@ class SupportResistanceDetector:
             return "UNCONFIRMED"
         return "NEUTRAL"
     
+    def _zone_is_broken(self, level: SRLevel) -> bool:
+        state = self._interaction_state.get(self._zone_key(level), {})
+        return state.get("state") in {
+            SRInteractionState.SUPPORT_BROKEN.value,
+            SRInteractionState.RESISTANCE_BROKEN.value,
+        }
+
+    def _retired_sources(self, level_type: SRLevelType) -> set[int]:
+        broken_state = (
+            SRInteractionState.SUPPORT_BROKEN.value
+            if level_type == SRLevelType.SUPPORT
+            else SRInteractionState.RESISTANCE_BROKEN.value
+        )
+        retired: set[int] = set()
+        for (kind, sources), state in self._interaction_state.items():
+            if kind == level_type.value and state.get("state") == broken_state:
+                retired.update(int(source) for source in sources)
+        return retired
+
+    def _all_support_levels(self, atr: float) -> list[SRLevel]:
+        return self.zone_merger.merge_levels(self._confirmed_lows, atr)
+
+    def _all_resistance_levels(self, atr: float) -> list[SRLevel]:
+        return self.zone_merger.merge_levels(self._confirmed_highs, atr)
+
     def _find_support_levels(
         self, high: NDArray, low: NDArray, index: int, atr: float
     ) -> list[SRLevel]:
-        """Merge only the active, already-confirmed support levels."""
-        return self.zone_merger.merge_levels(self._confirmed_lows, atr)
+        """Return validated support zones whose source pivots remain active."""
+        retired = self._retired_sources(SRLevelType.SUPPORT)
+        active = [
+            level for level in self._confirmed_lows
+            if level.bar_index not in retired
+        ]
+        return self.zone_merger.merge_levels(active, atr)
     
     def _find_resistance_levels(
         self, high: NDArray, low: NDArray, index: int, atr: float
     ) -> list[SRLevel]:
-        """Merge only the active, already-confirmed resistance levels."""
-        return self.zone_merger.merge_levels(self._confirmed_highs, atr)
+        """Return validated resistance zones whose source pivots remain active."""
+        retired = self._retired_sources(SRLevelType.RESISTANCE)
+        active = [
+            level for level in self._confirmed_highs
+            if level.bar_index not in retired
+        ]
+        return self.zone_merger.merge_levels(active, atr)
     
     def _nearest_level(
         self, levels: list[SRLevel], price: float, below: bool

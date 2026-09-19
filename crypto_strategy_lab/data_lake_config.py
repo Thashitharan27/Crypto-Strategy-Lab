@@ -55,22 +55,22 @@ class FeatureConfig:
     # appropriate structural horizon.
     sr_15m_pivot_left: int = 0
     sr_15m_pivot_right: int = 0
-    sr_15m_lookback_bars: int = 0
+    sr_15m_lookback_bars: int = 672   # ~7 days
     sr_1h_pivot_left: int = 0
     sr_1h_pivot_right: int = 0
-    sr_1h_lookback_bars: int = 0
+    sr_1h_lookback_bars: int = 720    # ~30 days
     sr_4h_pivot_left: int = 0
     sr_4h_pivot_right: int = 0
-    sr_4h_lookback_bars: int = 0
+    sr_4h_lookback_bars: int = 540    # ~90 days
     sr_1d_pivot_left: int = 0
     sr_1d_pivot_right: int = 0
-    sr_1d_lookback_bars: int = 0
-    # Historical name retained: this is the adjacent-pivot merge distance.
-    sr_zone_width_atr: float = 0.5
-    # Every confirmed pivot/cluster becomes a real price zone via symmetric padding.
-    sr_zone_padding_atr: float = 0.25
-    # Raw pivot clusters cannot grow beyond this ATR span through chaining.
-    sr_zone_max_cluster_span_atr: float = 1.0
+    sr_1d_lookback_bars: int = 365    # ~1 year
+    # v6 rejection-zone geometry. Historical field names remain in the persisted
+    # config contract, but the GUI labels describe their v6 meaning.
+    sr_zone_width_atr: float = 0.15  # maximum gap between zones that may merge
+    sr_zone_padding_atr: float = 0.10  # minimum wick/body zone width
+    sr_zone_max_cluster_span_atr: float = 0.50  # maximum zone/cluster width
+    sr_min_rejection_atr: float = 0.50
     sr_near_distance_atr: float = 0.75
     # Retained in the native config for old files/API compatibility. The GUI no
     # longer exposes this switch and normal research keeps confirmation enabled.
@@ -102,12 +102,7 @@ class FeatureConfig:
     basis_zscore_window_days: float = 7.0
 
     def sr_detection_parameters(self, timeframe_minutes: int) -> dict[str, int]:
-        """Resolve pivot/lookback settings for one independent S/R timeframe.
-
-        A zero timeframe-specific value inherits the historical shared setting.
-        This keeps old saved configurations stable while making 15m/1h/4h/1d
-        structural sensitivity independently configurable.
-        """
+        """Resolve causal pivot settings and a timeframe-aware structural horizon."""
         result = {
             "sr_pivot_left": int(self.sr_pivot_left),
             "sr_pivot_right": int(self.sr_pivot_right),
@@ -118,11 +113,22 @@ class FeatureConfig:
         )
         if label is None:
             return result
+
+        auto_lookback = {
+            "15m": 672,
+            "1h": 720,
+            "4h": 540,
+            "1d": 365,
+        }[label]
         for key in ("pivot_left", "pivot_right", "lookback_bars"):
             override = int(getattr(self, f"sr_{label}_{key}"))
             if override < 0:
-                raise ValueError(f"sr_{label}_{key} must be zero (inherit) or positive")
-            if override:
+                raise ValueError(
+                    f"sr_{label}_{key} must be zero (automatic/inherit) or positive"
+                )
+            if key == "lookback_bars":
+                result["sr_lookback_bars"] = override or auto_lookback
+            elif override:
                 result[f"sr_{key}"] = override
         return result
 
@@ -200,6 +206,7 @@ class FeatureConfig:
                 "sr_zone_width_atr": float(self.sr_zone_width_atr),
                 "sr_zone_padding_atr": float(self.sr_zone_padding_atr),
                 "sr_zone_max_cluster_span_atr": float(self.sr_zone_max_cluster_span_atr),
+                "sr_min_rejection_atr": float(self.sr_min_rejection_atr),
                 "sr_near_distance_atr": float(self.sr_near_distance_atr),
                 "enable_sr_hold_confirmation": bool(self.enable_sr_hold_confirmation),
                 "sr_hold_confirmation_bars": int(self.sr_hold_confirmation_bars),
@@ -402,6 +409,7 @@ class ResearchRunConfig:
             features.sr_zone_width_atr,
             features.sr_zone_padding_atr,
             features.sr_zone_max_cluster_span_atr,
+            features.sr_min_rejection_atr,
             features.sr_near_distance_atr,
             features.sr_hold_confirmation_atr,
             features.sr_break_tolerance_atr,
