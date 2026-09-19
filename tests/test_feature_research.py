@@ -276,6 +276,12 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert set(zones["structure"]) == {"SUPPORT"}
     assert zones.groupby("strategy_index")["nearest"].sum().eq(1).all()
     assert set(zones["zone_id"]) == {"SUPPORT:0", "SUPPORT:1"}
+    for column in (
+        "strategy_candle_open_time",
+        "decision_available_at",
+        "sr_completed_candle_time",
+    ):
+        assert zones[column].dt.tz is None
 
     with ResearchQueryService(run) as service:
         grouped = service.query(
