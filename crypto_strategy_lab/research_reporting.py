@@ -17,6 +17,7 @@ from .feature_research import (
     _write_parquet_atomic,
     write_research_artifacts,
 )
+from .research_adapters import _strategy_rule_trace_frame
 from .report_workbooks import (
     build_backtest_workbook,
     build_performance_breakdowns,
@@ -349,12 +350,9 @@ class CsvManifestReporter:
         _write_parquet_atomic(signals, signals_path)
         _validate_signal_artifact(signals_path, context_path, len(result.trades))
 
-        rule_trace = getattr(result, "rule_trace", None)
-        if rule_trace is None:
-            raise ValueError(
-                "native run did not expose decision-time strategy rule trace"
-            )
-        rule_trace = pd.DataFrame(rule_trace)
+        rule_trace = _strategy_rule_trace_frame(
+            getattr(result, "rule_trace", None)
+        )
         rule_trace_path = artifacts_dir / "rule_trace.parquet"
         _write_parquet_atomic(rule_trace, rule_trace_path)
         _validate_rule_trace_artifact(rule_trace_path, context_path)
