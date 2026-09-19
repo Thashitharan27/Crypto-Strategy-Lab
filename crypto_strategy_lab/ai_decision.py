@@ -24,6 +24,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_lab.sr_trade_context import RAW_SR_FIELDS
 from crypto_strategy_lab.strategy_profiles import profile_key
 
 
@@ -476,27 +477,10 @@ class OpenAIDecisionMixin:
             return None
         if context is None:
             return None
-        fields = (
-            "near_support",
-            "near_resistance",
-            "inside_support_zone",
-            "inside_resistance_zone",
-            "support_state",
-            "resistance_state",
-            "support_held",
-            "resistance_held",
-            "trade_location_rating",
-            "room_in_direction_atr",
-            "nearest_support_distance_atr",
-            "nearest_resistance_distance_atr",
-            "support_rejection_atr",
-            "resistance_rejection_atr",
-            "support_test_count",
-            "resistance_test_count",
-            "bars_since_support_test",
-            "bars_since_resistance_test",
-        )
-        return {field: _json_safe(getattr(context, field, None)) for field in fields}
+        return {
+            field: _json_safe(getattr(context, field, None))
+            for field in RAW_SR_FIELDS
+        }
 
     def _ai_pressure_snapshot(self, i: int, side: str) -> dict[str, Any]:
         try:
