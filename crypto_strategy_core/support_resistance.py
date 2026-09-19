@@ -87,6 +87,7 @@ class SRContext:
     inside_resistance_zone: bool
     
     room_in_direction_atr: float  # ATR distance to opposing structure
+    structure_conflict: bool = False  # simultaneously near support and resistance
     support_state: str = SRInteractionState.NO_SUPPORT_NEARBY.value
     resistance_state: str = SRInteractionState.NO_RESISTANCE_NEARBY.value
     support_tested: bool = False
@@ -836,6 +837,12 @@ class SupportResistanceDetector:
             ),
             
             room_in_direction_atr=room,
+            structure_conflict=bool(
+                np.isfinite(support_dist_atr)
+                and support_dist_atr <= self.near_distance_atr
+                and np.isfinite(resistance_dist_atr)
+                and resistance_dist_atr <= self.near_distance_atr
+            ),
             support_state=support_metrics["state"],
             resistance_state=resistance_metrics["state"],
             support_tested=support_metrics["tested"], resistance_tested=resistance_metrics["tested"],
@@ -1126,4 +1133,5 @@ class SupportResistanceDetector:
             inside_support_zone=False,
             inside_resistance_zone=False,
             room_in_direction_atr=np.nan,
+            structure_conflict=False,
         )
