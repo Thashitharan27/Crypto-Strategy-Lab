@@ -17,6 +17,8 @@ from crypto_strategy_lab.mean_reversion_v2 import (
     classify_rsi_state,
     classify_signal,
     moving_mean,
+    normalize_mean_type,
+    resolve_mean_type,
     signal_alignment,
     signal_direction,
 )
@@ -28,7 +30,14 @@ class EnhancedBacktestEngine(BacktestEngine):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         config = self.config
-        mean_type = str(getattr(config, "mean_reversion_mean_type", "EMA")).upper()
+        requested_mean_type = normalize_mean_type(
+            getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")
+        )
+        mean_type = resolve_mean_type(
+            requested_mean_type, int(config.strategy_timeframe_minutes)
+        )
+        self.mean_reversion_requested_mean_type = requested_mean_type
+        self.mean_reversion_effective_mean_type = mean_type
         period = int(config.mean_reversion_period)
         stddevs = float(getattr(config, "mean_reversion_bb_stddevs", 2.0))
         rsi_period = int(getattr(config, "mean_reversion_rsi_period", 14))
@@ -171,7 +180,17 @@ class EnhancedBacktestEngine(BacktestEngine):
         config = self.config
         result.update(
             {
-                "mean_reversion_mean_type": str(getattr(config, "mean_reversion_mean_type", "EMA")).upper(),
+                "mean_reversion_mean_type": getattr(
+                    self, "mean_reversion_requested_mean_type",
+                    normalize_mean_type(getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
+                ),
+                "mean_reversion_effective_mean_type": getattr(
+                    self, "mean_reversion_effective_mean_type",
+                    resolve_mean_type(
+                        getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME"),
+                        int(config.strategy_timeframe_minutes),
+                    ),
+                ),
                 "mean_reversion_bb_stddevs": float(getattr(config, "mean_reversion_bb_stddevs", 2.0)),
                 "mean_reversion_rsi_period": int(getattr(config, "mean_reversion_rsi_period", 14)),
                 "mean_reversion_rsi_oversold": float(getattr(config, "mean_reversion_rsi_oversold", 30.0)),
