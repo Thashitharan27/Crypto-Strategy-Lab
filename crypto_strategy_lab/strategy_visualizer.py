@@ -574,11 +574,20 @@ class CompletedRunVisualizer:
         return result
 
     @staticmethod
-    def _snap_to_candle(timestamp: Any, market: pd.DataFrame) -> int:
+    def _snap_to_candle(timestamp: Any, market: pd.DataFrame) -> int | None:
         target = _utc(timestamp)
         times = pd.DatetimeIndex(pd.to_datetime(market["period_start"], utc=True))
         if times.empty:
-            return _unix_seconds(target)
+            return None
+        if target < times[0]:
+            return None
+        interval_ns = (
+            int(np.median(np.diff(times.asi8)))
+            if len(times) > 1
+            else int(pd.Timedelta(minutes=1).value)
+        )
+        if target.value >= times[-1].value + max(1, interval_ns):
+            return None
         index = int(np.searchsorted(times.asi8, target.value, side="right") - 1)
         index = max(0, min(index, len(times) - 1))
         return _unix_seconds(times[index])
@@ -629,15 +638,18 @@ class CompletedRunVisualizer:
                         "exit_reason",
                     ),
                 )
-                markers.append(
-                    {
-                        "time": self._snap_to_candle(exit_time, market),
-                        "position": "aboveBar" if side == "LONG" else "belowBar",
-                        "shape": "square",
-                        "text": f"EXIT · {reason or ''}".strip(),
-                        "kind": "exit",
-                    }
-                )
+                snapped = self._snap_to_candle(exit_time, market)
+                if snapped is not None:
+                    markers.append(
+                        {
+                            "time": snapped,
+                            "position": "aboveBar" if side == "LONG" else "belowBar",
+                            "shape": "square",
+                            "text": f"EXIT · {reason or ''}".strip(),
+                            "kind": "exit",
+                        }
+                    )
+        markers.sort(key=lambda item: (int(item["time"]), str(item.get("kind", ""))))
         return markers
 
     def _price_lines(self, trade_index: int | None) -> list[dict[str, Any]]:
