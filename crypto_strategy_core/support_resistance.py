@@ -898,6 +898,18 @@ class SupportResistanceDetector:
             SRInteractionState.RESISTANCE_BROKEN.value,
         }
 
+    def _retired_sources(self, level_type: SRLevelType) -> set[int]:
+        broken_state = (
+            SRInteractionState.SUPPORT_BROKEN.value
+            if level_type == SRLevelType.SUPPORT
+            else SRInteractionState.RESISTANCE_BROKEN.value
+        )
+        retired: set[int] = set()
+        for (kind, sources), state in self._interaction_state.items():
+            if kind == level_type.value and state.get("state") == broken_state:
+                retired.update(int(source) for source in sources)
+        return retired
+
     def _all_support_levels(self, atr: float) -> list[SRLevel]:
         return self.zone_merger.merge_levels(self._confirmed_lows, atr)
 
@@ -907,22 +919,24 @@ class SupportResistanceDetector:
     def _find_support_levels(
         self, high: NDArray, low: NDArray, index: int, atr: float
     ) -> list[SRLevel]:
-        """Return validated support zones that have not been decisively broken."""
-        return [
-            level
-            for level in self._all_support_levels(atr)
-            if not self._zone_is_broken(level)
+        """Return validated support zones whose source pivots remain active."""
+        retired = self._retired_sources(SRLevelType.SUPPORT)
+        active = [
+            level for level in self._confirmed_lows
+            if level.bar_index not in retired
         ]
+        return self.zone_merger.merge_levels(active, atr)
     
     def _find_resistance_levels(
         self, high: NDArray, low: NDArray, index: int, atr: float
     ) -> list[SRLevel]:
-        """Return validated resistance zones that have not been decisively broken."""
-        return [
-            level
-            for level in self._all_resistance_levels(atr)
-            if not self._zone_is_broken(level)
+        """Return validated resistance zones whose source pivots remain active."""
+        retired = self._retired_sources(SRLevelType.RESISTANCE)
+        active = [
+            level for level in self._confirmed_highs
+            if level.bar_index not in retired
         ]
+        return self.zone_merger.merge_levels(active, atr)
     
     def _nearest_level(
         self, levels: list[SRLevel], price: float, below: bool
