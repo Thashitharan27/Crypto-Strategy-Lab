@@ -333,7 +333,7 @@ class DataclassForm(QWidget):
         "market_regime_method": ("BTC_STRUCTURAL", "ASSET_STRUCTURAL", "ASSET_RETURN"),
         "trade_flow_source": ("AGG_TRADES", "TRADES"),
         "sr_break_basis": ("CLOSE", "WICK"),
-        "mean_reversion_mean_type": ("SMA", "EMA"),
+        "mean_reversion_mean_type": ("AUTO_TIMEFRAME", "SMA", "EMA"),
         "risk_mode": ("ATR", "FIXED", "PERCENT", "SR_STRUCTURE"),
         "sr_stop_timeframe_minutes": (0, 60, 240, 1440),
         "sr_stop_no_level_policy": ("USE_ATR_STOP", "REJECT_TRADE"),
