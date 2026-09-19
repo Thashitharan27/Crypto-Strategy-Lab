@@ -37,6 +37,21 @@ def test_strategy_visualizer_exposes_dedicated_sr_review_controls_and_inspector(
         assert workspace.sr_review_timeframe.isEnabled()
         assert workspace.sr_review_snapshot.isEnabled()
         assert workspace.sr_review_details.isEnabled()
+        assert all(
+            not check.isEnabled()
+            for check in workspace.overlay_checks.values()
+        )
+
+        workspace.view_mode.setCurrentIndex(
+            workspace.view_mode.findData("normal")
+        )
+        assert all(
+            check.isEnabled()
+            for check in workspace.overlay_checks.values()
+        )
+        workspace.view_mode.setCurrentIndex(
+            workspace.view_mode.findData("sr-review")
+        )
 
         labels = [
             workspace.inspector_tabs.tabText(index)
