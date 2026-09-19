@@ -1,7 +1,20 @@
 from __future__ import annotations
 
-from crypto_strategy_lab.data_lake_config import build_data_lake_backtest_config, normalize_data_lake_config
+from crypto_strategy_lab.data_lake_config import (
+    ResearchRunConfig,
+    build_data_lake_backtest_config,
+    normalize_data_lake_config,
+)
 from crypto_strategy_lab.gui.enhanced_config import EnhancedBacktestConfig
+
+
+def test_data_lake_defaults_to_asset_return_regime_and_tighter_sr_near_distance() -> None:
+    config = ResearchRunConfig()
+
+    assert config.features.market_regime_method == "ASSET_RETURN"
+    assert config.features.bull_regime_lookback_days == 90
+    assert config.features.bull_regime_return_threshold == 0.20
+    assert config.features.sr_near_distance_atr == 0.50
 
 
 def test_data_lake_config_does_not_require_csv_paths() -> None:
