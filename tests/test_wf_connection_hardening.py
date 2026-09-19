@@ -40,6 +40,8 @@ def test_candidate_rows_stream_from_duckdb_instead_of_materializing_all(tmp_path
     samples = pd.DataFrame(
         {
             "research_signal_index": [1, 2, 3],
+            "walk_forward_candidate_id": ["wf-1-long", "wf-2-long", "wf-3-long"],
+            "walk_forward_candidate_source": [True, True, True],
             "strategy_profile_key": ["bull_long"] * 3,
             "side": ["LONG"] * 3,
             "entry_time": pd.to_datetime(
