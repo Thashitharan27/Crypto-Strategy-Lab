@@ -18,6 +18,7 @@ import pandas as pd
 
 from crypto_strategy_lab.data import DatasetKind
 from crypto_strategy_lab.data.timing import interval_to_timedelta
+from crypto_strategy_lab.data.source_identity import SourceSignature
 from crypto_strategy_lab.gui.completed_run_research import research_seed_from_manifest
 
 
@@ -193,6 +194,8 @@ class CompletedRunVisualizer:
     trades_path: Path
     signals_path: Path | None
     context_path: Path | None
+    source_archives_path: Path | None
+    source_verified: bool | None
     seed: Any
     trades: pd.DataFrame
 
@@ -215,6 +218,12 @@ class CompletedRunVisualizer:
         context_path = cls._optional_artifact(
             completed, run_dir, manifest, "feature_context"
         )
+        source_archives_path = cls._optional_artifact(
+            completed, run_dir, manifest, "source_archives"
+        )
+        source_verified = cls._verify_market_source(
+            service, seed, source_archives_path
+        )
         trades = cls._read_parquet(trades_path)
         if not trades.empty:
             timestamp_column = cls._trade_timestamp_column(trades)
@@ -231,6 +240,8 @@ class CompletedRunVisualizer:
             trades_path=trades_path,
             signals_path=signals_path,
             context_path=context_path,
+            source_archives_path=source_archives_path,
+            source_verified=source_verified,
             seed=seed,
             trades=trades,
         )
@@ -240,6 +251,39 @@ class CompletedRunVisualizer:
         if name not in (manifest.get("artifacts") or {}):
             return None
         return completed.artifact_path(run_dir, manifest, name)
+
+    @staticmethod
+    def _verify_market_source(service, seed, source_path: Path | None) -> bool | None:
+        """Verify chart OHLC resolves to the same canonical partitions as the run."""
+        if source_path is None:
+            return None
+        escaped = str(source_path).replace("'", "''")
+        interval = str(seed.request.strategy_timeframe)
+        with duckdb.connect(":memory:") as connection:
+            rows = connection.execute(
+                f"SELECT canonical_partition_identity FROM read_parquet('{escaped}') "
+                "WHERE lower(CAST(dataset AS VARCHAR)) = 'klines' "
+                "AND CAST(interval AS VARCHAR) = ?",
+                [interval],
+            ).fetchall()
+        identities = [str(row[0]) for row in rows if row and row[0]]
+        if not identities:
+            raise ValueError(
+                "completed run provenance does not contain its strategy-candle source identities"
+            )
+        expected = SourceSignature.from_canonical_identities(
+            DatasetKind.KLINES, identities
+        ).cache_identity()
+        request = seed.request.to_data_request((DatasetKind.KLINES,))
+        current = service.store.canonical_source_identity(
+            request, DatasetKind.KLINES, interval=interval
+        ).cache_identity()
+        if current != expected:
+            raise ValueError(
+                "current canonical candle source does not match the completed run provenance; "
+                "the underlying archive set was changed or repaired after this run"
+            )
+        return True
 
     @staticmethod
     def _read_parquet(path: Path) -> pd.DataFrame:
@@ -660,6 +704,7 @@ class CompletedRunVisualizer:
                 "timeframe": request.strategy_timeframe,
                 "start": _utc(request.period_start).isoformat(),
                 "end": _utc(request.period_end).isoformat(),
+                "sourceVerified": self.source_verified,
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": self.selected_trade_summary(trade_index),
