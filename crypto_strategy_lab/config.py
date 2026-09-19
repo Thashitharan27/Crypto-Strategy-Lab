@@ -75,6 +75,8 @@ class BacktestConfig:
     sr_pivot_right: int = 5
     sr_lookback_bars: int = 200
     sr_zone_width_atr: float = 0.5
+    sr_zone_padding_atr: float = 0.25
+    sr_zone_max_cluster_span_atr: float = 1.0
     sr_near_distance_atr: float = 0.75
     enable_sr_hold_confirmation: bool = True
     sr_hold_confirmation_bars: int = 3
@@ -166,7 +168,14 @@ class BacktestConfig:
             raise ValueError("asset-return regime settings are invalid")
         if self.sr_pivot_left < 1 or self.sr_pivot_right < 1 or self.sr_lookback_bars < 1:
             raise ValueError("support/resistance lookbacks must be positive")
-        if self.sr_zone_width_atr < 0 or self.sr_near_distance_atr < 0 or self.sr_hold_confirmation_atr < 0 or self.sr_break_tolerance_atr < 0:
+        if min(
+            self.sr_zone_width_atr,
+            self.sr_zone_padding_atr,
+            self.sr_zone_max_cluster_span_atr,
+            self.sr_near_distance_atr,
+            self.sr_hold_confirmation_atr,
+            self.sr_break_tolerance_atr,
+        ) < 0:
             raise ValueError("support/resistance ATR distances must be non-negative")
         if self.sr_filter_mode not in ("ANALYSIS_ONLY", "APPLY_ENTRY_RULES"):
             raise ValueError("invalid sr_filter_mode")
