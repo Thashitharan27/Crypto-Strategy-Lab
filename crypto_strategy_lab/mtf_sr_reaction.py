@@ -445,6 +445,7 @@ class MtfSrReactionMixin:
                 active_low = active_high = None
                 active_age = 0
                 previous_structure_state = ""
+                previous_break_index = None
                 last_zone_low = last_zone_high = None
 
                 structure_field = (
@@ -455,6 +456,21 @@ class MtfSrReactionMixin:
                 )
                 zone_high_field = (
                     "resistance_zone_high" if direction == "LONG" else "support_zone_high"
+                )
+                break_index_field = (
+                    "resistance_last_break_index"
+                    if direction == "LONG"
+                    else "support_last_break_index"
+                )
+                broken_zone_low_field = (
+                    "resistance_broken_zone_low"
+                    if direction == "LONG"
+                    else "support_broken_zone_low"
+                )
+                broken_zone_high_field = (
+                    "resistance_broken_zone_high"
+                    if direction == "LONG"
+                    else "support_broken_zone_high"
                 )
                 broken_name = (
                     "RESISTANCE_BROKEN" if direction == "LONG" else "SUPPORT_BROKEN"
@@ -473,14 +489,49 @@ class MtfSrReactionMixin:
                     if zone_low is not None and zone_high is not None:
                         last_zone_low, last_zone_high = zone_low, zone_high
 
-                    just_broke = (
-                        structure_state == broken_name
+                    break_index_value = self._finite(
+                        self._mtf_sr_raw(
+                            i, direction, break_index_field, requested
+                        )
+                    )
+                    break_index = (
+                        int(break_index_value)
+                        if break_index_value is not None
+                        else None
+                    )
+                    broken_low = self._finite(
+                        self._mtf_sr_raw(
+                            i, direction, broken_zone_low_field, requested
+                        )
+                    )
+                    broken_high = self._finite(
+                        self._mtf_sr_raw(
+                            i, direction, broken_zone_high_field, requested
+                        )
+                    )
+
+                    # v6 follows the broken zone's dedicated lifecycle identity.
+                    # The state-transition fallback keeps old prepared artifacts
+                    # interpretable without reconnecting unrelated active zones.
+                    v6_break = (
+                        break_index is not None
+                        and break_index != previous_break_index
+                        and broken_low is not None
+                        and broken_high is not None
+                    )
+                    legacy_break = (
+                        break_index is None
+                        and structure_state == broken_name
                         and previous_structure_state != broken_name
                         and last_zone_low is not None
                         and last_zone_high is not None
                     )
+                    just_broke = v6_break or legacy_break
                     if just_broke:
-                        active_low, active_high = last_zone_low, last_zone_high
+                        if v6_break:
+                            active_low, active_high = broken_low, broken_high
+                        else:
+                            active_low, active_high = last_zone_low, last_zone_high
                         active_age = 0
                         states[i] = "BREAKOUT_CONFIRMED"
 
@@ -529,6 +580,7 @@ class MtfSrReactionMixin:
                                 states[i] = "BREAKOUT_CONFIRMED"
 
                     previous_structure_state = structure_state
+                    previous_break_index = break_index
 
                 self.mtf_role_reversal[(requested, direction)] = states
 
