@@ -188,6 +188,42 @@ def test_support_resistance_settings_round_trip_and_validation(tmp_path):
         assert getattr(cfg2, key) == value
 
 
+def test_exact_legacy_sr_geometry_migrates_but_custom_geometry_is_preserved(tmp_path):
+    legacy_path = tmp_path / "legacy-sr.json"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "config_version": CONFIG_VERSION,
+                **base(tmp_path),
+                "sr_zone_width_atr": 0.50,
+                "sr_zone_padding_atr": 0.25,
+                "sr_zone_max_cluster_span_atr": 1.00,
+            }
+        )
+    )
+    migrated = load_config_json(legacy_path)
+    assert migrated["sr_zone_width_atr"] == pytest.approx(0.15)
+    assert migrated["sr_zone_padding_atr"] == pytest.approx(0.10)
+    assert migrated["sr_zone_max_cluster_span_atr"] == pytest.approx(0.50)
+
+    custom_path = tmp_path / "custom-sr.json"
+    custom_path.write_text(
+        json.dumps(
+            {
+                "config_version": CONFIG_VERSION,
+                **base(tmp_path),
+                "sr_zone_width_atr": 0.50,
+                "sr_zone_padding_atr": 0.20,
+                "sr_zone_max_cluster_span_atr": 1.00,
+            }
+        )
+    )
+    custom = load_config_json(custom_path)
+    assert custom["sr_zone_width_atr"] == pytest.approx(0.50)
+    assert custom["sr_zone_padding_atr"] == pytest.approx(0.20)
+    assert custom["sr_zone_max_cluster_span_atr"] == pytest.approx(1.00)
+
+
 def test_support_resistance_mode_and_unknown_keys_are_strict(tmp_path):
     values = {
         **base(tmp_path),

@@ -63,3 +63,29 @@ def test_data_lake_config_rejects_market_data_path_fields() -> None:
         assert "input_csv" in str(exc)
     else:
         raise AssertionError("Data Lake config accepted a legacy CSV path field")
+
+def test_data_lake_gui_v2_migrates_exact_legacy_sr_geometry_only() -> None:
+    migrated = normalize_data_lake_config(
+        {
+            "config_version": 2,
+            "sr_zone_width_atr": 0.50,
+            "sr_zone_padding_atr": 0.25,
+            "sr_zone_max_cluster_span_atr": 1.00,
+        }
+    )
+    assert migrated["sr_zone_width_atr"] == 0.15
+    assert migrated["sr_zone_padding_atr"] == 0.10
+    assert migrated["sr_zone_max_cluster_span_atr"] == 0.50
+
+    custom = normalize_data_lake_config(
+        {
+            "config_version": 2,
+            "sr_zone_width_atr": 0.50,
+            "sr_zone_padding_atr": 0.20,
+            "sr_zone_max_cluster_span_atr": 1.00,
+        }
+    )
+    assert custom["sr_zone_width_atr"] == 0.50
+    assert custom["sr_zone_padding_atr"] == 0.20
+    assert custom["sr_zone_max_cluster_span_atr"] == 1.00
+

@@ -25,6 +25,7 @@ SR_CONTEXT_FIELDS = (
     "nearest_resistance_distance_atr", "nearest_resistance_distance_price",
     "price_location", "trade_location_rating", "near_support", "near_resistance",
     "inside_support_zone", "inside_resistance_zone", "room_in_direction_atr",
+    "structure_conflict",
     "support_state", "resistance_state", "support_tested", "resistance_tested",
     "support_held", "resistance_held", "support_rejection_atr",
     "resistance_rejection_atr", "support_test_count", "resistance_test_count",

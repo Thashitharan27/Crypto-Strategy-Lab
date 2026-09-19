@@ -102,6 +102,12 @@ class HigherTimeframeSRDetector(SupportResistanceDetector):
             inside_support_zone=bool(nearest_support and nearest_support.zone_bottom <= current_price <= nearest_support.zone_top),
             inside_resistance_zone=bool(nearest_resistance and nearest_resistance.zone_bottom <= current_price <= nearest_resistance.zone_top),
             room_in_direction_atr=room,
+            structure_conflict=bool(
+                np.isfinite(support_dist_atr)
+                and support_dist_atr <= self.near_distance_atr
+                and np.isfinite(resistance_dist_atr)
+                and resistance_dist_atr <= self.near_distance_atr
+            ),
             support_state=support_metrics["state"],
             resistance_state=resistance_metrics["state"],
             support_tested=support_metrics["tested"],

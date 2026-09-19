@@ -26,7 +26,7 @@ from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 SUPPORT_RESISTANCE_FEATURE_NAME = "support_resistance"
-SUPPORT_RESISTANCE_FEATURE_VERSION = "6"
+SUPPORT_RESISTANCE_FEATURE_VERSION = "7"
 
 
 def _optional_float(value):
@@ -201,6 +201,7 @@ class SupportResistanceFeatureProvider:
             "near_resistance",
             "inside_support_zone",
             "inside_resistance_zone",
+            "structure_conflict",
             "support_tested",
             "resistance_tested",
             "support_held",
@@ -217,16 +218,24 @@ class SupportResistanceFeatureProvider:
                     output[column] = pd.to_numeric(output[column], errors="coerce")
         output.insert(0, "available_at", pd.to_datetime(available, utc=True))
         output.insert(0, "timestamp", source_times)
-        output["sr_completed_candle_time"] = pd.to_datetime(
+        completed_utc = pd.to_datetime(
             output["sr_completed_candle_time"], utc=True, errors="coerce"
         )
         if bool((output["available_at"] < source_times).any()):
             raise ValueError("S/R feature availability precedes its source candle")
-        completed = output["sr_completed_candle_time"].dropna()
+        completed = completed_utc.dropna()
         if not completed.empty:
             aligned_available = output.loc[completed.index, "available_at"]
             if bool((completed > aligned_available).any()):
                 raise ValueError("S/R context uses a higher-timeframe candle not yet completed")
+        # Persist S/R completion times in the same UTC-naive physical
+        # representation used by completed feature_context artifacts. Keeping
+        # these as TIMESTAMPTZ makes DuckDB render them in the session timezone
+        # (for example +05:30), which looks like future leakage even when the
+        # underlying instant is causal.
+        output["sr_completed_candle_time"] = (
+            completed_utc.dt.tz_convert("UTC").dt.tz_localize(None)
+        )
         output.attrs.update(
             {
                 "feature_name": self.definition.name,
@@ -255,7 +264,12 @@ class PreparedSupportResistanceContextReader:
     @staticmethod
     def _context_from_row(row, prefix: str) -> SRContext:
         def value(field: str):
-            return row[f"{prefix}_{field}"]
+            key = f"{prefix}_{field}"
+            if field == "structure_conflict" and key not in row:
+                return bool(row[f"{prefix}_near_support"]) and bool(
+                    row[f"{prefix}_near_resistance"]
+                )
+            return row[key]
 
         return SRContext(
             nearest_support_price=_optional_float(value("nearest_support_price")),
@@ -273,6 +287,7 @@ class PreparedSupportResistanceContextReader:
             inside_support_zone=bool(value("inside_support_zone")),
             inside_resistance_zone=bool(value("inside_resistance_zone")),
             room_in_direction_atr=_float_or_nan(value("room_in_direction_atr")),
+            structure_conflict=bool(value("structure_conflict")),
             support_state=str(value("support_state")),
             resistance_state=str(value("resistance_state")),
             support_tested=bool(value("support_tested")),

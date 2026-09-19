@@ -141,7 +141,40 @@ def theoretical_break_even(sl_mult: float, tp_mult: float) -> float:
     return losing_abs / denom if denom > 0 else 1.0
 
 
+_LEGACY_SR_GEOMETRY = {
+    "sr_zone_width_atr": 0.50,
+    "sr_zone_padding_atr": 0.25,
+    "sr_zone_max_cluster_span_atr": 1.00,
+}
+_CURRENT_SR_GEOMETRY = {
+    "sr_zone_width_atr": 0.15,
+    "sr_zone_padding_atr": 0.10,
+    "sr_zone_max_cluster_span_atr": 0.50,
+}
+
+
+def _migrate_legacy_sr_geometry(values: dict[str, Any]) -> dict[str, Any]:
+    """Upgrade only the exact pre-v6 GUI S/R geometry defaults.
+
+    Deliberate custom values are preserved. This migration is intentionally
+    bounded to GUI compatibility configs; native v3 research configs remain
+    explicit and reproducible.
+    """
+    migrated = dict(values)
+    try:
+        legacy = all(
+            key in migrated and float(migrated[key]) == expected
+            for key, expected in _LEGACY_SR_GEOMETRY.items()
+        )
+    except (TypeError, ValueError):
+        legacy = False
+    if legacy:
+        migrated.update(_CURRENT_SR_GEOMETRY)
+    return migrated
+
+
 def _merged_current(values: dict[str, Any]) -> dict[str, Any]:
+    values = _migrate_legacy_sr_geometry(values)
     unknown = sorted(set(values) - set(DEFAULT_GUI_CONFIG))
     if unknown:
         raise ValueError(f"Unknown/retired configuration settings: {', '.join(unknown)}")
