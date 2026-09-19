@@ -12,6 +12,7 @@ from crypto_strategy_lab.run_manifest import file_sha256
 from crypto_strategy_lab.walk_forward_candidate_engine import (
     _ema_stack,
     _price_vs_ema,
+    _safe_context,
     get_next_walk_forward_candidate,
 )
 
@@ -257,6 +258,84 @@ def _context() -> pd.DataFrame:
             },
         ]
     )
+
+
+
+def test_walk_forward_context_replaces_raw_sr_with_trade_relative_v2_units():
+    config = _config()
+    config["data"]["strategy_timeframe_minutes"] = 15
+    config["execution"]["risk_mode"] = "ATR"
+    config["execution"]["atr_multiplier"] = 1.0
+    profile = config["execution"]["profiles"]["bull_long"]
+    profile["stop_loss_multiple"] = 1.0
+    profile["reward_risk_ratio"] = 3.0
+
+    row = {
+        "signal_close_price": 1000.0,
+        "atr_at_entry": 100.0,
+        "atr": 100.0,
+    }
+    context = {
+        "atr": 100.0,
+        "sr_1h_long_nearest_support_price": 800.0,
+        "sr_1h_long_nearest_support_distance_atr": 1.0,
+        "sr_1h_long_nearest_support_distance_price": 200.0,
+        "sr_1h_long_nearest_resistance_price": 1600.0,
+        "sr_1h_long_nearest_resistance_distance_atr": 3.0,
+        "sr_1h_long_nearest_resistance_distance_price": 600.0,
+        "sr_1h_long_near_support": False,
+        "sr_1h_long_near_resistance": False,
+        "sr_1h_long_inside_support_zone": False,
+        "sr_1h_long_inside_resistance_zone": False,
+        "sr_1h_long_support_state": "APPROACHING_SUPPORT",
+        "sr_1h_long_resistance_state": "APPROACHING_RESISTANCE",
+        "sr_1h_long_support_held": False,
+        "sr_1h_long_resistance_held": False,
+        "sr_1h_long_support_zone_low": 750.0,
+        "sr_1h_long_support_zone_high": 850.0,
+        "sr_1h_long_resistance_zone_low": 1600.0,
+        "sr_1h_long_resistance_zone_high": 1700.0,
+        "sr_1d_long_nearest_support_price": 800.0,
+        "sr_1d_long_nearest_support_distance_atr": 0.15,
+        "sr_1d_long_nearest_support_distance_price": 200.0,
+        "sr_1d_long_nearest_resistance_price": 1600.0,
+        "sr_1d_long_nearest_resistance_distance_atr": 0.5,
+        "sr_1d_long_nearest_resistance_distance_price": 600.0,
+        "sr_1d_long_near_support": False,
+        "sr_1d_long_near_resistance": False,
+        "sr_1d_long_inside_support_zone": False,
+        "sr_1d_long_inside_resistance_zone": False,
+        "sr_1d_long_support_state": "APPROACHING_SUPPORT",
+        "sr_1d_long_resistance_state": "APPROACHING_RESISTANCE",
+        "sr_1d_long_support_held": False,
+        "sr_1d_long_resistance_held": False,
+        "sr_1d_long_support_zone_low": 750.0,
+        "sr_1d_long_support_zone_high": 850.0,
+        "sr_1d_long_resistance_zone_low": 1600.0,
+        "sr_1d_long_resistance_zone_high": 1700.0,
+    }
+
+    safe = _safe_context(
+        {**context, **row},
+        context,
+        direction="LONG",
+        profile="bull_long",
+        config=config,
+    )
+
+    sr = safe["support_resistance_trade_context_v2"]["timeframes"]
+    assert sr["1H"]["opposing_distance_native_atr"] == 3.0
+    assert sr["1D"]["opposing_distance_native_atr"] == 0.5
+    assert sr["1H"]["opposing_distance_strategy_atr"] == 6.0
+    assert sr["1D"]["opposing_distance_strategy_atr"] == 6.0
+    assert sr["1H"]["opposing_room_r"] == 6.0
+    assert sr["1D"]["opposing_room_r"] == 6.0
+    assert sr["1H"]["opposing_room_target_multiple"] == 2.0
+    assert sr["1D"]["opposing_room_target_multiple"] == 2.0
+    assert sr["1H"]["target_path"] == "TARGET_BEFORE_OPPOSING_ZONE"
+    assert sr["1D"]["target_path"] == "TARGET_BEFORE_OPPOSING_ZONE"
+    assert "sr_1h_long_nearest_resistance_distance_atr" not in safe["feature_context"]
+    assert "sr_1d_long_nearest_resistance_distance_atr" not in safe["feature_context"]
 
 
 def test_ema_categorical_values_match_strategy_builder_contract():
