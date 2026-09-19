@@ -416,6 +416,7 @@ class CompletedRunVisualizer:
             }
         escaped = str(self.rule_trace_path).replace("'", "''")
         with duckdb.connect(":memory:") as connection:
+            connection.execute("SET TimeZone='UTC'")
             frame = connection.execute(
                 f"SELECT * FROM read_parquet('{escaped}') "
                 "WHERE CAST(strategy_candle_open_time AS TIMESTAMPTZ)=? "
@@ -614,6 +615,7 @@ class CompletedRunVisualizer:
         target = _utc(timestamp)
         escaped = str(self.sr_zones_path).replace("'", "''")
         with duckdb.connect(":memory:") as connection:
+            connection.execute("SET TimeZone='UTC'")
             frame = connection.execute(
                 f"SELECT * FROM read_parquet('{escaped}') "
                 "WHERE CAST(strategy_candle_open_time AS TIMESTAMPTZ)=? "
@@ -845,6 +847,7 @@ class CompletedRunVisualizer:
         escaped = str(path).replace("'", "''")
         escaped_column = '"' + timestamp_column.replace('"', '""') + '"'
         with duckdb.connect(":memory:") as connection:
+            connection.execute("SET TimeZone='UTC'")
             columns = {
                 row[0]
                 for row in connection.execute(
