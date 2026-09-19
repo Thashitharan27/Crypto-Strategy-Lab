@@ -279,6 +279,13 @@ class SRZoneMerger:
                 anchor_value = float("nan")
             if np.isfinite(anchor_value) and anchor_value > 0:
                 return anchor_value
+        # Runtime-created pivots always carry confirmed_at_index. If ATR was not
+        # available at confirmation, keep that pivot unpadded/unmerged rather than
+        # allowing future ATR to rewrite its historical geometry. The fallback is
+        # only for legacy/direct callers that construct levels without confirmation
+        # metadata.
+        if level.confirmed_at_index is not None:
+            return float("nan")
         try:
             fallback = float(fallback_atr)
         except (TypeError, ValueError):
