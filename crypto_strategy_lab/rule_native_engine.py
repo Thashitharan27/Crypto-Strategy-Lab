@@ -494,13 +494,12 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
             return self._prepared_research_value(i, indicator)
         return super()._strategy_profile_rule_value(i, direction, profile, indicator)
 
-    def _strategy_profile_entry_rule_matches(self, i, direction, profile, rule):
-        """Treat missing required research as a failed requirement, never a pass.
+    def _strategy_profile_entry_rule_observation(self, i, direction, profile, rule):
+        """Return the exact rule value and native match used by production.
 
-        Builder REQUIRED rules are compiled into REJECT rules that match the
-        inverse of the desired condition. Returning ``True`` for missing evidence
-        therefore rejects the candidate. VETO/FLIP rules keep fail-open matching:
-        absent optional evidence cannot manufacture a veto or direction flip.
+        Missing REQUIRED evidence is represented as a native reject-match;
+        missing VETO/FLIP evidence remains fail-open and cannot manufacture an
+        optional action. Strategy Inspector consumes this same observation path.
         """
         indicator = rule["indicator"]
         sr_timeframe = rule.get("_builder_sr_timeframe_minutes")
@@ -517,6 +516,14 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
                 i, direction, profile, indicator
             )
         if not np.isfinite(value):
-            return str(rule.get("_builder_kind", "")).upper() == "REQUIRED"
+            matched = str(rule.get("_builder_kind", "")).upper() == "REQUIRED"
+            return value, matched
         inside = float(rule["minimum"]) <= value <= float(rule["maximum"])
-        return inside if rule.get("condition", "INSIDE") == "INSIDE" else not inside
+        matched = inside if rule.get("condition", "INSIDE") == "INSIDE" else not inside
+        return value, bool(matched)
+
+    def _strategy_profile_entry_rule_matches(self, i, direction, profile, rule):
+        _value, matched = self._strategy_profile_entry_rule_observation(
+            i, direction, profile, rule
+        )
+        return matched
