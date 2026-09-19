@@ -1381,7 +1381,14 @@ def build_visualizer_html(payload: Mapping[str, Any]) -> str:
 html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif;overflow:hidden}}
 #root{{height:100%;display:grid;grid-template-rows:1fr auto;min-height:0}}
 #chart-wrap{{position:relative;min-height:0}}
-#chart{{position:absolute;inset:0}}
+#chart{{position:absolute;inset:0;z-index:1}}
+#zone-layer,#zone-label-layer{{position:absolute;inset:0;pointer-events:none;overflow:hidden}}
+#zone-layer{{z-index:2}}
+#zone-label-layer{{z-index:4}}
+.zone-band{{position:absolute;box-sizing:border-box;border-radius:2px}}
+.zone-label{{position:absolute;right:66px;max-width:220px;padding:2px 6px;border-radius:3px;font-size:11px;font-weight:600;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35)}}
+.zone-label.support{{background:rgba(33,92,68,.92);color:#c7f4de;border:1px solid rgba(111,211,164,.55)}}
+.zone-label.resistance{{background:rgba(107,52,52,.92);color:#ffd1d1;border:1px solid rgba(240,138,138,.55)}}
 #readout{{position:absolute;left:10px;top:8px;z-index:5;pointer-events:none;background:rgba(15,23,32,.82);border:1px solid #334155;border-radius:5px;padding:7px 9px;font-size:12px;line-height:1.45;max-width:64%;white-space:normal}}
 #facts{{font-size:11px;color:#b8c2cc;margin-top:3px}}
 #footer{{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:5px 9px;border-top:1px solid #263241;color:#8f9baa;font-size:11px}}
@@ -1395,6 +1402,8 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
 <div id="root">
   <div id="chart-wrap">
     <div id="chart"></div>
+    <div id="zone-layer"></div>
+    <div id="zone-label-layer"></div>
     <div id="readout">Click a candle to inspect causal evidence.</div>
     <div id="error"></div>
   </div>
@@ -1452,13 +1461,122 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
     line.setData(overlay.data || []);
   }}
 
+  const chartWrap = document.getElementById('chart-wrap');
+  const zoneLayer = document.getElementById('zone-layer');
+  const zoneLabelLayer = document.getElementById('zone-label-layer');
+  const review = payload.srReview || {{ mode:'normal', snapshot:'live', details:'zones' }};
+
+  function activeForReference(zone) {{
+    return review.snapshot === 'entry'
+      ? Boolean(zone.activeAtEntry)
+      : Boolean(zone.activeAtEnd);
+  }}
+  function xForTime(time, startSide) {{
+    const direct = chart.timeScale().timeToCoordinate(time);
+    if (direct !== null && direct !== undefined) return direct;
+    const range = chart.timeScale().getVisibleRange();
+    if (!range) return null;
+    if (Number(time) <= Number(range.from)) return 0;
+    if (Number(time) >= Number(range.to)) return chartWrap.clientWidth;
+    return startSide ? 0 : chartWrap.clientWidth;
+  }}
+  function shortState(value) {{
+    return String(value || '')
+      .replace('SUPPORT_', '')
+      .replace('RESISTANCE_', '')
+      .replaceAll('_', ' ');
+  }}
+  function drawZones() {{
+    zoneLayer.replaceChildren();
+    zoneLabelLayer.replaceChildren();
+    const labels = [];
+    for (const zone of payload.srZones || []) {{
+      const x1 = xForTime(zone.start, true);
+      const x2 = xForTime(zone.end, false);
+      const yHigh = candle.priceToCoordinate(Number(zone.high));
+      const yLow = candle.priceToCoordinate(Number(zone.low));
+      if ([x1,x2,yHigh,yLow].some(v => v === null || v === undefined || !Number.isFinite(Number(v)))) continue;
+
+      const active = activeForReference(zone);
+      const snapshotDim = review.mode === 'review' && review.snapshot === 'entry' && !active;
+      const baseAlpha = review.mode === 'review'
+        ? (active ? 0.20 : snapshotDim ? 0.025 : 0.085)
+        : (active ? 0.11 : 0.045);
+      const support = zone.structure === 'support';
+      const fill = support
+        ? `rgba(53, 180, 119, ${baseAlpha})`
+        : `rgba(220, 90, 90, ${baseAlpha})`;
+      const border = support
+        ? `rgba(86, 214, 151, ${Math.min(.75, baseAlpha + .28)})`
+        : `rgba(238, 120, 120, ${Math.min(.75, baseAlpha + .28)})`;
+
+      const band = document.createElement('div');
+      band.className = 'zone-band';
+      band.style.left = Math.min(x1,x2) + 'px';
+      band.style.width = Math.max(2, Math.abs(x2-x1)) + 'px';
+      band.style.top = Math.min(yHigh,yLow) + 'px';
+      band.style.height = Math.max(2, Math.abs(yLow-yHigh)) + 'px';
+      band.style.background = fill;
+      band.style.borderTop = '1px solid ' + border;
+      band.style.borderBottom = '1px solid ' + border;
+      zoneLayer.appendChild(band);
+
+      if (active) {{
+        const state = review.snapshot === 'entry'
+          ? zone.stateAtEntry
+          : zone.stateEnd;
+        labels.push({{
+          top: (Number(yHigh) + Number(yLow))/2 - 10,
+          structure: zone.structure,
+          text: zone.name + (state ? ' · ' + shortState(state) : ''),
+        }});
+      }}
+    }}
+    labels.sort((a,b) => a.top-b.top);
+    let lastTop = -999;
+    for (const item of labels) {{
+      const top = Math.max(4, item.top <= lastTop + 20 ? lastTop + 22 : item.top);
+      lastTop = top;
+      const label = document.createElement('div');
+      label.className = 'zone-label ' + item.structure;
+      label.style.top = top + 'px';
+      label.textContent = item.text;
+      zoneLabelLayer.appendChild(label);
+    }}
+  }}
+
   if (LC.createSeriesMarkers) {{
-    const markers=(payload.markers || []).map(m => ({{
+    const markerSource = [
+      ...(payload.markers || []),
+      ...(payload.srEvents || []),
+    ];
+    if (
+      review.mode === 'review'
+      && review.snapshot === 'entry'
+      && payload.selectedTradeCandleTime
+    ) {{
+      markerSource.push({{
+        time: payload.selectedTradeCandleTime,
+        position: 'belowBar',
+        shape: 'circle',
+        text: 'S/R SNAPSHOT',
+        kind: 'sr-snapshot',
+      }});
+    }}
+    markerSource.sort((a,b) => Number(a.time)-Number(b.time));
+    const markers=markerSource.map(m => ({{
       time:m.time, position:m.position, shape:m.shape, text:m.text,
-      color: m.kind==='entry' ? '#6fd3a4' : m.kind==='exit' ? '#ffd166' : '#9aa5b1',
+      color: m.kind==='entry' ? '#6fd3a4'
+        : m.kind==='exit' ? '#ffd166'
+        : m.kind==='sr-snapshot' ? '#9ec5ff'
+        : m.kind==='sr-event' && m.event==='break' ? '#ff8e8e'
+        : m.kind==='sr-event' && m.event==='held' ? '#7ee2ac'
+        : m.kind==='sr-event' ? '#d8b36a'
+        : '#9aa5b1',
     }}));
     LC.createSeriesMarkers(candle, markers);
   }}
+
   for (const line of payload.priceLines || []) {{
     const color=line.kind==='entry' ? '#7db7ff' : line.kind==='stop' ? '#f08a8a' : '#79d39d';
     candle.createPriceLine({{
@@ -1494,6 +1612,11 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
   if (payload.visibleStart && payload.visibleEnd) {{
     chart.timeScale().setVisibleRange({{ from: payload.visibleStart, to: payload.visibleEnd }});
   }}
+  chart.timeScale().subscribeVisibleTimeRangeChange(() => drawZones());
+  if (window.ResizeObserver) {{
+    new ResizeObserver(() => drawZones()).observe(chartWrap);
+  }}
+  requestAnimationFrame(() => drawZones());
 }})();
 </script>
 </body>
