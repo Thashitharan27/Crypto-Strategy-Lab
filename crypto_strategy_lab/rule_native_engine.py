@@ -407,6 +407,12 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
         reference_price = float(self.close[i]) if i < len(self.close) else np.nan
         risk_unit = float(self.risk[i]) if i < len(self.risk) else np.nan
         stop_distance, target_distance = planned_trade_distances(profile, risk_unit)
+        risk_mode = getattr(getattr(self.config, "risk_mode", None), "value", getattr(self.config, "risk_mode", ""))
+        if str(risk_mode).upper() == "SR_STRUCTURE":
+            stop_distance = None
+            target_distance = None
+        if str(getattr(self.config, "sr_take_profit_mode", "FIXED_R")).upper() != "FIXED_R":
+            target_distance = None
         derived = derive_trade_sr_context(
             direction=direction,
             raw=raw,
