@@ -42,6 +42,7 @@ def _window(tmp_path: Path):
         "summary": {"path": "summary.json"},
         "trades": {"path": "artifacts/trades.parquet"},
         "signals": {"path": "artifacts/signals.parquet"},
+        "rule_trace": {"path": "artifacts/rule_trace.parquet"},
         "feature_context": {"path": "artifacts/feature_context.parquet"},
         "data_quality": {"path": "data_quality.json"},
         "source_archives": {"path": "provenance/source_archives.parquet"},
@@ -156,6 +157,7 @@ def test_dashboard_has_clean_artifact_surface_and_compact_timings(tmp_path):
 
     assert "telemetry" not in dashboard.artifact_buttons
     assert dashboard.artifact_buttons["source_archives"].isEnabled()
+    assert dashboard.artifact_buttons["rule_trace"].isEnabled()
     assert not dashboard.research_content.isVisible()
     assert not dashboard.performance_content.isVisible()
     assert dashboard.timing_values["data_features"].text() == "18.3s"
