@@ -243,66 +243,76 @@ class SwingDetector:
 
 
 class SRZoneMerger:
-    """Merges nearby SR levels into zones."""
-    
-    def __init__(self, zone_width_atr: float = 0.5):
+    """Merges confirmed pivots and expands them into ATR-sized price zones."""
+
+    def __init__(
+        self,
+        zone_width_atr: float = 0.5,
+        zone_padding_atr: float = 0.25,
+        max_cluster_span_atr: float = 1.0,
+    ):
         """
         Args:
-            zone_width_atr: merge levels within this many ATRs of each other
+            zone_width_atr:
+                Maximum adjacent-pivot distance used to merge nearby pivots.
+                Retained under its historical config name for compatibility.
+            zone_padding_atr:
+                Padding added below and above every raw pivot cluster. This gives
+                a single confirmed pivot a real price zone instead of a zero-width
+                line.
+            max_cluster_span_atr:
+                Maximum raw price span from the first to last pivot in one cluster.
+                This prevents adjacent-pivot chaining from creating an arbitrarily
+                wide zone.
         """
-        self.zone_width_atr = zone_width_atr
-    
+        self.zone_width_atr = max(0.0, float(zone_width_atr))
+        self.zone_padding_atr = max(0.0, float(zone_padding_atr))
+        self.max_cluster_span_atr = max(0.0, float(max_cluster_span_atr))
+
     def merge_levels(
         self, levels: list[SRLevel], atr: float
     ) -> list[SRLevel]:
-        """
-        Merge levels that are close together into zones.
-        
-        Args:
-            levels: list of SRLevel objects
-            atr: current ATR value for distance calculation
-            
-        Returns:
-            List of merged SRLevel objects with zone_bottom/zone_top set
-        """
+        """Merge nearby confirmed pivots, cap raw cluster span, then pad the zone."""
         if not levels:
             return []
-        
-        if atr <= 0:
+
+        if not np.isfinite(atr) or atr <= 0:
             return levels
-        
-        # Sort by price
+
         sorted_levels = sorted(levels, key=lambda x: x.price)
         merged = []
         current_zone = [sorted_levels[0]]
-        
+
         merge_distance = self.zone_width_atr * atr
-        
+        maximum_span = self.max_cluster_span_atr * atr
+
         for level in sorted_levels[1:]:
-            # If within merge distance, add to current zone
-            if abs(level.price - current_zone[-1].price) <= merge_distance:
+            adjacent_distance = abs(level.price - current_zone[-1].price)
+            raw_cluster_span = level.price - current_zone[0].price
+            if (
+                adjacent_distance <= merge_distance
+                and raw_cluster_span <= maximum_span
+            ):
                 current_zone.append(level)
             else:
-                # Finalize current zone and start new one
-                merged.append(self._finalize_zone(current_zone))
+                merged.append(self._finalize_zone(current_zone, atr))
                 current_zone = [level]
-        
-        # Finalize last zone
-        merged.append(self._finalize_zone(current_zone))
+
+        merged.append(self._finalize_zone(current_zone, atr))
         return merged
-    
-    def _finalize_zone(self, zone_levels: list[SRLevel]) -> SRLevel:
-        """Create a zone from multiple levels."""
+
+    def _finalize_zone(self, zone_levels: list[SRLevel], atr: float) -> SRLevel:
+        """Create one padded zone from the raw pivot prices in a cluster."""
         prices = [l.price for l in zone_levels]
         level_type = zone_levels[0].level_type
-        
-        # Use extreme of zone as price
+
+        # Preserve the historical representative price semantics. Support uses
+        # the lowest raw pivot; resistance uses the highest raw pivot.
         if level_type == SRLevelType.SUPPORT:
-            zone_price = min(prices)  # lowest point
+            zone_price = min(prices)
         else:
-            zone_price = max(prices)  # highest point
-        
-        # Combine metadata
+            zone_price = max(prices)
+
         result = SRLevel(
             price=zone_price,
             level_type=level_type,
@@ -311,8 +321,9 @@ class SRZoneMerger:
             touch_count=sum(l.touch_count for l in zone_levels),
             source_bar_indices=tuple(l.bar_index for l in zone_levels),
         )
-        result.zone_bottom = min(prices)
-        result.zone_top = max(prices)
+        padding = self.zone_padding_atr * atr
+        result.zone_bottom = min(prices) - padding
+        result.zone_top = max(prices) + padding
         return result
 
 
@@ -325,6 +336,8 @@ class SupportResistanceDetector:
         pivot_right: int = 5,
         lookback_bars: int = 200,
         zone_width_atr: float = 0.5,
+        zone_padding_atr: float = 0.25,
+        max_cluster_span_atr: float = 1.0,
         near_distance_atr: float = 0.75,
         enable_hold_confirmation: bool = True,
         hold_confirmation_bars: int = 3,
@@ -337,15 +350,23 @@ class SupportResistanceDetector:
             pivot_left: bars to left for swing detection
             pivot_right: bars to right for swing detection (delays level availability)
             lookback_bars: how many historical bars to scan for levels
-            zone_width_atr: merge levels within this ATR distance
+            zone_width_atr: merge adjacent pivots within this ATR distance
+            zone_padding_atr: pad each raw pivot cluster above/below by this ATR distance
+            max_cluster_span_atr: cap the raw pivot span of one merged cluster
             near_distance_atr: distance to be considered "near" a level
         """
         self.swing_detector = SwingDetector(
             pivot_left=pivot_left, pivot_right=pivot_right
         )
-        self.zone_merger = SRZoneMerger(zone_width_atr=zone_width_atr)
+        self.zone_merger = SRZoneMerger(
+            zone_width_atr=zone_width_atr,
+            zone_padding_atr=zone_padding_atr,
+            max_cluster_span_atr=max_cluster_span_atr,
+        )
         self.lookback_bars = _positive_integral(lookback_bars, "lookback_bars")
-        self.zone_width_atr = zone_width_atr
+        self.zone_width_atr = float(zone_width_atr)
+        self.zone_padding_atr = float(zone_padding_atr)
+        self.max_cluster_span_atr = float(max_cluster_span_atr)
         self.near_distance_atr = near_distance_atr
         self.enable_hold_confirmation = bool(enable_hold_confirmation)
         self.hold_confirmation_bars = _positive_integral(
@@ -667,13 +688,15 @@ class SupportResistanceDetector:
             return None
         
         if below:
-            # Support: find highest level below price
-            candidates = [l for l in levels if l.price <= price]
-            return max(candidates, key=lambda x: x.price) if candidates else None
+            # A padded support zone remains valid while price is inside it, even
+            # if the raw pivot price itself sits slightly above current price.
+            candidates = [l for l in levels if l.zone_bottom <= price]
+            return max(candidates, key=lambda x: x.zone_top) if candidates else None
         else:
-            # Resistance: find lowest level above price
-            candidates = [l for l in levels if l.price >= price]
-            return min(candidates, key=lambda x: x.price) if candidates else None
+            # Same principle for resistance: price inside a padded zone should
+            # still resolve to that resistance instead of losing structure.
+            candidates = [l for l in levels if l.zone_top >= price]
+            return min(candidates, key=lambda x: x.zone_bottom) if candidates else None
     
     def _calculate_distance(
         self, price: float, level: Optional[SRLevel], atr: float

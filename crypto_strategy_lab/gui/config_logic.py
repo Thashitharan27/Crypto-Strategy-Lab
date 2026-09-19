@@ -67,6 +67,8 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "sr_pivot_right": 5,
     "sr_lookback_bars": 200,
     "sr_zone_width_atr": 0.5,
+    "sr_zone_padding_atr": 0.25,
+    "sr_zone_max_cluster_span_atr": 1.0,
     "sr_near_distance_atr": 0.75,
     "enable_sr_hold_confirmation": True,
     "sr_hold_confirmation_bars": 3,
@@ -213,6 +215,17 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         errors.append("Invalid market regime method.")
     if values["sr_filter_mode"] not in ("ANALYSIS_ONLY", "APPLY_ENTRY_RULES"):
         errors.append("Invalid support/resistance usage mode.")
+    for key, label in (
+        ("sr_zone_width_atr", "S/R pivot merge distance"),
+        ("sr_zone_padding_atr", "S/R zone padding"),
+        ("sr_zone_max_cluster_span_atr", "S/R maximum cluster span"),
+        ("sr_near_distance_atr", "S/R near-zone distance"),
+    ):
+        try:
+            if float(values[key]) < 0:
+                errors.append(f"{label} must be >= 0.")
+        except (TypeError, ValueError, KeyError):
+            errors.append(f"{label} must be numeric.")
     if str(values["sr_break_basis"]).upper() not in ("CLOSE", "WICK"):
         errors.append("Invalid support/resistance break basis.")
     try:
@@ -250,6 +263,8 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         enable_support_resistance_analysis=bool(merged["enable_support_resistance_analysis"]),
         sr_pivot_left=int(merged["sr_pivot_left"]), sr_pivot_right=int(merged["sr_pivot_right"]),
         sr_lookback_bars=int(merged["sr_lookback_bars"]), sr_zone_width_atr=float(merged["sr_zone_width_atr"]),
+        sr_zone_padding_atr=float(merged["sr_zone_padding_atr"]),
+        sr_zone_max_cluster_span_atr=float(merged["sr_zone_max_cluster_span_atr"]),
         sr_near_distance_atr=float(merged["sr_near_distance_atr"]),
         enable_sr_hold_confirmation=bool(merged["enable_sr_hold_confirmation"]),
         sr_hold_confirmation_bars=int(merged["sr_hold_confirmation_bars"]),

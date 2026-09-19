@@ -8,6 +8,7 @@ import pandas.testing as pdt
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data_lake_config import FeatureConfig, ResearchRunConfig
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.features.support_resistance import (
     PreparedSupportResistanceContextReader,
@@ -79,6 +80,8 @@ def config() -> EnhancedBacktestConfig:
         sr_pivot_right=2,
         sr_lookback_bars=50,
         sr_zone_width_atr=0.4,
+        sr_zone_padding_atr=0.2,
+        sr_zone_max_cluster_span_atr=0.9,
         sr_near_distance_atr=0.8,
         enable_sr_hold_confirmation=True,
         sr_hold_confirmation_bars=3,
@@ -114,6 +117,8 @@ def prepared(frame: pd.DataFrame, cfg: EnhancedBacktestConfig | None = None):
         "sr_pivot_right": cfg.sr_pivot_right,
         "sr_lookback_bars": cfg.sr_lookback_bars,
         "sr_zone_width_atr": cfg.sr_zone_width_atr,
+        "sr_zone_padding_atr": cfg.sr_zone_padding_atr,
+        "sr_zone_max_cluster_span_atr": cfg.sr_zone_max_cluster_span_atr,
         "sr_near_distance_atr": cfg.sr_near_distance_atr,
         "enable_sr_hold_confirmation": cfg.enable_sr_hold_confirmation,
         "sr_hold_confirmation_bars": cfg.sr_hold_confirmation_bars,
@@ -142,6 +147,23 @@ def assert_context_equal(left: SRContext, right: SRContext) -> None:
             assert a == b, field.name
 
 
+def test_feature_config_publishes_padded_zone_geometry_parameters() -> None:
+    features = FeatureConfig(
+        enable_support_resistance_analysis=True,
+        sr_zone_width_atr=0.45,
+        sr_zone_padding_atr=0.22,
+        sr_zone_max_cluster_span_atr=0.95,
+    )
+    ResearchRunConfig(features=features).validate()
+    params = features.registry_parameters(
+        strategy_timeframe_minutes=15
+    )["support_resistance"]
+
+    assert params["sr_zone_width_atr"] == 0.45
+    assert params["sr_zone_padding_atr"] == 0.22
+    assert params["sr_zone_max_cluster_span_atr"] == 0.95
+
+
 def test_cached_reader_reconstructs_exact_detector_context() -> None:
     frame = canonical_klines()
     directional, sr, parameters = prepared(frame)
@@ -151,6 +173,8 @@ def test_cached_reader_reconstructs_exact_detector_context() -> None:
         pivot_right=parameters["sr_pivot_right"],
         lookback_bars=parameters["sr_lookback_bars"],
         zone_width_atr=parameters["sr_zone_width_atr"],
+        zone_padding_atr=parameters["sr_zone_padding_atr"],
+        max_cluster_span_atr=parameters["sr_zone_max_cluster_span_atr"],
         near_distance_atr=parameters["sr_near_distance_atr"],
         enable_hold_confirmation=parameters["enable_sr_hold_confirmation"],
         hold_confirmation_bars=parameters["sr_hold_confirmation_bars"],
@@ -198,7 +222,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 
     assert isinstance(engine, SRDynamicTPBacktestEngine)
     assert isinstance(engine.sr_detector, PreparedSupportResistanceContextReader)
-    assert engine.support_resistance_feature_source == "support_resistance@3"
+    assert engine.support_resistance_feature_source == "support_resistance@4"
     assert engine.sr_uses_higher_timeframe is False
 
     index = 75
