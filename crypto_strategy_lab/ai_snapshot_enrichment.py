@@ -125,12 +125,19 @@ def trade_relative_sr_snapshot(engine, i: int, snapshot: dict[str, Any]) -> dict
                 timeframes[label] = derived
         result[side.lower()] = {
             "unit_definitions": {
-                "native_atr": "ATR of the selected S/R timeframe.",
-                "strategy_atr": "ATR of the strategy/entry timeframe.",
+                "selected_tf_atr": "ATR of the selected S/R timeframe.",
+                "strategy_tf_atr": "ATR of the strategy/entry timeframe.",
                 "room_r": "Distance to opposing zone edge / configured full stop distance.",
                 "room_target_multiple": "Distance to opposing zone edge / planned final target distance.",
             },
-            "timeframes": timeframes,
+            "timeframes": {
+                label: {
+                    key.removeprefix("SR_").lower(): _json_safe(value)
+                    for key, value in values.items()
+                    if _json_safe(value) is not None
+                }
+                for label, values in timeframes.items()
+            },
         }
     return result
 
