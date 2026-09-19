@@ -246,6 +246,7 @@ class CompletedRunVisualizer:
     trades_path: Path
     signals_path: Path | None
     context_path: Path | None
+    sr_zones_path: Path | None
     rule_trace_path: Path | None
     source_archives_path: Path | None
     source_verified: bool | None
@@ -270,6 +271,9 @@ class CompletedRunVisualizer:
         signals_path = cls._optional_artifact(completed, run_dir, manifest, "signals")
         context_path = cls._optional_artifact(
             completed, run_dir, manifest, "feature_context"
+        )
+        sr_zones_path = cls._optional_artifact(
+            completed, run_dir, manifest, "sr_zones"
         )
         rule_trace_path = cls._optional_artifact(
             completed, run_dir, manifest, "rule_trace"
@@ -296,6 +300,7 @@ class CompletedRunVisualizer:
             trades_path=trades_path,
             signals_path=signals_path,
             context_path=context_path,
+            sr_zones_path=sr_zones_path,
             rule_trace_path=rule_trace_path,
             source_archives_path=source_archives_path,
             source_verified=source_verified,
@@ -603,6 +608,65 @@ class CompletedRunVisualizer:
             ),
         }
 
+    def _sr_zone_rows_at(self, timestamp: Any) -> list[dict[str, Any]]:
+        if self.sr_zones_path is None:
+            return []
+        target = _utc(timestamp)
+        escaped = str(self.sr_zones_path).replace("'", "''")
+        with duckdb.connect(":memory:") as connection:
+            frame = connection.execute(
+                f"SELECT * FROM read_parquet('{escaped}') "
+                "WHERE CAST(strategy_candle_open_time AS TIMESTAMPTZ)=? "
+                "ORDER BY sr_timeframe_minutes, structure, zone_low, zone_id",
+                [target.to_pydatetime()],
+            ).df()
+        if frame.empty:
+            return []
+
+        result: list[dict[str, Any]] = []
+        for _, raw in frame.iterrows():
+            label = str(raw.get("sr_timeframe") or "")
+            result.append(
+                {
+                    "key": label,
+                    "timeframe": SR_TIMEFRAMES.get(label, label),
+                    "zoneId": str(raw.get("zone_id") or ""),
+                    "structure": str(raw.get("structure") or "").upper(),
+                    "zoneLow": _finite(raw.get("zone_low")),
+                    "zoneHigh": _finite(raw.get("zone_high")),
+                    "state": _json_value(raw.get("state")),
+                    "nearest": bool(raw.get("nearest")),
+                    "near": bool(raw.get("near")),
+                    "inside": bool(raw.get("inside")),
+                    "tested": bool(raw.get("tested")),
+                    "held": bool(raw.get("held")),
+                    "testCount": _json_value(raw.get("test_count")),
+                    "touchCount": _json_value(raw.get("touch_count")),
+                    "sourceCount": _json_value(raw.get("source_count")),
+                    "validationRejectionAtr": _finite(
+                        raw.get("validation_rejection_atr")
+                    ),
+                    "rejectionAtr": _finite(raw.get("rejection_atr")),
+                    "distanceNativeAtr": _finite(raw.get("distance_atr")),
+                    "distancePrice": _finite(raw.get("distance_price")),
+                    "pivotIndex": _json_value(raw.get("pivot_bar_index")),
+                    "confirmedAtIndex": _json_value(raw.get("confirmed_at_index")),
+                    "barsSinceTest": _json_value(raw.get("bars_since_test")),
+                    "lastTestIndex": _json_value(raw.get("last_test_index")),
+                    "sourceBarIndices": _json_value(
+                        raw.get("source_bar_indices_json")
+                    ),
+                    "completedCandleTime": (
+                        _utc(raw.get("sr_completed_candle_time")).isoformat()
+                        if raw.get("sr_completed_candle_time") is not None
+                        and not pd.isna(raw.get("sr_completed_candle_time"))
+                        else None
+                    ),
+                }
+            )
+        return result
+
+
     def sr_inspector_at(self, timestamp: Any) -> dict[str, Any]:
         """Return persisted S/R evidence for one exact strategy candle."""
         target = _utc(timestamp)
@@ -634,11 +698,14 @@ class CompletedRunVisualizer:
             for label in SR_TIMEFRAMES
             if (block := self._sr_inspector_block(row, label)) is not None
         ]
+        zones = self._sr_zone_rows_at(target)
         return {
             "status": "AVAILABLE" if blocks else "NOT_AVAILABLE",
             "timestamp": target.isoformat(),
             "message": "" if blocks else "No persisted S/R context exists on this candle.",
             "timeframes": blocks,
+            "zones": zones,
+            "zoneInventoryAvailable": self.sr_zones_path is not None,
         }
 
     @property
@@ -824,6 +891,214 @@ class CompletedRunVisualizer:
             )
         return frame
 
+    def _sr_zone_inventory(
+        self, start: pd.Timestamp, end: pd.Timestamp
+    ) -> pd.DataFrame:
+        frame = self._query_time_window(
+            self.sr_zones_path,
+            "strategy_candle_open_time",
+            start,
+            end,
+        )
+        if not frame.empty:
+            frame["strategy_candle_open_time"] = pd.to_datetime(
+                frame["strategy_candle_open_time"], utc=True, errors="coerce"
+            )
+            if "sr_completed_candle_time" in frame.columns:
+                frame["sr_completed_candle_time"] = pd.to_datetime(
+                    frame["sr_completed_candle_time"], utc=True, errors="coerce"
+                )
+        return frame
+
+    def _inventory_sr_zones(
+        self,
+        inventory: pd.DataFrame,
+        *,
+        visible_start: pd.Timestamp,
+        visible_end: pd.Timestamp,
+        entry_snapshot: pd.Timestamp | None,
+    ) -> list[dict[str, Any]]:
+        """Compact full per-candle inventory into visual zone lifespans."""
+        if inventory.empty:
+            return []
+        frame = inventory.copy()
+        frame = frame.loc[
+            frame["strategy_candle_open_time"] >= visible_start
+        ].sort_values(
+            ["sr_timeframe_minutes", "zone_id", "strategy_index"],
+            kind="stable",
+        )
+        if frame.empty:
+            return []
+
+        interval = pd.Timedelta(
+            interval_to_timedelta(self.seed.request.strategy_timeframe)
+        )
+        entry = _utc(entry_snapshot) if entry_snapshot is not None else None
+        zones: list[dict[str, Any]] = []
+
+        group_columns = [
+            "sr_timeframe",
+            "zone_id",
+            "structure",
+            "zone_low",
+            "zone_high",
+        ]
+        for keys, group in frame.groupby(group_columns, sort=False, dropna=False):
+            label, zone_id, structure, zone_low, zone_high = keys
+            if label not in SR_TIMEFRAMES:
+                continue
+            group = group.sort_values("strategy_index", kind="stable").reset_index(
+                drop=True
+            )
+            cursor = 0
+            while cursor < len(group):
+                end = cursor + 1
+                while end < len(group):
+                    prior_index = int(group.iloc[end - 1]["strategy_index"])
+                    next_index = int(group.iloc[end]["strategy_index"])
+                    if next_index != prior_index + 1:
+                        break
+                    end += 1
+
+                segment = group.iloc[cursor:end]
+                first = segment.iloc[0]
+                last = segment.iloc[-1]
+                start_time = _utc(first["strategy_candle_open_time"])
+                end_time = _utc(last["strategy_candle_open_time"]) + interval
+                active_at_entry = bool(
+                    entry is not None and start_time <= entry < end_time
+                )
+                entry_row = None
+                if active_at_entry:
+                    eligible = segment.loc[
+                        pd.to_datetime(
+                            segment["strategy_candle_open_time"], utc=True
+                        )
+                        <= entry
+                    ]
+                    if not eligible.empty:
+                        entry_row = eligible.iloc[-1]
+                active_at_end = bool(end_time >= visible_end)
+
+                zones.append(
+                    {
+                        "name": (
+                            f"{SR_TIMEFRAMES[str(label)]} "
+                            f"{str(structure).title()}"
+                        ),
+                        "kind": "sr-zone",
+                        "timeframe": str(label),
+                        "structure": str(structure).lower(),
+                        "zoneIdentity": ["inventory", str(zone_id)],
+                        "start": _unix_seconds(start_time),
+                        "end": _unix_seconds(min(end_time, visible_end)),
+                        "low": float(zone_low),
+                        "high": float(zone_high),
+                        "stateEnd": _json_value(last.get("state")),
+                        "stateAtEntry": (
+                            _json_value(entry_row.get("state"))
+                            if entry_row is not None
+                            else None
+                        ),
+                        "activeAtEntry": active_at_entry,
+                        "activeAtEnd": active_at_end,
+                        "nearestAtEntry": (
+                            bool(entry_row.get("nearest"))
+                            if entry_row is not None
+                            else False
+                        ),
+                        "nearestAtEnd": (
+                            bool(last.get("nearest")) if active_at_end else False
+                        ),
+                        "nearAtEnd": bool(last.get("near")),
+                        "insideAtEnd": bool(last.get("inside")),
+                        "testCountEnd": _json_value(last.get("test_count")),
+                        "touchCountEnd": _json_value(last.get("touch_count")),
+                        "sourceCountEnd": _json_value(last.get("source_count")),
+                        "validationRejectionAtrEnd": _finite(
+                            last.get("validation_rejection_atr")
+                        ),
+                        "rejectionAtrEnd": _finite(last.get("rejection_atr")),
+                        "inventoryFull": True,
+                    }
+                )
+                cursor = end
+
+        zones.sort(
+            key=lambda item: (
+                item["timeframe"],
+                item["structure"],
+                item["start"],
+                item["low"],
+            )
+        )
+        return zones
+
+    @staticmethod
+    def _inventory_sr_lifecycle_events(
+        inventory: pd.DataFrame,
+    ) -> list[dict[str, Any]]:
+        """Show TEST/HELD transitions for every persisted active zone."""
+        if inventory.empty:
+            return []
+        events: list[dict[str, Any]] = []
+        grouped = inventory.sort_values(
+            ["sr_timeframe_minutes", "zone_id", "strategy_index"],
+            kind="stable",
+        ).groupby(["sr_timeframe", "zone_id", "structure"], sort=False)
+        for (label, _zone_id, structure), group in grouped:
+            if label not in SR_TIMEFRAMES:
+                continue
+            prior_test = None
+            prior_held = False
+            prior_index = None
+            for _, row in group.iterrows():
+                current_index = int(row.get("strategy_index"))
+                if prior_index is not None and current_index != prior_index + 1:
+                    prior_test = None
+                    prior_held = False
+                prior_index = current_index
+                test_count = int(row.get("test_count") or 0)
+                held = bool(row.get("held"))
+                event = None
+                if prior_test is not None and test_count > prior_test:
+                    event = "TEST"
+                if held and not prior_held:
+                    event = "HELD"
+                prior_test = test_count
+                prior_held = held
+                if event is None:
+                    continue
+                events.append(
+                    {
+                        "time": _unix_seconds(row["strategy_candle_open_time"]),
+                        "position": (
+                            "belowBar"
+                            if str(structure).upper() == "SUPPORT"
+                            else "aboveBar"
+                        ),
+                        "shape": "circle" if event == "TEST" else "square",
+                        "text": (
+                            f"{SR_TIMEFRAMES[str(label)]} "
+                            f"{str(structure)[0].upper()} {event}"
+                        ),
+                        "kind": "sr-event",
+                        "event": event.lower(),
+                        "timeframe": str(label),
+                        "structure": str(structure).lower(),
+                    }
+                )
+        events.sort(
+            key=lambda item: (
+                int(item["time"]),
+                item["timeframe"],
+                item["structure"],
+            )
+        )
+        return events
+
+
     @staticmethod
     def _sr_frame_column(
         frame: pd.DataFrame, label: str, suffix: str
@@ -1002,6 +1277,8 @@ class CompletedRunVisualizer:
                         ),
                         "activeAtEntry": active_at_entry,
                         "activeAtEnd": end == len(frame),
+                        "nearestAtEntry": active_at_entry,
+                        "nearestAtEnd": end == len(frame),
                         "nearAtEnd": bool(final_row.get(near_column))
                         if near_column
                         else False,
@@ -1313,6 +1590,7 @@ class CompletedRunVisualizer:
             raise ValueError("no canonical strategy candles are available for this chart window")
         context = self._feature_context(visible_start, visible_end)
         signals = self._signals(visible_start, visible_end)
+        zone_inventory = self._sr_zone_inventory(visible_start, visible_end)
 
         visible = market[
             (market["period_start"] >= visible_start)
@@ -1332,7 +1610,43 @@ class CompletedRunVisualizer:
         entry_snapshot = self.selected_trade_candle_time(trade_index)
         sr_zones: list[dict[str, Any]] = []
         sr_events: list[dict[str, Any]] = []
-        if not context.empty:
+        if not zone_inventory.empty:
+            sr_zones = self._inventory_sr_zones(
+                zone_inventory,
+                visible_start=visible_start,
+                visible_end=visible_end,
+                entry_snapshot=entry_snapshot,
+            )
+            sr_events = self._inventory_sr_lifecycle_events(zone_inventory)
+            if not context.empty:
+                # Broken zones are retired from the active inventory immediately.
+                # Preserve causal BREAK markers from the nearest-context lifecycle.
+                for label in SR_TIMEFRAMES:
+                    sr_events.extend(
+                        event
+                        for event in self._sr_lifecycle_events(
+                            context, label, visible_start
+                        )
+                        if event.get("event") == "break"
+                    )
+            sr_events = sorted(
+                {
+                    (
+                        int(event["time"]),
+                        str(event.get("timeframe")),
+                        str(event.get("structure")),
+                        str(event.get("event")),
+                    ): event
+                    for event in sr_events
+                }.values(),
+                key=lambda item: (
+                    int(item["time"]),
+                    str(item.get("timeframe")),
+                    str(item.get("structure")),
+                ),
+            )
+        elif not context.empty:
+            # Legacy completed runs contain nearest-zone context only.
             for label in SR_TIMEFRAMES:
                 sr_zones.extend(
                     self._sr_zones(
@@ -1353,6 +1667,7 @@ class CompletedRunVisualizer:
                 "end": _utc(request.period_end).isoformat(),
                 "sourceVerified": self.source_verified,
                 "ruleTraceAvailable": self.rule_trace_path is not None,
+                "srZoneInventoryAvailable": self.sr_zones_path is not None,
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": self.selected_trade_summary(trade_index),
@@ -1475,6 +1790,15 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
       ? Boolean(zone.activeAtEntry)
       : Boolean(zone.activeAtEnd);
   }}
+  function nearestForReference(zone) {{
+    if (review.snapshot === 'entry')
+      return zone.nearestAtEntry === undefined
+        ? Boolean(zone.activeAtEntry)
+        : Boolean(zone.nearestAtEntry);
+    return zone.nearestAtEnd === undefined
+      ? Boolean(zone.activeAtEnd)
+      : Boolean(zone.nearestAtEnd);
+  }}
   function xForTime(time, startSide) {{
     const direct = chart.timeScale().timeToCoordinate(time);
     if (direct !== null && direct !== undefined) return direct;
@@ -1511,10 +1835,11 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
       if ([x1,x2,yHigh,yLow].some(v => v === null || v === undefined || !Number.isFinite(Number(v)))) continue;
 
       const active = activeForReference(zone);
+      const nearest = nearestForReference(zone);
       const snapshotDim = review.mode === 'review' && review.snapshot === 'entry' && !active;
       const baseAlpha = review.mode === 'review'
-        ? (active ? 0.20 : snapshotDim ? 0.025 : 0.085)
-        : (active ? 0.11 : 0.045);
+        ? (nearest ? 0.24 : active ? 0.11 : snapshotDim ? 0.018 : 0.045)
+        : (nearest ? 0.13 : active ? 0.07 : 0.035);
       const support = zone.structure === 'support';
       const fill = support
         ? `rgba(53, 180, 119, ${{baseAlpha}})`
@@ -1534,7 +1859,7 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
       band.style.borderBottom = '1px solid ' + border;
       zoneLayer.appendChild(band);
 
-      if (active) {{
+      if (nearest) {{
         const state = review.snapshot === 'entry'
           ? zone.stateAtEntry
           : zone.stateEnd;

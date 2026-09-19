@@ -21,12 +21,12 @@ from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.data.timing import interval_to_timedelta
 
-from .base import FeatureDefinition, ParameterDefinition
+from .base import FeatureDefinition, OutputField, ParameterDefinition
 from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 SUPPORT_RESISTANCE_FEATURE_NAME = "support_resistance"
-SUPPORT_RESISTANCE_FEATURE_VERSION = "7"
+SUPPORT_RESISTANCE_FEATURE_VERSION = "8"
 
 
 def _optional_float(value):
@@ -86,7 +86,11 @@ class SupportResistanceFeatureProvider:
                 for field in _SR_FIELDS
             ),
             "sr_completed_candle_time",
+            "zone_inventory_json",
         ),
+        output_schema={
+            "zone_inventory_json": OutputField("string", nullable=False),
+        },
         warmup_bars=10,
         availability_rule="confirmed_pivots_through_latest_completed_configured_sr_candle",
     )
@@ -186,6 +190,7 @@ class SupportResistanceFeatureProvider:
             strategy_minutes=strategy_minutes,
             sr_timeframe_minutes=effective_minutes,
             atr_period=atr_period,
+            include_zone_inventory=True,
             **detector_config,
         )
         output = pd.DataFrame(rows)

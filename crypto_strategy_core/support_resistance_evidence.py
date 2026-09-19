@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import json
 from typing import Any
 
 import numpy as np
@@ -50,6 +51,115 @@ def _flatten(prefix: str, context: SRContext) -> dict[str, object]:
     }
 
 
+def _finite_or_none(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if np.isfinite(numeric) else None
+
+
+def _zone_inventory(
+    detector,
+    *,
+    index: int,
+    high: np.ndarray,
+    low: np.ndarray,
+    current_price: float,
+    current_atr: float,
+) -> list[dict[str, object]]:
+    """Return every active merged zone already known at the supplied index.
+
+    This is diagnostic/persistence evidence only. Strategy decisions continue to
+    use the existing nearest support/resistance context.
+    """
+    if index < 0 or not np.isfinite(current_atr) or current_atr <= 0:
+        return []
+    supports = detector._find_support_levels(high, low, index, current_atr)
+    resistances = detector._find_resistance_levels(high, low, index, current_atr)
+    nearest_support = detector._nearest_level(supports, current_price, below=True)
+    nearest_resistance = detector._nearest_level(
+        resistances, current_price, below=False
+    )
+    nearest_keys = {
+        "SUPPORT": detector._zone_key(nearest_support)
+        if nearest_support is not None
+        else None,
+        "RESISTANCE": detector._zone_key(nearest_resistance)
+        if nearest_resistance is not None
+        else None,
+    }
+
+    result: list[dict[str, object]] = []
+    for support, levels in ((True, supports), (False, resistances)):
+        structure = "SUPPORT" if support else "RESISTANCE"
+        for level in levels:
+            metrics = detector._interaction_metrics(level, index, support)
+            distance_price, distance_atr = detector._calculate_distance(
+                current_price, level, current_atr
+            )
+            key = detector._zone_key(level)
+            sources = tuple(int(value) for value in key[1])
+            low_value = float(level.zone_bottom)
+            high_value = float(level.zone_top)
+            result.append(
+                {
+                    "zone_id": f"{structure}:" + ",".join(map(str, sources)),
+                    "structure": structure,
+                    "zone_low": low_value,
+                    "zone_high": high_value,
+                    "anchor_price": float(level.price),
+                    "pivot_bar_index": int(level.bar_index),
+                    "confirmed_at_index": (
+                        int(level.confirmed_at_index)
+                        if level.confirmed_at_index is not None
+                        else None
+                    ),
+                    "source_bar_indices": list(sources),
+                    "source_count": len(sources),
+                    "touch_count": int(level.touch_count),
+                    "validation_rejection_atr": _finite_or_none(
+                        level.validation_rejection_atr
+                    ),
+                    "state": str(metrics["state"]),
+                    "tested": bool(metrics["tested"]),
+                    "held": bool(metrics["held"]),
+                    "rejection_atr": _finite_or_none(metrics["rejection_atr"]),
+                    "test_count": int(metrics["test_count"]),
+                    "bars_since_test": (
+                        int(metrics["bars_since_test"])
+                        if metrics["bars_since_test"] is not None
+                        else None
+                    ),
+                    "last_test_index": (
+                        int(metrics["last_test_index"])
+                        if metrics["last_test_index"] is not None
+                        else None
+                    ),
+                    "distance_price": _finite_or_none(distance_price),
+                    "distance_atr": _finite_or_none(distance_atr),
+                    "near": bool(
+                        np.isfinite(distance_atr)
+                        and distance_atr <= detector.near_distance_atr
+                    ),
+                    "inside": bool(low_value <= current_price <= high_value),
+                    "nearest": key == nearest_keys[structure],
+                }
+            )
+    result.sort(
+        key=lambda item: (
+            0 if item["structure"] == "SUPPORT" else 1,
+            float(item["zone_low"]),
+            str(item["zone_id"]),
+        )
+    )
+    return result
+
+
+def _inventory_json(rows: list[dict[str, object]]) -> str:
+    return json.dumps(rows, separators=(",", ":"), sort_keys=True)
+
+
 def support_resistance_evidence_series(
     candle_times: Sequence[object],
     decision_times: Sequence[object],
@@ -75,6 +185,7 @@ def support_resistance_evidence_series(
     hold_confirmation_atr: float = 0.25,
     break_tolerance_atr: float = 0.25,
     break_basis: str = "CLOSE",
+    include_zone_inventory: bool = False,
 ) -> list[dict[str, object]]:
     """Return CSL-compatible LONG/SHORT S/R context for each strategy candle.
 
@@ -142,6 +253,17 @@ def support_resistance_evidence_series(
             }
             row.update(_flatten("long", long_context))
             row.update(_flatten("short", short_context))
+            if include_zone_inventory:
+                row["zone_inventory_json"] = _inventory_json(
+                    _zone_inventory(
+                        detector,
+                        index=index,
+                        high=high,
+                        low=low,
+                        current_price=float(close[index]),
+                        current_atr=float(atr_source[index]),
+                    )
+                )
             rows.append(row)
         return rows
 
@@ -199,5 +321,19 @@ def support_resistance_evidence_series(
         row = {"sr_completed_candle_time": completed}
         row.update(_flatten("long", long_context))
         row.update(_flatten("short", short_context))
+        if include_zone_inventory:
+            inventory = (
+                _zone_inventory(
+                    detector,
+                    index=htf_index,
+                    high=htf_high,
+                    low=htf_low,
+                    current_price=float(close[index]),
+                    current_atr=float(htf_atr[htf_index]),
+                )
+                if htf_index >= 0
+                else []
+            )
+            row["zone_inventory_json"] = _inventory_json(inventory)
         rows.append(row)
     return rows

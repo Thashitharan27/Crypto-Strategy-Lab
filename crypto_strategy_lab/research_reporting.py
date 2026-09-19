@@ -175,6 +175,107 @@ def _validate_research_artifacts(
         raise ValueError("research semantic trade fingerprint mismatch")
 
 
+def _validate_sr_zone_artifact(
+    zones_path: Path,
+    context_path: Path,
+    expected_rows: int,
+) -> None:
+    """Verify full-zone inventory is causal and attached to exact strategy rows."""
+    required = {
+        "strategy_index",
+        "strategy_candle_open_time",
+        "decision_available_at",
+        "sr_timeframe",
+        "sr_timeframe_minutes",
+        "sr_completed_candle_time",
+        "zone_id",
+        "structure",
+        "zone_low",
+        "zone_high",
+        "source_count",
+        "test_count",
+        "nearest",
+    }
+    with duckdb.connect() as con:
+        columns = {
+            row[0]
+            for row in con.execute(
+                "DESCRIBE SELECT * FROM read_parquet(?)", [str(zones_path)]
+            ).fetchall()
+        }
+        missing = required - columns
+        if missing:
+            raise ValueError(
+                f"S/R zone artifact missing required columns: {sorted(missing)}"
+            )
+        rows = con.execute(
+            "SELECT count(*) FROM read_parquet(?)", [str(zones_path)]
+        ).fetchone()[0]
+        if int(rows) != int(expected_rows):
+            raise ValueError("S/R zone artifact row count mismatch")
+        if not rows:
+            return
+
+        bad = con.execute(
+            """
+            SELECT count(*)
+            FROM read_parquet(?) z
+            LEFT JOIN read_parquet(?) c ON z.strategy_index=c.strategy_index
+            WHERE c.strategy_index IS NULL
+               OR z.strategy_candle_open_time
+                    IS DISTINCT FROM c.strategy_candle_open_time
+               OR z.decision_available_at
+                    IS DISTINCT FROM c.decision_available_at
+               OR (
+                    z.sr_completed_candle_time IS NOT NULL
+                    AND z.sr_completed_candle_time > z.decision_available_at
+               )
+               OR upper(cast(z.structure AS VARCHAR))
+                    NOT IN ('SUPPORT','RESISTANCE')
+               OR lower(cast(z.sr_timeframe AS VARCHAR))
+                    NOT IN ('strategy','1h','4h','1d')
+               OR trim(cast(z.zone_id AS VARCHAR)) = ''
+               OR z.zone_low > z.zone_high
+               OR z.source_count < 1
+               OR z.test_count < 0
+            """,
+            [str(zones_path), str(context_path)],
+        ).fetchone()[0]
+        if bad:
+            raise ValueError("S/R zone artifact causal/schema validation failed")
+
+        duplicates = con.execute(
+            """
+            SELECT count(*) FROM (
+              SELECT strategy_index, sr_timeframe, zone_id, count(*) n
+              FROM read_parquet(?)
+              GROUP BY 1,2,3
+              HAVING count(*) > 1
+            )
+            """,
+            [str(zones_path)],
+        ).fetchone()[0]
+        if duplicates:
+            raise ValueError("S/R zone artifact contains duplicate active zones")
+
+        multiple_nearest = con.execute(
+            """
+            SELECT count(*) FROM (
+              SELECT strategy_index, sr_timeframe, structure,
+                     sum(CASE WHEN nearest THEN 1 ELSE 0 END) nearest_count
+              FROM read_parquet(?)
+              GROUP BY 1,2,3
+              HAVING nearest_count > 1
+            )
+            """,
+            [str(zones_path)],
+        ).fetchone()[0]
+        if multiple_nearest:
+            raise ValueError(
+                "S/R zone artifact contains multiple nearest zones for one side"
+            )
+
+
 def _validate_signal_artifact(
     signals_path: Path, context_path: Path, trade_rows: int
 ) -> None:
@@ -337,7 +438,13 @@ class CsvManifestReporter:
         )
         trades_path = artifacts_dir / "trades.parquet"
         context_path = artifacts_dir / "feature_context.parquet"
+        sr_zones_path = artifacts_dir / "sr_zones.parquet"
         _validate_research_artifacts(trades_path, context_path, research)
+        _validate_sr_zone_artifact(
+            sr_zones_path,
+            context_path,
+            int(research.get("sr_zone_row_count", -1)),
+        )
 
         trade_csv = run_dir / "trade_list.csv"
         result.trades.to_csv(trade_csv, index=False)
@@ -462,6 +569,14 @@ class CsvManifestReporter:
             ),
             "feature_context": _catalog_entry(
                 context_path, run_dir, "parquet", len(context.prepared)
+            ),
+            "sr_zones": _catalog_entry(
+                sr_zones_path,
+                run_dir,
+                "parquet",
+                int(research.get("sr_zone_row_count", 0)),
+                schema_version=1,
+                collection_status="COLLECTED",
             ),
             "signals": _catalog_entry(
                 signals_path,

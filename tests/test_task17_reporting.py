@@ -17,6 +17,7 @@ from crypto_strategy_lab.research_reporting import (
     _validate_research_artifacts,
     _validate_rule_trace_artifact,
     _validate_signal_artifact,
+    _validate_sr_zone_artifact,
 )
 from crypto_strategy_lab.run_manifest import (
     RUN_MANIFEST_CONTRACT,
@@ -213,6 +214,62 @@ def test_research_semantics_are_validated_before_completion(tmp_path: Path):
     _write_parquet_atomic(broken, trades_path)
     with pytest.raises(ValueError, match="causal"):
         _validate_research_artifacts(trades_path, context_path, research)
+
+
+def test_sr_zone_artifact_requires_exact_causal_attachment(tmp_path: Path):
+    _trades, context = _research_frames()
+    zones = pd.DataFrame(
+        [
+            {
+                "strategy_index": 1,
+                "strategy_candle_open_time": context.loc[
+                    1, "strategy_candle_open_time"
+                ],
+                "decision_available_at": context.loc[1, "decision_available_at"],
+                "sr_timeframe": "4h",
+                "sr_timeframe_minutes": 240,
+                "sr_completed_candle_time": context.loc[
+                    1, "decision_available_at"
+                ],
+                "zone_id": "SUPPORT:7",
+                "structure": "SUPPORT",
+                "zone_low": 95.0,
+                "zone_high": 96.0,
+                "anchor_price": 95.0,
+                "pivot_bar_index": 7,
+                "confirmed_at_index": 9,
+                "source_bar_indices_json": "[7]",
+                "source_count": 1,
+                "touch_count": 2,
+                "validation_rejection_atr": 0.8,
+                "state": "SUPPORT_HELD",
+                "tested": True,
+                "held": True,
+                "rejection_atr": 0.7,
+                "test_count": 2,
+                "bars_since_test": 1,
+                "last_test_index": 10,
+                "distance_price": 4.0,
+                "distance_atr": 1.0,
+                "near": False,
+                "inside": False,
+                "nearest": True,
+            }
+        ]
+    )
+    context_path = tmp_path / "context.parquet"
+    zones_path = tmp_path / "sr_zones.parquet"
+    _write_parquet_atomic(context, context_path)
+    _write_parquet_atomic(zones, zones_path)
+    _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
+
+    future = zones.copy()
+    future.loc[0, "sr_completed_candle_time"] = (
+        future.loc[0, "decision_available_at"] + pd.Timedelta(minutes=1)
+    )
+    _write_parquet_atomic(future, zones_path)
+    with pytest.raises(ValueError, match="causal/schema"):
+        _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
 
 
 def test_signal_frame_uses_same_run_rejections_and_exact_causal_rows(tmp_path: Path):

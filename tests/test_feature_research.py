@@ -87,6 +87,76 @@ def _prepared() -> _Prepared:
                 "book_depth_covered": np.array([True, False, True, True, True]),
             },
         ),
+        _ResearchBlock(
+            "support_resistance_4h",
+            available.to_numpy(dtype="datetime64[ns]"),
+            {
+                "sr_4h_completed_candle_time": available.to_numpy(
+                    dtype="datetime64[ns]"
+                ),
+                "sr_4h_zone_inventory_json": np.array(
+                    [
+                        json.dumps(
+                            [
+                                {
+                                    "zone_id": "SUPPORT:1",
+                                    "structure": "SUPPORT",
+                                    "zone_low": 95.0,
+                                    "zone_high": 96.0,
+                                    "anchor_price": 95.0,
+                                    "pivot_bar_index": 1,
+                                    "confirmed_at_index": 2,
+                                    "source_bar_indices": [1],
+                                    "source_count": 1,
+                                    "touch_count": 1,
+                                    "validation_rejection_atr": 0.8,
+                                    "state": "SUPPORT_HELD",
+                                    "tested": True,
+                                    "held": True,
+                                    "rejection_atr": 0.7,
+                                    "test_count": 2,
+                                    "bars_since_test": 1,
+                                    "last_test_index": 1,
+                                    "distance_price": 4.0,
+                                    "distance_atr": 1.0,
+                                    "near": False,
+                                    "inside": False,
+                                    "nearest": True,
+                                },
+                                {
+                                    "zone_id": "SUPPORT:0",
+                                    "structure": "SUPPORT",
+                                    "zone_low": 90.0,
+                                    "zone_high": 91.0,
+                                    "anchor_price": 90.0,
+                                    "pivot_bar_index": 0,
+                                    "confirmed_at_index": 1,
+                                    "source_bar_indices": [0],
+                                    "source_count": 1,
+                                    "touch_count": 1,
+                                    "validation_rejection_atr": 0.6,
+                                    "state": "APPROACHING_SUPPORT",
+                                    "tested": False,
+                                    "held": False,
+                                    "rejection_atr": None,
+                                    "test_count": 0,
+                                    "bars_since_test": None,
+                                    "last_test_index": None,
+                                    "distance_price": 9.0,
+                                    "distance_atr": 2.25,
+                                    "near": False,
+                                    "inside": False,
+                                    "nearest": False,
+                                },
+                            ],
+                            separators=(",", ":"),
+                        )
+                    ]
+                    * n,
+                    dtype=object,
+                ),
+            },
+        ),
     )
     return _Prepared(
         timestamp=times.to_numpy(dtype="datetime64[ns]"),
@@ -169,13 +239,16 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     research = run / "research"
     assert (research / "trades.parquet").is_file()
     assert (research / "feature_context.parquet").is_file()
+    assert (research / "sr_zones.parquet").is_file()
     manifest = json.loads((research / "research_manifest.json").read_text(encoding="utf-8"))
     assert manifest["artifact_contract"] == FEATURE_RESEARCH_ARTIFACT_CONTRACT
     assert manifest["artifact_version"] == 1
     assert manifest["trade_row_count"] == 5
     assert manifest["feature_context_row_count"] == 5
+    assert manifest["sr_zone_row_count"] == 10
     assert manifest["artifact_sizes_bytes"]["trades"] > 0
     assert manifest["artifact_sizes_bytes"]["feature_context"] > 0
+    assert manifest["artifact_sizes_bytes"]["sr_zones"] > 0
     assert {"open_interest", "funding_rate"} <= set(manifest["trade_context_parity_columns"])
 
     con = duckdb.connect()
@@ -188,8 +261,21 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     con.close()
     assert "strategy_index" in columns
     assert "momentum_return_24h" in columns
+    assert "sr_4h_zone_inventory_json" not in columns
     assert "open" not in columns and "high" not in columns and "low" not in columns
     assert "volume" not in columns
+
+    con = duckdb.connect()
+    zones = con.execute(
+        f"SELECT * FROM read_parquet('{research / 'sr_zones.parquet'}') "
+        "ORDER BY strategy_index, zone_low"
+    ).fetchdf()
+    con.close()
+    assert len(zones) == 10
+    assert set(zones["sr_timeframe"]) == {"4h"}
+    assert set(zones["structure"]) == {"SUPPORT"}
+    assert zones.groupby("strategy_index")["nearest"].sum().eq(1).all()
+    assert set(zones["zone_id"]) == {"SUPPORT:0", "SUPPORT:1"}
 
     with ResearchQueryService(run) as service:
         grouped = service.query(

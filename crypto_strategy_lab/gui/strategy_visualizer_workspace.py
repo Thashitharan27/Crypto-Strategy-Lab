@@ -250,7 +250,23 @@ class StrategyVisualizerWorkspace(QWidget):
         self.sr_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.sr_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.sr_table.horizontalHeader().setStretchLastSection(True)
-        sr_layout.addWidget(self.sr_table, 1)
+        sr_layout.addWidget(self.sr_table, 2)
+        self.sr_zone_label = QLabel("Active zone inventory")
+        self.sr_zone_label.setStyleSheet("font-weight:600;color:#52606d")
+        sr_layout.addWidget(self.sr_zone_label)
+        self.sr_zone_table = QTableWidget(0, 7)
+        self.sr_zone_table.setHorizontalHeaderLabels(
+            ("TF", "Type", "Zone", "State", "Tests", "Sources", "Nearest")
+        )
+        self.sr_zone_table.verticalHeader().setVisible(False)
+        self.sr_zone_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self.sr_zone_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.NoSelection
+        )
+        self.sr_zone_table.horizontalHeader().setStretchLastSection(True)
+        sr_layout.addWidget(self.sr_zone_table, 2)
         self.inspector_tabs.addTab(sr_tab, "S/R Inspector")
 
         inspector_layout.addWidget(self.inspector_tabs)
@@ -405,6 +421,13 @@ class StrategyVisualizerWorkspace(QWidget):
             self.sr_review_details,
         ):
             control.setEnabled(review)
+        for key, check in self.overlay_checks.items():
+            check.setEnabled(not review)
+            check.setToolTip(
+                "S/R Review uses the View / S/R TF / Snapshot / Details controls below."
+                if review
+                else "Normal-view chart overlay."
+            )
 
     def _sr_review_controls_changed(self, *_args):
         self._update_sr_review_controls()
@@ -511,6 +534,38 @@ class StrategyVisualizerWorkspace(QWidget):
         self.sr_table.resizeColumnsToContents()
         self.sr_table.horizontalHeader().setStretchLastSection(True)
 
+        zone_items = [
+            item
+            for item in list(snapshot.get("zones") or ())
+            if str(item.get("key") or "") in selected
+        ]
+        self.sr_zone_table.setRowCount(len(zone_items))
+        for row_number, item in enumerate(zone_items):
+            zone_text = self._sr_zone_text(
+                item.get("zoneLow"), item.get("zoneHigh")
+            )
+            values = (
+                item.get("timeframe", ""),
+                item.get("structure", ""),
+                zone_text,
+                item.get("state", ""),
+                self._sr_value_text(item.get("testCount")),
+                self._sr_value_text(item.get("sourceCount")),
+                "YES" if item.get("nearest") else "",
+            )
+            for column, value in enumerate(values):
+                self.sr_zone_table.setItem(
+                    row_number, column, QTableWidgetItem(str(value))
+                )
+        self.sr_zone_table.resizeColumnsToContents()
+        self.sr_zone_table.horizontalHeader().setStretchLastSection(True)
+        inventory_available = bool(snapshot.get("zoneInventoryAvailable"))
+        self.sr_zone_label.setText(
+            f"Active zone inventory · {len(zone_items)} zone(s)"
+            if inventory_available
+            else "Active zone inventory · unavailable for this legacy run"
+        )
+
         status = str(snapshot.get("status") or "")
         if status == "AVAILABLE":
             suffix = (
@@ -519,9 +574,14 @@ class StrategyVisualizerWorkspace(QWidget):
                 and self.view_mode.currentData() == "sr-review"
                 else ""
             )
+            inventory_note = (
+                f" · {len(zone_items)} active zone(s)"
+                if inventory_available
+                else " · nearest-zone context only"
+            )
             self.sr_summary.setText(
                 f"{snapshot.get('timestamp', '')}{suffix} · "
-                f"{len(blocks)} persisted S/R context(s)"
+                f"{len(blocks)} persisted S/R context(s){inventory_note}"
             )
         else:
             self.sr_summary.setText(str(snapshot.get("message") or status))
@@ -566,9 +626,23 @@ class StrategyVisualizerWorkspace(QWidget):
                 if verified is None
                 else ""
             )
+            inventory_available = bool(
+                (self._base_payload.get("run") or {}).get(
+                    "srZoneInventoryAvailable"
+                )
+            )
+            inventory_note = (
+                "Full active S/R zone inventory is available. "
+                if inventory_available
+                else (
+                    "Legacy S/R artifact: this run stores nearest-zone history only; "
+                    "rerun it to capture the full active-zone inventory. "
+                )
+            )
             self.status.setText(
                 f"Showing {count:,} canonical strategy candles. " + provenance
-                + "S/R, VWAP and Bollinger values come from the run's causal feature context; "
+                + inventory_note
+                + "S/R, VWAP and Bollinger values come from persisted causal artifacts; "
                 "EMA lines are display-only overlays."
             )
         except Exception as exc:
