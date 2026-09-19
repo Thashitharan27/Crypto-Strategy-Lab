@@ -302,7 +302,10 @@ RULE_TRACE_COLUMNS = (
 
 def _strategy_rule_trace_frame(rows) -> pd.DataFrame:
     """Normalize passive decision-time rule telemetry for immutable reporting."""
-    result = pd.DataFrame(list(rows or ()), columns=RULE_TRACE_COLUMNS)
+    if isinstance(rows, pd.DataFrame):
+        result = rows.reindex(columns=RULE_TRACE_COLUMNS).copy()
+    else:
+        result = pd.DataFrame(list(rows or ()), columns=RULE_TRACE_COLUMNS)
     if result.empty:
         return pd.DataFrame(
             {
