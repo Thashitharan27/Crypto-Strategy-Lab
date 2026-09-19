@@ -65,7 +65,12 @@ class FeatureConfig:
     sr_1d_pivot_left: int = 0
     sr_1d_pivot_right: int = 0
     sr_1d_lookback_bars: int = 0
+    # Historical name retained: this is the adjacent-pivot merge distance.
     sr_zone_width_atr: float = 0.5
+    # Every confirmed pivot/cluster becomes a real price zone via symmetric padding.
+    sr_zone_padding_atr: float = 0.25
+    # Raw pivot clusters cannot grow beyond this ATR span through chaining.
+    sr_zone_max_cluster_span_atr: float = 1.0
     sr_near_distance_atr: float = 0.75
     # Retained in the native config for old files/API compatibility. The GUI no
     # longer exposes this switch and normal research keeps confirmation enabled.
@@ -193,6 +198,8 @@ class FeatureConfig:
                 **self.sr_detection_parameters(effective_sr),
                 **self.sr_detection_override_parameters(),
                 "sr_zone_width_atr": float(self.sr_zone_width_atr),
+                "sr_zone_padding_atr": float(self.sr_zone_padding_atr),
+                "sr_zone_max_cluster_span_atr": float(self.sr_zone_max_cluster_span_atr),
                 "sr_near_distance_atr": float(self.sr_near_distance_atr),
                 "enable_sr_hold_confirmation": bool(self.enable_sr_hold_confirmation),
                 "sr_hold_confirmation_bars": int(self.sr_hold_confirmation_bars),
@@ -391,6 +398,15 @@ class ResearchRunConfig:
             raise ValueError("order-book maximum ages must be non-negative")
         if features.bull_regime_lookback_days <= 0 or features.bull_regime_return_threshold <= -1:
             raise ValueError("asset-return regime settings are invalid")
+        if min(
+            features.sr_zone_width_atr,
+            features.sr_zone_padding_atr,
+            features.sr_zone_max_cluster_span_atr,
+            features.sr_near_distance_atr,
+            features.sr_hold_confirmation_atr,
+            features.sr_break_tolerance_atr,
+        ) < 0:
+            raise ValueError("S/R ATR distances must be non-negative")
         if features.sr_break_basis not in {"CLOSE", "WICK"}:
             raise ValueError("invalid S/R break basis")
         if features.sr_timeframe_minutes:
