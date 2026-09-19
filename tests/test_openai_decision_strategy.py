@@ -96,35 +96,75 @@ def test_control_workspace_exposes_openai_signal_label_without_gui_dependency():
     assert SIGNAL_STRATEGIES[OPENAI_DECISION_MODE] == "AI Decision — OpenAI"
 
 
-def test_ai_snapshot_keeps_higher_timeframe_sr_independent_and_adds_structure():
+def test_ai_snapshot_uses_trade_relative_sr_v2_and_adds_structure():
+    class Profile:
+        partial_stop_enabled = False
+        stop_loss_multiple = 1.0
+        partial_profit_enabled = False
+        reward_risk_ratio = 3.0
+        r_step_trailing_enabled = False
+
     class Config:
         market_symbol = "BTCUSDT"
+        risk_mode = "ATR"
+        sr_take_profit_mode = "FIXED_R"
 
     class Engine:
         config = Config()
+        market_regime_values = ["BULL"]
+        risk = [100.0]
+        atr_values = [100.0]
+        close = [1000.0]
+
+        def _ai_profile(self, _regime, _side):
+            return Profile()
 
         def _prepared_research_raw_value(self, _i, feature_name, column):
             values = {
-                (
-                    "support_resistance_1h",
-                    "sr_1h_long_support_state",
-                ): "SUPPORT_HELD",
-                (
-                    "support_resistance_1h",
-                    "sr_1h_long_room_in_direction_atr",
-                ): 3.4,
-                (
-                    "support_resistance_1h",
-                    "sr_1h_short_resistance_state",
-                ): "RESISTANCE_TESTING",
-                (
-                    "support_resistance_4h",
-                    "sr_4h_long_support_state",
-                ): "APPROACHING_SUPPORT",
-                (
-                    "support_resistance_1d",
-                    "sr_1d_short_resistance_state",
-                ): "RESISTANCE_HELD",
+                ("support_resistance_1h", "sr_1h_long_nearest_support_price"): 800.0,
+                ("support_resistance_1h", "sr_1h_long_nearest_support_distance_atr"): 1.0,
+                ("support_resistance_1h", "sr_1h_long_nearest_support_distance_price"): 200.0,
+                ("support_resistance_1h", "sr_1h_long_nearest_resistance_price"): 1600.0,
+                ("support_resistance_1h", "sr_1h_long_nearest_resistance_distance_atr"): 3.0,
+                ("support_resistance_1h", "sr_1h_long_nearest_resistance_distance_price"): 600.0,
+                ("support_resistance_1h", "sr_1h_long_near_support"): True,
+                ("support_resistance_1h", "sr_1h_long_near_resistance"): False,
+                ("support_resistance_1h", "sr_1h_long_inside_support_zone"): False,
+                ("support_resistance_1h", "sr_1h_long_inside_resistance_zone"): False,
+                ("support_resistance_1h", "sr_1h_long_support_state"): "SUPPORT_HELD",
+                ("support_resistance_1h", "sr_1h_long_resistance_state"): "APPROACHING_RESISTANCE",
+                ("support_resistance_1h", "sr_1h_long_support_held"): True,
+                ("support_resistance_1h", "sr_1h_long_resistance_held"): False,
+                ("support_resistance_1h", "sr_1h_long_support_zone_low"): 750.0,
+                ("support_resistance_1h", "sr_1h_long_support_zone_high"): 850.0,
+                ("support_resistance_1h", "sr_1h_long_resistance_zone_low"): 1600.0,
+                ("support_resistance_1h", "sr_1h_long_resistance_zone_high"): 1700.0,
+                ("support_resistance_4h", "sr_4h_long_nearest_resistance_price"): 1600.0,
+                ("support_resistance_4h", "sr_4h_long_nearest_resistance_distance_atr"): 1.0,
+                ("support_resistance_4h", "sr_4h_long_nearest_resistance_distance_price"): 600.0,
+                ("support_resistance_4h", "sr_4h_long_near_support"): False,
+                ("support_resistance_4h", "sr_4h_long_near_resistance"): False,
+                ("support_resistance_4h", "sr_4h_long_inside_support_zone"): False,
+                ("support_resistance_4h", "sr_4h_long_inside_resistance_zone"): False,
+                ("support_resistance_4h", "sr_4h_long_resistance_state"): "APPROACHING_RESISTANCE",
+                ("support_resistance_4h", "sr_4h_long_resistance_zone_low"): 1600.0,
+                ("support_resistance_4h", "sr_4h_long_resistance_zone_high"): 1700.0,
+                ("support_resistance_1d", "sr_1d_short_nearest_support_price"): 400.0,
+                ("support_resistance_1d", "sr_1d_short_nearest_support_distance_atr"): 0.5,
+                ("support_resistance_1d", "sr_1d_short_nearest_support_distance_price"): 600.0,
+                ("support_resistance_1d", "sr_1d_short_nearest_resistance_price"): 1200.0,
+                ("support_resistance_1d", "sr_1d_short_nearest_resistance_distance_atr"): 0.2,
+                ("support_resistance_1d", "sr_1d_short_nearest_resistance_distance_price"): 200.0,
+                ("support_resistance_1d", "sr_1d_short_near_support"): False,
+                ("support_resistance_1d", "sr_1d_short_near_resistance"): True,
+                ("support_resistance_1d", "sr_1d_short_inside_support_zone"): False,
+                ("support_resistance_1d", "sr_1d_short_inside_resistance_zone"): False,
+                ("support_resistance_1d", "sr_1d_short_support_state"): "APPROACHING_SUPPORT",
+                ("support_resistance_1d", "sr_1d_short_resistance_state"): "RESISTANCE_HELD",
+                ("support_resistance_1d", "sr_1d_short_support_zone_low"): 300.0,
+                ("support_resistance_1d", "sr_1d_short_support_zone_high"): 400.0,
+                ("support_resistance_1d", "sr_1d_short_resistance_zone_low"): 1150.0,
+                ("support_resistance_1d", "sr_1d_short_resistance_zone_high"): 1250.0,
             }
             return values.get((feature_name, column))
 
@@ -139,34 +179,50 @@ def test_ai_snapshot_keeps_higher_timeframe_sr_independent_and_adds_structure():
         "market_regime": "BULL",
         "directional_context": {
             "LONG": {
+                "support_resistance": {"trade_location_rating": "GOOD_LOCATION"},
                 "trade_contract": {
                     "enabled": False,
-                    "reward_risk_ratio": 2.0,
-                }
+                    "reward_risk_ratio": 3.0,
+                },
             },
             "SHORT": {
+                "support_resistance": {"trade_location_rating": "BAD_LOCATION"},
                 "trade_contract": {
                     "enabled": True,
-                    "reward_risk_ratio": 1.0,
-                }
+                    "reward_risk_ratio": 3.0,
+                },
             },
         },
     }
     enriched = enrich_ai_snapshot(Engine(), 0, base_snapshot)
-    htf = enriched["higher_timeframe_support_resistance"]
+    sr = enriched["support_resistance_trade_context_v2"]
 
     assert enriched["symbol"] == "BTCUSDT"
+    assert "higher_timeframe_support_resistance" not in enriched
+    assert "support_resistance" not in enriched["directional_context"]["LONG"]
+    assert "support_resistance" not in enriched["directional_context"]["SHORT"]
     assert "enabled" not in enriched["directional_context"]["LONG"]["trade_contract"]
     assert "enabled" not in enriched["directional_context"]["SHORT"]["trade_contract"]
-    assert (
-        enriched["directional_context"]["LONG"]["trade_contract"]["reward_risk_ratio"]
-        == 2.0
-    )
-    assert htf["1h"]["long"]["support_state"] == "SUPPORT_HELD"
-    assert htf["1h"]["long"]["room_in_direction_atr"] == 3.4
-    assert htf["1h"]["short"]["resistance_state"] == "RESISTANCE_TESTING"
-    assert htf["4h"]["long"]["support_state"] == "APPROACHING_SUPPORT"
-    assert htf["1d"]["short"]["resistance_state"] == "RESISTANCE_HELD"
+
+    long_1h = sr["long"]["timeframes"]["1h"]
+    assert long_1h["SR_ENTRY_RELATION"] == "NEAR_FAVORABLE_STRUCTURE"
+    assert long_1h["SR_FAVORABLE_STRUCTURE_STATE"] == "HELD"
+    assert long_1h["SR_OPPOSING_DISTANCE_NATIVE_ATR"] == 3.0
+    assert long_1h["SR_OPPOSING_DISTANCE_STRATEGY_ATR"] == 6.0
+    assert long_1h["SR_OPPOSING_ROOM_R"] == 6.0
+    assert long_1h["SR_OPPOSING_ROOM_TARGET_MULTIPLE"] == 2.0
+    assert long_1h["SR_TARGET_PATH"] == "TARGET_BEFORE_OPPOSING_ZONE"
+
+    long_4h = sr["long"]["timeframes"]["4h"]
+    assert long_4h["SR_OPPOSING_DISTANCE_NATIVE_ATR"] == 1.0
+    assert long_4h["SR_OPPOSING_DISTANCE_STRATEGY_ATR"] == 6.0
+
+    short_1d = sr["short"]["timeframes"]["1d"]
+    assert short_1d["SR_ENTRY_RELATION"] == "NEAR_FAVORABLE_STRUCTURE"
+    assert short_1d["SR_FAVORABLE_STRUCTURE_STATE"] == "HELD"
+    assert short_1d["SR_OPPOSING_DISTANCE_NATIVE_ATR"] == 0.5
+    assert short_1d["SR_OPPOSING_DISTANCE_STRATEGY_ATR"] == 6.0
+
     assert enriched["confirmed_market_structure"]["market_structure_direction"] == "LONG"
 
 
