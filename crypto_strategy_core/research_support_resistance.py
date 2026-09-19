@@ -52,7 +52,7 @@ class _ResearchSRFastPathMixin:
         self._research_interaction_key_order = key_order
         self._research_next_interaction_order = len(key_order)
         self._research_zone_cache: dict[
-            str, tuple[tuple[int, float], list]
+            str, tuple[tuple[tuple[int, float | None], ...], list]
         ] = {}
 
     def _reset_incremental_state(self) -> None:
@@ -130,12 +130,24 @@ class _ResearchSRFastPathMixin:
 
     def _cached_zones(self, side: str, index: int, atr: float):
         self._ensure_research_fast_state()
-        key = (int(index), float(atr))
+        levels = self._confirmed_lows if side == "support" else self._confirmed_highs
+        # Zone geometry is now a pure function of active pivot identities plus
+        # their confirmation-time ATR anchors. Reuse it across candles until a
+        # pivot is confirmed/expired; current ATR only affects distance/hold/break
+        # metrics and must not invalidate the structural zone cache.
+        key = tuple(
+            (
+                int(level.bar_index),
+                float(level.anchor_atr)
+                if level.anchor_atr is not None
+                else None,
+            )
+            for level in levels
+        )
         cached = self._research_zone_cache.get(side)
         if cached is not None and cached[0] == key:
             return cached[1]
 
-        levels = self._confirmed_lows if side == "support" else self._confirmed_highs
         zones = self.zone_merger.merge_levels(levels, atr) if levels else []
         self._research_zone_cache[side] = (key, zones)
         return zones
