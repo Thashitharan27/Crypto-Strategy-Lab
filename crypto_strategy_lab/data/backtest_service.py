@@ -216,6 +216,79 @@ def _sr_research_targets(strategy_minutes: int) -> tuple[tuple[int, str], ...]:
     return tuple(targets)
 
 
+def _resolved_sr_detection_parameters(
+    base_sr: Mapping[str, object],
+    timeframe_minutes: int,
+) -> dict[str, int]:
+    """Resolve the same per-timeframe detection contract as the S/R provider."""
+    shared = {
+        "pivot_left": int(base_sr.get("sr_pivot_left", 5)),
+        "pivot_right": int(base_sr.get("sr_pivot_right", 5)),
+        "lookback_bars": int(base_sr.get("sr_lookback_bars", 200)),
+    }
+    label = {15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(
+        int(timeframe_minutes)
+    )
+    if label is None:
+        return shared
+
+    automatic_horizon = {
+        "15m": 672,
+        "1h": 720,
+        "4h": 540,
+        "1d": 365,
+    }[label]
+    result = dict(shared)
+    for key in ("pivot_left", "pivot_right", "lookback_bars"):
+        override = int(base_sr.get(f"sr_{label}_{key}", 0) or 0)
+        if override < 0:
+            raise ValueError(
+                f"sr_{label}_{key} must be zero (automatic/inherit) or positive"
+            )
+        if key == "lookback_bars":
+            result[key] = override or automatic_horizon
+        elif override:
+            result[key] = override
+    return result
+
+
+def _sr_warmup_start(
+    request: DataRequest,
+    base_sr: Mapping[str, object],
+    *,
+    strategy_minutes: int,
+) -> datetime:
+    """Return enough pre-run history for every independently prepared S/R context."""
+    atr_period = max(1, int(base_sr.get("atr_period", 14)))
+    warmup_minutes = 0
+    for minutes, _label in _sr_research_targets(strategy_minutes):
+        detection = _resolved_sr_detection_parameters(base_sr, minutes)
+        bars = (
+            int(detection["lookback_bars"])
+            + int(detection["pivot_left"])
+            + int(detection["pivot_right"])
+            + atr_period
+            + 5
+        )
+        warmup_minutes = max(warmup_minutes, bars * int(minutes))
+    return request.start - timedelta(minutes=warmup_minutes)
+
+
+def _feature_slice_for_request(
+    frame: pd.DataFrame,
+    request: DataRequest,
+) -> pd.DataFrame:
+    """Slice a warmed feature frame back to the exact user request."""
+    timestamps = pd.to_datetime(frame["timestamp"], utc=True, errors="raise")
+    mask = (
+        (timestamps >= pd.Timestamp(request.start))
+        & (timestamps < pd.Timestamp(request.end))
+    )
+    result = frame.loc[mask].reset_index(drop=True)
+    result.attrs.update(frame.attrs)
+    return result
+
+
 def _prefix_sr_research_frame(
     frame: pd.DataFrame,
     *,
@@ -248,6 +321,7 @@ def _independent_sr_research_features(
     primary_sr: pd.DataFrame,
     *,
     strategy_minutes: int,
+    output_request: DataRequest | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Materialize independent S/R contexts for research and rules.
 
@@ -287,6 +361,8 @@ def _independent_sr_research_features(
                 cache=cache,
             )
             frame = computed["support_resistance"]
+        if output_request is not None:
+            frame = _feature_slice_for_request(frame, output_request)
         result[f"support_resistance_{label}"] = _prefix_sr_research_frame(
             frame,
             label=label,
@@ -934,9 +1010,12 @@ def load_backtest_bundle(
     registry = (
         feature_registry if feature_registry is not None else production_feature_registry()
     )
+
+    # Normal strategy/context features remain scoped exactly to the user's
+    # request. S/R is prepared separately on a deeper causal history so the very
+    # first requested candle can see the structural horizon configured for 15m /
+    # 1h / 4h / 1d rather than starting from an empty S/R inventory.
     requested = ["production_market_context", "state_transition_daily"]
-    if enable_support_resistance_analysis:
-        requested.append("support_resistance")
     main_parameter_names = set(registry.dependency_order(requested))
     main_feature_parameters = {
         name: parameters
@@ -952,8 +1031,42 @@ def load_backtest_bundle(
     )
     directional = frames[CORE_DIRECTIONAL_FEATURE_NAME]
     context = frames["production_market_context"]
-    sr_features = frames.get("support_resistance")
     state_transition_daily = frames["state_transition_daily"]
+
+    sr_features = None
+    sr_full = None
+    sr_request = request
+    sr_canonical = canonical
+    if enable_support_resistance_analysis:
+        base_sr = dict(feature_parameters.get("support_resistance", {}))
+        sr_start = _sr_warmup_start(
+            request,
+            base_sr,
+            strategy_minutes=strategy_minutes,
+        )
+        sr_request = replace(request, start=sr_start)
+        sr_canonical = store.load_klines(sr_request, request.strategy_interval)
+        sr_parameter_names = set(
+            registry.dependency_order(["support_resistance"])
+        )
+        sr_parameters = {
+            name: parameters
+            for name, parameters in feature_parameters.items()
+            if name in sr_parameter_names
+        }
+        sr_frames = registry.execute(
+            ["support_resistance"],
+            sr_request,
+            {DatasetKind.KLINES: sr_canonical},
+            parameters=sr_parameters,
+            cache=FeatureFrameCache(store.cache.root),
+        )
+        sr_full = sr_frames["support_resistance"]
+        sr_features = _feature_slice_for_request(sr_full, request)
+        if len(sr_features) != len(strategy):
+            raise ValueError(
+                "Warmed S/R feature output does not align to the requested strategy window"
+            )
 
     research_features = _optional_futures_research_features(
         store,
@@ -973,16 +1086,17 @@ def load_backtest_bundle(
         name: _align_research_frame_to_strategy(frame, strategy)
         for name, frame in research_features.items()
     }
-    if enable_support_resistance_analysis and sr_features is not None:
+    if enable_support_resistance_analysis and sr_full is not None:
         research_features.update(
             _independent_sr_research_features(
                 store,
                 registry,
-                request,
-                canonical,
+                sr_request,
+                sr_canonical,
                 feature_parameters,
-                sr_features,
+                sr_full,
                 strategy_minutes=strategy_minutes,
+                output_request=request,
             )
         )
 
