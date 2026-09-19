@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from crypto_strategy_lab.strategy_profiles import RULE_INDICATORS
+from crypto_strategy_lab.mtf_sr_reaction import mtf_sr_reaction_timeframe_plan
 from crypto_strategy_lab.strategy_rule_model import (
     DIRECTION_MODES,
     MARKET_PERMISSIONS,
@@ -469,7 +470,7 @@ DIRECTION_LABELS = {
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
-    "MTF_SR_REACTION": "MTF S/R Reaction — 4H / 1H / Entry TF",
+    "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
 }
 SR_TIMEFRAME_OPTIONS = (
     (None, "Configured S/R (legacy)"),
@@ -1473,10 +1474,11 @@ class RuleStrategyBuilder(QWidget):
         direction_form.addRow("Signal strategy", self.direction_mode)
         direction_layout.addLayout(direction_form)
 
-        self.mtf_sr_preset_button = QPushButton("Load MTF S/R starter groups")
-        self.mtf_sr_preset_button.setToolTip(
-            "Replace the current Entry groups with editable 4H bounce and 4H break/retest starter groups using 1H deceleration and strategy-timeframe reversal confirmation."
+        self.strategy_timeframe_provider = None
+        self.mtf_sr_preset_button = QPushButton(
+            "Load adaptive MTF S/R starter groups"
         )
+        self._refresh_mtf_sr_preset_context()
         self.mtf_sr_preset_button.clicked.connect(self._load_mtf_sr_preset)
         direction_layout.addWidget(self.mtf_sr_preset_button)
 
@@ -1643,11 +1645,63 @@ class RuleStrategyBuilder(QWidget):
             table.changed.connect(self._notify)
         self._notify()
 
+    def set_strategy_timeframe_provider(self, provider) -> None:
+        self.strategy_timeframe_provider = provider
+        self._refresh_mtf_sr_preset_context()
+
+    def _current_strategy_timeframe_minutes(self) -> int:
+        provider = getattr(self, "strategy_timeframe_provider", None)
+        if callable(provider):
+            try:
+                value = int(provider())
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+        return 15
+
+    @staticmethod
+    def _tf_short_label(minutes: int) -> str:
+        value = int(minutes)
+        if value == 1440:
+            return "1D"
+        if value % 60 == 0:
+            return f"{value // 60}H"
+        return f"{value}m"
+
+    def _refresh_mtf_sr_preset_context(self, *_args) -> None:
+        if not hasattr(self, "mtf_sr_preset_button"):
+            return
+        strategy_minutes = self._current_strategy_timeframe_minutes()
+        try:
+            plan = mtf_sr_reaction_timeframe_plan(strategy_minutes)
+        except ValueError as exc:
+            self.mtf_sr_preset_button.setEnabled(False)
+            self.mtf_sr_preset_button.setToolTip(str(exc))
+            return
+        self.mtf_sr_preset_button.setEnabled(True)
+        structure = self._tf_short_label(plan["structure_minutes"])
+        approach = (
+            "Strategy TF"
+            if plan["approach_minutes"] == strategy_minutes
+            else self._tf_short_label(plan["approach_minutes"])
+        )
+        entry = self._tf_short_label(strategy_minutes)
+        self.mtf_sr_preset_button.setToolTip(
+            "Replace the current Entry groups with adaptive starter groups for "
+            f"{structure} structure → {approach} approach/reaction → "
+            f"{entry} entry confirmation. Existing edited groups are never "
+            "rewritten automatically when Strategy TF changes."
+        )
+
     def _load_mtf_sr_preset(self) -> None:
         index = self.direction_mode.findData("MTF_SR_REACTION")
         if index >= 0:
             self.direction_mode.setCurrentIndex(index)
-        self.required_rules.set_rules(mtf_sr_reaction_preset_rules())
+        strategy_minutes = self._current_strategy_timeframe_minutes()
+        self.required_rules.set_rules(
+            mtf_sr_reaction_preset_rules(strategy_minutes)
+        )
         self.rule_tabs.setCurrentIndex(0)
         self._notify()
 
