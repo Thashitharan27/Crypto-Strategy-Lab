@@ -189,6 +189,32 @@ class SupportResistanceFeatureProvider:
             **detector_config,
         )
         output = pd.DataFrame(rows)
+        categorical_fields = {
+            "price_location",
+            "trade_location_rating",
+            "support_state",
+            "resistance_state",
+            "confirmation_rating",
+        }
+        boolean_fields = {
+            "near_support",
+            "near_resistance",
+            "inside_support_zone",
+            "inside_resistance_zone",
+            "support_tested",
+            "resistance_tested",
+            "support_held",
+            "resistance_held",
+        }
+        numeric_fields = set(_SR_FIELDS) - categorical_fields - boolean_fields
+        for direction in ("long", "short"):
+            for field in numeric_fields:
+                column = f"{direction}_{field}"
+                if column in output:
+                    # All-None structural columns are valid when v6 rejects every
+                    # weak pivot in a bounded fixture. Keep their logical schema
+                    # numeric rather than letting pandas infer object dtype.
+                    output[column] = pd.to_numeric(output[column], errors="coerce")
         output.insert(0, "available_at", pd.to_datetime(available, utc=True))
         output.insert(0, "timestamp", source_times)
         output["sr_completed_candle_time"] = pd.to_datetime(
@@ -266,6 +292,12 @@ class PreparedSupportResistanceContextReader:
             support_zone_high=_optional_float(value("support_zone_high")),
             resistance_zone_low=_optional_float(value("resistance_zone_low")),
             resistance_zone_high=_optional_float(value("resistance_zone_high")),
+            support_last_break_index=_optional_int(value("support_last_break_index")),
+            resistance_last_break_index=_optional_int(value("resistance_last_break_index")),
+            support_broken_zone_low=_optional_float(value("support_broken_zone_low")),
+            support_broken_zone_high=_optional_float(value("support_broken_zone_high")),
+            resistance_broken_zone_low=_optional_float(value("resistance_broken_zone_low")),
+            resistance_broken_zone_high=_optional_float(value("resistance_broken_zone_high")),
         )
 
     def analyze_price_location(
