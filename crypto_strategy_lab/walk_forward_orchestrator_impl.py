@@ -45,7 +45,7 @@ from crypto_strategy_lab.walk_forward_research_policy import (
 
 
 
-ORCHESTRATOR_CONTRACT = "causal_walk_forward_orchestrator_v2"
+ORCHESTRATOR_CONTRACT = "causal_walk_forward_orchestrator_v1"
 DECISION_CONTRACT = "causal_walk_forward_frozen_decision_v1"
 OUTCOME_CONTRACT = "causal_walk_forward_revealed_outcome_v1"
 SETTLEMENT_CONTRACT = "causal_walk_forward_settlement_v1"
