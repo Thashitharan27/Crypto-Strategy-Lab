@@ -272,17 +272,41 @@ def _fixture(tmp_path: Path):
                     "validation_rejection_atr": 0.8 if nearest else 0.5,
                     "state": (
                         "SUPPORT_HELD"
-                        if structure == "SUPPORT" and nearest
+                        if structure == "SUPPORT"
+                        and nearest
+                        and strategy_index >= 301
+                        else "SUPPORT_TESTING"
+                        if structure == "SUPPORT"
+                        and nearest
+                        and strategy_index >= 300
                         else "APPROACHING_SUPPORT"
                         if structure == "SUPPORT"
                         else "APPROACHING_RESISTANCE"
                     ),
-                    "tested": bool(nearest),
-                    "held": bool(nearest and structure == "SUPPORT"),
-                    "rejection_atr": 0.7 if nearest else None,
-                    "test_count": 2 if nearest else 0,
-                    "bars_since_test": 2 if nearest else None,
-                    "last_test_index": strategy_index - 2 if nearest else None,
+                    "tested": bool(nearest and strategy_index >= 300),
+                    "held": bool(
+                        nearest
+                        and structure == "SUPPORT"
+                        and strategy_index >= 301
+                    ),
+                    "rejection_atr": (
+                        0.7 if nearest and strategy_index >= 300 else None
+                    ),
+                    "test_count": (
+                        2
+                        if nearest and strategy_index >= 300
+                        else 1
+                        if nearest
+                        else 0
+                    ),
+                    "bars_since_test": (
+                        max(0, strategy_index - 300)
+                        if nearest and strategy_index >= 300
+                        else None
+                    ),
+                    "last_test_index": (
+                        300 if nearest and strategy_index >= 300 else None
+                    ),
                     "distance_price": abs(float(close[strategy_index]) - low_value),
                     "distance_atr": abs(float(close[strategy_index]) - low_value) / 8.0,
                     "near": bool(nearest),
