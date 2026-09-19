@@ -73,6 +73,16 @@ def _make_run(
             "adx": [24.0, 35.0],
         }
     )
+    rule_trace = pd.DataFrame(
+        {
+            "strategy_index": [0],
+            "rule_kind": ["REQUIRED"],
+            "group_name": ["Trend entry"],
+            "evidence": ["ADX"],
+            "actual_value": [24.0],
+            "condition_passed": [True],
+        }
+    )
     source_archives = pd.DataFrame(
         {
             "dataset": ["klines", "metrics"],
@@ -83,10 +93,12 @@ def _make_run(
     trades_path = artifacts / "trades.parquet"
     signals_path = artifacts / "signals.parquet"
     context_path = artifacts / "feature_context.parquet"
+    rule_trace_path = artifacts / "rule_trace.parquet"
     source_path = provenance / "source_archives.parquet"
     _write_parquet(trades_path, trades)
     _write_parquet(signals_path, signals)
     _write_parquet(context_path, feature_context)
+    _write_parquet(rule_trace_path, rule_trace)
     _write_parquet(source_path, source_archives)
 
     trade_csv = run / "trade_list.csv"
@@ -138,6 +150,7 @@ def _make_run(
             "trades": _artifact(trades_path, run, "parquet", 2),
             "signals": _artifact(signals_path, run, "parquet", 2),
             "feature_context": _artifact(context_path, run, "parquet", 2),
+            "rule_trace": _artifact(rule_trace_path, run, "parquet", 1),
             "source_archives": _artifact(source_path, run, "parquet", 2),
             "trade_csv": _artifact(trade_csv, run, "csv", 2),
             "summary": _artifact(summary_path, run, "json"),
@@ -189,6 +202,7 @@ def test_completed_run_listing_latest_and_reads(reports: BacktestReports):
     by_name = {item["filename"]: item for item in listed}
     assert "run_manifest.json" in by_name
     assert "artifacts/feature_context.parquet" in by_name
+    assert "artifacts/rule_trace.parquet" in by_name
     assert "provenance/source_archives.parquet" in by_name
     assert "notes/diagnostic.txt" in by_name
     assert by_name["artifacts/feature_context.parquet"]["registered_artifact"] is True
@@ -220,6 +234,11 @@ def test_parquet_preview_and_queries_cover_all_current_run_parquets(reports: Bac
         "run-one",
         "SELECT strategy_index, plus_di, minus_di, adx FROM feature_context ORDER BY strategy_index",
     )["rows"][0] == [0, 31.0, 12.0, 24.0]
+    assert reports.query_parquet(
+        "run-one",
+        "artifacts/rule_trace.parquet",
+        "SELECT rule_kind, group_name, evidence, actual_value, condition_passed FROM data",
+    )["rows"][0] == ["REQUIRED", "Trend entry", "ADX", 24.0, True]
     assert reports.query_parquet(
         "run-one",
         "provenance/source_archives.parquet",
