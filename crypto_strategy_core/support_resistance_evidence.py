@@ -32,6 +32,9 @@ SR_CONTEXT_FIELDS = (
     "support_last_test_index", "resistance_last_test_index", "confirmation_rating",
     "support_zone_low", "support_zone_high", "resistance_zone_low",
     "resistance_zone_high",
+    "support_last_break_index", "resistance_last_break_index",
+    "support_broken_zone_low", "support_broken_zone_high",
+    "resistance_broken_zone_low", "resistance_broken_zone_high",
 )
 
 
