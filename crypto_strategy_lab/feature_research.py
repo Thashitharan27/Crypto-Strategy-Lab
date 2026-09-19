@@ -675,8 +675,16 @@ class ResearchQueryService:
         try:
             self._trades = trades_path
             self._context = context_path
+            sr_zones_name = self.manifest.get("sr_zones_parquet")
+            self._sr_zones = (
+                self._context.parent / str(sr_zones_name)
+                if isinstance(sr_zones_name, str) and sr_zones_name
+                else None
+            )
             if not self._trades.is_file() or not self._context.is_file():
                 raise ResearchArtifactError("research parquet artifact is missing")
+            if self._sr_zones is not None and not self._sr_zones.is_file():
+                raise ResearchArtifactError("S/R zone research artifact is missing")
             self._validate_file_hashes()
             self._install_relations()
             self._validate()
@@ -711,7 +719,14 @@ class ResearchQueryService:
             "trades": _file_sha256(self._trades),
             "feature_context": _file_sha256(self._context),
         }
-        if actual != dict(expected):
+        if self._sr_zones is not None:
+            actual["sr_zones"] = _file_sha256(self._sr_zones)
+        comparable_expected = {
+            key: value
+            for key, value in dict(expected).items()
+            if key in actual
+        }
+        if actual != comparable_expected:
             raise ResearchArtifactError("research parquet artifact hash mismatch")
 
     def _install_relations(self) -> None:
