@@ -214,6 +214,81 @@ def _validate_sr_zone_artifact(
                 raise ValueError(
                     f"S/R snapshot artifact missing required columns: {sorted(missing)}"
                 )
+            # V3 compact snapshots can be validated in one main scan.
+            # Compute causal/schema, duplicate-key, and digest/count failures
+            # together so the ~38 MB parquet is not repeatedly decompressed.
+            if "snapshot_sha256" in columns:
+                causal_bad, duplicate_bad, digest_bad = con.execute(
+                    """
+                    WITH z AS (
+                        SELECT
+                            strategy_index,
+                            strategy_candle_open_time,
+                            decision_available_at,
+                            sr_timeframe,
+                            sr_completed_candle_time,
+                            zone_count,
+                            cast(zone_inventory_json AS VARCHAR) AS payload,
+                            cast(snapshot_sha256 AS VARCHAR) AS snapshot_sha256,
+                            count(*) OVER (
+                                PARTITION BY strategy_index, sr_timeframe
+                            ) AS snapshot_key_count
+                        FROM read_parquet(?)
+                    ),
+                    checked AS (
+                        SELECT
+                            (
+                                c.strategy_index IS NULL
+                                OR z.strategy_candle_open_time
+                                     IS DISTINCT FROM c.strategy_candle_open_time
+                                OR z.decision_available_at
+                                     IS DISTINCT FROM c.decision_available_at
+                                OR (
+                                    z.sr_completed_candle_time IS NOT NULL
+                                    AND z.sr_completed_candle_time
+                                        > z.decision_available_at
+                                )
+                                OR lower(cast(z.sr_timeframe AS VARCHAR))
+                                     NOT IN ('strategy','1h','4h','1d')
+                                OR z.zone_count < 1
+                                OR trim(z.payload) IN ('','[]')
+                            ) AS causal_bad,
+                            z.snapshot_key_count > 1 AS duplicate_bad,
+                            (
+                                z.snapshot_sha256 IS NULL
+                                OR length(trim(z.snapshot_sha256)) <> 64
+                                OR lower(z.snapshot_sha256) <> sha256(z.payload)
+                                OR z.zone_count <> (
+                                    length(z.payload)
+                                    - length(replace(z.payload, '"zone_id":', ''))
+                                ) / length('"zone_id":')
+                            ) AS digest_bad
+                        FROM z
+                        LEFT JOIN read_parquet(?) c
+                          ON z.strategy_index=c.strategy_index
+                    )
+                    SELECT
+                        coalesce(sum(CASE WHEN causal_bad THEN 1 ELSE 0 END), 0),
+                        coalesce(sum(CASE WHEN duplicate_bad THEN 1 ELSE 0 END), 0),
+                        coalesce(sum(CASE WHEN digest_bad THEN 1 ELSE 0 END), 0)
+                    FROM checked
+                    """,
+                    [str(zones_path), str(context_path)],
+                ).fetchone()
+                if causal_bad:
+                    raise ValueError(
+                        "S/R snapshot artifact causal/schema validation failed"
+                    )
+                if duplicate_bad:
+                    raise ValueError(
+                        "S/R snapshot artifact contains duplicate candle/timeframe rows"
+                    )
+                if digest_bad:
+                    raise ValueError(
+                        "S/R snapshot artifact payload digest/count validation failed"
+                    )
+                return
+
             bad = con.execute(
                 """
                 SELECT count(*)
@@ -250,39 +325,6 @@ def _validate_sr_zone_artifact(
             ).fetchone()[0]
             if duplicates:
                 raise ValueError("S/R snapshot artifact contains duplicate candle/timeframe rows")
-
-            # V3 snapshots carry an upstream-validated count and payload digest
-            # from the S/R feature cache. feature_research verifies that digest
-            # again before persistence. Re-hash the persisted payload here to
-            # prove lossless parquet storage, but do not parse all logical zones
-            # or recompute JSON array lengths a second time.
-            if "snapshot_sha256" in columns:
-                digest_failures = con.execute(
-                    """
-                    SELECT count(*)
-                    FROM read_parquet(?)
-                    WHERE snapshot_sha256 IS NULL
-                       OR length(trim(cast(snapshot_sha256 AS VARCHAR))) <> 64
-                       OR lower(cast(snapshot_sha256 AS VARCHAR))
-                            <> sha256(cast(zone_inventory_json AS VARCHAR))
-                       OR zone_count <> (
-                            length(cast(zone_inventory_json AS VARCHAR))
-                            - length(
-                                replace(
-                                    cast(zone_inventory_json AS VARCHAR),
-                                    '"zone_id":',
-                                    ''
-                                )
-                            )
-                        ) / length('"zone_id":')
-                    """,
-                    [str(zones_path)],
-                ).fetchone()[0]
-                if digest_failures:
-                    raise ValueError(
-                        "S/R snapshot artifact payload digest/count validation failed"
-                    )
-                return
 
             # Backward-compatible V2 validation reparses inventories because
             # those artifacts predate the persisted payload digest.
