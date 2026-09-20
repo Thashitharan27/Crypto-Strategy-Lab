@@ -80,6 +80,7 @@ def next_teacher_for_learning(
     events: list[dict[str, Any]],
     *,
     include_losses: bool = False,
+    minimum_entry_time: Any | None = None,
 ) -> tuple[dict[str, Any], Any] | None:
     """Return the next causal teacher boundary.
 
