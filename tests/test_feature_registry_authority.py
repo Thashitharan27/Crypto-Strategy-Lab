@@ -13,6 +13,7 @@ from crypto_strategy_lab.features import (
     FeatureDefinition, FeatureRegistry, OutputField, ParameterDefinition,
     production_feature_registry,
 )
+from crypto_strategy_lab.features.atr_context import ATR_CONTEXT_FEATURE_NAME
 from crypto_strategy_lab.features.market_regime import (
     POLICY_MARKET_FEATURE_NAME,
     prepare_policy_market_features,
@@ -170,6 +171,42 @@ def test_identity_propagates_only_related_definition_and_parameters() -> None:
     assert base["parent"] != changed_version["parent"]
 
 
+def test_support_resistance_identity_ignores_unrelated_adx_di_changes() -> None:
+    def identities(*, atr_period=14, adx_period=14, di_pressure_lookback=3):
+        registry = production_feature_registry()
+        parameters = {
+            ATR_CONTEXT_FEATURE_NAME: {"atr_period": atr_period},
+            CORE_DIRECTIONAL_FEATURE_NAME: {
+                "atr_period": atr_period,
+                "adx_period": adx_period,
+                "di_pressure_lookback": di_pressure_lookback,
+            },
+            "support_resistance": {"atr_period": atr_period},
+        }
+        resolved = registry.resolve(
+            ["support_resistance", "production_market_context"],
+            parameters,
+        )
+        values = {}
+        source = {DatasetKind.KLINES: "same-kline-source"}
+        for item in resolved:
+            values[item.definition.name] = registry.identity(
+                item, REQUEST, source, values
+            )
+        return values
+
+    base = identities()
+    changed_directional = identities(adx_period=21, di_pressure_lookback=7)
+    assert base[CORE_DIRECTIONAL_FEATURE_NAME] != changed_directional[CORE_DIRECTIONAL_FEATURE_NAME]
+    assert base["production_market_context"] != changed_directional["production_market_context"]
+    assert base[ATR_CONTEXT_FEATURE_NAME] == changed_directional[ATR_CONTEXT_FEATURE_NAME]
+    assert base["support_resistance"] == changed_directional["support_resistance"]
+
+    changed_atr = identities(atr_period=20)
+    assert base[ATR_CONTEXT_FEATURE_NAME] != changed_atr[ATR_CONTEXT_FEATURE_NAME]
+    assert base["support_resistance"] != changed_atr["support_resistance"]
+
+
 def test_optional_material_dataset_changes_identity_only_when_present() -> None:
     registry = FeatureRegistry()
     provider = Provider("a", optional_datasets=(DatasetKind.PREMIUM_INDEX_KLINES,))
@@ -231,10 +268,13 @@ def test_policy_market_compatibility_adapter_executes_through_registry(monkeypat
 
 def test_production_registry_exposes_core_authoritative_metadata() -> None:
     registry = production_feature_registry()
-    expected = {"core_directional", "production_market_context", "policy_market_context",
+    expected = {"atr_context", "core_directional", "production_market_context", "policy_market_context",
                 "support_resistance", "state_transition_daily", "funding_context",
                 "basis_context", "futures_positioning", "trade_flow_context"}
     assert expected <= set(registry.names())
+    atr_context = registry.get(ATR_CONTEXT_FEATURE_NAME).definition
+    assert atr_context.availability_rule == "current_completed_kline_available_at"
+    assert set(atr_context.parameters) == {"atr_period"}
     core = registry.get(CORE_DIRECTIONAL_FEATURE_NAME).definition
     assert core.availability_rule == "current_completed_kline_available_at"
     assert set(core.parameters) == {"atr_period", "adx_period", "di_pressure_lookback"}
@@ -242,6 +282,8 @@ def test_production_registry_exposes_core_authoritative_metadata() -> None:
     assert daily.availability_rule == "daily_state_available_from_following_utc_midnight"
     context = registry.get("production_market_context").definition
     assert context.required_features == (CORE_DIRECTIONAL_FEATURE_NAME,)
+    support = registry.get("support_resistance").definition
+    assert support.required_features == (ATR_CONTEXT_FEATURE_NAME,)
     assert context.output_schema["mean_reversion_reentry_confirmation"].kind == "string"
     assert context.output_schema["close_location"].kind == "numeric"
     policy = registry.get(POLICY_MARKET_FEATURE_NAME).definition
