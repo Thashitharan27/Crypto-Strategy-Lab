@@ -48,6 +48,10 @@ The MCP tool schema currently retains `final_action` as a compatibility wire arg
 
 For normal long-running research, prefer `continue_walk_forward_autonomous` after verifying the authoritative experiment head.
 
+For new `BOOTSTRAP_THEN_WF` experiments, the first autonomous boundary is `BOOTSTRAP_RESEARCH_REQUIRED`. Use the normal read-only research/query tools over the immutable bootstrap window, then call `record_walk_forward_review` with `review_type="BOOTSTRAP"` and the selected BASE rule events. That atomic write freezes the rules at `research_protocol.walk_forward_start` and changes phase to `RESEARCH_WF`. Candidate and teacher scanning before that cutoff is blocked.
+
+Fixed-rule OOS validation remains a normal materialized Crypto Strategy Lab run from a verified walk-forward head; it is not a separate learning phase.
+
 The autonomous action consumes routine deterministic scan checkpoints internally. It returns one of four useful classes:
 
 - a genuine ChatGPT judgment packet:

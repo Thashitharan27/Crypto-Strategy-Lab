@@ -272,6 +272,7 @@ def _with_rule_schema(result):
         "TEACHER_LOSS_REVIEW_REQUIRED",
         "LOSS_REVIEW_REQUIRED",
         "PERIODIC_REVIEW_REQUIRED",
+        "BOOTSTRAP_RESEARCH_REQUIRED",
     }:
         return result
     updated = deepcopy(result)

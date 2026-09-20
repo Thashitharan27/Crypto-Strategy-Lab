@@ -42,6 +42,7 @@ _TEACHER_POLICY_CONTEXT = threading.local()
 def _clear_scan_context() -> None:
     _SCAN_CONTEXT.active = False
     _SCAN_CONTEXT.teacher_time = None
+    _SCAN_CONTEXT.minimum_time = None
     _SCAN_CONTEXT.stop_before_time = None
     _SCAN_CONTEXT.scan_key = None
     _SCAN_CONTEXT.last_stream = None
@@ -100,6 +101,11 @@ def _tracking_next_teacher(*args, **kwargs):
         *args,
         **kwargs,
         include_losses=_teacher_loss_flip_enabled(),
+        minimum_entry_time=(
+            getattr(_SCAN_CONTEXT, "minimum_time", None)
+            if getattr(_SCAN_CONTEXT, "active", False)
+            else None
+        ),
     )
     if getattr(_SCAN_CONTEXT, "active", False):
         _SCAN_CONTEXT.teacher_time = teacher[1] if teacher is not None else None
@@ -292,6 +298,13 @@ def _candidate_rows(
     cursor: pd.Timestamp | None,
     limit: int,
 ):
+    minimum_time = (
+        getattr(_SCAN_CONTEXT, "minimum_time", None)
+        if getattr(_SCAN_CONTEXT, "active", False)
+        else None
+    )
+    if minimum_time is not None and (cursor is None or cursor < minimum_time):
+        cursor = minimum_time
     stream = _StreamingCandidateRows(
         samples_path,
         context_path,
@@ -337,6 +350,45 @@ def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
             else None
         )
         try:
+            control = kwargs.get("control") or (args[0] if len(args) > 0 else None)
+            experiment_id = str(
+                kwargs.get("experiment_id") or (args[2] if len(args) > 2 else "")
+            ).strip()
+            if control is not None and experiment_id:
+                store = CausalExperimentStore(
+                    Path(control.project_root) / "walk_forward_experiments"
+                )
+                readback = store.read(experiment_id, recent_events=0)
+                expected_sequence = kwargs.get("expected_sequence")
+                expected_state_hash = kwargs.get("expected_state_hash")
+                if expected_sequence is not None and int(readback["sequence"]) != int(expected_sequence):
+                    raise ValueError(
+                        "walk-forward experiment changed since it was read; read the verified chain head again"
+                    )
+                if expected_state_hash is not None and str(readback["state_hash"]) != str(expected_state_hash).strip().lower():
+                    raise ValueError(
+                        "walk-forward experiment changed since it was read; read the verified chain head again"
+                    )
+                definition = (readback.get("manifest") or {}).get("definition") or {}
+                protocol = definition.get("research_protocol") or {}
+                if str(protocol.get("mode", "")).upper() == "BOOTSTRAP_THEN_WF":
+                    raw_start = protocol.get("walk_forward_start")
+                    if raw_start in (None, ""):
+                        raise ValueError("bootstrap protocol has no walk_forward_start")
+                    _SCAN_CONTEXT.minimum_time = _as_utc(raw_start)
+                    phase = str(((readback.get("derived_state") or {}).get("phase") or "")).upper()
+                    if phase == "BOOTSTRAP_RESEARCH":
+                        return {
+                            "contract": CANDIDATE_CONTEXT_CONTRACT,
+                            "status": "BOOTSTRAP_RESEARCH_REQUIRED",
+                            "experiment_id": experiment_id,
+                            "sequence": int(readback["sequence"]),
+                            "state_hash": str(readback["state_hash"]),
+                            "bootstrap_start": protocol.get("bootstrap_start"),
+                            "walk_forward_start": protocol.get("walk_forward_start"),
+                            "candidate_not_captured": True,
+                            "outcome_exposed": False,
+                        }
             result = _ORIGINAL_GET_NEXT_CANDIDATE(*args, **kwargs)
             stream = getattr(_SCAN_CONTEXT, "last_stream", None)
             if stream is None:

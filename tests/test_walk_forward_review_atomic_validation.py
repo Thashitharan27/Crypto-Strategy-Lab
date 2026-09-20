@@ -274,3 +274,61 @@ def test_mcp_facade_routes_reviews_through_validated_atomic_writers():
         control_server._impl._record_walk_forward_teacher_review
         is facade.record_walk_forward_teacher_review
     )
+
+
+def test_bootstrap_review_freezes_base_rules_and_transitions_atomically(tmp_path):
+    control, reports, store, _cold_head = _environment(tmp_path)
+    bootstrap_id = "BTCUSDT_15M_WF_BOOTSTRAP_TEST"
+    definition = _definition()
+    definition["research_protocol"] = {
+        "mode": "BOOTSTRAP_THEN_WF",
+        "bootstrap_start": "2020-06-01T00:00:00Z",
+        "walk_forward_start": "2022-06-01T00:00:00Z",
+    }
+    head = store.create(bootstrap_id, definition, "create:bootstrap-rule-preflight")
+
+    assert head["phase"] == "BOOTSTRAP_RESEARCH"
+
+    recorded = record_walk_forward_review(
+        control,
+        reports,
+        experiment_id=bootstrap_id,
+        review_type="BOOTSTRAP",
+        decision="BASE_RULES_FROZEN",
+        notes=(
+            "Bootstrap research selected a stable directional-DI continuation family; "
+            "bootstrap results are training evidence only."
+        ),
+        operation_id="review:bootstrap:freeze",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        rule_events=_canonical_di_ratio_rule(),
+        auto_advance=False,
+    )
+
+    assert recorded["atomic_batch"] is True
+    assert recorded["sequence"] == 4
+
+    readback = store.read(bootstrap_id, recent_events=20)
+    assert readback["derived_state"]["phase"] == "RESEARCH_WF"
+    assert [event["event_type"] for event in readback["recent_events"]] == [
+        "WF_CREATED",
+        "REVIEW_COMPLETED",
+        "ENTRY_LEARNED",
+        "PHASE_CHANGED",
+    ]
+
+    review = readback["recent_events"][1]
+    learned = readback["recent_events"][2]
+    phase = readback["recent_events"][3]
+    cutoff = "2022-06-01T00:00:00+00:00"
+
+    assert review["payload"]["review_type"] == "BOOTSTRAP"
+    assert review["payload"]["bootstrap_methodology_contract"] == "bootstrap_base_rule_method_v1"
+    assert review["effective_market_time"] == cutoff
+    assert learned["payload"]["evidence_source"] == "BOOTSTRAP"
+    assert learned["payload"]["effective_from"] == cutoff
+    assert learned["effective_market_time"] == cutoff
+    assert phase["payload"]["phase"] == "RESEARCH_WF"
+    assert phase["effective_market_time"] == cutoff
+    assert not any(event["event_type"] == "TRADE_RESOLVED" for event in readback["recent_events"])

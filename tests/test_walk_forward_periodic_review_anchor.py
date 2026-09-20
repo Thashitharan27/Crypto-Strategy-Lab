@@ -107,3 +107,23 @@ def test_manual_initial_anchor_policy_does_not_auto_schedule_first_review():
         )
         is None
     )
+
+
+def test_bootstrap_experiment_anchors_first_periodic_review_at_walk_forward_start():
+    definition = {
+        "reference_run": REFERENCE_RUN,
+        "periodic_review_policy": {"initial_anchor": "WALK_FORWARD_START"},
+        "research_protocol": {
+            "mode": "BOOTSTRAP_THEN_WF",
+            "bootstrap_start": "2023-01-01T00:00:00+00:00",
+            "walk_forward_start": "2025-01-01T00:00:00+00:00",
+        },
+    }
+    events = [_resolved(2, "2025-04-02T00:00:00+00:00", 1.0)]
+
+    anchor = _initial_periodic_review_anchor(FakeReports("2023-01-01T00:00:00+00:00"), definition, events)
+    result = _periodic_review_due(events, 3, initial_anchor=anchor)
+
+    assert anchor.isoformat() == "2025-01-01T00:00:00+00:00"
+    assert result is not None
+    assert result["review_due_time"] == "2025-04-01T00:00:00+00:00"

@@ -38,6 +38,7 @@ AUTONOMOUS_JUDGMENT_STATUSES = frozenset({
     "TEACHER_LOSS_REVIEW_REQUIRED",
     "LOSS_REVIEW_REQUIRED",
     "PERIODIC_REVIEW_REQUIRED",
+    "BOOTSTRAP_RESEARCH_REQUIRED",
 })
 _AUTONOMOUS_DETERMINISTIC_CONTINUE_STATUSES = frozenset({
     "SCAN_CHECKPOINTED",
@@ -702,6 +703,29 @@ def advance_walk_forward(
         raise ValueError("max_scan_rows must be an integer")
     if max_scan_rows < 1:
         raise ValueError("max_scan_rows must be positive")
+
+    store, readback, events = _impl._verified(
+        control, experiment_id, expected_sequence, expected_state_hash
+    )
+    phase = str(((readback.get("derived_state") or {}).get("phase") or "")).upper()
+    if phase == "BOOTSTRAP_RESEARCH":
+        definition = (readback.get("manifest") or {}).get("definition") or {}
+        protocol = definition.get("research_protocol") or {}
+        return {
+            "contract": _impl.ORCHESTRATOR_CONTRACT,
+            "status": "BOOTSTRAP_RESEARCH_REQUIRED",
+            "experiment_id": experiment_id,
+            "sequence": int(expected_sequence),
+            "state_hash": str(expected_state_hash),
+            "bootstrap_start": protocol.get("bootstrap_start"),
+            "walk_forward_start": protocol.get("walk_forward_start"),
+            "reference_run": definition.get("reference_run"),
+            "review_rule": (
+                "Research the bootstrap window in-sample, define stable reusable BASE rules, "
+                "then record one BOOTSTRAP review. Bootstrap evidence never changes walk-forward equity."
+            ),
+            "outcome_exposed": False,
+        }
 
     bounded_rows = min(int(max_scan_rows), ACCELERATED_SCAN_ROWS)
     result = _ORIGINAL_ADVANCE_WALK_FORWARD(

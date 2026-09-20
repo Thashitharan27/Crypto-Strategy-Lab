@@ -80,6 +80,7 @@ def next_teacher_for_learning(
     events: list[dict[str, Any]],
     *,
     include_losses: bool = False,
+    minimum_entry_time: Any | None = None,
 ) -> tuple[dict[str, Any], Any] | None:
     """Return the next causal teacher boundary.
 
@@ -95,6 +96,11 @@ def next_teacher_for_learning(
     trades_path = artifact_path(run_dir, manifest, "trades", verify=True)
     last = _candidate_impl._last_teacher_time(events)
     reviewed_pairs = _reviewed_teacher_pair_ids(events)
+    minimum_entry = (
+        _candidate_impl._utc_timestamp(minimum_entry_time, "teacher minimum_entry_time")
+        if minimum_entry_time is not None
+        else None
+    )
     allow_paired_losses = (
         bool(include_losses)
         and _candidate_impl._sampling_mode(manifest) == "WALK_FORWARD"
@@ -217,6 +223,12 @@ def next_teacher_for_learning(
         pair_id = str(values.get("pair_id"))
         if pair_id in reviewed_pairs:
             continue
+        if minimum_entry is not None:
+            entry_raw = values.get("entry_time")
+            if entry_raw is None:
+                continue
+            if _candidate_impl._utc_timestamp(entry_raw, "teacher entry_time") < minimum_entry:
+                continue
 
         resolution = _candidate_impl._utc_timestamp(
             values["learning_resolution_time"], "teacher learning_resolution_time"
