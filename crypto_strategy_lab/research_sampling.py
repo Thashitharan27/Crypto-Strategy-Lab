@@ -16,6 +16,7 @@ import pandas as pd
 
 from crypto_strategy_lab.config import EntryMode
 from crypto_strategy_lab.research_sampling_fast import ResearchSamplingFastExitMixin
+from crypto_strategy_lab.progress import emit_progress
 from crypto_strategy_lab.rule_native_engine import RuleAwareDataLakeProductionBacktestEngine
 
 
@@ -37,7 +38,42 @@ class StrategyResearchSamplingEngine(
 ):
     """Native engine variant that ignores portfolio overlap suppression only."""
 
+    def _emit_research_scan_progress(self, i: int) -> None:
+        callback = getattr(self, "research_progress_callback", None)
+        if callback is None:
+            return
+        total = int(getattr(self, "research_progress_total_rows", len(self.risk)))
+        if total <= 0:
+            return
+        completed = min(total, int(i) + 1)
+        stride = max(1000, total // 100)
+        if completed not in {1, total} and completed % stride:
+            return
+        started = getattr(self, "_research_progress_started", None)
+        if started is None:
+            started = time.perf_counter()
+            self._research_progress_started = started
+        elapsed = max(0.0, time.perf_counter() - started)
+        detail = f"Scanned {completed:,} of {total:,} strategy rows."
+        if completed > 0 and completed < total and elapsed >= 1.0:
+            eta = elapsed * (total - completed) / completed
+            detail += f" Approx. remaining {eta / 60.0:.1f} min."
+        emit_progress(
+            callback,
+            kind="work",
+            phase=str(
+                getattr(self, "research_progress_phase", "research_sampling")
+            ),
+            label=str(
+                getattr(self, "research_progress_label", "Research sampling")
+            ),
+            completed=completed,
+            total=total,
+            detail=detail,
+        )
+
     def _should_enter(self, i):
+        self._emit_research_scan_progress(i)
         # Research observations are not a portfolio. Existing open observations,
         # timeout history and max-active-pair limits must not suppress a new
         # opportunity. Strategy profile availability and the normal downstream
@@ -216,6 +252,7 @@ class WalkForwardCounterfactualSamplingEngine(StrategyResearchSamplingEngine):
         return self.research_forced_side_by_index.get(int(i))
 
     def _should_enter(self, i):
+        self._emit_research_scan_progress(i)
         direction = self._selected_direction(i)
         if direction not in {"LONG", "SHORT"}:
             return False
@@ -255,6 +292,8 @@ def _paired_walk_forward_samples(
     intrabar,
     native_config,
     source: pd.DataFrame,
+    *,
+    progress_callback=None,
 ) -> tuple[pd.DataFrame, dict]:
     """Return complete immutable LONG+SHORT outcome pairs for each viable source."""
     if source.empty:
@@ -287,6 +326,22 @@ def _paired_walk_forward_samples(
         prepared, intrabar, counter_config
     )
     counter_engine.research_forced_side_by_index = opposite_by_index
+    counter_engine.research_progress_callback = progress_callback
+    counter_engine.research_progress_total_rows = len(prepared)
+    counter_engine.research_progress_phase = "walk_forward_counterfactual"
+    counter_engine.research_progress_label = (
+        f"Walk Forward — opposite side ({len(source):,} candidates)"
+    )
+    emit_progress(
+        progress_callback,
+        kind="stage",
+        phase="walk_forward_counterfactual",
+        label="Walk Forward — calculating opposite side",
+        detail=(
+            f"Resolving immutable opposite-side outcomes for "
+            f"{len(source):,} viable candidates."
+        ),
+    )
     counter_raw = counter_engine.run()
     counter_stats = counter_engine.research_exit_optimization_stats()
     _release_research_rejection_metadata(counter_raw)
@@ -405,6 +460,7 @@ def generate_strategy_research_samples(
     *,
     mode: str,
     interval_candles: int = 1,
+    progress_callback=None,
 ) -> pd.DataFrame:
     """Evaluate configured strategy opportunities without portfolio suppression."""
     normalized_mode = str(mode).upper()
@@ -424,6 +480,21 @@ def generate_strategy_research_samples(
 
     config = research_native_config(native_config, len(prepared))
     engine = StrategyResearchSamplingEngine.from_prepared(prepared, intrabar, config)
+    engine.research_progress_callback = progress_callback
+    engine.research_progress_total_rows = len(prepared)
+    engine.research_progress_phase = "research_sampling_source"
+    engine.research_progress_label = (
+        "Walk Forward — source candidates"
+        if normalized_mode == WALK_FORWARD_SAMPLING_MODE
+        else "Research sampling — strategy-valid entries"
+    )
+    emit_progress(
+        progress_callback,
+        kind="stage",
+        phase="research_sampling_source",
+        label=engine.research_progress_label,
+        detail=f"Scanning {len(prepared):,} strategy rows.",
+    )
     raw = engine.run()
     exit_optimization = engine.research_exit_optimization_stats()
 
@@ -444,11 +515,19 @@ def generate_strategy_research_samples(
     selected = _select_sampling_mode(resolved, normalized_mode, interval)
     walk_forward_metadata = {}
     if normalized_mode == WALK_FORWARD_SAMPLING_MODE:
+        emit_progress(
+            progress_callback,
+            kind="stage",
+            phase="walk_forward_pairing",
+            label="Walk Forward — source scan complete",
+            detail=f"Found {len(selected):,} resolved viable source candidates.",
+        )
         selected, walk_forward_metadata = _paired_walk_forward_samples(
             prepared,
             intrabar,
             native_config,
             selected,
+            progress_callback=progress_callback,
         )
     selection_seconds = time.perf_counter() - started
 

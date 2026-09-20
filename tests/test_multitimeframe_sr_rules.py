@@ -115,7 +115,11 @@ def test_independent_sr_frames_get_separate_output_namespaces(tmp_path) -> None:
             calls.append(minutes)
             return {"support_resistance": _sr_frame(minutes / 60.0)}
 
-    store = SimpleNamespace(cache=SimpleNamespace(root=tmp_path))
+    progress_events = []
+    store = SimpleNamespace(
+        cache=SimpleNamespace(root=tmp_path),
+        progress_callback=progress_events.append,
+    )
     result = _independent_sr_research_features(
         store,
         Registry(),
@@ -139,6 +143,14 @@ def test_independent_sr_frames_get_separate_output_namespaces(tmp_path) -> None:
         "support_resistance_1d",
     )
     assert calls == [60, 240, 1440]
+    labels = [event.get("label") for event in progress_events]
+    assert "S/R 15m ready" in labels
+    assert "Preparing S/R 1h" in labels
+    assert "S/R 1h ready" in labels
+    assert "Preparing S/R 4h" in labels
+    assert "S/R 4h ready" in labels
+    assert "Preparing S/R 1d" in labels
+    assert "S/R 1d ready" in labels
     assert "sr_strategy_long_room_in_direction_atr" in result[
         "support_resistance_strategy"
     ]

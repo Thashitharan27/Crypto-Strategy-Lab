@@ -44,6 +44,7 @@ class ResearchRunContext:
     bundle: BacktestDataBundle
     prepared: Any
     selected_source_records: tuple[Any, ...] = ()
+    progress_callback: Any = None
 
 
 @dataclass(frozen=True)
@@ -379,7 +380,13 @@ class ResearchRunner:
         # Reporters receive the already-built frame so artifact production can
         # serialize decision context without reopening data or rebuilding it.
         selected = tuple(getattr(catalog, "selected_records", ())) if catalog else ()
-        context = ResearchRunContext(run_config, bundle, prepared, selected)
+        context = ResearchRunContext(
+            run_config,
+            bundle,
+            prepared,
+            selected,
+            progress_callback=progress,
+        )
         for reporter in self.reporters:
             reporter.report(result, context)
         timings["reporting"] = time.perf_counter() - report_started

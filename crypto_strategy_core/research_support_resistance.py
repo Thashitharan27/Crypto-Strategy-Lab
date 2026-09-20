@@ -22,8 +22,12 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from .higher_timeframe_sr import HigherTimeframeSRDetector
 from .support_resistance import (
+    LocationClassification,
+    SRContext,
     SRInteractionState,
     SRLevelType,
     SupportResistanceDetector,
@@ -233,6 +237,344 @@ class ResearchHigherTimeframeSRDetector(
     _ResearchSRFastPathMixin,
     HigherTimeframeSRDetector,
 ):
-    """Higher-timeframe detector optimized for repeated strategy-price queries."""
+    """Higher-timeframe detector optimized for repeated strategy-price queries.
 
-    pass
+    A 15m research run can ask the same completed 1h/4h/1d S/R candle about many
+    different 15m prices. The structural zones and interaction state do not change
+    until the next higher-timeframe candle completes, so cache that immutable
+    snapshot once per HTF index and only recompute price-relative distances.
+    """
+
+    def _reset_incremental_state(self) -> None:
+        super()._reset_incremental_state()
+        self._research_external_snapshot_cache = None
+        self._research_external_snapshot_builds = 0
+        self._research_external_snapshot_reuses = 0
+
+    @staticmethod
+    def _research_finite_or_none(value):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        return numeric if np.isfinite(numeric) else None
+
+    def _research_external_snapshot(
+        self,
+        index,
+        open_prices,
+        high_prices,
+        low_prices,
+        close_prices,
+        atr_values,
+    ):
+        current_atr = float(atr_values[index])
+        cached = getattr(self, "_research_external_snapshot_cache", None)
+        if (
+            cached is not None
+            and cached["index"] == int(index)
+            and cached["atr"] == current_atr
+        ):
+            self._research_external_snapshot_reuses = int(
+                getattr(self, "_research_external_snapshot_reuses", 0)
+            ) + 1
+            return cached
+
+        self._advance_to(
+            index,
+            open_prices,
+            high_prices,
+            low_prices,
+            close_prices,
+            atr_values,
+        )
+        support_levels = self._find_support_levels(
+            high_prices, low_prices, index, current_atr
+        )
+        resistance_levels = self._find_resistance_levels(
+            high_prices, low_prices, index, current_atr
+        )
+        support_metrics = {
+            self._zone_key(level): self._interaction_metrics(level, index, True)
+            for level in support_levels
+        }
+        resistance_metrics = {
+            self._zone_key(level): self._interaction_metrics(level, index, False)
+            for level in resistance_levels
+        }
+        broken_support = self._interaction_metrics_for_active_state(
+            index,
+            True,
+            SRInteractionState.SUPPORT_BROKEN.value,
+            current_atr,
+        )
+        broken_resistance = self._interaction_metrics_for_active_state(
+            index,
+            False,
+            SRInteractionState.RESISTANCE_BROKEN.value,
+            current_atr,
+        )
+        cached = {
+            "index": int(index),
+            "atr": current_atr,
+            "support_levels": support_levels,
+            "resistance_levels": resistance_levels,
+            "support_metrics": support_metrics,
+            "resistance_metrics": resistance_metrics,
+            "broken_support": broken_support,
+            "broken_resistance": broken_resistance,
+        }
+        self._research_external_snapshot_cache = cached
+        self._research_external_snapshot_builds = int(
+            getattr(self, "_research_external_snapshot_builds", 0)
+        ) + 1
+        return cached
+
+    def analyze_external_price(
+        self,
+        index: int,
+        open_prices: np.ndarray,
+        high_prices: np.ndarray,
+        low_prices: np.ndarray,
+        close_prices: np.ndarray,
+        atr_values: np.ndarray,
+        direction: str,
+        evaluation_price: float,
+    ) -> SRContext:
+        direction = str(direction).upper()
+        if index < self.swing_detector.pivot_left + self.swing_detector.pivot_right:
+            return self._default_context()
+        current_atr = float(atr_values[index])
+        current_price = float(evaluation_price)
+        if (
+            not np.isfinite(current_atr)
+            or current_atr <= 0
+            or not np.isfinite(current_price)
+        ):
+            return self._default_context()
+
+        snapshot = self._research_external_snapshot(
+            index,
+            open_prices,
+            high_prices,
+            low_prices,
+            close_prices,
+            atr_values,
+        )
+        support_levels = snapshot["support_levels"]
+        resistance_levels = snapshot["resistance_levels"]
+        nearest_support = self._nearest_level(
+            support_levels, current_price, below=True
+        )
+        nearest_resistance = self._nearest_level(
+            resistance_levels, current_price, below=False
+        )
+        support_dist_price, support_dist_atr = self._calculate_distance(
+            current_price, nearest_support, current_atr
+        )
+        resistance_dist_price, resistance_dist_atr = self._calculate_distance(
+            current_price, nearest_resistance, current_atr
+        )
+        location = self._classify_location(
+            nearest_support,
+            nearest_resistance,
+            support_dist_atr,
+            resistance_dist_atr,
+        )
+        rating = self._rate_location(location, direction)
+        room = self._calculate_room_in_direction(
+            nearest_support,
+            nearest_resistance,
+            current_price,
+            direction,
+            current_atr,
+        )
+
+        support_metrics = (
+            snapshot["support_metrics"].get(self._zone_key(nearest_support))
+            if nearest_support is not None
+            else snapshot["broken_support"]
+        )
+        resistance_metrics = (
+            snapshot["resistance_metrics"].get(self._zone_key(nearest_resistance))
+            if nearest_resistance is not None
+            else snapshot["broken_resistance"]
+        )
+        if support_metrics is None:
+            support_metrics = self._interaction_metrics(None, index, True)
+        if resistance_metrics is None:
+            resistance_metrics = self._interaction_metrics(None, index, False)
+        confirmation_rating = self._confirmation_rating(
+            direction,
+            support_metrics["state"],
+            resistance_metrics["state"],
+        )
+
+        return SRContext(
+            nearest_support_price=nearest_support.price if nearest_support else None,
+            nearest_support_bar_index=nearest_support.bar_index if nearest_support else None,
+            nearest_support_distance_atr=support_dist_atr,
+            nearest_support_distance_price=support_dist_price,
+            nearest_resistance_price=nearest_resistance.price if nearest_resistance else None,
+            nearest_resistance_bar_index=nearest_resistance.bar_index if nearest_resistance else None,
+            nearest_resistance_distance_atr=resistance_dist_atr,
+            nearest_resistance_distance_price=resistance_dist_price,
+            price_location=(
+                location
+                if isinstance(location, LocationClassification)
+                else LocationClassification.NO_STRUCTURE
+            ),
+            trade_location_rating=rating,
+            near_support=bool(
+                np.isfinite(support_dist_atr)
+                and support_dist_atr <= self.near_distance_atr
+            ),
+            near_resistance=bool(
+                np.isfinite(resistance_dist_atr)
+                and resistance_dist_atr <= self.near_distance_atr
+            ),
+            inside_support_zone=bool(
+                nearest_support
+                and nearest_support.zone_bottom <= current_price <= nearest_support.zone_top
+            ),
+            inside_resistance_zone=bool(
+                nearest_resistance
+                and nearest_resistance.zone_bottom <= current_price <= nearest_resistance.zone_top
+            ),
+            room_in_direction_atr=room,
+            structure_conflict=bool(
+                np.isfinite(support_dist_atr)
+                and support_dist_atr <= self.near_distance_atr
+                and np.isfinite(resistance_dist_atr)
+                and resistance_dist_atr <= self.near_distance_atr
+            ),
+            support_state=support_metrics["state"],
+            resistance_state=resistance_metrics["state"],
+            support_tested=support_metrics["tested"],
+            resistance_tested=resistance_metrics["tested"],
+            support_held=support_metrics["held"],
+            resistance_held=resistance_metrics["held"],
+            support_rejection_atr=support_metrics["rejection_atr"],
+            resistance_rejection_atr=resistance_metrics["rejection_atr"],
+            support_test_count=support_metrics["test_count"],
+            resistance_test_count=resistance_metrics["test_count"],
+            bars_since_support_test=support_metrics["bars_since_test"],
+            bars_since_resistance_test=resistance_metrics["bars_since_test"],
+            support_last_test_index=support_metrics["last_test_index"],
+            resistance_last_test_index=resistance_metrics["last_test_index"],
+            confirmation_rating=confirmation_rating,
+            support_zone_low=nearest_support.zone_bottom if nearest_support else None,
+            support_zone_high=nearest_support.zone_top if nearest_support else None,
+            resistance_zone_low=nearest_resistance.zone_bottom if nearest_resistance else None,
+            resistance_zone_high=nearest_resistance.zone_top if nearest_resistance else None,
+        )
+
+    def research_zone_inventory(
+        self,
+        *,
+        index: int,
+        high: np.ndarray,
+        low: np.ndarray,
+        current_price: float,
+        current_atr: float,
+    ):
+        """Project cached HTF structure onto one strategy price for diagnostics."""
+
+        snapshot = getattr(self, "_research_external_snapshot_cache", None)
+        if snapshot is None or snapshot["index"] != int(index):
+            return None
+        if not np.isfinite(current_atr) or current_atr <= 0:
+            return []
+
+        nearest_support = self._nearest_level(
+            snapshot["support_levels"], current_price, below=True
+        )
+        nearest_resistance = self._nearest_level(
+            snapshot["resistance_levels"], current_price, below=False
+        )
+        nearest_keys = {
+            "SUPPORT": (
+                self._zone_key(nearest_support)
+                if nearest_support is not None
+                else None
+            ),
+            "RESISTANCE": (
+                self._zone_key(nearest_resistance)
+                if nearest_resistance is not None
+                else None
+            ),
+        }
+
+        result = []
+        for support, levels, metrics_by_key in (
+            (True, snapshot["support_levels"], snapshot["support_metrics"]),
+            (False, snapshot["resistance_levels"], snapshot["resistance_metrics"]),
+        ):
+            structure = "SUPPORT" if support else "RESISTANCE"
+            for level in levels:
+                key = self._zone_key(level)
+                metrics = metrics_by_key[key]
+                distance_price, distance_atr = self._calculate_distance(
+                    current_price, level, current_atr
+                )
+                sources = tuple(int(value) for value in key[1])
+                low_value = float(level.zone_bottom)
+                high_value = float(level.zone_top)
+                result.append(
+                    {
+                        "zone_id": f"{structure}:" + ",".join(map(str, sources)),
+                        "structure": structure,
+                        "zone_low": low_value,
+                        "zone_high": high_value,
+                        "anchor_price": float(level.price),
+                        "pivot_bar_index": int(level.bar_index),
+                        "confirmed_at_index": (
+                            int(level.confirmed_at_index)
+                            if level.confirmed_at_index is not None
+                            else None
+                        ),
+                        "source_bar_indices": list(sources),
+                        "source_count": len(sources),
+                        "touch_count": int(level.touch_count),
+                        "validation_rejection_atr": self._research_finite_or_none(
+                            level.validation_rejection_atr
+                        ),
+                        "state": str(metrics["state"]),
+                        "tested": bool(metrics["tested"]),
+                        "held": bool(metrics["held"]),
+                        "rejection_atr": self._research_finite_or_none(
+                            metrics["rejection_atr"]
+                        ),
+                        "test_count": int(metrics["test_count"]),
+                        "bars_since_test": (
+                            int(metrics["bars_since_test"])
+                            if metrics["bars_since_test"] is not None
+                            else None
+                        ),
+                        "last_test_index": (
+                            int(metrics["last_test_index"])
+                            if metrics["last_test_index"] is not None
+                            else None
+                        ),
+                        "distance_price": self._research_finite_or_none(
+                            distance_price
+                        ),
+                        "distance_atr": self._research_finite_or_none(distance_atr),
+                        "near": bool(
+                            np.isfinite(distance_atr)
+                            and distance_atr <= self.near_distance_atr
+                        ),
+                        "inside": bool(
+                            low_value <= current_price <= high_value
+                        ),
+                        "nearest": key == nearest_keys[structure],
+                    }
+                )
+        result.sort(
+            key=lambda item: (
+                0 if item["structure"] == "SUPPORT" else 1,
+                float(item["zone_low"]),
+                str(item["zone_id"]),
+            )
+        )
+        return result

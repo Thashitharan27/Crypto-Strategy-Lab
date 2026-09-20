@@ -198,6 +198,7 @@ def append_research_sampling_artifacts(result, context) -> None:
         native_config,
         mode=mode,
         interval_candles=interval,
+        progress_callback=getattr(context, "progress_callback", None),
     )
     generate_seconds = time.perf_counter() - stage_started
     metadata = dict(samples.attrs.get("research_sampling", {}))
