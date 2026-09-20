@@ -378,11 +378,15 @@ def _sr_zone_inventory_frame(
     )
     records: list[dict[str, Any]] = []
     expanded_zone_rows = 0
-    consumed: list[str] = (
-        ["zone_inventory_json"]
-        if "zone_inventory_json" in feature_context.columns
-        else []
-    )
+    consumed: list[str] = [
+        name
+        for name in (
+            "zone_inventory_json",
+            "zone_inventory_count",
+            "zone_inventory_sha256",
+        )
+        if name in feature_context.columns
+    ]
 
     for label, minutes in specs:
         inventory_column = f"sr_{label}_zone_inventory_json"
