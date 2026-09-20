@@ -208,7 +208,12 @@ def _initial_periodic_anchor(
     policy = definition.get("periodic_review_policy") or {}
     if not isinstance(policy, dict):
         return None
-    if str(policy.get("initial_anchor", "")).strip().upper() != "REFERENCE_PERIOD_START":
+    anchor_mode = str(policy.get("initial_anchor", "")).strip().upper()
+    if anchor_mode == "WALK_FORWARD_START":
+        protocol = definition.get("research_protocol") or {}
+        raw = protocol.get("walk_forward_start") if isinstance(protocol, dict) else None
+        return _optional_utc(raw, "walk_forward_start")
+    if anchor_mode != "REFERENCE_PERIOD_START":
         return None
     provenance = definition.get("reference_provenance") or {}
     raw = provenance.get("period_start") if isinstance(provenance, dict) else None
