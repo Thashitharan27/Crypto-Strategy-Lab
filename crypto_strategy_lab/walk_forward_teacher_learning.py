@@ -223,6 +223,12 @@ def next_teacher_for_learning(
         pair_id = str(values.get("pair_id"))
         if pair_id in reviewed_pairs:
             continue
+        if minimum_entry is not None:
+            entry_raw = values.get("entry_time")
+            if entry_raw is None:
+                continue
+            if _candidate_impl._utc_timestamp(entry_raw, "teacher entry_time") < minimum_entry:
+                continue
 
         resolution = _candidate_impl._utc_timestamp(
             values["learning_resolution_time"], "teacher learning_resolution_time"
