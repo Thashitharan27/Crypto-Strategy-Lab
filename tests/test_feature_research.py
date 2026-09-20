@@ -288,6 +288,14 @@ def test_sr_snapshot_fast_path_uses_cached_inventory_metadata(monkeypatch):
         "sr_strategy_zone_inventory_sha256",
     } <= set(consumed)
 
+    bad_count = feature_context.copy()
+    bad_count.loc[0, "sr_strategy_zone_inventory_count"] = 2
+    with pytest.raises(ResearchArtifactError, match="count/payload mismatch"):
+        _sr_zone_inventory_frame(
+            bad_count,
+            strategy_interval="15m",
+        )
+
 
 def test_sr_snapshot_semantics_are_validated_before_persistence():
     valid = [
