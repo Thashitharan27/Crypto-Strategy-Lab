@@ -146,6 +146,50 @@ Reusing the same `operation_id` with the same mutation is an idempotent retry. R
 
 ## 5. Source roles
 
+### 5.0 Optional bootstrap research before causal WF
+
+New experiments may use either:
+
+```text
+COLD_START
+BOOTSTRAP_THEN_WF
+```
+
+`COLD_START` preserves the original methodology: the experiment begins directly in `RESEARCH_WF` with no learned ENTRY rules unless they are supplied by the normal causal chronology.
+
+`BOOTSTRAP_THEN_WF` is intended for strategy construction. Its immutable definition records:
+
+```json
+{
+  "research_protocol": {
+    "mode": "BOOTSTRAP_THEN_WF",
+    "bootstrap_start": "2020-06-01T00:00:00+00:00",
+    "walk_forward_start": "2022-06-01T00:00:00+00:00"
+  }
+}
+```
+
+The experiment begins in `BOOTSTRAP_RESEARCH`. During that phase ChatGPT/human research may inspect outcomes inside the bootstrap window and use the normal research/query tools to identify a small stable set of reusable BASE ENTRY/VETO/FLIP rules. This phase is explicitly in-sample strategy development, not walk-forward performance.
+
+Bootstrap rules should prefer:
+
+- a coherent trading thesis rather than winner memorization;
+- adequate sample size and multiple market regimes where available;
+- threshold neighborhoods that remain reasonably stable rather than isolated optimum values;
+- simple reusable rule families rather than many narrow micro-rules;
+- leaving under-supported profiles disabled instead of forcing coverage.
+
+Bootstrap finalization is one atomic `BOOTSTRAP` review. It must freeze at least one ENTRY rule, stamp all BASE rules with `evidence_source=BOOTSTRAP` and `effective_from=walk_forward_start`, then change phase to `RESEARCH_WF` at that same cutoff.
+
+The causal scanner must fail closed before bootstrap finalization. After finalization:
+
+- prospective candidate entries before `walk_forward_start` are never scanned;
+- teacher trades entered before `walk_forward_start` are never reused as post-cutoff learning evidence;
+- bootstrap trades never alter RESEARCH equity;
+- the first periodic-review anchor defaults to `WALK_FORWARD_START`, not the beginning of the bootstrap/reference period.
+
+A locked out-of-sample check does **not** require a separate causal experiment phase. At any verified chain head, materialize the exact active rule snapshot and run the normal Crypto Strategy Lab over an untouched later period. That backtest is a fixed-rule OOS validation run and must not feed rule changes back into the earlier historical chain.
+
 ### 5.1 Immutable teacher/reference run
 
 The completed reference run provides the chronological evidence stream and immutable historical execution artifacts.
@@ -879,6 +923,13 @@ A fresh ChatGPT session continuing an experiment should:
 The standardized walk-forward loop is:
 
 ```text
+OPTIONAL BOOTSTRAP_RESEARCH
+        |
+        +--> inspect bootstrap window in-sample
+        +--> freeze stable BASE rules
+        +--> atomic cutoff at walk_forward_start
+        |
+        v
 IMMUTABLE REFERENCE TIMELINE
         |
         v
@@ -921,9 +972,13 @@ process earliest causally due teacher/review/candidate event
                  future trades only
 ```
 
+For a fixed-rule out-of-sample check, materialize the current strategy snapshot and run the normal lab on a reserved later period without learning.
+
 At all times:
 
 ```text
+bootstrap P&L is never WF equity
+no pre-cutoff candidate/teacher leakage
 no future leakage
 no teacher equity
 no retroactive rules
