@@ -392,7 +392,7 @@ If an ENTRY already covers the structure sufficiently, recording `NO_CHANGE` is 
 The machine-enforced research policy contract is:
 
 ```text
-causal_walk_forward_entry_veto_method_v1
+causal_walk_forward_entry_veto_flip_method_v2
 ```
 
 When a teacher winner authors `ENTRY_LEARNED` or `ENTRY_REFINED`, the review must also record:
