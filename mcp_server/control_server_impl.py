@@ -678,7 +678,7 @@ def create_control_server(
         max_scan_slices: int = 4,
         teacher_loss_flip_enabled: bool = False,
     ) -> dict[str, Any]:
-        """Record a policy-validated teacher review; opt in to 1R loss FLIP evidence when needed."""
+        """Record a policy-validated teacher review; optionally include paired teacher-loss FLIP evidence."""
         try:
             with teacher_loss_flip_policy(teacher_loss_flip_enabled):
                 return _record_walk_forward_teacher_review(
