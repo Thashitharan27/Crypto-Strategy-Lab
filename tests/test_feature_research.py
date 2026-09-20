@@ -245,7 +245,9 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert manifest["artifact_version"] == 1
     assert manifest["trade_row_count"] == 5
     assert manifest["feature_context_row_count"] == 5
-    assert manifest["sr_zone_row_count"] == 10
+    assert manifest["sr_zone_row_count"] == 5
+    assert manifest["sr_zone_expanded_row_count"] == 10
+    assert manifest["sr_zone_storage_contract"] == "SNAPSHOT_JSON_V2"
     assert manifest["artifact_sizes_bytes"]["trades"] > 0
     assert manifest["artifact_sizes_bytes"]["feature_context"] > 0
     assert manifest["artifact_sizes_bytes"]["sr_zones"] > 0
@@ -268,20 +270,26 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     con = duckdb.connect()
     zones = con.execute(
         f"SELECT * FROM read_parquet('{research / 'sr_zones.parquet'}') "
-        "ORDER BY strategy_index, zone_low"
+        "ORDER BY strategy_index"
     ).fetchdf()
     con.close()
-    assert len(zones) == 10
+    assert len(zones) == 5
     assert set(zones["sr_timeframe"]) == {"4h"}
-    assert set(zones["structure"]) == {"SUPPORT"}
-    assert zones.groupby("strategy_index")["nearest"].sum().eq(1).all()
-    assert set(zones["zone_id"]) == {"SUPPORT:0", "SUPPORT:1"}
+    assert zones["zone_count"].eq(2).all()
+    assert "zone_inventory_json" in zones.columns
+    for payload in zones["zone_inventory_json"]:
+        inventory = json.loads(payload)
+        assert len(inventory) == 2
+        assert {zone["structure"] for zone in inventory} == {"SUPPORT"}
+        assert sum(bool(zone["nearest"]) for zone in inventory) == 1
+        assert {zone["zone_id"] for zone in inventory} == {"SUPPORT:0", "SUPPORT:1"}
     for column in (
         "strategy_candle_open_time",
         "decision_available_at",
         "sr_completed_candle_time",
     ):
         assert zones[column].dt.tz is None
+
 
     with ResearchQueryService(run) as service:
         grouped = service.query(

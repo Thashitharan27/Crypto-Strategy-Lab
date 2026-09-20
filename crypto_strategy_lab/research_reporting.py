@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import time
 from types import SimpleNamespace
@@ -180,26 +181,8 @@ def _validate_sr_zone_artifact(
     context_path: Path,
     expected_rows: int,
 ) -> None:
-    """Verify full-zone inventory is causal and attached to exact strategy rows."""
-    required = {
-        "strategy_index",
-        "strategy_candle_open_time",
-        "decision_available_at",
-        "sr_timeframe",
-        "sr_timeframe_minutes",
-        "sr_completed_candle_time",
-        "zone_id",
-        "structure",
-        "zone_low",
-        "zone_high",
-        "source_count",
-        "test_count",
-        "nearest",
-    }
+    """Verify S/R inventory storage is causal, complete, and lossless."""
     with duckdb.connect() as con:
-        # All completed-run timestamp contracts represent canonical UTC
-        # instants. Force DuckDB to UTC so validation never depends on the host
-        # machine timezone when an older/mixed TIMESTAMPTZ artifact is read.
         con.execute("SET TimeZone='UTC'")
         columns = {
             row[0]
@@ -207,11 +190,6 @@ def _validate_sr_zone_artifact(
                 "DESCRIBE SELECT * FROM read_parquet(?)", [str(zones_path)]
             ).fetchall()
         }
-        missing = required - columns
-        if missing:
-            raise ValueError(
-                f"S/R zone artifact missing required columns: {sorted(missing)}"
-            )
         rows = con.execute(
             "SELECT count(*) FROM read_parquet(?)", [str(zones_path)]
         ).fetchone()[0]
@@ -220,6 +198,129 @@ def _validate_sr_zone_artifact(
         if not rows:
             return
 
+        snapshot_required = {
+            "strategy_index",
+            "strategy_candle_open_time",
+            "decision_available_at",
+            "sr_timeframe",
+            "sr_timeframe_minutes",
+            "sr_completed_candle_time",
+            "zone_count",
+            "zone_inventory_json",
+        }
+        if "zone_inventory_json" in columns:
+            missing = snapshot_required - columns
+            if missing:
+                raise ValueError(
+                    f"S/R snapshot artifact missing required columns: {sorted(missing)}"
+                )
+            bad = con.execute(
+                """
+                SELECT count(*)
+                FROM read_parquet(?) z
+                LEFT JOIN read_parquet(?) c
+                  ON z.strategy_index=c.strategy_index
+                WHERE c.strategy_index IS NULL
+                   OR z.strategy_candle_open_time
+                        IS DISTINCT FROM c.strategy_candle_open_time
+                   OR z.decision_available_at
+                        IS DISTINCT FROM c.decision_available_at
+                   OR (z.sr_completed_candle_time IS NOT NULL
+                       AND z.sr_completed_candle_time > z.decision_available_at)
+                   OR lower(cast(z.sr_timeframe AS VARCHAR))
+                        NOT IN ('strategy','1h','4h','1d')
+                   OR z.zone_count < 1
+                   OR trim(cast(z.zone_inventory_json AS VARCHAR)) IN ('','[]')
+                """,
+                [str(zones_path), str(context_path)],
+            ).fetchone()[0]
+            if bad:
+                raise ValueError("S/R snapshot artifact causal/schema validation failed")
+
+            duplicates = con.execute(
+                """
+                SELECT count(*) FROM (
+                  SELECT strategy_index, sr_timeframe, count(*) n
+                  FROM read_parquet(?)
+                  GROUP BY 1,2
+                  HAVING count(*) > 1
+                )
+                """,
+                [str(zones_path)],
+            ).fetchone()[0]
+            if duplicates:
+                raise ValueError("S/R snapshot artifact contains duplicate candle/timeframe rows")
+
+            snapshots = con.execute(
+                """
+                SELECT strategy_index, sr_timeframe, zone_count, zone_inventory_json
+                FROM read_parquet(?)
+                ORDER BY strategy_index, sr_timeframe_minutes
+                """,
+                [str(zones_path)],
+            ).fetchall()
+            for strategy_index, timeframe, zone_count, payload in snapshots:
+                try:
+                    zones = json.loads(str(payload))
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        "S/R snapshot artifact contains invalid inventory JSON"
+                    ) from exc
+                if not isinstance(zones, list) or len(zones) != int(zone_count):
+                    raise ValueError(
+                        "S/R snapshot zone_count does not match inventory payload"
+                    )
+                seen: set[str] = set()
+                nearest = {"SUPPORT": 0, "RESISTANCE": 0}
+                for zone in zones:
+                    if not isinstance(zone, dict):
+                        raise ValueError("S/R snapshot inventory entry is not an object")
+                    zone_id = str(zone.get("zone_id") or "").strip()
+                    structure = str(zone.get("structure") or "").upper()
+                    if not zone_id or zone_id in seen:
+                        raise ValueError(
+                            "S/R snapshot contains empty or duplicate zone identity"
+                        )
+                    seen.add(zone_id)
+                    if structure not in nearest:
+                        raise ValueError("S/R snapshot contains invalid structure")
+                    low = zone.get("zone_low")
+                    high = zone.get("zone_high")
+                    if low is None or high is None or float(low) > float(high):
+                        raise ValueError("S/R snapshot contains inverted zone geometry")
+                    if int(zone.get("source_count", 0) or 0) < 1:
+                        raise ValueError("S/R snapshot contains invalid source_count")
+                    if int(zone.get("test_count", 0) or 0) < 0:
+                        raise ValueError("S/R snapshot contains invalid test_count")
+                    if bool(zone.get("nearest")):
+                        nearest[structure] += 1
+                if any(count > 1 for count in nearest.values()):
+                    raise ValueError(
+                        "S/R snapshot contains multiple nearest zones for one side"
+                    )
+            return
+
+        # Backward-compatible validation for already completed expanded artifacts.
+        required = {
+            "strategy_index",
+            "strategy_candle_open_time",
+            "decision_available_at",
+            "sr_timeframe",
+            "sr_timeframe_minutes",
+            "sr_completed_candle_time",
+            "zone_id",
+            "structure",
+            "zone_low",
+            "zone_high",
+            "source_count",
+            "test_count",
+            "nearest",
+        }
+        missing = required - columns
+        if missing:
+            raise ValueError(
+                f"S/R zone artifact missing required columns: {sorted(missing)}"
+            )
         predicates = (
             ("missing_strategy_row", "c.strategy_index IS NULL"),
             (
@@ -269,7 +370,6 @@ def _validate_sr_zone_artifact(
                 "S/R zone artifact causal/schema validation failed: "
                 + ", ".join(failures)
             )
-
         duplicates = con.execute(
             """
             SELECT count(*) FROM (
@@ -283,7 +383,6 @@ def _validate_sr_zone_artifact(
         ).fetchone()[0]
         if duplicates:
             raise ValueError("S/R zone artifact contains duplicate active zones")
-
         multiple_nearest = con.execute(
             """
             SELECT count(*) FROM (
@@ -603,6 +702,13 @@ class CsvManifestReporter:
                 int(research.get("sr_zone_row_count", 0)),
                 schema_version=1,
                 collection_status="COLLECTED",
+                storage_contract=research.get("sr_zone_storage_contract"),
+                expanded_zone_rows=int(
+                    research.get(
+                        "sr_zone_expanded_row_count",
+                        research.get("sr_zone_row_count", 0),
+                    )
+                ),
             ),
             "signals": _catalog_entry(
                 signals_path,

@@ -66,6 +66,19 @@ SR_ZONE_ARTIFACT_COLUMNS = (
     "nearest",
 )
 
+# Lossless compact storage for completed-run S/R zone inventories.
+SR_ZONE_SNAPSHOT_STORAGE_CONTRACT = "SNAPSHOT_JSON_V2"
+SR_ZONE_SNAPSHOT_COLUMNS = (
+    "strategy_index",
+    "strategy_candle_open_time",
+    "decision_available_at",
+    "sr_timeframe",
+    "sr_timeframe_minutes",
+    "sr_completed_candle_time",
+    "zone_count",
+    "zone_inventory_json",
+)
+
 DEFAULT_METRICS = (
     "trades",
     "wins",
@@ -258,49 +271,24 @@ def feature_context_frame(prepared) -> pd.DataFrame:
 
 
 def _empty_sr_zone_frame() -> pd.DataFrame:
-    result = pd.DataFrame({name: pd.Series(dtype="object") for name in SR_ZONE_ARTIFACT_COLUMNS})
+    result = pd.DataFrame(
+        {name: pd.Series(dtype="object") for name in SR_ZONE_SNAPSHOT_COLUMNS}
+    )
     result["strategy_index"] = pd.Series(dtype="int64")
     result["sr_timeframe_minutes"] = pd.Series(dtype="int64")
-    for name in (
-        "zone_low",
-        "zone_high",
-        "anchor_price",
-        "validation_rejection_atr",
-        "rejection_atr",
-        "distance_price",
-        "distance_atr",
-    ):
-        result[name] = pd.Series(dtype="float64")
-    for name in ("tested", "held", "near", "inside", "nearest"):
-        result[name] = pd.Series(dtype="bool")
-    for name in (
-        "sr_timeframe",
-        "zone_id",
-        "structure",
-        "source_bar_indices_json",
-        "state",
-    ):
-        result[name] = pd.Series(dtype="string")
-    for name in (
-        "pivot_bar_index",
-        "confirmed_at_index",
-        "source_count",
-        "touch_count",
-        "test_count",
-        "bars_since_test",
-        "last_test_index",
-    ):
-        result[name] = pd.Series(dtype="Int64")
+    result["zone_count"] = pd.Series(dtype="int64")
+    result["sr_timeframe"] = pd.Series(dtype="string")
+    result["zone_inventory_json"] = pd.Series(dtype="string")
     for name in (
         "strategy_candle_open_time",
         "decision_available_at",
         "sr_completed_candle_time",
     ):
-        # Completed-run artifacts store canonical UTC instants as UTC-naive
-        # datetime64[ns]. This matches feature_context.parquet and avoids
-        # session-timezone-dependent TIMESTAMP/TIMESTAMPTZ comparisons.
         result[name] = pd.Series(dtype="datetime64[ns]")
-    return result.loc[:, SR_ZONE_ARTIFACT_COLUMNS]
+    result = result.loc[:, SR_ZONE_SNAPSHOT_COLUMNS].copy()
+    result.attrs["expanded_zone_rows"] = 0
+    result.attrs["storage_contract"] = SR_ZONE_SNAPSHOT_STORAGE_CONTRACT
+    return result
 
 
 def _sr_zone_inventory_frame(
@@ -308,7 +296,13 @@ def _sr_zone_inventory_frame(
     *,
     strategy_interval: str,
 ) -> tuple[pd.DataFrame, tuple[str, ...]]:
-    """Expand private per-row S/R inventory snapshots into one audit artifact."""
+    """Persist exact per-candle S/R inventory snapshots without global expansion.
+
+    Every detector-produced zone dictionary remains in zone_inventory_json.
+    Consumers expand only the requested window, so geometry, lifecycle state,
+    counters, distance fields, near/inside/nearest flags, and source pivots are
+    preserved without creating one parquet row per active zone per candle.
+    """
     strategy_minutes = int(pd.Timedelta(strategy_interval).total_seconds() // 60)
     specs = (
         ("strategy", strategy_minutes),
@@ -317,10 +311,7 @@ def _sr_zone_inventory_frame(
         ("1d", 1440),
     )
     records: list[dict[str, Any]] = []
-    # The unprefixed primary provider also carries an inventory snapshot, but
-    # independent sr_strategy / sr_1h / sr_4h / sr_1d blocks are authoritative
-    # for this audit artifact. Drop the raw primary copy to avoid duplicating a
-    # potentially higher-timeframe primary context in feature_context.
+    expanded_zone_rows = 0
     consumed: list[str] = (
         ["zone_inventory_json"]
         if "zone_inventory_json" in feature_context.columns
@@ -335,10 +326,13 @@ def _sr_zone_inventory_frame(
         completed_column = f"sr_{label}_completed_candle_time"
         for row in feature_context.itertuples(index=False):
             payload = getattr(row, inventory_column, None)
-            if payload is None or pd.isna(payload) or str(payload).strip() in {"", "[]"}:
+            if payload is None or pd.isna(payload):
+                continue
+            payload_text = str(payload).strip()
+            if not payload_text or payload_text == "[]":
                 continue
             try:
-                zones = json.loads(str(payload))
+                zones = json.loads(payload_text)
             except json.JSONDecodeError as exc:
                 raise ResearchArtifactError(
                     f"invalid S/R zone inventory JSON in {inventory_column}"
@@ -347,63 +341,38 @@ def _sr_zone_inventory_frame(
                 raise ResearchArtifactError(
                     f"S/R zone inventory must be a list: {inventory_column}"
                 )
-
-            strategy_index = int(getattr(row, "strategy_index"))
-            candle_time = getattr(row, "strategy_candle_open_time")
-            available_at = getattr(row, "decision_available_at")
-            completed_at = (
-                getattr(row, completed_column)
-                if completed_column in feature_context.columns
-                else pd.NaT
-            )
             for zone in zones:
                 if not isinstance(zone, dict):
                     raise ResearchArtifactError(
                         f"S/R zone inventory row must be an object: {inventory_column}"
                     )
-                sources = zone.get("source_bar_indices") or []
-                records.append(
-                    {
-                        "strategy_index": strategy_index,
-                        "strategy_candle_open_time": candle_time,
-                        "decision_available_at": available_at,
-                        "sr_timeframe": label,
-                        "sr_timeframe_minutes": int(minutes),
-                        "sr_completed_candle_time": completed_at,
-                        "zone_id": str(zone.get("zone_id") or ""),
-                        "structure": str(zone.get("structure") or ""),
-                        "zone_low": zone.get("zone_low"),
-                        "zone_high": zone.get("zone_high"),
-                        "anchor_price": zone.get("anchor_price"),
-                        "pivot_bar_index": zone.get("pivot_bar_index"),
-                        "confirmed_at_index": zone.get("confirmed_at_index"),
-                        "source_bar_indices_json": json.dumps(
-                            sources, separators=(",", ":")
-                        ),
-                        "source_count": zone.get("source_count", len(sources)),
-                        "touch_count": zone.get("touch_count", 0),
-                        "validation_rejection_atr": zone.get(
-                            "validation_rejection_atr"
-                        ),
-                        "state": str(zone.get("state") or ""),
-                        "tested": bool(zone.get("tested")),
-                        "held": bool(zone.get("held")),
-                        "rejection_atr": zone.get("rejection_atr"),
-                        "test_count": zone.get("test_count", 0),
-                        "bars_since_test": zone.get("bars_since_test"),
-                        "last_test_index": zone.get("last_test_index"),
-                        "distance_price": zone.get("distance_price"),
-                        "distance_atr": zone.get("distance_atr"),
-                        "near": bool(zone.get("near")),
-                        "inside": bool(zone.get("inside")),
-                        "nearest": bool(zone.get("nearest")),
-                    }
-                )
+            zone_count = len(zones)
+            if zone_count == 0:
+                continue
+            expanded_zone_rows += zone_count
+            records.append(
+                {
+                    "strategy_index": int(getattr(row, "strategy_index")),
+                    "strategy_candle_open_time": getattr(
+                        row, "strategy_candle_open_time"
+                    ),
+                    "decision_available_at": getattr(row, "decision_available_at"),
+                    "sr_timeframe": label,
+                    "sr_timeframe_minutes": int(minutes),
+                    "sr_completed_candle_time": (
+                        getattr(row, completed_column)
+                        if completed_column in feature_context.columns
+                        else pd.NaT
+                    ),
+                    "zone_count": zone_count,
+                    "zone_inventory_json": payload_text,
+                }
+            )
 
     if not records:
         return _empty_sr_zone_frame(), tuple(consumed)
 
-    frame = pd.DataFrame.from_records(records, columns=SR_ZONE_ARTIFACT_COLUMNS)
+    frame = pd.DataFrame.from_records(records, columns=SR_ZONE_SNAPSHOT_COLUMNS)
     for name in (
         "strategy_candle_open_time",
         "decision_available_at",
@@ -411,33 +380,21 @@ def _sr_zone_inventory_frame(
     ):
         parsed = pd.to_datetime(frame[name], utc=True, errors="coerce")
         frame[name] = parsed.dt.tz_convert("UTC").dt.tz_localize(None)
-    for name in (
-        "zone_low",
-        "zone_high",
-        "anchor_price",
-        "validation_rejection_atr",
-        "rejection_atr",
-        "distance_price",
-        "distance_atr",
-    ):
-        frame[name] = pd.to_numeric(frame[name], errors="coerce")
-    for name in (
-        "strategy_index",
-        "sr_timeframe_minutes",
-        "pivot_bar_index",
-        "confirmed_at_index",
-        "source_count",
-        "touch_count",
-        "test_count",
-        "bars_since_test",
-        "last_test_index",
-    ):
-        frame[name] = pd.to_numeric(frame[name], errors="coerce").astype("Int64")
-    frame["strategy_index"] = frame["strategy_index"].astype("int64")
-    frame["sr_timeframe_minutes"] = frame["sr_timeframe_minutes"].astype("int64")
-    for name in ("tested", "held", "near", "inside", "nearest"):
-        frame[name] = frame[name].astype(bool)
-    return frame.loc[:, SR_ZONE_ARTIFACT_COLUMNS], tuple(consumed)
+    frame["strategy_index"] = pd.to_numeric(
+        frame["strategy_index"], errors="raise"
+    ).astype("int64")
+    frame["sr_timeframe_minutes"] = pd.to_numeric(
+        frame["sr_timeframe_minutes"], errors="raise"
+    ).astype("int64")
+    frame["zone_count"] = pd.to_numeric(
+        frame["zone_count"], errors="raise"
+    ).astype("int64")
+    frame["sr_timeframe"] = frame["sr_timeframe"].astype("string")
+    frame["zone_inventory_json"] = frame["zone_inventory_json"].astype("string")
+    frame = frame.loc[:, SR_ZONE_SNAPSHOT_COLUMNS].copy()
+    frame.attrs["expanded_zone_rows"] = int(expanded_zone_rows)
+    frame.attrs["storage_contract"] = SR_ZONE_SNAPSHOT_STORAGE_CONTRACT
+    return frame, tuple(consumed)
 
 
 def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
@@ -566,6 +523,14 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
         "trade_row_count": len(trades),
         "feature_context_row_count": len(feature_context),
         "sr_zone_row_count": len(sr_zones),
+        "sr_zone_expanded_row_count": int(
+            sr_zones.attrs.get("expanded_zone_rows", len(sr_zones))
+        ),
+        "sr_zone_storage_contract": str(
+            sr_zones.attrs.get(
+                "storage_contract", SR_ZONE_SNAPSHOT_STORAGE_CONTRACT
+            )
+        ),
         "trade_columns": list(trades.columns),
         "feature_context_columns": list(feature_context.columns),
         "trade_context_parity_columns": parity_columns,

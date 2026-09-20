@@ -482,6 +482,109 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
 
 
 
+
+def test_compact_sr_snapshots_reconstruct_same_visualizer_evidence(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    expanded_model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    baseline_payload = expanded_model.build_payload(
+        trade_index=0,
+        visible_candles=120,
+        show_rejections=False,
+    )
+    target = pd.Timestamp("2026-01-04 03:00:00+00:00")
+    baseline_inspector = expanded_model.sr_inspector_at(target)
+
+    zones_path = run_dir / "artifacts" / "sr_zones.parquet"
+    with duckdb.connect(":memory:") as connection:
+        expanded = connection.execute(
+            f"SELECT * FROM read_parquet('{zones_path}') "
+            "ORDER BY strategy_index, sr_timeframe_minutes, zone_id"
+        ).df()
+
+    def clean(value):
+        if value is None or value is pd.NA:
+            return None
+        try:
+            if bool(pd.isna(value)):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(value, np.generic):
+            return value.item()
+        return value
+
+    snapshots = []
+    group_columns = [
+        "strategy_index",
+        "strategy_candle_open_time",
+        "decision_available_at",
+        "sr_timeframe",
+        "sr_timeframe_minutes",
+        "sr_completed_candle_time",
+    ]
+    for keys, group in expanded.groupby(group_columns, sort=False, dropna=False):
+        inventory = []
+        for _, row in group.iterrows():
+            inventory.append(
+                {
+                    "zone_id": str(row["zone_id"]),
+                    "structure": str(row["structure"]),
+                    "zone_low": clean(row["zone_low"]),
+                    "zone_high": clean(row["zone_high"]),
+                    "anchor_price": clean(row["anchor_price"]),
+                    "pivot_bar_index": clean(row["pivot_bar_index"]),
+                    "confirmed_at_index": clean(row["confirmed_at_index"]),
+                    "source_bar_indices": json.loads(row["source_bar_indices_json"]),
+                    "source_count": int(row["source_count"]),
+                    "touch_count": int(row["touch_count"]),
+                    "validation_rejection_atr": clean(
+                        row["validation_rejection_atr"]
+                    ),
+                    "state": str(row["state"]),
+                    "tested": bool(row["tested"]),
+                    "held": bool(row["held"]),
+                    "rejection_atr": clean(row["rejection_atr"]),
+                    "test_count": int(row["test_count"]),
+                    "bars_since_test": clean(row["bars_since_test"]),
+                    "last_test_index": clean(row["last_test_index"]),
+                    "distance_price": clean(row["distance_price"]),
+                    "distance_atr": clean(row["distance_atr"]),
+                    "near": bool(row["near"]),
+                    "inside": bool(row["inside"]),
+                    "nearest": bool(row["nearest"]),
+                }
+            )
+        snapshots.append(
+            {
+                "strategy_index": int(keys[0]),
+                "strategy_candle_open_time": keys[1],
+                "decision_available_at": keys[2],
+                "sr_timeframe": keys[3],
+                "sr_timeframe_minutes": int(keys[4]),
+                "sr_completed_candle_time": keys[5],
+                "zone_count": len(inventory),
+                "zone_inventory_json": json.dumps(
+                    inventory, separators=(",", ":")
+                ),
+            }
+        )
+    compact = pd.DataFrame(snapshots)
+    _write_parquet(zones_path, compact)
+
+    compact_model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    compact_payload = compact_model.build_payload(
+        trade_index=0,
+        visible_candles=120,
+        show_rejections=False,
+    )
+    compact_inspector = compact_model.sr_inspector_at(target)
+
+    assert compact_payload["srZones"] == baseline_payload["srZones"]
+    assert compact_payload["srEvents"] == baseline_payload["srEvents"]
+    assert compact_inspector["zones"] == baseline_inspector["zones"]
+
+
+
 def test_sr_zones_never_connect_distinct_zone_identities():
     times = pd.date_range("2026-01-01", periods=6, freq="15min", tz="UTC")
     context = pd.DataFrame(
