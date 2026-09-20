@@ -229,3 +229,5 @@ def test_teacher_loss_packet_requires_verified_opposite_side_win(monkeypatch):
     assert updated["opposite_side_outcome"]["side"] == "SHORT"
     assert updated["flip_activation_allowed"] is True
     assert updated["prior_teacher_loss_evidence_count"] == 0
+    assert "same structural learning standard as ENTRY" in updated["review_rule"]
+    assert "Repeated prior examples may strengthen confidence but are not required" in updated["review_rule"]

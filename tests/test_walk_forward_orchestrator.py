@@ -341,7 +341,7 @@ def test_advance_stops_at_first_periodic_boundary_before_candidate_capture(tmp_p
     )
 
     assert result["status"] == "PERIODIC_REVIEW_REQUIRED"
-    assert result["research_policy"]["contract"] == "causal_walk_forward_entry_veto_method_v1"
+    assert result["research_policy"]["contract"] == "causal_walk_forward_entry_veto_flip_method_v2"
     assert result["methodology_prompt"]["primary_goal"] == "SIMPLIFY_CONSOLIDATE_AND_DIAGNOSE"
     assert result["periodic_review_summary"]["read_only"] is True
     assert result["periodic_review_summary"]["experiment_id"] == EXPERIMENT_ID
@@ -380,7 +380,7 @@ def test_submit_loss_returns_review_and_review_then_advances(tmp_path):
         expected_state_hash=first["state_hash"],
     )
     assert loss["status"] == "LOSS_REVIEW_REQUIRED"
-    assert loss["research_policy"]["contract"] == "causal_walk_forward_entry_veto_method_v1"
+    assert loss["research_policy"]["contract"] == "causal_walk_forward_entry_veto_flip_method_v2"
     assert loss["methodology_prompt"]["required_first_classification"] == "loss_diagnosis"
     assert loss["settlement"]["equity_after"] == 990.0
 
@@ -449,7 +449,7 @@ def test_teacher_review_is_a_judgment_boundary_and_never_changes_equity(tmp_path
         expected_state_hash=head["state_hash"],
     )
     assert due["status"] == "TEACHER_REVIEW_REQUIRED"
-    assert due["research_policy"]["contract"] == "causal_walk_forward_entry_veto_method_v1"
+    assert due["research_policy"]["contract"] == "causal_walk_forward_entry_veto_flip_method_v2"
     assert due["methodology_prompt"]["separate_breakout_logic"] is True
     assert due["teacher"]["pair_id"] == 593
     equity_before = store.read(EXPERIMENT_ID)["derived_state"]["ledgers"]["RESEARCH"]["equity"]

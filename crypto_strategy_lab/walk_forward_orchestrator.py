@@ -583,8 +583,10 @@ def _decorate_teacher_loss_packet(
     updated["status"] = "TEACHER_LOSS_REVIEW_REQUIRED"
     updated["review_rule"] = (
         "This resolved teacher loss is FLIP evidence only. Teacher evidence never changes "
-        "walk-forward equity. Use NO_CHANGE or FLIP_EVIDENCE unless repeated prior causal "
-        "evidence and the immutable paired opposite-side outcome justify FLIP_LEARNED."
+        "walk-forward equity. Treat FLIP with the same structural learning standard as ENTRY: "
+        "the immutable paired opposite-side outcome must verify a WIN, and FLIP_LEARNED "
+        "requires a positive reusable opposite-side setup thesis and entry family. Repeated "
+        "prior examples may strengthen confidence but are not required."
     )
 
     side = str(teacher.get("side", "")).upper()

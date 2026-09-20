@@ -376,7 +376,7 @@ def record_walk_forward_teacher_review(
             )
             if not bool(checked.get("flip_activation_allowed")):
                 raise ValueError(
-                    "teacher loss cannot activate FLIP: opposite-side immutable 1R outcome is not a verified WIN"
+                    "teacher loss cannot activate FLIP: the immutable paired opposite-side outcome is not a verified WIN"
                 )
 
     teacher_payload = {

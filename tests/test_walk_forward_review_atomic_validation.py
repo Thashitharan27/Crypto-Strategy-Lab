@@ -185,7 +185,7 @@ def test_teacher_review_rejects_uncompilable_rule_without_chain_mutation(
         "ENTRY_LEARNED",
     ]
     teacher_review = readback["recent_events"][-2]["payload"]
-    assert teacher_review["research_policy_contract"] == "causal_walk_forward_entry_veto_method_v1"
+    assert teacher_review["research_policy_contract"] == "causal_walk_forward_entry_veto_flip_method_v2"
     assert teacher_review["entry_family"] == "CONTINUATION"
     assert "directional DI dominance" in teacher_review["setup_thesis"]
 
@@ -210,6 +210,116 @@ def test_teacher_review_rejects_uncompilable_rule_without_chain_mutation(
             "learned_sequence": 3,
         }
     ]
+
+
+def test_teacher_loss_flip_uses_entry_quality_standard_without_repetition_requirement(
+    tmp_path, monkeypatch
+):
+    control, reports, store, head = _environment(tmp_path)
+    from crypto_strategy_lab import walk_forward_review_facade as facade
+
+    boundary = {
+        "pair_id": 4,
+        "side": "LONG",
+        "strategy_profile_key": "bull_long",
+        "entry_time": "2020-06-04T00:00:00Z",
+        "exit_time": "2020-06-04T03:00:00Z",
+        "result": "LOSS",
+        "pair_net_r": -1.0,
+        "teacher_learning_mode": "FLIP_FROM_LOSS_PAIRED",
+    }
+    monkeypatch.setattr(
+        facade._impl,
+        "_next_teacher",
+        lambda manifest, run_dir, events: (
+            boundary,
+            pd.Timestamp("2020-06-04T03:00:00Z"),
+        ),
+    )
+    monkeypatch.setattr(
+        facade._impl,
+        "_teacher_review_packet",
+        lambda *args, **kwargs: {
+            "status": "TEACHER_LOSS_REVIEW_REQUIRED",
+            "teacher": dict(boundary),
+            "entry_context": {},
+        },
+    )
+    monkeypatch.setattr(
+        facade,
+        "_decorate_teacher_loss_packet",
+        lambda control, reports, experiment_id, packet: {
+            **packet,
+            "flip_activation_allowed": True,
+            "prior_teacher_loss_evidence_count": 0,
+            "opposite_side_outcome": {
+                "available": True,
+                "side": "SHORT",
+                "outcome": {"result": "WIN", "net_r": 2.9},
+            },
+        },
+    )
+
+    flip_rule = _canonical_di_ratio_rule()
+    flip_rule[0]["event_type"] = "FLIP_LEARNED"
+    flip_rule[0]["payload"]["rule_id"] = "FLIP_001"
+
+    with pytest.raises(ValueError, match="FLIP learning requires setup_thesis"):
+        record_walk_forward_teacher_review(
+            control,
+            reports,
+            experiment_id=EXPERIMENT_ID,
+            teacher_pair_id="4",
+            decision="FLIP_LEARNED",
+            notes="Opposite side won, but structural thesis is still required.",
+            operation_id="teacher:4:flip:missing-thesis",
+            expected_sequence=head["sequence"],
+            expected_state_hash=head["state_hash"],
+            rule_events=flip_rule,
+            entry_family="REVERSAL",
+            auto_advance=False,
+        )
+
+    unchanged = store.read(EXPERIMENT_ID, recent_events=20)
+    assert unchanged["sequence"] == head["sequence"]
+    assert unchanged["state_hash"] == head["state_hash"]
+
+    recorded = record_walk_forward_teacher_review(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        teacher_pair_id="4",
+        decision="FLIP_LEARNED",
+        notes=(
+            "The opposite SHORT is a reusable reversal setup; DI direction is only "
+            "the source proposal."
+        ),
+        operation_id="teacher:4:flip:valid",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        rule_events=flip_rule,
+        setup_thesis=(
+            "Reusable bearish reversal structure supports SHORT against the source "
+            "LONG DI proposal."
+        ),
+        entry_family="REVERSAL",
+        auto_advance=False,
+    )
+
+    assert recorded["atomic_batch"] is True
+    assert recorded["sequence"] == 3
+    readback = store.read(EXPERIMENT_ID, recent_events=20)
+    assert [event["event_type"] for event in readback["recent_events"]] == [
+        "WF_CREATED",
+        "TEACHER_RESOLVED",
+        "FLIP_LEARNED",
+    ]
+    teacher_review = readback["recent_events"][-2]["payload"]
+    assert teacher_review["research_policy_contract"] == (
+        "causal_walk_forward_entry_veto_flip_method_v2"
+    )
+    assert teacher_review["entry_family"] == "REVERSAL"
+    assert "Reusable bearish reversal" in teacher_review["setup_thesis"]
 
 
 def test_periodic_review_rule_validation_is_atomic(tmp_path):

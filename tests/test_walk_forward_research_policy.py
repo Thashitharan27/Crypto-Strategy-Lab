@@ -134,6 +134,49 @@ def test_teacher_breakout_is_explicitly_separate_family():
     assert result["entry_family"] == "BREAKOUT"
 
 
+def test_teacher_flip_learning_uses_same_reusable_thesis_standard_as_entry():
+    with pytest.raises(ValueError, match="FLIP learning requires setup_thesis"):
+        validate_teacher_methodology(
+            [_rule("FLIP_LEARNED")],
+            teacher_result="LOSS",
+            setup_thesis=None,
+            entry_family="REVERSAL",
+        )
+
+    with pytest.raises(ValueError, match="FLIP learning requires entry_family"):
+        validate_teacher_methodology(
+            [_rule("FLIP_LEARNED")],
+            teacher_result="LOSS",
+            setup_thesis=(
+                "Opposite-side reversal has reusable bearish structure despite the "
+                "source DI direction."
+            ),
+            entry_family=None,
+        )
+
+    result = validate_teacher_methodology(
+        [_rule("FLIP_LEARNED")],
+        teacher_result="LOSS",
+        setup_thesis=(
+            "Opposite-side reversal has reusable bearish structure despite the "
+            "source DI direction."
+        ),
+        entry_family="REVERSAL",
+    )
+    assert result["entry_family"] == "REVERSAL"
+    assert "Opposite-side reversal" in result["setup_thesis"]
+
+
+def test_teacher_loss_packet_makes_flip_and_entry_learning_symmetric():
+    packet = decorate_review_packet({"status": "TEACHER_LOSS_REVIEW_REQUIRED"})
+    prompt = packet["methodology_prompt"]
+
+    assert prompt["required_before_flip_learning"] == ["setup_thesis", "entry_family"]
+    assert prompt["default_when_opposite_thesis_is_not_reusable"] == "FLIP_EVIDENCE"
+    assert "same structural learning standard as ENTRY" in prompt["teacher_loss_rule"]
+    assert "Repetition is not a special prerequisite for FLIP" in prompt["teacher_loss_rule"]
+
+
 def test_periodic_rule_writing_requires_strategic_action_and_rationale():
     with pytest.raises(ValueError, match="periodic_rule_action"):
         validate_periodic_methodology(
@@ -176,3 +219,11 @@ def test_policy_schema_prioritizes_entry_refinement_over_veto_accumulation():
     principles = " ".join(schema["principles"])
     assert "refine/consolidate the ENTRY" in principles
     assert "Periodic reviews are primarily for simplification" in principles
+    assert "ENTRY and FLIP use the same structural learning standard" in principles
+    flip_policy = schema["teacher_loss_flip_review"]
+    assert flip_policy["requirements_when_authoring_flip"]["paired_opposite_outcome"] == (
+        "must be causally available and WIN"
+    )
+    assert "Repeated prior examples may strengthen confidence but are not required" in (
+        flip_policy["rule"]
+    )
