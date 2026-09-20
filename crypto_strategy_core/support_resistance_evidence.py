@@ -322,18 +322,34 @@ def support_resistance_evidence_series(
         row.update(_flatten("long", long_context))
         row.update(_flatten("short", short_context))
         if include_zone_inventory:
-            inventory = (
-                _zone_inventory(
-                    detector,
-                    index=htf_index,
-                    high=htf_high,
-                    low=htf_low,
-                    current_price=float(close[index]),
-                    current_atr=float(htf_atr[htf_index]),
+            if htf_index >= 0:
+                current_price = float(close[index])
+                current_atr = float(htf_atr[htf_index])
+                optimized_inventory = getattr(
+                    detector, "research_zone_inventory", None
                 )
-                if htf_index >= 0
-                else []
-            )
+                inventory = (
+                    optimized_inventory(
+                        index=htf_index,
+                        high=htf_high,
+                        low=htf_low,
+                        current_price=current_price,
+                        current_atr=current_atr,
+                    )
+                    if callable(optimized_inventory)
+                    else None
+                )
+                if inventory is None:
+                    inventory = _zone_inventory(
+                        detector,
+                        index=htf_index,
+                        high=htf_high,
+                        low=htf_low,
+                        current_price=current_price,
+                        current_atr=current_atr,
+                    )
+            else:
+                inventory = []
             row["zone_inventory_json"] = _inventory_json(inventory)
         rows.append(row)
     return rows
