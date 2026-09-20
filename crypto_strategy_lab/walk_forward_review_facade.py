@@ -54,6 +54,7 @@ def _with_rule_schema(result: dict[str, Any]) -> dict[str, Any]:
         "TEACHER_LOSS_REVIEW_REQUIRED",
         "LOSS_REVIEW_REQUIRED",
         "PERIODIC_REVIEW_REQUIRED",
+        "BOOTSTRAP_RESEARCH_REQUIRED",
     }:
         return result
     updated = deepcopy(result)
@@ -126,20 +127,33 @@ def record_walk_forward_review(
     autonomous_mode: bool = False,
     max_scan_slices: int = DEFAULT_AUTONOMOUS_SCAN_SLICES,
 ) -> dict[str, Any]:
-    """Validate first, then atomically record a loss/periodic review and rules."""
+    """Validate first, then atomically record a bootstrap/loss/periodic review and rules."""
     store = _impl._store(control)
     readback, _all_events, events = _verified_prefix(
         store, experiment_id, expected_sequence, expected_state_hash
     )
     kind = str(review_type).strip().upper()
-    if kind not in {"LOSS", "PERIODIC", "QUARTERLY"}:
-        raise ValueError("review_type must be LOSS or PERIODIC/QUARTERLY")
+    if kind not in {"BOOTSTRAP", "LOSS", "PERIODIC", "QUARTERLY"}:
+        raise ValueError("review_type must be BOOTSTRAP, LOSS, or PERIODIC/QUARTERLY")
     text = str(notes).strip()
     if not str(decision).strip():
         raise ValueError("decision cannot be empty")
-    effective = _impl._max_event_time(events)
-    if effective is None:
-        raise ValueError("review requires an established market-time cursor")
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    phase = str(((readback.get("derived_state") or {}).get("phase") or "")).upper()
+    if kind == "BOOTSTRAP":
+        protocol = definition.get("research_protocol") or {}
+        if phase != "BOOTSTRAP_RESEARCH":
+            raise ValueError("BOOTSTRAP review is only valid during BOOTSTRAP_RESEARCH")
+        if str(protocol.get("mode", "")).upper() != "BOOTSTRAP_THEN_WF":
+            raise ValueError("BOOTSTRAP review requires BOOTSTRAP_THEN_WF protocol")
+        raw_start = protocol.get("walk_forward_start")
+        if raw_start in (None, ""):
+            raise ValueError("bootstrap protocol has no walk_forward_start")
+        effective = _impl._utc_timestamp(raw_start, "research_protocol.walk_forward_start")
+    else:
+        effective = _impl._max_event_time(events)
+        if effective is None:
+            raise ValueError("review requires an established market-time cursor")
     subject = str(candidate_id or "").strip()
     if kind == "LOSS":
         pending = _impl._unreviewed_loss(events)
@@ -157,6 +171,7 @@ def record_walk_forward_review(
         if kind == "LOSS"
         else set(_impl.RULE_EVENT_TYPES)
     )
+    evidence_source = "BOOTSTRAP" if kind == "BOOTSTRAP" else "PROSPECTIVE_WF"
     preflight = preflight_rule_events(
         control,
         reports,
@@ -164,7 +179,7 @@ def record_walk_forward_review(
         expected_sequence=expected_sequence,
         expected_state_hash=expected_state_hash,
         rule_events=list(rule_events or []),
-        evidence_source="PROSPECTIVE_WF",
+        evidence_source=evidence_source,
         effective_from=effective_iso,
         default_reason=text,
         allowed_types=allowed,
@@ -176,6 +191,14 @@ def record_walk_forward_review(
             loss_diagnosis=loss_diagnosis,
             failure_mechanism=failure_mechanism,
         )
+    elif kind == "BOOTSTRAP":
+        if not any(item.get("event_type") == "ENTRY_LEARNED" for item in canonical):
+            raise ValueError("BOOTSTRAP review must freeze at least one ENTRY_LEARNED base rule")
+        methodology = {
+            "bootstrap_methodology_contract": "bootstrap_base_rule_method_v1",
+            "bootstrap_rule_count": len(canonical),
+            "bootstrap_walk_forward_start": effective_iso,
+        }
     else:
         methodology = validate_periodic_methodology(
             canonical,
@@ -198,10 +221,23 @@ def record_walk_forward_review(
             "payload": payload,
             "operation_id": _impl._operation(operation_id, "review"),
             "effective_market_time": effective_iso,
-            "source": "CHATGPT_RESEARCH",
+            "source": "CHATGPT_BOOTSTRAP_RESEARCH" if kind == "BOOTSTRAP" else "CHATGPT_RESEARCH",
         },
         *_canonical_rule_specs(canonical, operation_id, effective_iso),
     ]
+    if kind == "BOOTSTRAP":
+        specs.append(
+            {
+                "event_type": "PHASE_CHANGED",
+                "payload": {
+                    "phase": "RESEARCH_WF",
+                    "reason": "bootstrap base rules frozen at walk_forward_start",
+                },
+                "operation_id": _impl._operation(operation_id, "phase-research-wf"),
+                "effective_market_time": effective_iso,
+                "source": "CHATGPT_BOOTSTRAP_RESEARCH",
+            }
+        )
     batch = append_events_atomic(
         store,
         experiment_id=experiment_id,
