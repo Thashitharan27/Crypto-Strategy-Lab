@@ -287,6 +287,22 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert manifest["artifact_sizes_bytes"]["trades"] > 0
     assert manifest["artifact_sizes_bytes"]["feature_context"] > 0
     assert manifest["artifact_sizes_bytes"]["sr_zones"] > 0
+    timings = manifest["artifact_stage_timings"]
+    assert {
+        "setup_and_trade_validation",
+        "feature_context_build",
+        "sr_snapshot_build",
+        "artifact_frame_finalize",
+        "write_trades_parquet",
+        "write_feature_context_parquet",
+        "write_sr_zones_parquet",
+        "trade_fingerprint",
+        "hash_trades_parquet",
+        "hash_feature_context_parquet",
+        "hash_sr_zones_parquet",
+    } <= set(timings)
+    assert all(float(value) >= 0.0 for value in timings.values())
+    assert manifest["artifact_write_seconds"] >= sum(timings.values())
     assert {"open_interest", "funding_rate"} <= set(manifest["trade_context_parity_columns"])
 
     con = duckdb.connect()
