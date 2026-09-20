@@ -251,6 +251,33 @@ def _validate_sr_zone_artifact(
             if duplicates:
                 raise ValueError("S/R snapshot artifact contains duplicate candle/timeframe rows")
 
+            # V3 snapshots are fully validated once while their JSON inventories
+            # are already parsed in memory by feature_research. Persisted payload
+            # digests then prove the parquet contains exactly those validated
+            # strings, while DuckDB checks the cheap row-level count invariant.
+            # This avoids a second Python json.loads + 1.5M-zone traversal.
+            if "snapshot_sha256" in columns:
+                digest_failures = con.execute(
+                    """
+                    SELECT count(*)
+                    FROM read_parquet(?)
+                    WHERE snapshot_sha256 IS NULL
+                       OR length(trim(cast(snapshot_sha256 AS VARCHAR))) <> 64
+                       OR lower(cast(snapshot_sha256 AS VARCHAR))
+                            <> sha256(cast(zone_inventory_json AS VARCHAR))
+                       OR zone_count
+                            <> json_array_length(cast(zone_inventory_json AS JSON))
+                    """,
+                    [str(zones_path)],
+                ).fetchone()[0]
+                if digest_failures:
+                    raise ValueError(
+                        "S/R snapshot artifact payload digest/count validation failed"
+                    )
+                return
+
+            # Backward-compatible V2 validation reparses inventories because
+            # those artifacts predate the persisted payload digest.
             snapshots = con.execute(
                 """
                 SELECT strategy_index, sr_timeframe, zone_count, zone_inventory_json

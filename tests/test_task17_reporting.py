@@ -1,6 +1,7 @@
 """Blocking contract tests for Task-17 provenance and passive result artifacts."""
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -321,6 +322,9 @@ def test_sr_snapshot_artifact_validates_exact_inventory_payload(tmp_path: Path):
                 "sr_completed_candle_time": context.loc[1, "decision_available_at"],
                 "zone_count": 2,
                 "zone_inventory_json": payload,
+                "snapshot_sha256": hashlib.sha256(
+                    payload.encode("utf-8")
+                ).hexdigest(),
             }
         ]
     )
@@ -333,8 +337,57 @@ def test_sr_snapshot_artifact_validates_exact_inventory_payload(tmp_path: Path):
     broken = snapshots.copy()
     broken.loc[0, "zone_count"] = 3
     _write_parquet_atomic(broken, zones_path)
-    with pytest.raises(ValueError, match="zone_count"):
+    with pytest.raises(ValueError, match="digest/count"):
         _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
+
+    tampered = snapshots.copy()
+    tampered.loc[0, "zone_inventory_json"] = payload.replace("95.0", "94.0", 1)
+    _write_parquet_atomic(tampered, zones_path)
+    with pytest.raises(ValueError, match="digest/count"):
+        _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
+
+
+
+def test_sr_snapshot_v2_fallback_still_validates_legacy_inventory(tmp_path: Path):
+    _trades, context = _research_frames()
+    payload = json.dumps(
+        [
+            {
+                "zone_id": "SUPPORT:legacy",
+                "structure": "SUPPORT",
+                "zone_low": 95.0,
+                "zone_high": 96.0,
+                "source_count": 1,
+                "test_count": 0,
+                "nearest": True,
+            }
+        ],
+        separators=(",", ":"),
+    )
+    snapshots = pd.DataFrame(
+        [
+            {
+                "strategy_index": 1,
+                "strategy_candle_open_time": context.loc[
+                    1, "strategy_candle_open_time"
+                ],
+                "decision_available_at": context.loc[1, "decision_available_at"],
+                "sr_timeframe": "4h",
+                "sr_timeframe_minutes": 240,
+                "sr_completed_candle_time": context.loc[
+                    1, "decision_available_at"
+                ],
+                "zone_count": 1,
+                "zone_inventory_json": payload,
+            }
+        ]
+    )
+    context_path = tmp_path / "context.parquet"
+    zones_path = tmp_path / "legacy_sr_zones.parquet"
+    _write_parquet_atomic(context, context_path)
+    _write_parquet_atomic(snapshots, zones_path)
+    _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
+
 
 
 def test_signal_frame_uses_same_run_rejections_and_exact_causal_rows(tmp_path: Path):

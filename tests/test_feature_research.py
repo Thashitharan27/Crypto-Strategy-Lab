@@ -15,6 +15,7 @@ from crypto_strategy_lab.feature_research import (
     FEATURE_RESEARCH_ARTIFACT_CONTRACT,
     ResearchArtifactError,
     ResearchQueryService,
+    _validate_sr_zone_inventory,
     write_research_artifacts,
 )
 
@@ -234,6 +235,41 @@ def _rehash(run: Path, key: str, path: Path) -> None:
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
 
+
+def test_sr_snapshot_semantics_are_validated_before_persistence():
+    valid = [
+        {
+            "zone_id": "SUPPORT:1",
+            "structure": "SUPPORT",
+            "zone_low": 95.0,
+            "zone_high": 96.0,
+            "source_count": 1,
+            "test_count": 0,
+            "nearest": True,
+        }
+    ]
+    _validate_sr_zone_inventory(valid, inventory_column="sr_4h_zone_inventory_json")
+
+    duplicate = valid + [dict(valid[0])]
+    with pytest.raises(ResearchArtifactError, match="duplicate zone identity"):
+        _validate_sr_zone_inventory(
+            duplicate, inventory_column="sr_4h_zone_inventory_json"
+        )
+
+    multiple_nearest = [
+        valid[0],
+        {
+            **valid[0],
+            "zone_id": "SUPPORT:2",
+        },
+    ]
+    with pytest.raises(ResearchArtifactError, match="multiple nearest"):
+        _validate_sr_zone_inventory(
+            multiple_nearest, inventory_column="sr_4h_zone_inventory_json"
+        )
+
+
+
 def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_families(tmp_path):
     run = _write_run(tmp_path)
     research = run / "research"
@@ -247,7 +283,7 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert manifest["feature_context_row_count"] == 5
     assert manifest["sr_zone_row_count"] == 5
     assert manifest["sr_zone_expanded_row_count"] == 10
-    assert manifest["sr_zone_storage_contract"] == "SNAPSHOT_JSON_V2"
+    assert manifest["sr_zone_storage_contract"] == "SNAPSHOT_JSON_V3"
     assert manifest["artifact_sizes_bytes"]["trades"] > 0
     assert manifest["artifact_sizes_bytes"]["feature_context"] > 0
     assert manifest["artifact_sizes_bytes"]["sr_zones"] > 0
@@ -277,7 +313,12 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert set(zones["sr_timeframe"]) == {"4h"}
     assert zones["zone_count"].eq(2).all()
     assert "zone_inventory_json" in zones.columns
-    for payload in zones["zone_inventory_json"]:
+    assert "snapshot_sha256" in zones.columns
+    for _, snapshot in zones.iterrows():
+        payload = snapshot["zone_inventory_json"]
+        assert snapshot["snapshot_sha256"] == hashlib.sha256(
+            payload.encode("utf-8")
+        ).hexdigest()
         inventory = json.loads(payload)
         assert len(inventory) == 2
         assert {zone["structure"] for zone in inventory} == {"SUPPORT"}
