@@ -18,7 +18,7 @@ from copy import deepcopy
 from typing import Any, Iterable
 
 
-RESEARCH_POLICY_CONTRACT = "causal_walk_forward_entry_veto_method_v1"
+RESEARCH_POLICY_CONTRACT = "causal_walk_forward_entry_veto_flip_method_v2"
 
 LOSS_DIAGNOSES = frozenset({
     "ENTRY_TOO_BROAD",
