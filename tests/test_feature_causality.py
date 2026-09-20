@@ -159,6 +159,10 @@ def _mutate_benchmark(frame, cutoff):
     frame.loc[_future(frame, cutoff), "close"] *= 1.6
 
 
+def _atr():
+    return {"atr_context": {"atr_period": 7}}
+
+
 def _core():
     return {"core_directional": {"atr_period": 7, "adx_period": 6, "di_pressure_lookback": 3}}
 
@@ -179,7 +183,7 @@ def _production():
 
 
 def _support():
-    return {**_core(), "support_resistance": {
+    return {**_atr(), "support_resistance": {
         "atr_period": 7, "sr_timeframe_minutes": 240, "sr_pivot_left": 2,
         "sr_pivot_right": 2, "sr_lookback_bars": 60, "sr_zone_width_atr": .5,
         "sr_near_distance_atr": .75, "enable_sr_hold_confirmation": False,
