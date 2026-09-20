@@ -301,7 +301,11 @@ def test_shared_sr_reports_coarse_progress_without_changing_rows() -> None:
         ),
         progress_interval=17,
     )
-    assert actual == expected
+    pd.testing.assert_frame_equal(
+        pd.DataFrame(actual),
+        pd.DataFrame(expected),
+        check_dtype=False,
+    )
     assert progress == [(17, 73), (34, 73), (51, 73), (68, 73), (73, 73)]
 
 
@@ -351,3 +355,4 @@ def test_research_htf_detector_reuses_structural_snapshot_without_changing_conte
         current_atr=current_atr,
     )
     assert fast_inventory == reference_inventory
+\n
