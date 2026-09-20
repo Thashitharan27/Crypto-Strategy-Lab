@@ -42,6 +42,7 @@ _TEACHER_POLICY_CONTEXT = threading.local()
 def _clear_scan_context() -> None:
     _SCAN_CONTEXT.active = False
     _SCAN_CONTEXT.teacher_time = None
+    _SCAN_CONTEXT.minimum_time = None
     _SCAN_CONTEXT.stop_before_time = None
     _SCAN_CONTEXT.scan_key = None
     _SCAN_CONTEXT.last_stream = None
@@ -100,6 +101,11 @@ def _tracking_next_teacher(*args, **kwargs):
         *args,
         **kwargs,
         include_losses=_teacher_loss_flip_enabled(),
+        minimum_entry_time=(
+            getattr(_SCAN_CONTEXT, "minimum_time", None)
+            if getattr(_SCAN_CONTEXT, "active", False)
+            else None
+        ),
     )
     if getattr(_SCAN_CONTEXT, "active", False):
         _SCAN_CONTEXT.teacher_time = teacher[1] if teacher is not None else None
@@ -292,6 +298,13 @@ def _candidate_rows(
     cursor: pd.Timestamp | None,
     limit: int,
 ):
+    minimum_time = (
+        getattr(_SCAN_CONTEXT, "minimum_time", None)
+        if getattr(_SCAN_CONTEXT, "active", False)
+        else None
+    )
+    if minimum_time is not None and (cursor is None or cursor < minimum_time):
+        cursor = minimum_time
     stream = _StreamingCandidateRows(
         samples_path,
         context_path,
