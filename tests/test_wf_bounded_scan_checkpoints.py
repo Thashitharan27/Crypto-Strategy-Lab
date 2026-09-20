@@ -27,6 +27,11 @@ def _parquets(tmp_path, rows):
             "side": [row[2] for row in rows],
             "entry_time": pd.to_datetime([row[1] for row in rows], utc=True),
             "adx": [20.0 + index for index in range(len(rows))],
+            "walk_forward_candidate_id": [
+                f"wf-{row[0]}-{str(row[2]).lower()}" for row in rows
+            ],
+            "walk_forward_candidate_source": [True] * len(rows),
+            "research_sample_id": [f"sample-{row[0]}-{row[2]}" for row in rows],
         }
     )
     unique_context = {}
@@ -40,6 +45,9 @@ def _parquets(tmp_path, rows):
                 [item[1] for item in context_items], utc=True
             ),
             "adx": [20.0 + index for index in range(len(context_items))],
+            "unused_wide_context": [
+                "x" * 1000 for _ in range(len(context_items))
+            ],
         }
     )
     with duckdb.connect(":memory:") as connection:
@@ -47,6 +55,51 @@ def _parquets(tmp_path, rows):
         _write_parquet(connection, context, "context", context_path)
     return samples_path, context_path
 
+
+
+def test_stream_projects_only_requested_rule_columns(tmp_path):
+    samples_path, context_path = _parquets(
+        tmp_path,
+        [
+            (1, "2025-01-01T00:00:00Z", "LONG"),
+            (2, "2025-01-02T00:00:00Z", "LONG"),
+        ],
+    )
+    stream = _StreamingCandidateRows(
+        samples_path,
+        context_path,
+        None,
+        10,
+        required_columns={"adx"},
+    )
+    rows = list(stream.iterrows())
+
+    assert len(rows) == 2
+    assert "adx" in rows[0][1].index
+    assert "__ctx_adx" in rows[0][1].index
+    assert "__ctx_unused_wide_context" not in rows[0][1].index
+    assert "__wf_prev_adx" not in rows[0][1].index
+
+
+def test_stream_adds_previous_adx_only_when_rule_requires_it(tmp_path):
+    samples_path, context_path = _parquets(
+        tmp_path,
+        [
+            (1, "2025-01-01T00:00:00Z", "LONG"),
+            (2, "2025-01-02T00:00:00Z", "LONG"),
+        ],
+    )
+    stream = _StreamingCandidateRows(
+        samples_path,
+        context_path,
+        None,
+        10,
+        required_columns={"adx", "__wf_prev_adx"},
+    )
+    rows = list(stream.iterrows())
+
+    assert len(rows) == 2
+    assert "__wf_prev_adx" in rows[0][1].index
 
 def test_stream_stops_at_teacher_market_boundary(tmp_path):
     samples_path, context_path = _parquets(
