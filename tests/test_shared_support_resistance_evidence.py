@@ -10,7 +10,9 @@ from crypto_strategy_core.candles import atr
 from crypto_strategy_core.higher_timeframe_sr import HigherTimeframeSRDetector
 from crypto_strategy_core.research_support_resistance import (
     ResearchHigherTimeframeSRDetector,
+    ResearchSupportResistanceDetector,
 )
+from crypto_strategy_core.support_resistance import SupportResistanceDetector
 from crypto_strategy_core.support_resistance_evidence import (
     _zone_inventory,
     support_resistance_evidence_series,
@@ -211,6 +213,96 @@ def _assert_sr_context_equal(left, right) -> None:
             assert float(a) == pytest.approx(float(b)), name
         else:
             assert a == b, name
+
+
+def test_research_same_timeframe_fastpath_preserves_every_context_and_zone() -> None:
+    _, _, open_, high, low, close, atr_values = _series(520)
+    config = dict(
+        pivot_left=2,
+        pivot_right=2,
+        lookback_bars=80,
+        zone_width_atr=0.45,
+        zone_padding_atr=0.15,
+        max_cluster_span_atr=0.85,
+        min_rejection_atr=0.0,
+        near_distance_atr=0.75,
+        enable_hold_confirmation=True,
+        hold_confirmation_bars=3,
+        hold_confirmation_atr=0.2,
+        break_tolerance_atr=0.2,
+        break_basis="CLOSE",
+    )
+    baseline = SupportResistanceDetector(**config)
+    optimized = ResearchSupportResistanceDetector(**config)
+
+    for index in range(len(close)):
+        for direction in ("LONG", "SHORT"):
+            expected = baseline.analyze_price_location(
+                index, open_, high, low, close, atr_values, direction
+            )
+            actual = optimized.analyze_price_location(
+                index, open_, high, low, close, atr_values, direction
+            )
+            _assert_sr_context_equal(actual, expected)
+
+        expected_inventory = _zone_inventory(
+            baseline,
+            index=index,
+            high=high,
+            low=low,
+            current_price=float(close[index]),
+            current_atr=float(atr_values[index]),
+        )
+        actual_inventory = _zone_inventory(
+            optimized,
+            index=index,
+            high=high,
+            low=low,
+            current_price=float(close[index]),
+            current_atr=float(atr_values[index]),
+        )
+        assert actual_inventory == expected_inventory
+
+
+def test_shared_sr_reports_coarse_progress_without_changing_rows() -> None:
+    times, decisions, open_, high, low, close, atr_values = _series(73)
+    progress = []
+    expected = support_resistance_evidence_series(
+        times,
+        decisions,
+        open_,
+        high,
+        low,
+        close,
+        atr_values,
+        strategy_minutes=60,
+        pivot_left=2,
+        pivot_right=2,
+        lookback_bars=40,
+        min_rejection_atr=0.0,
+        include_zone_inventory=True,
+    )
+    actual = support_resistance_evidence_series(
+        times,
+        decisions,
+        open_,
+        high,
+        low,
+        close,
+        atr_values,
+        strategy_minutes=60,
+        pivot_left=2,
+        pivot_right=2,
+        lookback_bars=40,
+        min_rejection_atr=0.0,
+        include_zone_inventory=True,
+        progress_callback=lambda completed, total: progress.append(
+            (completed, total)
+        ),
+        progress_interval=17,
+    )
+    assert actual == expected
+    assert progress == [(17, 73), (34, 73), (51, 73), (68, 73), (73, 73)]
 
 
 def test_research_htf_detector_reuses_structural_snapshot_without_changing_context() -> None:
