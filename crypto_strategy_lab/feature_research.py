@@ -535,6 +535,12 @@ def _empty_trade_schema(trades: pd.DataFrame) -> pd.DataFrame:
 def write_research_artifacts(run_dir: Path, result, context, *, authoritative_layout: bool = False) -> dict[str, Any]:
     """Publish immutable Parquets derived only from this already-completed run."""
     started = time.perf_counter()
+    artifact_stage_timings: dict[str, float] = {}
+
+    def finish_stage(name: str, stage_started: float) -> None:
+        artifact_stage_timings[name] = time.perf_counter() - stage_started
+
+    stage_started = time.perf_counter()
     run_dir = Path(run_dir)
     research_dir = run_dir / ("artifacts" if authoritative_layout else "research")
     research_dir.mkdir(parents=True, exist_ok=True)
@@ -543,16 +549,24 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
     if trades.empty:
         trades = _empty_trade_schema(trades)
     _validate_input_trades(trades)
+    finish_stage("setup_and_trade_validation", stage_started)
 
+    stage_started = time.perf_counter()
     feature_context = feature_context_frame(context.prepared)
     if len(feature_context) != len(context.prepared):
         raise ResearchArtifactError(
             "feature context row count differs from prepared frame"
         )
+    finish_stage("feature_context_build", stage_started)
+
+    stage_started = time.perf_counter()
     sr_zones, inventory_columns = _sr_zone_inventory_frame(
         feature_context,
         strategy_interval=result.request.strategy_interval,
     )
+    finish_stage("sr_snapshot_build", stage_started)
+
+    stage_started = time.perf_counter()
     research_parity = set(feature_context.attrs.get("research_parity_columns", ()))
     if inventory_columns:
         feature_context = feature_context.drop(columns=list(inventory_columns))
@@ -560,14 +574,39 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
 
     parity_candidates = research_parity
     parity_columns = sorted(parity_candidates & set(trades.columns))
+    finish_stage("artifact_frame_finalize", stage_started)
 
     trades_path = research_dir / "trades.parquet"
     context_path = research_dir / "feature_context.parquet"
     sr_zones_path = research_dir / "sr_zones.parquet"
 
+    stage_started = time.perf_counter()
     _write_parquet_atomic(trades, trades_path)
+    finish_stage("write_trades_parquet", stage_started)
+
+    stage_started = time.perf_counter()
     _write_parquet_atomic(feature_context, context_path)
+    finish_stage("write_feature_context_parquet", stage_started)
+
+    stage_started = time.perf_counter()
     _write_parquet_atomic(sr_zones, sr_zones_path)
+    finish_stage("write_sr_zones_parquet", stage_started)
+
+    stage_started = time.perf_counter()
+    trade_fingerprint = _trade_fingerprint(trades)
+    finish_stage("trade_fingerprint", stage_started)
+
+    stage_started = time.perf_counter()
+    trades_sha256 = _file_sha256(trades_path)
+    finish_stage("hash_trades_parquet", stage_started)
+
+    stage_started = time.perf_counter()
+    feature_context_sha256 = _file_sha256(context_path)
+    finish_stage("hash_feature_context_parquet", stage_started)
+
+    stage_started = time.perf_counter()
+    sr_zones_sha256 = _file_sha256(sr_zones_path)
+    finish_stage("hash_sr_zones_parquet", stage_started)
 
     request = result.request
     manifest = {
@@ -606,18 +645,19 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
         "trades_parquet": "trades.parquet",
         "context_parquet": "feature_context.parquet",
         "sr_zones_parquet": "sr_zones.parquet",
-        "trade_fingerprint": _trade_fingerprint(trades),
+        "trade_fingerprint": trade_fingerprint,
         "trade_fingerprint_contract": "completed_trade_semantics_v1",
         "artifact_sha256": {
-            "trades": _file_sha256(trades_path),
-            "feature_context": _file_sha256(context_path),
-            "sr_zones": _file_sha256(sr_zones_path),
+            "trades": trades_sha256,
+            "feature_context": feature_context_sha256,
+            "sr_zones": sr_zones_sha256,
         },
         "artifact_sizes_bytes": {
             "trades": trades_path.stat().st_size,
             "feature_context": context_path.stat().st_size,
             "sr_zones": sr_zones_path.stat().st_size,
         },
+        "artifact_stage_timings": artifact_stage_timings,
         "artifact_write_seconds": time.perf_counter() - started,
     }
     if not authoritative_layout:
