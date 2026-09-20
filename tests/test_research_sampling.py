@@ -217,6 +217,46 @@ def test_research_sampling_emits_bounded_scan_progress():
     assert all(event["label"] == "Walk Forward — source candidates" for event in events)
 
 
+@pytest.mark.parametrize(
+    ("phase", "label", "expected_phase", "expected_label"),
+    [
+        (
+            "research_sampling_source",
+            "Walk Forward — source candidates",
+            "walk_forward_source_finalize",
+            "Walk Forward — finalizing source outcomes",
+        ),
+        (
+            "walk_forward_counterfactual",
+            "Walk Forward — opposite side (12 candidates)",
+            "walk_forward_counterfactual_finalize",
+            "Walk Forward — finalizing opposite-side outcomes",
+        ),
+    ],
+)
+def test_research_scan_100_percent_transitions_to_finalizing_stage(
+    phase, label, expected_phase, expected_label
+):
+    engine = object.__new__(StrategyResearchSamplingEngine)
+    engine.progress_callback = None
+    events = []
+    engine.research_progress_callback = events.append
+    engine.research_progress_phase = phase
+    engine.research_progress_label = label
+    engine.research_progress_finalize_phase = expected_phase
+    engine.research_progress_finalize_label = expected_label
+    engine.research_progress_finalize_detail = "Row scan complete; finalizing."
+
+    engine._emit_progress(5000, 5000)
+    engine._emit_progress(5000, 5000)
+
+    assert len(events) == 1
+    assert events[0]["kind"] == "stage"
+    assert events[0]["phase"] == expected_phase
+    assert events[0]["label"] == expected_label
+    assert "finalizing" in events[0]["detail"].lower()
+
+
 def test_research_engine_ignores_open_overlap_but_still_requires_strategy_context():
     engine = object.__new__(StrategyResearchSamplingEngine)
     engine.risk = np.ones(3)
