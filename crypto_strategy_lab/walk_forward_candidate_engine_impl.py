@@ -292,11 +292,175 @@ def _columns(connection: duckdb.DuckDBPyConnection, path: Path) -> list[str]:
     return [str(row[0]) for row in rows]
 
 
+_SCAN_IDENTITY_COLUMNS = frozenset({
+    "research_sample_id",
+    "research_signal_index",
+    "strategy_profile_key",
+    "side",
+    "entry_time",
+    "signal_available_at",
+    "walk_forward_candidate_id",
+    "walk_forward_candidate_source",
+    "strategy_index",
+    "decision_available_at",
+})
+
+
+def _condition_required_columns(
+    condition: dict[str, Any],
+    profile: str,
+    config: dict[str, Any],
+) -> set[str]:
+    """Return the immutable entry-time columns needed to evaluate one rule."""
+    indicator = str(condition.get("indicator", "")).upper()
+    columns: set[str] = set()
+
+    if indicator in _DIRECT_NUMERIC:
+        columns.update(_DIRECT_NUMERIC[indicator])
+    elif indicator in _DIRECT_CATEGORICAL:
+        columns.update(_DIRECT_CATEGORICAL[indicator])
+    elif indicator in PRICE_ACTION_RULE_INDICATORS:
+        label = _mtf_label(config, condition)
+        field = _MTF_PRICE_ACTION_FIELDS.get(indicator)
+        if label and field:
+            columns.add(f"mtf_{label}_{field}")
+    elif indicator in MTF_SR_DERIVED_RULE_INDICATORS:
+        label = _mtf_label(config, condition)
+        field = _MTF_SR_DERIVED_FIELDS.get(indicator)
+        if label and field:
+            columns.update(
+                f"mtf_{label}_{side}_{field}" for side in ("long", "short")
+            )
+    elif indicator in {"DIRECTIONAL_DI", "DIRECTIONAL_DI_RATIO"}:
+        columns.update({"plus_di", "minus_di"})
+    elif indicator == "DI_PRESSURE_STATE":
+        columns.update({
+            "long_di_pressure_state",
+            "short_di_pressure_state",
+            "di_pressure_state",
+        })
+    elif indicator == "DI_SPREAD_CHANGE":
+        columns.update({"di_pressure_spread_change", "di_spread_change"})
+    elif indicator == "DIRECTIONAL_DI_CHANGE":
+        columns.update({
+            "long_directional_di_change",
+            "short_directional_di_change",
+            "directional_di_change",
+        })
+    elif indicator == "OPPOSING_DI_CHANGE":
+        columns.update({
+            "long_opposing_di_change",
+            "short_opposing_di_change",
+            "opposing_di_change",
+        })
+    elif indicator == "ADX_CHANGE":
+        columns.update({"adx", "__wf_prev_adx"})
+    elif indicator == "EMA_STACK_STATE":
+        columns.update({"ema_50", "ema_100", "ema_200"})
+    elif indicator == "PRICE_VS_EMA_STACK":
+        columns.update({
+            "signal_close_price", "close", "ema_50", "ema_100", "ema_200",
+        })
+    elif indicator == "MOMENTUM":
+        columns.update({"momentum", "directional_momentum_return_at_entry"})
+        profile_cfg = (
+            ((config.get("strategy") or {}).get("profiles") or {}).get(profile)
+            or {}
+        )
+        hours = int(profile_cfg.get("momentum_lookback_hours", 24))
+        columns.add(f"momentum_return_{hours}h")
+    elif indicator == "VWAP_DISTANCE":
+        columns.update({
+            "signal_close_price", "close", "session_vwap", "atr_at_entry", "atr",
+        })
+    elif indicator == "MR_TRADE_STRETCH_ATR":
+        columns.update({"mean_reversion_distance_atr", "mean_distance_atr"})
+    elif indicator == "MR_TRADE_ALIGNMENT":
+        columns.update({"mean_reversion_signal", "mr_signal"})
+    elif indicator in SR_TRADE_RULE_INDICATORS:
+        prefix = _sr_prefix(config, condition)
+        if prefix:
+            for side in ("long", "short"):
+                columns.update(f"{prefix}_{side}_{field}" for field in RAW_SR_FIELDS)
+        columns.update({
+            "atr",
+            "atr_at_entry",
+            "signal_close_price",
+            "close",
+            "strategy_entry_price",
+        })
+    elif indicator in _SR_CATEGORICAL_FIELDS or indicator in _SR_NUMERIC_FIELDS:
+        prefix = _sr_prefix(config, condition)
+        field = _SR_CATEGORICAL_FIELDS.get(indicator) or _SR_NUMERIC_FIELDS.get(indicator)
+        if prefix and field:
+            columns.update(
+                f"{prefix}_{side}_{field}" for side in ("long", "short")
+            )
+    elif indicator in _RESEARCH_NUMERIC_FIELDS:
+        _feature, column, _scale = _RESEARCH_NUMERIC_FIELDS[indicator]
+        columns.add(column)
+    elif indicator in _RESEARCH_CATEGORICAL_FIELDS:
+        _feature, column = _RESEARCH_CATEGORICAL_FIELDS[indicator]
+        columns.add(column)
+
+    return columns
+
+
+def _rule_scan_columns(
+    groups_by_profile: dict[str, dict[str, list[dict[str, Any]]]],
+    config: dict[str, Any],
+) -> set[str]:
+    """Build a minimal safe projection for deterministic rule scanning."""
+    columns = set(_SCAN_IDENTITY_COLUMNS)
+    for profile, families in groups_by_profile.items():
+        if not isinstance(families, dict):
+            continue
+        for family in ("ENTRY", "VETO", "FLIP"):
+            for group in families.get(family, []) or []:
+                if not bool(group.get("enabled", True)):
+                    continue
+                for condition in group.get("conditions") or []:
+                    if isinstance(condition, dict):
+                        columns.update(
+                            _condition_required_columns(condition, profile, config)
+                        )
+    return columns
+
+
+def _projection_parts(
+    sample_columns: list[str],
+    context_columns: list[str],
+    required_columns: set[str] | None,
+) -> tuple[list[str], list[str], bool]:
+    """Return sample/context SELECT expressions and whether previous ADX is needed."""
+    if required_columns is None:
+        sample_select = ["t.*"]
+        context_names = list(context_columns)
+        needs_prev_adx = True
+    else:
+        requested = set(required_columns) | set(_SCAN_IDENTITY_COLUMNS)
+        sample_names = [name for name in sample_columns if name in requested]
+        context_names = [name for name in context_columns if name in requested]
+        sample_select = []
+        for name in sample_names:
+            escaped = name.replace('"', '""')
+            sample_select.append(f't."{escaped}"')
+        needs_prev_adx = "__wf_prev_adx" in requested
+
+    context_select = []
+    for name in context_names:
+        escaped = name.replace('"', '""')
+        alias = ("__ctx_" + name).replace('"', "")
+        context_select.append(f'c."{escaped}" AS "{alias}"')
+    return sample_select, context_select, needs_prev_adx
+
+
 def _candidate_rows(
     samples_path: Path,
     context_path: Path,
     cursor: pd.Timestamp | None,
     limit: int,
+    required_columns: set[str] | None = None,
 ) -> pd.DataFrame:
     with duckdb.connect(":memory:") as connection:
         sample_columns = _columns(connection, samples_path)
@@ -318,11 +482,14 @@ def _candidate_rows(
                 "feature-context artifact is missing causal identity columns: "
                 + ", ".join(sorted(missing_context))
             )
-        context_select = []
-        for name in context_columns:
-            escaped = name.replace('"', '""')
-            alias = ("__ctx_" + name).replace('"', '')
-            context_select.append(f'c."{escaped}" AS "{alias}"')
+
+        sample_select, context_select, needs_prev_adx = _projection_parts(
+            sample_columns, context_columns, required_columns
+        )
+        select_items = [*sample_select, *context_select]
+        if needs_prev_adx:
+            select_items.append("prev.adx AS __wf_prev_adx")
+
         conditions = [
             "COALESCE(CAST(t.walk_forward_candidate_source AS BOOLEAN), FALSE)"
         ]
@@ -333,19 +500,63 @@ def _candidate_rows(
             conditions.append("CAST(t.entry_time AS TIMESTAMPTZ) >= ?")
             params.append(cursor.to_pydatetime())
         where = "WHERE " + " AND ".join(conditions)
+
+        prev_join = ""
+        if needs_prev_adx:
+            prev_join = f"""
+            LEFT JOIN read_parquet('{_quote(context_path)}') prev
+              ON CAST(prev.strategy_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)-1
+            """
+
         sql = f"""
-            SELECT t.*, {', '.join(context_select)}, prev.adx AS __wf_prev_adx
+            SELECT {', '.join(select_items)}
             FROM read_parquet('{_quote(samples_path)}') t
             JOIN read_parquet('{_quote(context_path)}') c
               ON CAST(t.research_signal_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)
-            LEFT JOIN read_parquet('{_quote(context_path)}') prev
-              ON CAST(prev.strategy_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)-1
+            {prev_join}
             {where}
             ORDER BY CAST(t.entry_time AS TIMESTAMPTZ),
                      CAST(t.research_signal_index AS BIGINT), UPPER(CAST(t.side AS VARCHAR))
             LIMIT {int(limit)}
         """
         return connection.execute(sql, params).fetchdf()
+
+
+def _candidate_detail_row(
+    samples_path: Path,
+    context_path: Path,
+    research_signal_index: int,
+    side: str,
+) -> pd.Series:
+    """Hydrate complete entry-time context only after a projected row matches."""
+    with duckdb.connect(":memory:") as connection:
+        context_columns = _columns(connection, context_path)
+        context_select = []
+        for name in context_columns:
+            escaped = name.replace('"', '""')
+            alias = ("__ctx_" + name).replace('"', "")
+            context_select.append(f'c."{escaped}" AS "{alias}"')
+        rows = connection.execute(
+            f"""
+            SELECT t.*, {', '.join(context_select)}, prev.adx AS __wf_prev_adx
+            FROM read_parquet('{_quote(samples_path)}') t
+            JOIN read_parquet('{_quote(context_path)}') c
+              ON CAST(t.research_signal_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)
+            LEFT JOIN read_parquet('{_quote(context_path)}') prev
+              ON CAST(prev.strategy_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)-1
+            WHERE COALESCE(CAST(t.walk_forward_candidate_source AS BOOLEAN), FALSE)
+              AND CAST(t.research_signal_index AS BIGINT)=?
+              AND UPPER(CAST(t.side AS VARCHAR))=?
+            LIMIT 2
+            """,
+            [int(research_signal_index), str(side).upper()],
+        ).fetchdf()
+    if len(rows) != 1:
+        raise ValueError(
+            "walk-forward candidate detail lookup did not resolve exactly one source row "
+            f"for signal {int(research_signal_index)} {str(side).upper()}"
+        )
+    return rows.iloc[0]
 
 
 def _row_maps(series: pd.Series) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -904,7 +1115,14 @@ def get_next_walk_forward_candidate(
 
     teacher = _next_teacher(reference_manifest, run_dir, events)
     cursor = _max_event_time(events)
-    frame = _candidate_rows(samples_path, context_path, cursor, max_scan_rows)
+    scan_columns = _rule_scan_columns(groups_by_profile, config)
+    frame = _candidate_rows(
+        samples_path,
+        context_path,
+        cursor,
+        max_scan_rows,
+        required_columns=scan_columns,
+    )
     seen_samples, seen_identities = _seen_keys(events)
     counters = {
         "rows_scanned": 0, "skipped_seen": 0,
@@ -946,6 +1164,43 @@ def get_next_walk_forward_candidate(
                 "teacher_boundary": teacher[0], "candidate_not_captured": True,
                 "scan": counters, "outcome_exposed": False,
             }
+
+        detail_series = _candidate_detail_row(
+            samples_path, context_path, signal_index, source_side
+        )
+        full_row, full_feature_context = _row_maps(detail_series)
+        full_profile = str(full_row.get("strategy_profile_key", "")).lower()
+        if full_profile != profile:
+            raise ValueError(
+                "projected walk-forward scan profile disagrees with hydrated candidate"
+            )
+        verified_decision = _rule_decision(
+            full_row,
+            full_profile,
+            source_side,
+            groups_by_profile[full_profile],
+            config,
+        )
+        decision_keys = (
+            "eligible",
+            "reason",
+            "matched_entry_groups",
+            "matched_veto_groups",
+            "matched_flip_groups",
+            "rule_effective_side",
+        )
+        if any(
+            verified_decision.get(key) != decision.get(key)
+            for key in decision_keys
+        ):
+            raise ValueError(
+                "projected walk-forward rule evaluation disagrees with full candidate context"
+            )
+        row = full_row
+        feature_context = full_feature_context
+        profile = full_profile
+        decision = verified_decision
+        sample_id = str(row.get("research_sample_id", "") or "").strip()
 
         candidate_id = f"{signal_index}-{source_side.lower()}"
         if CausalExperimentStore._candidate_state(events, candidate_id) != "UNSEEN":

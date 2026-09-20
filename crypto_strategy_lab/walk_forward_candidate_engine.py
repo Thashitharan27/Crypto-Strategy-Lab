@@ -145,6 +145,7 @@ class _StreamingCandidateRows:
         teacher_time: pd.Timestamp | None = None,
         stop_before_time: pd.Timestamp | None = None,
         scan_key: dict[str, Any] | None = None,
+        required_columns: set[str] | None = None,
     ) -> None:
         self.samples_path = Path(samples_path)
         self.context_path = Path(context_path)
@@ -154,6 +155,9 @@ class _StreamingCandidateRows:
         self.teacher_time = teacher_time
         self.stop_before_time = stop_before_time
         self.scan_key = scan_key
+        self.required_columns = (
+            None if required_columns is None else set(required_columns)
+        )
         self.rows_yielded = 0
         self.teacher_boundary_reached = False
         self.time_boundary_reached = False
@@ -186,11 +190,14 @@ class _StreamingCandidateRows:
                     + ", ".join(sorted(missing_context))
                 )
 
-            context_select = []
-            for name in context_columns:
-                escaped = name.replace('"', '""')
-                alias = ("__ctx_" + name).replace('"', "")
-                context_select.append(f'c."{escaped}" AS "{alias}"')
+            sample_select, context_select, needs_prev_adx = _impl._projection_parts(
+                sample_columns,
+                context_columns,
+                self.required_columns,
+            )
+            select_items = [*sample_select, *context_select]
+            if needs_prev_adx:
+                select_items.append("prev.adx AS __wf_prev_adx")
 
             where = ""
             params: list[Any] = []
@@ -228,13 +235,19 @@ class _StreamingCandidateRows:
             else:
                 where = f"WHERE {source_filter}"
 
+            prev_join = ""
+            if needs_prev_adx:
+                prev_join = f"""
+                LEFT JOIN read_parquet('{_impl._quote(self.context_path)}') prev
+                  ON CAST(prev.strategy_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)-1
+                """
+
             sql = f"""
-                SELECT t.*, {', '.join(context_select)}, prev.adx AS __wf_prev_adx
+                SELECT {', '.join(select_items)}
                 FROM read_parquet('{_impl._quote(self.samples_path)}') t
                 JOIN read_parquet('{_impl._quote(self.context_path)}') c
                   ON CAST(t.research_signal_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)
-                LEFT JOIN read_parquet('{_impl._quote(self.context_path)}') prev
-                  ON CAST(prev.strategy_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)-1
+                {prev_join}
                 {where}
                 ORDER BY CAST(t.entry_time AS TIMESTAMPTZ),
                          CAST(t.research_signal_index AS BIGINT),
@@ -297,6 +310,7 @@ def _candidate_rows(
     context_path: Path,
     cursor: pd.Timestamp | None,
     limit: int,
+    required_columns: set[str] | None = None,
 ):
     minimum_time = (
         getattr(_SCAN_CONTEXT, "minimum_time", None)
@@ -325,6 +339,7 @@ def _candidate_rows(
             if getattr(_SCAN_CONTEXT, "active", False)
             else None
         ),
+        required_columns=required_columns,
     )
     if getattr(_SCAN_CONTEXT, "active", False):
         _SCAN_CONTEXT.last_stream = stream
@@ -359,6 +374,16 @@ def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
                     Path(control.project_root) / "walk_forward_experiments"
                 )
                 readback = store.read(experiment_id, recent_events=0)
+                operation_id = str(kwargs.get("operation_id") or "").strip()
+                replay = None
+                if operation_id:
+                    replay = _impl._existing_operation(
+                        _impl._events(store, experiment_id),
+                        operation_id,
+                    )
+                if replay is not None:
+                    return _ORIGINAL_GET_NEXT_CANDIDATE(*args, **kwargs)
+
                 expected_sequence = kwargs.get("expected_sequence")
                 expected_state_hash = kwargs.get("expected_state_hash")
                 if expected_sequence is not None and int(readback["sequence"]) != int(expected_sequence):
@@ -396,6 +421,14 @@ def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
 
             scan = dict(result.get("scan") or {})
             scan["bounded_scan_rows"] = int(stream.limit)
+            scan["scan_projection_columns"] = (
+                None
+                if stream.required_columns is None
+                else len(stream.required_columns)
+            )
+            scan["full_context_hydration"] = (
+                "ALL_ROWS" if stream.required_columns is None else "MATCH_ONLY"
+            )
             scan["teacher_boundary_reached"] = bool(stream.teacher_boundary_reached)
             scan["time_boundary_reached"] = bool(stream.time_boundary_reached)
             if stream.last_cursor is not None:
