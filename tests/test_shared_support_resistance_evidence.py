@@ -355,4 +355,3 @@ def test_research_htf_detector_reuses_structural_snapshot_without_changing_conte
         current_atr=current_atr,
     )
     assert fast_inventory == reference_inventory
-\n
