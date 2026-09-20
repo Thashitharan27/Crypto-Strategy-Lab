@@ -38,6 +38,40 @@ class StrategyResearchSamplingEngine(
 ):
     """Native engine variant that ignores portfolio overlap suppression only."""
 
+    def _emit_progress(self, processed_candles, total_candles):
+        """Move completed row scans immediately into an explicit finalizing stage."""
+        super()._emit_progress(processed_candles, total_candles)
+        total = int(total_candles or 0)
+        completed = int(processed_candles or 0)
+        if total <= 0 or completed < total:
+            return
+        if bool(getattr(self, "_research_scan_finalizing_emitted", False)):
+            return
+        callback = getattr(self, "research_progress_callback", None)
+        label = getattr(self, "research_progress_finalize_label", None)
+        if callback is None or not label:
+            return
+        self._research_scan_finalizing_emitted = True
+        emit_progress(
+            callback,
+            kind="stage",
+            phase=str(
+                getattr(
+                    self,
+                    "research_progress_finalize_phase",
+                    "research_sampling_finalize",
+                )
+            ),
+            label=str(label),
+            detail=str(
+                getattr(
+                    self,
+                    "research_progress_finalize_detail",
+                    "Strategy-row scan complete. Finalizing research outcomes.",
+                )
+            ),
+        )
+
     def _emit_research_scan_progress(self, i: int) -> None:
         callback = getattr(self, "research_progress_callback", None)
         if callback is None:
@@ -332,6 +366,16 @@ def _paired_walk_forward_samples(
     counter_engine.research_progress_label = (
         f"Walk Forward — opposite side ({len(source):,} candidates)"
     )
+    counter_engine.research_progress_finalize_phase = (
+        "walk_forward_counterfactual_finalize"
+    )
+    counter_engine.research_progress_finalize_label = (
+        "Walk Forward — finalizing opposite-side outcomes"
+    )
+    counter_engine.research_progress_finalize_detail = (
+        "Opposite-side strategy-row scan complete. Resolving remaining outcomes "
+        "before pairing."
+    )
     emit_progress(
         progress_callback,
         kind="stage",
@@ -346,6 +390,16 @@ def _paired_walk_forward_samples(
     counter_stats = counter_engine.research_exit_optimization_stats()
     _release_research_rejection_metadata(counter_raw)
     counter = _resolved_samples(counter_raw)
+    emit_progress(
+        progress_callback,
+        kind="stage",
+        phase="walk_forward_pairing",
+        label="Walk Forward — assembling paired outcomes",
+        detail=(
+            f"Opposite-side outcomes finalized; pairing up to "
+            f"{len(source):,} source candidates."
+        ),
+    )
 
     if not counter.empty:
         counter_index = pd.to_numeric(
@@ -488,6 +542,24 @@ def generate_strategy_research_samples(
         if normalized_mode == WALK_FORWARD_SAMPLING_MODE
         else "Research sampling — strategy-valid entries"
     )
+    if normalized_mode == WALK_FORWARD_SAMPLING_MODE:
+        engine.research_progress_finalize_phase = "walk_forward_source_finalize"
+        engine.research_progress_finalize_label = (
+            "Walk Forward — finalizing source outcomes"
+        )
+        engine.research_progress_finalize_detail = (
+            "Strategy-row scan complete. Resolving open source outcomes and "
+            "preparing viable candidates."
+        )
+    else:
+        engine.research_progress_finalize_phase = "research_sampling_finalize"
+        engine.research_progress_finalize_label = (
+            "Research sampling — finalizing outcomes"
+        )
+        engine.research_progress_finalize_detail = (
+            "Strategy-row scan complete. Resolving open outcomes and preparing "
+            "selected samples."
+        )
     emit_progress(
         progress_callback,
         kind="stage",
