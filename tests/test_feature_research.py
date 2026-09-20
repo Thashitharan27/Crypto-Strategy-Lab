@@ -15,6 +15,7 @@ from crypto_strategy_lab.feature_research import (
     FEATURE_RESEARCH_ARTIFACT_CONTRACT,
     ResearchArtifactError,
     ResearchQueryService,
+    _validate_sr_zone_inventory,
     write_research_artifacts,
 )
 
@@ -232,6 +233,41 @@ def _rehash(run: Path, key: str, path: Path) -> None:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     manifest["artifact_sha256"][key] = digest
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+
+def test_sr_snapshot_semantics_are_validated_before_persistence():
+    valid = [
+        {
+            "zone_id": "SUPPORT:1",
+            "structure": "SUPPORT",
+            "zone_low": 95.0,
+            "zone_high": 96.0,
+            "source_count": 1,
+            "test_count": 0,
+            "nearest": True,
+        }
+    ]
+    _validate_sr_zone_inventory(valid, inventory_column="sr_4h_zone_inventory_json")
+
+    duplicate = valid + [dict(valid[0])]
+    with pytest.raises(ResearchArtifactError, match="duplicate zone identity"):
+        _validate_sr_zone_inventory(
+            duplicate, inventory_column="sr_4h_zone_inventory_json"
+        )
+
+    multiple_nearest = [
+        valid[0],
+        {
+            **valid[0],
+            "zone_id": "SUPPORT:2",
+        },
+    ]
+    with pytest.raises(ResearchArtifactError, match="multiple nearest"):
+        _validate_sr_zone_inventory(
+            multiple_nearest, inventory_column="sr_4h_zone_inventory_json"
+        )
+
 
 
 def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_families(tmp_path):
