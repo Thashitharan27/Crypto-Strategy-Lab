@@ -435,6 +435,11 @@ def _sr_zone_inventory_frame(
                     raise ResearchArtifactError(
                         f"S/R zone inventory digest mismatch in {inventory_column}"
                     )
+                serialized_zone_count = payload_text.count('"zone_id":')
+                if zone_count != serialized_zone_count:
+                    raise ResearchArtifactError(
+                        f"S/R zone inventory count/payload mismatch in {inventory_column}"
+                    )
                 if (zone_count == 0) != (payload_text == "[]"):
                     raise ResearchArtifactError(
                         f"S/R zone inventory count/empty payload mismatch in {inventory_column}"
