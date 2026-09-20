@@ -544,6 +544,14 @@ class CsvManifestReporter:
 
     def report(self, result, context):
         started = time.perf_counter()
+        reporting_timings: dict[str, float] = {}
+
+        def finish_phase(name: str, phase_started: float) -> None:
+            reporting_timings[f"reporting_{name}"] = (
+                time.perf_counter() - phase_started
+            )
+
+        setup_started = time.perf_counter()
         if self.run_id is None:
             self.begin(result.request, context.config)
         self.output_root.mkdir(parents=True, exist_ok=True)
@@ -556,24 +564,34 @@ class CsvManifestReporter:
         artifacts_dir.mkdir()
         provenance_dir = run_dir / "provenance"
         provenance_dir.mkdir()
+        finish_phase("setup", setup_started)
 
         # Task 16 owns the one authoritative trade/context Parquets.
+        phase_started = time.perf_counter()
         research = write_research_artifacts(
             run_dir, result, context, authoritative_layout=True
         )
+        finish_phase("research_artifacts", phase_started)
         trades_path = artifacts_dir / "trades.parquet"
         context_path = artifacts_dir / "feature_context.parquet"
         sr_zones_path = artifacts_dir / "sr_zones.parquet"
+        phase_started = time.perf_counter()
         _validate_research_artifacts(trades_path, context_path, research)
+        finish_phase("research_validation", phase_started)
+        phase_started = time.perf_counter()
         _validate_sr_zone_artifact(
             sr_zones_path,
             context_path,
             int(research.get("sr_zone_row_count", -1)),
         )
+        finish_phase("sr_zone_validation", phase_started)
 
+        phase_started = time.perf_counter()
         trade_csv = run_dir / "trade_list.csv"
         result.trades.to_csv(trade_csv, index=False)
+        finish_phase("trade_csv", phase_started)
 
+        phase_started = time.perf_counter()
         signals = getattr(result, "signals", None)
         if signals is None:
             raise ValueError(
@@ -583,14 +601,18 @@ class CsvManifestReporter:
         signals_path = artifacts_dir / "signals.parquet"
         _write_parquet_atomic(signals, signals_path)
         _validate_signal_artifact(signals_path, context_path, len(result.trades))
+        finish_phase("signals", phase_started)
 
+        phase_started = time.perf_counter()
         rule_trace = _strategy_rule_trace_frame(
             getattr(result, "rule_trace", None)
         )
         rule_trace_path = artifacts_dir / "rule_trace.parquet"
         _write_parquet_atomic(rule_trace, rule_trace_path)
         _validate_rule_trace_artifact(rule_trace_path, context_path)
+        finish_phase("rule_trace", phase_started)
 
+        phase_started = time.perf_counter()
         source_rows, source_digest = selected_source_snapshot(
             context.selected_source_records
         )
@@ -617,7 +639,9 @@ class CsvManifestReporter:
             source_frame["mtime_ns"] = pd.Series(dtype="int64")
         source_path = provenance_dir / "source_archives.parquet"
         _write_parquet_atomic(source_frame, source_path)
+        finish_phase("source_provenance", phase_started)
 
+        phase_started = time.perf_counter()
         initial_equity = float(context.config.execution.initial_equity)
         try:
             summary = summarize(result.trades, initial_equity)
@@ -651,7 +675,9 @@ class CsvManifestReporter:
             if result.data_quality
             else {"status": "NOT_AVAILABLE"},
         )
+        finish_phase("summary_outputs", phase_started)
 
+        phase_started = time.perf_counter()
         request = result.request
         report_config = SimpleNamespace(
             run_name=context.config.reporting.run_name or self.run_id,
@@ -667,7 +693,9 @@ class CsvManifestReporter:
             run_dir,
             result.trades,
         )
+        finish_phase("workbook", phase_started)
 
+        phase_started = time.perf_counter()
         with duckdb.connect() as con:
             parquet_count = con.execute(
                 "SELECT count(*) FROM read_parquet(?)", [str(trades_path)]
@@ -683,11 +711,16 @@ class CsvManifestReporter:
             or int(summary.get("total_trades", -1)) != expected_count
         ):
             raise ValueError("trade CSV/Parquet/summary parity validation failed")
+        finish_phase("trade_parity_validation", phase_started)
 
+        phase_started = time.perf_counter()
         effective_intrabar = getattr(
             context.bundle, "intrabar_interval", request.intrabar_interval
         )
         hashes = config_hashes(context.config, effective_intrabar)
+        finish_phase("config_hashes", phase_started)
+
+        phase_started = time.perf_counter()
         artifacts = {
             "trades": _catalog_entry(
                 trades_path, run_dir, "parquet", expected_count
@@ -737,7 +770,9 @@ class CsvManifestReporter:
                 quality_path, run_dir, "json", None
             ),
         }
+        finish_phase("artifact_catalog", phase_started)
 
+        phase_started = time.perf_counter()
         grouped: dict[tuple[str, Any], list[dict[str, Any]]] = {}
         for row in source_rows:
             grouped.setdefault((row["dataset"], row["interval"]), []).append(row)
@@ -751,6 +786,9 @@ class CsvManifestReporter:
             }
             for key, rows in sorted(grouped.items(), key=str)
         ]
+        finish_phase("source_catalog", phase_started)
+
+        phase_started = time.perf_counter()
         manifest = {
             "run_manifest_contract": RUN_MANIFEST_CONTRACT,
             "run_manifest_version": RUN_MANIFEST_VERSION,
@@ -800,12 +838,21 @@ class CsvManifestReporter:
                 ],
                 "stage_timings": {
                     **result.stage_timings,
-                    "reporting": time.perf_counter() - started,
+                    **reporting_timings,
                 },
             },
             "artifacts": artifacts,
             "research": research,
         }
+        finish_phase("manifest_payload", phase_started)
+        reporting_total = time.perf_counter() - started
+        accounted = sum(reporting_timings.values())
+        reporting_timings["reporting_unattributed"] = max(
+            0.0, reporting_total - accounted
+        )
+        reporting_timings["reporting"] = reporting_total
+        manifest["execution_result"]["stage_timings"].update(reporting_timings)
+
         # Completion marker is deliberately the final write and atomic rename.
         atomic_json(run_dir / "run_manifest.json", manifest)
         object.__setattr__(result, "output_dir", run_dir)
