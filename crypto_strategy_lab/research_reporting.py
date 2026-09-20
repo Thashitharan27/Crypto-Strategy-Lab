@@ -265,6 +265,16 @@ def _validate_sr_zone_artifact(
                        OR length(trim(cast(snapshot_sha256 AS VARCHAR))) <> 64
                        OR lower(cast(snapshot_sha256 AS VARCHAR))
                             <> sha256(cast(zone_inventory_json AS VARCHAR))
+                       OR zone_count <> (
+                            length(cast(zone_inventory_json AS VARCHAR))
+                            - length(
+                                replace(
+                                    cast(zone_inventory_json AS VARCHAR),
+                                    '"zone_id":',
+                                    ''
+                                )
+                            )
+                        ) / length('"zone_id":')
                     """,
                     [str(zones_path)],
                 ).fetchone()[0]
