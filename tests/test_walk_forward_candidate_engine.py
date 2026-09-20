@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import duckdb
 import pandas as pd
 import pytest
 
@@ -68,6 +69,13 @@ def _definition() -> dict:
     }
 
 
+def _write_parquet(frame: pd.DataFrame, path: Path) -> None:
+    with duckdb.connect(":memory:") as connection:
+        connection.register("frame", frame)
+        escaped = str(path).replace("'", "''")
+        connection.execute(f"COPY frame TO '{escaped}' (FORMAT PARQUET)")
+
+
 def _catalog(path: Path, run_dir: Path) -> dict:
     return {
         "path": str(path.relative_to(run_dir)).replace("\\", "/"),
@@ -92,15 +100,15 @@ def _write_reference(
 
     samples_path = artifacts / "research_sampling_trades.parquet"
     context_path = artifacts / "feature_context.parquet"
-    samples.to_parquet(samples_path, index=False)
-    context.to_parquet(context_path, index=False)
+    _write_parquet(samples, samples_path)
+    _write_parquet(context, context_path)
     artifact_map = {
         "research_sampling_trades": _catalog(samples_path, run_dir),
         "feature_context": _catalog(context_path, run_dir),
     }
     if teacher_trades is not None:
         trades_path = artifacts / "trades.parquet"
-        teacher_trades.to_parquet(trades_path, index=False)
+        _write_parquet(teacher_trades, trades_path)
         artifact_map["trades"] = _catalog(trades_path, run_dir)
 
     manifest = {
