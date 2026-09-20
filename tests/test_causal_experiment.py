@@ -80,6 +80,43 @@ def test_manual_periodic_review_anchor_policy_is_preserved(tmp_path):
     }
 
 
+
+def test_bootstrap_protocol_starts_in_bootstrap_phase_and_anchors_reviews_at_wf_start(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["research_protocol"] = {
+        "mode": "bootstrap_then_wf",
+        "bootstrap_start": "2020-06-01T00:00:00Z",
+        "walk_forward_start": "2022-06-01T00:00:00Z",
+    }
+
+    created = store.create("BTC_BOOTSTRAP_WF", definition, "create:bootstrap")
+    readback = store.read("BTC_BOOTSTRAP_WF")
+
+    assert created["phase"] == "BOOTSTRAP_RESEARCH"
+    assert readback["derived_state"]["phase"] == "BOOTSTRAP_RESEARCH"
+    assert readback["manifest"]["definition"]["research_protocol"] == {
+        "mode": "BOOTSTRAP_THEN_WF",
+        "bootstrap_start": "2020-06-01T00:00:00+00:00",
+        "walk_forward_start": "2022-06-01T00:00:00+00:00",
+    }
+    assert readback["manifest"]["definition"]["periodic_review_policy"] == {
+        "initial_anchor": "WALK_FORWARD_START"
+    }
+
+
+def test_bootstrap_protocol_rejects_invalid_training_window(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["research_protocol"] = {
+        "mode": "BOOTSTRAP_THEN_WF",
+        "bootstrap_start": "2022-06-01T00:00:00Z",
+        "walk_forward_start": "2022-06-01T00:00:00Z",
+    }
+
+    with pytest.raises(ValueError, match="bootstrap_start must be before"):
+        store.create("BTC_BAD_BOOTSTRAP_WF", definition, "create:bad-bootstrap")
+
 def test_definition_requires_experiment_identity_fields(tmp_path):
     store = CausalExperimentStore(tmp_path / "experiments")
     definition = _definition()
