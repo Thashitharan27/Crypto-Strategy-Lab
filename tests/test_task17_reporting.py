@@ -346,6 +346,19 @@ def test_sr_snapshot_artifact_validates_exact_inventory_payload(tmp_path: Path):
     with pytest.raises(ValueError, match="digest/count"):
         _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
 
+    future = snapshots.copy()
+    future.loc[0, "sr_completed_candle_time"] = (
+        future.loc[0, "decision_available_at"] + pd.Timedelta(minutes=1)
+    )
+    _write_parquet_atomic(future, zones_path)
+    with pytest.raises(ValueError, match="causal/schema"):
+        _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
+
+    duplicated = pd.concat([snapshots, snapshots], ignore_index=True)
+    _write_parquet_atomic(duplicated, zones_path)
+    with pytest.raises(ValueError, match="duplicate candle/timeframe"):
+        _validate_sr_zone_artifact(zones_path, context_path, expected_rows=2)
+
 
 
 def test_sr_snapshot_v2_fallback_still_validates_legacy_inventory(tmp_path: Path):
