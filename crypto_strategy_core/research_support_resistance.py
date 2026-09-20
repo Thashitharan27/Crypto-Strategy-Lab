@@ -55,6 +55,27 @@ class _ResearchSRFastPathMixin:
         self._research_source_first_state = source_first
         self._research_interaction_key_order = key_order
         self._research_next_interaction_order = len(key_order)
+        states_by_source: dict[tuple[str, int], list[tuple[int, dict[str, Any]]]] = {}
+        retired_sources: dict[str, set[int]] = {
+            SRLevelType.SUPPORT.value: set(),
+            SRLevelType.RESISTANCE.value: set(),
+        }
+        broken_states = {
+            SRInteractionState.SUPPORT_BROKEN.value,
+            SRInteractionState.RESISTANCE_BROKEN.value,
+        }
+        for key, state in self._interaction_state.items():
+            order = key_order[key]
+            for source_index in key[1]:
+                states_by_source.setdefault(
+                    (key[0], int(source_index)), []
+                ).append((order, state))
+            if state.get("state") in broken_states:
+                retired_sources.setdefault(key[0], set()).update(
+                    int(source_index) for source_index in key[1]
+                )
+        self._research_states_by_source = states_by_source
+        self._research_retired_sources = retired_sources
         self._research_zone_cache: dict[
             str, tuple[tuple[tuple[int, float | None], ...], list]
         ] = {}
@@ -64,6 +85,11 @@ class _ResearchSRFastPathMixin:
         self._research_source_first_state = {}
         self._research_interaction_key_order = {}
         self._research_next_interaction_order = 0
+        self._research_states_by_source = {}
+        self._research_retired_sources = {
+            SRLevelType.SUPPORT.value: set(),
+            SRLevelType.RESISTANCE.value: set(),
+        }
         self._research_zone_cache = {}
 
     def _seed_interaction_state(self, level) -> None:
@@ -115,8 +141,12 @@ class _ResearchSRFastPathMixin:
         self._research_next_interaction_order += 1
         self._research_interaction_key_order[key] = order
         for source_index in key[1]:
+            source_key = (key[0], int(source_index))
             self._research_source_first_state.setdefault(
-                (key[0], int(source_index)), (order, state)
+                source_key, (order, state)
+            )
+            self._research_states_by_source.setdefault(source_key, []).append(
+                (order, state)
             )
 
     def _update_zone_interaction(
@@ -138,6 +168,21 @@ class _ResearchSRFastPathMixin:
             low,
             close,
             atr,
+        )
+        key = self._zone_key(level)
+        state = self._interaction_state.get(key)
+        if state is not None and state.get("state") in {
+            SRInteractionState.SUPPORT_BROKEN.value,
+            SRInteractionState.RESISTANCE_BROKEN.value,
+        }:
+            self._research_retired_sources.setdefault(key[0], set()).update(
+                int(source_index) for source_index in key[1]
+            )
+
+    def _retired_sources(self, level_type: SRLevelType) -> set[int]:
+        self._ensure_research_fast_state()
+        return set(
+            self._research_retired_sources.get(level_type.value, set())
         )
 
     def _cached_zones(self, side: str, index: int, atr: float):
@@ -177,6 +222,27 @@ class _ResearchSRFastPathMixin:
     def _find_resistance_levels(self, high, low, index: int, atr: float):
         return self._cached_zones("resistance", index, atr)
 
+    def _states_for_current_sources(
+        self,
+        *,
+        support: bool,
+    ) -> dict[int, dict[str, Any]]:
+        """Return interaction states touching current pivots in insertion order."""
+        self._ensure_research_fast_state()
+        kind = (
+            SRLevelType.SUPPORT.value
+            if support
+            else SRLevelType.RESISTANCE.value
+        )
+        current_levels = self._confirmed_lows if support else self._confirmed_highs
+        candidates: dict[int, dict[str, Any]] = {}
+        for level in current_levels:
+            for order, state in self._research_states_by_source.get(
+                (kind, int(level.bar_index)), ()
+            ):
+                candidates.setdefault(int(order), state)
+        return candidates
+
     def _interaction_metrics_for_active_state(
         self,
         index: int,
@@ -184,11 +250,77 @@ class _ResearchSRFastPathMixin:
         wanted_state: str,
         atr: float,
     ) -> dict:
-        # Broken zones are deliberately retired from active-zone caches, so use
-        # the authoritative lifecycle-state lookup for break/retest evidence.
-        return super()._interaction_metrics_for_active_state(
-            index, support, wanted_state, atr
+        # Equivalent to the authoritative full-history scan, but only states
+        # that share a currently active source pivot can possibly match.
+        del atr
+        candidates = [
+            (order, state)
+            for order, state in self._states_for_current_sources(
+                support=support
+            ).items()
+            if state.get("state") == wanted_state
+        ]
+        if not candidates:
+            return self._interaction_metrics(None, index, support)
+        order, state = max(
+            candidates,
+            key=lambda item: (
+                item[1].get("held_index") or -1,
+                item[1].get("last_test_index") or -1,
+                -int(item[0]),
+            ),
         )
+        del order
+        last_test = state.get("last_test_index")
+        held_value = (
+            SRInteractionState.SUPPORT_HELD.value
+            if support
+            else SRInteractionState.RESISTANCE_HELD.value
+        )
+        return {
+            "state": wanted_state,
+            "tested": bool(state.get("test_count", 0)),
+            "held": wanted_state == held_value,
+            "rejection_atr": state.get("rejection_atr", np.nan),
+            "test_count": int(state.get("test_count", 0)),
+            "bars_since_test": index - last_test if last_test is not None else None,
+            "last_test_index": last_test,
+        }
+
+    def _latest_broken_zone(self, support: bool) -> dict:
+        broken_state = (
+            SRInteractionState.SUPPORT_BROKEN.value
+            if support
+            else SRInteractionState.RESISTANCE_BROKEN.value
+        )
+        candidates = []
+        for order, state in self._states_for_current_sources(
+            support=support
+        ).items():
+            if state.get("state") != broken_state:
+                continue
+            broken_index = state.get("broken_index")
+            low = state.get("broken_zone_low")
+            high = state.get("broken_zone_high")
+            if broken_index is None or low is None or high is None:
+                continue
+            candidates.append(
+                (
+                    int(order),
+                    {
+                        "index": int(broken_index),
+                        "low": float(low),
+                        "high": float(high),
+                    },
+                )
+            )
+        if not candidates:
+            return {"index": None, "low": None, "high": None}
+        _order, result = max(
+            candidates,
+            key=lambda item: (item[1]["index"], -int(item[0])),
+        )
+        return result
 
 
 class ResearchSupportResistanceDetector(

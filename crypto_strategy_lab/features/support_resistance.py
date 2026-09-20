@@ -20,13 +20,14 @@ from crypto_strategy_core.support_resistance_evidence import (
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.data.timing import interval_to_timedelta
+from crypto_strategy_lab.progress import emit_progress
 
+from .atr_context import ATR_CONTEXT_FEATURE_NAME
 from .base import FeatureDefinition, OutputField, ParameterDefinition
-from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 SUPPORT_RESISTANCE_FEATURE_NAME = "support_resistance"
-SUPPORT_RESISTANCE_FEATURE_VERSION = "9"
+SUPPORT_RESISTANCE_FEATURE_VERSION = "10"
 
 
 def _optional_float(value):
@@ -49,7 +50,7 @@ class SupportResistanceFeatureProvider:
         name=SUPPORT_RESISTANCE_FEATURE_NAME,
         version=SUPPORT_RESISTANCE_FEATURE_VERSION,
         required_datasets=(DatasetKind.KLINES,),
-        required_features=(CORE_DIRECTIONAL_FEATURE_NAME,),
+        required_features=(ATR_CONTEXT_FEATURE_NAME,),
         parameters={
             "atr_period": ParameterDefinition(int, 14),
             "sr_timeframe_minutes": ParameterDefinition(int, 0),
@@ -105,14 +106,15 @@ class SupportResistanceFeatureProvider:
         datasets: Mapping[DatasetKind, pd.DataFrame],
         parameters: Mapping[str, object],
         feature_frames: Mapping[str, pd.DataFrame] | None = None,
+        progress_callback=None,
     ) -> pd.DataFrame:
         try:
             source = datasets[DatasetKind.KLINES].copy()
         except KeyError as exc:
             raise ValueError("support_resistance requires canonical kline data") from exc
-        if not feature_frames or CORE_DIRECTIONAL_FEATURE_NAME not in feature_frames:
-            raise ValueError("support_resistance requires prepared core_directional features")
-        directional = feature_frames[CORE_DIRECTIONAL_FEATURE_NAME].reset_index(drop=True)
+        if not feature_frames or ATR_CONTEXT_FEATURE_NAME not in feature_frames:
+            raise ValueError("support_resistance requires prepared atr_context features")
+        atr_context = feature_frames[ATR_CONTEXT_FEATURE_NAME].reset_index(drop=True)
 
         required = {"period_start", "available_at", "open", "high", "low", "close"}
         missing = sorted(required - set(source.columns))
@@ -121,10 +123,10 @@ class SupportResistanceFeatureProvider:
         source = source.sort_values("period_start", kind="stable").drop_duplicates(
             "period_start", keep="last"
         ).reset_index(drop=True)
-        if len(source) != len(directional):
+        if len(source) != len(atr_context):
             raise ValueError("S/R dependency rows do not match kline rows")
         source_times = pd.to_datetime(source["period_start"], utc=True).reset_index(drop=True)
-        dependency_times = pd.to_datetime(directional["timestamp"], utc=True).reset_index(drop=True)
+        dependency_times = pd.to_datetime(atr_context["timestamp"], utc=True).reset_index(drop=True)
         if not source_times.equals(dependency_times):
             raise ValueError("S/R dependency timestamps do not match klines")
 
@@ -132,6 +134,11 @@ class SupportResistanceFeatureProvider:
         configured_minutes = int(parameters.get("sr_timeframe_minutes", 0) or 0)
         effective_minutes = configured_minutes or strategy_minutes
         atr_period = int(parameters.get("atr_period", 14))
+        dependency_atr_period = atr_context.attrs.get("atr_period")
+        if dependency_atr_period is not None and int(dependency_atr_period) != atr_period:
+            raise ValueError(
+                "support_resistance atr_period must match prepared atr_context"
+            )
 
         shared_detection = {
             "pivot_left": int(parameters.get("sr_pivot_left", 5)),
@@ -178,10 +185,29 @@ class SupportResistanceFeatureProvider:
         high = pd.to_numeric(source["high"], errors="raise").to_numpy(float)
         low = pd.to_numeric(source["low"], errors="raise").to_numpy(float)
         close = pd.to_numeric(source["close"], errors="raise").to_numpy(float)
-        atr_values = pd.to_numeric(directional["atr"], errors="raise").to_numpy(float)
+        atr_values = pd.to_numeric(atr_context["atr"], errors="raise").to_numpy(float)
         source_available = pd.to_datetime(source["available_at"], utc=True).reset_index(drop=True)
-        dependency_available = pd.to_datetime(directional["available_at"], utc=True).reset_index(drop=True)
+        dependency_available = pd.to_datetime(atr_context["available_at"], utc=True).reset_index(drop=True)
         available = pd.concat([source_available, dependency_available], axis=1).max(axis=1)
+
+        progress_label = {15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(
+            effective_minutes, f"{effective_minutes}m"
+        )
+        progress_interval = max(1000, len(source) // 200) if len(source) else 1
+
+        def row_progress(completed: int, total: int) -> None:
+            emit_progress(
+                progress_callback,
+                kind="work",
+                phase="support_resistance",
+                label=f"Building S/R {progress_label}",
+                completed=int(completed),
+                total=int(total),
+                detail=(
+                    f"Exact causal S/R preparation: {completed:,} of {total:,} rows. "
+                    "No pivots, zones, or evidence are sampled."
+                ),
+            )
 
         rows = support_resistance_evidence_series(
             source_times.tolist(),
@@ -195,6 +221,8 @@ class SupportResistanceFeatureProvider:
             sr_timeframe_minutes=effective_minutes,
             atr_period=atr_period,
             include_zone_inventory=True,
+            progress_callback=row_progress if progress_callback is not None else None,
+            progress_interval=progress_interval,
             **detector_config,
         )
         output = pd.DataFrame(rows)
@@ -257,7 +285,7 @@ class SupportResistanceFeatureProvider:
                     detector_config["hold_confirmation_bars"] + 1,
                 ),
                 "request_cache_key": request.cache_key(),
-                "core_directional_cache_key": directional.attrs.get("feature_cache_key"),
+                "atr_context_cache_key": atr_context.attrs.get("feature_cache_key"),
             }
         )
         return output

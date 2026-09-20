@@ -227,6 +227,8 @@ def support_resistance_evidence_series(
     break_tolerance_atr: float = 0.25,
     break_basis: str = "CLOSE",
     include_zone_inventory: bool = False,
+    progress_callback=None,
+    progress_interval: int = 1000,
 ) -> list[dict[str, object]]:
     """Return CSL-compatible LONG/SHORT S/R context for each strategy candle.
 
@@ -279,6 +281,13 @@ def support_resistance_evidence_series(
         break_basis=str(break_basis).upper(),
     )
     rows: list[dict[str, object]] = []
+    progress_interval = max(1, int(progress_interval))
+
+    def _report_progress(completed: int) -> None:
+        if progress_callback is None:
+            return
+        if completed == size or completed % progress_interval == 0:
+            progress_callback(int(completed), int(size))
 
     if effective_minutes == strategy_minutes:
         detector = ResearchSupportResistanceDetector(**config)
@@ -308,6 +317,7 @@ def support_resistance_evidence_series(
                 row["zone_inventory_count"] = count
                 row["zone_inventory_sha256"] = digest
             rows.append(row)
+            _report_progress(index + 1)
         return rows
 
     strategy_frame = pd.DataFrame(
@@ -398,4 +408,5 @@ def support_resistance_evidence_series(
             row["zone_inventory_count"] = count
             row["zone_inventory_sha256"] = digest
         rows.append(row)
+        _report_progress(index + 1)
     return rows

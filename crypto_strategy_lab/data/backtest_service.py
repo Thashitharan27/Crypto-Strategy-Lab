@@ -29,6 +29,7 @@ from crypto_strategy_lab.features.taker_flow import (
     TakerFlowContextFeatureProvider,
     taker_flow_resource,
 )
+from crypto_strategy_lab.features.atr_context import ATR_CONTEXT_FEATURE_NAME
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
 from .query import DataRequest
 from .store import DataNotAvailableError, MarketDataStore
@@ -310,6 +311,7 @@ def _independent_sr_research_features(
                 {DatasetKind.KLINES: canonical},
                 parameters=parameters,
                 cache=cache,
+                progress_callback=progress,
             )
             frame = computed["support_resistance"]
             elapsed = time.perf_counter() - started
@@ -835,6 +837,9 @@ def load_backtest_bundle(
             raise ValueError("market_regime_method is required without FeatureConfig")
         effective_sr_minutes = int(sr_timeframe_minutes or strategy_minutes)
         feature_parameters = {
+            ATR_CONTEXT_FEATURE_NAME: {
+                "atr_period": int(atr_period),
+            },
             CORE_DIRECTIONAL_FEATURE_NAME: {
                 "atr_period": int(atr_period),
                 "adx_period": int(adx_period),
@@ -1003,6 +1008,7 @@ def load_backtest_bundle(
         {DatasetKind.KLINES: canonical},
         parameters=main_feature_parameters,
         cache=FeatureFrameCache(store.cache.root),
+        progress_callback=progress,
     )
     main_features_elapsed = time.perf_counter() - main_features_started
     directional = frames[CORE_DIRECTIONAL_FEATURE_NAME]

@@ -106,10 +106,13 @@ def test_independent_sr_frames_get_separate_output_namespaces(tmp_path) -> None:
     class Registry:
         def dependency_order(self, requested):
             assert requested == ["support_resistance"]
-            return ("core_directional", "support_resistance")
+            return ("atr_context", "support_resistance")
 
-        def execute(self, requested, request, datasets, *, parameters, cache):
-            del request, datasets, cache
+        def execute(
+            self, requested, request, datasets, *, parameters, cache,
+            progress_callback=None,
+        ):
+            del request, datasets, cache, progress_callback
             assert requested == ["support_resistance"]
             minutes = int(parameters["support_resistance"]["sr_timeframe_minutes"])
             calls.append(minutes)
@@ -126,7 +129,7 @@ def test_independent_sr_frames_get_separate_output_namespaces(tmp_path) -> None:
         SimpleNamespace(),
         pd.DataFrame(),
         {
-            "core_directional": {"atr_period": 14, "adx_period": 14},
+            "atr_context": {"atr_period": 14},
             "support_resistance": {
                 "atr_period": 14,
                 "sr_timeframe_minutes": 15,

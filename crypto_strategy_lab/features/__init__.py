@@ -8,6 +8,11 @@ from .order_book import (ORDER_BOOK_FEATURE_NAME, ORDER_BOOK_FEATURE_VERSION,
 from .base import FeatureDataResource, FeatureDefinition, FeatureProvider, OutputField, ParameterDefinition
 from .taker_flow import (TAKER_FLOW_CONTEXT_FEATURE_NAME, TAKER_FLOW_CONTEXT_FEATURE_VERSION,
                          TakerFlowContextFeatureProvider, taker_flow_resource)
+from .atr_context import (
+    ATR_CONTEXT_FEATURE_NAME,
+    ATR_CONTEXT_FEATURE_VERSION,
+    ATRContextFeatureProvider,
+)
 from .basis import (
     BASIS_CONTEXT_FEATURE_NAME,
     BASIS_CONTEXT_FEATURE_VERSION,
@@ -63,6 +68,9 @@ __all__ = [
     "ParameterDefinition",
     "FeatureRegistry",
     "FeatureFrameCache",
+    "ATR_CONTEXT_FEATURE_NAME",
+    "ATR_CONTEXT_FEATURE_VERSION",
+    "ATRContextFeatureProvider",
     "CORE_DIRECTIONAL_FEATURE_NAME",
     "CORE_DIRECTIONAL_FEATURE_VERSION",
     "CoreDirectionalFeatureProvider",
@@ -105,6 +113,7 @@ def production_feature_registry(*, structural_benchmark=None) -> FeatureRegistry
     """Return the authoritative catalog of native production/research features."""
     registry = FeatureRegistry()
     for provider in (
+        ATRContextFeatureProvider(),
         CoreDirectionalFeatureProvider(),
         MarketContextFeatureProvider(),
         ProductionContextFeatureProvider(),

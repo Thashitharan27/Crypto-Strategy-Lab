@@ -168,6 +168,7 @@ class FeatureConfig:
             "mean_reversion_require_reentry": bool(self.mean_reversion_require_reentry),
         }
         result = {
+            "atr_context": {"atr_period": int(self.atr_period)},
             "core_directional": directional,
             "production_market_context": context,
         }
