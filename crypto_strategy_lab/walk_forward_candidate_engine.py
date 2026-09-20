@@ -374,6 +374,16 @@ def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
                     Path(control.project_root) / "walk_forward_experiments"
                 )
                 readback = store.read(experiment_id, recent_events=0)
+                operation_id = str(kwargs.get("operation_id") or "").strip()
+                replay = None
+                if operation_id:
+                    replay = _impl._existing_operation(
+                        _impl._events(store, experiment_id),
+                        operation_id,
+                    )
+                if replay is not None:
+                    return _ORIGINAL_GET_NEXT_CANDIDATE(*args, **kwargs)
+
                 expected_sequence = kwargs.get("expected_sequence")
                 expected_state_hash = kwargs.get("expected_state_hash")
                 if expected_sequence is not None and int(readback["sequence"]) != int(expected_sequence):
