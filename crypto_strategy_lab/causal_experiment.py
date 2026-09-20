@@ -777,9 +777,16 @@ class CausalExperimentStore:
                     row["closing_equity"] = float(payload["equity_after"])
 
         reference_start = reference.get("period_start")
+        protocol = definition.get("research_protocol") or {}
+        performance_start = (
+            protocol.get("walk_forward_start")
+            if isinstance(protocol, dict)
+            and str(protocol.get("mode", "")).strip().upper() == "BOOTSTRAP_THEN_WF"
+            else reference_start
+        )
         default_start = None
-        if reference_start:
-            default_start = _parse_iso(str(reference_start), "reference period_start")[:7]
+        if performance_start:
+            default_start = _parse_iso(str(performance_start), "performance period_start")[:7]
         default_start = default_start or first_trade_month or (latest_market_time[:7] if latest_market_time else None)
 
         default_end = latest_market_time[:7] if latest_market_time else last_trade_month
@@ -813,7 +820,9 @@ class CausalExperimentStore:
             raise ValueError("start_month cannot be after end_month")
 
         reference_start_time = (
-            _parse_iso(str(reference_start), "reference period_start") if reference_start else None
+            _parse_iso(str(performance_start), "performance period_start")
+            if performance_start
+            else None
         )
         rows: list[dict[str, Any]] = []
         carry_equity = initial_equity
