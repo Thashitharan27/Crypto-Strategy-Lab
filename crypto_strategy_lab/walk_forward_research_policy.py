@@ -208,8 +208,8 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
         updated["methodology_prompt"] = {
             "teacher_loss_rule": (
                 "Do not infer a FLIP from the loss alone. Opposite-side immutable "
-                "evidence must independently verify the alternative. Treat FLIP like "
-                "ENTRY for learning quality: require a positive reusable setup thesis "
+                "evidence must independently verify the alternative. FLIP uses the "
+                "same structural learning standard as ENTRY: require a positive reusable setup thesis "
                 "and entry_family for the opposite executable side. Repetition is not "
                 "a special prerequisite for FLIP."
             ),
