@@ -26,7 +26,7 @@ from .technical import CORE_DIRECTIONAL_FEATURE_NAME
 
 
 SUPPORT_RESISTANCE_FEATURE_NAME = "support_resistance"
-SUPPORT_RESISTANCE_FEATURE_VERSION = "8"
+SUPPORT_RESISTANCE_FEATURE_VERSION = "9"
 
 
 def _optional_float(value):
@@ -87,9 +87,13 @@ class SupportResistanceFeatureProvider:
             ),
             "sr_completed_candle_time",
             "zone_inventory_json",
+            "zone_inventory_count",
+            "zone_inventory_sha256",
         ),
         output_schema={
             "zone_inventory_json": OutputField("string", nullable=False),
+            "zone_inventory_count": OutputField("numeric", nullable=False),
+            "zone_inventory_sha256": OutputField("string", nullable=False),
         },
         warmup_bars=10,
         availability_rule="confirmed_pivots_through_latest_completed_configured_sr_candle",

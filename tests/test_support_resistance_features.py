@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import fields, replace
+import hashlib
 import json
 
 import numpy as np
@@ -187,6 +188,16 @@ def test_prepared_sr_exports_full_active_zone_inventory_json() -> None:
     _, sr, _ = prepared(frame)
 
     assert "zone_inventory_json" in sr.columns
+    assert "zone_inventory_count" in sr.columns
+    assert "zone_inventory_sha256" in sr.columns
+    for _, row in sr.iterrows():
+        payload = str(row["zone_inventory_json"])
+        zones = json.loads(payload)
+        assert int(row["zone_inventory_count"]) == len(zones)
+        assert row["zone_inventory_sha256"] == hashlib.sha256(
+            payload.encode("utf-8")
+        ).hexdigest()
+
     populated = [
         (index, json.loads(value))
         for index, value in enumerate(sr["zone_inventory_json"])
@@ -318,7 +329,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 
     assert isinstance(engine, SRDynamicTPBacktestEngine)
     assert isinstance(engine.sr_detector, PreparedSupportResistanceContextReader)
-    assert engine.support_resistance_feature_source == "support_resistance@8"
+    assert engine.support_resistance_feature_source == "support_resistance@9"
     assert engine.sr_uses_higher_timeframe is False
 
     index = 75
