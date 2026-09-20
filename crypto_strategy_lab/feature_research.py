@@ -388,30 +388,76 @@ def _sr_zone_inventory_frame(
         inventory_column = f"sr_{label}_zone_inventory_json"
         if inventory_column not in feature_context.columns:
             continue
+        count_column = f"sr_{label}_zone_inventory_count"
+        sha_column = f"sr_{label}_zone_inventory_sha256"
+        has_cached_metadata = (
+            count_column in feature_context.columns
+            and sha_column in feature_context.columns
+        )
         consumed.append(inventory_column)
+        if has_cached_metadata:
+            consumed.extend((count_column, sha_column))
         completed_column = f"sr_{label}_completed_candle_time"
         for row in feature_context.itertuples(index=False):
             payload = getattr(row, inventory_column, None)
             if payload is None or pd.isna(payload):
                 continue
             payload_text = str(payload).strip()
-            if not payload_text or payload_text == "[]":
+            if not payload_text:
                 continue
-            try:
-                zones = json.loads(payload_text)
-            except json.JSONDecodeError as exc:
-                raise ResearchArtifactError(
-                    f"invalid S/R zone inventory JSON in {inventory_column}"
-                ) from exc
-            if not isinstance(zones, list):
-                raise ResearchArtifactError(
-                    f"S/R zone inventory must be a list: {inventory_column}"
+
+            if has_cached_metadata:
+                raw_count = getattr(row, count_column, None)
+                raw_digest = getattr(row, sha_column, None)
+                if raw_count is None or pd.isna(raw_count):
+                    raise ResearchArtifactError(
+                        f"missing S/R zone inventory count in {count_column}"
+                    )
+                if raw_digest is None or pd.isna(raw_digest):
+                    raise ResearchArtifactError(
+                        f"missing S/R zone inventory digest in {sha_column}"
+                    )
+                try:
+                    zone_count = int(raw_count)
+                except (TypeError, ValueError) as exc:
+                    raise ResearchArtifactError(
+                        f"invalid S/R zone inventory count in {count_column}"
+                    ) from exc
+                if zone_count < 0:
+                    raise ResearchArtifactError(
+                        f"negative S/R zone inventory count in {count_column}"
+                    )
+                digest = str(raw_digest).strip().lower()
+                expected_digest = hashlib.sha256(
+                    payload_text.encode("utf-8")
+                ).hexdigest()
+                if digest != expected_digest:
+                    raise ResearchArtifactError(
+                        f"S/R zone inventory digest mismatch in {inventory_column}"
+                    )
+                if (zone_count == 0) != (payload_text == "[]"):
+                    raise ResearchArtifactError(
+                        f"S/R zone inventory count/empty payload mismatch in {inventory_column}"
+                    )
+            else:
+                # Backward-compatible path for v8 and older cached S/R features.
+                try:
+                    zones = json.loads(payload_text)
+                except json.JSONDecodeError as exc:
+                    raise ResearchArtifactError(
+                        f"invalid S/R zone inventory JSON in {inventory_column}"
+                    ) from exc
+                if not isinstance(zones, list):
+                    raise ResearchArtifactError(
+                        f"S/R zone inventory must be a list: {inventory_column}"
+                    )
+                _validate_sr_zone_inventory(
+                    zones,
+                    inventory_column=inventory_column,
                 )
-            _validate_sr_zone_inventory(
-                zones,
-                inventory_column=inventory_column,
-            )
-            zone_count = len(zones)
+                zone_count = len(zones)
+                digest = hashlib.sha256(payload_text.encode("utf-8")).hexdigest()
+
             if zone_count == 0:
                 continue
             expanded_zone_rows += zone_count
@@ -431,9 +477,7 @@ def _sr_zone_inventory_frame(
                     ),
                     "zone_count": zone_count,
                     "zone_inventory_json": payload_text,
-                    "snapshot_sha256": hashlib.sha256(
-                        payload_text.encode("utf-8")
-                    ).hexdigest(),
+                    "snapshot_sha256": digest,
                 }
             )
 
