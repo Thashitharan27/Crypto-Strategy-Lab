@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import hashlib
 import json
 from typing import Any
 
@@ -156,8 +157,48 @@ def _zone_inventory(
     return result
 
 
-def _inventory_json(rows: list[dict[str, object]]) -> str:
-    return json.dumps(rows, separators=(",", ":"), sort_keys=True)
+def _validated_inventory_payload(
+    rows: list[dict[str, object]],
+) -> tuple[str, int, str]:
+    """Validate one structured inventory, then serialize it exactly once.
+
+    The count and digest travel with the cached S/R feature so downstream
+    reporting can prove payload integrity without reparsing every logical zone.
+    """
+    seen: set[str] = set()
+    nearest = {"SUPPORT": 0, "RESISTANCE": 0}
+    for zone in rows:
+        zone_id = str(zone.get("zone_id") or "").strip()
+        structure = str(zone.get("structure") or "").upper()
+        if not zone_id or zone_id in seen:
+            raise ValueError("S/R inventory contains empty or duplicate zone identity")
+        seen.add(zone_id)
+        if structure not in nearest:
+            raise ValueError("S/R inventory contains invalid structure")
+        low = zone.get("zone_low")
+        high = zone.get("zone_high")
+        try:
+            inverted = low is None or high is None or float(low) > float(high)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("S/R inventory contains invalid zone geometry") from exc
+        if inverted:
+            raise ValueError("S/R inventory contains inverted zone geometry")
+        try:
+            source_count = int(zone.get("source_count", 0) or 0)
+            test_count = int(zone.get("test_count", 0) or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("S/R inventory contains invalid counters") from exc
+        if source_count < 1:
+            raise ValueError("S/R inventory contains invalid source_count")
+        if test_count < 0:
+            raise ValueError("S/R inventory contains invalid test_count")
+        if bool(zone.get("nearest")):
+            nearest[structure] += 1
+    if any(count > 1 for count in nearest.values()):
+        raise ValueError("S/R inventory contains multiple nearest zones for one side")
+
+    payload = json.dumps(rows, separators=(",", ":"), sort_keys=True)
+    return payload, len(rows), hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def support_resistance_evidence_series(
@@ -254,16 +295,18 @@ def support_resistance_evidence_series(
             row.update(_flatten("long", long_context))
             row.update(_flatten("short", short_context))
             if include_zone_inventory:
-                row["zone_inventory_json"] = _inventory_json(
-                    _zone_inventory(
-                        detector,
-                        index=index,
-                        high=high,
-                        low=low,
-                        current_price=float(close[index]),
-                        current_atr=float(atr_source[index]),
-                    )
+                inventory = _zone_inventory(
+                    detector,
+                    index=index,
+                    high=high,
+                    low=low,
+                    current_price=float(close[index]),
+                    current_atr=float(atr_source[index]),
                 )
+                payload, count, digest = _validated_inventory_payload(inventory)
+                row["zone_inventory_json"] = payload
+                row["zone_inventory_count"] = count
+                row["zone_inventory_sha256"] = digest
             rows.append(row)
         return rows
 
@@ -350,6 +393,9 @@ def support_resistance_evidence_series(
                     )
             else:
                 inventory = []
-            row["zone_inventory_json"] = _inventory_json(inventory)
+            payload, count, digest = _validated_inventory_payload(inventory)
+            row["zone_inventory_json"] = payload
+            row["zone_inventory_count"] = count
+            row["zone_inventory_sha256"] = digest
         rows.append(row)
     return rows
