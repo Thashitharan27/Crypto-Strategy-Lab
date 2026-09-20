@@ -188,6 +188,7 @@ class FeatureRegistry:
         parameters=None,
         cache=None,
         source_identities: Mapping[object, str] | None = None,
+        progress_callback=None,
     ) -> dict[str, pd.DataFrame]:
         frames, identities = {}, {}
         source_ids = source_identities or {
@@ -215,12 +216,18 @@ class FeatureRegistry:
                 dependencies = {
                     name: frames[name] for name in definition.required_features
                 }
-                if "feature_frames" in inspect.signature(provider.compute).parameters:
-                    frame = provider.compute(
-                        request, datasets, resolved.parameters, dependencies
-                    )
-                else:
-                    frame = provider.compute(request, datasets, resolved.parameters)
+                compute_parameters = inspect.signature(provider.compute).parameters
+                compute_kwargs = {}
+                if "feature_frames" in compute_parameters:
+                    compute_kwargs["feature_frames"] = dependencies
+                if "progress_callback" in compute_parameters:
+                    compute_kwargs["progress_callback"] = progress_callback
+                frame = provider.compute(
+                    request,
+                    datasets,
+                    resolved.parameters,
+                    **compute_kwargs,
+                )
                 definition.validate_output(frame, resolved.parameters)
                 validate_feature_timeline(definition, frame, resolved.parameters)
                 frame.attrs.update(
