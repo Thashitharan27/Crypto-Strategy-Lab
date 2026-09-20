@@ -686,18 +686,21 @@ def _initial_periodic_review_anchor(
     if not isinstance(policy, dict):
         return None
     anchor_mode = str(policy.get("initial_anchor", "")).strip().upper()
-    if anchor_mode != "REFERENCE_PERIOD_START":
+    if anchor_mode == "WALK_FORWARD_START":
+        protocol = definition.get("research_protocol") or {}
+        raw = protocol.get("walk_forward_start") if isinstance(protocol, dict) else None
+    elif anchor_mode == "REFERENCE_PERIOD_START":
+        provenance = definition.get("reference_provenance") or {}
+        raw = provenance.get("period_start") if isinstance(provenance, dict) else None
+        if not raw:
+            reference_run = str(definition.get("reference_run", "")).strip()
+            if not reference_run:
+                return None
+            manifest = reports.get_run_manifest(reference_run)
+            request = manifest.get("request") or {}
+            raw = request.get("start")
+    else:
         return None
-
-    provenance = definition.get("reference_provenance") or {}
-    raw = provenance.get("period_start") if isinstance(provenance, dict) else None
-    if not raw:
-        reference_run = str(definition.get("reference_run", "")).strip()
-        if not reference_run:
-            return None
-        manifest = reports.get_run_manifest(reference_run)
-        request = manifest.get("request") or {}
-        raw = request.get("start")
     if not raw:
         return None
     return _utc_timestamp(raw, "initial periodic review anchor")
@@ -936,6 +939,11 @@ def advance_walk_forward(
             initial_anchor=initial_review_anchor,
         )
         if periodic is not None:
+            if periodic.get("previous_review_sequence") is None:
+                policy = definition.get("periodic_review_policy") or {}
+                periodic["review_anchor_source"] = str(
+                    policy.get("initial_anchor", periodic.get("review_anchor_source"))
+                ).strip().upper()
             periodic.update(
                 contract=ORCHESTRATOR_CONTRACT,
                 experiment_id=experiment_id,
