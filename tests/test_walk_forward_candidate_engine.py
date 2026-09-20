@@ -12,6 +12,7 @@ from crypto_strategy_lab.run_manifest import file_sha256
 from crypto_strategy_lab.walk_forward_candidate_engine import (
     _ema_stack,
     _price_vs_ema,
+    _rule_scan_columns,
     _safe_context,
     get_next_walk_forward_candidate,
 )
@@ -222,6 +223,7 @@ def _context() -> pd.DataFrame:
                 "session_vwap": 98.0,
                 "close_location": 0.7,
                 "mean_reversion_state": "NEAR_MEAN",
+                "unused_hydration_probe": "context-1",
             },
             {
                 "strategy_index": 10,
@@ -236,6 +238,7 @@ def _context() -> pd.DataFrame:
                 "session_vwap": 99.0,
                 "close_location": 0.7,
                 "mean_reversion_state": "NEAR_MEAN",
+                "unused_hydration_probe": "context-2",
             },
             {
                 "strategy_index": 11,
@@ -250,6 +253,7 @@ def _context() -> pd.DataFrame:
                 "session_vwap": 108.0,
                 "close_location": 0.8,
                 "mean_reversion_state": "ABOVE_MEAN",
+                "unused_hydration_probe": "context-3",
             },
             {
                 "strategy_index": 12,
@@ -264,11 +268,46 @@ def _context() -> pd.DataFrame:
                 "session_vwap": 118.0,
                 "close_location": 0.85,
                 "mean_reversion_state": "ABOVE_MEAN",
+                "unused_hydration_probe": "context-4",
             },
         ]
     )
 
 
+
+
+def test_rule_scan_projection_tracks_only_active_rule_dependencies():
+    config = _config()
+    groups = {
+        "bull_long": {
+            "ENTRY": [
+                {
+                    "id": "ENTRY_001",
+                    "enabled": True,
+                    "conditions": [
+                        {"indicator": "ADX", "condition": "GTE", "value": 20},
+                        {"indicator": "RSI", "condition": "LTE", "value": 70},
+                    ],
+                }
+            ],
+            "VETO": [],
+            "FLIP": [],
+        }
+    }
+
+    projected = _rule_scan_columns(groups, config)
+
+    assert "adx" in projected
+    assert "rsi" in projected
+    assert "decision_available_at" in projected
+    assert "research_signal_index" in projected
+    assert "unused_hydration_probe" not in projected
+    assert "__wf_prev_adx" not in projected
+
+    groups["bull_long"]["ENTRY"][0]["conditions"].append(
+        {"indicator": "ADX_CHANGE", "condition": "GTE", "value": 0}
+    )
+    assert "__wf_prev_adx" in _rule_scan_columns(groups, config)
 
 def test_walk_forward_context_replaces_raw_sr_with_trade_relative_v2_units():
     config = _config()
@@ -391,6 +430,9 @@ def test_scanner_applies_entry_veto_flip_and_never_returns_outcome(tmp_path):
     assert candidate["rule_effective_side"] == "SHORT"
     assert candidate["matched_entry_groups"] == ["ENTRY_001"]
     assert candidate["matched_flip_groups"] == ["FLIP_001"]
+    assert candidate["context"]["feature_context"]["unused_hydration_probe"] == "context-4"
+    assert result["scan"]["full_context_hydration"] == "MATCH_ONLY"
+    assert result["scan"]["scan_projection_columns"] < len(_context().columns)
     assert result["outcome_exposed"] is False
     flat = str(candidate).lower()
     assert "pair_net_r" not in flat
