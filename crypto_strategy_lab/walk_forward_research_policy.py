@@ -125,13 +125,35 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
         "TEACHER_LOSS_REVIEW_REQUIRED",
         "LOSS_REVIEW_REQUIRED",
         "PERIODIC_REVIEW_REQUIRED",
+        "BOOTSTRAP_RESEARCH_REQUIRED",
     }:
         return packet
 
     updated = deepcopy(packet)
     updated["research_policy"] = research_policy_schema()
 
-    if status == "LOSS_REVIEW_REQUIRED":
+    if status == "BOOTSTRAP_RESEARCH_REQUIRED":
+        updated["methodology_prompt"] = {
+            "primary_goal": "FREEZE_STABLE_REUSABLE_BASE_RULES",
+            "bootstrap_is_in_sample": True,
+            "bootstrap_equity_counts_as_wf": False,
+            "prefer": [
+                "coherent trading thesis",
+                "adequate sample size",
+                "multiple regimes where available",
+                "stable threshold neighborhoods",
+                "simple reusable ENTRY/VETO families",
+            ],
+            "avoid": [
+                "maximizing bootstrap win rate",
+                "single-trade rules",
+                "isolated optimum thresholds",
+                "forcing unsupported profile coverage",
+            ],
+            "completion": "record one BOOTSTRAP review with at least one ENTRY_LEARNED base rule",
+        }
+
+    elif status == "LOSS_REVIEW_REQUIRED":
         group_stats = (
             ((updated.get("causal_history") or {}).get("entry_group_stats") or {})
             if isinstance(updated.get("causal_history"), dict)
