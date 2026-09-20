@@ -247,7 +247,7 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert manifest["feature_context_row_count"] == 5
     assert manifest["sr_zone_row_count"] == 5
     assert manifest["sr_zone_expanded_row_count"] == 10
-    assert manifest["sr_zone_storage_contract"] == "SNAPSHOT_JSON_V2"
+    assert manifest["sr_zone_storage_contract"] == "SNAPSHOT_JSON_V3"
     assert manifest["artifact_sizes_bytes"]["trades"] > 0
     assert manifest["artifact_sizes_bytes"]["feature_context"] > 0
     assert manifest["artifact_sizes_bytes"]["sr_zones"] > 0
@@ -277,7 +277,12 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert set(zones["sr_timeframe"]) == {"4h"}
     assert zones["zone_count"].eq(2).all()
     assert "zone_inventory_json" in zones.columns
-    for payload in zones["zone_inventory_json"]:
+    assert "snapshot_sha256" in zones.columns
+    for _, snapshot in zones.iterrows():
+        payload = snapshot["zone_inventory_json"]
+        assert snapshot["snapshot_sha256"] == hashlib.sha256(
+            payload.encode("utf-8")
+        ).hexdigest()
         inventory = json.loads(payload)
         assert len(inventory) == 2
         assert {zone["structure"] for zone in inventory} == {"SUPPORT"}
