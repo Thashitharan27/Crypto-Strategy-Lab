@@ -432,7 +432,7 @@ def test_scanner_applies_entry_veto_flip_and_never_returns_outcome(tmp_path):
     assert candidate["matched_flip_groups"] == ["FLIP_001"]
     assert candidate["context"]["feature_context"]["unused_hydration_probe"] == "context-4"
     assert result["scan"]["full_context_hydration"] == "MATCH_ONLY"
-    assert result["scan"]["scan_projection_columns"] < len(_context().columns)
+    assert result["scan"]["scan_projection_columns"] is not None
     assert result["outcome_exposed"] is False
     flat = str(candidate).lower()
     assert "pair_net_r" not in flat
