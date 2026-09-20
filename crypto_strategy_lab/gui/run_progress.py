@@ -91,6 +91,20 @@ class RunProgressRelay(QObject):
             detail.setText("  •  ".join(parts))
             return
 
+        if kind == "work":
+            completed = max(0, int(payload.get("completed", 0) or 0))
+            total = max(0, int(payload.get("total", 0) or 0))
+            stage.setText(str(payload.get("label") or "Research work"))
+            if total:
+                progress.setRange(0, total)
+                progress.setValue(min(completed, total))
+                progress.setFormat("%v / %m rows")
+            else:
+                progress.setRange(0, 0)
+                progress.setFormat("")
+            detail.setText(str(payload.get("detail") or ""))
+            return
+
         if kind == "complete":
             progress.setRange(0, 100)
             progress.setValue(100)
