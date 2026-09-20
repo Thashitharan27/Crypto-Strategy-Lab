@@ -23,8 +23,6 @@ from crypto_strategy_lab.walk_forward_rule_validation import (
     rule_event_schema,
     _verified_prefix,
 )
-from crypto_strategy_lab.walk_forward_candidate_engine import _teacher_loss_flip_enabled
-from crypto_strategy_lab.walk_forward_teacher_learning import next_teacher_for_learning
 from crypto_strategy_lab.walk_forward_research_policy import (
     decorate_review_packet,
     validate_loss_methodology,
@@ -305,12 +303,15 @@ def record_walk_forward_teacher_review(
         if str(protocol.get("mode", "")).upper() == "BOOTSTRAP_THEN_WF"
         else None
     )
-    teacher = next_teacher_for_learning(
-        manifest,
-        run_dir,
-        events,
-        include_losses=_teacher_loss_flip_enabled(),
-        minimum_entry_time=minimum_entry_time,
+    teacher = (
+        _impl._next_teacher(
+            manifest,
+            run_dir,
+            events,
+            minimum_entry_time=minimum_entry_time,
+        )
+        if minimum_entry_time is not None
+        else _impl._next_teacher(manifest, run_dir, events)
     )
     if teacher is None:
         raise ValueError("there is no unresolved teacher trade")
