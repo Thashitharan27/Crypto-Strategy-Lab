@@ -4,9 +4,15 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from crypto_strategy_core.candles import atr
+from crypto_strategy_core.higher_timeframe_sr import HigherTimeframeSRDetector
+from crypto_strategy_core.research_support_resistance import (
+    ResearchHigherTimeframeSRDetector,
+)
 from crypto_strategy_core.support_resistance_evidence import (
+    _zone_inventory,
     support_resistance_evidence_series,
 )
 
@@ -191,3 +197,65 @@ def test_shared_sr_zone_inventory_is_causal_and_contains_all_active_zones() -> N
         row["zone_inventory_json"] for row in mutated[: cutoff + 1]
     ]
 
+
+
+def _assert_sr_context_equal(left, right) -> None:
+    for name in left.__dataclass_fields__:
+        a = getattr(left, name)
+        b = getattr(right, name)
+        if isinstance(a, float) and np.isnan(a):
+            assert isinstance(b, float) and np.isnan(b), name
+        elif isinstance(b, float) and np.isnan(b):
+            assert isinstance(a, float) and np.isnan(a), name
+        elif isinstance(a, float) or isinstance(b, float):
+            assert float(a) == pytest.approx(float(b)), name
+        else:
+            assert a == b, name
+
+
+def test_research_htf_detector_reuses_structural_snapshot_without_changing_context() -> None:
+    _, _, open_, high, low, close, atr_values = _series(120)
+    config = dict(
+        pivot_left=2,
+        pivot_right=2,
+        lookback_bars=80,
+        min_rejection_atr=0.0,
+    )
+    baseline = HigherTimeframeSRDetector(**config)
+    optimized = ResearchHigherTimeframeSRDetector(**config)
+    index = 90
+
+    for direction, price in (
+        ("LONG", float(close[index])),
+        ("SHORT", float(close[index] + 0.75)),
+        ("LONG", float(close[index] - 0.50)),
+    ):
+        expected = baseline.analyze_external_price(
+            index, open_, high, low, close, atr_values, direction, price
+        )
+        actual = optimized.analyze_external_price(
+            index, open_, high, low, close, atr_values, direction, price
+        )
+        _assert_sr_context_equal(actual, expected)
+
+    assert optimized._research_external_snapshot_builds == 1
+    assert optimized._research_external_snapshot_reuses == 2
+
+    current_price = float(close[index] + 0.25)
+    current_atr = float(atr_values[index])
+    fast_inventory = optimized.research_zone_inventory(
+        index=index,
+        high=high,
+        low=low,
+        current_price=current_price,
+        current_atr=current_atr,
+    )
+    reference_inventory = _zone_inventory(
+        optimized,
+        index=index,
+        high=high,
+        low=low,
+        current_price=current_price,
+        current_atr=current_atr,
+    )
+    assert fast_inventory == reference_inventory
