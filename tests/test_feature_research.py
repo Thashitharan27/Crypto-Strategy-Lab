@@ -15,6 +15,7 @@ from crypto_strategy_lab.feature_research import (
     FEATURE_RESEARCH_ARTIFACT_CONTRACT,
     ResearchArtifactError,
     ResearchQueryService,
+    _sr_zone_inventory_frame,
     _validate_sr_zone_inventory,
     write_research_artifacts,
 )
@@ -234,6 +235,58 @@ def _rehash(run: Path, key: str, path: Path) -> None:
     manifest["artifact_sha256"][key] = digest
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
+
+
+def test_sr_snapshot_fast_path_uses_cached_inventory_metadata(monkeypatch):
+    payload = json.dumps(
+        [
+            {
+                "zone_id": "SUPPORT:1",
+                "structure": "SUPPORT",
+                "zone_low": 95.0,
+                "zone_high": 96.0,
+                "source_count": 1,
+                "test_count": 0,
+                "nearest": True,
+            }
+        ],
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    feature_context = pd.DataFrame(
+        {
+            "strategy_index": [0],
+            "strategy_candle_open_time": [pd.Timestamp("2026-01-01")],
+            "decision_available_at": [pd.Timestamp("2026-01-01 00:15:00")],
+            "sr_strategy_completed_candle_time": [
+                pd.Timestamp("2026-01-01 00:15:00")
+            ],
+            "sr_strategy_zone_inventory_json": [payload],
+            "sr_strategy_zone_inventory_count": [1],
+            "sr_strategy_zone_inventory_sha256": [digest],
+        }
+    )
+
+    monkeypatch.setattr(
+        "crypto_strategy_lab.feature_research.json.loads",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("fast path must not parse inventory JSON")
+        ),
+    )
+    zones, consumed = _sr_zone_inventory_frame(
+        feature_context,
+        strategy_interval="15m",
+    )
+
+    assert len(zones) == 1
+    assert int(zones.loc[0, "zone_count"]) == 1
+    assert zones.loc[0, "snapshot_sha256"] == digest
+    assert {
+        "sr_strategy_zone_inventory_json",
+        "sr_strategy_zone_inventory_count",
+        "sr_strategy_zone_inventory_sha256",
+    } <= set(consumed)
 
 
 def test_sr_snapshot_semantics_are_validated_before_persistence():
