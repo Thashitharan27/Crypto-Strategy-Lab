@@ -159,6 +159,25 @@ def assert_context_equal(left: SRContext, right: SRContext) -> None:
             assert a == b, field.name
 
 
+def test_atr_context_matches_core_directional_atr_exactly() -> None:
+    frame = canonical_klines(180)
+    cfg = config()
+    req = request_for(frame)
+    directional = directional_for(frame, cfg)
+    atr_context = ATRContextFeatureProvider().compute(
+        req,
+        {DatasetKind.KLINES: frame},
+        {"atr_period": cfg.atr_period},
+    )
+    np.testing.assert_allclose(
+        atr_context["atr"].to_numpy(float),
+        directional["atr"].to_numpy(float),
+        rtol=0.0,
+        atol=0.0,
+        equal_nan=True,
+    )
+
+
 def test_feature_config_publishes_rejection_zone_geometry_parameters() -> None:
     features = FeatureConfig(
         enable_support_resistance_analysis=True,
