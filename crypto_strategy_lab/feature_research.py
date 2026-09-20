@@ -67,7 +67,7 @@ SR_ZONE_ARTIFACT_COLUMNS = (
 )
 
 # Lossless compact storage for completed-run S/R zone inventories.
-SR_ZONE_SNAPSHOT_STORAGE_CONTRACT = "SNAPSHOT_JSON_V2"
+SR_ZONE_SNAPSHOT_STORAGE_CONTRACT = "SNAPSHOT_JSON_V3"
 SR_ZONE_SNAPSHOT_COLUMNS = (
     "strategy_index",
     "strategy_candle_open_time",
@@ -77,6 +77,7 @@ SR_ZONE_SNAPSHOT_COLUMNS = (
     "sr_completed_candle_time",
     "zone_count",
     "zone_inventory_json",
+    "snapshot_sha256",
 )
 
 DEFAULT_METRICS = (
@@ -279,6 +280,7 @@ def _empty_sr_zone_frame() -> pd.DataFrame:
     result["zone_count"] = pd.Series(dtype="int64")
     result["sr_timeframe"] = pd.Series(dtype="string")
     result["zone_inventory_json"] = pd.Series(dtype="string")
+    result["snapshot_sha256"] = pd.Series(dtype="string")
     for name in (
         "strategy_candle_open_time",
         "decision_available_at",
@@ -289,6 +291,70 @@ def _empty_sr_zone_frame() -> pd.DataFrame:
     result.attrs["expanded_zone_rows"] = 0
     result.attrs["storage_contract"] = SR_ZONE_SNAPSHOT_STORAGE_CONTRACT
     return result
+
+
+def _validate_sr_zone_inventory(
+    zones: list[Any],
+    *,
+    inventory_column: str,
+) -> None:
+    """Validate every logical zone once, before persistence.
+
+    Compact snapshots are parsed while they are already in memory. Performing
+    the full semantic validation here avoids reparsing the same JSON after the
+    parquet write while preserving the same all-zone quality guarantees.
+    """
+    seen: set[str] = set()
+    nearest = {"SUPPORT": 0, "RESISTANCE": 0}
+    for zone in zones:
+        if not isinstance(zone, dict):
+            raise ResearchArtifactError(
+                f"S/R zone inventory row must be an object: {inventory_column}"
+            )
+        zone_id = str(zone.get("zone_id") or "").strip()
+        structure = str(zone.get("structure") or "").upper()
+        if not zone_id or zone_id in seen:
+            raise ResearchArtifactError(
+                f"S/R snapshot contains empty or duplicate zone identity: {inventory_column}"
+            )
+        seen.add(zone_id)
+        if structure not in nearest:
+            raise ResearchArtifactError(
+                f"S/R snapshot contains invalid structure: {inventory_column}"
+            )
+        low = zone.get("zone_low")
+        high = zone.get("zone_high")
+        try:
+            inverted = low is None or high is None or float(low) > float(high)
+        except (TypeError, ValueError) as exc:
+            raise ResearchArtifactError(
+                f"S/R snapshot contains invalid zone geometry: {inventory_column}"
+            ) from exc
+        if inverted:
+            raise ResearchArtifactError(
+                f"S/R snapshot contains inverted zone geometry: {inventory_column}"
+            )
+        try:
+            source_count = int(zone.get("source_count", 0) or 0)
+            test_count = int(zone.get("test_count", 0) or 0)
+        except (TypeError, ValueError) as exc:
+            raise ResearchArtifactError(
+                f"S/R snapshot contains invalid counters: {inventory_column}"
+            ) from exc
+        if source_count < 1:
+            raise ResearchArtifactError(
+                f"S/R snapshot contains invalid source_count: {inventory_column}"
+            )
+        if test_count < 0:
+            raise ResearchArtifactError(
+                f"S/R snapshot contains invalid test_count: {inventory_column}"
+            )
+        if bool(zone.get("nearest")):
+            nearest[structure] += 1
+    if any(count > 1 for count in nearest.values()):
+        raise ResearchArtifactError(
+            f"S/R snapshot contains multiple nearest zones for one side: {inventory_column}"
+        )
 
 
 def _sr_zone_inventory_frame(
@@ -341,11 +407,10 @@ def _sr_zone_inventory_frame(
                 raise ResearchArtifactError(
                     f"S/R zone inventory must be a list: {inventory_column}"
                 )
-            for zone in zones:
-                if not isinstance(zone, dict):
-                    raise ResearchArtifactError(
-                        f"S/R zone inventory row must be an object: {inventory_column}"
-                    )
+            _validate_sr_zone_inventory(
+                zones,
+                inventory_column=inventory_column,
+            )
             zone_count = len(zones)
             if zone_count == 0:
                 continue
@@ -366,6 +431,9 @@ def _sr_zone_inventory_frame(
                     ),
                     "zone_count": zone_count,
                     "zone_inventory_json": payload_text,
+                    "snapshot_sha256": hashlib.sha256(
+                        payload_text.encode("utf-8")
+                    ).hexdigest(),
                 }
             )
 
@@ -391,6 +459,7 @@ def _sr_zone_inventory_frame(
     ).astype("int64")
     frame["sr_timeframe"] = frame["sr_timeframe"].astype("string")
     frame["zone_inventory_json"] = frame["zone_inventory_json"].astype("string")
+    frame["snapshot_sha256"] = frame["snapshot_sha256"].astype("string")
     frame = frame.loc[:, SR_ZONE_SNAPSHOT_COLUMNS].copy()
     frame.attrs["expanded_zone_rows"] = int(expanded_zone_rows)
     frame.attrs["storage_contract"] = SR_ZONE_SNAPSHOT_STORAGE_CONTRACT
