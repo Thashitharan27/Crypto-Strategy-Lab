@@ -678,10 +678,21 @@ class CompletedRunVisualizer:
         escaped = str(self.sr_zones_path).replace("'", "''")
         with duckdb.connect(":memory:") as connection:
             connection.execute("SET TimeZone='UTC'")
+            columns = {
+                row[0]
+                for row in connection.execute(
+                    f"DESCRIBE SELECT * FROM read_parquet('{escaped}')"
+                ).fetchall()
+            }
+            order_by = (
+                "sr_timeframe_minutes"
+                if "zone_inventory_json" in columns
+                else "sr_timeframe_minutes, structure, zone_low, zone_id"
+            )
             frame = connection.execute(
                 f"SELECT * FROM read_parquet('{escaped}') "
                 "WHERE CAST(strategy_candle_open_time AS TIMESTAMPTZ)=? "
-                "ORDER BY sr_timeframe_minutes",
+                f"ORDER BY {order_by}",
                 [target.to_pydatetime()],
             ).df()
         if frame.empty:
