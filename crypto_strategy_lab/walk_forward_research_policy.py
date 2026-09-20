@@ -58,6 +58,7 @@ def research_policy_schema() -> dict[str, Any]:
             "ENTRY describes the positive reusable reason a trade deserves to exist.",
             "VETO describes a specific exceptional contradiction that invalidates an otherwise-valid ENTRY.",
             "A repeated version of the same contradiction is evidence to refine/consolidate the ENTRY before adding another VETO.",
+            "ENTRY and FLIP use the same structural learning standard: each requires a positive reusable setup thesis and family; FLIP is not held to a higher repetition threshold.",
             "A teacher winner is evidence, not an automatic ENTRY rule; NO_CHANGE is valid when the thesis is not reusable.",
             "A prospective loss is evidence, not an automatic VETO; NO_CHANGE is preferred when no distinct causal mechanism is supported.",
             "For multi-R targets, room to opposing higher-timeframe support/resistance is an ENTRY-quality dimension, not something momentum can automatically override.",
@@ -93,6 +94,22 @@ def research_policy_schema() -> dict[str, Any]:
             "rule": (
                 "Winning is insufficient by itself. Learn/refine ENTRY only when "
                 "the teacher winner expresses a reusable positive setup structure."
+            ),
+        },
+        "teacher_loss_flip_review": {
+            "entry_families": sorted(ENTRY_FAMILIES),
+            "requirements_when_authoring_flip": {
+                "setup_thesis": (
+                    "required positive reusable thesis for the opposite executable side"
+                ),
+                "entry_family": "required; same structural family taxonomy as ENTRY",
+                "paired_opposite_outcome": "must be causally available and WIN",
+            },
+            "rule": (
+                "FLIP uses the same structural quality standard as ENTRY. A source-side "
+                "loss plus opposite-side win is evidence, but FLIP_LEARNED is justified "
+                "only when the opposite side expresses a reusable positive setup structure. "
+                "Repeated prior examples may strengthen confidence but are not required."
             ),
         },
         "periodic_review": {
@@ -191,8 +208,13 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
         updated["methodology_prompt"] = {
             "teacher_loss_rule": (
                 "Do not infer a FLIP from the loss alone. Opposite-side immutable "
-                "evidence must independently verify the alternative."
-            )
+                "evidence must independently verify the alternative. Treat FLIP like "
+                "ENTRY for learning quality: require a positive reusable setup thesis "
+                "and entry_family for the opposite executable side. Repetition is not "
+                "a special prerequisite for FLIP."
+            ),
+            "required_before_flip_learning": ["setup_thesis", "entry_family"],
+            "default_when_opposite_thesis_is_not_reusable": "FLIP_EVIDENCE",
         }
 
     elif status == "PERIODIC_REVIEW_REQUIRED":
@@ -283,7 +305,7 @@ def validate_teacher_methodology(
     setup_thesis: str | None,
     entry_family: str | None,
 ) -> dict[str, Any]:
-    """Require a positive reusable thesis before teacher-winner ENTRY learning."""
+    """Require the same positive reusable thesis standard for ENTRY and FLIP."""
     canonical = list(canonical_rule_events)
     result = _upper(teacher_result)
     thesis = _clean(setup_thesis)
@@ -294,10 +316,10 @@ def validate_teacher_methodology(
             "entry_family must be one of: " + ", ".join(sorted(ENTRY_FAMILIES))
         )
 
-    has_entry_rule = any(
-        _upper(item.get("event_type")) in {"ENTRY_LEARNED", "ENTRY_REFINED"}
-        for item in canonical
-    )
+    event_types = {_upper(item.get("event_type")) for item in canonical}
+    has_entry_rule = bool(event_types & {"ENTRY_LEARNED", "ENTRY_REFINED"})
+    has_flip_rule = "FLIP_LEARNED" in event_types
+
     if result == "WIN" and has_entry_rule:
         if not thesis:
             raise ValueError(
@@ -306,6 +328,17 @@ def validate_teacher_methodology(
         if not family:
             raise ValueError(
                 "teacher-winner ENTRY learning requires entry_family"
+            )
+
+    if result == "LOSS" and has_flip_rule:
+        if not thesis:
+            raise ValueError(
+                "teacher-loss FLIP learning requires setup_thesis for the opposite side; "
+                "opposite-side winning alone is insufficient"
+            )
+        if not family:
+            raise ValueError(
+                "teacher-loss FLIP learning requires entry_family using the same structural standard as ENTRY"
             )
 
     return {
