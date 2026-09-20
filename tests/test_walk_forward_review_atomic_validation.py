@@ -331,5 +331,4 @@ def test_bootstrap_review_freezes_base_rules_and_transitions_atomically(tmp_path
     assert learned["effective_market_time"] == cutoff
     assert phase["payload"]["phase"] == "RESEARCH_WF"
     assert phase["effective_market_time"] == cutoff
-    assert readback["derived_state"]["ledgers"]["RESEARCH"]["last_trade_sequence"] if False else True
     assert not any(event["event_type"] == "TRADE_RESOLVED" for event in readback["recent_events"])
