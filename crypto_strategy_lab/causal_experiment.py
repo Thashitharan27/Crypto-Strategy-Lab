@@ -71,9 +71,10 @@ RULE_EVENT_TYPES = {
     "FLIP_LEARNED",
 }
 
-PHASES = {"RESEARCH_WF", "VALIDATED", "SHADOW", "LIVE", "RETIRED"}
+PHASES = {"BOOTSTRAP_RESEARCH", "RESEARCH_WF", "VALIDATED", "SHADOW", "LIVE", "RETIRED"}
 LEDGERS = {"RESEARCH", "SHADOW", "LIVE"}
-EVIDENCE_SOURCES = {"TEACHER", "PROSPECTIVE_WF", "SHADOW", "LIVE"}
+EVIDENCE_SOURCES = {"BOOTSTRAP", "TEACHER", "PROSPECTIVE_WF", "SHADOW", "LIVE"}
+RESEARCH_PROTOCOL_MODES = {"COLD_START", "BOOTSTRAP_THEN_WF"}
 
 DEFAULT_PERIODIC_REVIEW_POLICY = {"initial_anchor": "REFERENCE_PERIOD_START"}
 
@@ -162,16 +163,50 @@ class CausalExperimentStore:
             risk_pct = float(value["risk_pct"])
             if not 0 < risk_pct <= 100:
                 raise ValueError("risk_pct must be greater than 0 and at most 100")
+        protocol = value.get("research_protocol")
+        if protocol is not None:
+            if not isinstance(protocol, dict):
+                raise ValueError("research_protocol must be an object")
+            mode = str(protocol.get("mode", "")).strip().upper()
+            if mode not in RESEARCH_PROTOCOL_MODES:
+                raise ValueError(
+                    "research_protocol.mode must be COLD_START or BOOTSTRAP_THEN_WF"
+                )
+            protocol["mode"] = mode
+            if mode == "BOOTSTRAP_THEN_WF":
+                walk_forward_start = protocol.get("walk_forward_start")
+                if walk_forward_start in (None, ""):
+                    raise ValueError(
+                        "BOOTSTRAP_THEN_WF requires research_protocol.walk_forward_start"
+                    )
+                protocol["walk_forward_start"] = _parse_iso(
+                    str(walk_forward_start), "research_protocol.walk_forward_start"
+                )
+                bootstrap_start = protocol.get("bootstrap_start")
+                if bootstrap_start not in (None, ""):
+                    protocol["bootstrap_start"] = _parse_iso(
+                        str(bootstrap_start), "research_protocol.bootstrap_start"
+                    )
+                    if protocol["bootstrap_start"] >= protocol["walk_forward_start"]:
+                        raise ValueError(
+                            "research_protocol.bootstrap_start must be before walk_forward_start"
+                        )
         policy = value.get("periodic_review_policy")
         if policy is not None:
             if not isinstance(policy, dict):
                 raise ValueError("periodic_review_policy must be an object")
             anchor = str(policy.get("initial_anchor", "")).strip().upper()
-            if anchor not in {"REFERENCE_PERIOD_START", "MANUAL"}:
+            if anchor not in {"REFERENCE_PERIOD_START", "WALK_FORWARD_START", "MANUAL"}:
                 raise ValueError(
                     "periodic_review_policy.initial_anchor must be "
-                    "REFERENCE_PERIOD_START or MANUAL"
+                    "REFERENCE_PERIOD_START, WALK_FORWARD_START, or MANUAL"
                 )
+            if anchor == "WALK_FORWARD_START":
+                mode = str(((value.get("research_protocol") or {}).get("mode", ""))).upper()
+                if mode != "BOOTSTRAP_THEN_WF":
+                    raise ValueError(
+                        "WALK_FORWARD_START periodic anchor requires BOOTSTRAP_THEN_WF"
+                    )
             policy["initial_anchor"] = anchor
         return value
 
@@ -482,12 +517,29 @@ class CausalExperimentStore:
             definition = self._validate_definition(definition)
         else:
             definition = deepcopy(definition)
+            protocol = definition.get("research_protocol") or {}
+            bootstrap_mode = (
+                isinstance(protocol, dict)
+                and str(protocol.get("mode", "")).strip().upper() == "BOOTSTRAP_THEN_WF"
+            )
             definition.setdefault(
-                "periodic_review_policy", deepcopy(DEFAULT_PERIODIC_REVIEW_POLICY)
+                "periodic_review_policy",
+                {"initial_anchor": "WALK_FORWARD_START"}
+                if bootstrap_mode
+                else deepcopy(DEFAULT_PERIODIC_REVIEW_POLICY),
             )
             definition = self._validate_definition(definition)
         operation_id = self._validate_operation_id(operation_id)
         phase = str(initial_phase).strip().upper()
+        protocol_mode = str(
+            ((definition.get("research_protocol") or {}).get("mode", "COLD_START"))
+        ).strip().upper()
+        if protocol_mode == "BOOTSTRAP_THEN_WF" and phase == "RESEARCH_WF":
+            phase = "BOOTSTRAP_RESEARCH"
+        if phase == "BOOTSTRAP_RESEARCH" and protocol_mode != "BOOTSTRAP_THEN_WF":
+            raise ValueError(
+                "BOOTSTRAP_RESEARCH initial phase requires research_protocol.mode=BOOTSTRAP_THEN_WF"
+            )
         if phase not in PHASES:
             raise ValueError(f"initial_phase must be one of: {', '.join(sorted(PHASES))}")
         value, directory, manifest_path, events_path = self._paths(experiment_id)
