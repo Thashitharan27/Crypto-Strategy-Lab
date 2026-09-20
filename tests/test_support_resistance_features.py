@@ -12,6 +12,7 @@ from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from crypto_strategy_lab.data_lake_config import FeatureConfig, ResearchRunConfig
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
+from crypto_strategy_lab.features.atr_context import ATRContextFeatureProvider
 from crypto_strategy_lab.features.support_resistance import (
     PreparedSupportResistanceContextReader,
     SupportResistanceFeatureProvider,
@@ -113,6 +114,12 @@ def prepared(frame: pd.DataFrame, cfg: EnhancedBacktestConfig | None = None):
     cfg = cfg or config()
     req = request_for(frame)
     directional = directional_for(frame, cfg)
+    atr_context = ATRContextFeatureProvider().compute(
+        req,
+        {DatasetKind.KLINES: frame},
+        {"atr_period": cfg.atr_period},
+    )
+    atr_context.attrs["feature_cache_key"] = "atr-sr-test"
     parameters = {
         "atr_period": cfg.atr_period,
         "sr_timeframe_minutes": int(cfg.sr_timeframe_minutes or cfg.strategy_timeframe_minutes),
@@ -135,7 +142,7 @@ def prepared(frame: pd.DataFrame, cfg: EnhancedBacktestConfig | None = None):
         req,
         {DatasetKind.KLINES: frame},
         parameters,
-        {"core_directional": directional},
+        {"atr_context": atr_context},
     )
     return directional, sr, parameters
 
@@ -329,7 +336,7 @@ def test_production_engine_uses_cached_same_timeframe_sr_without_losing_enhanced
 
     assert isinstance(engine, SRDynamicTPBacktestEngine)
     assert isinstance(engine.sr_detector, PreparedSupportResistanceContextReader)
-    assert engine.support_resistance_feature_source == "support_resistance@9"
+    assert engine.support_resistance_feature_source == "support_resistance@10"
     assert engine.sr_uses_higher_timeframe is False
 
     index = 75
