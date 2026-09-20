@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
+import time
 
 import pandas as pd
 
@@ -23,6 +24,7 @@ from crypto_strategy_lab.features.futures_positioning import (
     FuturesPositioningFeatureProvider,
     futures_positioning_price_resource,
 )
+from crypto_strategy_lab.progress import emit_progress
 from crypto_strategy_lab.features.taker_flow import (
     TakerFlowContextFeatureProvider,
     taker_flow_resource,
@@ -266,10 +268,32 @@ def _independent_sr_research_features(
     cache = FeatureFrameCache(store.cache.root)
     result: dict[str, pd.DataFrame] = {}
 
+    progress = getattr(store, "progress_callback", None)
     for minutes, label in _sr_research_targets(strategy_minutes):
+        display_label = label if label != "strategy" else f"{strategy_minutes}m"
         if minutes == primary_minutes:
             frame = primary_sr
+            emit_progress(
+                progress,
+                kind="stage",
+                phase="support_resistance",
+                label=f"S/R {display_label} ready",
+                detail=(
+                    f"Reusing the primary {display_label} S/R frame; "
+                    f"{len(frame):,} strategy rows."
+                ),
+            )
         else:
+            emit_progress(
+                progress,
+                kind="stage",
+                phase="support_resistance",
+                label=f"Preparing S/R {display_label}",
+                detail=(
+                    f"Building or loading independent {display_label} S/R context "
+                    f"for {len(canonical):,} strategy rows."
+                ),
+            )
             parameters = {
                 name: dict(feature_parameters[name])
                 for name in dependency_names
@@ -279,6 +303,7 @@ def _independent_sr_research_features(
                 **base_sr,
                 "sr_timeframe_minutes": int(minutes),
             }
+            started = time.perf_counter()
             computed = registry.execute(
                 ["support_resistance"],
                 request,
@@ -287,6 +312,22 @@ def _independent_sr_research_features(
                 cache=cache,
             )
             frame = computed["support_resistance"]
+            elapsed = time.perf_counter() - started
+            cache_state = (
+                "cache hit"
+                if bool(frame.attrs.get("feature_cache_hit", False))
+                else "cache built"
+            )
+            emit_progress(
+                progress,
+                kind="stage",
+                phase="support_resistance",
+                label=f"S/R {display_label} ready",
+                detail=(
+                    f"{cache_state}; {len(frame):,} strategy rows in "
+                    f"{elapsed:.1f}s."
+                ),
+            )
         result[f"support_resistance_{label}"] = _prefix_sr_research_frame(
             frame,
             label=label,
@@ -943,6 +984,19 @@ def load_backtest_bundle(
         for name, parameters in feature_parameters.items()
         if name in main_parameter_names
     }
+    progress = getattr(store, "progress_callback", None)
+    if enable_support_resistance_analysis:
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="support_resistance",
+            label=f"Preparing S/R {strategy_minutes}m",
+            detail=(
+                f"Building or loading strategy-timeframe S/R and core feature "
+                f"dependencies for {len(canonical):,} rows."
+            ),
+        )
+    main_features_started = time.perf_counter()
     frames = registry.execute(
         requested,
         request,
@@ -950,10 +1004,27 @@ def load_backtest_bundle(
         parameters=main_feature_parameters,
         cache=FeatureFrameCache(store.cache.root),
     )
+    main_features_elapsed = time.perf_counter() - main_features_started
     directional = frames[CORE_DIRECTIONAL_FEATURE_NAME]
     context = frames["production_market_context"]
     sr_features = frames.get("support_resistance")
     state_transition_daily = frames["state_transition_daily"]
+    if enable_support_resistance_analysis and sr_features is not None:
+        cache_state = (
+            "cache hit"
+            if bool(sr_features.attrs.get("feature_cache_hit", False))
+            else "cache built"
+        )
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="support_resistance",
+            label=f"S/R {strategy_minutes}m ready",
+            detail=(
+                f"{cache_state}; {len(sr_features):,} strategy rows. "
+                f"Primary feature block completed in {main_features_elapsed:.1f}s."
+            ),
+        )
 
     research_features = _optional_futures_research_features(
         store,
