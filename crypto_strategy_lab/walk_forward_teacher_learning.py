@@ -96,6 +96,11 @@ def next_teacher_for_learning(
     trades_path = artifact_path(run_dir, manifest, "trades", verify=True)
     last = _candidate_impl._last_teacher_time(events)
     reviewed_pairs = _reviewed_teacher_pair_ids(events)
+    minimum_entry = (
+        _candidate_impl._utc_timestamp(minimum_entry_time, "teacher minimum_entry_time")
+        if minimum_entry_time is not None
+        else None
+    )
     allow_paired_losses = (
         bool(include_losses)
         and _candidate_impl._sampling_mode(manifest) == "WALK_FORWARD"
