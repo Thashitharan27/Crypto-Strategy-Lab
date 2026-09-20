@@ -197,6 +197,26 @@ def test_research_native_config_preserves_strategy_rules_and_per_trade_execution
     assert research.enable_daily_entry_schedule is False
 
 
+def test_research_sampling_emits_bounded_scan_progress():
+    engine = object.__new__(StrategyResearchSamplingEngine)
+    engine.risk = np.ones(5000)
+    events = []
+    engine.research_progress_callback = events.append
+    engine.research_progress_total_rows = 5000
+    engine.research_progress_phase = "research_sampling_source"
+    engine.research_progress_label = "Walk Forward — source candidates"
+
+    for index in (0, 999, 1999, 2999, 3999, 4999):
+        engine._emit_research_scan_progress(index)
+
+    assert events
+    assert events[0]["kind"] == "work"
+    assert events[0]["completed"] == 1
+    assert events[-1]["completed"] == 5000
+    assert all(event["total"] == 5000 for event in events)
+    assert all(event["label"] == "Walk Forward — source candidates" for event in events)
+
+
 def test_research_engine_ignores_open_overlap_but_still_requires_strategy_context():
     engine = object.__new__(StrategyResearchSamplingEngine)
     engine.risk = np.ones(3)
