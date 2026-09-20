@@ -244,7 +244,8 @@ A VETO group blocks an otherwise admitted ENTRY setup.
 
 ### FLIP
 
-A FLIP group changes the executable side of an admitted setup:
+A FLIP group changes the executable side of an admitted setup. For DI Direction research, ENTRY and FLIP are symmetric structural rules: ENTRY authorizes the DI-proposed side, while FLIP authorizes the opposite side when that opposite direction has an equally reusable positive setup thesis.
+
 
 ```text
 source_side = LONG
@@ -439,10 +440,10 @@ FLIP_LEARNED
 `FLIP_LEARNED` requires:
 
 - a valid FLIP rule event;
-- prior causal support rather than automatic one-loss inversion;
-- a causally available immutable paired opposite-side outcome supporting the rule.
+- a causally available immutable paired opposite-side outcome that is a WIN;
+- the same structural learning standard as ENTRY: a positive reusable `setup_thesis` and `entry_family` for the opposite executable side.
 
-The preferred behavior for an isolated first teacher loss remains evidence collection (`FLIP_EVIDENCE`) or `NO_CHANGE`, not automatic FLIP activation.
+A FLIP is not held to a higher repetition threshold than ENTRY. A single causally valid teacher example may justify `FLIP_LEARNED` when the opposite side is structurally coherent and reusable. Repeated prior examples strengthen confidence but are not mandatory. If the opposite side won but no reusable positive structure is supported, record `FLIP_EVIDENCE` or `NO_CHANGE` instead.
 
 Teacher losses remain learning evidence only and never change walk-forward equity.
 
