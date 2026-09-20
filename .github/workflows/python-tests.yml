@@ -206,6 +206,8 @@ jobs:
           tests/test_rule_control_service.py
           tests/test_mcp_control_server.py
           tests/test_mcp_tool_diagnostics.py
+          tests/test_walk_forward_candidate_engine.py
+          tests/test_wf_bounded_scan_checkpoints.py
           tests/test_walk_forward_rule_analytics.py
           tests/test_walk_forward_research_policy.py
           tests/test_walk_forward_review_atomic_validation.py
