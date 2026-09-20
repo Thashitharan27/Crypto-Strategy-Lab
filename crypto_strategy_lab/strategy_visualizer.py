@@ -609,6 +609,68 @@ class CompletedRunVisualizer:
             ),
         }
 
+    @staticmethod
+    def _expand_sr_snapshot_frame(frame: pd.DataFrame) -> pd.DataFrame:
+        """Expand compact S/R snapshots only for the requested visualizer window."""
+        if frame.empty or "zone_inventory_json" not in frame.columns:
+            return frame
+        records: list[dict[str, Any]] = []
+        for _, snapshot in frame.iterrows():
+            payload = snapshot.get("zone_inventory_json")
+            if payload is None or pd.isna(payload):
+                continue
+            try:
+                zones = json.loads(str(payload))
+            except json.JSONDecodeError as exc:
+                raise ValueError("completed run contains invalid S/R inventory JSON") from exc
+            if not isinstance(zones, list):
+                raise ValueError("completed run S/R inventory JSON is not a list")
+            expected = snapshot.get("zone_count")
+            if expected is not None and not pd.isna(expected) and len(zones) != int(expected):
+                raise ValueError("completed run S/R snapshot zone_count mismatch")
+            for zone in zones:
+                if not isinstance(zone, dict):
+                    raise ValueError("completed run S/R inventory entry is not an object")
+                sources = zone.get("source_bar_indices") or []
+                records.append({
+                    "strategy_index": int(snapshot["strategy_index"]),
+                    "strategy_candle_open_time": snapshot["strategy_candle_open_time"],
+                    "decision_available_at": snapshot["decision_available_at"],
+                    "sr_timeframe": snapshot["sr_timeframe"],
+                    "sr_timeframe_minutes": int(snapshot["sr_timeframe_minutes"]),
+                    "sr_completed_candle_time": snapshot.get("sr_completed_candle_time"),
+                    "zone_id": str(zone.get("zone_id") or ""),
+                    "structure": str(zone.get("structure") or ""),
+                    "zone_low": zone.get("zone_low"),
+                    "zone_high": zone.get("zone_high"),
+                    "anchor_price": zone.get("anchor_price"),
+                    "pivot_bar_index": zone.get("pivot_bar_index"),
+                    "confirmed_at_index": zone.get("confirmed_at_index"),
+                    "source_bar_indices_json": json.dumps(sources, separators=(",", ":")),
+                    "source_count": zone.get("source_count", len(sources)),
+                    "touch_count": zone.get("touch_count", 0),
+                    "validation_rejection_atr": zone.get("validation_rejection_atr"),
+                    "state": str(zone.get("state") or ""),
+                    "tested": bool(zone.get("tested")),
+                    "held": bool(zone.get("held")),
+                    "rejection_atr": zone.get("rejection_atr"),
+                    "test_count": zone.get("test_count", 0),
+                    "bars_since_test": zone.get("bars_since_test"),
+                    "last_test_index": zone.get("last_test_index"),
+                    "distance_price": zone.get("distance_price"),
+                    "distance_atr": zone.get("distance_atr"),
+                    "near": bool(zone.get("near")),
+                    "inside": bool(zone.get("inside")),
+                    "nearest": bool(zone.get("nearest")),
+                })
+        result = pd.DataFrame.from_records(records)
+        if not result.empty:
+            result = result.sort_values(
+                ["sr_timeframe_minutes", "structure", "zone_low", "zone_id", "strategy_index"],
+                kind="stable",
+            ).reset_index(drop=True)
+        return result
+
     def _sr_zone_rows_at(self, timestamp: Any) -> list[dict[str, Any]]:
         if self.sr_zones_path is None:
             return []
@@ -619,9 +681,12 @@ class CompletedRunVisualizer:
             frame = connection.execute(
                 f"SELECT * FROM read_parquet('{escaped}') "
                 "WHERE CAST(strategy_candle_open_time AS TIMESTAMPTZ)=? "
-                "ORDER BY sr_timeframe_minutes, structure, zone_low, zone_id",
+                "ORDER BY sr_timeframe_minutes",
                 [target.to_pydatetime()],
             ).df()
+        if frame.empty:
+            return []
+        frame = self._expand_sr_snapshot_frame(frame)
         if frame.empty:
             return []
 
@@ -911,6 +976,15 @@ class CompletedRunVisualizer:
                 frame["sr_completed_candle_time"] = pd.to_datetime(
                     frame["sr_completed_candle_time"], utc=True, errors="coerce"
                 )
+            frame = self._expand_sr_snapshot_frame(frame)
+            if not frame.empty:
+                frame["strategy_candle_open_time"] = pd.to_datetime(
+                    frame["strategy_candle_open_time"], utc=True, errors="coerce"
+                )
+                if "sr_completed_candle_time" in frame.columns:
+                    frame["sr_completed_candle_time"] = pd.to_datetime(
+                        frame["sr_completed_candle_time"], utc=True, errors="coerce"
+                    )
         return frame
 
     def _inventory_sr_zones(
