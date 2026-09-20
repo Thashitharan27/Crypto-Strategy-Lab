@@ -285,9 +285,10 @@ def _empty_sr_zone_frame() -> pd.DataFrame:
         "sr_completed_candle_time",
     ):
         result[name] = pd.Series(dtype="datetime64[ns]")
+    result = result.loc[:, SR_ZONE_SNAPSHOT_COLUMNS].copy()
     result.attrs["expanded_zone_rows"] = 0
     result.attrs["storage_contract"] = SR_ZONE_SNAPSHOT_STORAGE_CONTRACT
-    return result.loc[:, SR_ZONE_SNAPSHOT_COLUMNS]
+    return result
 
 
 def _sr_zone_inventory_frame(
@@ -390,9 +391,10 @@ def _sr_zone_inventory_frame(
     ).astype("int64")
     frame["sr_timeframe"] = frame["sr_timeframe"].astype("string")
     frame["zone_inventory_json"] = frame["zone_inventory_json"].astype("string")
+    frame = frame.loc[:, SR_ZONE_SNAPSHOT_COLUMNS].copy()
     frame.attrs["expanded_zone_rows"] = int(expanded_zone_rows)
     frame.attrs["storage_contract"] = SR_ZONE_SNAPSHOT_STORAGE_CONTRACT
-    return frame.loc[:, SR_ZONE_SNAPSHOT_COLUMNS], tuple(consumed)
+    return frame, tuple(consumed)
 
 
 def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
