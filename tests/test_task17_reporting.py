@@ -1,6 +1,7 @@
 """Blocking contract tests for Task-17 provenance and passive result artifacts."""
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -281,6 +282,58 @@ def test_sr_zone_artifact_requires_exact_causal_attachment(tmp_path: Path):
     with pytest.raises(
         ValueError, match="future_sr_completed_candle=1"
     ):
+        _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
+
+
+def test_sr_snapshot_artifact_validates_exact_inventory_payload(tmp_path: Path):
+    _trades, context = _research_frames()
+    payload = json.dumps(
+        [
+            {
+                "zone_id": "SUPPORT:7",
+                "structure": "SUPPORT",
+                "zone_low": 95.0,
+                "zone_high": 96.0,
+                "source_count": 1,
+                "test_count": 2,
+                "nearest": True,
+            },
+            {
+                "zone_id": "RESISTANCE:9",
+                "structure": "RESISTANCE",
+                "zone_low": 110.0,
+                "zone_high": 111.0,
+                "source_count": 1,
+                "test_count": 0,
+                "nearest": True,
+            },
+        ],
+        separators=(",", ":"),
+    )
+    snapshots = pd.DataFrame(
+        [
+            {
+                "strategy_index": 1,
+                "strategy_candle_open_time": context.loc[1, "strategy_candle_open_time"],
+                "decision_available_at": context.loc[1, "decision_available_at"],
+                "sr_timeframe": "4h",
+                "sr_timeframe_minutes": 240,
+                "sr_completed_candle_time": context.loc[1, "decision_available_at"],
+                "zone_count": 2,
+                "zone_inventory_json": payload,
+            }
+        ]
+    )
+    context_path = tmp_path / "context.parquet"
+    zones_path = tmp_path / "sr_zones.parquet"
+    _write_parquet_atomic(context, context_path)
+    _write_parquet_atomic(snapshots, zones_path)
+    _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
+
+    broken = snapshots.copy()
+    broken.loc[0, "zone_count"] = 3
+    _write_parquet_atomic(broken, zones_path)
+    with pytest.raises(ValueError, match="zone_count"):
         _validate_sr_zone_artifact(zones_path, context_path, expected_rows=1)
 
 
