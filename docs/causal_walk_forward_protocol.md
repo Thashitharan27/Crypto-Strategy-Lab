@@ -481,6 +481,20 @@ That state is inspection-required and must not append `TEACHER_RESOLVED`, `NO_CH
 
 Overlapping teacher observations do not invalidate an otherwise complete pair. The causal boundary remains the later of that pair's source-side and opposite-side resolution times.
 
+### Teacher phase compression
+
+`WAIT_UNTIL_CLOSED` remains a RESEARCH-equity participation constraint only. Teacher learning uses a separate causal novelty constraint.
+
+Every viable paired WALK_FORWARD observation remains immutable research evidence. The learning workflow may automatically resolve a teacher without ChatGPT review only when it is a coarse structural repeat of the last surfaced teacher in the same `research_episode_id`. Episode identity only defines the local comparison scope; it is never sufficient reason to skip a teacher.
+
+The comparison uses a deterministic entry-time phase fingerprint covering coarse directional/trend buckets, S/R state across available timeframes, breakout/reclaim state, source/paired outcome class when causally known, and active ENTRY/VETO/FLIP matches. It compares against the last surfaced teacher, not the immediately previous raw observation.
+
+Compression must be bypassed for structural phase changes, outcome contradictions, active-rule failures, active-rule direction conflicts, changed active-rule matches, breakout/reclaim changes, important higher-timeframe S/R changes, and the first qualifying confirmation after a newly learned rule. A learned rule has one explicit confirmation quota; after that, same-phase repeats may auto-resolve until a contradiction or new phase appears.
+
+Every auto-compressed observation appends `TEACHER_RESOLVED` with `teacher_review_status=AUTO_COMPRESSED`, a reason such as `CORRELATED_PHASE_DUPLICATE`, `RULE_PHASE_REPEAT`, or `POST_CONFIRMATION_REPEAT`, the compared teacher ID, phase fingerprints, and active rule matches. Raw observations are never deleted and continue to count in later rule-performance analytics.
+
+Legacy teacher reviews that predate phase fingerprints are never retroactively compressed. The next comparable teacher is surfaced once to establish a causal audited baseline.
+
 For example, with TP3:
 
 ```text
