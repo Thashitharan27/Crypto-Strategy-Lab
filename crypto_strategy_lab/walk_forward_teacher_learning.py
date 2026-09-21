@@ -403,6 +403,8 @@ def next_teacher_for_learning(
             "source_exit_time",
             "opposite_exit_time",
             "opposite_count",
+            "opposite_side",
+            "opposite_pair_net_r",
         }
         boundary = {
             key: _candidate_impl._json_safe(value)
@@ -426,6 +428,13 @@ def next_teacher_for_learning(
                 _candidate_impl._utc_timestamp(
                     values["opposite_exit_time"], "teacher opposite_exit_time"
                 ).isoformat()
+            )
+        if result == "LOSS":
+            boundary["paired_opposite_side"] = str(
+                values.get("opposite_side") or ""
+            ).upper()
+            boundary["paired_opposite_net_r"] = float(
+                values["opposite_pair_net_r"]
             )
         boundary["teacher_learning_mode"] = (
             TEACHER_WIN_MODE if result == "WIN" else TEACHER_LOSS_FLIP_MODE
