@@ -29,11 +29,15 @@ and settles canonical nested risk models without requiring legacy root fields.
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+import os
+from pathlib import Path
 import time
 from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator as _wf_orchestrator
 from crypto_strategy_lab import walk_forward_review_facade as _wf_review_facade
+from crypto_strategy_lab import walk_forward_candidate_engine as _wf_candidate_engine
 from crypto_strategy_lab.walk_forward_opposite_replay import (
     replay_opposite_one_r as _replay_opposite_one_r,
 )
@@ -312,6 +316,222 @@ _ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS = _impl._continue_walk_forward_autono
 _CREATE_ADVANCE_GRACE_ATTEMPTS = 20
 _CREATE_ADVANCE_GRACE_SECONDS = 0.1
 
+_REVIEW_PACKET_CACHE_VERSION = 1
+_RECOVERABLE_REVIEW_STATUSES = frozenset({
+    "TEACHER_REVIEW_REQUIRED",
+    "TEACHER_LOSS_REVIEW_REQUIRED",
+    "TEACHER_FLIP_VALIDATION_INCONSISTENCY",
+    "LOSS_REVIEW_REQUIRED",
+    "PERIODIC_REVIEW_REQUIRED",
+})
+
+
+def _review_packet_cache_coordinates(args, kwargs):
+    control = args[0] if args else kwargs.get("control")
+    experiment_id = str(kwargs.get("experiment_id") or "").strip()
+    expected_sequence = kwargs.get("expected_sequence")
+    expected_state_hash = str(kwargs.get("expected_state_hash") or "").strip().lower()
+    if (
+        control is None
+        or not experiment_id
+        or expected_sequence is None
+        or not expected_state_hash
+    ):
+        return None
+    return control, experiment_id, int(expected_sequence), expected_state_hash
+
+
+def _review_packet_cache_path(
+    control: Any,
+    experiment_id: str,
+    sequence: int,
+    state_hash: str,
+    review_interval_months: int,
+    teacher_loss_flip_enabled: bool,
+) -> tuple[Any, Path]:
+    store = _wf_orchestrator._impl._store(control)
+    _value, directory = store._dir(experiment_id)
+    store._assert_safe_dir(directory, must_exist=True)
+    cache_dir = directory / "review_packet_cache"
+    if cache_dir.exists() and (cache_dir.is_symlink() or not cache_dir.is_dir()):
+        raise ValueError("review packet cache path is not a safe directory")
+    cache_dir.mkdir(parents=False, exist_ok=True)
+    name = (
+        f"review-{int(sequence)}-{str(state_hash).lower()}-"
+        f"flip{int(bool(teacher_loss_flip_enabled))}-"
+        f"months{int(review_interval_months)}.json"
+    )
+    return store, cache_dir / name
+
+
+def _review_packet_cache_head(
+    store: Any,
+    experiment_id: str,
+    sequence: int,
+    state_hash: str,
+) -> None:
+    readback = store.read(experiment_id, recent_events=0)
+    if (
+        int(readback.get("sequence", -1)) != int(sequence)
+        or str(readback.get("state_hash") or "").lower() != str(state_hash).lower()
+    ):
+        raise ValueError(
+            "walk-forward experiment changed since it was read; read the verified chain head again"
+        )
+
+
+def _review_packet_json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _review_packet_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_review_packet_json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "item"):
+        try:
+            return _review_packet_json_safe(value.item())
+        except (TypeError, ValueError):
+            pass
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except (TypeError, ValueError):
+            pass
+    return str(value)
+
+
+def _load_cached_review_packet(action, args, kwargs):
+    coordinates = _review_packet_cache_coordinates(args, kwargs)
+    if coordinates is None:
+        return None
+    control, experiment_id, sequence, state_hash = coordinates
+    months = int(kwargs.get("review_interval_months", 3))
+    flip_enabled = bool(_wf_candidate_engine._teacher_loss_flip_enabled())
+    store, path = _review_packet_cache_path(
+        control,
+        experiment_id,
+        sequence,
+        state_hash,
+        months,
+        flip_enabled,
+    )
+    _review_packet_cache_head(store, experiment_id, sequence, state_hash)
+    if not path.is_file():
+        return None
+    try:
+        envelope = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return None
+    if (
+        int(envelope.get("version", -1)) != _REVIEW_PACKET_CACHE_VERSION
+        or str(envelope.get("experiment_id") or "") != experiment_id
+        or int(envelope.get("sequence", -1)) != sequence
+        or str(envelope.get("state_hash") or "").lower() != state_hash
+        or bool(envelope.get("teacher_loss_flip_enabled")) != flip_enabled
+        or int(envelope.get("review_interval_months", -1)) != months
+        or not isinstance(envelope.get("packet"), dict)
+    ):
+        return None
+    _review_packet_cache_head(store, experiment_id, sequence, state_hash)
+    packet = deepcopy(envelope["packet"])
+    if action is _ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS:
+        packet.setdefault(
+            "autonomous_contract",
+            _wf_orchestrator.AUTONOMOUS_ORCHESTRATOR_CONTRACT,
+        )
+        packet.setdefault(
+            "autonomous",
+            _wf_orchestrator._autonomous_metadata(
+                continue_without_user=True,
+                assistant_judgment_required=True,
+                stop_reason="ASSISTANT_JUDGMENT_REQUIRED",
+                scan_slices=0,
+                scan_checkpoints=0,
+                rows_scanned=0,
+            ),
+        )
+    else:
+        packet.pop("autonomous_contract", None)
+        packet.pop("autonomous", None)
+    packet["review_packet_cache"] = {
+        "hit": True,
+        "persisted": True,
+        "sequence": sequence,
+        "state_hash": state_hash,
+    }
+    return packet
+
+
+def _persist_review_packet(action, args, kwargs, result):
+    if not isinstance(result, dict):
+        return result
+    status = str(result.get("status") or "")
+    if status not in _RECOVERABLE_REVIEW_STATUSES:
+        return result
+    experiment_id = str(result.get("experiment_id") or kwargs.get("experiment_id") or "").strip()
+    sequence = result.get("sequence")
+    state_hash = str(result.get("state_hash") or "").strip().lower()
+    control = args[0] if args else kwargs.get("control")
+    if control is None or not experiment_id or sequence is None or not state_hash:
+        return result
+    months = int(kwargs.get("review_interval_months", 3))
+    flip_enabled = bool(_wf_candidate_engine._teacher_loss_flip_enabled())
+    store, path = _review_packet_cache_path(
+        control,
+        experiment_id,
+        int(sequence),
+        state_hash,
+        months,
+        flip_enabled,
+    )
+    _review_packet_cache_head(store, experiment_id, int(sequence), state_hash)
+    packet = deepcopy(result)
+    packet.pop("review_packet_cache", None)
+    envelope = {
+        "version": _REVIEW_PACKET_CACHE_VERSION,
+        "experiment_id": experiment_id,
+        "sequence": int(sequence),
+        "state_hash": state_hash,
+        "teacher_loss_flip_enabled": flip_enabled,
+        "review_interval_months": months,
+        "status": status,
+        "packet": _review_packet_json_safe(packet),
+    }
+    temp = path.parent / (
+        f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp"
+    )
+    try:
+        text = json.dumps(
+            envelope,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        with temp.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, path)
+    finally:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+    _review_packet_cache_head(store, experiment_id, int(sequence), state_hash)
+    updated = deepcopy(result)
+    updated["review_packet_cache"] = {
+        "hit": False,
+        "persisted": True,
+        "sequence": int(sequence),
+        "state_hash": state_hash,
+    }
+    return updated
+
 
 def _verified_create_walk_forward_experiment(
     self,
@@ -381,10 +601,15 @@ def _verified_create_walk_forward_experiment(
 
 
 def _with_create_advance_grace(action, *args, **kwargs):
+    cached = _load_cached_review_packet(action, args, kwargs)
+    if cached is not None:
+        return cached
+
     last_error: ValueError | None = None
     for attempt in range(_CREATE_ADVANCE_GRACE_ATTEMPTS):
         try:
-            return _with_rule_schema(action(*args, **kwargs))
+            result = _with_rule_schema(action(*args, **kwargs))
+            return _persist_review_packet(action, args, kwargs, result)
         except ValueError as exc:
             if "causal experiment does not exist:" not in str(exc):
                 raise
