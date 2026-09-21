@@ -407,6 +407,10 @@ class ResearchRunConfig:
             (features.di_pressure_lookback, "DI pressure lookback"),
             (features.bb_period, "BB period"), (features.mean_reversion_period, "MR period"),
             (features.mean_reversion_rsi_period, "MR RSI period"),
+            (features.ichimoku_conversion_period, "Ichimoku conversion period"),
+            (features.ichimoku_base_period, "Ichimoku base period"),
+            (features.ichimoku_span_b_period, "Ichimoku Span B period"),
+            (features.ichimoku_displacement, "Ichimoku displacement"),
         ):
             if int(value) <= 0:
                 raise ValueError(f"{label} must be positive")
