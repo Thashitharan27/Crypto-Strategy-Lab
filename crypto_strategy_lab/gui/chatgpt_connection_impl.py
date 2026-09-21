@@ -370,8 +370,10 @@ class ChatGPTIntegrationWidget(QWidget):
         self.settings = settings
         self.manager = ChatGPTConnectionManager(output_dir, self)
         self.secondary_manager = ChatGPTConnectionManager(output_dir, self)
+        self._loading = True
         self._build()
         self._load()
+        self._loading = False
         self.manager.state_changed.connect(self._status)
         self.manager.diagnostic_changed.connect(self._diagnostic)
         self.manager.error.connect(
@@ -603,6 +605,8 @@ class ChatGPTIntegrationWidget(QWidget):
         self._update_endpoint_secondary()
 
     def _save(self):
+        if self._loading:
+            return
         self.settings.setValue("tunnel_client_path", self.path.text().strip())
         self.settings.setValue("tunnel_id", self.tunnel_id.text().strip())
         self.settings.setValue("mcp_port", self.port.value())
