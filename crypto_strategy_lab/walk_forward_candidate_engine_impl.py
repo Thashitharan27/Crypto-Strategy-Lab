@@ -1054,7 +1054,7 @@ def _safe_context(
         "ichimoku_trade_context_v1": _ichimoku_trade_context(
             context,
             strategy_timeframe_minutes=(
-                int((config.get("data") or {}).get("strategy_timeframe_minutes", 0))
+                int((config.get("data") or {}).get("strategy_timeframe_minutes", 0) or 0)
                 if isinstance(config, dict)
                 else None
             ),
