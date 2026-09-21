@@ -102,6 +102,24 @@ _MTF_SR_DERIVED_FIELDS = {
     "SR_BREAKOUT_CLOSE_BEYOND_ZONE_ATR": "sr_breakout_close_beyond_zone_atr",
 }
 _MTF_LABELS = ("strategy", "1h", "4h", "1d")
+_ICHIMOKU_CONTEXT_CONTRACT = "ichimoku_trade_context_v1"
+_ICHIMOKU_SUMMARY_FIELDS = (
+    "price_vs_cloud",
+    "tk_state",
+    "tk_cross",
+    "tk_spread_atr",
+    "tenkan_distance_atr",
+    "kijun_distance_atr",
+    "kijun_slope_atr",
+    "kijun_flat_bars",
+    "current_cloud_state",
+    "future_cloud_state",
+    "cloud_thickness_atr",
+    "future_cloud_thickness_atr",
+    "kumo_twist",
+    "chikou_vs_price",
+    "cloud_distance_atr",
+)
 _SAFE_TRADE_ENTRY_COLUMNS = (
     *_SAFE_TRADE_ENTRY_COLUMNS,
     *(
@@ -935,6 +953,76 @@ def _rule_decision(
     }
 
 
+def _ichimoku_trade_context(
+    context: dict[str, Any],
+    *,
+    strategy_timeframe_minutes: int | None,
+) -> dict[str, Any]:
+    """Build a compact explicit Ichimoku block without requiring it to exist.
+
+    Older immutable reference runs may predate Ichimoku research entirely. Those
+    runs remain valid: the block reports unavailable rather than raising or
+    inventing evidence.
+    """
+    timeframes: dict[str, dict[str, Any]] = {}
+    targets = (
+        ("STRATEGY_TF", "", strategy_timeframe_minutes),
+        ("1H", "ich_1h_", 60),
+        ("4H", "ich_4h_", 240),
+        ("1D", "ich_1d_", 1440),
+    )
+    for label, prefix, default_minutes in targets:
+        values: dict[str, Any] = {}
+        if prefix:
+            completed_name = f"{prefix}completed_candle_time"
+            timeframe_name = f"{prefix}timeframe_minutes"
+            field_name = lambda field: f"{prefix}{field}"
+        else:
+            completed_name = "ichimoku_completed_candle_time"
+            timeframe_name = "ichimoku_timeframe_minutes"
+            field_name = lambda field: field
+
+        completed = _json_safe(context.get(completed_name))
+        raw_minutes = _json_safe(context.get(timeframe_name))
+        if completed is not None:
+            values["completed_candle_time"] = completed
+        if raw_minutes is not None:
+            values["timeframe_minutes"] = raw_minutes
+        elif default_minutes:
+            values["timeframe_minutes"] = int(default_minutes)
+
+        evidence_count = 0
+        for field in _ICHIMOKU_SUMMARY_FIELDS:
+            value = _json_safe(context.get(field_name(field)))
+            if value is None:
+                continue
+            values[field] = value
+            evidence_count += 1
+
+        # Do not advertise a timeframe merely because a default timeframe number
+        # exists; at least one actual Ichimoku evidence field must be present.
+        if evidence_count:
+            timeframes[label] = values
+
+    available = bool(timeframes)
+    return {
+        "contract": _ICHIMOKU_CONTEXT_CONTRACT,
+        "available": available,
+        "availability_reason": (
+            "AVAILABLE"
+            if available
+            else "NOT_PRESENT_IN_REFERENCE_RUN"
+        ),
+        "review_instruction": (
+            "When available, explicitly assess Ichimoku alongside S/R, DI/ADX, "
+            "EMA/MR, MACD/momentum and flow. Treat it as causal supporting "
+            "evidence; do not force a rule from one observation. When unavailable, "
+            "do not infer or reconstruct Ichimoku from later data."
+        ),
+        "timeframes": timeframes,
+    }
+
+
 def _safe_context(
     row: dict[str, Any],
     context: dict[str, Any],
@@ -963,6 +1051,14 @@ def _safe_context(
         # PreparedBacktestFrame validates that every value in this artifact is
         # available no later than the decision candle completes.
         "feature_context": feature,
+        "ichimoku_trade_context_v1": _ichimoku_trade_context(
+            context,
+            strategy_timeframe_minutes=(
+                int((config.get("data") or {}).get("strategy_timeframe_minutes", 0))
+                if isinstance(config, dict)
+                else None
+            ),
+        ),
     }
     if direction in {"LONG", "SHORT"} and profile and isinstance(config, dict):
         timeframe_context = {}
