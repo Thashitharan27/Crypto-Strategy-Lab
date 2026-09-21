@@ -345,8 +345,9 @@ def test_teacher_winner_does_not_expose_unresolved_opposite_result(tmp_path):
     boundary, _resolved_at = teacher
     assert boundary["result"] == "WIN"
     assert boundary["research_episode_id"] == "episode-000001"
-    assert boundary["research_episode_entry_number"] == 1
-    assert boundary["research_episode_viable_entries"] == 2
+    assert boundary["research_episode_entries_seen_so_far"] == 1
+    assert "research_episode_viable_entries" not in boundary
+    assert "research_episode_entry_number" not in boundary
     assert "paired_opposite_net_r" not in boundary
     assert "paired_opposite_side" not in boundary
     assert "opposite_pair_net_r" not in boundary
