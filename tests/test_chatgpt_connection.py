@@ -192,7 +192,7 @@ def test_secondary_connection_rejects_primary_port(qapp, tmp_path):
             return_value=object(),
         ):
             _key, errors = widget._validated_secondary()
-        assert any("different from Connection 1" in error for error in errors)
+        assert any("different from Connections 1 and 3" in error for error in errors)
     finally:
         widget.shutdown()
 
