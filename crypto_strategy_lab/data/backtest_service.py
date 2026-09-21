@@ -31,6 +31,7 @@ from crypto_strategy_lab.features.taker_flow import (
 )
 from crypto_strategy_lab.features.atr_context import ATR_CONTEXT_FEATURE_NAME
 from crypto_strategy_lab.features.technical import CORE_DIRECTIONAL_FEATURE_NAME
+from crypto_strategy_lab.features.ichimoku import ICHIMOKU_CONTEXT_FEATURE_NAME
 from .query import DataRequest
 from .store import DataNotAvailableError, MarketDataStore
 from .timing import interval_to_timedelta
@@ -335,6 +336,123 @@ def _independent_sr_research_features(
             label=label,
             timeframe_minutes=minutes,
         )
+    return result
+
+
+_INDEPENDENT_ICHIMOKU_TIMEFRAMES = ((60, "1h"), (240, "4h"), (1440, "1d"))
+
+
+def _ichimoku_research_targets(
+    strategy_minutes: int, *, include_higher_timeframes: bool
+) -> tuple[tuple[int, str], ...]:
+    strategy_minutes = int(strategy_minutes)
+    targets: list[tuple[int, str]] = [(strategy_minutes, "strategy")]
+    if include_higher_timeframes:
+        for minutes, label in _INDEPENDENT_ICHIMOKU_TIMEFRAMES:
+            if minutes > strategy_minutes and minutes % strategy_minutes == 0:
+                targets.append((minutes, label))
+    return tuple(targets)
+
+
+def _prefix_ichimoku_research_frame(
+    frame: pd.DataFrame,
+    *,
+    label: str,
+    timeframe_minutes: int,
+) -> pd.DataFrame:
+    prefix = f"ich_{label}_"
+    rename_map = {}
+    for column in frame.columns:
+        if column in {"timestamp", "available_at"}:
+            continue
+        suffix = column.removeprefix("ichimoku_")
+        rename_map[column] = f"{prefix}{suffix}"
+    renamed = frame.rename(columns=rename_map).copy()
+    renamed.attrs.update(frame.attrs)
+    renamed.attrs["ichimoku_context_label"] = label
+    renamed.attrs["ichimoku_context_timeframe_minutes"] = int(timeframe_minutes)
+    return renamed
+
+
+def _independent_ichimoku_research_features(
+    store: MarketDataStore,
+    registry,
+    request: DataRequest,
+    strategy: pd.DataFrame,
+    feature_parameters: Mapping[str, Mapping[str, object]],
+    *,
+    strategy_minutes: int,
+    include_higher_timeframes: bool,
+) -> dict[str, pd.DataFrame]:
+    """Build causal strategy/HTF Ichimoku blocks without changing signal policy."""
+    base = dict(feature_parameters.get(ICHIMOKU_CONTEXT_FEATURE_NAME, {}))
+    if not base:
+        return {}
+
+    targets = _ichimoku_research_targets(
+        strategy_minutes,
+        include_higher_timeframes=include_higher_timeframes,
+    )
+    maximum_minutes = max(minutes for minutes, _label in targets)
+    span_b = int(base.get("span_b_period", 52))
+    displacement = int(base.get("displacement", 26))
+    atr_period = int(base.get("atr_period", 14))
+    base_period = int(base.get("base_period", 26))
+    warmup_bars = max(span_b + displacement, base_period + displacement, atr_period)
+    warmup_days = max(
+        2,
+        int(np.ceil((warmup_bars * maximum_minutes) / (24.0 * 60.0))) + 2,
+    )
+    warm_request = replace(
+        request,
+        start=request.start - timedelta(days=warmup_days),
+    )
+    try:
+        warm_source = store.load_klines(warm_request, request.strategy_interval)
+    except DataNotAvailableError:
+        warm_source = strategy
+
+    cache = FeatureFrameCache(store.cache.root)
+    progress = getattr(store, "progress_callback", None)
+    result: dict[str, pd.DataFrame] = {}
+    for minutes, label in targets:
+        display = (
+            f"{strategy_minutes}m"
+            if label == "strategy"
+            else label
+        )
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="ichimoku",
+            label=f"Preparing Ichimoku {display}",
+            detail="Building or loading causal Ichimoku market-structure context.",
+        )
+        parameters = {
+            ICHIMOKU_CONTEXT_FEATURE_NAME: {
+                **base,
+                "timeframe_minutes": int(minutes),
+            }
+        }
+        frame = registry.execute(
+            [ICHIMOKU_CONTEXT_FEATURE_NAME],
+            warm_request,
+            {DatasetKind.KLINES: warm_source},
+            parameters=parameters,
+            cache=cache,
+            progress_callback=progress,
+        )[ICHIMOKU_CONTEXT_FEATURE_NAME]
+        aligned = _align_research_frame_to_strategy(frame, strategy)
+        if label == "strategy":
+            result[ICHIMOKU_CONTEXT_FEATURE_NAME] = aligned
+        else:
+            result[f"{ICHIMOKU_CONTEXT_FEATURE_NAME}_{label}"] = (
+                _prefix_ichimoku_research_frame(
+                    aligned,
+                    label=label,
+                    timeframe_minutes=minutes,
+                )
+            )
     return result
 
 
@@ -760,6 +878,12 @@ def load_backtest_bundle(
     mean_reversion_rsi_oversold: float = 30.0,
     mean_reversion_rsi_overbought: float = 70.0,
     mean_reversion_require_reentry: bool = True,
+    ichimoku_enabled: bool = False,
+    ichimoku_conversion_period: int = 9,
+    ichimoku_base_period: int = 26,
+    ichimoku_span_b_period: int = 52,
+    ichimoku_displacement: int = 26,
+    ichimoku_include_higher_timeframes: bool = True,
     enable_support_resistance_analysis: bool = False,
     sr_timeframe_minutes: int = 0,
     sr_pivot_left: int = 5,
@@ -824,6 +948,10 @@ def load_backtest_bundle(
         enable_support_resistance_analysis = bool(
             feature_config.enable_support_resistance_analysis
         )
+        ichimoku_enabled = bool(feature_config.ichimoku_enabled)
+        ichimoku_include_higher_timeframes = bool(
+            feature_config.ichimoku_include_higher_timeframes
+        )
         trade_flow_enabled = bool(feature_config.trade_flow_enabled)
         order_book_enabled = bool(feature_config.order_book_enabled)
         trade_flow_source = DatasetKind[str(feature_config.trade_flow_source).upper()]
@@ -857,6 +985,15 @@ def load_backtest_bundle(
                 "mean_reversion_require_reentry": bool(mean_reversion_require_reentry),
             },
         }
+        if ichimoku_enabled:
+            feature_parameters[ICHIMOKU_CONTEXT_FEATURE_NAME] = {
+                "timeframe_minutes": 0,
+                "conversion_period": int(ichimoku_conversion_period),
+                "base_period": int(ichimoku_base_period),
+                "span_b_period": int(ichimoku_span_b_period),
+                "displacement": int(ichimoku_displacement),
+                "atr_period": int(atr_period),
+            }
         if enable_support_resistance_analysis:
             feature_parameters["support_resistance"] = {
                 "atr_period": int(atr_period),
@@ -1050,6 +1187,18 @@ def load_backtest_bundle(
         name: _align_research_frame_to_strategy(frame, strategy)
         for name, frame in research_features.items()
     }
+    if ichimoku_enabled:
+        research_features.update(
+            _independent_ichimoku_research_features(
+                store,
+                registry,
+                request,
+                strategy,
+                feature_parameters,
+                strategy_minutes=strategy_minutes,
+                include_higher_timeframes=ichimoku_include_higher_timeframes,
+            )
+        )
     if enable_support_resistance_analysis and sr_features is not None:
         research_features.update(
             _independent_sr_research_features(
