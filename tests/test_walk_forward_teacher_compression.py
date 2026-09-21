@@ -26,6 +26,7 @@ def _packet(
     matched_entry: tuple[str, ...] = (),
     matched_flip: tuple[str, ...] = (),
     effective_side: str = "LONG",
+    rule_version: str = "1",
 ) -> dict:
     coverage = {
         "eligible": bool(matched_entry),
@@ -45,7 +46,7 @@ def _packet(
             "result": result,
         },
         "active_rule_versions": [
-            {"rule_id": rule_id, "rule_version": "1"}
+            {"rule_id": rule_id, "rule_version": rule_version}
             for rule_id in (*matched_entry, *matched_flip)
         ],
         "current_rule_coverage": coverage,
@@ -133,23 +134,31 @@ def test_first_teacher_in_episode_always_surfaces() -> None:
     assert decision["reason"] == "FIRST_SURFACED_TEACHER_IN_EPISODE"
 
 
-def test_same_coarse_phase_auto_compresses_without_rule_learning() -> None:
-    first = _packet(teacher_id="wf-100-long")
-    later = _packet(teacher_id="wf-101-long", di_ratio=2.8, adx=59.0, ema50=3.6)
+def test_same_actionability_auto_compresses_fine_feature_changes() -> None:
+    first = _packet(teacher_id="wf-100-long", matched_entry=("ENTRY_001",))
+    later = _packet(
+        teacher_id="wf-101-long",
+        di_ratio=2.8,
+        adx=59.0,
+        ema50=3.6,
+        matched_entry=("ENTRY_001",),
+    )
     decision = teacher_compression_decision(later, [_reviewed_event(first)])
     assert decision["action"] == "AUTO_COMPRESS"
-    assert decision["reason"] == "CORRELATED_PHASE_DUPLICATE"
+    assert decision["reason"] == "RULE_ACTIONABILITY_REPEAT"
     assert decision["compared_to_teacher_id"] == "wf-100-long"
 
 
-def test_previously_reviewed_phase_is_compressed_after_intervening_phase() -> None:
+def test_actionability_memory_ignores_intervening_fine_structure() -> None:
     phase_a = _packet(
         teacher_id="wf-100-long",
         relation_4h="NEAR_OPPOSING_STRUCTURE",
+        matched_entry=("ENTRY_001",),
     )
     phase_b = _packet(
         teacher_id="wf-101-long",
         relation_4h="BETWEEN_STRUCTURES",
+        matched_entry=("ENTRY_001",),
     )
     phase_a_again = _packet(
         teacher_id="wf-102-long",
@@ -157,6 +166,7 @@ def test_previously_reviewed_phase_is_compressed_after_intervening_phase() -> No
         di_ratio=2.8,
         adx=59.0,
         ema50=3.6,
+        matched_entry=("ENTRY_001",),
     )
 
     decision = teacher_compression_decision(
@@ -168,16 +178,24 @@ def test_previously_reviewed_phase_is_compressed_after_intervening_phase() -> No
     )
 
     assert decision["action"] == "AUTO_COMPRESS"
-    assert decision["reason"] == "CORRELATED_PHASE_DUPLICATE"
-    assert decision["compared_to_teacher_id"] == "wf-100-long"
+    assert decision["reason"] == "RULE_ACTIONABILITY_REPEAT"
+    assert decision["compared_to_teacher_id"] == "wf-101-long"
 
 
-def test_structural_bucket_change_surfaces_new_phase() -> None:
-    first = _packet(teacher_id="wf-100-long", relation_4h="NEAR_OPPOSING_STRUCTURE")
-    later = _packet(teacher_id="wf-101-long", relation_4h="BETWEEN_STRUCTURES")
+def test_minor_structural_bucket_change_does_not_surface() -> None:
+    first = _packet(
+        teacher_id="wf-100-long",
+        relation_4h="NEAR_OPPOSING_STRUCTURE",
+        matched_entry=("ENTRY_001",),
+    )
+    later = _packet(
+        teacher_id="wf-101-long",
+        relation_4h="BETWEEN_STRUCTURES",
+        matched_entry=("ENTRY_001",),
+    )
     decision = teacher_compression_decision(later, [_reviewed_event(first)])
-    assert decision["action"] == "SURFACE"
-    assert decision["reason"] == "STRUCTURAL_PHASE_CHANGED"
+    assert decision["action"] == "AUTO_COMPRESS"
+    assert decision["reason"] == "RULE_ACTIONABILITY_REPEAT"
 
 
 def test_outcome_change_always_surfaces() -> None:
@@ -394,6 +412,96 @@ def test_open_confirmation_quota_does_not_surface_nonmatching_phase() -> None:
     )
 
     assert decision["action"] == "SURFACE"
-    assert decision["reason"] == "STRUCTURAL_PHASE_CHANGED"
+    assert decision["reason"] == "UNMATCHED_WINNER"
     assert decision["confirmation_of_teacher_id"] is None
     assert decision["confirmation_rule_ids"] == []
+
+
+def test_unmatched_winner_always_surfaces() -> None:
+    first = _packet(teacher_id="wf-100-long", result="LOSS")
+    first["teacher"]["paired_opposite_net_r"] = -1.0
+    later = _packet(teacher_id="wf-101-long", result="WIN")
+    decision = teacher_compression_decision(later, [_reviewed_event(first)])
+    assert decision["action"] == "SURFACE"
+    assert decision["reason"] == "UNMATCHED_WINNER"
+
+
+def test_unruled_loss_loss_auto_compresses_after_baseline() -> None:
+    first = _packet(teacher_id="wf-100-long", result="LOSS")
+    first["teacher"]["paired_opposite_net_r"] = -1.0
+    later = _packet(teacher_id="wf-101-long", result="LOSS")
+    later["teacher"]["paired_opposite_net_r"] = -1.2
+    decision = teacher_compression_decision(later, [_reviewed_event(first)])
+    assert decision["action"] == "AUTO_COMPRESS"
+    assert decision["reason"] == "UNRULED_NONACTIONABLE_LOSS"
+
+
+def test_paired_flip_opportunity_always_surfaces() -> None:
+    first = _packet(teacher_id="wf-100-long", result="LOSS")
+    first["teacher"]["paired_opposite_net_r"] = -1.0
+    later = _packet(teacher_id="wf-101-long", result="LOSS")
+    later["teacher"]["paired_opposite_net_r"] = 2.5
+    decision = teacher_compression_decision(later, [_reviewed_event(first)])
+    assert decision["action"] == "SURFACE"
+    assert decision["reason"] == "PAIRED_FLIP_OPPORTUNITY"
+
+
+def test_genuine_setup_class_change_surfaces() -> None:
+    first = _packet(
+        teacher_id="wf-100-long",
+        matched_entry=("ENTRY_001",),
+        di_state="CONTRACTING",
+        adx=58.0,
+        ema50=3.4,
+        macd_histogram=-0.5,
+    )
+    later = _packet(
+        teacher_id="wf-101-long",
+        matched_entry=("ENTRY_001",),
+        di_state="EXPANDING",
+        di_ratio=2.7,
+        adx=35.0,
+        ema50=1.0,
+        macd_histogram=0.2,
+    )
+    decision = teacher_compression_decision(later, [_reviewed_event(first)])
+    assert decision["action"] == "SURFACE"
+    assert decision["reason"] == "SETUP_CLASS_CHANGED"
+
+
+def test_blocked_entry_winner_surfaces() -> None:
+    first = _packet(
+        teacher_id="wf-100-long",
+        matched_entry=("ENTRY_001",),
+    )
+    later = _packet(
+        teacher_id="wf-101-long",
+        matched_entry=("ENTRY_001",),
+    )
+    later["current_rule_coverage"]["eligible"] = False
+    later["current_rule_coverage"]["reason"] = "VETO_MATCHED"
+    decision = teacher_compression_decision(later, [_reviewed_event(first)])
+    assert decision["action"] == "SURFACE"
+    assert decision["reason"] == "RULE_BLOCKED_WINNER"
+
+
+def test_confirmation_requires_exact_rule_version() -> None:
+    learning = _packet(teacher_id="wf-100-long")
+    learning_event = _reviewed_event(learning, sequence=10)
+    rule_event = {
+        "sequence": 11,
+        "event_type": "ENTRY_LEARNED",
+        "payload": {"rule_id": "ENTRY_001", "rule_version": "1"},
+    }
+    current = _packet(
+        teacher_id="wf-101-long",
+        matched_entry=("ENTRY_001",),
+        rule_version="2",
+    )
+    decision = teacher_compression_decision(
+        current, [learning_event, rule_event]
+    )
+    assert decision["reason"] != "FIRST_RULE_CONFIRMATION_REQUIRED"
+    assert decision["confirmation_of_teacher_id"] is None
+    assert decision["confirmation_rule_ids"] == []
+    assert decision["confirmation_rule_versions"] == []
