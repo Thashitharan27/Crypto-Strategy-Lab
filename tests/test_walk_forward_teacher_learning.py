@@ -184,6 +184,21 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
             },
         ]
     )
+    episode_map = {
+        "wf-42-short": ("episode-000001", 1, 2),
+        "wf-43-short": ("episode-000001", 2, 2),
+        "wf-44-long": ("episode-000002", 1, 1),
+        "wf-45-long": ("episode-000003", 1, 1),
+    }
+    samples["research_episode_id"] = samples["walk_forward_candidate_id"].map(
+        lambda value: episode_map[str(value)][0]
+    )
+    samples["research_episode_entry_number"] = samples[
+        "walk_forward_candidate_id"
+    ].map(lambda value: episode_map[str(value)][1])
+    samples["research_episode_viable_entries"] = samples[
+        "walk_forward_candidate_id"
+    ].map(lambda value: episode_map[str(value)][2])
     _write_parquet(samples, samples_path)
     manifest = {
         "config": {
@@ -329,6 +344,9 @@ def test_teacher_winner_does_not_expose_unresolved_opposite_result(tmp_path):
     assert teacher is not None
     boundary, _resolved_at = teacher
     assert boundary["result"] == "WIN"
+    assert boundary["research_episode_id"] == "episode-000001"
+    assert boundary["research_episode_entry_number"] == 1
+    assert boundary["research_episode_viable_entries"] == 2
     assert "paired_opposite_net_r" not in boundary
     assert "paired_opposite_side" not in boundary
     assert "opposite_pair_net_r" not in boundary
