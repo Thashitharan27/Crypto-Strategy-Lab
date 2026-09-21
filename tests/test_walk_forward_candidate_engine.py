@@ -482,20 +482,10 @@ def test_scanner_blocks_advancing_while_candidate_is_unresolved(tmp_path):
 
 
 def test_scanner_returns_teacher_boundary_before_later_candidate(tmp_path):
-    teachers = pd.DataFrame(
-        [
-            {
-                "pair_id": 593,
-                "side": "LONG",
-                "strategy_profile_key": "bull_long",
-                "entry_time": "2025-01-01T00:00:00Z",
-                "exit_time": "2025-01-02T12:00:00Z",
-                "pair_net_r": 1.0,
-            }
-        ]
-    )
+    samples = _samples()
+    samples.loc[samples["research_signal_index"].eq(10), "pair_net_r"] = 1.0
     control, reports, store, head = _write_reference(
-        tmp_path, samples=_samples(), context=_context(), teacher_trades=teachers
+        tmp_path, samples=samples, context=_context()
     )
     head = _append_rule(
         store, head, "ENTRY_LEARNED", "ENTRY_001", "ENTRY",
@@ -508,9 +498,50 @@ def test_scanner_returns_teacher_boundary_before_later_candidate(tmp_path):
         expected_state_hash=head["state_hash"],
     )
     assert result["status"] == "TEACHER_DUE_FIRST"
-    assert result["teacher_boundary"]["pair_id"] == 593
+    assert result["teacher_boundary"]["pair_id"] == "wf-10-long"
+    assert result["teacher_boundary"]["teacher_observation_source"] == "WALK_FORWARD_SOURCE_ROW"
+    assert result["teacher_boundary"]["portfolio_overlap_suppression_applies"] is False
     assert result["candidate_not_captured"] is True
     assert store.read(EXPERIMENT_ID)["derived_state"]["candidate_states"] == {}
+
+
+def test_teacher_boundary_survives_market_cursor_advancing_past_teacher_resolution(tmp_path):
+    samples = _samples()
+    samples.loc[samples["research_signal_index"].eq(10), "pair_net_r"] = 1.0
+    control, reports, store, head = _write_reference(
+        tmp_path, samples=samples, context=_context()
+    )
+    head = _append_rule(
+        store, head, "ENTRY_LEARNED", "ENTRY_001", "ENTRY",
+        [{"indicator": "ADX", "condition": "GTE", "value": 30}],
+        "rule:entry",
+    )
+    head = store.append_event(
+        EXPERIMENT_ID,
+        "CHECKPOINT_CREATED",
+        {
+            "checkpoint_type": "TEST_OPEN_TRADE_RESOLUTION_CURSOR",
+            "reason": "simulate WAIT_UNTIL_CLOSED fund cursor moving past teacher resolution",
+        },
+        "cursor:after-open-trade",
+        head["sequence"],
+        head["state_hash"],
+        effective_market_time="2025-01-02T18:00:00Z",
+        source="SYSTEM",
+    )
+
+    result = get_next_walk_forward_candidate(
+        control, reports, experiment_id=EXPERIMENT_ID,
+        operation_id="candidate:teacher-after-fund-cursor",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+    )
+
+    assert result["status"] == "TEACHER_DUE_FIRST"
+    assert result["teacher_boundary"]["pair_id"] == "wf-10-long"
+    assert result["teacher_boundary"]["resolution_time"] == "2025-01-02T12:00:00+00:00"
+    assert result["teacher_boundary"]["portfolio_overlap_suppression_applies"] is False
+    assert result["candidate_not_captured"] is True
 
 
 def test_scanner_rejects_stale_chain_head(tmp_path):
