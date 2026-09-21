@@ -111,6 +111,8 @@ A teacher, review, rule change, candidate/trade event, or other later causal mut
 
 Teacher boundaries are also enforced before rule matching: once a pending teacher winner has resolved by the decision time of the next candidate row, scanning stops and returns `TEACHER_REVIEW_REQUIRED` even when the current strategy has no ENTRY rule that would admit that row. This avoids scanning hundreds of thousands of irrelevant rows before the first teacher review.
 
+For canonical paired `WALK_FORWARD` references, teacher chronology comes from the immutable source rows in `research_sampling_trades`, not from the portfolio `trades` population. Source-row sampling intentionally allows overlap, so `WAIT_UNTIL_CLOSED` suppresses only additional RESEARCH-equity entries; it does not remove overlapping observations from teacher learning. If the fund cursor has already advanced beyond an unresolved teacher resolution, the teacher boundary is still surfaced before the next eligible candidate. Existing experiments do not retroactively backfill teacher observations behind an already-processed teacher cursor.
+
 ## Outcome firewall
 
 `submit_walk_forward_decision` freezes ChatGPT's research view before the strategy outcome is opened.
