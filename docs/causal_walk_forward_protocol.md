@@ -860,9 +860,9 @@ New protocol features must not silently change historical experiment semantics.
 
 In particular:
 
-- historical teacher processing is winner-only by default;
-- teacher-loss FLIP chronology must be explicitly enabled;
-- even when enabled, only immutable 1.0R profiles are eligible;
+- fresh paired WALK_FORWARD experiments enable teacher-loss FLIP chronology by default;
+- paired teacher-loss FLIP evidence is valid at any configured R:R when the immutable opposite-side row exists and resolves as a WIN;
+- callers may explicitly disable teacher-loss FLIP processing when preserving the semantics of a legacy experiment created before paired-loss learning was adopted;
 - an older experiment should be resumed under the semantics it was created/tested with unless an explicit compatible migration is documented;
 - if a change would alter already-processed chronology, create a fresh experiment rather than rewriting history.
 
