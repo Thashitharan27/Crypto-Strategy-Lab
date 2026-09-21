@@ -697,7 +697,18 @@ def teacher_compression_decision(
             result["reason"] = "FIRST_RULE_CONFIRMATION_REQUIRED"
             return result
 
-    # 5) Exact actionability memory compresses fine-grained DI/ADX/MACD/SR/Ichimoku
+    # 5) Repeated unruled LOSS/LOSS observations are retained in audit data but do
+    # not require ChatGPT. A paired winner was already caught above.
+    if (
+        not matched_entry_or_flip
+        and current_outcome in {"LOSS", "BREAKEVEN"}
+        and current_paired in {"LOSS", "BREAKEVEN"}
+    ):
+        result["action"] = "AUTO_COMPRESS"
+        result["reason"] = "UNRULED_NONACTIONABLE_LOSS"
+        return result
+
+    # 6) Exact actionability memory compresses fine-grained DI/ADX/MACD/SR/Ichimoku
     # changes that do not alter setup class, outcomes, or executable rule context.
     current_actionability = audit.get("actionability_fingerprint")
     actionability_match = next(
@@ -718,17 +729,6 @@ def teacher_compression_decision(
             result["reason"] = "RULE_ACTIONABILITY_REPEAT"
         else:
             result["reason"] = "CORRELATED_ACTIONABILITY_DUPLICATE"
-        return result
-
-    # 6) Repeated unruled LOSS/LOSS observations are retained in audit data but do
-    # not require ChatGPT. A paired winner was already caught above.
-    if (
-        not matched_entry_or_flip
-        and current_outcome in {"LOSS", "BREAKEVEN"}
-        and current_paired in {"LOSS", "BREAKEVEN"}
-    ):
-        result["action"] = "AUTO_COMPRESS"
-        result["reason"] = "UNRULED_NONACTIONABLE_LOSS"
         return result
 
     # 7) A genuinely different setup family is actionable even when the detailed
