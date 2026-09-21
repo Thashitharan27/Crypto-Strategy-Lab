@@ -84,16 +84,17 @@ def next_teacher_for_learning(
 ) -> tuple[dict[str, Any], Any] | None:
     """Return the next causal teacher boundary.
 
-    Winners become reviewable at their own immutable trade exit. Paired teacher
-    losses become reviewable only after BOTH the source teacher trade and its
-    immutable opposite-side WALK_FORWARD row have resolved. That delayed boundary
-    allows arbitrary R:R FLIP evidence without reading future information at the
-    source loss timestamp.
-    """
-    if "trades" not in (manifest.get("artifacts") or {}):
-        return None
+    Canonical WALK_FORWARD experiments learn from immutable paired source
+    observations rather than from the portfolio trades artifact. The paired
+    research population deliberately ignores portfolio overlap suppression, so a
+    viable observation remains eligible teacher evidence even when
+    WAIT_UNTIL_CLOSED would prevent it from becoming a RESEARCH-equity trade.
 
-    trades_path = artifact_path(run_dir, manifest, "trades", verify=True)
+    Winners become reviewable at their immutable source-row exit. Paired teacher
+    losses become reviewable only after BOTH the source row and its immutable
+    opposite-side row have resolved. Teacher evidence never changes equity.
+    """
+    artifacts = manifest.get("artifacts") or {}
     last = _candidate_impl._last_teacher_time(events)
     reviewed_pairs = _reviewed_teacher_pair_ids(events)
     minimum_entry = (
@@ -101,33 +102,25 @@ def next_teacher_for_learning(
         if minimum_entry_time is not None
         else None
     )
-    allow_paired_losses = (
-        bool(include_losses)
-        and _candidate_impl._sampling_mode(manifest) == "WALK_FORWARD"
-        and "research_sampling_trades" in (manifest.get("artifacts") or {})
+    sampling_mode = _candidate_impl._sampling_mode(manifest)
+    samples_available = (
+        sampling_mode == "WALK_FORWARD"
+        and "research_sampling_trades" in artifacts
     )
 
-    with duckdb.connect(":memory:") as connection:
-        trade_columns = set(_candidate_impl._columns(connection, trades_path))
-        required = {"pair_id", "pair_net_r", "exit_time"}
-        if required - trade_columns:
-            return None
-        if allow_paired_losses and not {
-            "side", "strategy_profile_key", "entry_time"
-        }.issubset(trade_columns):
-            allow_paired_losses = False
+    rows: list[tuple[Any, ...]] = []
+    names: list[str] = []
 
-        optional = [
-            name
-            for name in ("trade_id", "side", "strategy_profile_key", "entry_time")
-            if name in trade_columns
-        ]
-        selection = [f't."{name}"' for name in ["pair_id", *optional, "pair_net_r"]]
-
-        if allow_paired_losses:
-            samples_path = artifact_path(
-                run_dir, manifest, "research_sampling_trades", verify=True
-            )
+    if samples_available:
+        samples_path = artifact_path(
+            run_dir, manifest, "research_sampling_trades", verify=True
+        )
+        trades_path = (
+            artifact_path(run_dir, manifest, "trades", verify=True)
+            if "trades" in artifacts
+            else None
+        )
+        with duckdb.connect(":memory:") as connection:
             sample_columns = set(_candidate_impl._columns(connection, samples_path))
             required_pair = {
                 "walk_forward_candidate_id",
@@ -136,21 +129,81 @@ def next_teacher_for_learning(
                 "strategy_profile_key",
                 "entry_time",
                 "exit_time",
+                "pair_net_r",
             }
-            if required_pair - sample_columns:
-                allow_paired_losses = False
+            missing = sorted(required_pair - sample_columns)
+            if missing:
+                raise ValueError(
+                    "paired WALK_FORWARD teacher source is missing columns: "
+                    + ", ".join(missing)
+                )
 
-        if allow_paired_losses:
-            # One validated WALK_FORWARD candidate has exactly one source row and
-            # one opposite row. The loss becomes causally knowable for FLIP review
-            # at the later of the teacher exit and opposite-side exit.
+            sample_id_sql = (
+                "CAST(research_sample_id AS VARCHAR)"
+                if "research_sample_id" in sample_columns
+                else "NULL::VARCHAR"
+            )
+            signal_index_sql = (
+                "CAST(research_signal_index AS BIGINT)"
+                if "research_signal_index" in sample_columns
+                else "NULL::BIGINT"
+            )
+
+            trade_match_cte = ""
+            trade_join = ""
+            legacy_pair_sql = "NULL::BIGINT"
+            legacy_trade_sql = "NULL::VARCHAR"
+            if trades_path is not None:
+                trade_columns = set(_candidate_impl._columns(connection, trades_path))
+                match_required = {
+                    "pair_id",
+                    "side",
+                    "strategy_profile_key",
+                    "entry_time",
+                }
+                if match_required.issubset(trade_columns):
+                    legacy_trade_expr = (
+                        "CAST(MIN(trade_id) AS VARCHAR)"
+                        if "trade_id" in trade_columns
+                        else "NULL::VARCHAR"
+                    )
+                    trade_match_cte = f"""
+                    , trade_matches AS (
+                        SELECT
+                            CAST(entry_time AS TIMESTAMPTZ) AS entry_time,
+                            UPPER(CAST(side AS VARCHAR)) AS side,
+                            LOWER(CAST(strategy_profile_key AS VARCHAR)) AS profile,
+                            COUNT(*) AS match_count,
+                            MIN(pair_id) AS legacy_pair_id,
+                            {legacy_trade_expr} AS legacy_trade_id
+                        FROM read_parquet('{_candidate_impl._quote(trades_path)}')
+                        GROUP BY 1, 2, 3
+                    )
+                    """
+                    trade_join = """
+                    LEFT JOIN trade_matches tm
+                      ON tm.entry_time=s.entry_time
+                     AND tm.side=s.side
+                     AND tm.profile=s.profile
+                    """
+                    legacy_pair_sql = (
+                        "CASE WHEN tm.match_count=1 THEN tm.legacy_pair_id ELSE NULL END"
+                    )
+                    legacy_trade_sql = (
+                        "CASE WHEN tm.match_count=1 THEN tm.legacy_trade_id ELSE NULL END"
+                    )
+
             sql = f"""
                 WITH source_rows AS (
                     SELECT
                         CAST(walk_forward_candidate_id AS VARCHAR) AS candidate_id,
+                        {sample_id_sql} AS research_sample_id,
+                        {signal_index_sql} AS research_signal_index,
                         CAST(entry_time AS TIMESTAMPTZ) AS entry_time,
+                        CAST(exit_time AS TIMESTAMPTZ) AS source_exit_time,
                         UPPER(CAST(side AS VARCHAR)) AS side,
-                        LOWER(CAST(strategy_profile_key AS VARCHAR)) AS profile
+                        LOWER(CAST(strategy_profile_key AS VARCHAR)) AS profile,
+                        CAST(pair_net_r AS DOUBLE) AS pair_net_r
                     FROM read_parquet('{_candidate_impl._quote(samples_path)}')
                     WHERE COALESCE(
                         CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
@@ -162,77 +215,125 @@ def next_teacher_for_learning(
                         UPPER(CAST(side AS VARCHAR)) AS side,
                         CAST(exit_time AS TIMESTAMPTZ) AS exit_time
                     FROM read_parquet('{_candidate_impl._quote(samples_path)}')
+                    WHERE NOT COALESCE(
+                        CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
+                    )
                 )
+                {trade_match_cte}
                 SELECT
-                    {", ".join(selection)},
-                    CAST(t.exit_time AS TIMESTAMPTZ) AS source_exit_time,
+                    {legacy_pair_sql} AS legacy_pair_id,
+                    {legacy_trade_sql} AS trade_id,
+                    s.candidate_id AS teacher_observation_id,
+                    s.side,
+                    s.profile AS strategy_profile_key,
+                    s.entry_time,
+                    s.pair_net_r,
+                    s.source_exit_time,
                     CASE
-                        WHEN t.pair_net_r > 0
-                            THEN CAST(t.exit_time AS TIMESTAMPTZ)
-                        ELSE GREATEST(
-                            CAST(t.exit_time AS TIMESTAMPTZ),
-                            o.exit_time
-                        )
+                        WHEN s.pair_net_r > 0 THEN s.source_exit_time
+                        WHEN o.exit_time IS NOT NULL
+                            THEN GREATEST(s.source_exit_time, o.exit_time)
+                        ELSE NULL
                     END AS learning_resolution_time,
                     s.candidate_id AS walk_forward_candidate_id,
-                    o.exit_time AS opposite_exit_time
-                FROM read_parquet('{_candidate_impl._quote(trades_path)}') t
-                LEFT JOIN source_rows s
-                  ON CAST(t.entry_time AS TIMESTAMPTZ)=s.entry_time
-                 AND UPPER(CAST(t.side AS VARCHAR))=s.side
-                 AND LOWER(CAST(t.strategy_profile_key AS VARCHAR))=s.profile
+                    o.exit_time AS opposite_exit_time,
+                    s.research_sample_id,
+                    s.research_signal_index
+                FROM source_rows s
                 LEFT JOIN opposite_rows o
                   ON o.candidate_id=s.candidate_id
                  AND o.side<>s.side
-                WHERE (
-                    t.pair_net_r > 0
-                    OR (
-                        t.pair_net_r < 0
-                        AND s.candidate_id IS NOT NULL
-                        AND o.exit_time IS NOT NULL
-                    )
-                )
-                ORDER BY learning_resolution_time, CAST(t.pair_id AS VARCHAR)
+                {trade_join}
+                WHERE s.pair_net_r<>0
+                ORDER BY learning_resolution_time, s.candidate_id
             """
-        else:
-            sql = f"""
+            rows = connection.execute(sql).fetchall()
+            names = [
+                "legacy_pair_id",
+                "trade_id",
+                "teacher_observation_id",
+                "side",
+                "strategy_profile_key",
+                "entry_time",
+                "pair_net_r",
+                "source_exit_time",
+                "learning_resolution_time",
+                "walk_forward_candidate_id",
+                "opposite_exit_time",
+                "research_sample_id",
+                "research_signal_index",
+            ]
+    else:
+        if "trades" not in artifacts:
+            return None
+        trades_path = artifact_path(run_dir, manifest, "trades", verify=True)
+        with duckdb.connect(":memory:") as connection:
+            trade_columns = set(_candidate_impl._columns(connection, trades_path))
+            required = {"pair_id", "pair_net_r", "exit_time"}
+            if required - trade_columns:
+                return None
+            optional = [
+                name
+                for name in ("trade_id", "side", "strategy_profile_key", "entry_time")
+                if name in trade_columns
+            ]
+            selection = [
+                f't."{name}"'
+                for name in ["pair_id", *optional, "pair_net_r"]
+            ]
+            rows = connection.execute(
+                f"""
                 SELECT
                     {", ".join(selection)},
                     CAST(t.exit_time AS TIMESTAMPTZ) AS source_exit_time,
-                    CAST(t.exit_time AS TIMESTAMPTZ) AS learning_resolution_time,
-                    NULL::VARCHAR AS walk_forward_candidate_id,
-                    NULL::TIMESTAMPTZ AS opposite_exit_time
+                    CAST(t.exit_time AS TIMESTAMPTZ) AS learning_resolution_time
                 FROM read_parquet('{_candidate_impl._quote(trades_path)}') t
                 WHERE t.pair_net_r > 0
                 ORDER BY learning_resolution_time, CAST(t.pair_id AS VARCHAR)
-            """
-
-        rows = connection.execute(sql).fetchall()
-        names = [
-            "pair_id",
-            *optional,
-            "pair_net_r",
-            "source_exit_time",
-            "learning_resolution_time",
-            "walk_forward_candidate_id",
-            "opposite_exit_time",
-        ]
+                """
+            ).fetchall()
+            names = [
+                "pair_id",
+                *optional,
+                "pair_net_r",
+                "source_exit_time",
+                "learning_resolution_time",
+            ]
 
     for row in rows:
         values = dict(zip(names, row))
+        if samples_available:
+            legacy_pair_id = values.get("legacy_pair_id")
+            observation_id = str(values.get("teacher_observation_id") or "").strip()
+            teacher_id: Any = (
+                legacy_pair_id
+                if legacy_pair_id not in (None, "")
+                else observation_id
+            )
+            values["pair_id"] = teacher_id
         pair_id = str(values.get("pair_id"))
         if pair_id in reviewed_pairs:
             continue
+
         if minimum_entry is not None:
             entry_raw = values.get("entry_time")
             if entry_raw is None:
                 continue
-            if _candidate_impl._utc_timestamp(entry_raw, "teacher entry_time") < minimum_entry:
+            if (
+                _candidate_impl._utc_timestamp(entry_raw, "teacher entry_time")
+                < minimum_entry
+            ):
                 continue
 
+        resolution_raw = values.get("learning_resolution_time")
+        if resolution_raw is None:
+            continue
         resolution = _candidate_impl._utc_timestamp(
-            values["learning_resolution_time"], "teacher learning_resolution_time"
+            resolution_raw, "teacher learning_resolution_time"
         )
+        # Never backfill teacher learning behind an already-processed teacher
+        # boundary when upgrading an existing experiment. Fresh experiments see
+        # every paired source observation in causal order.
         if last is not None and resolution < last:
             continue
 
@@ -243,26 +344,38 @@ def next_teacher_for_learning(
         if result == "LOSS":
             profile = str(values.get("strategy_profile_key") or "").lower()
             if (
-                not allow_paired_losses
+                not samples_available
+                or not bool(include_losses)
                 or not profile_supports_teacher_loss_flip(manifest, profile)
                 or not values.get("walk_forward_candidate_id")
+                or values.get("opposite_exit_time") is None
             ):
                 continue
 
+        excluded = {
+            "legacy_pair_id",
+            "teacher_observation_id",
+            "learning_resolution_time",
+            "source_exit_time",
+            "opposite_exit_time",
+        }
         boundary = {
             key: _candidate_impl._json_safe(value)
             for key, value in values.items()
-            if key not in {
-                "learning_resolution_time",
-                "source_exit_time",
-                "opposite_exit_time",
-            }
+            if key not in excluded
         }
+        boundary["pair_id"] = _candidate_impl._json_safe(values.get("pair_id"))
         boundary["result"] = result
         boundary["resolution_time"] = resolution.isoformat()
         boundary["source_trade_resolution_time"] = _candidate_impl._utc_timestamp(
             values["source_exit_time"], "teacher source_exit_time"
         ).isoformat()
+        if samples_available:
+            boundary["teacher_observation_source"] = "WALK_FORWARD_SOURCE_ROW"
+            boundary["portfolio_overlap_suppression_applies"] = False
+        else:
+            boundary["teacher_observation_source"] = "PORTFOLIO_TRADE"
+            boundary["portfolio_overlap_suppression_applies"] = True
         if values.get("opposite_exit_time") is not None:
             boundary["paired_opposite_resolution_time"] = (
                 _candidate_impl._utc_timestamp(
