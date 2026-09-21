@@ -556,21 +556,30 @@ def teacher_compression_decision(
         value.startswith("ENTRY:") or value.startswith("FLIP:")
         for value in active_matches
     )
+    source_side = _upper(teacher.get("side"))
+    effective_side = _upper(coverage.get("rule_effective_side"))
+    effective_outcome = current_outcome
     if (
-        current_outcome == "LOSS"
-        and bool(coverage.get("eligible", False))
+        source_side in {"LONG", "SHORT"}
+        and effective_side in {"LONG", "SHORT"}
+        and effective_side != source_side
+    ):
+        effective_outcome = current_paired
+
+    if (
+        bool(coverage.get("eligible", False))
         and matched_entry_or_flip
+        and effective_outcome in {"LOSS", "BREAKEVEN"}
     ):
         result["reason"] = "ACTIVE_RULE_FAILURE"
         return result
 
-    source_side = _upper(teacher.get("side"))
-    effective_side = _upper(coverage.get("rule_effective_side"))
     if (
         current_outcome == "WIN"
         and source_side in {"LONG", "SHORT"}
         and effective_side in {"LONG", "SHORT"}
         and effective_side != source_side
+        and effective_outcome == "UNAVAILABLE"
     ):
         result["reason"] = "ACTIVE_RULE_DIRECTION_CONFLICT"
         return result
