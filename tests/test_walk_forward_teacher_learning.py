@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import duckdb
 import pandas as pd
 
 from crypto_strategy_lab.run_manifest import file_sha256
@@ -20,12 +21,27 @@ def _catalog(path: Path, run_dir: Path) -> dict:
     }
 
 
+def _write_parquet(frame: pd.DataFrame, path: Path) -> None:
+    with duckdb.connect(":memory:") as connection:
+        connection.register("frame", frame)
+        escaped = str(path).replace("'", "''")
+        connection.execute(f"COPY frame TO '{escaped}' (FORMAT PARQUET)")
+
+
+def _read_parquet(path: Path) -> pd.DataFrame:
+    escaped = str(path).replace("'", "''")
+    with duckdb.connect(":memory:") as connection:
+        return connection.execute(
+            f"SELECT * FROM read_parquet('{escaped}')"
+        ).fetchdf()
+
+
 def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
     run_dir = tmp_path / "reference"
     artifacts = run_dir / "artifacts"
     artifacts.mkdir(parents=True)
     trades_path = artifacts / "trades.parquet"
-    pd.DataFrame(
+    trades = pd.DataFrame(
         [
             {
                 "pair_id": 2,
@@ -60,14 +76,15 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
                 "pair_net_r": 0.96,
             },
         ]
-    ).to_parquet(trades_path, index=False)
+    )
+    _write_parquet(trades, trades_path)
     samples_path = artifacts / "research_sampling_trades.parquet"
     opposite_exit = (
         "2025-01-03T03:30:00Z"
         if reward_risk_ratio == 1.0
         else "2025-01-03T06:00:00Z"
     )
-    pd.DataFrame(
+    samples = pd.DataFrame(
         [
             {
                 "research_signal_index": 42,
@@ -166,7 +183,8 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
                 "pair_net_r": -1.0,
             },
         ]
-    ).to_parquet(samples_path, index=False)
+    )
+    _write_parquet(samples, samples_path)
     manifest = {
         "config": {
             "execution": {
@@ -275,7 +293,7 @@ def test_overlapping_teacher_observation_does_not_invalidate_paired_flip_evidenc
 def test_overlap_only_walk_forward_source_row_remains_teacher_evidence(tmp_path):
     manifest, run_dir = _reference(tmp_path, 3.0)
     samples_path = run_dir / "artifacts" / "research_sampling_trades.parquet"
-    samples = pd.read_parquet(samples_path)
+    samples = _read_parquet(samples_path)
     overlap = pd.DataFrame(
         [
             {
@@ -304,7 +322,7 @@ def test_overlap_only_walk_forward_source_row_remains_teacher_evidence(tmp_path)
             },
         ]
     )
-    pd.concat([samples, overlap], ignore_index=True).to_parquet(samples_path, index=False)
+    _write_parquet(pd.concat([samples, overlap], ignore_index=True), samples_path)
     manifest["artifacts"]["research_sampling_trades"] = _catalog(samples_path, run_dir)
 
     teacher = next_teacher_for_learning(
@@ -343,7 +361,7 @@ def test_overlap_only_walk_forward_source_row_remains_teacher_evidence(tmp_path)
 def test_existing_experiment_does_not_backfill_overlap_teacher_behind_teacher_cursor(tmp_path):
     manifest, run_dir = _reference(tmp_path, 3.0)
     samples_path = run_dir / "artifacts" / "research_sampling_trades.parquet"
-    samples = pd.read_parquet(samples_path)
+    samples = _read_parquet(samples_path)
     overlap = pd.DataFrame(
         [
             {
@@ -372,7 +390,7 @@ def test_existing_experiment_does_not_backfill_overlap_teacher_behind_teacher_cu
             },
         ]
     )
-    pd.concat([samples, overlap], ignore_index=True).to_parquet(samples_path, index=False)
+    _write_parquet(pd.concat([samples, overlap], ignore_index=True), samples_path)
     manifest["artifacts"]["research_sampling_trades"] = _catalog(samples_path, run_dir)
 
     events = [
