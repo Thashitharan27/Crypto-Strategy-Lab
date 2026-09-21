@@ -32,6 +32,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     is_context_timeframe_evidence,
     is_support_resistance_evidence,
     normalize_rule,
+    uses_higher_timeframe_ichimoku_rules,
     uses_ichimoku_rules,
     rule_value_options,
 )
@@ -915,4 +916,12 @@ class RuleWorkspace:
             self.rules["FLIP"],
         ):
             result["features"]["ichimoku_enabled"] = True
+            strategy_minutes = int(result["data"]["strategy_timeframe_minutes"])
+            if uses_higher_timeframe_ichimoku_rules(
+                strategy_minutes,
+                self.rules["REQUIRED"],
+                self.rules["VETO"],
+                self.rules["FLIP"],
+            ):
+                result["features"]["ichimoku_include_higher_timeframes"] = True
         return result
