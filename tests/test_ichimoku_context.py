@@ -146,6 +146,26 @@ def test_higher_timeframe_context_uses_only_completed_candles() -> None:
     assert bool((selected < decisions).all())
 
 
+def test_higher_timeframe_alignment_accepts_microsecond_source_timestamps() -> None:
+    frame = _klines(500)
+    for column in ("period_start", "period_end", "available_at"):
+        frame[column] = frame[column].astype("datetime64[us, UTC]")
+
+    assert str(frame["available_at"].dtype) == "datetime64[us, UTC]"
+
+    provider = IchimokuContextFeatureProvider()
+    output = provider.compute(
+        _request(frame),
+        {DatasetKind.KLINES: frame},
+        _parameters(60),
+    )
+
+    assert len(output) == len(frame)
+    assert str(output["available_at"].dtype) == "datetime64[ns, UTC]"
+    assert output.loc[3, "ichimoku_completed_candle_time"] == frame.loc[0, "period_start"]
+    assert output.loc[3, "available_at"] == frame.loc[3, "available_at"]
+
+
 def test_ichimoku_evidence_is_authorable_without_new_signal_mode() -> None:
     expected = {
         "ICH_PRICE_VS_CLOUD",
