@@ -589,7 +589,7 @@ If a specific mechanism is claimed, record it in `failure_mechanism`. The machin
 
 Before adding a new VETO, compare the current mechanism with prior losses of the matched ENTRY. If the same weakness is recurring, prefer ENTRY refinement/consolidation over accumulating another narrow VETO.
 
-For multi-R targets such as TP3, opposing higher-timeframe support/resistance room is an ENTRY-quality dimension. Strong DI, momentum, or flow does not automatically compensate for insufficient travel room.
+For multi-R targets such as TP3, opposing higher-timeframe support/resistance room is graded ENTRY evidence rather than an automatic rejection threshold. Strong HELD opposing structure close to entry is a serious contradiction, but nearby structure by itself does not disqualify an otherwise coherent positive-expectancy setup. Continuation/pullback logic should weigh room more heavily; an explicit BREAKOUT thesis may trade through structure when break/acceptance evidence supports it.
 
 A valid setup that simply failed remains a legitimate loss and stays in equity.
 
@@ -1000,6 +1000,8 @@ process earliest causally due teacher/review/candidate event
                |
                v
           apply active ENTRY/VETO/FLIP
+          ENTRY match -> source side unless VETO blocks; matching FLIP may invert
+          standalone FLIP match -> opposite side without a separate ENTRY match
                |
                v
           strategy_action fixed

@@ -55,10 +55,10 @@ def research_policy_schema() -> dict[str, Any]:
     return {
         "contract": RESEARCH_POLICY_CONTRACT,
         "principles": [
-            "ENTRY describes the positive reusable reason a trade deserves to exist.",
+            "ENTRY describes a positive reusable setup with plausible positive expectancy; it is not a certificate that the setup is perfect or highly certain.",
             "VETO describes a specific exceptional contradiction that invalidates an otherwise-valid ENTRY.",
             "A repeated version of the same contradiction is evidence to refine/consolidate the ENTRY before adding another VETO.",
-            "ENTRY and FLIP use the same structural learning standard: each requires a positive reusable setup thesis and family; FLIP is not held to a higher repetition threshold.",
+            "ENTRY and FLIP use the same structural learning standard: each requires a positive reusable setup thesis and family; FLIP is not held to a higher repetition threshold and, once learned, is a complete admission thesis for the opposite executable side.",
             "A teacher winner is evidence, not an automatic ENTRY rule; NO_CHANGE is valid when the thesis is not reusable.",
             "WAIT_UNTIL_CLOSED constrains fund-affecting RESEARCH entries only; overlapping immutable WALK_FORWARD source observations remain eligible teacher evidence and never alter an already-open trade.",
             "Teacher phase compression is a learning-review constraint, not a data filter: every immutable source observation remains available, while only causally redundant same-phase observations may auto-resolve without another ChatGPT review.",
@@ -66,9 +66,9 @@ def research_policy_schema() -> dict[str, Any]:
             "Episode identity only scopes teacher comparisons. Structural novelty must be decided from current entry-time evidence, settled teacher outcome, active causal rules, and previously reviewed teachers; future episode length or later observations are forbidden and eventual episode size must not be exposed in teacher packets.",
             "A newly learned rule gets one later qualifying same-phase confirmation review before further repeats may be compressed; later contradictions always reopen review.",
             "A prospective loss is evidence, not an automatic VETO; NO_CHANGE is preferred when no distinct causal mechanism is supported.",
-            "For multi-R targets, room to opposing higher-timeframe support/resistance is an ENTRY-quality dimension, not something momentum can automatically override.",
-            "Every surfaced judgment must explicitly inspect available Ichimoku evidence alongside support/resistance, DI/ADX, EMA/MR, MACD/momentum and flow; unavailable Ichimoku is missing evidence, never a reason to infer or reconstruct it.",
-            "BREAKOUT logic must remain distinguishable from normal CONTINUATION/PULLBACK logic so a successful breakout does not weaken room requirements elsewhere.",
+            "For multi-R targets, opposing higher-timeframe support/resistance room is graded ENTRY evidence, not an automatic rejection threshold: nearby or strong HELD structure lowers confidence, while a coherent continuation or explicit breakout thesis may still have positive expectancy.",
+            "Every surfaced judgment must explicitly inspect available Ichimoku evidence alongside support/resistance, DI/ADX, EMA/MR, MACD/momentum and flow; Ichimoku is supporting/contradicting context rather than a requirement that strategy-TF, 1h, 4h and 1D all agree, and unavailable Ichimoku is missing evidence rather than a reason to infer it.",
+            "BREAKOUT logic must remain distinguishable from normal CONTINUATION/PULLBACK logic: a breakout may explicitly trade through nearby structure when its break/acceptance thesis is reusable, without weakening room expectations for ordinary continuation or pullback entries.",
             "Periodic reviews are primarily for simplification, consolidation, regime-level diagnosis, and evidence sufficiency—not for accumulating micro-rules.",
             "ChatGPT disagreement is diagnostic evidence only; any rule must encode the concrete structural reason for the disagreement.",
         ],
@@ -116,8 +116,10 @@ def research_policy_schema() -> dict[str, Any]:
                 "entry_family": "required",
             },
             "rule": (
-                "Winning is insufficient by itself. Learn/refine ENTRY only when "
-                "the teacher winner expresses a reusable positive setup structure."
+                "Winning is insufficient by itself. Learn/refine ENTRY when the "
+                "teacher winner expresses a reusable positive setup with plausible positive "
+                "expectancy; do not require a perfect setup, unanimous higher-timeframe "
+                "agreement, or a completely unobstructed path to the final target."
             ),
         },
         "teacher_loss_flip_review": {
@@ -132,8 +134,10 @@ def research_policy_schema() -> dict[str, Any]:
             "rule": (
                 "FLIP uses the same structural quality standard as ENTRY. A source-side "
                 "loss plus opposite-side win is evidence, but FLIP_LEARNED is justified "
-                "only when the opposite side expresses a reusable positive setup structure. "
-                "Repeated prior examples may strengthen confidence but are not required."
+                "only when the opposite side expresses a reusable positive-expectancy setup. "
+                "Once learned, that FLIP thesis can independently admit the opposite executable "
+                "side; it does not require a separate ENTRY match. Repeated prior examples may "
+                "strengthen confidence but are not required."
             ),
         },
         "periodic_review": {
@@ -249,8 +253,12 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
     elif status == "TEACHER_REVIEW_REQUIRED":
         updated["methodology_prompt"] = {
             "required_before_entry_learning": ["setup_thesis", "entry_family"],
-            "default_when_thesis_is_not_reusable": "NO_CHANGE",
+            "entry_learning_bar": "POSITIVE_EXPECTANCY_NOT_PERFECTION",
+            "sr_room_is_weighted_evidence": True,
+            "higher_timeframe_unanimity_required": False,
             "separate_breakout_logic": True,
+            "breakout_can_trade_through_structure_when_thesis_is_explicit": True,
+            "default_when_thesis_is_not_reusable": "NO_CHANGE",
         }
 
     elif status == "TEACHER_LOSS_REVIEW_REQUIRED":
@@ -263,6 +271,7 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
                 "a special prerequisite for FLIP."
             ),
             "required_before_flip_learning": ["setup_thesis", "entry_family"],
+            "standalone_flip_admission": True,
             "default_when_opposite_thesis_is_not_reusable": "FLIP_EVIDENCE",
         }
 
