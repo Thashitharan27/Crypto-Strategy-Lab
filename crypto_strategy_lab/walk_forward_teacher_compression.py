@@ -548,7 +548,22 @@ def _pending_rule_confirmation(
         if not teacher_id or _confirmation_consumed(events, teacher_id):
             continue
         learned_rule_tokens = _rules_learned_immediately_after(events, event)
-        qualifying = sorted(current_rule_tokens.intersection(learned_rule_tokensdef teacher_compression_decision(
+        qualifying = sorted(current_rule_tokens.intersection(learned_rule_tokens))
+        if qualifying:
+            return event, qualifying
+    return None
+
+
+def _episode_review_count(prior: list[dict[str, Any]]) -> int:
+    return len(prior)
+
+
+def _latest_audited(
+    audited_prior: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return audited_prior[-1]
+
+def teacher_compression_decision(
     packet: dict[str, Any],
     events: list[dict[str, Any]],
 ) -> dict[str, Any]:
