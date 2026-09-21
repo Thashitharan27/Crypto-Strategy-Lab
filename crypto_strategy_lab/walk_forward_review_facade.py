@@ -302,6 +302,11 @@ def record_walk_forward_teacher_review(
     reference_run = str(definition.get("reference_run", ""))
     manifest = reports.get_run_manifest(reference_run)
     run_dir = reports.resolve_run(reference_run)
+    reference_artifacts = manifest.get("artifacts") or {}
+    teacher_phase_context_available = (
+        "research_sampling_trades" in reference_artifacts
+        and "feature_context" in reference_artifacts
+    )
     protocol = definition.get("research_protocol") or {}
     minimum_entry_time = (
         protocol.get("walk_forward_start")
@@ -383,7 +388,7 @@ def record_walk_forward_teacher_review(
         entry_family=entry_family,
     )
 
-    if base_phase_packet is None:
+    if base_phase_packet is None and teacher_phase_context_available:
         base_phase_packet = _impl._teacher_review_packet(
             control,
             reports,
@@ -392,7 +397,22 @@ def record_walk_forward_teacher_review(
             expected_state_hash=expected_state_hash,
             teacher_boundary=boundary,
         )
-    phase_decision = teacher_compression_decision(base_phase_packet, events)
+    if base_phase_packet is None:
+        # Compatibility path for legacy/minimal reference runs that can still
+        # record a valid teacher review but do not expose the immutable context
+        # required for deterministic phase compression. Persist no usable phase
+        # fingerprint so this review can never silently become a compression
+        # baseline; a later fully-audited teacher will surface once.
+        phase_decision = {
+            "action": "SURFACE",
+            "reason": "PHASE_CONTEXT_UNAVAILABLE",
+            "audit": {},
+            "compared_to_teacher_id": None,
+            "confirmation_of_teacher_id": None,
+            "confirmation_rule_ids": [],
+        }
+    else:
+        phase_decision = teacher_compression_decision(base_phase_packet, events)
     phase_audit = deepcopy(phase_decision.get("audit") or {})
 
     if teacher_result == "LOSS":
