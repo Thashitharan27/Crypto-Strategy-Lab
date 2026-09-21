@@ -815,6 +815,7 @@ If reveal succeeded but settlement transport failed, settlement must be idempote
 - `strategy_action` vs `chatgpt_view` separation;
 - deterministic outcome/replay rules;
 - teacher equity isolation;
+- deterministic skipping of verified non-actionable teacher LOSS/LOSS and LOSS/BREAKEVEN pairs without suppressing prospective trades;
 - current-equity settlement;
 - chronological scan checkpoints;
 - safe recovery from frozen/revealed states;
