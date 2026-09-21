@@ -207,3 +207,30 @@ def test_native_rules_read_prepared_ichimoku_context() -> None:
     assert engine._strategy_profile_rule_value(
         0, "LONG", profile, "ICH_KIJUN_DISTANCE_ATR"
     ) == 0.60
+
+
+
+def test_native_rule_can_select_higher_timeframe_ichimoku_context() -> None:
+    engine = object.__new__(RuleAwareDataLakeProductionBacktestEngine)
+    engine.config = SimpleNamespace(strategy_timeframe_minutes=15)
+    engine.research_features = {
+        "ichimoku_context": pd.DataFrame(
+            {"future_cloud_state": ["BULLISH"], "kijun_distance_atr": [0.25]}
+        ),
+        "ichimoku_context_4h": pd.DataFrame(
+            {
+                "ich_4h_future_cloud_state": ["BEARISH"],
+                "ich_4h_kijun_distance_atr": [-0.75],
+            }
+        ),
+    }
+
+    assert engine._prepared_ichimoku_value_for_timeframe(
+        0, "ICH_FUTURE_CLOUD_STATE", 0
+    ) == 1.0
+    assert engine._prepared_ichimoku_value_for_timeframe(
+        0, "ICH_FUTURE_CLOUD_STATE", 240
+    ) == 2.0
+    assert engine._prepared_ichimoku_value_for_timeframe(
+        0, "ICH_KIJUN_DISTANCE_ATR", 240
+    ) == -0.75
