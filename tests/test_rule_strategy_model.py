@@ -5,6 +5,7 @@ import pytest
 from crypto_strategy_lab.data_lake_config import ExecutionProfileConfig
 from crypto_strategy_lab.strategy_profiles import StrategyProfile
 from crypto_strategy_lab.strategy_rule_model import (
+    ICHIMOKU_RULE_EVIDENCE,
     MARKET_PERMISSIONS,
     SUPPORT_RESISTANCE_RULE_EVIDENCE,
     compile_profiles,
@@ -13,6 +14,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     normalize_rule,
     normalize_rules,
     rule_operator_options,
+    uses_ichimoku_rules,
     uses_support_resistance_rules,
 )
 
@@ -204,6 +206,20 @@ def test_support_resistance_rule_dependency_is_detected_from_any_rule_group():
     assert not uses_support_resistance_rules((ordinary,))
     assert uses_support_resistance_rules((ordinary,), (sr,))
     assert "SR_ROOM_IN_DIRECTION_ATR" in SUPPORT_RESISTANCE_RULE_EVIDENCE
+
+
+def test_ichimoku_rule_dependency_is_detected_and_muted_groups_do_not_force_it():
+    ordinary = new_rule(kind="REQUIRED", evidence="DI_SPREAD")
+    ichimoku = new_rule(kind="VETO", evidence="ICH_FUTURE_CLOUD_STATE")
+    muted = new_rule(
+        kind="REQUIRED",
+        evidence="ICH_PRICE_VS_CLOUD",
+        group_enabled=False,
+    )
+    assert not uses_ichimoku_rules((ordinary,))
+    assert uses_ichimoku_rules((ordinary,), (ichimoku,))
+    assert not uses_ichimoku_rules((muted,))
+    assert "ICH_KIJUN_DISTANCE_ATR" in ICHIMOKU_RULE_EVIDENCE
 
 
 def test_scoped_veto_only_reaches_matching_regime_and_side():
