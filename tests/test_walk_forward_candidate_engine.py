@@ -526,6 +526,37 @@ def test_scanner_applies_entry_veto_flip_and_never_returns_outcome(tmp_path):
     assert replay["candidate"]["candidate_id"] == "12-long"
 
 
+
+def test_scanner_allows_standalone_flip_without_entry(tmp_path):
+    control, reports, store, head = _write_reference(
+        tmp_path, samples=_samples(), context=_context()
+    )
+    head = _append_rule(
+        store, head, "FLIP_LEARNED", "FLIP_001", "FLIP",
+        [{"indicator": "ADX", "condition": "GTE", "value": 40}],
+        "rule:standalone-flip",
+    )
+
+    result = get_next_walk_forward_candidate(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="candidate:standalone-flip",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+    )
+
+    assert result["status"] == "CANDIDATE_CAPTURED"
+    candidate = result["candidate"]
+    assert candidate["research_signal_index"] == 12
+    assert candidate["source_side"] == "LONG"
+    assert candidate["rule_effective_side"] == "SHORT"
+    assert candidate["matched_entry_groups"] == []
+    assert candidate["matched_veto_groups"] == []
+    assert candidate["matched_flip_groups"] == ["FLIP_001"]
+    assert result["outcome_exposed"] is False
+
+
 def test_loss_loss_teacher_skip_does_not_hide_active_entry_candidate(tmp_path):
     samples = _samples()
     source = samples.loc[samples["research_signal_index"].eq(10)].iloc[0].copy()
