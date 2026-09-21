@@ -231,22 +231,36 @@ the local endpoints directly to the public internet.
 
 ## ChatGPT Integration
 
-The desktop application's **ChatGPT** tab now starts the **unified 8766 MCP** and
-an OpenAI Secure Tunnel without separate command windows:
+The desktop application's **ChatGPT** tab can run **two independent copies of the
+same unified MCP**, each with its own OpenAI Secure Tunnel. This allows two ChatGPT
+plugins/chats to work at the same time while sharing the same Crypto Strategy Lab
+market data, configs, caches, and output directory.
 
-1. Create the OpenAI tunnel externally once and download `tunnel-client.exe`.
+The default local endpoints are:
+
+```text
+Connection 1 / Plugin 1: http://127.0.0.1:8766/mcp
+Connection 2 / Plugin 2: http://127.0.0.1:8767/mcp
+```
+
+Setup:
+
+1. Create two OpenAI tunnels externally and download `tunnel-client.exe`.
 2. Open **Crypto Strategy Lab → ChatGPT**.
-3. Browse to the tunnel client executable (its location is not fixed).
-4. Paste the tunnel ID supplied when the tunnel was created.
-5. Choose **Set / Change API Key** and securely save the tunnel runtime API key.
-6. Keep the MCP port at **8766** unless you intentionally need another local port.
-7. Select **Start ChatGPT Connection**. The unified local MCP becomes ready
-   before the secure tunnel is started.
-8. Enable or refresh the single **Crypto Strategy Lab** plugin in ChatGPT.
+3. Configure **Connection 1** with tunnel 1, its runtime API key, and port **8766**.
+4. Configure **Connection 2** with tunnel 2, its runtime API key, and port **8767**.
+   Both connections reuse the same tunnel-client executable.
+5. Start each connection. Each local MCP becomes ready before its matching secure
+   tunnel is started.
+6. Add/refresh two ChatGPT plugins, one for each tunnel, and use the plugins in
+   separate chats.
 
-That one plugin can now run a backtest and then read/analyze the completed output
-through the same MCP connection. This is the base workflow for iterative research
-and walk-forward testing.
+Both plugins expose the same research/control tools and see the same completed
+runs. They may work on different runs or different walk-forward experiments in
+parallel. Do **not** intentionally have both chats mutate the same walk-forward
+experiment at the same time; the sequence/hash stale-write checks will reject
+conflicting causal writes, but separate experiments are the intended parallel
+workflow.
 
 The runtime API key is stored through `keyring` in Windows Credential Manager;
 it is never saved in application settings, configuration files, command-line
