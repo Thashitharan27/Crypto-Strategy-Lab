@@ -527,7 +527,11 @@ def teacher_compression_decision(
     previous_id = _teacher_id(previous)
     result["compared_to_teacher_id"] = previous_id or None
     previous_audit = previous.get("teacher_phase_audit")
-    if not isinstance(previous_audit, dict):
+    if (
+        not isinstance(previous_audit, dict)
+        or not previous_audit.get("structural_fingerprint")
+        or not previous_audit.get("phase_fingerprint")
+    ):
         result["reason"] = "LEGACY_PHASE_BASELINE_REQUIRED"
         return result
 
