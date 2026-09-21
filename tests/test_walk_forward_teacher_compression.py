@@ -251,6 +251,7 @@ def test_new_flip_rule_gets_confirmation_when_effective_side_wins() -> None:
     assert decision["reason"] == "FIRST_RULE_CONFIRMATION_REQUIRED"
     assert decision["confirmation_of_teacher_id"] == "wf-100-long"
     assert decision["confirmation_rule_ids"] == ["FLIP_004"]
+    assert decision["confirmation_rule_versions"] == ["FLIP_004@1"]
 
 
 def test_confirmation_quota_for_new_entry_rule_is_consumed_once() -> None:
@@ -274,6 +275,7 @@ def test_confirmation_quota_for_new_entry_rule_is_consumed_once() -> None:
     assert decision["reason"] == "FIRST_RULE_CONFIRMATION_REQUIRED"
     assert decision["confirmation_of_teacher_id"] == "wf-100-long"
     assert decision["confirmation_rule_ids"] == ["ENTRY_001"]
+    assert decision["confirmation_rule_versions"] == ["ENTRY_001@1"]
 
     confirmation_event = _reviewed_event(
         confirmation,
@@ -373,7 +375,9 @@ def test_auto_compressed_teacher_persists_full_audit_metadata() -> None:
     assert store.payload["compression_reason"] == "UNRULED_NONACTIONABLE_LOSS"
     assert store.payload["compared_to_teacher_id"] == "wf-100-long"
     assert store.payload["phase_fingerprint"]
+    assert store.payload["actionability_fingerprint"]
     assert store.payload["structural_phase_fingerprint"]
+    assert store.payload["episode_review_budget"] == 5
     assert store.payload["active_rule_matches"] == []
     assert store.payload["teacher_phase_audit"]["episode_id"] == "episode-000001"
 
@@ -508,3 +512,19 @@ def test_confirmation_requires_exact_rule_version() -> None:
     assert decision["confirmation_of_teacher_id"] is None
     assert decision["confirmation_rule_ids"] == []
     assert decision["confirmation_rule_versions"] == []
+
+
+def test_episode_review_budget_compresses_ordinary_novelty() -> None:
+    reviewed = [
+        _reviewed_event(
+            _packet(teacher_id=f"wf-{100 + index}-long", result="WIN"),
+            sequence=10 + index,
+        )
+        for index in range(5)
+    ]
+    later = _packet(teacher_id="wf-200-long", result="LOSS")
+    decision = teacher_compression_decision(later, reviewed)
+    assert decision["action"] == "AUTO_COMPRESS"
+    assert decision["reason"] == "EPISODE_REVIEW_BUDGET"
+    assert decision["episode_review_count"] == 5
+    assert decision["episode_review_budget"] == 5
