@@ -177,6 +177,17 @@ def test_teacher_loss_packet_makes_flip_and_entry_learning_symmetric():
     assert "Repetition is not a special prerequisite for FLIP" in prompt["teacher_loss_rule"]
 
 
+def test_candidate_decision_packet_requires_explicit_ichimoku_review():
+    packet = decorate_review_packet({"status": "CANDIDATE_DECISION_REQUIRED"})
+
+    assert packet["research_policy"]["contract"] == RESEARCH_POLICY_CONTRACT
+    required = packet["evidence_review_prompt"]["required_before_judgment"]
+    assert "support_resistance_trade_context_v2" in required
+    assert "ichimoku_trade_context_v1" in required
+    assert packet["methodology_prompt"]["ichimoku_is_supporting_evidence"] is True
+    assert packet["methodology_prompt"]["do_not_change_strategy_action"] is True
+
+
 def test_periodic_rule_writing_requires_strategic_action_and_rationale():
     with pytest.raises(ValueError, match="periodic_rule_action"):
         validate_periodic_methodology(
@@ -227,3 +238,6 @@ def test_policy_schema_prioritizes_entry_refinement_over_veto_accumulation():
     assert "Repeated prior examples may strengthen confidence but are not required" in (
         flip_policy["rule"]
     )
+    evidence = schema["evidence_review"]
+    assert "ichimoku_trade_context_v1" in evidence["required_before_judgment"]
+    assert "do not infer it from later data" in evidence["ichimoku"]
