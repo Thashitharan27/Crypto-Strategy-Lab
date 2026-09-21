@@ -6,6 +6,7 @@ from PySide6.QtCore import QProcess, QSettings
 
 from crypto_strategy_lab.gui.chatgpt_connection import (
     DEFAULT_MCP_PORT,
+    SECONDARY_MCP_PORT,
     MCP_MODULE,
     ChatGPTConnectionManager,
     ChatGPTIntegrationWidget,
@@ -87,6 +88,94 @@ def test_tunnel_command_and_environment_do_not_mix_secret():
     assert env.value("CONTROL_PLANE_API_KEY") == secret
     assert env.value("CONTROL_PLANE_TUNNEL_ID") == "tunnel_example"
     assert env.value("MCP_SERVER_URL").endswith("/mcp")
+
+
+def test_widget_exposes_two_independent_chatgpt_connections(qapp, tmp_path):
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
+    output = tmp_path / "output"
+    output.mkdir()
+    fake_keyring = Mock()
+    fake_keyring.get_password.return_value = None
+
+    with patch(
+        "crypto_strategy_lab.gui.chatgpt_connection_impl.importlib.import_module",
+        return_value=fake_keyring,
+    ):
+        widget = ChatGPTIntegrationWidget(settings, lambda: str(output))
+
+    try:
+        assert widget.manager is not widget.secondary_manager
+        assert widget.port.value() == DEFAULT_MCP_PORT
+        assert widget.port2.value() == SECONDARY_MCP_PORT
+        assert widget.endpoint.text().endswith(f":{DEFAULT_MCP_PORT}/mcp")
+        assert widget.endpoint2.text().endswith(f":{SECONDARY_MCP_PORT}/mcp")
+    finally:
+        widget.shutdown()
+
+
+def test_secondary_connection_rejects_primary_port(qapp, tmp_path):
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
+    output = tmp_path / "output"
+    output.mkdir()
+    fake_keyring = Mock()
+    fake_keyring.get_password.return_value = "secret"
+
+    with patch(
+        "crypto_strategy_lab.gui.chatgpt_connection_impl.importlib.import_module",
+        return_value=fake_keyring,
+    ):
+        widget = ChatGPTIntegrationWidget(settings, lambda: str(output))
+
+    try:
+        exe = tmp_path / "tunnel-client.exe"
+        exe.touch()
+        widget.path.setText(str(exe))
+        widget.tunnel_id2.setText("tunnel_two")
+        widget.port2.setValue(widget.port.value())
+        with patch(
+            "crypto_strategy_lab.gui.chatgpt_connection_impl.importlib.util.find_spec",
+            return_value=object(),
+        ):
+            _key, errors = widget._validated_secondary()
+        assert any("different from Connection 1" in error for error in errors)
+    finally:
+        widget.shutdown()
+
+
+def test_widget_shutdown_stops_both_owned_connections(qapp, tmp_path):
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
+    output = tmp_path / "output"
+    output.mkdir()
+    fake_keyring = Mock()
+    fake_keyring.get_password.return_value = None
+
+    with patch(
+        "crypto_strategy_lab.gui.chatgpt_connection_impl.importlib.import_module",
+        return_value=fake_keyring,
+    ):
+        widget = ChatGPTIntegrationWidget(settings, lambda: str(output))
+
+    events = []
+    for label, manager in (
+        ("one", widget.manager),
+        ("two", widget.secondary_manager),
+    ):
+        manager.tunnel = FakeProcess(f"tunnel {label}", events)
+        manager.mcp = FakeProcess(f"mcp {label}", events)
+        manager._tunnel_started = manager._mcp_started = True
+
+    widget.shutdown()
+
+    assert events == [
+        "terminate tunnel two",
+        "wait tunnel two",
+        "terminate mcp two",
+        "wait mcp two",
+        "terminate tunnel one",
+        "wait tunnel one",
+        "terminate mcp one",
+        "wait mcp one",
+    ]
 
 
 def test_duplicate_start_and_stop_without_processes(qapp, tmp_path):
@@ -246,6 +335,9 @@ def test_api_key_is_not_a_settings_key(tmp_path):
         "tunnel_id": "tunnel_x",
         "mcp_port": DEFAULT_MCP_PORT,
         "auto_start_chatgpt_connection": True,
+        "tunnel_id_2": "tunnel_y",
+        "mcp_port_2": SECONDARY_MCP_PORT,
+        "auto_start_chatgpt_connection_2": True,
     }.items():
         settings.setValue(key, value)
     settings.sync()
