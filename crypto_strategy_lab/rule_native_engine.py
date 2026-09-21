@@ -26,7 +26,10 @@ from crypto_strategy_lab.sr_trade_context import (
     derive_trade_sr_context,
     planned_trade_distances,
 )
-from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_VALUE_CODES
+from crypto_strategy_lab.strategy_rule_model import (
+    CATEGORICAL_VALUE_CODES,
+    ICHIMOKU_RULE_EVIDENCE,
+)
 
 
 DI_PRESSURE_STATE_CODES = CATEGORICAL_VALUE_CODES["DI_PRESSURE_STATE"]
@@ -61,6 +64,12 @@ _SR_RESEARCH_CONTEXTS = {
     60: ("support_resistance_1h", "sr_1h"),
     240: ("support_resistance_4h", "sr_4h"),
     1440: ("support_resistance_1d", "sr_1d"),
+}
+_ICHIMOKU_RESEARCH_CONTEXTS = {
+    0: ("ichimoku_context", None),
+    60: ("ichimoku_context_1h", "ich_1h"),
+    240: ("ichimoku_context_4h", "ich_4h"),
+    1440: ("ichimoku_context_1d", "ich_1d"),
 }
 
 # These are lightweight source-native research blocks already prepared by the
@@ -543,6 +552,53 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
             return CATEGORICAL_VALUE_CODES[indicator].get(key, np.nan)
         raise KeyError(indicator)
 
+    def _prepared_ichimoku_value_for_timeframe(
+        self, i, indicator, timeframe_minutes
+    ):
+        """Read one explicitly selected causal Ichimoku context."""
+        if indicator not in ICHIMOKU_RULE_EVIDENCE:
+            raise KeyError(indicator)
+        config = getattr(self, "config", None)
+        if config is None:
+            return np.nan
+        try:
+            requested = int(timeframe_minutes)
+        except (TypeError, ValueError, OverflowError):
+            return np.nan
+        strategy_minutes = int(getattr(config, "strategy_timeframe_minutes", 0) or 0)
+        context_key = 0 if requested in {0, strategy_minutes} else requested
+        block_info = _ICHIMOKU_RESEARCH_CONTEXTS.get(context_key)
+        if block_info is None:
+            return np.nan
+        feature_name, prefix = block_info
+
+        if indicator in _RESEARCH_NUMERIC_FIELDS:
+            _default_feature, base_column, scale = _RESEARCH_NUMERIC_FIELDS[indicator]
+            column = base_column if prefix is None else f"{prefix}_{base_column}"
+            raw = self._prepared_research_raw_value(i, feature_name, column)
+            try:
+                value = float(raw) * scale
+            except (TypeError, ValueError):
+                return np.nan
+            return value if np.isfinite(value) else np.nan
+
+        if indicator in _RESEARCH_CATEGORICAL_FIELDS:
+            _default_feature, base_column = _RESEARCH_CATEGORICAL_FIELDS[indicator]
+            column = base_column if prefix is None else f"{prefix}_{base_column}"
+            raw = self._prepared_research_raw_value(i, feature_name, column)
+            if raw is None or raw is pd.NA:
+                return np.nan
+            if hasattr(raw, "value"):
+                raw = raw.value
+            try:
+                if bool(pd.isna(raw)):
+                    return np.nan
+            except (TypeError, ValueError):
+                return np.nan
+            key = str(raw).upper()
+            return CATEGORICAL_VALUE_CODES[indicator].get(key, np.nan)
+        raise KeyError(indicator)
+
     def _prepared_mtf_sr_reaction_value(
         self, i, direction, indicator, timeframe_minutes=0
     ):
@@ -602,7 +658,11 @@ class RuleAwareDataLakeProductionBacktestEngine(MtfSrReactionMixin, Ema920Pullba
         """
         indicator = rule["indicator"]
         sr_timeframe = rule.get("_builder_sr_timeframe_minutes")
-        if indicator in MTF_SR_REACTION_RULE_INDICATORS and sr_timeframe is not None:
+        if indicator in ICHIMOKU_RULE_EVIDENCE and sr_timeframe is not None:
+            value = self._prepared_ichimoku_value_for_timeframe(
+                i, indicator, sr_timeframe
+            )
+        elif indicator in MTF_SR_REACTION_RULE_INDICATORS and sr_timeframe is not None:
             value = self._prepared_mtf_sr_reaction_value(
                 i, direction, indicator, sr_timeframe
             )
