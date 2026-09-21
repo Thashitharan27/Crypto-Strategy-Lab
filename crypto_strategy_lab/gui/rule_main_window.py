@@ -23,10 +23,12 @@ from PySide6.QtWidgets import (
 from crypto_strategy_lab.data import DataQualityStatus
 from crypto_strategy_lab.data_lake_config import ExecutionProfileConfig
 from crypto_strategy_lab.strategy_rule_model import (
+    ICHIMOKU_RULE_EVIDENCE,
     MEAN_REVERSION_RULE_EVIDENCE,
     SUPPORT_RESISTANCE_RULE_EVIDENCE,
     common_execution_profile,
     compile_profiles,
+    uses_ichimoku_rules,
     uses_mean_reversion_rules,
     uses_support_resistance_rules,
 )
@@ -705,6 +707,8 @@ class MainWindow(LegacyMainWindow):
                 features = replace(features, mean_reversion_track_atr_distance=True)
             if mr_evidence & {"MR_MOTION", "MR_DISTANCE_CHANGE_ATR"}:
                 features = replace(features, mean_reversion_track_motion=True)
+        if uses_ichimoku_rules(required_rules, veto_rules, flip_rules):
+            features = replace(features, ichimoku_enabled=True)
         if (
             authored.get("direction_mode") == "MTF_SR_REACTION"
             or uses_support_resistance_rules(required_rules, veto_rules, flip_rules)
@@ -816,6 +820,15 @@ class MainWindow(LegacyMainWindow):
         mr_rule_count = sum(
             rule["evidence"] in MEAN_REVERSION_RULE_EVIDENCE
             for rule in all_rules
+        )
+        ichimoku_rule_count = sum(
+            rule["evidence"] in ICHIMOKU_RULE_EVIDENCE
+            for rule in all_rules
+        )
+        ichimoku_text = (
+            f"Rule Evidence ({ichimoku_rule_count} rule(s))"
+            if ichimoku_rule_count
+            else ("Research Enabled" if config.features.ichimoku_enabled else "Off")
         )
         mr_text = (
             f"Rule Evidence ({mr_rule_count} rule(s))"
