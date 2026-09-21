@@ -1,10 +1,11 @@
 """Teacher chronology helpers for causal walk-forward learning.
 
-Teacher/reference trades normally surface winners for ENTRY learning. Paired
-walk-forward reference runs also persist the exact opposite-side execution
-outcome for each source candidate, so resolved teacher losses can be reviewed as
-FLIP evidence at any configured R:R without inferring the opposite result. Loss
-review remains opt-in through the causal teacher-loss policy.
+Canonical paired WALK_FORWARD references use overlap-independent source rows as
+teacher observations. Portfolio participation controls RESEARCH equity only; it
+does not determine teacher eligibility. The paired artifact also persists the
+exact opposite-side execution outcome, so resolved teacher losses can be reviewed
+as FLIP evidence at any configured R:R without inferring the opposite result.
+Loss review remains opt-in through the causal teacher-loss policy.
 """
 from __future__ import annotations
 
