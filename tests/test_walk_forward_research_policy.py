@@ -172,9 +172,26 @@ def test_teacher_loss_packet_makes_flip_and_entry_learning_symmetric():
     prompt = packet["methodology_prompt"]
 
     assert prompt["required_before_flip_learning"] == ["setup_thesis", "entry_family"]
+    assert prompt["standalone_flip_admission"] is True
     assert prompt["default_when_opposite_thesis_is_not_reusable"] == "FLIP_EVIDENCE"
     assert "same structural learning standard as ENTRY" in prompt["teacher_loss_rule"]
     assert "Repetition is not a special prerequisite for FLIP" in prompt["teacher_loss_rule"]
+
+
+
+def test_teacher_entry_packet_targets_positive_expectancy_not_perfection():
+    packet = decorate_review_packet({"status": "TEACHER_REVIEW_REQUIRED"})
+    prompt = packet["methodology_prompt"]
+
+    assert prompt["entry_learning_bar"] == "POSITIVE_EXPECTANCY_NOT_PERFECTION"
+    assert prompt["sr_room_is_weighted_evidence"] is True
+    assert prompt["higher_timeframe_unanimity_required"] is False
+    assert prompt["separate_breakout_logic"] is True
+    assert prompt["breakout_can_trade_through_structure_when_thesis_is_explicit"] is True
+
+    principles = " ".join(packet["research_policy"]["principles"])
+    assert "not a certificate that the setup is perfect" in principles
+    assert "graded ENTRY evidence, not an automatic rejection threshold" in principles
 
 
 def test_candidate_decision_packet_requires_explicit_ichimoku_review():
