@@ -395,6 +395,72 @@ def test_walk_forward_context_replaces_raw_sr_with_trade_relative_v2_units():
     assert "sr_1d_long_nearest_resistance_distance_atr" not in safe["feature_context"]
 
 
+def test_walk_forward_context_exposes_explicit_ichimoku_timeframes():
+    config = _config()
+    config["data"]["strategy_timeframe_minutes"] = 15
+    context = {
+        "price_vs_cloud": "ABOVE_CLOUD",
+        "tk_state": "BULLISH",
+        "tk_cross": "BULLISH_CROSS",
+        "tk_spread_atr": 0.22,
+        "kijun_distance_atr": 0.45,
+        "kijun_slope_atr": 0.08,
+        "kijun_flat_bars": 2.0,
+        "current_cloud_state": "BULLISH",
+        "future_cloud_state": "BULLISH",
+        "cloud_thickness_atr": 0.7,
+        "future_cloud_thickness_atr": 0.8,
+        "kumo_twist": "NONE",
+        "chikou_vs_price": "ABOVE_PRICE",
+        "cloud_distance_atr": 0.35,
+        "ichimoku_completed_candle_time": "2025-01-04T00:00:00Z",
+        "ichimoku_timeframe_minutes": 15,
+        "ich_1h_price_vs_cloud": "ABOVE_CLOUD",
+        "ich_1h_tk_state": "BULLISH",
+        "ich_1h_future_cloud_state": "BULLISH",
+        "ich_1h_cloud_thickness_atr": 1.1,
+        "ich_1h_cloud_distance_atr": 0.6,
+        "ich_1h_completed_candle_time": "2025-01-03T23:00:00Z",
+        "ich_1h_timeframe_minutes": 60,
+        "ich_4h_price_vs_cloud": "INSIDE_CLOUD",
+        "ich_4h_tk_state": "BEARISH",
+        "ich_4h_future_cloud_state": "BULLISH",
+        "ich_4h_cloud_thickness_atr": 0.9,
+        "ich_4h_completed_candle_time": "2025-01-03T20:00:00Z",
+        "ich_4h_timeframe_minutes": 240,
+    }
+
+    safe = _safe_context({}, context, config=config)
+    ich = safe["ichimoku_trade_context_v1"]
+
+    assert ich["contract"] == "ichimoku_trade_context_v1"
+    assert ich["available"] is True
+    assert ich["availability_reason"] == "AVAILABLE"
+    assert ich["timeframes"]["STRATEGY_TF"]["price_vs_cloud"] == "ABOVE_CLOUD"
+    assert ich["timeframes"]["STRATEGY_TF"]["tk_cross"] == "BULLISH_CROSS"
+    assert ich["timeframes"]["1H"]["future_cloud_state"] == "BULLISH"
+    assert ich["timeframes"]["1H"]["cloud_thickness_atr"] == 1.1
+    assert ich["timeframes"]["4H"]["price_vs_cloud"] == "INSIDE_CLOUD"
+    assert "1D" not in ich["timeframes"]
+
+
+def test_walk_forward_context_keeps_pre_ichimoku_reference_runs_compatible():
+    config = _config()
+    config["data"]["strategy_timeframe_minutes"] = 15
+
+    safe = _safe_context(
+        {"adx": 28.0},
+        {"adx": 28.0, "mean_reversion_state": "NEAR_MEAN"},
+        config=config,
+    )
+    ich = safe["ichimoku_trade_context_v1"]
+
+    assert ich["available"] is False
+    assert ich["availability_reason"] == "NOT_PRESENT_IN_REFERENCE_RUN"
+    assert ich["timeframes"] == {}
+    assert "do not infer" in ich["review_instruction"]
+
+
 def test_ema_categorical_values_match_strategy_builder_contract():
     bullish = {"ema_50": 3.0, "ema_100": 2.0, "ema_200": 1.0, "close": 4.0}
     bearish = {"ema_50": 1.0, "ema_100": 2.0, "ema_200": 3.0, "close": 0.0}
