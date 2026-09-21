@@ -434,9 +434,9 @@ def create_control_server(
         expected_sequence: int,
         expected_state_hash: str,
         max_scan_rows: int = 250000,
-        teacher_loss_flip_enabled: bool = False,
+        teacher_loss_flip_enabled: bool = True,
     ) -> dict[str, Any]:
-        """Capture the next candidate; optionally include eligible 1R teacher losses."""
+        """Capture the next candidate; paired teacher-loss FLIP review is enabled by default at any configured R:R."""
         try:
             return _get_next_walk_forward_candidate(
                 control,
@@ -511,9 +511,9 @@ def create_control_server(
         review_interval_months: int = 3,
         max_scan_rows: int = 250000,
         max_transitions: int = 20,
-        teacher_loss_flip_enabled: bool = False,
+        teacher_loss_flip_enabled: bool = True,
     ) -> dict[str, Any]:
-        """Advance causal work; optionally surface 1R teacher losses for FLIP review."""
+        """Advance causal work; surface causally valid paired teacher losses for FLIP review by default at any configured R:R."""
         try:
             with teacher_loss_flip_policy(teacher_loss_flip_enabled):
                 return _advance_walk_forward(
@@ -540,9 +540,9 @@ def create_control_server(
         max_scan_rows: int = 250000,
         max_transitions: int = 20,
         max_scan_slices: int = 4,
-        teacher_loss_flip_enabled: bool = False,
+        teacher_loss_flip_enabled: bool = True,
     ) -> dict[str, Any]:
-        """Continue routine causal work without user checkpoints until judgment or a safe request budget."""
+        """Continue causal work autonomously; paired teacher-loss FLIP review is enabled by default at any configured R:R."""
         try:
             with teacher_loss_flip_policy(teacher_loss_flip_enabled):
                 return _continue_walk_forward_autonomous(
@@ -575,9 +575,9 @@ def create_control_server(
         review_interval_months: int = 3,
         autonomous_mode: bool = False,
         max_scan_slices: int = 4,
-        teacher_loss_flip_enabled: bool = False,
+        teacher_loss_flip_enabled: bool = True,
     ) -> dict[str, Any]:
-        """Freeze, reveal, settle, and optionally continue with 1R teacher-loss review enabled."""
+        """Freeze, reveal, settle, and continue with paired teacher-loss FLIP review enabled by default at any configured R:R."""
         try:
             with teacher_loss_flip_policy(teacher_loss_flip_enabled):
                 return _submit_walk_forward_decision(
@@ -625,9 +625,9 @@ def create_control_server(
         review_interval_months: int = 3,
         autonomous_mode: bool = False,
         max_scan_slices: int = 4,
-        teacher_loss_flip_enabled: bool = False,
+        teacher_loss_flip_enabled: bool = True,
     ) -> dict[str, Any]:
-        """Record a policy-validated review and optionally continue autonomously."""
+        """Record a policy-validated review and continue with paired teacher-loss FLIP review enabled by default unless explicitly disabled."""
         try:
             with teacher_loss_flip_policy(teacher_loss_flip_enabled):
                 return _record_walk_forward_review(
@@ -676,9 +676,9 @@ def create_control_server(
         review_interval_months: int = 3,
         autonomous_mode: bool = False,
         max_scan_slices: int = 4,
-        teacher_loss_flip_enabled: bool = False,
+        teacher_loss_flip_enabled: bool = True,
     ) -> dict[str, Any]:
-        """Record a policy-validated teacher review; optionally include paired teacher-loss FLIP evidence."""
+        """Record a policy-validated teacher review; paired teacher-loss FLIP evidence is enabled by default at any configured R:R."""
         try:
             with teacher_loss_flip_policy(teacher_loss_flip_enabled):
                 return _record_walk_forward_teacher_review(
