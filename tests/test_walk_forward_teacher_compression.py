@@ -324,10 +324,13 @@ def test_auto_compressed_events_are_not_comparison_baselines() -> None:
 
 
 def test_auto_compressed_teacher_persists_full_audit_metadata() -> None:
-    first = _packet(teacher_id="wf-100-long")
-    later = _packet(teacher_id="wf-101-long", di_ratio=2.8, adx=59.0)
+    first = _packet(teacher_id="wf-100-long", result="LOSS")
+    first["teacher"]["paired_opposite_net_r"] = -1.0
+    later = _packet(teacher_id="wf-101-long", result="LOSS", di_ratio=2.8, adx=59.0)
+    later["teacher"]["paired_opposite_net_r"] = -1.2
     reviewed = _reviewed_event(first)
     decision = teacher_compression_decision(later, [reviewed])
+    assert decision["action"] == "AUTO_COMPRESS"
     later["teacher"]["resolution_time"] = "2025-01-01T04:00:00+00:00"
 
     class Store:
@@ -367,7 +370,7 @@ def test_auto_compressed_teacher_persists_full_audit_metadata() -> None:
     assert recorded["sequence"] == 21
     assert store.source == "DETERMINISTIC_TEACHER_COMPRESSION"
     assert store.payload["teacher_review_status"] == "AUTO_COMPRESSED"
-    assert store.payload["compression_reason"] == "CORRELATED_PHASE_DUPLICATE"
+    assert store.payload["compression_reason"] == "UNRULED_NONACTIONABLE_LOSS"
     assert store.payload["compared_to_teacher_id"] == "wf-100-long"
     assert store.payload["phase_fingerprint"]
     assert store.payload["structural_phase_fingerprint"]
