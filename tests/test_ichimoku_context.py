@@ -162,6 +162,8 @@ def test_ichimoku_evidence_is_authorable_without_new_signal_mode() -> None:
     rule = new_rule(kind="REQUIRED", evidence="ICH_PRICE_VS_CLOUD")
     assert rule["operator"] == "IS"
     assert rule["value"] == "ABOVE_CLOUD"
+    assert rule["sr_timeframe_minutes"] == 0
+    rule["sr_timeframe_minutes"] = 240
 
     profiles, _execution = compile_profiles(
         direction_mode="DI",
@@ -171,6 +173,7 @@ def test_ichimoku_evidence_is_authorable_without_new_signal_mode() -> None:
     native = profiles["bull_long"].entry_rules[0]
     assert native["indicator"] == "ICH_PRICE_VS_CLOUD"
     assert native["minimum"] == native["maximum"] == 1.0
+    assert native["_builder_sr_timeframe_minutes"] == 240
 
 
 def test_native_rules_read_prepared_ichimoku_context() -> None:
