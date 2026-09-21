@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import time
 
+import numpy as np
 import pandas as pd
 
 from crypto_strategy_lab.data.schemas import DatasetKind, MarketKind
