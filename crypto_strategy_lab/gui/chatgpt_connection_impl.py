@@ -27,7 +27,9 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
+    QScrollArea,
     QSpinBox,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -393,8 +395,54 @@ class ChatGPTIntegrationWidget(QWidget):
             lambda text: QMessageBox.warning(self, "ChatGPT Connection 3", text)
         )
 
+    @staticmethod
+    def _collapsible_section(title_text: str, content: QWidget):
+        """Return a compact disclosure row plus content panel."""
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        toggle = QToolButton()
+        toggle.setText(title_text)
+        toggle.setCheckable(True)
+        toggle.setChecked(False)
+        toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        toggle.setArrowType(Qt.ArrowType.RightArrow)
+        toggle.setStyleSheet("QToolButton { font-weight: 600; }")
+        content.setVisible(False)
+
+        def set_expanded(expanded: bool) -> None:
+            content.setVisible(bool(expanded))
+            toggle.setArrowType(
+                Qt.ArrowType.DownArrow
+                if expanded
+                else Qt.ArrowType.RightArrow
+            )
+
+        toggle.toggled.connect(set_expanded)
+        layout.addWidget(toggle)
+        layout.addWidget(content)
+        return section, toggle
+
     def _build(self):
-        outer = QVBoxLayout(self)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.scroll_content = QWidget()
+        outer = QVBoxLayout(self.scroll_content)
+        outer.setContentsMargins(10, 10, 10, 10)
+        self.scroll_area.setWidget(self.scroll_content)
+        root.addWidget(self.scroll_area)
+
         title = QLabel("ChatGPT Integration")
         title.setStyleSheet("font-size:20px;font-weight:600")
         outer.addWidget(title)
@@ -452,7 +500,11 @@ class ChatGPTIntegrationWidget(QWidget):
         self.port = QSpinBox()
         self.port.setRange(1, 65535)
         cf.addRow("MCP Port", self.port)
-        outer.addWidget(config)
+        self.config_panel = config
+        config_section, self.config_toggle = self._collapsible_section(
+            "Configuration 1", config
+        )
+        outer.addWidget(config_section)
 
         actions = QHBoxLayout()
         test = QPushButton("Test Connection 1")
@@ -504,7 +556,11 @@ class ChatGPTIntegrationWidget(QWidget):
         self.port2 = QSpinBox()
         self.port2.setRange(1, 65535)
         cf2.addRow("MCP Port", self.port2)
-        outer.addWidget(config2)
+        self.config_panel2 = config2
+        config_section2, self.config_toggle2 = self._collapsible_section(
+            "Configuration 2", config2
+        )
+        outer.addWidget(config_section2)
 
         actions2 = QHBoxLayout()
         test2 = QPushButton("Test Connection 2")
@@ -556,7 +612,11 @@ class ChatGPTIntegrationWidget(QWidget):
         self.port3 = QSpinBox()
         self.port3.setRange(1, 65535)
         cf3.addRow("MCP Port", self.port3)
-        outer.addWidget(config3)
+        self.config_panel3 = config3
+        config_section3, self.config_toggle3 = self._collapsible_section(
+            "Configuration 3", config3
+        )
+        outer.addWidget(config_section3)
 
         actions3 = QHBoxLayout()
         test3 = QPushButton("Test Connection 3")
