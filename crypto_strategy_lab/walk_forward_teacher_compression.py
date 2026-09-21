@@ -21,10 +21,11 @@ import math
 from typing import Any
 
 
-TEACHER_COMPRESSION_CONTRACT = "causal_teacher_phase_compression_v2"
+TEACHER_COMPRESSION_CONTRACT = "causal_teacher_actionability_compression_v3"
 
 AUTO_COMPRESSED_STATUS = "AUTO_COMPRESSED"
 CHATGPT_REVIEWED_STATUS = "CHATGPT_REVIEWED"
+EPISODE_REVIEW_BUDGET = 5
 
 RULE_EVENT_TYPES = frozenset(
     {"ENTRY_LEARNED", "ENTRY_REFINED", "VETO_LEARNED", "FLIP_LEARNED"}
@@ -404,6 +405,17 @@ def build_teacher_phase_audit(packet: dict[str, Any]) -> dict[str, Any]:
         "paired_outcome_class": _paired_outcome_class(teacher),
         "active_rule_signature": rule_signature,
     }
+    # Actionability intentionally ignores fine structural buckets. Those details
+    # remain in structural_components for audit, but they should not repeatedly
+    # wake ChatGPT when the executable rule context and causal setup are the same.
+    actionability_components = {
+        "profile": profile,
+        "source_side": side,
+        "setup_classification": structural_components["setup_classification"],
+        "source_outcome_class": phase_components["source_outcome_class"],
+        "paired_outcome_class": phase_components["paired_outcome_class"],
+        "active_rule_signature": rule_signature,
+    }
 
     return {
         "contract": TEACHER_COMPRESSION_CONTRACT,
@@ -419,6 +431,8 @@ def build_teacher_phase_audit(packet: dict[str, Any]) -> dict[str, Any]:
         "structural_phase": structural_components["setup_classification"],
         "structural_fingerprint": _hash(structural_components),
         "phase_fingerprint": _hash(phase_components),
+        "actionability_fingerprint": _hash(actionability_components),
+        "actionability_components": actionability_components,
         "source_outcome_class": phase_components["source_outcome_class"],
         "paired_outcome_class": phase_components["paired_outcome_class"],
         "active_rule_matches": list(rule_signature["matches"]),
@@ -454,11 +468,12 @@ def _reviewed_teacher_events(
 def _rules_learned_immediately_after(
     events: list[dict[str, Any]], teacher_event: dict[str, Any]
 ) -> list[str]:
+    """Return exact learned rule-version tokens (RULE_ID@VERSION)."""
     try:
         start_sequence = int(teacher_event.get("sequence", 0))
     except (TypeError, ValueError):
         return []
-    rule_ids: list[str] = []
+    rule_tokens: list[str] = []
     started = False
     for event in events:
         try:
@@ -470,16 +485,18 @@ def _rules_learned_immediately_after(
         event_type = str(event.get("event_type") or "").upper()
         if event_type in RULE_EVENT_TYPES:
             started = True
-            rule_id = str((event.get("payload") or {}).get("rule_id") or "").strip()
+            payload = event.get("payload") or {}
+            rule_id = str(payload.get("rule_id") or "").strip()
+            version = str(payload.get("rule_version") or "").strip()
             if rule_id:
-                rule_ids.append(rule_id)
+                rule_tokens.append(f"{rule_id}@{version}" if version else rule_id)
             continue
         if started or event_type == "TEACHER_RESOLVED":
             break
         # Atomic teacher-review batches place rule events immediately after the
         # teacher event. If any unrelated event appears first, there was no rule.
         break
-    return sorted(set(rule_ids))
+    return sorted(set(rule_tokens))
 
 
 def _confirmation_consumed(
@@ -507,9 +524,10 @@ def _complete_phase_audit(payload: dict[str, Any]) -> dict[str, Any] | None:
     return audit
 
 
-def _current_rule_ids(active_matches: set[str]) -> set[str]:
+def _current_rule_tokens(active_matches: set[str]) -> set[str]:
+    """Return exact RULE_ID@VERSION tokens from versioned family matches."""
     return {
-        token.split(":", 1)[1].split("@", 1)[0]
+        token.split(":", 1)[1]
         for token in active_matches
         if ":" in token
     }
@@ -520,27 +538,27 @@ def _pending_rule_confirmation(
     prior: list[dict[str, Any]],
     active_matches: set[str],
 ) -> tuple[dict[str, Any], list[str]] | None:
-    """Find the newest earlier learned rule that this teacher can confirm."""
-    current_rule_ids = _current_rule_ids(active_matches)
-    if not current_rule_ids:
+    """Find the newest earlier learned *version* this teacher can confirm."""
+    current_rule_tokens = _current_rule_tokens(active_matches)
+    if not current_rule_tokens:
         return None
     for event in reversed(prior):
         payload = event.get("payload") or {}
         teacher_id = _teacher_id(payload)
         if not teacher_id or _confirmation_consumed(events, teacher_id):
             continue
-        learned_rule_ids = _rules_learned_immediately_after(events, event)
-        qualifying = sorted(current_rule_ids.intersection(learned_rule_ids))
-        if qualifying:
-            return event, qualifying
-    return None
-
-
-def teacher_compression_decision(
+        learned_rule_tokens = _rules_learned_immediately_after(events, event)
+        qualifying = sorted(current_rule_tokens.intersection(learned_rule_tokensdef teacher_compression_decision(
     packet: dict[str, Any],
     events: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Return SURFACE or AUTO_COMPRESS for one resolved teacher observation."""
+    """Return SURFACE or AUTO_COMPRESS using causal actionability novelty.
+
+    Fine-grained feature changes remain fully audited, but ChatGPT is only
+    surfaced when they change something actionable: a rule failure, blocked or
+    unmatched winner, paired FLIP opportunity, first rule-version confirmation,
+    genuine setup-class transition, or rule-set/version transition.
+    """
     audit = build_teacher_phase_audit(packet)
     result: dict[str, Any] = {
         "contract": TEACHER_COMPRESSION_CONTRACT,
@@ -550,6 +568,9 @@ def teacher_compression_decision(
         "compared_to_teacher_id": None,
         "confirmation_of_teacher_id": None,
         "confirmation_rule_ids": [],
+        "confirmation_rule_versions": [],
+        "episode_review_budget": EPISODE_REVIEW_BUDGET,
+        "episode_review_count": 0,
     }
 
     episode_id = str(audit.get("episode_id") or "").strip()
@@ -558,6 +579,7 @@ def teacher_compression_decision(
         return result
 
     prior = _reviewed_teacher_events(events, episode_id)
+    result["episode_review_count"] = _episode_review_count(prior)
     if not prior:
         result["reason"] = "FIRST_SURFACED_TEACHER_IN_EPISODE"
         return result
@@ -583,10 +605,12 @@ def teacher_compression_decision(
         value.startswith("ENTRY:") or value.startswith("FLIP:")
         for value in active_matches
     )
+    matched_entry = any(value.startswith("ENTRY:") for value in active_matches)
     source_side = _upper(teacher.get("side"))
     current_outcome = _upper(audit.get("source_outcome_class"))
     current_paired = _upper(audit.get("paired_outcome_class"))
     effective_side = _upper(coverage.get("rule_effective_side"))
+    eligible = bool(coverage.get("eligible", False))
     effective_outcome = current_outcome
     if (
         source_side in {"LONG", "SHORT"}
@@ -595,13 +619,11 @@ def teacher_compression_decision(
     ):
         effective_outcome = current_paired
 
-    # Active causal rules are always accountable. Compression must never hide a
-    # prospective failure or an unresolved direction conflict.
-    if (
-        bool(coverage.get("eligible", False))
-        and matched_entry_or_flip
-        and effective_outcome in {"LOSS", "BREAKEVEN"}
-    ):
+    latest_event, latest_payload, latest_audit = _latest_audited(audited_prior)
+    result["compared_to_teacher_id"] = _teacher_id(latest_payload) or None
+
+    # 1) Existing executable rules remain accountable. Never compress a failure.
+    if eligible and matched_entry_or_flip and effective_outcome in {"LOSS", "BREAKEVEN"}:
         result["reason"] = "ACTIVE_RULE_FAILURE"
         return result
 
@@ -615,87 +637,114 @@ def teacher_compression_decision(
         result["reason"] = "ACTIVE_RULE_DIRECTION_CONFLICT"
         return result
 
-    # One qualifying confirmation is owed to any earlier learned rule that has
-    # not yet received independent confirmation. Non-matching observations do
-    # not consume or repeatedly surface merely because the quota is open.
-    confirmation = _pending_rule_confirmation(events, prior, active_matches)
-    if confirmation is not None:
-        confirmation_event, qualifying_rule_ids = confirmation
-        confirmation_payload = confirmation_event.get("payload") or {}
-        confirmation_teacher_id = _teacher_id(confirmation_payload)
-        result["compared_to_teacher_id"] = confirmation_teacher_id or None
-        result["confirmation_of_teacher_id"] = confirmation_teacher_id or None
-        result["confirmation_rule_ids"] = qualifying_rule_ids
-        result["reason"] = "FIRST_RULE_CONFIRMATION_REQUIRED"
+    # 2) A source loss with a winning opposite leg is actionable FLIP evidence.
+    if current_outcome == "LOSS" and current_paired == "WIN":
+        result["reason"] = "PAIRED_FLIP_OPPORTUNITY"
         return result
 
-    # Strong phase memory: if this exact causal phase was already surfaced
-    # anywhere earlier in the episode, an intervening B phase does not force
-    # A to be reviewed again. Search newest-to-oldest so audit metadata points
-    # to the most recent equivalent reviewed phase.
-    current_phase = audit.get("phase_fingerprint")
-    exact_match = next(
+    # 3) Winners that the current executable policy would miss or block stay visible.
+    if current_outcome == "WIN" and not matched_entry_or_flip:
+        result["reason"] = "UNMATCHED_WINNER"
+        return result
+    if current_outcome == "WIN" and matched_entry and not eligible:
+        result["reason"] = "RULE_BLOCKED_WINNER"
+        return result
+
+    # 4) One independent winning confirmation is owed to each exact learned/refined
+    # rule version. A newer version cannot accidentally consume an older version's
+    # confirmation quota.
+    if eligible and matched_entry_or_flip and effective_outcome == "WIN":
+        confirmation = _pending_rule_confirmation(events, prior, active_matches)
+        if confirmation is not None:
+            confirmation_event, qualifying_rule_versions = confirmation
+            confirmation_payload = confirmation_event.get("payload") or {}
+            confirmation_teacher_id = _teacher_id(confirmation_payload)
+            result["compared_to_teacher_id"] = confirmation_teacher_id or None
+            result["confirmation_of_teacher_id"] = confirmation_teacher_id or None
+            result["confirmation_rule_versions"] = qualifying_rule_versions
+            result["confirmation_rule_ids"] = sorted(
+                {token.split("@", 1)[0] for token in qualifying_rule_versions}
+            )
+            result["reason"] = "FIRST_RULE_CONFIRMATION_REQUIRED"
+            return result
+
+    # 5) Exact actionability memory compresses fine-grained DI/ADX/MACD/SR/Ichimoku
+    # changes that do not alter setup class, outcomes, or executable rule context.
+    current_actionability = audit.get("actionability_fingerprint")
+    actionability_match = next(
         (
             item
             for item in reversed(audited_prior)
-            if item[2].get("phase_fingerprint") == current_phase
+            if item[2].get("actionability_fingerprint") == current_actionability
         ),
         None,
     )
-    if exact_match is not None:
-        _event, payload, _prior_audit = exact_match
-        matched_teacher_id = _teacher_id(payload)
-        result["compared_to_teacher_id"] = matched_teacher_id or None
+    if actionability_match is not None:
+        _event, payload, prior_audit = actionability_match
+        result["compared_to_teacher_id"] = _teacher_id(payload) or None
         result["action"] = "AUTO_COMPRESS"
         if str(payload.get("confirmation_of_teacher_id") or "").strip():
             result["reason"] = "POST_CONFIRMATION_REPEAT"
         elif active_matches:
-            result["reason"] = "RULE_PHASE_REPEAT"
+            result["reason"] = "RULE_ACTIONABILITY_REPEAT"
         else:
-            result["reason"] = "CORRELATED_PHASE_DUPLICATE"
+            result["reason"] = "CORRELATED_ACTIONABILITY_DUPLICATE"
         return result
 
-    # No exact prior phase. Compare with the latest reviewed phase that shares
-    # the same market structure to explain why this observation is materially
-    # different (outcome/rules), otherwise surface it as a genuinely new phase.
-    current_structural = audit.get("structural_fingerprint")
-    structural_match = next(
-        (
-            item
-            for item in reversed(audited_prior)
-            if item[2].get("structural_fingerprint") == current_structural
-        ),
-        None,
-    )
-    if structural_match is None:
-        _event, payload, _prior_audit = audited_prior[-1]
-        result["compared_to_teacher_id"] = _teacher_id(payload) or None
-        result["reason"] = "STRUCTURAL_PHASE_CHANGED"
+    # 6) Repeated unruled LOSS/LOSS observations are retained in audit data but do
+    # not require ChatGPT. A paired winner was already caught above.
+    if (
+        not matched_entry_or_flip
+        and current_outcome in {"LOSS", "BREAKEVEN"}
+        and current_paired in {"LOSS", "BREAKEVEN"}
+    ):
+        result["action"] = "AUTO_COMPRESS"
+        result["reason"] = "UNRULED_NONACTIONABLE_LOSS"
         return result
 
-    _event, payload, prior_audit = structural_match
-    result["compared_to_teacher_id"] = _teacher_id(payload) or None
-    previous_outcome = _upper(prior_audit.get("source_outcome_class"))
-    if current_outcome != previous_outcome:
-        result["reason"] = "OUTCOME_CLASS_CHANGED"
+    # 7) A genuinely different setup family is actionable even when the detailed
+    # fingerprint changes for many other reasons.
+    current_setup = _upper(audit.get("structural_phase"))
+    seen_setups = {
+        _upper(item[2].get("structural_phase"))
+        for item in audited_prior
+    }
+    if current_setup not in seen_setups:
+        result["reason"] = "SETUP_CLASS_CHANGED"
         return result
 
-    previous_paired = _upper(prior_audit.get("paired_outcome_class"))
-    if current_paired != previous_paired:
-        result["reason"] = (
-            "PAIRED_OUTCOME_CLASS_CHANGED"
-            if "UNAVAILABLE" not in {current_paired, previous_paired}
-            else "PAIRED_OUTCOME_CONTEXT_CHANGED"
-        )
-        return result
-
-    if audit.get("active_rule_signature") != prior_audit.get("active_rule_signature"):
+    # 8) A changed exact rule/version match set is executable-policy novelty.
+    if audit.get("active_rule_signature") != latest_audit.get("active_rule_signature"):
         result["reason"] = "ACTIVE_RULE_SET_CHANGED"
         return result
 
-    # The phase fingerprint is composed from structure, outcome classes and
-    # active-rule signature, so reaching this branch should be rare. Keep the
-    # conservative surface default rather than silently compressing.
-    result["reason"] = "PHASE_FINGERPRINT_CHANGED"
+    # 9) Outcome changes that survived the actionable guards remain reviewable
+    # until the episode budget is exhausted.
+    previous_outcome = _upper(latest_audit.get("source_outcome_class"))
+    previous_paired = _upper(latest_audit.get("paired_outcome_class"))
+    if result["episode_review_count"] < EPISODE_REVIEW_BUDGET:
+        if current_outcome != previous_outcome:
+            result["reason"] = "OUTCOME_CLASS_CHANGED"
+            return result
+        if current_paired != previous_paired:
+            result["reason"] = (
+                "PAIRED_OUTCOME_CLASS_CHANGED"
+                if "UNAVAILABLE" not in {current_paired, previous_paired}
+                else "PAIRED_OUTCOME_CONTEXT_CHANGED"
+            )
+            return result
+
+    # 10) Guardrail: after five surfaced reviews in one uninterrupted episode,
+    # ordinary non-actionable novelty is compressed. High-priority exceptions
+    # above (failures, unmatched/blocked wins, FLIP evidence, confirmations,
+    # setup changes, rule-set changes) always break through this budget.
+    if result["episode_review_count"] >= EPISODE_REVIEW_BUDGET:
+        result["action"] = "AUTO_COMPRESS"
+        result["reason"] = "EPISODE_REVIEW_BUDGET"
+        return result
+
+    # Fine structural buckets changed, but no causal/actionable condition above did.
+    result["action"] = "AUTO_COMPRESS"
+    result["reason"] = "NONACTIONABLE_STRUCTURE_VARIATION"
     return result
 
