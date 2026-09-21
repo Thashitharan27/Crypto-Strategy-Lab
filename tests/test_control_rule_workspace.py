@@ -170,6 +170,25 @@ def test_mcp_authored_ichimoku_rule_auto_enables_feature():
     rebuilt = workspace.to_config()
     assert rebuilt["features"]["ichimoku_enabled"] is True
 
+    workspace.add_group(
+        "bull_long",
+        "VETO",
+        {
+            "id": "ichimoku_4h_veto",
+            "conditions": [
+                {
+                    "indicator": "ICH_FUTURE_CLOUD_STATE",
+                    "condition": "EQUALS",
+                    "value": "BEARISH",
+                    "sr_timeframe_minutes": 240,
+                }
+            ],
+        },
+    )
+    workspace._base_config["features"]["ichimoku_include_higher_timeframes"] = False
+    rebuilt = workspace.to_config()
+    assert rebuilt["features"]["ichimoku_include_higher_timeframes"] is True
+
 
 def test_profile_replacement_preserves_shared_scope_builder_group():
     shared = new_rule(
