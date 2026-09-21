@@ -153,6 +153,22 @@ def next_teacher_for_learning(
                 else "NULL::BIGINT"
             )
 
+            episode_id_sql = (
+                "CAST(research_episode_id AS VARCHAR)"
+                if "research_episode_id" in sample_columns
+                else "NULL::VARCHAR"
+            )
+            episode_entry_sql = (
+                "CAST(research_episode_entry_number AS BIGINT)"
+                if "research_episode_entry_number" in sample_columns
+                else "NULL::BIGINT"
+            )
+            episode_size_sql = (
+                "CAST(research_episode_viable_entries AS BIGINT)"
+                if "research_episode_viable_entries" in sample_columns
+                else "NULL::BIGINT"
+            )
+
             trade_match_cte = ""
             trade_join = ""
             legacy_pair_sql = "NULL::BIGINT"
@@ -203,6 +219,9 @@ def next_teacher_for_learning(
                         CAST(walk_forward_candidate_id AS VARCHAR) AS candidate_id,
                         {sample_id_sql} AS research_sample_id,
                         {signal_index_sql} AS research_signal_index,
+                        {episode_id_sql} AS research_episode_id,
+                        {episode_entry_sql} AS research_episode_entry_number,
+                        {episode_size_sql} AS research_episode_viable_entries,
                         CAST(entry_time AS TIMESTAMPTZ) AS entry_time,
                         CAST(exit_time AS TIMESTAMPTZ) AS source_exit_time,
                         UPPER(CAST(side AS VARCHAR)) AS side,
@@ -248,7 +267,10 @@ def next_teacher_for_learning(
                     o.side AS opposite_side,
                     o.pair_net_r AS opposite_pair_net_r,
                     s.research_sample_id,
-                    s.research_signal_index
+                    s.research_signal_index,
+                    s.research_episode_id,
+                    s.research_episode_entry_number,
+                    s.research_episode_viable_entries
                 FROM source_rows s
                 LEFT JOIN opposite_rows o
                   ON o.candidate_id=s.candidate_id
@@ -274,6 +296,9 @@ def next_teacher_for_learning(
                 "opposite_pair_net_r",
                 "research_sample_id",
                 "research_signal_index",
+                "research_episode_id",
+                "research_episode_entry_number",
+                "research_episode_viable_entries",
             ]
     else:
         if "trades" not in artifacts:
