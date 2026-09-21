@@ -181,12 +181,19 @@ def _outcome_row_after_decision(
         raise ValueError("reference run is not a WALK_FORWARD paired research run")
     run_dir = reports.resolve_run(reference_run)
     path = _artifact(manifest, run_dir, "research_sampling_trades")
-    signal_index = int(candidate["research_signal_index"])
+    signal_index_raw = candidate.get("research_signal_index")
     source_side = str(candidate.get("source_side", "")).upper()
     sample_id = str(candidate.get("reference_sample_id") or "").strip()
     paired_candidate_id = str(
         candidate.get("reference_walk_forward_candidate_id") or ""
     ).strip()
+    if not paired_candidate_id and signal_index_raw in (None, ""):
+        raise ValueError(
+            "paired outcome lookup requires walk_forward_candidate_id or research_signal_index"
+        )
+    signal_index = (
+        int(signal_index_raw) if signal_index_raw not in (None, "") else None
+    )
     source_profile = str(candidate.get("strategy_profile_key", "")).lower()
     regime = source_profile.rsplit("_", 1)[0] if "_" in source_profile else ""
     target_profile = f"{regime}_{frozen_side.lower()}" if regime else ""
@@ -214,6 +221,7 @@ def _outcome_row_after_decision(
             )
             params: list[Any] = [paired_candidate_id, frozen_side]
         else:
+            assert signal_index is not None
             where = (
                 "CAST(research_signal_index AS BIGINT)=? "
                 "AND UPPER(CAST(side AS VARCHAR))=?"
@@ -238,6 +246,28 @@ def _outcome_row_after_decision(
             )
         raise ValueError("captured candidate has no unique immutable paired Walk Forward outcome")
     values = dict(zip(selected, rows[0]))
+    if paired_candidate_id:
+        actual_pair_id = str(values.get("walk_forward_candidate_id") or "").strip()
+        if actual_pair_id != paired_candidate_id:
+            raise ValueError(
+                "paired outcome walk_forward_candidate_id does not match captured candidate"
+            )
+    actual_side = str(values.get("side") or "").upper()
+    if actual_side != frozen_side:
+        raise ValueError("paired outcome side does not match requested frozen side")
+    if signal_index is not None and values.get("research_signal_index") is not None:
+        if int(values["research_signal_index"]) != signal_index:
+            raise ValueError(
+                "paired outcome research_signal_index does not match captured candidate"
+            )
+    if (
+        source_side in {"LONG", "SHORT"}
+        and "walk_forward_source_side" in values
+        and str(values.get("walk_forward_source_side") or "").upper() != source_side
+    ):
+        raise ValueError(
+            "paired outcome walk_forward_source_side does not match captured source side"
+        )
     if "entry_time" in values and candidate.get("entry_time"):
         actual = _utc_timestamp(values["entry_time"], "outcome entry_time")
         expected = _utc_timestamp(candidate["entry_time"], "candidate entry_time")
