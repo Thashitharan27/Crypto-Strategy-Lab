@@ -67,10 +67,29 @@ def research_policy_schema() -> dict[str, Any]:
             "A newly learned rule gets one later qualifying same-phase confirmation review before further repeats may be compressed; later contradictions always reopen review.",
             "A prospective loss is evidence, not an automatic VETO; NO_CHANGE is preferred when no distinct causal mechanism is supported.",
             "For multi-R targets, room to opposing higher-timeframe support/resistance is an ENTRY-quality dimension, not something momentum can automatically override.",
+            "Every surfaced judgment must explicitly inspect available Ichimoku evidence alongside support/resistance, DI/ADX, EMA/MR, MACD/momentum and flow; unavailable Ichimoku is missing evidence, never a reason to infer or reconstruct it.",
             "BREAKOUT logic must remain distinguishable from normal CONTINUATION/PULLBACK logic so a successful breakout does not weaken room requirements elsewhere.",
             "Periodic reviews are primarily for simplification, consolidation, regime-level diagnosis, and evidence sufficiency—not for accumulating micro-rules.",
             "ChatGPT disagreement is diagnostic evidence only; any rule must encode the concrete structural reason for the disagreement.",
         ],
+        "evidence_review": {
+            "required_before_judgment": [
+                "support_resistance_trade_context_v2",
+                "ichimoku_trade_context_v1",
+                "DI/ADX",
+                "EMA/MR",
+                "MACD/momentum/flow",
+            ],
+            "ichimoku": (
+                "If ichimoku_trade_context_v1.available is true, explicitly assess "
+                "strategy-TF plus available 1h/4h/1D cloud location, Tenkan/Kijun "
+                "structure/cross, Kijun behavior, cloud thickness/distance, Kumo "
+                "twist and Chikou confirmation. Use Ichimoku as supporting causal "
+                "evidence rather than forcing a rule from one observation. If "
+                "available is false, state that the immutable reference predates "
+                "or lacks Ichimoku and do not infer it from later data."
+            ),
+        },
         "loss_review": {
             "diagnoses": sorted(LOSS_DIAGNOSES),
             "requirements_when_authoring_rules": {
@@ -143,6 +162,7 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
         return packet
     status = _upper(packet.get("status"))
     if status not in {
+        "CANDIDATE_DECISION_REQUIRED",
         "TEACHER_REVIEW_REQUIRED",
         "TEACHER_LOSS_REVIEW_REQUIRED",
         "LOSS_REVIEW_REQUIRED",
@@ -153,8 +173,32 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
 
     updated = deepcopy(packet)
     updated["research_policy"] = research_policy_schema()
+    updated["evidence_review_prompt"] = {
+        "required_before_judgment": [
+            "support_resistance_trade_context_v2",
+            "ichimoku_trade_context_v1",
+            "DI/ADX",
+            "EMA/MR",
+            "MACD/momentum/flow",
+        ],
+        "ichimoku_instruction": (
+            "If ichimoku_trade_context_v1.available=true, explicitly assess it "
+            "before deciding. If available=false, record it as unavailable and "
+            "do not infer or reconstruct Ichimoku."
+        ),
+    }
 
-    if status == "BOOTSTRAP_RESEARCH_REQUIRED":
+    if status == "CANDIDATE_DECISION_REQUIRED":
+        updated["methodology_prompt"] = {
+            "primary_goal": "FREEZE_INDEPENDENT_DIRECTIONAL_VIEW",
+            "required_evidence_review": updated["evidence_review_prompt"][
+                "required_before_judgment"
+            ],
+            "ichimoku_is_supporting_evidence": True,
+            "do_not_change_strategy_action": True,
+        }
+
+    elif status == "BOOTSTRAP_RESEARCH_REQUIRED":
         updated["methodology_prompt"] = {
             "primary_goal": "FREEZE_STABLE_REUSABLE_BASE_RULES",
             "bootstrap_is_in_sample": True,
