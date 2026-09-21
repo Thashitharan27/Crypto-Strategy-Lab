@@ -252,8 +252,8 @@ def test_paired_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path
     assert boundary["result"] == "LOSS"
     assert boundary["pair_net_r"] == -1.119
     assert boundary["teacher_learning_mode"] == TEACHER_LOSS_FLIP_MODE
-    assert boundary["opposite_side"] == "SHORT"
-    assert boundary["opposite_pair_net_r"] == 0.98
+    assert boundary["paired_opposite_side"] == "SHORT"
+    assert boundary["paired_opposite_net_r"] == 0.98
     assert _resolved_at == pd.Timestamp("2025-01-03T04:00:00Z")
 
 
@@ -314,6 +314,25 @@ def test_malformed_teacher_loss_pair_is_not_silently_skipped(tmp_path):
         assert "no unique immutable opposite row" in str(exc)
     else:
         raise AssertionError("malformed paired teacher loss must require inspection")
+
+
+def test_teacher_winner_does_not_expose_unresolved_opposite_result(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 3.0)
+
+    teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        [],
+        include_losses=True,
+    )
+
+    assert teacher is not None
+    boundary, _resolved_at = teacher
+    assert boundary["result"] == "WIN"
+    assert "paired_opposite_net_r" not in boundary
+    assert "paired_opposite_side" not in boundary
+    assert "opposite_pair_net_r" not in boundary
+    assert "opposite_side" not in boundary
 
 
 def test_default_remains_winner_only_when_loss_learning_is_disabled(tmp_path):
