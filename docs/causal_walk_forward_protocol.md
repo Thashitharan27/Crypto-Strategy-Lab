@@ -760,6 +760,15 @@ A rule/teacher/trade/review mutation invalidates an older cursor when necessary 
 
 Conversation context is never authoritative. Every judgment and deterministic checkpoint must be persisted before progressing. If the ChatGPT turn becomes large enough to threaten reasoning quality, finish/persist the current judgment, stop at a verified sequence/hash, report a `SAFE_STOP_CONTEXT_BUDGET`, and resume in a fresh turn by reading the authoritative experiment head. Routine scan checkpoints must not be shown as user-facing snapshots.
 
+
+### Recoverable read-only review packets
+
+A review boundary is read-only until ChatGPT records a decision, but the fully built review packet may be expensive to assemble. A completed teacher/loss/periodic packet must therefore be atomically persisted as a **non-authoritative response cache** keyed by the exact experiment sequence/state hash and review policy.
+
+The cache does not append an event, change equity, activate a rule, or advance the causal cursor. If transport times out after packet construction, a retry from the same verified head must return the persisted packet rather than recomputing it. If the authoritative sequence/hash has changed, the cached packet is stale and must not be returned.
+
+For paired `WALK_FORWARD` teachers that carry `research_signal_index` and `walk_forward_candidate_id`, review context hydration should use that exact source identity rather than scanning a wide entry-time window.
+
 ---
 
 ## 22. Recovery from interruptions
