@@ -5,7 +5,7 @@ teacher observations. Portfolio participation controls RESEARCH equity only; it
 does not determine teacher eligibility. The paired artifact also persists the
 exact opposite-side execution outcome, so resolved teacher losses can be reviewed
 as FLIP evidence at any configured R:R without inferring the opposite result.
-Loss review remains opt-in through the causal teacher-loss policy.
+Fresh MCP walk-forward scans enable paired teacher-loss FLIP review by default at any configured R:R; callers may explicitly disable it when preserving legacy experiment semantics.
 """
 from __future__ import annotations
 
