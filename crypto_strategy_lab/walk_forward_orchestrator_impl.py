@@ -43,6 +43,11 @@ from crypto_strategy_lab.walk_forward_research_policy import (
     validate_periodic_methodology,
     validate_teacher_methodology,
 )
+from crypto_strategy_lab.walk_forward_teacher_compression import (
+    AUTO_COMPRESSED_STATUS,
+    TEACHER_COMPRESSION_CONTRACT,
+    teacher_compression_decision,
+)
 
 
 
@@ -843,7 +848,10 @@ def _teacher_review_packet(
         "contract": ORCHESTRATOR_CONTRACT,
         "status": "TEACHER_REVIEW_REQUIRED",
         "experiment_id": experiment_id,
-        "teacher": {**deepcopy(teacher_boundary), "result": "WIN"},
+        "teacher": {
+            **deepcopy(teacher_boundary),
+            "result": str(teacher_boundary.get("result", "WIN")).upper(),
+        },
         "active_rule_versions": snapshot.get("active_rule_versions"),
         "rule_counts": snapshot.get("rule_counts"),
         "review_rule": "Teacher evidence may teach/refine ENTRY only; it never changes walk-forward equity.",
@@ -927,6 +935,80 @@ def _teacher_review_packet(
         config=snapshot["materialized_config"],
     )
     return packet
+
+
+def _teacher_phase_metadata(
+    packet: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    decision = teacher_compression_decision(packet, events)
+    return {
+        "teacher_phase_audit": deepcopy(decision.get("audit") or {}),
+        "teacher_review_reason": decision.get("reason"),
+        "compared_to_teacher_id": decision.get("compared_to_teacher_id"),
+        "confirmation_of_teacher_id": decision.get("confirmation_of_teacher_id"),
+        "confirmation_rule_ids": list(decision.get("confirmation_rule_ids") or []),
+        "teacher_compression_action": decision.get("action"),
+        "teacher_compression_contract": TEACHER_COMPRESSION_CONTRACT,
+    }
+
+
+def _append_auto_compressed_teacher(
+    store: CausalExperimentStore,
+    *,
+    experiment_id: str,
+    packet: dict[str, Any],
+    decision: dict[str, Any],
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+) -> dict[str, Any]:
+    teacher = deepcopy(packet.get("teacher") or {})
+    resolution_raw = teacher.get("resolution_time")
+    if resolution_raw in (None, ""):
+        raise ValueError("teacher phase compression requires a causal resolution_time")
+    resolution = _utc_timestamp(resolution_raw, "teacher compression resolution_time")
+    audit = deepcopy(decision.get("audit") or {})
+    teacher_id = str(
+        teacher.get("pair_id")
+        or teacher.get("walk_forward_candidate_id")
+        or ""
+    ).strip()
+    reason = str(decision.get("reason") or "CORRELATED_PHASE_DUPLICATE").upper()
+    payload = {
+        **teacher,
+        "review_decision": AUTO_COMPRESSED_STATUS,
+        "teacher_review_status": AUTO_COMPRESSED_STATUS,
+        "compression_reason": reason,
+        "compression_contract": TEACHER_COMPRESSION_CONTRACT,
+        "compared_to_teacher_id": decision.get("compared_to_teacher_id"),
+        "teacher_phase_audit": audit,
+        "phase_fingerprint": audit.get("phase_fingerprint"),
+        "structural_phase_fingerprint": audit.get("structural_fingerprint"),
+        "active_rule_matches": list(audit.get("active_rule_matches") or []),
+        "validated_rule_event_count": 0,
+        "notes": (
+            "Deterministically compressed as a repeated causal teacher phase; "
+            "the immutable raw observation remains available for later analytics."
+        ),
+    }
+    appended = store.append_event(
+        experiment_id,
+        "TEACHER_RESOLVED",
+        payload,
+        operation_id,
+        int(expected_sequence),
+        str(expected_state_hash),
+        effective_market_time=resolution.isoformat(),
+        source="DETERMINISTIC_TEACHER_COMPRESSION",
+    )
+    return {
+        "sequence": int(appended["sequence"]),
+        "state_hash": str(appended["state_hash"]),
+        "teacher_id": teacher_id or None,
+        "compression_reason": reason,
+        "teacher_phase_audit": audit,
+    }
 
 
 def _judgment_candidate(events: list[dict[str, Any]], candidate_id: str) -> dict[str, Any]:
@@ -1085,7 +1167,28 @@ def advance_walk_forward(
                 expected_state_hash=state_hash,
                 teacher_boundary=scan["teacher_boundary"],
             )
-            packet.update(sequence=sequence, state_hash=state_hash, scan=scan.get("scan"))
+            phase_decision = teacher_compression_decision(packet, events)
+            if phase_decision.get("action") == "AUTO_COMPRESS":
+                compressed = _append_auto_compressed_teacher(
+                    store,
+                    experiment_id=experiment_id,
+                    packet=packet,
+                    decision=phase_decision,
+                    operation_id=_operation(
+                        operation_id, f"teacher-compress-{step}-{sequence}"
+                    ),
+                    expected_sequence=sequence,
+                    expected_state_hash=state_hash,
+                )
+                sequence = int(compressed["sequence"])
+                state_hash = str(compressed["state_hash"])
+                continue
+            packet.update(
+                sequence=sequence,
+                state_hash=state_hash,
+                scan=scan.get("scan"),
+                **_teacher_phase_metadata(packet, events),
+            )
             return packet
         if status == "NO_ELIGIBLE_CANDIDATE_IN_SCAN":
             return {
