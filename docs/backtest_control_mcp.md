@@ -7,7 +7,7 @@ Crypto Strategy Lab has one primary ChatGPT-facing MCP endpoint:
 | **Unified research + control** | `http://127.0.0.1:8766/mcp` | Create/validate/run local backtests and analyze completed outputs through one plugin |
 | Legacy reports-only endpoint | `http://127.0.0.1:8765/mcp` | Backward-compatible read-only analysis only |
 
-The primary ChatGPT plugin normally points to **8766**. The desktop integration can also launch a second identical unified MCP on **8767** with a second secure tunnel, allowing two ChatGPT plugins/chats to use the Lab concurrently. Both instances share the same data/config/output roots; parallel work should use different runs or walk-forward experiment IDs rather than mutating one causal experiment from both chats.
+The primary ChatGPT plugin normally points to **8766**. The desktop integration can also launch identical unified MCP instances on **8767** and **8768**, each with its own secure tunnel, allowing three ChatGPT plugins/chats to use the Lab concurrently. All instances share the same data/config/output roots; parallel work should use different runs or walk-forward experiment IDs rather than mutating one causal experiment from multiple chats.
 
 The write boundary is still **backtest-only**. The unified server does not provide arbitrary shell execution, source-code editing, credential access, exchange-order actions, or live-trading actions.
 
