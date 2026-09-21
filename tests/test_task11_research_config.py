@@ -64,6 +64,13 @@ def test_v3_defaults_match_current_research_defaults():
     assert config.features.bull_regime_return_threshold == pytest.approx(0.20)
     assert config.features.sr_near_distance_atr == pytest.approx(0.50)
     assert config.features.mean_reversion_mean_type == "AUTO_TIMEFRAME"
+    assert config.features.ichimoku_enabled is False
+    assert (
+        config.features.ichimoku_conversion_period,
+        config.features.ichimoku_base_period,
+        config.features.ichimoku_span_b_period,
+        config.features.ichimoku_displacement,
+    ) == (9, 26, 52, 26)
     assert config.strategy.enable_di_direction_selection is True
     assert config.strategy.enable_di_pressure_analysis is True
     assert config.strategy.enable_mean_reversion_analysis is True
@@ -118,6 +125,38 @@ def test_sr_registry_parameters_are_owned_by_feature_config():
     params = features.registry_parameters(strategy_timeframe_minutes=240)
     assert params["support_resistance"]["sr_timeframe_minutes"] == 240
     assert params["support_resistance"]["atr_period"] == features.atr_period
+
+
+def test_ichimoku_registry_parameters_are_opt_in_and_versioned_by_settings():
+    inactive = FeatureConfig()
+    assert "ichimoku_context" not in inactive.registry_parameters()
+
+    features = FeatureConfig(
+        ichimoku_enabled=True,
+        ichimoku_conversion_period=10,
+        ichimoku_base_period=30,
+        ichimoku_span_b_period=60,
+        ichimoku_displacement=30,
+    )
+    params = features.registry_parameters(strategy_timeframe_minutes=15)
+    assert params["ichimoku_context"] == {
+        "timeframe_minutes": 0,
+        "conversion_period": 10,
+        "base_period": 30,
+        "span_b_period": 60,
+        "displacement": 30,
+        "atr_period": features.atr_period,
+    }
+
+
+def test_ichimoku_periods_must_be_positive():
+    base = ResearchRunConfig()
+    invalid = replace(
+        base,
+        features=replace(base.features, ichimoku_displacement=0),
+    )
+    with pytest.raises(ValueError, match="Ichimoku displacement must be positive"):
+        invalid.validate()
 
 
 def test_inactive_telemetry_interval_does_not_block_higher_timeframe_run():
