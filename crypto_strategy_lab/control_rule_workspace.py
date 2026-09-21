@@ -32,6 +32,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     is_context_timeframe_evidence,
     is_support_resistance_evidence,
     normalize_rule,
+    uses_ichimoku_rules,
     rule_value_options,
 )
 
@@ -908,4 +909,10 @@ class RuleWorkspace:
             rebuilt[key] = asdict(profile)
         result = deepcopy(self._base_config)
         result["strategy"]["profiles"] = rebuilt
+        if uses_ichimoku_rules(
+            self.rules["REQUIRED"],
+            self.rules["VETO"],
+            self.rules["FLIP"],
+        ):
+            result["features"]["ichimoku_enabled"] = True
         return result
