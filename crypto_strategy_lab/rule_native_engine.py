@@ -136,6 +136,14 @@ _RESEARCH_NUMERIC_FIELDS = {
         "flow_persistence",
         1.0,
     ),
+    "ICH_TK_SPREAD_ATR": ("ichimoku_context", "tk_spread_atr", 1.0),
+    "ICH_TENKAN_DISTANCE_ATR": ("ichimoku_context", "tenkan_distance_atr", 1.0),
+    "ICH_KIJUN_DISTANCE_ATR": ("ichimoku_context", "kijun_distance_atr", 1.0),
+    "ICH_KIJUN_SLOPE_ATR": ("ichimoku_context", "kijun_slope_atr", 1.0),
+    "ICH_KIJUN_FLAT_BARS": ("ichimoku_context", "kijun_flat_bars", 1.0),
+    "ICH_CLOUD_THICKNESS_ATR": ("ichimoku_context", "cloud_thickness_atr", 1.0),
+    "ICH_FUTURE_CLOUD_THICKNESS_ATR": ("ichimoku_context", "future_cloud_thickness_atr", 1.0),
+    "ICH_CLOUD_DISTANCE_ATR": ("ichimoku_context", "cloud_distance_atr", 1.0),
 }
 _RESEARCH_CATEGORICAL_FIELDS = {
     "PRICE_OI_STATE": ("futures_positioning", "price_oi_state"),
@@ -144,6 +152,13 @@ _RESEARCH_CATEGORICAL_FIELDS = {
     "FUNDING_EXTREME_POSITIVE": ("funding_context", "funding_extreme_positive"),
     "FUNDING_EXTREME_NEGATIVE": ("funding_context", "funding_extreme_negative"),
     "MARK_INDEX_BASIS_STATE": ("basis_context", "mark_index_basis_state"),
+    "ICH_PRICE_VS_CLOUD": ("ichimoku_context", "price_vs_cloud"),
+    "ICH_TK_STATE": ("ichimoku_context", "tk_state"),
+    "ICH_TK_CROSS": ("ichimoku_context", "tk_cross"),
+    "ICH_CURRENT_CLOUD_STATE": ("ichimoku_context", "current_cloud_state"),
+    "ICH_FUTURE_CLOUD_STATE": ("ichimoku_context", "future_cloud_state"),
+    "ICH_KUMO_TWIST": ("ichimoku_context", "kumo_twist"),
+    "ICH_CHIKOU_VS_PRICE": ("ichimoku_context", "chikou_vs_price"),
 }
 _RESEARCH_RULE_INDICATORS = frozenset(
     (*_RESEARCH_NUMERIC_FIELDS, *_RESEARCH_CATEGORICAL_FIELDS)
