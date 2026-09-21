@@ -721,6 +721,8 @@ def test_teacher_review_packet_uses_exact_source_identity_instead_of_window_scan
             "trade_entry_context": {
                 "research_signal_index": row["research_signal_index"],
                 "walk_forward_candidate_id": row["walk_forward_candidate_id"],
+                "research_episode_entry_number": 3,
+                "research_episode_viable_entries": 9,
             }
         },
     )
@@ -751,3 +753,7 @@ def test_teacher_review_packet_uses_exact_source_identity_instead_of_window_scan
     assert packet["status"] == "TEACHER_REVIEW_REQUIRED"
     assert packet["entry_context"]["trade_entry_context"]["research_signal_index"] == 44
     assert packet["entry_context"]["trade_entry_context"]["walk_forward_candidate_id"] == "wf-44-long"
+    teacher_trade = packet["entry_context"]["trade_entry_context"]
+    assert teacher_trade["research_episode_entries_seen_so_far"] == 3
+    assert "research_episode_entry_number" not in teacher_trade
+    assert "research_episode_viable_entries" not in teacher_trade
