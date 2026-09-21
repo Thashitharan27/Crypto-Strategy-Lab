@@ -480,11 +480,11 @@ class ResearchRunConfig:
                     sr_rule_minutes = int(raw_sr_timeframe)
                 except (TypeError, ValueError, OverflowError) as exc:
                     raise ValueError(
-                        f"{key}: S/R rule timeframe is invalid"
+                        f"{key}: context rule timeframe is invalid"
                     ) from exc
                 if sr_rule_minutes not in {0, 60, 240, 1440}:
                     raise ValueError(
-                        f"{key}: S/R rule timeframe must be Strategy TF, 1h, 4h or 1d"
+                        f"{key}: context rule timeframe must be Strategy TF, 1h, 4h or 1d"
                     )
                 effective_rule_minutes = (
                     data.strategy_timeframe_minutes
