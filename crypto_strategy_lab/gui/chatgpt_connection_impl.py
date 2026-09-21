@@ -618,6 +618,7 @@ class ChatGPTIntegrationWidget(QWidget):
         self.settings.setValue(
             "auto_start_chatgpt_connection_2", self.auto_start2.isChecked()
         )
+        self.settings.sync()
         self._update_endpoint()
         self._update_endpoint_secondary()
 
@@ -739,6 +740,11 @@ class ChatGPTIntegrationWidget(QWidget):
         )
         if self.port2.value() == self.port.value():
             errors.append("Connection 2 MCP port must be different from Connection 1.")
+        if (
+            self.tunnel_id2.text().strip()
+            and self.tunnel_id2.text().strip() == self.tunnel_id.text().strip()
+        ):
+            errors.append("Connection 2 Tunnel ID must be different from Connection 1.")
         return key, errors
 
     def test(self):
