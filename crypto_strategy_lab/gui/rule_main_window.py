@@ -28,6 +28,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     SUPPORT_RESISTANCE_RULE_EVIDENCE,
     common_execution_profile,
     compile_profiles,
+    uses_higher_timeframe_ichimoku_rules,
     uses_ichimoku_rules,
     uses_mean_reversion_rules,
     uses_support_resistance_rules,
@@ -708,7 +709,19 @@ class MainWindow(LegacyMainWindow):
             if mr_evidence & {"MR_MOTION", "MR_DISTANCE_CHANGE_ATR"}:
                 features = replace(features, mean_reversion_track_motion=True)
         if uses_ichimoku_rules(required_rules, veto_rules, flip_rules):
-            features = replace(features, ichimoku_enabled=True)
+            features = replace(
+                features,
+                ichimoku_enabled=True,
+                ichimoku_include_higher_timeframes=(
+                    features.ichimoku_include_higher_timeframes
+                    or uses_higher_timeframe_ichimoku_rules(
+                        data.strategy_timeframe_minutes,
+                        required_rules,
+                        veto_rules,
+                        flip_rules,
+                    )
+                ),
+            )
         if (
             authored.get("direction_mode") == "MTF_SR_REACTION"
             or uses_support_resistance_rules(required_rules, veto_rules, flip_rules)
