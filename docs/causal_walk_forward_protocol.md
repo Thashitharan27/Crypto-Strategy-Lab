@@ -457,6 +457,16 @@ For a paired teacher loss, the reference artifact itself is the verification sou
 2. read the independently simulated opposite row only when its resolution is causally due;
 3. use its actual result and net R; never infer it from the source trade.
 
+The exact `walk_forward_candidate_id` is authoritative when present. A validator lookup failure, duplicate/missing opposite row, side mismatch, signal mismatch, entry-time mismatch, or other disagreement with the immutable pair is **not** a research `NO_CHANGE`. It must stop at:
+
+```text
+TEACHER_FLIP_VALIDATION_INCONSISTENCY
+```
+
+That state is inspection-required and must not append `TEACHER_RESOLVED`, `NO_CHANGE`, `FLIP_EVIDENCE`, or `FLIP_LEARNED` until the pair identity/outcome is reconciled. `NO_CHANGE` means valid evidence was reviewed and no reusable rule was justified; it must never be used as a data-validation fallback.
+
+Overlapping teacher observations do not invalidate an otherwise complete pair. The causal boundary remains the later of that pair's source-side and opposite-side resolution times.
+
 For example, with TP3:
 
 ```text

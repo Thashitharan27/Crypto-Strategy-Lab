@@ -415,6 +415,31 @@ def test_walk_forward_artifact_validation_requires_complete_long_short_pairs():
     with pytest.raises(ValueError, match="exactly two rows per candidate"):
         _validate_samples(rows.iloc[[0]].copy())
 
+    signal_mismatch = rows.copy()
+    signal_mismatch.loc[1, "research_signal_index"] = 11
+    with pytest.raises(ValueError, match="disagree on research_signal_index"):
+        _validate_samples(signal_mismatch)
+
+    entry_mismatch = rows.copy()
+    entry_mismatch.loc[1, "entry_time"] = "2026-01-01T00:15:00Z"
+    with pytest.raises(ValueError, match="disagree on entry_time"):
+        _validate_samples(entry_mismatch)
+
+    source_side_mismatch = rows.copy()
+    source_side_mismatch.loc[1, "walk_forward_source_side"] = "SHORT"
+    with pytest.raises(ValueError, match="disagree on walk_forward_source_side"):
+        _validate_samples(source_side_mismatch)
+
+    source_profile_mismatch = rows.copy()
+    source_profile_mismatch.loc[1, "walk_forward_source_profile_key"] = "bear_long"
+    with pytest.raises(ValueError, match="disagree on walk_forward_source_profile_key"):
+        _validate_samples(source_profile_mismatch)
+
+    counterfactual_mismatch = rows.copy()
+    counterfactual_mismatch.loc[1, "walk_forward_counterfactual"] = False
+    with pytest.raises(ValueError, match="exactly one counterfactual row"):
+        _validate_samples(counterfactual_mismatch)
+
 
 def test_end_of_data_is_censored_before_outcome_reporting():
     frame = _annotate_episodes(_viable_rows())

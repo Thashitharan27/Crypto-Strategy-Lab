@@ -322,6 +322,74 @@ def test_teacher_loss_flip_uses_entry_quality_standard_without_repetition_requir
     assert "Reusable bearish reversal" in teacher_review["setup_thesis"]
 
 
+def test_teacher_loss_validation_inconsistency_cannot_be_recorded_as_no_change(
+    tmp_path, monkeypatch
+):
+    control, reports, store, head = _environment(tmp_path)
+    from crypto_strategy_lab import walk_forward_review_facade as facade
+
+    boundary = {
+        "pair_id": 4,
+        "side": "SHORT",
+        "strategy_profile_key": "sideways_short",
+        "entry_time": "2020-06-01T00:45:00Z",
+        "exit_time": "2020-06-01T01:56:00Z",
+        "result": "LOSS",
+        "pair_net_r": -1.166,
+        "teacher_learning_mode": "FLIP_FROM_LOSS_PAIRED",
+    }
+    monkeypatch.setattr(
+        facade._impl,
+        "_next_teacher",
+        lambda manifest, run_dir, events: (
+            boundary,
+            pd.Timestamp("2020-06-01T22:45:00Z"),
+        ),
+    )
+    monkeypatch.setattr(
+        facade._impl,
+        "_teacher_review_packet",
+        lambda *args, **kwargs: {
+            "status": "TEACHER_LOSS_REVIEW_REQUIRED",
+            "teacher": dict(boundary),
+            "entry_context": {},
+        },
+    )
+    monkeypatch.setattr(
+        facade,
+        "_decorate_teacher_loss_packet",
+        lambda control, reports, experiment_id, packet: {
+            **packet,
+            "status": "TEACHER_FLIP_VALIDATION_INCONSISTENCY",
+            "inspection_required": True,
+            "flip_activation_allowed": False,
+            "validation_inconsistency": {
+                "code": "PAIR_LOOKUP_MISMATCH",
+                "reason": "raw pair exists but validator lookup did not resolve it",
+            },
+        },
+    )
+
+    with pytest.raises(ValueError, match="PAIR_LOOKUP_MISMATCH"):
+        record_walk_forward_teacher_review(
+            control,
+            reports,
+            experiment_id=EXPERIMENT_ID,
+            teacher_pair_id="4",
+            decision="NO_CHANGE",
+            notes="Would previously have silently discarded the FLIP evidence.",
+            operation_id="teacher:4:inconsistent:no-change",
+            expected_sequence=head["sequence"],
+            expected_state_hash=head["state_hash"],
+            auto_advance=False,
+        )
+
+    unchanged = store.read(EXPERIMENT_ID, recent_events=20)
+    assert unchanged["sequence"] == head["sequence"]
+    assert unchanged["state_hash"] == head["state_hash"]
+    assert [event["event_type"] for event in unchanged["recent_events"]] == ["WF_CREATED"]
+
+
 def test_periodic_review_rule_validation_is_atomic(tmp_path):
     control, reports, store, head = _environment(tmp_path)
     cursor = store.append_event(
