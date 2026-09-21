@@ -194,7 +194,7 @@ def test_overlapping_teacher_observation_does_not_invalidate_paired_flip_evidenc
     assert teacher is not None
     boundary, resolved_at = teacher
     assert boundary["pair_id"] == 4
-    assert boundary["entry_time"] == "2025-01-03T00:00:00"
+    assert pd.Timestamp(boundary["entry_time"]) == pd.Timestamp("2025-01-03T00:00:00Z")
     assert boundary["result"] == "LOSS"
     assert resolved_at == pd.Timestamp("2025-01-03T06:00:00Z")
     assert boundary["paired_opposite_resolution_time"] == "2025-01-03T06:00:00+00:00"
@@ -254,6 +254,7 @@ def test_teacher_loss_packet_requires_verified_opposite_side_win(monkeypatch):
     assert updated["opposite_side_outcome"]["available"] is True
     assert updated["opposite_side_outcome"]["side"] == "SHORT"
     assert updated["flip_activation_allowed"] is True
+    assert updated["opposite_side_outcome"]["validation_code"] == "VERIFIED_WIN"
     assert updated["prior_teacher_loss_evidence_count"] == 0
     assert "same structural learning standard as ENTRY" in updated["review_rule"]
     assert "Repeated prior examples may strengthen confidence but are not required" in updated["review_rule"]
