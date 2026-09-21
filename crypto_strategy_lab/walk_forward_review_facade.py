@@ -29,6 +29,11 @@ from crypto_strategy_lab.walk_forward_research_policy import (
     validate_periodic_methodology,
     validate_teacher_methodology,
 )
+from crypto_strategy_lab.walk_forward_teacher_compression import (
+    CHATGPT_REVIEWED_STATUS,
+    TEACHER_COMPRESSION_CONTRACT,
+    teacher_compression_decision,
+)
 
 
 def _canonical_rule_specs(
@@ -326,22 +331,25 @@ def record_walk_forward_teacher_review(
     notes_text = str(notes).strip()
     effective_iso = resolution_time.isoformat()
 
+    base_phase_packet = _impl._teacher_review_packet(
+        control,
+        reports,
+        experiment_id=experiment_id,
+        expected_sequence=expected_sequence,
+        expected_state_hash=expected_state_hash,
+        teacher_boundary=boundary,
+    )
+    phase_decision = teacher_compression_decision(base_phase_packet, events)
+    phase_audit = deepcopy(phase_decision.get("audit") or {})
+
     checked_loss_packet: dict[str, Any] | None = None
     if teacher_result == "LOSS":
         if decision_value not in {"NO_CHANGE", "FLIP_EVIDENCE", "FLIP_LEARNED"}:
             raise ValueError(
                 "teacher loss decision must be NO_CHANGE, FLIP_EVIDENCE, or FLIP_LEARNED"
             )
-        base_packet = _impl._teacher_review_packet(
-            control,
-            reports,
-            experiment_id=experiment_id,
-            expected_sequence=expected_sequence,
-            expected_state_hash=expected_state_hash,
-            teacher_boundary=boundary,
-        )
         checked_loss_packet = _decorate_teacher_loss_packet(
-            control, reports, experiment_id, base_packet
+            control, reports, experiment_id, deepcopy(base_phase_packet)
         )
         if bool(checked_loss_packet.get("inspection_required")) or str(
             checked_loss_packet.get("status", "")
@@ -400,6 +408,24 @@ def record_walk_forward_teacher_review(
         **deepcopy(boundary),
         "result": teacher_result,
         "review_decision": decision_value,
+        "teacher_review_status": CHATGPT_REVIEWED_STATUS,
+        "review_surface_reason": phase_decision.get("reason"),
+        "compression_contract": TEACHER_COMPRESSION_CONTRACT,
+        "compared_to_teacher_id": phase_decision.get("compared_to_teacher_id"),
+        "confirmation_of_teacher_id": phase_decision.get(
+            "confirmation_of_teacher_id"
+        ),
+        "confirmation_rule_ids": list(
+            phase_decision.get("confirmation_rule_ids") or []
+        ),
+        "teacher_phase_audit": phase_audit,
+        "phase_fingerprint": phase_audit.get("phase_fingerprint"),
+        "structural_phase_fingerprint": phase_audit.get(
+            "structural_fingerprint"
+        ),
+        "active_rule_matches": list(
+            phase_audit.get("active_rule_matches") or []
+        ),
         "notes": notes_text,
         "validated_rule_event_count": len(canonical),
         "rule_event_schema_contract": preflight["rule_event_schema"]["contract"],
