@@ -32,6 +32,7 @@ ACCELERATED_SCAN_ROWS = 4096
 AUTONOMOUS_ORCHESTRATOR_CONTRACT = "causal_walk_forward_autonomous_v1"
 DEFAULT_AUTONOMOUS_SCAN_SLICES = 4
 MAX_AUTONOMOUS_SCAN_SLICES = 16
+TEACHER_FLIP_VALIDATION_INCONSISTENCY = "TEACHER_FLIP_VALIDATION_INCONSISTENCY"
 AUTONOMOUS_JUDGMENT_STATUSES = frozenset({
     "CANDIDATE_DECISION_REQUIRED",
     "TEACHER_REVIEW_REQUIRED",
@@ -567,6 +568,41 @@ def _teacher_loss_evidence(
     return rows[-20:]
 
 
+def _teacher_flip_validation_inconsistency(
+    updated: dict[str, Any],
+    *,
+    code: str,
+    reason: str,
+    opposite_side: str | None = None,
+    trade_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Stop teacher learning when immutable pair evidence cannot be reconciled."""
+    context = trade_context or {}
+    candidate_id = context.get("walk_forward_candidate_id")
+    updated["status"] = TEACHER_FLIP_VALIDATION_INCONSISTENCY
+    updated["inspection_required"] = True
+    updated["flip_activation_allowed"] = False
+    updated["validation_inconsistency"] = {
+        "code": str(code).strip().upper(),
+        "reason": str(reason).strip(),
+        "walk_forward_candidate_id": candidate_id,
+        "research_signal_index": context.get("research_signal_index"),
+        "opposite_side": opposite_side,
+    }
+    updated["opposite_side_outcome"] = {
+        "available": False,
+        "side": opposite_side,
+        "validation_code": str(code).strip().upper(),
+        "reason": str(reason).strip(),
+    }
+    updated["review_rule"] = (
+        "Inspection required. Do not record NO_CHANGE, FLIP_EVIDENCE, or FLIP_LEARNED "
+        "while immutable paired outcome identity/validation is inconsistent. "
+        "NO_CHANGE is a research judgment, not a data-validation fallback."
+    )
+    return updated
+
+
 def _decorate_teacher_loss_packet(
     control: Any,
     reports: Any,
@@ -601,13 +637,27 @@ def _decorate_teacher_loss_packet(
     entry_context = updated.get("entry_context") or {}
     trade_context = entry_context.get("trade_entry_context") or {}
     signal_index = trade_context.get("research_signal_index")
-    if side not in {"LONG", "SHORT"} or signal_index in (None, ""):
-        updated["opposite_side_outcome"] = {
-            "available": False,
-            "reason": "teacher entry context did not expose a unique research signal identity",
-        }
-        updated["flip_activation_allowed"] = False
-        return updated
+    paired_candidate_id = str(
+        trade_context.get("walk_forward_candidate_id") or ""
+    ).strip()
+    if side not in {"LONG", "SHORT"}:
+        return _teacher_flip_validation_inconsistency(
+            updated,
+            code="SIDE_MISMATCH",
+            reason="teacher entry context did not expose a valid source side",
+            trade_context=trade_context,
+        )
+    if not paired_candidate_id and signal_index in (None, ""):
+        return _teacher_flip_validation_inconsistency(
+            updated,
+            code="PAIR_IDENTITY_MISSING",
+            reason=(
+                "teacher entry context exposed neither walk_forward_candidate_id "
+                "nor research_signal_index"
+            ),
+            opposite_side="SHORT" if side == "LONG" else "LONG",
+            trade_context=trade_context,
+        )
 
     store = _impl._store(control)
     readback = store.read(experiment_id, recent_events=0)
@@ -615,36 +665,92 @@ def _decorate_teacher_loss_packet(
     reference_run = str(definition.get("reference_run", "")).strip()
     opposite = "SHORT" if side == "LONG" else "LONG"
     candidate = {
-        "research_signal_index": int(signal_index),
         "source_side": side,
         "reference_sample_id": trade_context.get("research_sample_id"),
-        "reference_walk_forward_candidate_id": trade_context.get(
-            "walk_forward_candidate_id"
-        ),
+        "reference_walk_forward_candidate_id": paired_candidate_id or None,
         "strategy_profile_key": profile,
         "entry_time": teacher.get("entry_time") or trade_context.get("entry_time"),
     }
+    if signal_index not in (None, ""):
+        candidate["research_signal_index"] = int(signal_index)
+
     try:
         outcome = _impl._outcome_row_after_decision(
             reports, reference_run, candidate, opposite
         )
     except ValueError as exc:
-        updated["opposite_side_outcome"] = {
-            "available": False,
-            "side": opposite,
-            "reason": str(exc),
-        }
-        updated["flip_activation_allowed"] = False
-        return updated
+        message = str(exc)
+        code = (
+            "PAIR_LOOKUP_MISMATCH"
+            if "no unique immutable paired Walk Forward outcome" in message
+            else "OPPOSITE_OUTCOME_LOOKUP_ERROR"
+        )
+        return _teacher_flip_validation_inconsistency(
+            updated,
+            code=code,
+            reason=message,
+            opposite_side=opposite,
+            trade_context=trade_context,
+        )
 
+    actual_side = str(outcome.get("side") or "").upper()
+    if actual_side != opposite:
+        return _teacher_flip_validation_inconsistency(
+            updated,
+            code="SIDE_MISMATCH",
+            reason=f"paired outcome side {actual_side or '<missing>'} does not match {opposite}",
+            opposite_side=opposite,
+            trade_context=trade_context,
+        )
+    actual_pair_id = str(outcome.get("walk_forward_candidate_id") or "").strip()
+    if paired_candidate_id and actual_pair_id != paired_candidate_id:
+        return _teacher_flip_validation_inconsistency(
+            updated,
+            code="CANDIDATE_ID_MISMATCH",
+            reason=(
+                f"paired outcome candidate {actual_pair_id or '<missing>'} does not match "
+                f"{paired_candidate_id}"
+            ),
+            opposite_side=opposite,
+            trade_context=trade_context,
+        )
+    actual_signal = outcome.get("research_signal_index")
+    if signal_index not in (None, "") and actual_signal not in (None, ""):
+        if int(actual_signal) != int(signal_index):
+            return _teacher_flip_validation_inconsistency(
+                updated,
+                code="SIGNAL_INDEX_MISMATCH",
+                reason=(
+                    f"paired outcome signal {actual_signal} does not match "
+                    f"teacher signal {signal_index}"
+                ),
+                opposite_side=opposite,
+                trade_context=trade_context,
+            )
+
+    result = str(outcome.get("result", "")).upper()
+    if result not in {"WIN", "LOSS", "BREAKEVEN"}:
+        return _teacher_flip_validation_inconsistency(
+            updated,
+            code="OUTCOME_RESULT_INVALID",
+            reason=f"paired outcome result is not recognized: {result or '<missing>'}",
+            opposite_side=opposite,
+            trade_context=trade_context,
+        )
+
+    validation_code = {
+        "WIN": "VERIFIED_WIN",
+        "LOSS": "OPPOSITE_LOSS",
+        "BREAKEVEN": "OPPOSITE_BREAKEVEN",
+    }[result]
     updated["opposite_side_outcome"] = {
         "available": True,
         "side": opposite,
+        "validation_code": validation_code,
         "outcome": outcome,
     }
-    updated["flip_activation_allowed"] = str(outcome.get("result", "")).upper() == "WIN"
+    updated["flip_activation_allowed"] = result == "WIN"
     return updated
-
 
 def _decorate_advance_result(
     control: Any,
