@@ -171,8 +171,10 @@ def test_active_rule_loss_bypasses_compression() -> None:
     assert decision["reason"] == "ACTIVE_RULE_FAILURE"
 
 
-def test_new_rule_gets_one_confirmation_then_repeats_compress() -> None:
+def test_new_flip_rule_gets_confirmation_when_effective_side_wins() -> None:
     learning = _packet(teacher_id="wf-100-long")
+    learning["teacher"]["result"] = "LOSS"
+    learning["teacher"]["paired_opposite_net_r"] = 2.8
     learning_event = _reviewed_event(
         learning, sequence=10, validated_rule_event_count=1
     )
@@ -184,27 +186,20 @@ def test_new_rule_gets_one_confirmation_then_repeats_compress() -> None:
 
     confirmation = _packet(
         teacher_id="wf-101-long",
-        matched_entry=(),
+        matched_entry=("ENTRY_001",),
         matched_flip=("FLIP_004",),
         effective_side="SHORT",
     )
-    # A source LONG win while the active FLIP points SHORT is a contradiction,
-    # so use a source LOSS for a clean same-thesis confirmation path.
     confirmation["teacher"]["result"] = "LOSS"
     confirmation["teacher"]["paired_opposite_net_r"] = 2.9
-    learning["teacher"]["result"] = "LOSS"
-    learning["teacher"]["paired_opposite_net_r"] = 2.8
-    learning_event = _reviewed_event(
-        learning, sequence=10, validated_rule_event_count=1
-    )
 
     decision = teacher_compression_decision(
         confirmation, [learning_event, rule_event]
     )
-    # A matched active FLIP on a source loss is rule-accountability evidence and
-    # must surface regardless of the confirmation quota.
     assert decision["action"] == "SURFACE"
-    assert decision["reason"] == "ACTIVE_RULE_FAILURE"
+    assert decision["reason"] == "FIRST_RULE_CONFIRMATION_REQUIRED"
+    assert decision["confirmation_of_teacher_id"] == "wf-100-long"
+    assert decision["confirmation_rule_ids"] == ["FLIP_004"]
 
 
 def test_confirmation_quota_for_new_entry_rule_is_consumed_once() -> None:
