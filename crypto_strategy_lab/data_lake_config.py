@@ -47,6 +47,12 @@ class FeatureConfig:
     mean_reversion_require_reentry: bool = True
     mean_reversion_track_atr_distance: bool = True
     mean_reversion_track_motion: bool = True
+    ichimoku_enabled: bool = False
+    ichimoku_conversion_period: int = 9
+    ichimoku_base_period: int = 26
+    ichimoku_span_b_period: int = 52
+    ichimoku_displacement: int = 26
+    ichimoku_include_higher_timeframes: bool = True
     enable_support_resistance_analysis: bool = False
     sr_timeframe_minutes: int = 0
     sr_pivot_left: int = 5
@@ -172,6 +178,15 @@ class FeatureConfig:
             "core_directional": directional,
             "production_market_context": context,
         }
+        if self.ichimoku_enabled:
+            result["ichimoku_context"] = {
+                "timeframe_minutes": 0,
+                "conversion_period": int(self.ichimoku_conversion_period),
+                "base_period": int(self.ichimoku_base_period),
+                "span_b_period": int(self.ichimoku_span_b_period),
+                "displacement": int(self.ichimoku_displacement),
+                "atr_period": int(self.atr_period),
+            }
         result["futures_positioning"] = {
             "oi_zscore_window_days": float(self.oi_zscore_window_days),
             "oi_zscore_min_samples": int(self.oi_zscore_min_samples),
