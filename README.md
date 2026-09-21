@@ -231,8 +231,8 @@ the local endpoints directly to the public internet.
 
 ## ChatGPT Integration
 
-The desktop application's **ChatGPT** tab can run **two independent copies of the
-same unified MCP**, each with its own OpenAI Secure Tunnel. This allows two ChatGPT
+The desktop application's **ChatGPT** tab can run **three independent copies of the
+same unified MCP**, each with its own OpenAI Secure Tunnel. This allows three ChatGPT
 plugins/chats to work at the same time while sharing the same Crypto Strategy Lab
 market data, configs, caches, and output directory.
 
@@ -241,26 +241,28 @@ The default local endpoints are:
 ```text
 Connection 1 / Plugin 1: http://127.0.0.1:8766/mcp
 Connection 2 / Plugin 2: http://127.0.0.1:8767/mcp
+Connection 3 / Plugin 3: http://127.0.0.1:8768/mcp
 ```
 
 Setup:
 
-1. Create two OpenAI tunnels externally and download `tunnel-client.exe`.
+1. Create three OpenAI tunnels externally and download `tunnel-client.exe`.
 2. Open **Crypto Strategy Lab → ChatGPT**.
 3. Configure **Connection 1** with tunnel 1, its runtime API key, and port **8766**.
 4. Configure **Connection 2** with tunnel 2, its runtime API key, and port **8767**.
-   Both connections reuse the same tunnel-client executable.
-5. Start each connection. Each local MCP becomes ready before its matching secure
+5. Configure **Connection 3** with tunnel 3, its runtime API key, and port **8768**.
+   All three connections reuse the same tunnel-client executable.
+6. Start each connection. Each local MCP becomes ready before its matching secure
    tunnel is started.
-6. Add/refresh two ChatGPT plugins, one for each tunnel, and use the plugins in
+7. Add/refresh three ChatGPT plugins, one for each tunnel, and use the plugins in
    separate chats.
 
-Both plugins expose the same research/control tools and see the same completed
+All three plugins expose the same research/control tools and see the same completed
 runs. They may work on different runs or different walk-forward experiments in
-parallel. Do **not** intentionally have both chats mutate the same walk-forward
+parallel. Do **not** intentionally have multiple chats mutate the same walk-forward
 experiment at the same time; the sequence/hash stale-write checks will reject
 conflicting causal writes, but separate experiments are the intended parallel
-workflow.
+workflow. Running three heavy backtests at once can also increase CPU/RAM usage.
 
 The runtime API key is stored through `keyring` in Windows Credential Manager;
 it is never saved in application settings, configuration files, command-line
