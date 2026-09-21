@@ -11,6 +11,15 @@ The immutable reference run must contain research sampling in `WALK_FORWARD` mod
 - the exact join `research_signal_index = strategy_index`;
 - the verified causal experiment event stream as the rule/chronology source of truth.
 
+Hydrated candidate/teacher context now also exposes a compact
+`ichimoku_trade_context_v1` block for strategy-TF and available 1h/4h/1D
+Ichimoku evidence. It is deliberately optional: immutable reference runs created
+before Ichimoku research remain valid and return
+`available=false, availability_reason=NOT_PRESENT_IN_REFERENCE_RUN` rather than
+raising or reconstructing later data. Review methodology requires ChatGPT to
+inspect this block when available alongside S/R, DI/ADX, EMA/MR,
+MACD/momentum, and flow.
+
 It does **not** start a new backtest to find each candidate and does not rewrite the reference run.
 
 ## Tool contract
