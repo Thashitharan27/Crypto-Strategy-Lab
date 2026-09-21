@@ -934,6 +934,15 @@ def _teacher_review_packet(
         profile=profile,
         config=snapshot["materialized_config"],
     )
+    trade_context = packet["entry_context"].get("trade_entry_context")
+    if isinstance(trade_context, dict):
+        # Teacher learning must not see the eventual episode length. Keep only
+        # causal progress through the current observation and use an explicit
+        # forward-only name in the ChatGPT-facing packet.
+        entry_number = trade_context.pop("research_episode_entry_number", None)
+        trade_context.pop("research_episode_viable_entries", None)
+        if entry_number is not None:
+            trade_context["research_episode_entries_seen_so_far"] = entry_number
     return packet
 
 
