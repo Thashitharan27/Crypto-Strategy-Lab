@@ -29,6 +29,11 @@ from crypto_strategy_lab.walk_forward_research_policy import (
     validate_periodic_methodology,
     validate_teacher_methodology,
 )
+from crypto_strategy_lab.walk_forward_teacher_compression import (
+    CHATGPT_REVIEWED_STATUS,
+    TEACHER_COMPRESSION_CONTRACT,
+    teacher_compression_decision,
+)
 
 
 def _canonical_rule_specs(
@@ -297,6 +302,11 @@ def record_walk_forward_teacher_review(
     reference_run = str(definition.get("reference_run", ""))
     manifest = reports.get_run_manifest(reference_run)
     run_dir = reports.resolve_run(reference_run)
+    reference_artifacts = manifest.get("artifacts") or {}
+    teacher_phase_context_available = (
+        "research_sampling_trades" in reference_artifacts
+        and "feature_context" in reference_artifacts
+    )
     protocol = definition.get("research_protocol") or {}
     minimum_entry_time = (
         protocol.get("walk_forward_start")
@@ -326,13 +336,14 @@ def record_walk_forward_teacher_review(
     notes_text = str(notes).strip()
     effective_iso = resolution_time.isoformat()
 
+    base_phase_packet: dict[str, Any] | None = None
     checked_loss_packet: dict[str, Any] | None = None
     if teacher_result == "LOSS":
         if decision_value not in {"NO_CHANGE", "FLIP_EVIDENCE", "FLIP_LEARNED"}:
             raise ValueError(
                 "teacher loss decision must be NO_CHANGE, FLIP_EVIDENCE, or FLIP_LEARNED"
             )
-        base_packet = _impl._teacher_review_packet(
+        base_phase_packet = _impl._teacher_review_packet(
             control,
             reports,
             experiment_id=experiment_id,
@@ -341,7 +352,7 @@ def record_walk_forward_teacher_review(
             teacher_boundary=boundary,
         )
         checked_loss_packet = _decorate_teacher_loss_packet(
-            control, reports, experiment_id, base_packet
+            control, reports, experiment_id, deepcopy(base_phase_packet)
         )
         if bool(checked_loss_packet.get("inspection_required")) or str(
             checked_loss_packet.get("status", "")
@@ -377,6 +388,33 @@ def record_walk_forward_teacher_review(
         entry_family=entry_family,
     )
 
+    if base_phase_packet is None and teacher_phase_context_available:
+        base_phase_packet = _impl._teacher_review_packet(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
+            teacher_boundary=boundary,
+        )
+    if base_phase_packet is None:
+        # Compatibility path for legacy/minimal reference runs that can still
+        # record a valid teacher review but do not expose the immutable context
+        # required for deterministic phase compression. Persist no usable phase
+        # fingerprint so this review can never silently become a compression
+        # baseline; a later fully-audited teacher will surface once.
+        phase_decision = {
+            "action": "SURFACE",
+            "reason": "PHASE_CONTEXT_UNAVAILABLE",
+            "audit": {},
+            "compared_to_teacher_id": None,
+            "confirmation_of_teacher_id": None,
+            "confirmation_rule_ids": [],
+        }
+    else:
+        phase_decision = teacher_compression_decision(base_phase_packet, events)
+    phase_audit = deepcopy(phase_decision.get("audit") or {})
+
     if teacher_result == "LOSS":
         if decision_value in {"NO_CHANGE", "FLIP_EVIDENCE"} and canonical:
             raise ValueError(
@@ -400,6 +438,24 @@ def record_walk_forward_teacher_review(
         **deepcopy(boundary),
         "result": teacher_result,
         "review_decision": decision_value,
+        "teacher_review_status": CHATGPT_REVIEWED_STATUS,
+        "review_surface_reason": phase_decision.get("reason"),
+        "compression_contract": TEACHER_COMPRESSION_CONTRACT,
+        "compared_to_teacher_id": phase_decision.get("compared_to_teacher_id"),
+        "confirmation_of_teacher_id": phase_decision.get(
+            "confirmation_of_teacher_id"
+        ),
+        "confirmation_rule_ids": list(
+            phase_decision.get("confirmation_rule_ids") or []
+        ),
+        "teacher_phase_audit": phase_audit,
+        "phase_fingerprint": phase_audit.get("phase_fingerprint"),
+        "structural_phase_fingerprint": phase_audit.get(
+            "structural_fingerprint"
+        ),
+        "active_rule_matches": list(
+            phase_audit.get("active_rule_matches") or []
+        ),
         "notes": notes_text,
         "validated_rule_event_count": len(canonical),
         "rule_event_schema_contract": preflight["rule_event_schema"]["contract"],

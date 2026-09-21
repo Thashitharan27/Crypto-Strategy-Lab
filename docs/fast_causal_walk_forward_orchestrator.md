@@ -115,6 +115,8 @@ Teacher boundaries are also enforced before rule matching: once a pending teache
 
 For canonical paired `WALK_FORWARD` references, teacher chronology comes from the immutable source rows in `research_sampling_trades`, not from the portfolio `trades` population. Source-row sampling intentionally allows overlap, so `WAIT_UNTIL_CLOSED` suppresses only additional RESEARCH-equity entries; it does not remove overlapping observations from teacher learning. If the fund cursor has already advanced beyond an unresolved teacher resolution, the teacher boundary is still surfaced before the next eligible candidate. Existing experiments do not retroactively backfill teacher observations behind an already-processed teacher cursor.
 
+After a teacher boundary is hydrated, the orchestrator applies `causal_teacher_phase_compression_v1`. A coarse entry-time structural fingerprint is compared with the last surfaced teacher in the same episode. Deterministically redundant phases append an audited `TEACHER_RESOLVED/AUTO_COMPRESSED` event and scanning continues without an MCP/ChatGPT review round-trip. Structural novelty, contradictions, rule-accountability failures, and first post-learning confirmations still stop for judgment. The immutable source row is never removed, so later rule analytics continue to use the full evidence population.
+
 ## Outcome firewall
 
 `submit_walk_forward_decision` freezes ChatGPT's research view before the strategy outcome is opened.
