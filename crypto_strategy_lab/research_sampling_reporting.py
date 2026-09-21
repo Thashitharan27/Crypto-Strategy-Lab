@@ -111,6 +111,56 @@ def _validate_samples(samples: pd.DataFrame) -> None:
         ).all():
             raise ValueError("walk-forward source row does not match its source side")
 
+        counterfactual_counts = grouped["walk_forward_counterfactual"].sum()
+        if not counterfactual_counts.eq(1).all():
+            raise ValueError(
+                "walk-forward sampling requires exactly one counterfactual row per candidate"
+            )
+        if (
+            source_rows["walk_forward_counterfactual"]
+            .astype(bool)
+            .any()
+        ):
+            raise ValueError("walk-forward source row cannot be marked counterfactual")
+
+        signal_counts = grouped["research_signal_index"].nunique(dropna=False)
+        if not signal_counts.eq(1).all():
+            raise ValueError(
+                "walk-forward candidate rows disagree on research_signal_index"
+            )
+
+        normalized_entries = pd.to_datetime(samples["entry_time"], utc=True)
+        entry_frame = samples[["walk_forward_candidate_id"]].copy()
+        entry_frame["entry_time_utc"] = normalized_entries
+        entry_counts = entry_frame.groupby(
+            "walk_forward_candidate_id", sort=False
+        )["entry_time_utc"].nunique(dropna=False)
+        if not entry_counts.eq(1).all():
+            raise ValueError("walk-forward candidate rows disagree on entry_time")
+
+        source_side_counts = grouped["walk_forward_source_side"].agg(
+            lambda values: set(values.astype(str).str.upper())
+        )
+        if not source_side_counts.map(lambda value: len(value) == 1).all():
+            raise ValueError(
+                "walk-forward candidate rows disagree on walk_forward_source_side"
+            )
+
+        source_profile_counts = grouped["walk_forward_source_profile_key"].agg(
+            lambda values: set(values.astype(str).str.lower())
+        )
+        if not source_profile_counts.map(lambda value: len(value) == 1).all():
+            raise ValueError(
+                "walk-forward candidate rows disagree on walk_forward_source_profile_key"
+            )
+        if not (
+            source_rows["strategy_profile_key"].astype(str).str.lower()
+            == source_rows["walk_forward_source_profile_key"].astype(str).str.lower()
+        ).all():
+            raise ValueError(
+                "walk-forward source row does not match its source profile"
+            )
+
 
 def _episode_reporting_context(
     episodes: pd.DataFrame,
