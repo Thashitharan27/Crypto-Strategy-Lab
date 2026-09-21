@@ -164,6 +164,7 @@ jobs:
           tests/test_core_directional_features.py
           tests/test_market_context_features.py
           tests/test_production_context_features.py
+          tests/test_ichimoku_context.py
           tests/test_support_resistance_features.py
           tests/test_futures_positioning_features.py
           tests/test_funding_context_features.py
