@@ -23,6 +23,7 @@ import pandas as pd
 from crypto_strategy_lab.causal_experiment import CausalExperimentStore, RULE_EVENT_TYPES
 from crypto_strategy_lab.walk_forward_candidate_engine import (
     _artifact,
+    _candidate_detail_row,
     _candidate_rows,
     _events,
     _max_event_time,
@@ -859,15 +860,57 @@ def _teacher_review_packet(
     samples_path = _artifact(manifest, run_dir, "research_sampling_trades")
     context_path = _artifact(manifest, run_dir, "feature_context")
     entry_time = _utc_timestamp(entry_raw, "teacher entry_time")
-    frame = _candidate_rows(samples_path, context_path, entry_time, 64)
+    signal_index = teacher_boundary.get("research_signal_index")
+    candidate_id = str(
+        teacher_boundary.get("walk_forward_candidate_id") or ""
+    ).strip()
+
     chosen = None
-    for _, series in frame.iterrows():
+    if signal_index not in (None, ""):
+        # Canonical paired WALK_FORWARD teachers already carry the exact source
+        # identity. Hydrate that one row directly instead of scanning a time
+        # window of the wide research/context artifacts.
+        series = _candidate_detail_row(
+            samples_path,
+            context_path,
+            int(signal_index),
+            side,
+        )
         row, context = _row_maps(series)
-        if _utc_timestamp(row.get("entry_time"), "teacher candidate entry_time") != entry_time:
-            break
-        if str(row.get("side", "")).upper() == side and str(row.get("strategy_profile_key", "")).lower() == profile:
-            chosen = (row, context)
-            break
+        actual_entry = _utc_timestamp(
+            row.get("entry_time"), "teacher candidate entry_time"
+        )
+        actual_profile = str(row.get("strategy_profile_key", "")).lower()
+        actual_candidate = str(row.get("walk_forward_candidate_id") or "").strip()
+        if actual_entry != entry_time:
+            raise ValueError(
+                "exact teacher source row entry_time does not match teacher boundary"
+            )
+        if actual_profile != profile:
+            raise ValueError(
+                "exact teacher source row profile does not match teacher boundary"
+            )
+        if candidate_id and actual_candidate != candidate_id:
+            raise ValueError(
+                "exact teacher source row candidate id does not match teacher boundary"
+            )
+        chosen = (row, context)
+    else:
+        # Compatibility fallback for older reference artifacts that did not
+        # persist research_signal_index in the teacher boundary.
+        frame = _candidate_rows(samples_path, context_path, entry_time, 64)
+        for _, series in frame.iterrows():
+            row, context = _row_maps(series)
+            if _utc_timestamp(
+                row.get("entry_time"), "teacher candidate entry_time"
+            ) != entry_time:
+                break
+            if (
+                str(row.get("side", "")).upper() == side
+                and str(row.get("strategy_profile_key", "")).lower() == profile
+            ):
+                chosen = (row, context)
+                break
     if chosen is None:
         return packet
     row, context = chosen

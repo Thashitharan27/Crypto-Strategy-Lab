@@ -522,3 +522,115 @@ def test_teacher_loss_pair_lookup_mismatch_requires_inspection(monkeypatch):
     assert updated["validation_inconsistency"]["code"] == "PAIR_LOOKUP_MISMATCH"
     assert updated["validation_inconsistency"]["walk_forward_candidate_id"] == "wf-14594-short"
     assert "Do not record NO_CHANGE" in updated["review_rule"]
+
+
+def test_teacher_review_packet_uses_exact_source_identity_instead_of_window_scan(
+    monkeypatch, tmp_path
+):
+    from crypto_strategy_lab import walk_forward_orchestrator_impl as orchestrator_impl
+
+    observed = {}
+
+    class Reports:
+        def get_run_manifest(self, run):
+            assert run == "BTCUSDT_15m_reference"
+            return {"research": {"strategy_research_sampling": {"mode": "WALK_FORWARD"}}}
+
+        def resolve_run(self, run):
+            assert run == "BTCUSDT_15m_reference"
+            return tmp_path
+
+    monkeypatch.setattr(
+        orchestrator_impl,
+        "_verified",
+        lambda *args, **kwargs: (
+            object(),
+            {
+                "manifest": {
+                    "definition": {"reference_run": "BTCUSDT_15m_reference"}
+                }
+            },
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        orchestrator_impl,
+        "materialize_walk_forward_strategy",
+        lambda *args, **kwargs: {
+            "active_rule_versions": [],
+            "rule_counts": {"ENTRY": 0, "VETO": 0, "FLIP": 0},
+            "groups_by_profile": {"bull_long": []},
+            "materialized_config": {},
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator_impl,
+        "_artifact",
+        lambda manifest, run_dir, name: tmp_path / f"{name}.parquet",
+    )
+    monkeypatch.setattr(
+        orchestrator_impl,
+        "_sampling_mode",
+        lambda manifest: "WALK_FORWARD",
+    )
+
+    def detail(samples_path, context_path, signal_index, side):
+        observed["signal_index"] = signal_index
+        observed["side"] = side
+        return pd.Series(
+            {
+                "research_signal_index": 44,
+                "walk_forward_candidate_id": "wf-44-long",
+                "strategy_profile_key": "bull_long",
+                "side": "LONG",
+                "entry_time": "2025-01-03T00:00:00Z",
+                "__ctx_strategy_index": 44,
+                "__ctx_decision_available_at": "2025-01-03T00:00:00Z",
+            }
+        )
+
+    monkeypatch.setattr(orchestrator_impl, "_candidate_detail_row", detail)
+    monkeypatch.setattr(
+        orchestrator_impl,
+        "_candidate_rows",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("time-window teacher scan should not run")
+        ),
+    )
+    monkeypatch.setattr(
+        orchestrator_impl,
+        "_safe_context",
+        lambda row, context, **kwargs: {
+            "trade_entry_context": {
+                "research_signal_index": row["research_signal_index"],
+                "walk_forward_candidate_id": row["walk_forward_candidate_id"],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator_impl,
+        "_rule_decision",
+        lambda *args, **kwargs: {"entry_allowed": False},
+    )
+
+    packet = orchestrator_impl._teacher_review_packet(
+        SimpleNamespace(),
+        Reports(),
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        expected_sequence=3,
+        expected_state_hash="a" * 64,
+        teacher_boundary={
+            "pair_id": "wf-44-long",
+            "walk_forward_candidate_id": "wf-44-long",
+            "research_signal_index": 44,
+            "strategy_profile_key": "bull_long",
+            "side": "LONG",
+            "entry_time": "2025-01-03T00:00:00Z",
+            "pair_net_r": 0.98,
+        },
+    )
+
+    assert observed == {"signal_index": 44, "side": "LONG"}
+    assert packet["status"] == "TEACHER_REVIEW_REQUIRED"
+    assert packet["entry_context"]["trade_entry_context"]["research_signal_index"] == 44
+    assert packet["entry_context"]["trade_entry_context"]["walk_forward_candidate_id"] == "wf-44-long"
