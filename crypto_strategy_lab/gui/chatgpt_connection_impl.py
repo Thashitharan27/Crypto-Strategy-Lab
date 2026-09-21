@@ -479,7 +479,7 @@ class ChatGPTIntegrationWidget(QWidget):
         form.addRow(self.auto_start)
         outer.addWidget(connection)
 
-        config = QGroupBox("Configuration 1")
+        config = QGroupBox()
         cf = QFormLayout(config)
         self.path = QLineEdit()
         browse = QPushButton("Browse")
@@ -538,7 +538,7 @@ class ChatGPTIntegrationWidget(QWidget):
         form2.addRow(self.auto_start2)
         outer.addWidget(connection2)
 
-        config2 = QGroupBox("Configuration 2")
+        config2 = QGroupBox()
         cf2 = QFormLayout(config2)
         shared_client = QLabel("Uses the same Tunnel Client executable as Connection 1")
         shared_client.setWordWrap(True)
@@ -594,7 +594,7 @@ class ChatGPTIntegrationWidget(QWidget):
         form3.addRow(self.auto_start3)
         outer.addWidget(connection3)
 
-        config3 = QGroupBox("Configuration 3")
+        config3 = QGroupBox()
         cf3 = QFormLayout(config3)
         shared_client3 = QLabel("Uses the same Tunnel Client executable as Connection 1")
         shared_client3.setWordWrap(True)
