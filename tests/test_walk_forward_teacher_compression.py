@@ -142,6 +142,36 @@ def test_same_coarse_phase_auto_compresses_without_rule_learning() -> None:
     assert decision["compared_to_teacher_id"] == "wf-100-long"
 
 
+def test_previously_reviewed_phase_is_compressed_after_intervening_phase() -> None:
+    phase_a = _packet(
+        teacher_id="wf-100-long",
+        relation_4h="NEAR_OPPOSING_STRUCTURE",
+    )
+    phase_b = _packet(
+        teacher_id="wf-101-long",
+        relation_4h="BETWEEN_STRUCTURES",
+    )
+    phase_a_again = _packet(
+        teacher_id="wf-102-long",
+        relation_4h="NEAR_OPPOSING_STRUCTURE",
+        di_ratio=2.8,
+        adx=59.0,
+        ema50=3.6,
+    )
+
+    decision = teacher_compression_decision(
+        phase_a_again,
+        [
+            _reviewed_event(phase_a, sequence=10),
+            _reviewed_event(phase_b, sequence=11),
+        ],
+    )
+
+    assert decision["action"] == "AUTO_COMPRESS"
+    assert decision["reason"] == "CORRELATED_PHASE_DUPLICATE"
+    assert decision["compared_to_teacher_id"] == "wf-100-long"
+
+
 def test_structural_bucket_change_surfaces_new_phase() -> None:
     first = _packet(teacher_id="wf-100-long", relation_4h="NEAR_OPPOSING_STRUCTURE")
     later = _packet(teacher_id="wf-101-long", relation_4h="BETWEEN_STRUCTURES")
@@ -342,3 +372,28 @@ def test_empty_phase_audit_is_never_used_as_compression_baseline() -> None:
     decision = teacher_compression_decision(_packet(), [unaudited])
     assert decision["action"] == "SURFACE"
     assert decision["reason"] == "LEGACY_PHASE_BASELINE_REQUIRED"
+
+
+
+def test_open_confirmation_quota_does_not_surface_nonmatching_phase() -> None:
+    learning = _packet(teacher_id="wf-100-long")
+    learning_event = _reviewed_event(learning, sequence=10)
+    rule_event = {
+        "sequence": 11,
+        "event_type": "ENTRY_LEARNED",
+        "payload": {"rule_id": "ENTRY_001", "rule_version": "1"},
+    }
+    different_phase = _packet(
+        teacher_id="wf-101-long",
+        relation_4h="BETWEEN_STRUCTURES",
+    )
+
+    decision = teacher_compression_decision(
+        different_phase,
+        [learning_event, rule_event],
+    )
+
+    assert decision["action"] == "SURFACE"
+    assert decision["reason"] == "STRUCTURAL_PHASE_CHANGED"
+    assert decision["confirmation_of_teacher_id"] is None
+    assert decision["confirmation_rule_ids"] == []

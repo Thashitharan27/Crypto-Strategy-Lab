@@ -345,8 +345,9 @@ def test_teacher_winner_does_not_expose_unresolved_opposite_result(tmp_path):
     boundary, _resolved_at = teacher
     assert boundary["result"] == "WIN"
     assert boundary["research_episode_id"] == "episode-000001"
-    assert boundary["research_episode_entry_number"] == 1
-    assert boundary["research_episode_viable_entries"] == 2
+    assert boundary["research_episode_entries_seen_so_far"] == 1
+    assert "research_episode_viable_entries" not in boundary
+    assert "research_episode_entry_number" not in boundary
     assert "paired_opposite_net_r" not in boundary
     assert "paired_opposite_side" not in boundary
     assert "opposite_pair_net_r" not in boundary
@@ -720,6 +721,8 @@ def test_teacher_review_packet_uses_exact_source_identity_instead_of_window_scan
             "trade_entry_context": {
                 "research_signal_index": row["research_signal_index"],
                 "walk_forward_candidate_id": row["walk_forward_candidate_id"],
+                "research_episode_entry_number": 3,
+                "research_episode_viable_entries": 9,
             }
         },
     )
@@ -750,3 +753,7 @@ def test_teacher_review_packet_uses_exact_source_identity_instead_of_window_scan
     assert packet["status"] == "TEACHER_REVIEW_REQUIRED"
     assert packet["entry_context"]["trade_entry_context"]["research_signal_index"] == 44
     assert packet["entry_context"]["trade_entry_context"]["walk_forward_candidate_id"] == "wf-44-long"
+    teacher_trade = packet["entry_context"]["trade_entry_context"]
+    assert teacher_trade["research_episode_entries_seen_so_far"] == 3
+    assert "research_episode_entry_number" not in teacher_trade
+    assert "research_episode_viable_entries" not in teacher_trade
