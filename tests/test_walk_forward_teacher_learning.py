@@ -70,6 +70,54 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
     pd.DataFrame(
         [
             {
+                "research_signal_index": 42,
+                "research_sample_id": "wf-42-short-short",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-42-short",
+                "walk_forward_candidate_source": True,
+                "strategy_profile_key": "sideways_short",
+                "side": "SHORT",
+                "entry_time": "2025-01-01T00:00:00Z",
+                "exit_time": "2025-01-01T04:00:00Z",
+                "pair_net_r": 0.98,
+            },
+            {
+                "research_signal_index": 42,
+                "research_sample_id": "wf-42-short-long",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-42-short",
+                "walk_forward_candidate_source": False,
+                "strategy_profile_key": "sideways_long",
+                "side": "LONG",
+                "entry_time": "2025-01-01T00:00:00Z",
+                "exit_time": "2025-01-01T02:00:00Z",
+                "pair_net_r": -1.0,
+            },
+            {
+                "research_signal_index": 43,
+                "research_sample_id": "wf-43-short-short",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-43-short",
+                "walk_forward_candidate_source": True,
+                "strategy_profile_key": "sideways_short",
+                "side": "SHORT",
+                "entry_time": "2025-01-02T00:00:00Z",
+                "exit_time": "2025-01-02T04:00:00Z",
+                "pair_net_r": 0.97,
+            },
+            {
+                "research_signal_index": 43,
+                "research_sample_id": "wf-43-short-long",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-43-short",
+                "walk_forward_candidate_source": False,
+                "strategy_profile_key": "sideways_long",
+                "side": "LONG",
+                "entry_time": "2025-01-02T00:00:00Z",
+                "exit_time": "2025-01-02T03:00:00Z",
+                "pair_net_r": -1.0,
+            },
+            {
                 "research_signal_index": 44,
                 "research_sample_id": "wf-44-long-long",
                 "research_sampling_mode": "WALK_FORWARD",
@@ -93,6 +141,30 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
                 "exit_time": opposite_exit,
                 "pair_net_r": 2.85 if reward_risk_ratio == 3.0 else 0.98,
             },
+            {
+                "research_signal_index": 45,
+                "research_sample_id": "wf-45-long-long",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-45-long",
+                "walk_forward_candidate_source": True,
+                "strategy_profile_key": "bull_long",
+                "side": "LONG",
+                "entry_time": "2025-01-04T00:00:00Z",
+                "exit_time": "2025-01-04T04:00:00Z",
+                "pair_net_r": 0.96,
+            },
+            {
+                "research_signal_index": 45,
+                "research_sample_id": "wf-45-long-short",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-45-long",
+                "walk_forward_candidate_source": False,
+                "strategy_profile_key": "bull_short",
+                "side": "SHORT",
+                "entry_time": "2025-01-04T00:00:00Z",
+                "exit_time": "2025-01-04T02:00:00Z",
+                "pair_net_r": -1.0,
+            },
         ]
     ).to_parquet(samples_path, index=False)
     manifest = {
@@ -113,7 +185,7 @@ def _reference(tmp_path: Path, reward_risk_ratio: float) -> tuple[dict, Path]:
     return manifest, run_dir
 
 
-def _resolved(pair_id: int, when: str) -> dict:
+def _resolved(pair_id: int | str, when: str) -> dict:
     return {
         "event_type": "TEACHER_RESOLVED",
         "effective_market_time": when,
@@ -198,6 +270,126 @@ def test_overlapping_teacher_observation_does_not_invalidate_paired_flip_evidenc
     assert boundary["result"] == "LOSS"
     assert resolved_at == pd.Timestamp("2025-01-03T06:00:00Z")
     assert boundary["paired_opposite_resolution_time"] == "2025-01-03T06:00:00+00:00"
+
+
+def test_overlap_only_walk_forward_source_row_remains_teacher_evidence(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 3.0)
+    samples_path = run_dir / "artifacts" / "research_sampling_trades.parquet"
+    samples = pd.read_parquet(samples_path)
+    overlap = pd.DataFrame(
+        [
+            {
+                "research_signal_index": 445,
+                "research_sample_id": "wf-445-short-short",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-445-short",
+                "walk_forward_candidate_source": True,
+                "strategy_profile_key": "sideways_short",
+                "side": "SHORT",
+                "entry_time": "2025-01-03T00:30:00Z",
+                "exit_time": "2025-01-03T03:00:00Z",
+                "pair_net_r": 0.95,
+            },
+            {
+                "research_signal_index": 445,
+                "research_sample_id": "wf-445-short-long",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-445-short",
+                "walk_forward_candidate_source": False,
+                "strategy_profile_key": "sideways_long",
+                "side": "LONG",
+                "entry_time": "2025-01-03T00:30:00Z",
+                "exit_time": "2025-01-03T05:00:00Z",
+                "pair_net_r": -1.0,
+            },
+        ]
+    )
+    pd.concat([samples, overlap], ignore_index=True).to_parquet(samples_path, index=False)
+    manifest["artifacts"]["research_sampling_trades"] = _catalog(samples_path, run_dir)
+
+    teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        _events_through_pair_3(),
+        include_losses=True,
+    )
+
+    assert teacher is not None
+    boundary, resolved_at = teacher
+    assert boundary["pair_id"] == "wf-445-short"
+    assert boundary["walk_forward_candidate_id"] == "wf-445-short"
+    assert boundary["result"] == "WIN"
+    assert boundary["teacher_observation_source"] == "WALK_FORWARD_SOURCE_ROW"
+    assert boundary["portfolio_overlap_suppression_applies"] is False
+    assert resolved_at == pd.Timestamp("2025-01-03T03:00:00Z")
+
+    events = [
+        *_events_through_pair_3(),
+        _resolved("wf-445-short", "2025-01-03T03:00:00Z"),
+    ]
+    next_teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        events,
+        include_losses=True,
+    )
+    assert next_teacher is not None
+    next_boundary, next_resolved_at = next_teacher
+    assert next_boundary["pair_id"] == 4
+    assert next_boundary["result"] == "LOSS"
+    assert next_resolved_at == pd.Timestamp("2025-01-03T06:00:00Z")
+
+
+def test_existing_experiment_does_not_backfill_overlap_teacher_behind_teacher_cursor(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 3.0)
+    samples_path = run_dir / "artifacts" / "research_sampling_trades.parquet"
+    samples = pd.read_parquet(samples_path)
+    overlap = pd.DataFrame(
+        [
+            {
+                "research_signal_index": 445,
+                "research_sample_id": "wf-445-short-short",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-445-short",
+                "walk_forward_candidate_source": True,
+                "strategy_profile_key": "sideways_short",
+                "side": "SHORT",
+                "entry_time": "2025-01-03T00:30:00Z",
+                "exit_time": "2025-01-03T03:00:00Z",
+                "pair_net_r": 0.95,
+            },
+            {
+                "research_signal_index": 445,
+                "research_sample_id": "wf-445-short-long",
+                "research_sampling_mode": "WALK_FORWARD",
+                "walk_forward_candidate_id": "wf-445-short",
+                "walk_forward_candidate_source": False,
+                "strategy_profile_key": "sideways_long",
+                "side": "LONG",
+                "entry_time": "2025-01-03T00:30:00Z",
+                "exit_time": "2025-01-03T05:00:00Z",
+                "pair_net_r": -1.0,
+            },
+        ]
+    )
+    pd.concat([samples, overlap], ignore_index=True).to_parquet(samples_path, index=False)
+    manifest["artifacts"]["research_sampling_trades"] = _catalog(samples_path, run_dir)
+
+    events = [
+        *_events_through_pair_3(),
+        _resolved(4, "2025-01-03T06:00:00Z"),
+    ]
+    teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        events,
+        include_losses=True,
+    )
+
+    assert teacher is not None
+    boundary, resolved_at = teacher
+    assert boundary["pair_id"] == 5
+    assert resolved_at == pd.Timestamp("2025-01-04T04:00:00Z")
 
 
 def test_teacher_loss_packet_requires_verified_opposite_side_win(monkeypatch):
