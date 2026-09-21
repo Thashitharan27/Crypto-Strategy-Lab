@@ -47,7 +47,7 @@ Every walk-forward implementation and every ChatGPT session must preserve all of
 8. **A loss does not automatically deserve a VETO or FLIP.** Ordinary variance remains a valid outcome.
 9. **A teacher loss does not automatically imply the opposite direction won.** Opposite-side evidence must be verified from immutable data.
 10. **Existing experiment semantics must not silently change.** New research behavior that could alter chronology must be opt-in or require a new experiment/migration.
-11. **An open prospective trade must resolve before the chronology moves past it.** This is the `WAIT_UNTIL_CLOSED` rule.
+11. **`WAIT_UNTIL_CLOSED` blocks additional RESEARCH-equity entries, not teacher evidence.** Overlapping immutable teacher observations remain eligible learning evidence; they never affect equity and never alter an already-open prospective trade.
 12. **Retries must be idempotent.** A transport failure or reconnect must never duplicate a decision, rule, trade, or equity mutation.
 
 ---
@@ -341,9 +341,19 @@ A candidate with causally invalid/missing required context may instead become an
 
 ### `WAIT_UNTIL_CLOSED`
 
-Once a prospective trade is active, later teacher evidence, periodic reviews, or newly knowable rules must not alter that already-open trade.
+`WAIT_UNTIL_CLOSED` is an **equity/execution constraint**, not a teacher-observation filter.
 
-The open trade resolves under the rule state frozen at its entry. Only after resolution may later learning become active for subsequent opportunities.
+Once a prospective RESEARCH trade is active:
+
+- another prospective candidate must not become a fund-affecting RESEARCH trade until the open trade resolves;
+- overlapping immutable `WALK_FORWARD` source observations may still become teacher evidence when their own causal resolution boundary is reached;
+- teacher observations never alter RESEARCH equity;
+- teacher learning must never change the side, stop, target, sizing, or outcome of the already-open prospective trade;
+- any ENTRY/VETO/FLIP learned from overlapping teacher evidence applies only to later eligible prospective opportunities.
+
+The open trade always resolves under the rule state frozen at its own entry.
+
+For canonical paired `WALK_FORWARD` references, teacher eligibility comes from the overlap-independent source population in `research_sampling_trades`, not from whether the normal portfolio happened to open that observation. If an existing experiment has already advanced its teacher cursor beyond a newly discoverable historical observation, that observation is not retroactively backfilled; start a fresh experiment when full overlap-independent teacher chronology is required from the beginning.
 
 ---
 
@@ -372,6 +382,10 @@ This is particularly important when reveal itself fails after the decision has a
 ## 10. Teacher chronology and winner learning
 
 Teacher/reference evidence is chronological and learning-only.
+
+For canonical paired `WALK_FORWARD` references, the teacher population is the immutable set of source rows in `research_sampling_trades`. That source population intentionally ignores portfolio overlap suppression, so `WAIT_UNTIL_CLOSED` cannot make a valid source observation disappear from teacher learning merely because another RESEARCH trade was open.
+
+Where a source observation uniquely corresponds to a legacy portfolio trade, the existing numeric `pair_id` is preserved as the teacher identity for continuity. An overlap-only source observation uses its `walk_forward_candidate_id` as the teacher identity.
 
 When the next resolved teacher **winner** becomes causally due, the walk-forward must stop before scanning past it and return a teacher review boundary.
 

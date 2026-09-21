@@ -60,6 +60,7 @@ def research_policy_schema() -> dict[str, Any]:
             "A repeated version of the same contradiction is evidence to refine/consolidate the ENTRY before adding another VETO.",
             "ENTRY and FLIP use the same structural learning standard: each requires a positive reusable setup thesis and family; FLIP is not held to a higher repetition threshold.",
             "A teacher winner is evidence, not an automatic ENTRY rule; NO_CHANGE is valid when the thesis is not reusable.",
+            "WAIT_UNTIL_CLOSED constrains fund-affecting RESEARCH entries only; overlapping immutable WALK_FORWARD source observations remain eligible teacher evidence and never alter an already-open trade.",
             "A prospective loss is evidence, not an automatic VETO; NO_CHANGE is preferred when no distinct causal mechanism is supported.",
             "For multi-R targets, room to opposing higher-timeframe support/resistance is an ENTRY-quality dimension, not something momentum can automatically override.",
             "BREAKOUT logic must remain distinguishable from normal CONTINUATION/PULLBACK logic so a successful breakout does not weaken room requirements elsewhere.",
