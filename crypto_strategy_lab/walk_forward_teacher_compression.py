@@ -7,7 +7,7 @@ new ChatGPT learning review.
 Compression is deliberately conservative:
 - research_episode_id scopes comparisons but never causes a skip by itself;
 - fingerprints use coarse, entry-time structural buckets;
-- comparisons are against the last *surfaced* teacher in the episode;
+- phase memory recognizes any previously surfaced equivalent audited phase in the episode;
 - outcome contradictions, active-rule failures, structural changes, and the
   first confirmation after newly learned rules always surface;
 - legacy reviewed teachers without an audit fingerprint force a new surfaced
@@ -21,7 +21,7 @@ import math
 from typing import Any
 
 
-TEACHER_COMPRESSION_CONTRACT = "causal_teacher_phase_compression_v1"
+TEACHER_COMPRESSION_CONTRACT = "causal_teacher_phase_compression_v2"
 
 AUTO_COMPRESSED_STATUS = "AUTO_COMPRESSED"
 CHATGPT_REVIEWED_STATUS = "CHATGPT_REVIEWED"
@@ -496,6 +496,46 @@ def _confirmation_consumed(
     return False
 
 
+def _complete_phase_audit(payload: dict[str, Any]) -> dict[str, Any] | None:
+    audit = payload.get("teacher_phase_audit")
+    if (
+        not isinstance(audit, dict)
+        or not audit.get("structural_fingerprint")
+        or not audit.get("phase_fingerprint")
+    ):
+        return None
+    return audit
+
+
+def _current_rule_ids(active_matches: set[str]) -> set[str]:
+    return {
+        token.split(":", 1)[1].split("@", 1)[0]
+        for token in active_matches
+        if ":" in token
+    }
+
+
+def _pending_rule_confirmation(
+    events: list[dict[str, Any]],
+    prior: list[dict[str, Any]],
+    active_matches: set[str],
+) -> tuple[dict[str, Any], list[str]] | None:
+    """Find the newest earlier learned rule that this teacher can confirm."""
+    current_rule_ids = _current_rule_ids(active_matches)
+    if not current_rule_ids:
+        return None
+    for event in reversed(prior):
+        payload = event.get("payload") or {}
+        teacher_id = _teacher_id(payload)
+        if not teacher_id or _confirmation_consumed(events, teacher_id):
+            continue
+        learned_rule_ids = _rules_learned_immediately_after(events, event)
+        qualifying = sorted(current_rule_ids.intersection(learned_rule_ids))
+        if qualifying:
+            return event, qualifying
+    return None
+
+
 def teacher_compression_decision(
     packet: dict[str, Any],
     events: list[dict[str, Any]],
@@ -522,33 +562,16 @@ def teacher_compression_decision(
         result["reason"] = "FIRST_SURFACED_TEACHER_IN_EPISODE"
         return result
 
-    previous_event = prior[-1]
-    previous = previous_event.get("payload") or {}
-    previous_id = _teacher_id(previous)
-    result["compared_to_teacher_id"] = previous_id or None
-    previous_audit = previous.get("teacher_phase_audit")
-    if (
-        not isinstance(previous_audit, dict)
-        or not previous_audit.get("structural_fingerprint")
-        or not previous_audit.get("phase_fingerprint")
-    ):
+    audited_prior: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    for event in prior:
+        payload = event.get("payload") or {}
+        prior_audit = _complete_phase_audit(payload)
+        if prior_audit is not None:
+            audited_prior.append((event, payload, prior_audit))
+
+    if not audited_prior:
         result["reason"] = "LEGACY_PHASE_BASELINE_REQUIRED"
-        return result
-
-    current_outcome = _upper(audit.get("source_outcome_class"))
-    previous_outcome = _upper(previous_audit.get("source_outcome_class"))
-    if current_outcome != previous_outcome:
-        result["reason"] = "OUTCOME_CLASS_CHANGED"
-        return result
-
-    current_paired = _upper(audit.get("paired_outcome_class"))
-    previous_paired = _upper(previous_audit.get("paired_outcome_class"))
-    if (
-        current_paired != "UNAVAILABLE"
-        and previous_paired != "UNAVAILABLE"
-        and current_paired != previous_paired
-    ):
-        result["reason"] = "PAIRED_OUTCOME_CLASS_CHANGED"
+        result["compared_to_teacher_id"] = _teacher_id(prior[-1].get("payload") or {}) or None
         return result
 
     teacher = packet.get("teacher") or {}
@@ -561,6 +584,8 @@ def teacher_compression_decision(
         for value in active_matches
     )
     source_side = _upper(teacher.get("side"))
+    current_outcome = _upper(audit.get("source_outcome_class"))
+    current_paired = _upper(audit.get("paired_outcome_class"))
     effective_side = _upper(coverage.get("rule_effective_side"))
     effective_outcome = current_outcome
     if (
@@ -570,6 +595,8 @@ def teacher_compression_decision(
     ):
         effective_outcome = current_paired
 
+    # Active causal rules are always accountable. Compression must never hide a
+    # prospective failure or an unresolved direction conflict.
     if (
         bool(coverage.get("eligible", False))
         and matched_entry_or_flip
@@ -588,43 +615,87 @@ def teacher_compression_decision(
         result["reason"] = "ACTIVE_RULE_DIRECTION_CONFLICT"
         return result
 
-    if (
-        audit.get("structural_fingerprint")
-        != previous_audit.get("structural_fingerprint")
-    ):
+    # One qualifying confirmation is owed to any earlier learned rule that has
+    # not yet received independent confirmation. Non-matching observations do
+    # not consume or repeatedly surface merely because the quota is open.
+    confirmation = _pending_rule_confirmation(events, prior, active_matches)
+    if confirmation is not None:
+        confirmation_event, qualifying_rule_ids = confirmation
+        confirmation_payload = confirmation_event.get("payload") or {}
+        confirmation_teacher_id = _teacher_id(confirmation_payload)
+        result["compared_to_teacher_id"] = confirmation_teacher_id or None
+        result["confirmation_of_teacher_id"] = confirmation_teacher_id or None
+        result["confirmation_rule_ids"] = qualifying_rule_ids
+        result["reason"] = "FIRST_RULE_CONFIRMATION_REQUIRED"
+        return result
+
+    # Strong phase memory: if this exact causal phase was already surfaced
+    # anywhere earlier in the episode, an intervening B phase does not force
+    # A to be reviewed again. Search newest-to-oldest so audit metadata points
+    # to the most recent equivalent reviewed phase.
+    current_phase = audit.get("phase_fingerprint")
+    exact_match = next(
+        (
+            item
+            for item in reversed(audited_prior)
+            if item[2].get("phase_fingerprint") == current_phase
+        ),
+        None,
+    )
+    if exact_match is not None:
+        _event, payload, _prior_audit = exact_match
+        matched_teacher_id = _teacher_id(payload)
+        result["compared_to_teacher_id"] = matched_teacher_id or None
+        result["action"] = "AUTO_COMPRESS"
+        if str(payload.get("confirmation_of_teacher_id") or "").strip():
+            result["reason"] = "POST_CONFIRMATION_REPEAT"
+        elif active_matches:
+            result["reason"] = "RULE_PHASE_REPEAT"
+        else:
+            result["reason"] = "CORRELATED_PHASE_DUPLICATE"
+        return result
+
+    # No exact prior phase. Compare with the latest reviewed phase that shares
+    # the same market structure to explain why this observation is materially
+    # different (outcome/rules), otherwise surface it as a genuinely new phase.
+    current_structural = audit.get("structural_fingerprint")
+    structural_match = next(
+        (
+            item
+            for item in reversed(audited_prior)
+            if item[2].get("structural_fingerprint") == current_structural
+        ),
+        None,
+    )
+    if structural_match is None:
+        _event, payload, _prior_audit = audited_prior[-1]
+        result["compared_to_teacher_id"] = _teacher_id(payload) or None
         result["reason"] = "STRUCTURAL_PHASE_CHANGED"
         return result
 
-    learned_rule_ids = _rules_learned_immediately_after(events, previous_event)
-    if learned_rule_ids and not _confirmation_consumed(events, previous_id):
-        current_match_ids = {
-            token.split(":", 1)[1].split("@", 1)[0]
-            for token in active_matches
-            if ":" in token
-        }
-        result["confirmation_of_teacher_id"] = previous_id or None
-        result["confirmation_rule_ids"] = learned_rule_ids
-        if current_match_ids.intersection(learned_rule_ids):
-            result["reason"] = "FIRST_RULE_CONFIRMATION_REQUIRED"
-        else:
-            result["reason"] = "LEARNED_RULE_PHASE_MISS"
+    _event, payload, prior_audit = structural_match
+    result["compared_to_teacher_id"] = _teacher_id(payload) or None
+    previous_outcome = _upper(prior_audit.get("source_outcome_class"))
+    if current_outcome != previous_outcome:
+        result["reason"] = "OUTCOME_CLASS_CHANGED"
         return result
 
-    if (
-        audit.get("active_rule_signature")
-        != previous_audit.get("active_rule_signature")
-    ):
+    previous_paired = _upper(prior_audit.get("paired_outcome_class"))
+    if current_paired != previous_paired:
+        result["reason"] = (
+            "PAIRED_OUTCOME_CLASS_CHANGED"
+            if "UNAVAILABLE" not in {current_paired, previous_paired}
+            else "PAIRED_OUTCOME_CONTEXT_CHANGED"
+        )
+        return result
+
+    if audit.get("active_rule_signature") != prior_audit.get("active_rule_signature"):
         result["reason"] = "ACTIVE_RULE_SET_CHANGED"
         return result
 
-    previous_confirmation_target = str(
-        previous.get("confirmation_of_teacher_id") or ""
-    ).strip()
-    result["action"] = "AUTO_COMPRESS"
-    if previous_confirmation_target:
-        result["reason"] = "POST_CONFIRMATION_REPEAT"
-    elif active_matches:
-        result["reason"] = "RULE_PHASE_REPEAT"
-    else:
-        result["reason"] = "CORRELATED_PHASE_DUPLICATE"
+    # The phase fingerprint is composed from structure, outcome classes and
+    # active-rule signature, so reaching this branch should be rare. Keep the
+    # conservative surface default rather than silently compressing.
+    result["reason"] = "PHASE_FINGERPRINT_CHANGED"
     return result
+
