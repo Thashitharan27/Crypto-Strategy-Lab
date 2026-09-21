@@ -357,6 +357,29 @@ def uses_ichimoku_rules(*rule_groups) -> bool:
     )
 
 
+def uses_higher_timeframe_ichimoku_rules(
+    strategy_timeframe_minutes: int, *rule_groups
+) -> bool:
+    strategy_minutes = int(strategy_timeframe_minutes)
+    for group in rule_groups:
+        for rule in (group or ()):
+            if (
+                not _rule_group_enabled(rule)
+                or not is_ichimoku_evidence(rule.get("evidence", ""))
+            ):
+                continue
+            raw = rule.get("sr_timeframe_minutes")
+            if raw is None:
+                continue
+            try:
+                requested = int(raw)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if requested > strategy_minutes:
+                return True
+    return False
+
+
 def is_support_resistance_evidence(evidence: str) -> bool:
     return str(evidence).upper() in SUPPORT_RESISTANCE_RULE_EVIDENCE
 
