@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+from crypto_strategy_lab.walk_forward_orchestrator_impl import (
+    _append_auto_compressed_teacher,
+)
 from crypto_strategy_lab.walk_forward_teacher_compression import (
     AUTO_COMPRESSED_STATUS,
     build_teacher_phase_audit,
@@ -269,3 +272,56 @@ def test_auto_compressed_events_are_not_comparison_baselines() -> None:
     later = _packet(teacher_id="wf-102-long")
     decision = teacher_compression_decision(later, [reviewed, compressed])
     assert decision["compared_to_teacher_id"] == "wf-100-long"
+
+
+
+def test_auto_compressed_teacher_persists_full_audit_metadata() -> None:
+    first = _packet(teacher_id="wf-100-long")
+    later = _packet(teacher_id="wf-101-long", di_ratio=2.8, adx=59.0)
+    reviewed = _reviewed_event(first)
+    decision = teacher_compression_decision(later, [reviewed])
+    later["teacher"]["resolution_time"] = "2025-01-01T04:00:00+00:00"
+
+    class Store:
+        def __init__(self):
+            self.payload = None
+            self.source = None
+
+        def append_event(
+            self,
+            experiment_id,
+            event_type,
+            payload,
+            operation_id,
+            expected_sequence,
+            expected_state_hash,
+            *,
+            effective_market_time,
+            source,
+        ):
+            self.payload = payload
+            self.source = source
+            assert event_type == "TEACHER_RESOLVED"
+            assert effective_market_time == "2025-01-01T04:00:00+00:00"
+            return {"sequence": expected_sequence + 1, "state_hash": "b" * 64}
+
+    store = Store()
+    recorded = _append_auto_compressed_teacher(
+        store,
+        experiment_id="BTCUSDT_15M_WF_TEST",
+        packet=later,
+        decision=decision,
+        operation_id="compress-test",
+        expected_sequence=20,
+        expected_state_hash="a" * 64,
+    )
+
+    assert recorded["sequence"] == 21
+    assert store.source == "DETERMINISTIC_TEACHER_COMPRESSION"
+    assert store.payload["teacher_review_status"] == "AUTO_COMPRESSED"
+    assert store.payload["compression_reason"] == "CORRELATED_PHASE_DUPLICATE"
+    assert store.payload["compared_to_teacher_id"] == "wf-100-long"
+    assert store.payload["phase_fingerprint"]
+    assert store.payload["structural_phase_fingerprint"]
+    assert store.payload["active_rule_matches"] == []
+    assert store.payload["teacher_phase_audit"]["episode_id"] == "episode-000001"
