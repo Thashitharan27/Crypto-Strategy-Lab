@@ -410,6 +410,9 @@ def record_walk_forward_teacher_review(
             "compared_to_teacher_id": None,
             "confirmation_of_teacher_id": None,
             "confirmation_rule_ids": [],
+            "confirmation_rule_versions": [],
+            "episode_review_count": 0,
+            "episode_review_budget": None,
         }
     else:
         phase_decision = teacher_compression_decision(base_phase_packet, events)
@@ -448,8 +451,14 @@ def record_walk_forward_teacher_review(
         "confirmation_rule_ids": list(
             phase_decision.get("confirmation_rule_ids") or []
         ),
+        "confirmation_rule_versions": list(
+            phase_decision.get("confirmation_rule_versions") or []
+        ),
+        "episode_review_count": phase_decision.get("episode_review_count"),
+        "episode_review_budget": phase_decision.get("episode_review_budget"),
         "teacher_phase_audit": phase_audit,
         "phase_fingerprint": phase_audit.get("phase_fingerprint"),
+        "actionability_fingerprint": phase_audit.get("actionability_fingerprint"),
         "structural_phase_fingerprint": phase_audit.get(
             "structural_fingerprint"
         ),
