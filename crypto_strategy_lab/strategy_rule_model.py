@@ -366,7 +366,11 @@ def is_price_action_evidence(evidence: str) -> bool:
 
 
 def is_context_timeframe_evidence(evidence: str) -> bool:
-    return is_support_resistance_evidence(evidence) or is_price_action_evidence(evidence)
+    return (
+        is_support_resistance_evidence(evidence)
+        or is_price_action_evidence(evidence)
+        or is_ichimoku_evidence(evidence)
+    )
 
 
 def uses_support_resistance_rules(*rule_groups) -> bool:
