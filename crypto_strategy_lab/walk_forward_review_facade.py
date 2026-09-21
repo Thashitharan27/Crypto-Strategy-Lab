@@ -331,23 +331,21 @@ def record_walk_forward_teacher_review(
     notes_text = str(notes).strip()
     effective_iso = resolution_time.isoformat()
 
-    base_phase_packet = _impl._teacher_review_packet(
-        control,
-        reports,
-        experiment_id=experiment_id,
-        expected_sequence=expected_sequence,
-        expected_state_hash=expected_state_hash,
-        teacher_boundary=boundary,
-    )
-    phase_decision = teacher_compression_decision(base_phase_packet, events)
-    phase_audit = deepcopy(phase_decision.get("audit") or {})
-
+    base_phase_packet: dict[str, Any] | None = None
     checked_loss_packet: dict[str, Any] | None = None
     if teacher_result == "LOSS":
         if decision_value not in {"NO_CHANGE", "FLIP_EVIDENCE", "FLIP_LEARNED"}:
             raise ValueError(
                 "teacher loss decision must be NO_CHANGE, FLIP_EVIDENCE, or FLIP_LEARNED"
             )
+        base_phase_packet = _impl._teacher_review_packet(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
+            teacher_boundary=boundary,
+        )
         checked_loss_packet = _decorate_teacher_loss_packet(
             control, reports, experiment_id, deepcopy(base_phase_packet)
         )
@@ -384,6 +382,18 @@ def record_walk_forward_teacher_review(
         setup_thesis=setup_thesis,
         entry_family=entry_family,
     )
+
+    if base_phase_packet is None:
+        base_phase_packet = _impl._teacher_review_packet(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
+            teacher_boundary=boundary,
+        )
+    phase_decision = teacher_compression_decision(base_phase_packet, events)
+    phase_audit = deepcopy(phase_decision.get("audit") or {})
 
     if teacher_result == "LOSS":
         if decision_value in {"NO_CHANGE", "FLIP_EVIDENCE"} and canonical:
