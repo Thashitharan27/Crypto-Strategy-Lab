@@ -34,12 +34,14 @@ from PySide6.QtWidgets import (
 
 KEYRING_SERVICE = "CryptoStrategyLab.OpenAITunnel"
 KEYRING_USERNAME = "runtime_api_key"
+KEYRING_USERNAME_SECONDARY = "runtime_api_key_2"
 TUNNEL_ARGUMENTS = ["run", "--log.level=info", "--log.format=struct-text"]
 _SECRET_RE = re.compile(
     r"(?i)(?:sk-[A-Za-z0-9_-]{8,}|CONTROL_PLANE_API_KEY\s*[=:]\s*\S+)"
 )
 CREATE_NO_WINDOW = 0x08000000
 DEFAULT_MCP_PORT = 8766
+SECONDARY_MCP_PORT = 8767
 MCP_MODULE = "mcp_server.control_server"
 
 
@@ -367,12 +369,18 @@ class ChatGPTIntegrationWidget(QWidget):
         super().__init__(parent)
         self.settings = settings
         self.manager = ChatGPTConnectionManager(output_dir, self)
+        self.secondary_manager = ChatGPTConnectionManager(output_dir, self)
         self._build()
         self._load()
         self.manager.state_changed.connect(self._status)
         self.manager.diagnostic_changed.connect(self._diagnostic)
         self.manager.error.connect(
-            lambda text: QMessageBox.warning(self, "ChatGPT Connection", text)
+            lambda text: QMessageBox.warning(self, "ChatGPT Connection 1", text)
+        )
+        self.secondary_manager.state_changed.connect(self._status_secondary)
+        self.secondary_manager.diagnostic_changed.connect(self._diagnostic_secondary)
+        self.secondary_manager.error.connect(
+            lambda text: QMessageBox.warning(self, "ChatGPT Connection 2", text)
         )
 
     def _build(self):
@@ -381,7 +389,15 @@ class ChatGPTIntegrationWidget(QWidget):
         title.setStyleSheet("font-size:20px;font-weight:600")
         outer.addWidget(title)
 
-        connection = QGroupBox("Connection")
+        explanation = QLabel(
+            "Two independent MCP + tunnel connections can be attached as two ChatGPT plugins. "
+            "They share the same Crypto Strategy Lab data/output, but use separate local ports "
+            "and separate tunnel IDs."
+        )
+        explanation.setWordWrap(True)
+        outer.addWidget(explanation)
+
+        connection = QGroupBox("Connection 1 — Plugin 1")
         form = QFormLayout(connection)
         self.connection_status = QLabel("● Disconnected")
         self.mcp_status = QLabel("● Stopped")
@@ -405,7 +421,7 @@ class ChatGPTIntegrationWidget(QWidget):
         form.addRow(self.auto_start)
         outer.addWidget(connection)
 
-        config = QGroupBox("Configuration")
+        config = QGroupBox("Configuration 1")
         cf = QFormLayout(config)
         self.path = QLineEdit()
         browse = QPushButton("Browse")
@@ -429,12 +445,64 @@ class ChatGPTIntegrationWidget(QWidget):
         outer.addWidget(config)
 
         actions = QHBoxLayout()
-        test = QPushButton("Test Configuration")
-        logs = QPushButton("Open Logs")
+        test = QPushButton("Test Connection 1")
+        logs = QPushButton("Open Logs 1")
         actions.addWidget(test)
         actions.addWidget(logs)
         actions.addStretch()
         outer.addLayout(actions)
+
+        connection2 = QGroupBox("Connection 2 — Plugin 2")
+        form2 = QFormLayout(connection2)
+        self.connection_status2 = QLabel("● Disconnected")
+        self.mcp_status2 = QLabel("● Stopped")
+        self.tunnel_status2 = QLabel("● Stopped")
+        self.endpoint2 = QLabel()
+        self.last_error2 = QLabel("—")
+        self.last_error2.setWordWrap(True)
+        form2.addRow("Connection Status", self.connection_status2)
+        form2.addRow("Local MCP Server", self.mcp_status2)
+        form2.addRow("Secure Tunnel", self.tunnel_status2)
+        form2.addRow("MCP Endpoint", self.endpoint2)
+        form2.addRow("Last Connection Error", self.last_error2)
+        buttons2 = QHBoxLayout()
+        self.start_button2 = QPushButton("Start ChatGPT Connection 2")
+        self.stop_button2 = QPushButton("Stop Connection 2")
+        self.stop_button2.setEnabled(False)
+        buttons2.addWidget(self.start_button2)
+        buttons2.addWidget(self.stop_button2)
+        form2.addRow(buttons2)
+        self.auto_start2 = QCheckBox("Start Connection 2 automatically with Crypto Strategy Lab")
+        form2.addRow(self.auto_start2)
+        outer.addWidget(connection2)
+
+        config2 = QGroupBox("Configuration 2")
+        cf2 = QFormLayout(config2)
+        shared_client = QLabel("Uses the same Tunnel Client executable as Connection 1")
+        shared_client.setWordWrap(True)
+        cf2.addRow("Tunnel Client", shared_client)
+        self.tunnel_id2 = QLineEdit()
+        cf2.addRow("Tunnel ID", self.tunnel_id2)
+        self.key_status2 = QLabel("Not configured")
+        self.key_button2 = QPushButton("Set / Change API Key 2")
+        clear2 = QPushButton("Clear API Key 2")
+        kr2 = QHBoxLayout()
+        kr2.addWidget(self.key_status2)
+        kr2.addWidget(self.key_button2)
+        kr2.addWidget(clear2)
+        cf2.addRow("API Key", kr2)
+        self.port2 = QSpinBox()
+        self.port2.setRange(1, 65535)
+        cf2.addRow("MCP Port", self.port2)
+        outer.addWidget(config2)
+
+        actions2 = QHBoxLayout()
+        test2 = QPushButton("Test Connection 2")
+        logs2 = QPushButton("Open Logs 2")
+        actions2.addWidget(test2)
+        actions2.addWidget(logs2)
+        actions2.addStretch()
+        outer.addLayout(actions2)
         outer.addStretch()
 
         self.start_button.clicked.connect(self.start)
@@ -444,20 +512,35 @@ class ChatGPTIntegrationWidget(QWidget):
         clear.clicked.connect(self.clear_key)
         test.clicked.connect(self.test)
         logs.clicked.connect(self.open_logs)
+        self.start_button2.clicked.connect(self.start_secondary)
+        self.stop_button2.clicked.connect(self.secondary_manager.stop)
+        self.key_button2.clicked.connect(self.set_key_secondary)
+        clear2.clicked.connect(self.clear_key_secondary)
+        test2.clicked.connect(self.test_secondary)
+        logs2.clicked.connect(self.open_logs_secondary)
         self.path.editingFinished.connect(self._save)
         self.tunnel_id.editingFinished.connect(self._save)
+        self.tunnel_id2.editingFinished.connect(self._save)
         self.port.valueChanged.connect(self._save)
+        self.port2.valueChanged.connect(self._save)
         self.auto_start.toggled.connect(self._save)
+        self.auto_start2.toggled.connect(self._save)
 
-    def _credential(self):
+    def _credential_for(self, username):
         try:
             return importlib.import_module("keyring").get_password(
-                KEYRING_SERVICE, KEYRING_USERNAME
+                KEYRING_SERVICE, username
             )
         except Exception as exc:
             raise RuntimeError(
                 f"Windows Credential Manager is unavailable: {exc}"
             ) from exc
+
+    def _credential(self):
+        return self._credential_for(KEYRING_USERNAME)
+
+    def _credential_secondary(self):
+        return self._credential_for(KEYRING_USERNAME_SECONDARY)
 
     def _load(self):
         default_path = next(
@@ -500,8 +583,24 @@ class ChatGPTIntegrationWidget(QWidget):
             ).lower()
             == "true"
         )
+        self.tunnel_id2.setText(str(self.settings.value("tunnel_id_2", "")))
+        try:
+            port2 = int(self.settings.value("mcp_port_2", str(SECONDARY_MCP_PORT)))
+        except (TypeError, ValueError):
+            port2 = SECONDARY_MCP_PORT
+        self.port2.setValue(
+            port2 if 1 <= port2 <= 65535 else SECONDARY_MCP_PORT
+        )
+        self.auto_start2.setChecked(
+            str(
+                self.settings.value("auto_start_chatgpt_connection_2", "false")
+            ).lower()
+            == "true"
+        )
         self._refresh_key()
+        self._refresh_key_secondary()
         self._update_endpoint()
+        self._update_endpoint_secondary()
 
     def _save(self):
         self.settings.setValue("tunnel_client_path", self.path.text().strip())
@@ -510,7 +609,13 @@ class ChatGPTIntegrationWidget(QWidget):
         self.settings.setValue(
             "auto_start_chatgpt_connection", self.auto_start.isChecked()
         )
+        self.settings.setValue("tunnel_id_2", self.tunnel_id2.text().strip())
+        self.settings.setValue("mcp_port_2", self.port2.value())
+        self.settings.setValue(
+            "auto_start_chatgpt_connection_2", self.auto_start2.isChecked()
+        )
         self._update_endpoint()
+        self._update_endpoint_secondary()
 
     def _refresh_key(self):
         try:
@@ -519,8 +624,18 @@ class ChatGPTIntegrationWidget(QWidget):
             configured = False
         self.key_status.setText("Configured" if configured else "Not configured")
 
+    def _refresh_key_secondary(self):
+        try:
+            configured = bool(self._credential_secondary())
+        except RuntimeError:
+            configured = False
+        self.key_status2.setText("Configured" if configured else "Not configured")
+
     def _update_endpoint(self):
         self.endpoint.setText(f"http://127.0.0.1:{self.port.value()}/mcp")
+
+    def _update_endpoint_secondary(self):
+        self.endpoint2.setText(f"http://127.0.0.1:{self.port2.value()}/mcp")
 
     def browse(self):
         value, _ = QFileDialog.getOpenFileName(
@@ -563,6 +678,36 @@ class ChatGPTIntegrationWidget(QWidget):
             )
         self._refresh_key()
 
+    def set_key_secondary(self):
+        value, ok = QInputDialog.getText(
+            self, "Runtime API Key 2", "API key:", QLineEdit.Password
+        )
+        if ok and value:
+            try:
+                importlib.import_module("keyring").set_password(
+                    KEYRING_SERVICE, KEYRING_USERNAME_SECONDARY, value
+                )
+            except Exception as exc:
+                QMessageBox.critical(
+                    self,
+                    "Credential Manager",
+                    f"Could not securely store the second key: {exc}",
+                )
+            self._refresh_key_secondary()
+
+    def clear_key_secondary(self):
+        try:
+            importlib.import_module("keyring").delete_password(
+                KEYRING_SERVICE, KEYRING_USERNAME_SECONDARY
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Credential Manager",
+                f"Could not clear the second key: {exc}",
+            )
+        self._refresh_key_secondary()
+
     def _validated(self):
         try:
             key = self._credential()
@@ -576,12 +721,38 @@ class ChatGPTIntegrationWidget(QWidget):
             self.port.value(),
         )
 
+    def _validated_secondary(self):
+        try:
+            key = self._credential_secondary()
+        except RuntimeError as exc:
+            return None, [str(exc)]
+        errors = validate_configuration(
+            self.path.text(),
+            self.tunnel_id2.text(),
+            key,
+            self.secondary_manager.output_dir(),
+            self.port2.value(),
+        )
+        if self.port2.value() == self.port.value():
+            errors.append("Connection 2 MCP port must be different from Connection 1.")
+        return key, errors
+
     def test(self):
         _, errors = self._validated()
         QMessageBox.information(
             self,
             "Configuration Test",
-            "Configuration is ready."
+            "Connection 1 configuration is ready."
+            if not errors
+            else "Please fix:\n\n" + "\n".join(errors),
+        )
+
+    def test_secondary(self):
+        _, errors = self._validated_secondary()
+        QMessageBox.information(
+            self,
+            "Configuration Test",
+            "Connection 2 configuration is ready."
             if not errors
             else "Please fix:\n\n" + "\n".join(errors),
         )
@@ -600,16 +771,36 @@ class ChatGPTIntegrationWidget(QWidget):
             self.path.text(), self.tunnel_id.text(), key, self.port.value()
         )
 
+    def start_secondary(self):
+        self._save()
+        key, errors = self._validated_secondary()
+        if errors:
+            QMessageBox.warning(
+                self,
+                "ChatGPT Configuration 2",
+                "Please fix:\n\n" + "\n".join(errors),
+            )
+            return
+        self.secondary_manager.start(
+            self.path.text(), self.tunnel_id2.text(), key, self.port2.value()
+        )
+
     def auto_start_connection(self):
         if self.auto_start.isChecked():
             self.start()
+        if self.auto_start2.isChecked():
+            self.start_secondary()
 
     def shutdown(self):
-        """Stop child processes owned by this integration widget."""
+        """Stop child processes owned by both ChatGPT integration connections."""
+        self.secondary_manager.stop()
         self.manager.stop()
 
     def _diagnostic(self, text):
         self.last_error.setText(text or "—")
+
+    def _diagnostic_secondary(self, text):
+        self.last_error2.setText(text or "—")
 
     def _status(self, state, mcp, tunnel):
         color = (
@@ -633,17 +824,49 @@ class ChatGPTIntegrationWidget(QWidget):
         )
         self.stop_button.setEnabled(active and state != "Stopping...")
 
-    def open_logs(self):
+    def _status_secondary(self, state, mcp, tunnel):
+        color = (
+            "#16833b"
+            if state == "Connected"
+            else ("#b42318" if state == "Error" else "#666")
+        )
+        self.connection_status2.setText(f"● {state}")
+        self.connection_status2.setStyleSheet(f"color:{color};font-weight:600")
+        self.mcp_status2.setText(f"● {mcp}")
+        self.tunnel_status2.setText(f"● {tunnel}")
+        active = state in (
+            "Starting MCP...",
+            "Starting Tunnel...",
+            "Connected",
+            "Stopping...",
+        ) or self.secondary_manager.owns_running_processes
+        self.start_button2.setEnabled(not active)
+        self.start_button2.setText(
+            "Connection 2 Active" if state == "Connected" else "Start ChatGPT Connection 2"
+        )
+        self.stop_button2.setEnabled(active and state != "Stopping...")
+
+    def _open_logs_for(self, manager, title, attr_name):
         dialog = QDialog(self)
-        dialog.setWindowTitle("ChatGPT Connection Logs")
+        dialog.setWindowTitle(title)
         dialog.resize(800, 450)
         layout = QVBoxLayout(dialog)
         edit = QPlainTextEdit()
         edit.setReadOnly(True)
         edit.setMaximumBlockCount(2000)
-        edit.setPlainText("\n".join(self.manager.logs))
+        edit.setPlainText("\n".join(manager.logs))
         layout.addWidget(edit)
-        self.manager.log_added.connect(edit.appendPlainText)
+        manager.log_added.connect(edit.appendPlainText)
         dialog.setAttribute(Qt.WA_DeleteOnClose)
         dialog.show()
-        self._log_dialog = dialog
+        setattr(self, attr_name, dialog)
+
+    def open_logs(self):
+        self._open_logs_for(
+            self.manager, "ChatGPT Connection 1 Logs", "_log_dialog"
+        )
+
+    def open_logs_secondary(self):
+        self._open_logs_for(
+            self.secondary_manager, "ChatGPT Connection 2 Logs", "_log_dialog2"
+        )
