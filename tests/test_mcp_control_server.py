@@ -1,3 +1,10 @@
+from types import SimpleNamespace
+
+import pytest
+
+from crypto_strategy_lab.causal_experiment import CausalExperimentStore
+from crypto_strategy_lab.walk_forward_candidate_engine import teacher_loss_flip_policy
+import mcp_server.control_server as control_server_module
 from mcp_server.control_server import (
     CAUSAL_EXPERIMENT_TOOLS,
     CONTROL_TOOLS,
@@ -250,3 +257,129 @@ def test_unified_server_keeps_expected_tool_groups_stable():
         "research_aggregate",
         "compare_runs",
     }
+
+
+def _review_cache_definition():
+    return {
+        "symbol": "BTCUSDT",
+        "strategy_timeframe": "15m",
+        "strategy": "DI_DIRECTION",
+        "stop_loss": {"type": "ATR", "multiple": 1.0},
+        "take_profit": {"type": "R", "multiple": 3.0},
+        "regime_method": "ASSET_RETURN",
+        "risk_model": "FIXED_FRACTIONAL",
+        "reference_run": "BTCUSDT_15m_reference",
+        "initial_equity": 1000.0,
+        "risk_pct": 1.0,
+    }
+
+
+def test_review_packet_cache_recovers_same_head_without_state_mutation(tmp_path):
+    control = SimpleNamespace(project_root=tmp_path / "project")
+    store = CausalExperimentStore(
+        control.project_root / "walk_forward_experiments"
+    )
+    head = store.create(
+        "BTCUSDT_15M_WF_CACHE_TEST",
+        _review_cache_definition(),
+        "create:cache-test",
+    )
+    args = (control, object())
+    kwargs = {
+        "experiment_id": "BTCUSDT_15M_WF_CACHE_TEST",
+        "operation_id": "autonomous:first",
+        "expected_sequence": head["sequence"],
+        "expected_state_hash": head["state_hash"],
+        "review_interval_months": 3,
+    }
+    packet = {
+        "status": "TEACHER_LOSS_REVIEW_REQUIRED",
+        "experiment_id": kwargs["experiment_id"],
+        "sequence": head["sequence"],
+        "state_hash": head["state_hash"],
+        "teacher": {
+            "pair_id": "wf-14594-short",
+            "result": "LOSS",
+        },
+        "entry_context": {"feature_context": {"adx": 28.21}},
+    }
+
+    with teacher_loss_flip_policy(True):
+        persisted = control_server_module._persist_review_packet(
+            control_server_module._ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS,
+            args,
+            kwargs,
+            packet,
+        )
+        recovered = control_server_module._load_cached_review_packet(
+            control_server_module._ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS,
+            args,
+            {**kwargs, "operation_id": "autonomous:recovery"},
+        )
+
+    assert persisted["review_packet_cache"]["persisted"] is True
+    assert persisted["review_packet_cache"]["hit"] is False
+    assert recovered is not None
+    assert recovered["status"] == "TEACHER_LOSS_REVIEW_REQUIRED"
+    assert recovered["teacher"]["pair_id"] == "wf-14594-short"
+    assert recovered["review_packet_cache"]["hit"] is True
+    assert recovered["review_packet_cache"]["persisted"] is True
+    assert recovered["autonomous"]["assistant_judgment_required"] is True
+    readback = store.read(kwargs["experiment_id"], recent_events=10)
+    assert readback["sequence"] == head["sequence"]
+    assert readback["state_hash"] == head["state_hash"]
+    assert [event["event_type"] for event in readback["recent_events"]] == ["WF_CREATED"]
+
+
+def test_review_packet_cache_is_invalid_after_authoritative_head_moves(tmp_path):
+    control = SimpleNamespace(project_root=tmp_path / "project")
+    store = CausalExperimentStore(
+        control.project_root / "walk_forward_experiments"
+    )
+    head = store.create(
+        "BTCUSDT_15M_WF_CACHE_STALE",
+        _review_cache_definition(),
+        "create:cache-stale",
+    )
+    args = (control, object())
+    kwargs = {
+        "experiment_id": "BTCUSDT_15M_WF_CACHE_STALE",
+        "operation_id": "autonomous:first",
+        "expected_sequence": head["sequence"],
+        "expected_state_hash": head["state_hash"],
+        "review_interval_months": 3,
+    }
+    packet = {
+        "status": "TEACHER_REVIEW_REQUIRED",
+        "experiment_id": kwargs["experiment_id"],
+        "sequence": head["sequence"],
+        "state_hash": head["state_hash"],
+        "teacher": {"pair_id": "wf-10-long", "result": "WIN"},
+    }
+
+    with teacher_loss_flip_policy(False):
+        control_server_module._persist_review_packet(
+            control_server_module._ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS,
+            args,
+            kwargs,
+            packet,
+        )
+
+    store.append_event(
+        kwargs["experiment_id"],
+        "CHECKPOINT_CREATED",
+        {"checkpoint_type": "TEST", "reason": "advance authoritative head"},
+        "checkpoint:move-head",
+        head["sequence"],
+        head["state_hash"],
+        effective_market_time="2025-01-01T00:00:00+00:00",
+        source="SYSTEM",
+    )
+
+    with teacher_loss_flip_policy(False):
+        with pytest.raises(ValueError, match="changed since it was read"):
+            control_server_module._load_cached_review_packet(
+                control_server_module._ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS,
+                args,
+                kwargs,
+            )
