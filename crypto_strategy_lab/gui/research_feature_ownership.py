@@ -204,7 +204,7 @@ class ResearchFeaturesPanel(QWidget):
         intro_text = QLabel(
             "Core strategy dependencies stay automatic. Lightweight Binance futures "
             "context is attached automatically when local coverage exists. Support / "
-            "Resistance, detailed Trade Flow and Order Book are explicit because they "
+            "Resistance, Ichimoku, detailed Trade Flow and Order Book are explicit because they "
             "can add preparation work."
         )
         intro_text.setWordWrap(True)
@@ -218,7 +218,7 @@ class ResearchFeaturesPanel(QWidget):
         self.preset.addItem("Fast — core + lightweight automatic context", "FAST")
         self.preset.addItem("Standard — recommended", "STANDARD")
         self.preset.addItem(
-            "Deep Research — includes S/R, Trade Flow and Order Book", "DEEP"
+            "Deep Research — includes Ichimoku, S/R, Trade Flow and Order Book", "DEEP"
         )
         self.preset.addItem("Custom", "CUSTOM")
         self.apply_preset = QPushButton("Apply")
