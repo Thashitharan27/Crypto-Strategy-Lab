@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from crypto_strategy_lab.strategy_rule_model import (
+    uses_ichimoku_rules,
     uses_mean_reversion_rules,
     uses_support_resistance_rules,
 )
@@ -51,6 +52,12 @@ FRIENDLY_LABELS = {
     "mean_reversion_require_reentry": "Require re-entry",
     "mean_reversion_track_atr_distance": "Track ATR distance",
     "mean_reversion_track_motion": "Track motion",
+    "ichimoku_enabled": "Include Ichimoku research",
+    "ichimoku_conversion_period": "Tenkan / conversion period",
+    "ichimoku_base_period": "Kijun / base period",
+    "ichimoku_span_b_period": "Span B period",
+    "ichimoku_displacement": "Cloud / Chikou displacement",
+    "ichimoku_include_higher_timeframes": "Include compatible 1h / 4h / 1d contexts",
     "market_regime_method": "Regime model",
     "structural_regime_sma_days": "SMA period",
     "structural_regime_slope_lookback_days": "SMA slope lookback",
@@ -197,7 +204,7 @@ class ResearchFeaturesPanel(QWidget):
         intro_text = QLabel(
             "Core strategy dependencies stay automatic. Lightweight Binance futures "
             "context is attached automatically when local coverage exists. Support / "
-            "Resistance, detailed Trade Flow and Order Book are explicit because they "
+            "Resistance, Ichimoku, detailed Trade Flow and Order Book are explicit because they "
             "can add preparation work."
         )
         intro_text.setWordWrap(True)
@@ -211,7 +218,7 @@ class ResearchFeaturesPanel(QWidget):
         self.preset.addItem("Fast — core + lightweight automatic context", "FAST")
         self.preset.addItem("Standard — recommended", "STANDARD")
         self.preset.addItem(
-            "Deep Research — includes S/R, Trade Flow and Order Book", "DEEP"
+            "Deep Research — includes Ichimoku, S/R, Trade Flow and Order Book", "DEEP"
         )
         self.preset.addItem("Custom", "CUSTOM")
         self.apply_preset = QPushButton("Apply")
@@ -294,6 +301,32 @@ class ResearchFeaturesPanel(QWidget):
         )
         self.mr_card.layout().insertWidget(1, self.mr_mean_summary)
         layout.addWidget(self.mr_card)
+
+        self.ichimoku_enable = self.widgets["ichimoku_enabled"]
+        self.ichimoku_enable.setText("Include Ichimoku research")
+        self.ichimoku_card = FeatureCard(
+            "Ichimoku Market Structure",
+            status="OFF · RULE-READY",
+            note=(
+                "Adds causal Tenkan/Kijun, current/future Kumo and Chikou context. "
+                "Classic 9/26/52/26 is the default; enabling higher timeframes prepares "
+                "compatible 1h, 4h and 1d context without changing the signal strategy."
+            ),
+            enable=self.ichimoku_enable,
+            expandable=True,
+            expanded=False,
+        )
+        self._add_fields(
+            self.ichimoku_card,
+            (
+                "ichimoku_conversion_period",
+                "ichimoku_base_period",
+                "ichimoku_span_b_period",
+                "ichimoku_displacement",
+                "ichimoku_include_higher_timeframes",
+            ),
+        )
+        layout.addWidget(self.ichimoku_card)
 
         self.sr_enable = self.widgets["enable_support_resistance_analysis"]
         self.sr_enable.setText("Include Support / Resistance research")
@@ -527,18 +560,22 @@ class ResearchFeaturesPanel(QWidget):
             strategy_tf.currentIndexChanged.connect(
                 lambda _index: self.refresh_visibility()
             )
+        self.ichimoku_enable.toggled.connect(lambda _checked: self.refresh_visibility())
         self.sr_enable.toggled.connect(lambda _checked: self.refresh_visibility())
         self.trade_enable.toggled.connect(lambda _checked: self.refresh_visibility())
         self.book_enable.toggled.connect(lambda _checked: self.refresh_visibility())
         self.builder.enable_mr.toggled.connect(lambda _checked: self._mark_custom())
+        self.ichimoku_enable.toggled.connect(lambda _checked: self._mark_custom())
         self.sr_enable.toggled.connect(lambda _checked: self._mark_custom())
         self.trade_enable.toggled.connect(lambda _checked: self._mark_custom())
         self.book_enable.toggled.connect(lambda _checked: self._mark_custom())
         self.builder.changed.connect(self._sync_mr_requirement)
+        self.builder.changed.connect(self._sync_ichimoku_requirement)
         self.builder.changed.connect(self._sync_sr_requirement)
         self.form.changed.connect(self.refresh_visibility)
 
         self._sync_mr_requirement()
+        self._sync_ichimoku_requirement()
         self._sync_sr_requirement()
         self.refresh_visibility()
         self._infer_preset()
@@ -650,32 +687,35 @@ class ResearchFeaturesPanel(QWidget):
         self._applying_preset = True
         try:
             values = {
-                "FAST": (False, False, False, False),
-                "STANDARD": (True, True, False, False),
-                "DEEP": (True, True, True, True),
+                "FAST": (False, False, False, False, False),
+                "STANDARD": (True, False, True, False, False),
+                "DEEP": (True, True, True, True, True),
             }[preset]
-            mr, sr, trade, book = values
+            mr, ichimoku, sr, trade, book = values
             self.builder.enable_mr.setChecked(mr)
+            self.ichimoku_enable.setChecked(ichimoku)
             self.sr_enable.setChecked(sr)
             self.trade_enable.setChecked(trade)
             self.book_enable.setChecked(book)
         finally:
             self._applying_preset = False
         self._sync_mr_requirement()
+        self._sync_ichimoku_requirement()
         self._sync_sr_requirement()
         self.refresh_visibility()
 
     def _infer_preset(self) -> None:
         state = (
             self.builder.enable_mr.isChecked(),
+            self.ichimoku_enable.isChecked(),
             self.sr_enable.isChecked(),
             self.trade_enable.isChecked(),
             self.book_enable.isChecked(),
         )
         native = {
-            (False, False, False, False): "FAST",
-            (True, True, False, False): "STANDARD",
-            (True, True, True, True): "DEEP",
+            (False, False, False, False, False): "FAST",
+            (True, False, True, False, False): "STANDARD",
+            (True, True, True, True, True): "DEEP",
         }.get(state, "CUSTOM")
         index = self.preset.findData(native)
         if index >= 0:
@@ -701,6 +741,29 @@ class ResearchFeaturesPanel(QWidget):
             self.builder.enable_mr.setText("Include Mean Reversion research")
             self.mr_card.set_status(
                 "RULE-READY" if self.builder.enable_mr.isChecked() else "OFF · RULE-READY"
+            )
+        self.refresh_visibility()
+
+    def _sync_ichimoku_requirement(self, *_args) -> None:
+        try:
+            required = uses_ichimoku_rules(
+                self.builder.required_rules.rules(),
+                self.builder.veto_rules.rules(),
+                self.builder.flip_rules.rules(),
+            )
+        except (AttributeError, TypeError, ValueError):
+            required = False
+        if required:
+            if not self.ichimoku_enable.isChecked():
+                self.ichimoku_enable.setChecked(True)
+            self.ichimoku_enable.setEnabled(False)
+            self.ichimoku_enable.setText("Ichimoku calculation required by strategy rule")
+            self.ichimoku_card.set_status("REQUIRED BY STRATEGY")
+        else:
+            self.ichimoku_enable.setEnabled(True)
+            self.ichimoku_enable.setText("Include Ichimoku research")
+            self.ichimoku_card.set_status(
+                "RULE-READY" if self.ichimoku_enable.isChecked() else "OFF · RULE-READY"
             )
         self.refresh_visibility()
 
@@ -770,6 +833,10 @@ class ResearchFeaturesPanel(QWidget):
             self.mr_card.set_status(
                 "RULE-READY" if self.builder.enable_mr.isChecked() else "OFF · RULE-READY"
             )
+        if self.ichimoku_enable.isEnabled():
+            self.ichimoku_card.set_status(
+                "RULE-READY" if self.ichimoku_enable.isChecked() else "OFF · RULE-READY"
+            )
         if self.sr_enable.isEnabled():
             self.sr_card.set_status(
                 "RESEARCH ONLY" if self.sr_enable.isChecked() else "OFF / RESEARCH ONLY"
@@ -781,6 +848,7 @@ class ResearchFeaturesPanel(QWidget):
             "HEAVY · ENABLED" if self.book_enable.isChecked() else "HEAVY · OFF"
         )
         self.mr_card._refresh_settings_visibility()
+        self.ichimoku_card._refresh_settings_visibility()
         self.sr_card._refresh_settings_visibility()
         self.trade_card._refresh_settings_visibility()
         self.book_card._refresh_settings_visibility()

@@ -65,6 +65,7 @@ def test_research_features_are_reorganized_without_replacing_authoritative_form(
         assert panel.price_card.status.text() == "AUTOMATIC"
         assert panel.di_card.status.text() == "REQUIRED BY STRATEGY"
         assert panel.regime_card.status.text() == "REQUIRED BY STRATEGY"
+        assert panel.ichimoku_card.status.text() == "OFF · RULE-READY"
         assert panel.oi_card.status.text() == "AUTO · RULE-READY"
         assert panel.funding_card.status.text() == "AUTO · RULE-READY"
         assert panel.basis_card.status.text() == "AUTO · RULE-READY"
@@ -78,6 +79,11 @@ def test_research_features_are_reorganized_without_replacing_authoritative_form(
         assert result.atr_period == 14
         assert result.market_regime_method == "ASSET_RETURN"
         assert result.mean_reversion_mean_type == "AUTO_TIMEFRAME"
+        assert result.ichimoku_enabled is False
+        assert result.ichimoku_conversion_period == 9
+        assert result.ichimoku_base_period == 26
+        assert result.ichimoku_span_b_period == 52
+        assert result.ichimoku_displacement == 26
         assert result.trade_flow_enabled is False
         assert result.order_book_enabled is False
 
@@ -190,6 +196,7 @@ def test_presets_control_only_explicit_optional_or_heavy_features():
         panel.preset.setCurrentIndex(panel.preset.findData("FAST"))
         panel._apply_selected_preset()
         assert window.rule_builder.enable_mr.isChecked() is False
+        assert panel.ichimoku_enable.isChecked() is False
         assert panel.sr_enable.isChecked() is False
         assert panel.trade_enable.isChecked() is False
         assert panel.book_enable.isChecked() is False
@@ -197,6 +204,7 @@ def test_presets_control_only_explicit_optional_or_heavy_features():
         panel.preset.setCurrentIndex(panel.preset.findData("STANDARD"))
         panel._apply_selected_preset()
         assert window.rule_builder.enable_mr.isChecked() is True
+        assert panel.ichimoku_enable.isChecked() is False
         assert panel.sr_enable.isChecked() is True
         assert panel.trade_enable.isChecked() is False
         assert panel.book_enable.isChecked() is False
@@ -204,6 +212,7 @@ def test_presets_control_only_explicit_optional_or_heavy_features():
         panel.preset.setCurrentIndex(panel.preset.findData("DEEP"))
         panel._apply_selected_preset()
         assert window.rule_builder.enable_mr.isChecked() is True
+        assert panel.ichimoku_enable.isChecked() is True
         assert panel.sr_enable.isChecked() is True
         assert panel.trade_enable.isChecked() is True
         assert panel.book_enable.isChecked() is True
@@ -227,6 +236,26 @@ def test_mr_rule_makes_mean_reversion_a_required_dependency():
         assert window.rule_builder.enable_mr.isEnabled() is False
         assert panel.mr_card.status.text() == "REQUIRED BY STRATEGY"
         assert "required by strategy rule" in window.rule_builder.enable_mr.text().lower()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_ichimoku_rule_makes_ichimoku_a_required_dependency():
+    app, window, _scroll = _window()
+    try:
+        apply_research_feature_ownership(window)
+        panel = window.research_features_panel
+        panel.ichimoku_enable.setChecked(False)
+
+        rule = new_rule(kind="VETO", evidence="ICH_FUTURE_CLOUD_STATE")
+        window.rule_builder.veto_rules.set_rules((rule,))
+        panel._sync_ichimoku_requirement()
+
+        assert panel.ichimoku_enable.isChecked() is True
+        assert panel.ichimoku_enable.isEnabled() is False
+        assert panel.ichimoku_card.status.text() == "REQUIRED BY STRATEGY"
+        assert "required by strategy rule" in panel.ichimoku_enable.text().lower()
     finally:
         window.close()
         app.processEvents()

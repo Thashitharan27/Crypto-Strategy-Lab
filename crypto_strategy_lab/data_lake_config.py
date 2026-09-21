@@ -47,6 +47,12 @@ class FeatureConfig:
     mean_reversion_require_reentry: bool = True
     mean_reversion_track_atr_distance: bool = True
     mean_reversion_track_motion: bool = True
+    ichimoku_enabled: bool = False
+    ichimoku_conversion_period: int = 9
+    ichimoku_base_period: int = 26
+    ichimoku_span_b_period: int = 52
+    ichimoku_displacement: int = 26
+    ichimoku_include_higher_timeframes: bool = True
     enable_support_resistance_analysis: bool = False
     sr_timeframe_minutes: int = 0
     sr_pivot_left: int = 5
@@ -172,6 +178,15 @@ class FeatureConfig:
             "core_directional": directional,
             "production_market_context": context,
         }
+        if self.ichimoku_enabled:
+            result["ichimoku_context"] = {
+                "timeframe_minutes": 0,
+                "conversion_period": int(self.ichimoku_conversion_period),
+                "base_period": int(self.ichimoku_base_period),
+                "span_b_period": int(self.ichimoku_span_b_period),
+                "displacement": int(self.ichimoku_displacement),
+                "atr_period": int(self.atr_period),
+            }
         result["futures_positioning"] = {
             "oi_zscore_window_days": float(self.oi_zscore_window_days),
             "oi_zscore_min_samples": int(self.oi_zscore_min_samples),
@@ -392,6 +407,10 @@ class ResearchRunConfig:
             (features.di_pressure_lookback, "DI pressure lookback"),
             (features.bb_period, "BB period"), (features.mean_reversion_period, "MR period"),
             (features.mean_reversion_rsi_period, "MR RSI period"),
+            (features.ichimoku_conversion_period, "Ichimoku conversion period"),
+            (features.ichimoku_base_period, "Ichimoku base period"),
+            (features.ichimoku_span_b_period, "Ichimoku Span B period"),
+            (features.ichimoku_displacement, "Ichimoku displacement"),
         ):
             if int(value) <= 0:
                 raise ValueError(f"{label} must be positive")
@@ -461,11 +480,11 @@ class ResearchRunConfig:
                     sr_rule_minutes = int(raw_sr_timeframe)
                 except (TypeError, ValueError, OverflowError) as exc:
                     raise ValueError(
-                        f"{key}: S/R rule timeframe is invalid"
+                        f"{key}: context rule timeframe is invalid"
                     ) from exc
                 if sr_rule_minutes not in {0, 60, 240, 1440}:
                     raise ValueError(
-                        f"{key}: S/R rule timeframe must be Strategy TF, 1h, 4h or 1d"
+                        f"{key}: context rule timeframe must be Strategy TF, 1h, 4h or 1d"
                     )
                 effective_rule_minutes = (
                     data.strategy_timeframe_minutes

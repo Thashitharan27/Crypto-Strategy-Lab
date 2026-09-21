@@ -121,7 +121,38 @@ def _research_frames(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
         }
     )
     funding.attrs.update(feature_name="funding_context", feature_version="1")
-    return {"futures_positioning": positioning, "funding_context": funding}
+
+    ichimoku = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "available_at": available,
+            "price_vs_cloud": np.where(index % 2 == 0, "ABOVE_CLOUD", "INSIDE_CLOUD"),
+            "future_cloud_state": np.where(index % 3 == 0, "BULLISH", "BEARISH"),
+            "kijun_distance_atr": index / 100.0,
+        }
+    )
+    ichimoku.attrs.update(feature_name="ichimoku_context", feature_version="1")
+
+    ichimoku_1h = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "available_at": available,
+            "ich_1h_future_cloud_state": np.where(index % 4 == 0, "BULLISH", "BEARISH"),
+            "ich_1h_cloud_thickness_atr": 0.5 + index / 200.0,
+        }
+    )
+    ichimoku_1h.attrs.update(
+        feature_name="ichimoku_context",
+        feature_version="1",
+        ichimoku_context_label="1h",
+        ichimoku_context_timeframe_minutes=60,
+    )
+    return {
+        "futures_positioning": positioning,
+        "funding_context": funding,
+        "ichimoku_context": ichimoku,
+        "ichimoku_context_1h": ichimoku_1h,
+    }
 
 
 def test_scheduled_entry_trade_row_uses_previous_completed_signal_candle_research() -> None:
@@ -160,6 +191,11 @@ def test_scheduled_entry_trade_row_uses_previous_completed_signal_candle_researc
     assert row["price_oi_state"] == research["futures_positioning"].iloc[indicator_index]["price_oi_state"]
     assert row["funding_rate"] == research["funding_context"].iloc[indicator_index]["funding_rate"]
     assert row["funding_bias"] == research["funding_context"].iloc[indicator_index]["funding_bias"]
+    assert row["price_vs_cloud"] == research["ichimoku_context"].iloc[indicator_index]["price_vs_cloud"]
+    assert row["future_cloud_state"] == research["ichimoku_context"].iloc[indicator_index]["future_cloud_state"]
+    assert row["kijun_distance_atr"] == research["ichimoku_context"].iloc[indicator_index]["kijun_distance_atr"]
+    assert row["ich_1h_future_cloud_state"] == research["ichimoku_context_1h"].iloc[indicator_index]["ich_1h_future_cloud_state"]
+    assert row["ich_1h_cloud_thickness_atr"] == research["ichimoku_context_1h"].iloc[indicator_index]["ich_1h_cloud_thickness_atr"]
     assert pd.Timestamp(row["futures_positioning_feature_available_at"]) == expected_signal_available
     assert pd.Timestamp(row["funding_context_feature_available_at"]) == expected_signal_available
 

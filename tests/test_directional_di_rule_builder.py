@@ -23,6 +23,7 @@ def test_evidence_picker_uses_compact_top_level_categories():
     assert tuple(label for label, _children in EVIDENCE_MENU_TREE) == (
         "Directional / DI",
         "Trend & Volatility",
+        "Ichimoku",
         "Momentum & Price",
         "Mean Reversion",
         "Futures",

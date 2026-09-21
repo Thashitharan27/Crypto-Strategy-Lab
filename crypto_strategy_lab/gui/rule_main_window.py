@@ -23,10 +23,13 @@ from PySide6.QtWidgets import (
 from crypto_strategy_lab.data import DataQualityStatus
 from crypto_strategy_lab.data_lake_config import ExecutionProfileConfig
 from crypto_strategy_lab.strategy_rule_model import (
+    ICHIMOKU_RULE_EVIDENCE,
     MEAN_REVERSION_RULE_EVIDENCE,
     SUPPORT_RESISTANCE_RULE_EVIDENCE,
     common_execution_profile,
     compile_profiles,
+    uses_higher_timeframe_ichimoku_rules,
+    uses_ichimoku_rules,
     uses_mean_reversion_rules,
     uses_support_resistance_rules,
 )
@@ -705,6 +708,20 @@ class MainWindow(LegacyMainWindow):
                 features = replace(features, mean_reversion_track_atr_distance=True)
             if mr_evidence & {"MR_MOTION", "MR_DISTANCE_CHANGE_ATR"}:
                 features = replace(features, mean_reversion_track_motion=True)
+        if uses_ichimoku_rules(required_rules, veto_rules, flip_rules):
+            features = replace(
+                features,
+                ichimoku_enabled=True,
+                ichimoku_include_higher_timeframes=(
+                    features.ichimoku_include_higher_timeframes
+                    or uses_higher_timeframe_ichimoku_rules(
+                        data.strategy_timeframe_minutes,
+                        required_rules,
+                        veto_rules,
+                        flip_rules,
+                    )
+                ),
+            )
         if (
             authored.get("direction_mode") == "MTF_SR_REACTION"
             or uses_support_resistance_rules(required_rules, veto_rules, flip_rules)
@@ -817,6 +834,15 @@ class MainWindow(LegacyMainWindow):
             rule["evidence"] in MEAN_REVERSION_RULE_EVIDENCE
             for rule in all_rules
         )
+        ichimoku_rule_count = sum(
+            rule["evidence"] in ICHIMOKU_RULE_EVIDENCE
+            for rule in all_rules
+        )
+        ichimoku_text = (
+            f"Rule Evidence ({ichimoku_rule_count} rule(s))"
+            if ichimoku_rule_count
+            else ("Research Enabled" if config.features.ichimoku_enabled else "Off")
+        )
         mr_text = (
             f"Rule Evidence ({mr_rule_count} rule(s))"
             if mr_rule_count
@@ -854,6 +880,7 @@ class MainWindow(LegacyMainWindow):
             f"DI Pressure  {pressure_text}\n"
             f"S/R  {sr_text}\n"
             f"MR  {mr_text}\n"
+            f"Ichimoku  {ichimoku_text}\n"
             f"Trade Flow  {'ANALYZE' if config.features.trade_flow_enabled else 'OFF'}\n"
             f"Order Book  {'ANALYZE' if config.features.order_book_enabled else 'OFF'}\n\n"
             f"Base risk  {risk}\nMax trades  {config.execution.max_active_pairs}\n\n"
@@ -879,6 +906,7 @@ class MainWindow(LegacyMainWindow):
                 f"Entry rules: {required} required · {veto} veto\n"
                 f"DI pressure: {pressure_text}\n"
                 f"Mean Reversion: {mr_text}\n"
+                f"Ichimoku: {ichimoku_text}\n"
                 f"Support / Resistance: {sr_text}\n\n"
                 f"Starting Equity: ${config.execution.initial_equity:,.2f}\n"
                 f"Base Risk: {risk}\n"

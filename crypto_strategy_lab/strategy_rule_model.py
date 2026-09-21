@@ -52,6 +52,13 @@ CATEGORICAL_RULE_VALUES = {
     "DI_PRESSURE_STATE": ("EXPANDING", "CONTRACTING", "MIXED"),
     "EMA_STACK_STATE": ("BULLISH_STACK", "BEARISH_STACK", "MIXED"),
     "PRICE_VS_EMA_STACK": ("ABOVE_ALL_EMAS", "AMONG_EMAS", "BELOW_ALL_EMAS"),
+    "ICH_PRICE_VS_CLOUD": ("ABOVE_CLOUD", "INSIDE_CLOUD", "BELOW_CLOUD"),
+    "ICH_TK_STATE": ("BULLISH", "BEARISH", "FLAT"),
+    "ICH_TK_CROSS": ("BULLISH_CROSS", "BEARISH_CROSS", "NONE"),
+    "ICH_CURRENT_CLOUD_STATE": ("BULLISH", "BEARISH", "FLAT"),
+    "ICH_FUTURE_CLOUD_STATE": ("BULLISH", "BEARISH", "FLAT"),
+    "ICH_KUMO_TWIST": ("BULLISH_TWIST", "BEARISH_TWIST", "NONE"),
+    "ICH_CHIKOU_VS_PRICE": ("ABOVE_PRICE", "BELOW_PRICE", "AT_PRICE"),
     "MACD_CROSS_STATE": ("BULLISH", "BEARISH", "NONE"),
     "MACD_ZERO_STATE": ("ABOVE_ZERO", "BELOW_ZERO", "AT_ZERO"),
     "BULLISH_ENGULFING": _BOOL_VALUES,
@@ -135,6 +142,13 @@ CATEGORICAL_VALUE_CODES = {
     "DI_PRESSURE_STATE": {"EXPANDING": 1.0, "CONTRACTING": 2.0, "MIXED": 3.0},
     "EMA_STACK_STATE": {"BULLISH_STACK": 1.0, "BEARISH_STACK": 2.0, "MIXED": 3.0},
     "PRICE_VS_EMA_STACK": {"ABOVE_ALL_EMAS": 1.0, "AMONG_EMAS": 2.0, "BELOW_ALL_EMAS": 3.0},
+    "ICH_PRICE_VS_CLOUD": {"ABOVE_CLOUD": 1.0, "INSIDE_CLOUD": 2.0, "BELOW_CLOUD": 3.0},
+    "ICH_TK_STATE": {"BULLISH": 1.0, "BEARISH": 2.0, "FLAT": 3.0},
+    "ICH_TK_CROSS": {"BULLISH_CROSS": 1.0, "BEARISH_CROSS": 2.0, "NONE": 3.0},
+    "ICH_CURRENT_CLOUD_STATE": {"BULLISH": 1.0, "BEARISH": 2.0, "FLAT": 3.0},
+    "ICH_FUTURE_CLOUD_STATE": {"BULLISH": 1.0, "BEARISH": 2.0, "FLAT": 3.0},
+    "ICH_KUMO_TWIST": {"BULLISH_TWIST": 1.0, "BEARISH_TWIST": 2.0, "NONE": 3.0},
+    "ICH_CHIKOU_VS_PRICE": {"ABOVE_PRICE": 1.0, "BELOW_PRICE": 2.0, "AT_PRICE": 3.0},
     "MACD_CROSS_STATE": {"BULLISH": 1.0, "BEARISH": 2.0, "NONE": 3.0},
     "MACD_ZERO_STATE": {"ABOVE_ZERO": 1.0, "BELOW_ZERO": 2.0, "AT_ZERO": 3.0},
     "BULLISH_ENGULFING": {"TRUE": 1.0, "FALSE": 0.0},
@@ -288,6 +302,9 @@ CATEGORICAL_RULE_VALUE_OPTIONS = {
 MEAN_REVERSION_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("MR_")
 )
+ICHIMOKU_RULE_EVIDENCE = frozenset(
+    indicator for indicator in RULE_INDICATORS if indicator.startswith("ICH_")
+)
 SUPPORT_RESISTANCE_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("SR_")
 )
@@ -327,6 +344,42 @@ def uses_mean_reversion_rules(*rule_groups) -> bool:
     )
 
 
+def is_ichimoku_evidence(evidence: str) -> bool:
+    return str(evidence).upper() in ICHIMOKU_RULE_EVIDENCE
+
+
+def uses_ichimoku_rules(*rule_groups) -> bool:
+    return any(
+        _rule_group_enabled(rule)
+        and is_ichimoku_evidence(rule.get("evidence", ""))
+        for group in rule_groups
+        for rule in (group or ())
+    )
+
+
+def uses_higher_timeframe_ichimoku_rules(
+    strategy_timeframe_minutes: int, *rule_groups
+) -> bool:
+    strategy_minutes = int(strategy_timeframe_minutes)
+    for group in rule_groups:
+        for rule in (group or ()):
+            if (
+                not _rule_group_enabled(rule)
+                or not is_ichimoku_evidence(rule.get("evidence", ""))
+            ):
+                continue
+            raw = rule.get("sr_timeframe_minutes")
+            if raw is None:
+                continue
+            try:
+                requested = int(raw)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if requested > strategy_minutes:
+                return True
+    return False
+
+
 def is_support_resistance_evidence(evidence: str) -> bool:
     return str(evidence).upper() in SUPPORT_RESISTANCE_RULE_EVIDENCE
 
@@ -336,7 +389,11 @@ def is_price_action_evidence(evidence: str) -> bool:
 
 
 def is_context_timeframe_evidence(evidence: str) -> bool:
-    return is_support_resistance_evidence(evidence) or is_price_action_evidence(evidence)
+    return (
+        is_support_resistance_evidence(evidence)
+        or is_price_action_evidence(evidence)
+        or is_ichimoku_evidence(evidence)
+    )
 
 
 def uses_support_resistance_rules(*rule_groups) -> bool:

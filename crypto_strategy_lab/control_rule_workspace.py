@@ -32,6 +32,8 @@ from crypto_strategy_lab.strategy_rule_model import (
     is_context_timeframe_evidence,
     is_support_resistance_evidence,
     normalize_rule,
+    uses_higher_timeframe_ichimoku_rules,
+    uses_ichimoku_rules,
     rule_value_options,
 )
 
@@ -93,6 +95,21 @@ EVIDENCE_LABELS = {
     "EMA_200_DISTANCE_ATR": "Price − EMA 200 (ATR)",
     "EMA_STACK_STATE": "EMA Stack State (50 / 100 / 200)",
     "PRICE_VS_EMA_STACK": "Price vs EMA Stack (50 / 100 / 200)",
+    "ICH_PRICE_VS_CLOUD": "Ichimoku — Price vs Cloud",
+    "ICH_TK_STATE": "Ichimoku — Tenkan / Kijun State",
+    "ICH_TK_CROSS": "Ichimoku — Tenkan / Kijun Cross",
+    "ICH_TK_SPREAD_ATR": "Ichimoku — Tenkan − Kijun (ATR)",
+    "ICH_TENKAN_DISTANCE_ATR": "Ichimoku — Price − Tenkan (ATR)",
+    "ICH_KIJUN_DISTANCE_ATR": "Ichimoku — Price − Kijun (ATR)",
+    "ICH_KIJUN_SLOPE_ATR": "Ichimoku — Kijun Slope (ATR / bar)",
+    "ICH_KIJUN_FLAT_BARS": "Ichimoku — Kijun Flat Bars",
+    "ICH_CURRENT_CLOUD_STATE": "Ichimoku — Current Cloud State",
+    "ICH_FUTURE_CLOUD_STATE": "Ichimoku — Future Cloud State",
+    "ICH_CLOUD_THICKNESS_ATR": "Ichimoku — Current Cloud Thickness (ATR)",
+    "ICH_FUTURE_CLOUD_THICKNESS_ATR": "Ichimoku — Future Cloud Thickness (ATR)",
+    "ICH_KUMO_TWIST": "Ichimoku — Future Kumo Twist",
+    "ICH_CHIKOU_VS_PRICE": "Ichimoku — Chikou vs Historical Price",
+    "ICH_CLOUD_DISTANCE_ATR": "Ichimoku — Price Distance from Cloud (ATR)",
     "MACD_LINE": "MACD Line (12/26)",
     "MACD_SIGNAL": "MACD Signal (9)",
     "MACD_HISTOGRAM": "MACD Histogram",
@@ -893,4 +910,18 @@ class RuleWorkspace:
             rebuilt[key] = asdict(profile)
         result = deepcopy(self._base_config)
         result["strategy"]["profiles"] = rebuilt
+        if uses_ichimoku_rules(
+            self.rules["REQUIRED"],
+            self.rules["VETO"],
+            self.rules["FLIP"],
+        ):
+            result["features"]["ichimoku_enabled"] = True
+            strategy_minutes = int(result["data"]["strategy_timeframe_minutes"])
+            if uses_higher_timeframe_ichimoku_rules(
+                strategy_minutes,
+                self.rules["REQUIRED"],
+                self.rules["VETO"],
+                self.rules["FLIP"],
+            ):
+                result["features"]["ichimoku_include_higher_timeframes"] = True
         return result

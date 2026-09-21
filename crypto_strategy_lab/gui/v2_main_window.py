@@ -71,6 +71,11 @@ FEATURE_GROUPS = (
         "mean_reversion_require_reentry", "mean_reversion_track_atr_distance",
         "mean_reversion_track_motion",
     ), None),
+    ("Ichimoku", (
+        "ichimoku_enabled", "ichimoku_conversion_period", "ichimoku_base_period",
+        "ichimoku_span_b_period", "ichimoku_displacement",
+        "ichimoku_include_higher_timeframes",
+    ), None),
     ("Regime", (
         "market_regime_method", "structural_regime_sma_days",
         "structural_regime_slope_lookback_days", "bull_regime_lookback_days",
