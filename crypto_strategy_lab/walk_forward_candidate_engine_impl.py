@@ -924,32 +924,50 @@ def _rule_decision(
         diagnostics.append({"group_id": group.get("id"), "matched": matched, "conditions": details})
         if matched:
             entry_matches.append(str(group.get("id")))
-    if not entry_matches:
-        return {"eligible": False, "reason": "NO_ENTRY_GROUP_MATCH", "entry_diagnostics": diagnostics}
-
-    veto_matches = []
-    for group in groups.get("VETO", []):
-        matched, _ = _group_match(row, source_side, profile, group, config)
-        if matched:
-            veto_matches.append(str(group.get("id")))
-    if veto_matches:
-        return {
-            "eligible": False, "reason": "VETO_GROUP_MATCH",
-            "matched_entry_groups": entry_matches, "matched_veto_groups": veto_matches,
-        }
-
+    # FLIP is a complete positive setup thesis, not merely an ENTRY modifier.
+    # Evaluate it even when no ENTRY group matched so an already-learned FLIP can
+    # independently admit the opposite executable side.
     flip_matches = []
     for group in groups.get("FLIP", []):
         matched, _ = _group_match(row, source_side, profile, group, config)
         if matched:
             flip_matches.append(str(group.get("id")))
+
+    if not entry_matches and not flip_matches:
+        return {
+            "eligible": False,
+            "reason": "NO_ENTRY_OR_FLIP_GROUP_MATCH",
+            "entry_diagnostics": diagnostics,
+        }
+
+    # Preserve historical precedence for normal ENTRY admissions: a matching
+    # source-side VETO still blocks the trade before an optional FLIP can invert
+    # execution. A standalone FLIP has no source ENTRY to veto, so it admits the
+    # opposite side directly.
+    veto_matches = []
+    if entry_matches:
+        for group in groups.get("VETO", []):
+            matched, _ = _group_match(row, source_side, profile, group, config)
+            if matched:
+                veto_matches.append(str(group.get("id")))
+        if veto_matches:
+            return {
+                "eligible": False, "reason": "VETO_GROUP_MATCH",
+                "matched_entry_groups": entry_matches,
+                "matched_veto_groups": veto_matches,
+                "matched_flip_groups": flip_matches,
+            }
+
     effective_side = (
         "SHORT" if source_side == "LONG" else "LONG"
     ) if flip_matches else source_side
     return {
-        "eligible": True, "reason": "ENTRY_MATCHED",
-        "matched_entry_groups": entry_matches, "matched_veto_groups": [],
-        "matched_flip_groups": flip_matches, "rule_effective_side": effective_side,
+        "eligible": True,
+        "reason": "ENTRY_MATCHED" if entry_matches else "FLIP_MATCHED_WITHOUT_ENTRY",
+        "matched_entry_groups": entry_matches,
+        "matched_veto_groups": [],
+        "matched_flip_groups": flip_matches,
+        "rule_effective_side": effective_side,
     }
 
 
