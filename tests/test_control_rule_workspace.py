@@ -151,6 +151,26 @@ def test_gui_display_indicator_alias_is_accepted():
     assert created["conditions"][0]["value"] == "ABOVE_MEAN"
 
 
+def test_mcp_authored_ichimoku_rule_auto_enables_feature():
+    workspace = RuleWorkspace(ResearchRunConfig().to_dict())
+    workspace.add_group(
+        "bull_long",
+        "VETO",
+        {
+            "id": "ichimoku_veto",
+            "conditions": [
+                {
+                    "indicator": "ICH_FUTURE_CLOUD_STATE",
+                    "condition": "EQUALS",
+                    "value": "BEARISH",
+                }
+            ],
+        },
+    )
+    rebuilt = workspace.to_config()
+    assert rebuilt["features"]["ichimoku_enabled"] is True
+
+
 def test_profile_replacement_preserves_shared_scope_builder_group():
     shared = new_rule(
         kind="VETO",
