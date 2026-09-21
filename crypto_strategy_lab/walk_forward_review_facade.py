@@ -326,10 +326,32 @@ def record_walk_forward_teacher_review(
     notes_text = str(notes).strip()
     effective_iso = resolution_time.isoformat()
 
+    checked_loss_packet: dict[str, Any] | None = None
     if teacher_result == "LOSS":
         if decision_value not in {"NO_CHANGE", "FLIP_EVIDENCE", "FLIP_LEARNED"}:
             raise ValueError(
                 "teacher loss decision must be NO_CHANGE, FLIP_EVIDENCE, or FLIP_LEARNED"
+            )
+        base_packet = _impl._teacher_review_packet(
+            control,
+            reports,
+            experiment_id=experiment_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
+            teacher_boundary=boundary,
+        )
+        checked_loss_packet = _decorate_teacher_loss_packet(
+            control, reports, experiment_id, base_packet
+        )
+        if bool(checked_loss_packet.get("inspection_required")) or str(
+            checked_loss_packet.get("status", "")
+        ).upper() == "TEACHER_FLIP_VALIDATION_INCONSISTENCY":
+            inconsistency = checked_loss_packet.get("validation_inconsistency") or {}
+            code = str(inconsistency.get("code") or "VALIDATION_INCONSISTENCY")
+            reason = str(inconsistency.get("reason") or "paired outcome could not be verified")
+            raise ValueError(
+                f"teacher loss review blocked by {code}: {reason}; "
+                "inspect immutable paired evidence before recording any research decision"
             )
         allowed_types = {"FLIP_LEARNED"}
     else:
@@ -363,20 +385,15 @@ def record_walk_forward_teacher_review(
         if decision_value == "FLIP_LEARNED":
             if not canonical:
                 raise ValueError("FLIP_LEARNED requires at least one FLIP_LEARNED rule event")
-            base_packet = _impl._teacher_review_packet(
-                control,
-                reports,
-                experiment_id=experiment_id,
-                expected_sequence=expected_sequence,
-                expected_state_hash=expected_state_hash,
-                teacher_boundary=boundary,
-            )
-            checked = _decorate_teacher_loss_packet(
-                control, reports, experiment_id, base_packet
-            )
+            checked = checked_loss_packet or {}
             if not bool(checked.get("flip_activation_allowed")):
+                validation = (
+                    (checked.get("opposite_side_outcome") or {}).get("validation_code")
+                    or "NOT_VERIFIED"
+                )
                 raise ValueError(
-                    "teacher loss cannot activate FLIP: the immutable paired opposite-side outcome is not a verified WIN"
+                    "teacher loss cannot activate FLIP: the immutable paired opposite-side "
+                    f"outcome is not a verified WIN ({validation})"
                 )
 
     teacher_payload = {
