@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from PySide6.QtCore import QProcess, QSettings
+from PySide6.QtCore import QProcess, QSettings, Qt
 
 from crypto_strategy_lab.gui.chatgpt_connection import (
     DEFAULT_MCP_PORT,
@@ -114,6 +114,43 @@ def test_widget_exposes_three_independent_chatgpt_connections(qapp, tmp_path):
         assert widget.endpoint.text().endswith(f":{DEFAULT_MCP_PORT}/mcp")
         assert widget.endpoint2.text().endswith(f":{SECONDARY_MCP_PORT}/mcp")
         assert widget.endpoint3.text().endswith(f":{TERTIARY_MCP_PORT}/mcp")
+    finally:
+        widget.shutdown()
+
+
+def test_chatgpt_tab_is_scrollable_and_configuration_sections_collapse(qapp, tmp_path):
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
+    output = tmp_path / "output"
+    output.mkdir()
+    fake_keyring = Mock()
+    fake_keyring.get_password.return_value = None
+
+    with patch(
+        "crypto_strategy_lab.gui.chatgpt_connection_impl.importlib.import_module",
+        return_value=fake_keyring,
+    ):
+        widget = ChatGPTIntegrationWidget(settings, lambda: str(output))
+
+    try:
+        assert widget.scroll_area.widgetResizable() is True
+        assert widget.scroll_area.widget() is widget.scroll_content
+
+        for toggle, panel in (
+            (widget.config_toggle, widget.config_panel),
+            (widget.config_toggle2, widget.config_panel2),
+            (widget.config_toggle3, widget.config_panel3),
+        ):
+            assert toggle.isChecked() is False
+            assert panel.isHidden() is True
+            assert toggle.arrowType() == Qt.ArrowType.RightArrow
+
+            toggle.setChecked(True)
+            assert panel.isHidden() is False
+            assert toggle.arrowType() == Qt.ArrowType.DownArrow
+
+            toggle.setChecked(False)
+            assert panel.isHidden() is True
+            assert toggle.arrowType() == Qt.ArrowType.RightArrow
     finally:
         widget.shutdown()
 
