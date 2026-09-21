@@ -288,7 +288,7 @@ def record_walk_forward_teacher_review(
     autonomous_mode: bool = False,
     max_scan_slices: int = DEFAULT_AUTONOMOUS_SCAN_SLICES,
 ) -> dict[str, Any]:
-    """Atomically record a teacher winner ENTRY review or enabled 1R loss FLIP review."""
+    """Atomically record a teacher winner ENTRY review or paired-loss FLIP review."""
     store = _impl._store(control)
     readback, _all_events, events = _verified_prefix(
         store, experiment_id, expected_sequence, expected_state_hash
