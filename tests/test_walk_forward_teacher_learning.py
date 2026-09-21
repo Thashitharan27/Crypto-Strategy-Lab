@@ -218,6 +218,24 @@ def _events_through_pair_3() -> list[dict]:
     ]
 
 
+def _set_opposite_net_r(
+    manifest: dict,
+    run_dir: Path,
+    candidate_id: str,
+    net_r: float,
+) -> None:
+    samples_path = run_dir / "artifacts" / "research_sampling_trades.parquet"
+    samples = _read_parquet(samples_path)
+    mask = (
+        samples["walk_forward_candidate_id"].astype(str).eq(candidate_id)
+        & ~samples["walk_forward_candidate_source"].astype(bool)
+    )
+    assert int(mask.sum()) == 1
+    samples.loc[mask, "pair_net_r"] = float(net_r)
+    _write_parquet(samples, samples_path)
+    manifest["artifacts"]["research_sampling_trades"] = _catalog(samples_path, run_dir)
+
+
 def test_paired_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path):
     manifest, run_dir = _reference(tmp_path, 1.0)
 
@@ -234,7 +252,87 @@ def test_paired_teacher_loss_surfaces_before_later_winner_when_opted_in(tmp_path
     assert boundary["result"] == "LOSS"
     assert boundary["pair_net_r"] == -1.119
     assert boundary["teacher_learning_mode"] == TEACHER_LOSS_FLIP_MODE
+    assert boundary["paired_opposite_side"] == "SHORT"
+    assert boundary["paired_opposite_net_r"] == 0.98
     assert _resolved_at == pd.Timestamp("2025-01-03T04:00:00Z")
+
+
+def test_paired_teacher_loss_loss_is_skipped_before_chatgpt_review(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 3.0)
+    _set_opposite_net_r(manifest, run_dir, "wf-44-long", -1.3027)
+
+    teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        _events_through_pair_3(),
+        include_losses=True,
+    )
+
+    assert teacher is not None
+    boundary, resolved_at = teacher
+    assert boundary["pair_id"] == 5
+    assert boundary["result"] == "WIN"
+    assert resolved_at == pd.Timestamp("2025-01-04T04:00:00Z")
+
+
+def test_paired_teacher_loss_breakeven_is_skipped_before_chatgpt_review(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 3.0)
+    _set_opposite_net_r(manifest, run_dir, "wf-44-long", 0.0)
+
+    teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        _events_through_pair_3(),
+        include_losses=True,
+    )
+
+    assert teacher is not None
+    boundary, _resolved_at = teacher
+    assert boundary["pair_id"] == 5
+    assert boundary["result"] == "WIN"
+
+
+def test_malformed_teacher_loss_pair_is_not_silently_skipped(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 3.0)
+    samples_path = run_dir / "artifacts" / "research_sampling_trades.parquet"
+    samples = _read_parquet(samples_path)
+    duplicate = samples.loc[
+        samples["research_sample_id"].astype(str).eq("wf-44-long-short")
+    ].copy()
+    duplicate["research_sample_id"] = "wf-44-long-short-duplicate"
+    _write_parquet(pd.concat([samples, duplicate], ignore_index=True), samples_path)
+    manifest["artifacts"]["research_sampling_trades"] = _catalog(samples_path, run_dir)
+
+    try:
+        next_teacher_for_learning(
+            manifest,
+            run_dir,
+            _events_through_pair_3(),
+            include_losses=True,
+        )
+    except ValueError as exc:
+        assert "no unique immutable opposite row" in str(exc)
+    else:
+        raise AssertionError("malformed paired teacher loss must require inspection")
+
+
+def test_teacher_winner_does_not_expose_unresolved_opposite_result(tmp_path):
+    manifest, run_dir = _reference(tmp_path, 3.0)
+
+    teacher = next_teacher_for_learning(
+        manifest,
+        run_dir,
+        [],
+        include_losses=True,
+    )
+
+    assert teacher is not None
+    boundary, _resolved_at = teacher
+    assert boundary["result"] == "WIN"
+    assert "paired_opposite_net_r" not in boundary
+    assert "paired_opposite_side" not in boundary
+    assert "opposite_pair_net_r" not in boundary
+    assert "opposite_side" not in boundary
 
 
 def test_default_remains_winner_only_when_loss_learning_is_disabled(tmp_path):

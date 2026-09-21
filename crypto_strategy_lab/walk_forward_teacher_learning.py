@@ -9,6 +9,7 @@ Loss review remains opt-in through the causal teacher-loss policy.
 """
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -92,8 +93,10 @@ def next_teacher_for_learning(
     WAIT_UNTIL_CLOSED would prevent it from becoming a RESEARCH-equity trade.
 
     Winners become reviewable at their immutable source-row exit. Paired teacher
-    losses become reviewable only after BOTH the source row and its immutable
-    opposite-side row have resolved. Teacher evidence never changes equity.
+    losses become reviewable only after BOTH sides resolve and only when the
+    exact immutable opposite side is a WIN. Verified LOSS/LOSS and
+    LOSS/BREAKEVEN pairs remain in the reference data/analytics but do not
+    consume ChatGPT teacher review. Teacher evidence never changes equity.
     """
     artifacts = manifest.get("artifacts") or {}
     last = _candidate_impl._last_teacher_time(events)
@@ -213,12 +216,15 @@ def next_teacher_for_learning(
                 opposite_rows AS (
                     SELECT
                         CAST(walk_forward_candidate_id AS VARCHAR) AS candidate_id,
-                        UPPER(CAST(side AS VARCHAR)) AS side,
-                        CAST(exit_time AS TIMESTAMPTZ) AS exit_time
+                        COUNT(*) AS opposite_count,
+                        MIN(UPPER(CAST(side AS VARCHAR))) AS side,
+                        MIN(CAST(exit_time AS TIMESTAMPTZ)) AS exit_time,
+                        MIN(CAST(pair_net_r AS DOUBLE)) AS pair_net_r
                     FROM read_parquet('{_candidate_impl._quote(samples_path)}')
                     WHERE NOT COALESCE(
                         CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
                     )
+                    GROUP BY 1
                 )
                 {trade_match_cte}
                 SELECT
@@ -238,12 +244,14 @@ def next_teacher_for_learning(
                     END AS learning_resolution_time,
                     s.candidate_id AS walk_forward_candidate_id,
                     o.exit_time AS opposite_exit_time,
+                    o.opposite_count,
+                    o.side AS opposite_side,
+                    o.pair_net_r AS opposite_pair_net_r,
                     s.research_sample_id,
                     s.research_signal_index
                 FROM source_rows s
                 LEFT JOIN opposite_rows o
                   ON o.candidate_id=s.candidate_id
-                 AND o.side<>s.side
                 {trade_join}
                 WHERE s.pair_net_r<>0
                 ORDER BY learning_resolution_time, s.candidate_id
@@ -261,6 +269,9 @@ def next_teacher_for_learning(
                 "learning_resolution_time",
                 "walk_forward_candidate_id",
                 "opposite_exit_time",
+                "opposite_count",
+                "opposite_side",
+                "opposite_pair_net_r",
                 "research_sample_id",
                 "research_signal_index",
             ]
@@ -353,12 +364,47 @@ def next_teacher_for_learning(
             ):
                 continue
 
+            # Teacher losses are useful only as possible FLIP evidence. Resolve
+            # the exact immutable counterfactual deterministically before
+            # creating a ChatGPT review boundary. A verified LOSS/BREAKEVEN on
+            # the opposite side has no positive directional thesis to judge and
+            # is skipped as teacher material. Prospective ENTRY/FLIP trades are
+            # completely separate and still settle/review normally.
+            opposite_count = int(values.get("opposite_count") or 0)
+            if opposite_count != 1:
+                raise ValueError(
+                    "paired teacher loss has no unique immutable opposite row; "
+                    "inspection required"
+                )
+            expected_opposite = "SHORT" if str(values.get("side")).upper() == "LONG" else "LONG"
+            opposite_side = str(values.get("opposite_side") or "").upper()
+            if opposite_side != expected_opposite:
+                raise ValueError(
+                    "paired teacher loss opposite side does not match source side; "
+                    "inspection required"
+                )
+            opposite_raw = values.get("opposite_pair_net_r")
+            if opposite_raw is None:
+                raise ValueError(
+                    "paired teacher loss opposite result is missing; inspection required"
+                )
+            opposite_net_r = float(opposite_raw)
+            if not math.isfinite(opposite_net_r):
+                raise ValueError(
+                    "paired teacher loss opposite result is not finite; inspection required"
+                )
+            if opposite_net_r <= 0:
+                continue
+
         excluded = {
             "legacy_pair_id",
             "teacher_observation_id",
             "learning_resolution_time",
             "source_exit_time",
             "opposite_exit_time",
+            "opposite_count",
+            "opposite_side",
+            "opposite_pair_net_r",
         }
         boundary = {
             key: _candidate_impl._json_safe(value)
@@ -382,6 +428,13 @@ def next_teacher_for_learning(
                 _candidate_impl._utc_timestamp(
                     values["opposite_exit_time"], "teacher opposite_exit_time"
                 ).isoformat()
+            )
+        if result == "LOSS":
+            boundary["paired_opposite_side"] = str(
+                values.get("opposite_side") or ""
+            ).upper()
+            boundary["paired_opposite_net_r"] = float(
+                values["opposite_pair_net_r"]
             )
         boundary["teacher_learning_mode"] = (
             TEACHER_WIN_MODE if result == "WIN" else TEACHER_LOSS_FLIP_MODE

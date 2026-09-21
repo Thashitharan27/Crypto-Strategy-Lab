@@ -57,9 +57,11 @@ The autonomous action consumes routine deterministic scan checkpoints internally
 - a genuine ChatGPT judgment packet:
   - `CANDIDATE_DECISION_REQUIRED`
   - `TEACHER_REVIEW_REQUIRED`
-  - `TEACHER_LOSS_REVIEW_REQUIRED`
+  - `TEACHER_LOSS_REVIEW_REQUIRED` only when a source teacher LOSS has an exact immutable paired opposite WIN
   - `LOSS_REVIEW_REQUIRED`
   - `PERIODIC_REVIEW_REQUIRED`
+
+Verified teacher LOSS/LOSS and LOSS/BREAKEVEN pairs are deterministic non-actions: they remain in the immutable reference data/analytics but do not consume a ChatGPT teacher review. This optimization applies only to teacher learning; a prospective candidate admitted by an already-active ENTRY/FLIP still settles and reviews its loss normally.
 - `AUTONOMOUS_CONTINUE`: the current MCP request reached its safe deterministic slice budget; immediately call `continue_walk_forward_autonomous` again with the returned sequence/hash;
 - `NO_MORE_ACTION_IN_SCAN`: there is no further causal action in the available reference data;
 - an inspection-required status: stop automatic progression and inspect the blocker instead of guessing.

@@ -16,6 +16,7 @@ from crypto_strategy_lab.walk_forward_candidate_engine import (
     _rule_scan_columns,
     _safe_context,
     get_next_walk_forward_candidate,
+    teacher_loss_flip_policy,
 )
 
 
@@ -457,6 +458,45 @@ def test_scanner_applies_entry_veto_flip_and_never_returns_outcome(tmp_path):
     )
     assert replay["idempotent_replay"] is True
     assert replay["candidate"]["candidate_id"] == "12-long"
+
+
+def test_loss_loss_teacher_skip_does_not_hide_active_entry_candidate(tmp_path):
+    samples = _samples()
+    source = samples.loc[samples["research_signal_index"].eq(10)].iloc[0].copy()
+    source["research_sample_id"] = "s10-short"
+    source["walk_forward_candidate_source"] = False
+    source["walk_forward_counterfactual"] = True
+    source["side"] = "SHORT"
+    source["strategy_profile_key"] = "bull_short"
+    source["pair_net_r"] = -1.2
+    source["exit_time"] = "2025-01-02T10:00:00Z"
+    samples = pd.concat([samples, pd.DataFrame([source])], ignore_index=True)
+
+    control, reports, store, head = _write_reference(
+        tmp_path, samples=samples, context=_context()
+    )
+    head = _append_rule(
+        store, head, "ENTRY_LEARNED", "ENTRY_001", "ENTRY",
+        [{"indicator": "ADX", "condition": "GTE", "value": 20}],
+        "rule:entry",
+    )
+
+    with teacher_loss_flip_policy(True):
+        result = get_next_walk_forward_candidate(
+            control,
+            reports,
+            experiment_id=EXPERIMENT_ID,
+            operation_id="candidate:loss-loss-active-entry",
+            expected_sequence=head["sequence"],
+            expected_state_hash=head["state_hash"],
+        )
+
+    assert result["status"] == "CANDIDATE_CAPTURED"
+    assert result["candidate"]["research_signal_index"] == 10
+    assert result["candidate"]["matched_entry_groups"] == ["ENTRY_001"]
+    assert result["candidate"]["source_side"] == "LONG"
+    assert result["candidate"]["rule_effective_side"] == "LONG"
+    assert result["outcome_exposed"] is False
 
 
 def test_scanner_blocks_advancing_while_candidate_is_unresolved(tmp_path):

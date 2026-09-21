@@ -610,6 +610,10 @@ Primary purpose: teach or refine ENTRY structure.
 
 Primary purpose: collect/validate possible FLIP evidence. It does not teach a VETO from retrospective teacher losses and does not alter equity.
 
+A source-side teacher LOSS is actionable only when its exact immutable paired opposite side is a verified WIN. Deterministically verified LOSS/LOSS and LOSS/BREAKEVEN pairs remain in the reference data and analytics but are skipped from the ChatGPT teacher-review queue because they cannot teach ENTRY or FLIP. Any missing, duplicate, malformed, or identity-inconsistent paired outcome is **not** skipped; it must stop for integrity inspection.
+
+This teacher-only skip must never suppress prospective strategy accountability. If an already-active ENTRY or FLIP admits the same candidate, the executable prospective trade still opens, settles against RESEARCH equity, and a loss still reaches the normal prospective loss review.
+
 ### Prospective walk-forward loss
 
 Primary purpose: examine actual strategy failure under rules that were active at entry. It may justify VETO, ENTRY refinement, FLIP learning, or no change.
@@ -811,6 +815,7 @@ If reveal succeeded but settlement transport failed, settlement must be idempote
 - `strategy_action` vs `chatgpt_view` separation;
 - deterministic outcome/replay rules;
 - teacher equity isolation;
+- deterministic skipping of verified non-actionable teacher LOSS/LOSS and LOSS/BREAKEVEN pairs without suppressing prospective trades;
 - current-equity settlement;
 - chronological scan checkpoints;
 - safe recovery from frozen/revealed states;
@@ -824,7 +829,7 @@ If reveal succeeded but settlement transport failed, settlement must be idempote
 
 - independent LONG/SHORT view and confidence;
 - whether a teacher winner teaches/refines ENTRY;
-- whether a teacher loss is `NO_CHANGE`, `FLIP_EVIDENCE`, or sufficiently supported `FLIP_LEARNED`;
+- for an actionable teacher loss whose exact paired opposite is a verified WIN, whether it is `NO_CHANGE`, `FLIP_EVIDENCE`, or sufficiently supported `FLIP_LEARNED`;
 - whether a prospective loss deserves VETO/ENTRY/FLIP change or should simply be kept;
 - periodic structural interpretation;
 - eventual shadow/live promotion decisions.
@@ -971,7 +976,9 @@ process earliest causally due teacher/review/candidate event
         |
         +--> teacher winner -> ENTRY review only -> no equity change
         |
-        +--> enabled paired teacher loss -> FLIP evidence review -> no equity change
+        +--> enabled paired teacher loss
+        |      +--> opposite verified WIN -> FLIP evidence review -> no equity change
+        |      +--> opposite verified LOSS/BREAKEVEN -> deterministic teacher skip
         |
         +--> prospective candidate
                |
