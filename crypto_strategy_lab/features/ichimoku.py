@@ -31,6 +31,13 @@ ICHIMOKU_DEFAULT_SPAN_B_PERIOD = 52
 ICHIMOKU_DEFAULT_DISPLACEMENT = 26
 
 
+def _utc_ns(values: pd.Series) -> pd.Series:
+    """Normalize UTC timestamps to merge-compatible nanosecond precision."""
+    return pd.to_datetime(values, utc=True, errors="raise").astype(
+        "datetime64[ns, UTC]"
+    )
+
+
 def _rolling_midpoint(high: np.ndarray, low: np.ndarray, period: int) -> np.ndarray:
     high_series = pd.Series(high, dtype=float)
     low_series = pd.Series(low, dtype=float)
@@ -146,8 +153,8 @@ def _resample_completed(
     frame = source[
         ["period_start", "available_at", "open", "high", "low", "close"]
     ].copy()
-    frame["period_start"] = pd.to_datetime(frame["period_start"], utc=True)
-    frame["available_at"] = pd.to_datetime(frame["available_at"], utc=True)
+    frame["period_start"] = _utc_ns(frame["period_start"])
+    frame["available_at"] = _utc_ns(frame["available_at"])
     grouped = frame.set_index("period_start").resample(
         f"{target_minutes}min", label="left", closed="left", origin="epoch"
     )
@@ -250,8 +257,8 @@ class IchimokuContextFeatureProvider:
         source = source.sort_values("period_start", kind="stable").drop_duplicates(
             "period_start", keep="last"
         ).reset_index(drop=True)
-        source["period_start"] = pd.to_datetime(source["period_start"], utc=True)
-        source["available_at"] = pd.to_datetime(source["available_at"], utc=True)
+        source["period_start"] = _utc_ns(source["period_start"])
+        source["available_at"] = _utc_ns(source["available_at"])
 
         strategy_minutes = int(
             interval_to_timedelta(request.strategy_interval).total_seconds() // 60
@@ -302,10 +309,8 @@ class IchimokuContextFeatureProvider:
 
         bar_context = pd.DataFrame(
             {
-                "ichimoku_completed_candle_time": pd.to_datetime(
-                    bars["period_start"], utc=True
-                ),
-                "_context_available_at": pd.to_datetime(bars["available_at"], utc=True),
+                "ichimoku_completed_candle_time": _utc_ns(bars["period_start"]),
+                "_context_available_at": _utc_ns(bars["available_at"]),
                 "ichimoku_timeframe_minutes": float(timeframe_minutes),
                 "ichimoku_tenkan": tenkan,
                 "ichimoku_kijun": kijun,
@@ -334,8 +339,8 @@ class IchimokuContextFeatureProvider:
 
         decision = pd.DataFrame(
             {
-                "timestamp": pd.to_datetime(source["period_start"], utc=True),
-                "available_at": pd.to_datetime(source["available_at"], utc=True),
+                "timestamp": _utc_ns(source["period_start"]),
+                "available_at": _utc_ns(source["available_at"]),
                 "_decision_price": pd.to_numeric(source["close"], errors="raise").to_numpy(float),
             }
         )
