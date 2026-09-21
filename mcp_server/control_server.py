@@ -632,12 +632,49 @@ def _continue_walk_forward_autonomous_with_create_grace(*args, **kwargs):
     )
 
 
+_ORIGINAL_SUBMIT_WALK_FORWARD_DECISION = _impl._submit_walk_forward_decision
+_ORIGINAL_RECORD_WALK_FORWARD_REVIEW = _impl._record_walk_forward_review
+_ORIGINAL_RECORD_WALK_FORWARD_TEACHER_REVIEW = _impl._record_walk_forward_teacher_review
+
+
+def _persist_review_packet_from_mutating_action(action, *args, **kwargs):
+    result = action(*args, **kwargs)
+    return _persist_review_packet(action, args, kwargs, result)
+
+
+def _submit_walk_forward_decision_with_review_packet_cache(*args, **kwargs):
+    return _persist_review_packet_from_mutating_action(
+        _ORIGINAL_SUBMIT_WALK_FORWARD_DECISION, *args, **kwargs
+    )
+
+
+def _record_walk_forward_review_with_review_packet_cache(*args, **kwargs):
+    return _persist_review_packet_from_mutating_action(
+        _ORIGINAL_RECORD_WALK_FORWARD_REVIEW, *args, **kwargs
+    )
+
+
+def _record_walk_forward_teacher_review_with_review_packet_cache(*args, **kwargs):
+    return _persist_review_packet_from_mutating_action(
+        _ORIGINAL_RECORD_WALK_FORWARD_TEACHER_REVIEW, *args, **kwargs
+    )
+
+
 _impl.RuleAwareBacktestControlService.create_walk_forward_experiment = (
     _verified_create_walk_forward_experiment
 )
 _impl._advance_walk_forward = _advance_walk_forward_with_create_grace
 _impl._continue_walk_forward_autonomous = (
     _continue_walk_forward_autonomous_with_create_grace
+)
+_impl._submit_walk_forward_decision = (
+    _submit_walk_forward_decision_with_review_packet_cache
+)
+_impl._record_walk_forward_review = (
+    _record_walk_forward_review_with_review_packet_cache
+)
+_impl._record_walk_forward_teacher_review = (
+    _record_walk_forward_teacher_review_with_review_packet_cache
 )
 RuleAwareBacktestControlService = _impl.RuleAwareBacktestControlService
 
