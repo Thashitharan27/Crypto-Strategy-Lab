@@ -4,14 +4,15 @@ Every immutable WALK_FORWARD source observation remains in the reference artifac
 This module only decides whether one already-resolved teacher observation needs a
 new ChatGPT learning review.
 
-Compression is deliberately conservative:
-- research_episode_id scopes comparisons but never causes a skip by itself;
-- fingerprints use coarse, entry-time structural buckets;
-- phase memory recognizes any previously surfaced equivalent audited phase in the episode;
-- outcome contradictions, active-rule failures, structural changes, and the
-  first confirmation after newly learned rules always surface;
-- legacy reviewed teachers without an audit fingerprint force a new surfaced
-  baseline rather than retroactively changing experiment semantics.
+Compression is actionability-first:
+- research_episode_id scopes comparisons but never discards immutable evidence;
+- fine entry-time structure remains in the audit fingerprint;
+- ChatGPT is surfaced for executable-rule failures, unmatched/blocked winners,
+  paired FLIP opportunities, exact rule-version confirmations, genuine setup
+  transitions, and rule-set/version changes;
+- ordinary feature-bucket variation and repeated unruled LOSS/LOSS observations
+  are auto-compressed, with a five-review per-episode guardrail;
+- legacy reviewed teachers without an audit fingerprint force a surfaced baseline.
 """
 from __future__ import annotations
 
@@ -563,6 +564,8 @@ def _latest_audited(
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     return audited_prior[-1]
 
+
+
 def teacher_compression_decision(
     packet: dict[str, Any],
     events: list[dict[str, Any]],
@@ -621,6 +624,7 @@ def teacher_compression_decision(
         for value in active_matches
     )
     matched_entry = any(value.startswith("ENTRY:") for value in active_matches)
+    matched_flip = any(value.startswith("FLIP:") for value in active_matches)
     source_side = _upper(teacher.get("side"))
     current_outcome = _upper(audit.get("source_outcome_class"))
     current_paired = _upper(audit.get("paired_outcome_class"))
@@ -653,7 +657,17 @@ def teacher_compression_decision(
         return result
 
     # 2) A source loss with a winning opposite leg is actionable FLIP evidence.
-    if current_outcome == "LOSS" and current_paired == "WIN":
+    if (
+        current_outcome == "LOSS"
+        and current_paired == "WIN"
+        and not (
+            eligible
+            and matched_flip
+            and source_side in {"LONG", "SHORT"}
+            and effective_side in {"LONG", "SHORT"}
+            and effective_side != source_side
+        )
+    ):
         result["reason"] = "PAIRED_FLIP_OPPORTUNITY"
         return result
 
