@@ -71,7 +71,7 @@ The scanner refuses to advance while a candidate is still captured/frozen/reveal
 
 ## Teacher chronology guard
 
-Teacher/reference winners can change future ENTRY rules only after they resolve. The scanner therefore compares the next unresolved reference-winner resolution boundary with the next eligible candidate's decision time.
+Teacher/reference winners can change future ENTRY rules only after they resolve. For paired `WALK_FORWARD` references, the unresolved teacher stream is drawn from overlap-independent source rows rather than portfolio trades, so `WAIT_UNTIL_CLOSED` cannot suppress teacher eligibility. The scanner therefore compares the next unresolved teacher resolution boundary with the next eligible candidate's decision time.
 
 If the teacher resolves first, the tool returns:
 
