@@ -113,6 +113,31 @@ def test_widget_exposes_two_independent_chatgpt_connections(qapp, tmp_path):
         widget.shutdown()
 
 
+def test_widget_restores_secondary_settings_without_primary_load_overwriting_them(qapp, tmp_path):
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
+    settings.setValue("tunnel_id_2", "tunnel_saved_two")
+    settings.setValue("mcp_port_2", 8877)
+    settings.setValue("auto_start_chatgpt_connection_2", True)
+    settings.sync()
+    output = tmp_path / "output"
+    output.mkdir()
+    fake_keyring = Mock()
+    fake_keyring.get_password.return_value = None
+
+    with patch(
+        "crypto_strategy_lab.gui.chatgpt_connection_impl.importlib.import_module",
+        return_value=fake_keyring,
+    ):
+        widget = ChatGPTIntegrationWidget(settings, lambda: str(output))
+
+    try:
+        assert widget.tunnel_id2.text() == "tunnel_saved_two"
+        assert widget.port2.value() == 8877
+        assert widget.auto_start2.isChecked() is True
+    finally:
+        widget.shutdown()
+
+
 def test_secondary_connection_rejects_primary_port(qapp, tmp_path):
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
     output = tmp_path / "output"
