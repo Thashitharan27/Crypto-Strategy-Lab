@@ -993,12 +993,16 @@ def _append_auto_compressed_teacher(
         "compared_to_teacher_id": decision.get("compared_to_teacher_id"),
         "teacher_phase_audit": audit,
         "phase_fingerprint": audit.get("phase_fingerprint"),
+        "actionability_fingerprint": audit.get("actionability_fingerprint"),
         "structural_phase_fingerprint": audit.get("structural_fingerprint"),
         "active_rule_matches": list(audit.get("active_rule_matches") or []),
+        "episode_review_count": decision.get("episode_review_count"),
+        "episode_review_budget": decision.get("episode_review_budget"),
         "validated_rule_event_count": 0,
         "notes": (
-            "Deterministically compressed as a repeated causal teacher phase; "
-            "the immutable raw observation remains available for later analytics."
+            "Deterministically compressed because no new causal actionability "
+            "required ChatGPT review; the immutable raw observation remains "
+            "available for later analytics."
         ),
     }
     appended = store.append_event(
