@@ -302,6 +302,9 @@ CATEGORICAL_RULE_VALUE_OPTIONS = {
 MEAN_REVERSION_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("MR_")
 )
+ICHIMOKU_RULE_EVIDENCE = frozenset(
+    indicator for indicator in RULE_INDICATORS if indicator.startswith("ICH_")
+)
 SUPPORT_RESISTANCE_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("SR_")
 )
@@ -336,6 +339,19 @@ def uses_mean_reversion_rules(*rule_groups) -> bool:
     return any(
         _rule_group_enabled(rule)
         and is_mean_reversion_evidence(rule.get("evidence", ""))
+        for group in rule_groups
+        for rule in (group or ())
+    )
+
+
+def is_ichimoku_evidence(evidence: str) -> bool:
+    return str(evidence).upper() in ICHIMOKU_RULE_EVIDENCE
+
+
+def uses_ichimoku_rules(*rule_groups) -> bool:
+    return any(
+        _rule_group_enabled(rule)
+        and is_ichimoku_evidence(rule.get("evidence", ""))
         for group in rule_groups
         for rule in (group or ())
     )
