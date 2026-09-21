@@ -852,13 +852,22 @@ class ChatGPTIntegrationWidget(QWidget):
             key = self._credential()
         except RuntimeError as exc:
             return None, [str(exc)]
-        return key, validate_configuration(
+        errors = validate_configuration(
             self.path.text(),
             self.tunnel_id.text(),
             key,
             self.manager.output_dir(),
             self.port.value(),
         )
+        if self.port.value() in {self.port2.value(), self.port3.value()}:
+            errors.append("Connection 1 MCP port must be different from Connections 2 and 3.")
+        tunnel1 = self.tunnel_id.text().strip()
+        if tunnel1 and tunnel1 in {
+            self.tunnel_id2.text().strip(),
+            self.tunnel_id3.text().strip(),
+        }:
+            errors.append("Connection 1 Tunnel ID must be different from Connections 2 and 3.")
+        return key, errors
 
     def _validated_secondary(self):
         try:
@@ -872,13 +881,14 @@ class ChatGPTIntegrationWidget(QWidget):
             self.secondary_manager.output_dir(),
             self.port2.value(),
         )
-        if self.port2.value() == self.port.value():
-            errors.append("Connection 2 MCP port must be different from Connection 1.")
-        if (
-            self.tunnel_id2.text().strip()
-            and self.tunnel_id2.text().strip() == self.tunnel_id.text().strip()
-        ):
-            errors.append("Connection 2 Tunnel ID must be different from Connection 1.")
+        if self.port2.value() in {self.port.value(), self.port3.value()}:
+            errors.append("Connection 2 MCP port must be different from Connections 1 and 3.")
+        tunnel2 = self.tunnel_id2.text().strip()
+        if tunnel2 and tunnel2 in {
+            self.tunnel_id.text().strip(),
+            self.tunnel_id3.text().strip(),
+        }:
+            errors.append("Connection 2 Tunnel ID must be different from Connections 1 and 3.")
         return key, errors
 
     def _validated_tertiary(self):
