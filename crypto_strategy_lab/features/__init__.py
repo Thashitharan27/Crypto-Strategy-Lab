@@ -24,6 +24,11 @@ from .context import (
     MARKET_CONTEXT_FEATURE_VERSION,
     MarketContextFeatureProvider,
 )
+from .ichimoku import (
+    ICHIMOKU_CONTEXT_FEATURE_NAME,
+    ICHIMOKU_CONTEXT_FEATURE_VERSION,
+    IchimokuContextFeatureProvider,
+)
 from .funding import (
     FUNDING_CONTEXT_FEATURE_NAME,
     FUNDING_CONTEXT_FEATURE_VERSION,
@@ -92,6 +97,9 @@ __all__ = [
     "FUTURES_POSITIONING_FEATURE_NAME",
     "FUTURES_POSITIONING_FEATURE_VERSION",
     "FuturesPositioningFeatureProvider",
+    "ICHIMOKU_CONTEXT_FEATURE_NAME",
+    "ICHIMOKU_CONTEXT_FEATURE_VERSION",
+    "IchimokuContextFeatureProvider",
     "FUNDING_CONTEXT_FEATURE_NAME",
     "FUNDING_CONTEXT_FEATURE_VERSION",
     "FundingContextFeatureProvider",
@@ -120,6 +128,7 @@ def production_feature_registry(*, structural_benchmark=None) -> FeatureRegistry
         PolicyMarketFeatureProvider(structural_benchmark=structural_benchmark),
         SupportResistanceFeatureProvider(),
         StateTransitionDailyFeatureProvider(),
+        IchimokuContextFeatureProvider(),
         FuturesPositioningFeatureProvider(),
         FundingContextFeatureProvider(),
         BasisContextFeatureProvider(),
