@@ -325,3 +325,20 @@ def test_auto_compressed_teacher_persists_full_audit_metadata() -> None:
     assert store.payload["structural_phase_fingerprint"]
     assert store.payload["active_rule_matches"] == []
     assert store.payload["teacher_phase_audit"]["episode_id"] == "episode-000001"
+
+
+
+def test_empty_phase_audit_is_never_used_as_compression_baseline() -> None:
+    unaudited = {
+        "sequence": 5,
+        "event_type": "TEACHER_RESOLVED",
+        "payload": {
+            "pair_id": "wf-minimal-long",
+            "research_episode_id": "episode-000001",
+            "result": "WIN",
+            "teacher_phase_audit": {},
+        },
+    }
+    decision = teacher_compression_decision(_packet(), [unaudited])
+    assert decision["action"] == "SURFACE"
+    assert decision["reason"] == "LEGACY_PHASE_BASELINE_REQUIRED"
