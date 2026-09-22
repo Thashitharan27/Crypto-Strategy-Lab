@@ -1532,7 +1532,7 @@ def summarize_walk_forward_periodic_review(
             readback,
             events,
             records,
-            cursor=cursor,
+            cursor=review_end,
         )
         for record in records:
             if record["family"] != "VETO":
