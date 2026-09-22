@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import duckdb
 import pandas as pd
 import pytest
 
@@ -216,8 +217,23 @@ def _write_reference(
     project.mkdir(parents=True)
     samples_path = artifacts / "research_sampling_trades.parquet"
     context_path = artifacts / "feature_context.parquet"
-    _samples(include_short=include_short).to_parquet(samples_path, index=False)
-    _context().to_parquet(context_path, index=False)
+    if monthly_batch:
+        # Keep this new mode's end-to-end regression test independent of
+        # pandas' optional pyarrow/fastparquet extras used by older fixtures.
+        with duckdb.connect(":memory:") as connection:
+            samples_frame = _samples(include_short=include_short)
+            context_frame = _context()
+            connection.register("samples_frame", samples_frame)
+            connection.register("context_frame", context_frame)
+            connection.execute(
+                f"COPY samples_frame TO '{samples_path.as_posix()}' (FORMAT PARQUET)"
+            )
+            connection.execute(
+                f"COPY context_frame TO '{context_path.as_posix()}' (FORMAT PARQUET)"
+            )
+    else:
+        _samples(include_short=include_short).to_parquet(samples_path, index=False)
+        _context().to_parquet(context_path, index=False)
     artifact_map = {
         "research_sampling_trades": _catalog(samples_path, run_dir),
         "feature_context": _catalog(context_path, run_dir),
