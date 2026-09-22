@@ -1063,10 +1063,6 @@ def summarize_walk_forward_rule_performance(
         raise ValueError("include_veto_effectiveness must be boolean")
 
     _store, readback, events = _verified_experiment(control, experiment_id)
-    definition = (readback.get("manifest") or {}).get("definition") or {}
-    rule_update_policy = definition.get("rule_update_policy") or {}
-    if str(rule_update_policy.get("mode", "")).strip().upper() == "MONTHLY_BATCH_OOS":
-        review_interval_months = 1
     cursor = _market_cursor(events)
     records = _rule_versions(events)
     trades, attribution_warnings = _trade_history(events, records)
@@ -1404,6 +1400,10 @@ def summarize_walk_forward_periodic_review(
         raise ValueError("review_interval_months must be between 1 and 24")
 
     _store, readback, events = _verified_experiment(control, experiment_id)
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    rule_update_policy = definition.get("rule_update_policy") or {}
+    if str(rule_update_policy.get("mode", "")).strip().upper() == "MONTHLY_BATCH_OOS":
+        review_interval_months = 1
     cursor = _market_cursor(events)
     if cursor is None:
         raise ValueError("experiment has no market-time cursor")
