@@ -1056,6 +1056,7 @@ def _append_monthly_batch_teacher(
     *,
     experiment_id: str,
     teacher_boundary: dict[str, Any],
+    teacher_packet: dict[str, Any],
     operation_id: str,
     expected_sequence: int,
     expected_state_hash: str,
@@ -1071,9 +1072,17 @@ def _append_monthly_batch_teacher(
         "review_decision": MONTHLY_BATCH_DEFERRED,
         "teacher_review_status": MONTHLY_BATCH_DEFERRED,
         "validated_rule_event_count": 0,
+        "batch_entry_context": deepcopy(teacher_packet.get("entry_context")),
+        "batch_current_rule_coverage": deepcopy(
+            teacher_packet.get("current_rule_coverage")
+        ),
+        "batch_active_rule_versions": deepcopy(
+            teacher_packet.get("active_rule_versions")
+        ),
         "notes": (
-            "Teacher evidence recorded without a rule mutation because "
-            "MONTHLY_BATCH_OOS freezes the strategy until the month-end review."
+            "Teacher evidence and entry-time context were recorded without a rule "
+            "mutation because MONTHLY_BATCH_OOS freezes the strategy until the "
+            "month-end review."
         ),
     }
     appended = store.append_event(
@@ -1331,10 +1340,19 @@ def advance_walk_forward(
             }
         if status == "TEACHER_DUE_FIRST":
             if monthly_batch:
+                teacher_packet = _teacher_review_packet(
+                    control,
+                    reports,
+                    experiment_id=experiment_id,
+                    expected_sequence=sequence,
+                    expected_state_hash=state_hash,
+                    teacher_boundary=scan["teacher_boundary"],
+                )
                 deferred = _append_monthly_batch_teacher(
                     store,
                     experiment_id=experiment_id,
                     teacher_boundary=scan["teacher_boundary"],
+                    teacher_packet=teacher_packet,
                     operation_id=_operation(
                         operation_id, f"monthly-teacher-{step}-{sequence}"
                     ),
