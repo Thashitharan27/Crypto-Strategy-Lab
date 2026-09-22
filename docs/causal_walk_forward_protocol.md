@@ -700,7 +700,7 @@ completed month N evidence
         v
 MONTH-END BATCH REVIEW
         |
-        +--> KEEP / learn / refine ENTRY / VETO / FLIP
+        +--> KEEP / learn / refine ENTRY / VETO / FLIP / retire stale rule
         |
         v
 freeze exact rule snapshot R(N+1)
@@ -741,8 +741,9 @@ The month-end packet contains completed prospective trades, deferred teacher
 observations with entry-time context, rule attribution, and periodic
 rule-performance analytics. ChatGPT should reason over the batch as a
 population, prefer repeated causal structures and simplification over
-single-trade micro-rules, and leave the rule set unchanged when evidence is
-weak.
+single-trade micro-rules, retire stale or redundant active versions when the
+completed batch supports that decision, and leave the rule set unchanged when
+evidence is weak.
 
 This mode is intended for direct A/B comparison with `TRADE_BY_TRADE` using
 the same immutable reference run, starting equity, risk model, TP/SL, feature
