@@ -1097,30 +1097,41 @@ def _decorate_advance_result(
             ),
             include_veto_effectiveness=True,
         )
-        if (
-            str(
-                (updated.get("rule_update_policy") or {}).get("mode", "")
-            ).upper()
-            == _impl.MONTHLY_BATCH_OOS_MODE
-        ):
-            updated["monthly_batch_evidence"] = _monthly_batch_review_evidence(
+        batch_mode = str(
+            (updated.get("rule_update_policy") or {}).get("mode", "")
+        ).upper()
+        if batch_mode in _impl.BATCH_OOS_MODES:
+            evidence = _batch_review_evidence(
                 control, reports, experiment_id, updated
             )
+            updated["batch_oos_evidence"] = evidence
+            if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE:
+                updated["weekly_batch_evidence"] = deepcopy(evidence)
+                period_name = "week"
+                future_key = "next_week_is_pure_oos"
+                frozen_key = "rules_were_frozen_during_completed_week"
+                primary_goal = "BATCH_LEARN_FREEZE_NEXT_WEEK"
+            else:
+                updated["monthly_batch_evidence"] = deepcopy(evidence)
+                period_name = "month"
+                future_key = "next_month_is_pure_oos"
+                frozen_key = "rules_were_frozen_during_completed_month"
+                primary_goal = "BATCH_LEARN_FREEZE_NEXT_MONTH"
             updated["methodology_prompt"] = {
-                "primary_goal": "BATCH_LEARN_FREEZE_NEXT_MONTH",
-                "rules_were_frozen_during_completed_month": True,
+                "primary_goal": primary_goal,
+                frozen_key: True,
                 "no_backdating": True,
-                "next_month_is_pure_oos": True,
+                future_key: True,
                 "prefer": [
                     "repeated causal structures across the completed batch",
                     "simple reusable ENTRY/VETO/FLIP families",
                     "consolidation or refinement before micro-rules",
-                    "keeping rules unchanged when monthly evidence is weak",
+                    f"keeping rules unchanged when {period_name}ly evidence is weak",
                 ],
                 "avoid": [
                     "reacting to one isolated trade",
-                    "using future-month evidence",
-                    "changing any completed-month decision",
+                    f"using future-{period_name} evidence",
+                    f"changing any completed-{period_name} decision",
                 ],
             }
     return updated
