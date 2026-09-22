@@ -75,8 +75,15 @@ PHASES = {"BOOTSTRAP_RESEARCH", "RESEARCH_WF", "VALIDATED", "SHADOW", "LIVE", "R
 LEDGERS = {"RESEARCH", "SHADOW", "LIVE"}
 EVIDENCE_SOURCES = {"BOOTSTRAP", "TEACHER", "PROSPECTIVE_WF", "SHADOW", "LIVE"}
 RESEARCH_PROTOCOL_MODES = {"COLD_START", "BOOTSTRAP_THEN_WF"}
+LEARNING_MODES = {"TRADE_BY_TRADE", "MONTHLY_BATCH_OOS"}
 
 DEFAULT_PERIODIC_REVIEW_POLICY = {"initial_anchor": "REFERENCE_PERIOD_START"}
+DEFAULT_MONTHLY_BATCH_POLICY = {
+    "interval_months": 1,
+    "freeze_between_reviews": True,
+    "defer_teacher_learning": True,
+    "defer_loss_learning": True,
+}
 
 
 def _utc_now() -> str:
@@ -191,6 +198,38 @@ class CausalExperimentStore:
                         raise ValueError(
                             "research_protocol.bootstrap_start must be before walk_forward_start"
                         )
+        learning_mode = str(value.get("learning_mode", "TRADE_BY_TRADE")).strip().upper()
+        if learning_mode not in LEARNING_MODES:
+            raise ValueError(
+                "learning_mode must be TRADE_BY_TRADE or MONTHLY_BATCH_OOS"
+            )
+        value["learning_mode"] = learning_mode
+        if learning_mode == "MONTHLY_BATCH_OOS":
+            batch_policy = value.get("monthly_batch_policy")
+            if batch_policy is None:
+                batch_policy = deepcopy(DEFAULT_MONTHLY_BATCH_POLICY)
+                value["monthly_batch_policy"] = batch_policy
+            if not isinstance(batch_policy, dict):
+                raise ValueError("monthly_batch_policy must be an object")
+            try:
+                interval = int(batch_policy.get("interval_months", 1))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("monthly_batch_policy.interval_months must be 1") from exc
+            if interval != 1:
+                raise ValueError("MONTHLY_BATCH_OOS currently requires interval_months=1")
+            if batch_policy.get("freeze_between_reviews", True) is not True:
+                raise ValueError("MONTHLY_BATCH_OOS requires freeze_between_reviews=true")
+            if batch_policy.get("defer_teacher_learning", True) is not True:
+                raise ValueError("MONTHLY_BATCH_OOS requires defer_teacher_learning=true")
+            if batch_policy.get("defer_loss_learning", True) is not True:
+                raise ValueError("MONTHLY_BATCH_OOS requires defer_loss_learning=true")
+            value["monthly_batch_policy"] = {
+                "interval_months": 1,
+                "freeze_between_reviews": True,
+                "defer_teacher_learning": True,
+                "defer_loss_learning": True,
+            }
+
         policy = value.get("periodic_review_policy")
         if policy is not None:
             if not isinstance(policy, dict):
@@ -517,6 +556,7 @@ class CausalExperimentStore:
             definition = self._validate_definition(definition)
         else:
             definition = deepcopy(definition)
+            definition.setdefault("learning_mode", "TRADE_BY_TRADE")
             protocol = definition.get("research_protocol") or {}
             bootstrap_mode = (
                 isinstance(protocol, dict)
