@@ -168,7 +168,16 @@ class RiskExecutionWorkspace(QWidget):
         self.stop_card.add_field("sr_stop_buffer_atr", "Buffer Beyond S/R", self.account["sr_stop_buffer_atr"])
         self.stop_card.add_field("sr_stop_maximum_atr", "Maximum Structural Stop", self.account["sr_stop_maximum_atr"])
         self.stop_card.add_field("sr_stop_no_level_policy", "If No Valid S/R Exists", self.account["sr_stop_no_level_policy"])
-        self.stop_card.add_field("stop_loss_multiple", "Stop Multiplier", self.trade["stop_loss_multiple"])
+        self.stop_card.add_field("stop_loss_multiple", "Actual Stop Multiplier", self.trade["stop_loss_multiple"])
+        self.stop_card.add_control(
+            "position_sizing_stop_override_enabled",
+            self.trade["position_sizing_stop_override_enabled"],
+        )
+        self.stop_card.add_field(
+            "position_sizing_stop_multiple",
+            "Position-Sizing Stop Multiplier",
+            self.trade["position_sizing_stop_multiple"],
+        )
 
         self.ema_stop_method = QLabel("EMA 9/20 Micro-Swing — Automatic")
         self.ema_stop_method.setStyleSheet("font-weight:600")
@@ -276,6 +285,7 @@ class RiskExecutionWorkspace(QWidget):
         if builder is not None:
             builder.direction_mode.currentIndexChanged.connect(self.refresh_visibility)
         for name in (
+            "position_sizing_stop_override_enabled",
             "break_even_enabled", "trailing_enabled", "partial_profit_enabled",
             "partial_stop_enabled", "timeout_enabled", "r_step_trailing_enabled",
             "atr_checkpoint_tp_extension_enabled",
@@ -287,6 +297,7 @@ class RiskExecutionWorkspace(QWidget):
 
     def _prepare_widgets(self) -> None:
         for name, text in {
+            "position_sizing_stop_override_enabled": "Use separate position-sizing stop",
             "break_even_enabled": "Enable break-even",
             "trailing_enabled": "Enable trailing stop",
             "partial_profit_enabled": "Enable partial profit-taking",
@@ -306,6 +317,8 @@ class RiskExecutionWorkspace(QWidget):
         # "distance units" wording and do not affect stored native values.
         if hasattr(self.trade["stop_loss_multiple"], "setSuffix"):
             self.trade["stop_loss_multiple"].setSuffix(" ×")
+        if hasattr(self.trade["position_sizing_stop_multiple"], "setSuffix"):
+            self.trade["position_sizing_stop_multiple"].setSuffix(" ×")
         if hasattr(self.account["atr_multiplier"], "setSuffix"):
             self.account["atr_multiplier"].setSuffix(" × ATR")
 
@@ -334,6 +347,8 @@ class RiskExecutionWorkspace(QWidget):
                 "risk_mode", "atr_multiplier", "percent_r", "fixed_r",
                 "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
                 "sr_stop_maximum_atr", "sr_stop_no_level_policy", "stop_loss_multiple",
+                "position_sizing_stop_override_enabled",
+                "position_sizing_stop_multiple",
             ):
                 self.stop_card.set_row_visible(name, False)
         else:
@@ -350,6 +365,16 @@ class RiskExecutionWorkspace(QWidget):
             # multiplier remains preserved in the profile but is not a user-facing
             # input for the final structural stop.
             self.stop_card.set_row_visible("stop_loss_multiple", not structural_stop)
+            sizing_override_available = not structural_stop
+            self.stop_card.set_row_visible(
+                "position_sizing_stop_override_enabled",
+                sizing_override_available,
+            )
+            self.stop_card.set_row_visible(
+                "position_sizing_stop_multiple",
+                sizing_override_available
+                and self.trade["position_sizing_stop_override_enabled"].isChecked(),
+            )
 
         target_mode = str(self.account["sr_take_profit_mode"].currentData() or "FIXED_R")
         sr_target = target_mode in ("SR_CAPPED_R", "SR_LEVEL")
@@ -456,6 +481,29 @@ class RiskExecutionWorkspace(QWidget):
         risk_dollars = float(execution.initial_equity) * effective_risk
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
         ema_920 = self._ema_920_selected()
+        sizing_override = bool(
+            base.position_sizing_stop_override_enabled
+            and not ema_920
+            and str(execution.risk_mode).upper() != "SR_STRUCTURE"
+        )
+        sizing_stop_mult = (
+            float(base.position_sizing_stop_multiple)
+            if sizing_override
+            else stop_mult
+        )
+        if base.partial_stop_enabled:
+            first_fraction = float(base.sl1_close_pct) / 100.0
+            gross_stop_mult = (
+                first_fraction * float(base.sl1_r)
+                + (1.0 - first_fraction) * float(base.sl2_r)
+            )
+        else:
+            gross_stop_mult = stop_mult
+        gross_stop_exposure = (
+            effective_risk * gross_stop_mult / sizing_stop_mult
+            if sizing_stop_mult > 0
+            else effective_risk
+        )
 
         timing = str(getattr(execution, "entry_timing_mode", "SIGNAL_CLOSE")).upper()
         entry_fill = (
