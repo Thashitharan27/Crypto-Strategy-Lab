@@ -482,7 +482,10 @@ def submit_walk_forward_view(
         if key in {"strategy_action", "chatgpt_view", "chatgpt_agrees_with_strategy"}
     })
 
-    if str(settlement.get("result")) == "LOSS":
+    readback = _impl._store(control).read(experiment_id, recent_events=0)
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    monthly_batch = _impl._monthly_batch_enabled(definition)
+    if str(settlement.get("result")) == "LOSS" and not monthly_batch:
         packet = _ORIGINAL_BUILD_LOSS_REVIEW_PACKET(
             control, experiment_id=experiment_id, candidate_id=candidate_id
         )
@@ -752,6 +755,140 @@ def _decorate_teacher_loss_packet(
     updated["flip_activation_allowed"] = result == "WIN"
     return updated
 
+def _monthly_batch_review_evidence(
+    control: Any,
+    experiment_id: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Assemble the completed frozen month for one batch review."""
+    store = _impl._store(control)
+    events = _impl._events(store, experiment_id)
+    start_raw = result.get("review_anchor_time")
+    end_raw = result.get("current_market_cursor") or result.get("review_due_time")
+    start = (
+        _impl._utc_timestamp(start_raw, "monthly batch review anchor")
+        if start_raw not in (None, "")
+        else None
+    )
+    end = (
+        _impl._utc_timestamp(end_raw, "monthly batch review end")
+        if end_raw not in (None, "")
+        else None
+    )
+
+    def in_window(event: dict[str, Any]) -> bool:
+        raw = event.get("effective_market_time")
+        if raw in (None, ""):
+            return False
+        when = _impl._utc_timestamp(raw, "monthly batch event time")
+        if start is not None and when <= start:
+            return False
+        if end is not None and when > end:
+            return False
+        return True
+
+    captures: dict[str, dict[str, Any]] = {}
+    decisions: dict[str, dict[str, Any]] = {}
+    teachers: list[dict[str, Any]] = []
+    prospective: list[dict[str, Any]] = []
+
+    for event in events:
+        event_type = str(event.get("event_type") or "")
+        payload = event.get("payload") or {}
+        candidate_id = str(payload.get("candidate_id") or "").strip()
+        if event_type == "CANDIDATE_CONTEXT_CAPTURED" and candidate_id:
+            captures[candidate_id] = deepcopy(payload)
+            continue
+        if event_type == "DECISION_FROZEN" and candidate_id:
+            decisions[candidate_id] = deepcopy(payload)
+            continue
+        if (
+            event_type == "TEACHER_RESOLVED"
+            and str(payload.get("teacher_review_status") or "").upper()
+            == _impl.MONTHLY_BATCH_DEFERRED
+            and in_window(event)
+        ):
+            teachers.append(
+                {
+                    "pair_id": payload.get("pair_id"),
+                    "walk_forward_candidate_id": payload.get(
+                        "walk_forward_candidate_id"
+                    ),
+                    "research_signal_index": payload.get("research_signal_index"),
+                    "side": payload.get("side"),
+                    "strategy_profile_key": payload.get("strategy_profile_key"),
+                    "entry_time": payload.get("entry_time"),
+                    "resolution_time": payload.get("resolution_time")
+                    or event.get("effective_market_time"),
+                    "result": payload.get("result"),
+                    "pair_net_r": payload.get("pair_net_r"),
+                    "teacher_learning_mode": payload.get("teacher_learning_mode"),
+                    "paired_opposite_side": payload.get("paired_opposite_side"),
+                    "paired_opposite_net_r": payload.get("paired_opposite_net_r"),
+                    "entry_context": deepcopy(payload.get("batch_entry_context")),
+                    "rule_coverage_at_observation": deepcopy(
+                        payload.get("batch_current_rule_coverage")
+                    ),
+                }
+            )
+            continue
+        if (
+            event_type == "TRADE_RESOLVED"
+            and str(payload.get("ledger", "RESEARCH")).upper() == "RESEARCH"
+            and candidate_id
+            and in_window(event)
+        ):
+            capture = captures.get(candidate_id, {})
+            decision = decisions.get(candidate_id, {})
+            prospective.append(
+                {
+                    "candidate_id": candidate_id,
+                    "entry_time": capture.get("entry_time"),
+                    "resolved_time": event.get("effective_market_time"),
+                    "strategy_profile_key": capture.get("strategy_profile_key"),
+                    "source_side": capture.get("source_side"),
+                    "strategy_action": decision.get("strategy_action")
+                    or decision.get("final_action")
+                    or capture.get("rule_effective_side")
+                    or capture.get("source_side"),
+                    "matched_entry_groups": list(
+                        capture.get("matched_entry_groups") or []
+                    ),
+                    "matched_veto_groups": list(
+                        capture.get("matched_veto_groups") or []
+                    ),
+                    "matched_flip_groups": list(
+                        capture.get("matched_flip_groups") or []
+                    ),
+                    "result": payload.get("result"),
+                    "net_r": payload.get("net_r"),
+                    "net_pnl": payload.get("net_pnl"),
+                    "equity_before": payload.get("equity_before"),
+                    "equity_after": payload.get("equity_after"),
+                    "entry_context": deepcopy(capture.get("context")),
+                }
+            )
+
+    return {
+        "mode": _impl.MONTHLY_BATCH_OOS_MODE,
+        "window": {
+            "start_exclusive": start.isoformat() if start is not None else None,
+            "end_inclusive": end.isoformat() if end is not None else None,
+        },
+        "rules_frozen_during_period": True,
+        "teacher_observation_count": len(teachers),
+        "prospective_trade_count": len(prospective),
+        "teacher_observations": teachers,
+        "prospective_trades": prospective,
+        "review_instruction": (
+            "Judge the completed month as one evidence batch. Do not backdate any "
+            "change. ENTRY/VETO/FLIP changes recorded now become active only for "
+            "the next frozen OOS month; prefer repeated causal structures and "
+            "consolidation over single-trade micro-rules."
+        ),
+    }
+
+
 def _decorate_advance_result(
     control: Any,
     reports: Any,
@@ -785,6 +922,32 @@ def _decorate_advance_result(
             ),
             include_veto_effectiveness=True,
         )
+        if (
+            str(
+                (updated.get("rule_update_policy") or {}).get("mode", "")
+            ).upper()
+            == _impl.MONTHLY_BATCH_OOS_MODE
+        ):
+            updated["monthly_batch_evidence"] = _monthly_batch_review_evidence(
+                control, experiment_id, updated
+            )
+            updated["methodology_prompt"] = {
+                "primary_goal": "BATCH_LEARN_FREEZE_NEXT_MONTH",
+                "rules_were_frozen_during_completed_month": True,
+                "no_backdating": True,
+                "next_month_is_pure_oos": True,
+                "prefer": [
+                    "repeated causal structures across the completed batch",
+                    "simple reusable ENTRY/VETO/FLIP families",
+                    "consolidation or refinement before micro-rules",
+                    "keeping rules unchanged when monthly evidence is weak",
+                ],
+                "avoid": [
+                    "reacting to one isolated trade",
+                    "using future-month evidence",
+                    "changing any completed-month decision",
+                ],
+            }
     return updated
 
 
