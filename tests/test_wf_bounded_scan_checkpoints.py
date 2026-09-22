@@ -8,6 +8,7 @@ from crypto_strategy_lab import walk_forward_orchestrator as orchestrator
 from crypto_strategy_lab.walk_forward_candidate_engine import (
     SCAN_CHECKPOINT_TYPE,
     _StreamingCandidateRows,
+    _scan_checkpoint,
 )
 
 
@@ -227,6 +228,22 @@ def _definition():
         "risk_pct": 1.0,
     }
 
+
+
+def test_legacy_entry_time_only_checkpoint_falls_back_safely():
+    event = {
+        "event_type": "CHECKPOINT_CREATED",
+        "payload": {
+            "checkpoint_type": SCAN_CHECKPOINT_TYPE,
+            "entry_time": "2025-01-05T00:00:00+00:00",
+            "research_signal_index": 8123,
+            "side": "SHORT",
+        },
+    }
+
+    # The old entry-time key is not comparable with the new decision-time sort
+    # key. Ignoring it causes a safe causal re-scan instead of skipping rows.
+    assert _scan_checkpoint(event) is None
 
 def test_accelerated_orchestrator_persists_resumable_checkpoint(tmp_path, monkeypatch):
     project = tmp_path / "project"
