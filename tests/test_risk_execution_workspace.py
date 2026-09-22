@@ -59,7 +59,7 @@ def test_risk_page_is_reorganized_around_one_execution_plan():
         assert window.execution_form.isHidden()
         assert window.base_execution_form.isHidden()
         assert not window.execution_form.widgets["entry_timing_mode"].isHidden()
-        assert "effective risk budget" in workspace.summary_label.text().lower()
+        assert "effective sizing budget" in workspace.summary_label.text().lower()
         assert "Entry fill:" in workspace.summary_label.text()
         assert "ATR distance unit" in workspace.summary_label.text()
     finally:
@@ -78,6 +78,12 @@ def test_stop_distance_method_shows_only_the_active_parameter():
         sr_timeframe = window.execution_form.widgets["sr_stop_timeframe_minutes"]
         sr_buffer = window.execution_form.widgets["sr_stop_buffer_atr"]
         stop_multiplier = window.base_execution_form.widgets["stop_loss_multiple"]
+        sizing_override = window.base_execution_form.widgets[
+            "position_sizing_stop_override_enabled"
+        ]
+        sizing_multiple = window.base_execution_form.widgets[
+            "position_sizing_stop_multiple"
+        ]
 
         mode.setCurrentIndex(mode.findData("ATR"))
         workspace.refresh_visibility()
@@ -105,7 +111,47 @@ def test_stop_distance_method_shows_only_the_active_parameter():
         assert not sr_timeframe.isHidden()
         assert not sr_buffer.isHidden()
         assert stop_multiplier.isHidden()
+        assert sizing_override.isHidden()
+        assert sizing_multiple.isHidden()
         assert "structural s/r" in workspace.summary_label.text().lower()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_separate_sizing_stop_shows_actual_gross_stop_exposure():
+    app, window = _window()
+    try:
+        workspace = window.risk_execution_workspace
+        risk = window.execution_form.widgets["risk_per_leg"]
+        actual_stop = window.base_execution_form.widgets["stop_loss_multiple"]
+        override = window.base_execution_form.widgets[
+            "position_sizing_stop_override_enabled"
+        ]
+        sizing_stop = window.base_execution_form.widgets[
+            "position_sizing_stop_multiple"
+        ]
+
+        risk.setValue(5.0)
+        actual_stop.setValue(0.2)
+        override.setChecked(True)
+        sizing_stop.setValue(1.0)
+        app.processEvents()
+        workspace.refresh_visibility()
+
+        assert not override.isHidden()
+        assert not sizing_stop.isHidden()
+        summary = workspace.summary_label.text()
+        assert "sizing budget 5.00%" in summary
+        assert "separate 1× reference stop" in summary
+        assert "about 1.00%" in summary
+        assert "gross stop exposure before fees/slippage" in summary
+
+        override.setChecked(False)
+        app.processEvents()
+        workspace.refresh_visibility()
+        assert sizing_stop.isHidden()
+        assert "gross stop exposure before fees/slippage" not in workspace.summary_label.text()
     finally:
         window.close()
         app.processEvents()
