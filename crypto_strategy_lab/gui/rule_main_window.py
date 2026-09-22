@@ -886,12 +886,47 @@ class MainWindow(LegacyMainWindow):
             f"Base risk  {risk}\nMax trades  {config.execution.max_active_pairs}\n\n"
             f"Data  {self._data_state()}"
         )
-        self.risk_explanation.setText(
-            f"Base Risk: {risk}. At ${config.execution.initial_equity:,.2f}, planned full-stop "
-            f"account risk is ${config.execution.initial_equity * config.execution.risk_per_leg:,.2f}. "
-            f"Base stop distance: {base_execution.stop_loss_multiple:g} distance units; "
-            f"fixed target: {base_execution.reward_risk_ratio:g}R."
+        effective_sizing_pct = (
+            float(config.execution.risk_per_leg) * float(base_execution.risk_multiplier)
         )
+        effective_sizing_dollars = (
+            float(config.execution.initial_equity) * effective_sizing_pct
+        )
+        sizing_override = bool(
+            base_execution.position_sizing_stop_override_enabled
+        )
+        if sizing_override:
+            gross_stop_pct = (
+                effective_sizing_pct
+                * float(base_execution.stop_loss_multiple)
+                / float(base_execution.position_sizing_stop_multiple)
+            )
+            gross_stop_dollars = (
+                float(config.execution.initial_equity) * gross_stop_pct
+            )
+            physical_rr = (
+                float(base_execution.reward_risk_ratio)
+                * float(base_execution.position_sizing_stop_multiple)
+                / float(base_execution.stop_loss_multiple)
+            )
+            risk_text = (
+                f"Base sizing budget: {risk}. Effective profile sizing budget is "
+                f"{effective_sizing_pct * 100:.2f}% (${effective_sizing_dollars:,.2f}). "
+                f"Quantity uses {base_execution.position_sizing_stop_multiple:g} distance units, "
+                f"while the actual stop is {base_execution.stop_loss_multiple:g}; "
+                f"gross stop exposure is about {gross_stop_pct * 100:.2f}% "
+                f"(${gross_stop_dollars:,.2f}) before fees/slippage. "
+                f"Fixed target: {base_execution.reward_risk_ratio:g} sizing-R "
+                f"(physical target:stop {physical_rr:g}:1)."
+            )
+        else:
+            risk_text = (
+                f"Base sizing budget: {risk}. Effective profile sizing budget is "
+                f"{effective_sizing_pct * 100:.2f}% (${effective_sizing_dollars:,.2f}). "
+                f"Actual stop: {base_execution.stop_loss_multiple:g} distance units; "
+                f"fixed target: {base_execution.reward_risk_ratio:g}R."
+            )
+        self.risk_explanation.setText(risk_text)
 
         if hasattr(self, "review_summary"):
             allowed = (
@@ -909,9 +944,16 @@ class MainWindow(LegacyMainWindow):
                 f"Ichimoku: {ichimoku_text}\n"
                 f"Support / Resistance: {sr_text}\n\n"
                 f"Starting Equity: ${config.execution.initial_equity:,.2f}\n"
-                f"Base Risk: {risk}\n"
-                f"Stop: {base_execution.stop_loss_multiple:g} distance units · "
-                f"Target: {base_execution.reward_risk_ratio:g}R\n"
+                f"Base Sizing Budget: {risk}\n"
+                + (
+                    f"Sizing Reference: {base_execution.position_sizing_stop_multiple:g} distance units · "
+                    f"Actual Stop: {base_execution.stop_loss_multiple:g} · "
+                    f"Target: {base_execution.reward_risk_ratio:g} sizing-R\n"
+                    if sizing_override
+                    else
+                    f"Stop: {base_execution.stop_loss_multiple:g} distance units · "
+                    f"Target: {base_execution.reward_risk_ratio:g}R\n"
+                )
                 f"Maximum Active Trades: {config.execution.max_active_pairs}\n"
                 f"Reports: {config.reporting.analysis_level}\n\n"
                 f"DATA STATUS: {self._data_state()}"
