@@ -57,7 +57,10 @@ OUTCOME_CONTRACT = "causal_walk_forward_revealed_outcome_v1"
 SETTLEMENT_CONTRACT = "causal_walk_forward_settlement_v1"
 
 MONTHLY_BATCH_OOS_MODE = "MONTHLY_BATCH_OOS"
+WEEKLY_BATCH_OOS_MODE = "WEEKLY_BATCH_OOS"
 MONTHLY_BATCH_DEFERRED = "DEFERRED_TO_MONTHLY_BATCH"
+WEEKLY_BATCH_DEFERRED = "DEFERRED_TO_WEEKLY_BATCH"
+BATCH_OOS_MODES = frozenset({MONTHLY_BATCH_OOS_MODE, WEEKLY_BATCH_OOS_MODE})
 
 
 def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
@@ -69,17 +72,36 @@ def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
             "interval_months": 1,
             "freeze_between_reviews": True,
         }
+    if mode == WEEKLY_BATCH_OOS_MODE:
+        return {
+            "mode": WEEKLY_BATCH_OOS_MODE,
+            "interval_weeks": 1,
+            "freeze_between_reviews": True,
+        }
     return {"mode": "TRADE_BY_TRADE"}
 
 
+def _batch_oos_mode(definition: dict[str, Any]) -> str | None:
+    mode = _rule_update_policy(definition)["mode"]
+    return mode if mode in BATCH_OOS_MODES else None
+
+
+def _batch_oos_enabled(definition: dict[str, Any]) -> bool:
+    return _batch_oos_mode(definition) is not None
+
+
 def _monthly_batch_enabled(definition: dict[str, Any]) -> bool:
-    return _rule_update_policy(definition)["mode"] == MONTHLY_BATCH_OOS_MODE
+    return _batch_oos_mode(definition) == MONTHLY_BATCH_OOS_MODE
+
+
+def _weekly_batch_enabled(definition: dict[str, Any]) -> bool:
+    return _batch_oos_mode(definition) == WEEKLY_BATCH_OOS_MODE
 
 
 def _effective_review_interval(
     definition: dict[str, Any], requested_months: int
 ) -> int:
-    if _monthly_batch_enabled(definition):
+    if _batch_oos_enabled(definition):
         return 1
     return int(requested_months)
 
@@ -841,6 +863,7 @@ def _periodic_review_due(
     return {
         "status": "PERIODIC_REVIEW_REQUIRED",
         "review_interval_months": int(months),
+        "review_cadence": "MONTHLY",
         "previous_review_sequence": last_event["sequence"] if last_event is not None else None,
         "previous_review_time": last_time.isoformat() if last_event is not None else None,
         "review_anchor_source": anchor_source,
@@ -849,6 +872,82 @@ def _periodic_review_due(
         "current_market_cursor": cursor.isoformat(),
         "period_trade_stats": _stats(history),
     }
+
+
+def _weekly_review_due(
+    events: list[dict[str, Any]],
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> dict[str, Any] | None:
+    anchor = _periodic_review_anchor(events, initial_anchor)
+    if anchor is None:
+        return None
+    last_event, last_time, anchor_source = anchor
+    cursor = _max_event_time(events)
+    if cursor is None:
+        return None
+    due = last_time + pd.DateOffset(weeks=1)
+    if cursor < due:
+        return None
+
+    history = []
+    for event in events:
+        if event.get("event_type") != "TRADE_RESOLVED":
+            continue
+        raw = event.get("effective_market_time")
+        if not raw:
+            continue
+        when = _utc_timestamp(raw, "trade resolution time")
+        if last_time < when <= cursor:
+            history.append(event.get("payload") or {})
+
+    return {
+        "status": "PERIODIC_REVIEW_REQUIRED",
+        "review_interval_weeks": 1,
+        "review_cadence": "WEEKLY",
+        "previous_review_sequence": last_event["sequence"] if last_event is not None else None,
+        "previous_review_time": last_time.isoformat() if last_event is not None else None,
+        "review_anchor_source": anchor_source,
+        "review_anchor_time": last_time.isoformat(),
+        "review_due_time": due.isoformat(),
+        "current_market_cursor": cursor.isoformat(),
+        "period_trade_stats": _stats(history),
+    }
+
+
+def _review_due(
+    definition: dict[str, Any],
+    events: list[dict[str, Any]],
+    requested_months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> dict[str, Any] | None:
+    if _weekly_batch_enabled(definition):
+        return _weekly_review_due(events, initial_anchor=initial_anchor)
+    return _periodic_review_due(
+        events,
+        _effective_review_interval(definition, requested_months),
+        initial_anchor=initial_anchor,
+    )
+
+
+def _next_review_time(
+    definition: dict[str, Any],
+    events: list[dict[str, Any]],
+    requested_months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> pd.Timestamp | None:
+    if _weekly_batch_enabled(definition):
+        anchor = _periodic_review_anchor(events, initial_anchor)
+        if anchor is None:
+            return None
+        return anchor[1] + pd.DateOffset(weeks=1)
+    return _next_periodic_review_time(
+        events,
+        _effective_review_interval(definition, requested_months),
+        initial_anchor=initial_anchor,
+    )
 
 
 def _teacher_review_packet(
