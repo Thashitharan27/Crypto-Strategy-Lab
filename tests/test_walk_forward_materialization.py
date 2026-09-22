@@ -233,6 +233,67 @@ def test_materialization_uses_latest_rule_versions_and_preserves_reference_confi
     assert bull_vetoes[0]["id"] == "VETO_001"
 
 
+
+def test_materialization_enables_flip_only_profile_but_not_veto_only_profile(tmp_path):
+    control, reports, store, head = _setup(tmp_path)
+    head = _append(
+        store,
+        head,
+        "FLIP_LEARNED",
+        {
+            "rule_id": "FLIP_001",
+            "rule_version": "1",
+            "effective_from": "2025-01-01T00:00:00Z",
+            "reason": "standalone opposite-side thesis",
+            "evidence_source": "TEACHER",
+            "profile": "bull_long",
+            "conditions": [
+                {
+                    "indicator": "MR_STATE",
+                    "condition": "EQUALS",
+                    "value": "STRONGLY_ABOVE_MEAN",
+                }
+            ],
+        },
+        "rule:flip1:v1",
+    )
+    head = _append(
+        store,
+        head,
+        "VETO_LEARNED",
+        {
+            "rule_id": "VETO_001",
+            "rule_version": "1",
+            "effective_from": "2025-01-01T00:00:00Z",
+            "reason": "blocking evidence only",
+            "evidence_source": "TEACHER",
+            "profile": "sideways_long",
+            "conditions": [
+                {"indicator": "ADX", "condition": "GTE", "value": 40}
+            ],
+        },
+        "rule:veto1:v1",
+    )
+
+    snapshot = materialize_walk_forward_strategy(
+        control,
+        reports,
+        experiment_id="BTCUSDT_1D_WF_TEST",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        include_config=True,
+    )
+
+    assert snapshot["rule_counts"] == {"ENTRY": 0, "VETO": 1, "FLIP": 1}
+    assert snapshot["enabled_profiles"] == ["bull_long"]
+    config = snapshot["materialized_config"]
+    assert config["strategy"]["profiles"]["bull_long"]["enabled"] is True
+    assert config["strategy"]["profiles"]["sideways_long"]["enabled"] is False
+    assert snapshot["groups_by_profile"]["bull_long"]["ENTRY"] == []
+    assert [g["id"] for g in snapshot["groups_by_profile"]["bull_long"]["FLIP"]] == [
+        "FLIP_001"
+    ]
+
 def test_materialization_rejects_stale_chain_head(tmp_path):
     control, reports, store, head = _setup(tmp_path)
     original = dict(head)

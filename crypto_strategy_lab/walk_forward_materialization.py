@@ -318,7 +318,7 @@ def materialize_walk_forward_strategy(
     workspace.rules["VETO"] = []
     workspace.rules["FLIP"] = []
 
-    profiles_with_entry: set[str] = set()
+    profiles_with_admission: set[str] = set()
     groups_by_profile: dict[str, dict[str, list[dict[str, Any]]]] = {
         profile: {"ENTRY": [], "VETO": [], "FLIP": []} for profile in PROFILE_KEYS
     }
@@ -328,20 +328,24 @@ def materialize_walk_forward_strategy(
         group = deepcopy(rule["group"])
         built = workspace.add_group(profile, family, group)
         groups_by_profile[profile][family].append(built)
-        if family == "ENTRY" and bool(built.get("enabled", True)):
-            profiles_with_entry.add(profile)
+        # ENTRY and FLIP can independently admit a prospective trade. A
+        # standalone FLIP is a complete opposite-side setup thesis, so a
+        # FLIP-only source profile must remain executable even when it has no
+        # ENTRY group. VETO alone never admits a trade.
+        if family in {"ENTRY", "FLIP"} and bool(built.get("enabled", True)):
+            profiles_with_admission.add(profile)
 
     materialized_config = workspace.to_config()
     materialized_config.setdefault("reporting", {})["output_dir"] = str(control.output_root)
     original_profiles = (base_config.get("strategy") or {}).get("profiles") or {}
     for profile in PROFILE_KEYS:
         original_enabled = bool((original_profiles.get(profile) or {}).get("enabled", False))
-        if profile in profiles_with_entry and not original_enabled:
+        if profile in profiles_with_admission and not original_enabled:
             raise ValueError(
-                f"active ENTRY rules exist for {profile}, but the immutable reference configuration disables that profile"
+                f"active ENTRY/FLIP admission rules exist for {profile}, but the immutable reference configuration disables that profile"
             )
         materialized_config["strategy"]["profiles"][profile]["enabled"] = (
-            original_enabled and profile in profiles_with_entry
+            original_enabled and profile in profiles_with_admission
         )
 
     active_rule_versions = [
@@ -385,7 +389,7 @@ def materialize_walk_forward_strategy(
             family: sum(1 for rule in active_rules if rule["family"] == family)
             for family in ("ENTRY", "VETO", "FLIP")
         },
-        "enabled_profiles": sorted(profiles_with_entry),
+        "enabled_profiles": sorted(profiles_with_admission),
         "groups_by_profile": groups_by_profile,
         "materialized_config_sha256": canonical_sha256(materialized_config),
     }

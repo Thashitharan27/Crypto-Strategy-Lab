@@ -208,6 +208,7 @@ def _write_reference(
     include_short: bool = False,
     teachers: pd.DataFrame | None = None,
     monthly_batch: bool = False,
+    initial_entry: bool = True,
 ):
     project = tmp_path / "project"
     output = tmp_path / "output"
@@ -260,23 +261,24 @@ def _write_reference(
             "freeze_between_reviews": True,
         }
     head = store.create(EXPERIMENT_ID, definition, "create:orch")
-    head = store.append_event(
-        EXPERIMENT_ID,
-        "ENTRY_LEARNED",
-        {
-            "rule_id": "ENTRY_001",
-            "rule_version": "1",
-            "effective_from": "2025-01-01T00:00:00Z",
-            "reason": "test entry",
-            "evidence_source": "TEACHER",
-            "profile": "bull_long",
-            "conditions": [{"indicator": "ADX", "condition": "GTE", "value": 30}],
-        },
-        "rule:entry",
-        head["sequence"],
-        head["state_hash"],
-        effective_market_time="2025-01-01T00:00:00Z",
-    )
+    if initial_entry:
+        head = store.append_event(
+            EXPERIMENT_ID,
+            "ENTRY_LEARNED",
+            {
+                "rule_id": "ENTRY_001",
+                "rule_version": "1",
+                "effective_from": "2025-01-01T00:00:00Z",
+                "reason": "test entry",
+                "evidence_source": "TEACHER",
+                "profile": "bull_long",
+                "conditions": [{"indicator": "ADX", "condition": "GTE", "value": 30}],
+            },
+            "rule:entry",
+            head["sequence"],
+            head["state_hash"],
+            effective_market_time="2025-01-01T00:00:00Z",
+        )
     return control, reports, store, head
 
 
@@ -467,6 +469,69 @@ def test_monthly_batch_auto_executes_loss_without_mid_month_review(tmp_path):
         for event in events
     )
 
+
+
+def test_monthly_batch_executes_standalone_flip_without_entry(tmp_path):
+    control, reports, store, head = _write_reference(
+        tmp_path,
+        include_short=True,
+        monthly_batch=True,
+        initial_entry=False,
+    )
+    head = store.append_event(
+        EXPERIMENT_ID,
+        "FLIP_LEARNED",
+        {
+            "rule_id": "FLIP_001",
+            "rule_version": "1",
+            "effective_from": "2025-01-01T00:00:00Z",
+            "reason": "standalone opposite-side setup",
+            "evidence_source": "TEACHER",
+            "profile": "bull_long",
+            "conditions": [
+                {
+                    "indicator": "MR_STATE",
+                    "condition": "EQUALS",
+                    "value": "NEAR_MEAN",
+                }
+            ],
+        },
+        "rule:flip",
+        head["sequence"],
+        head["state_hash"],
+        effective_market_time="2025-01-01T00:00:00Z",
+    )
+
+    result = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:monthly-flip-only",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        max_transitions=20,
+    )
+
+    events = store.read(EXPERIMENT_ID, recent_events=100)["recent_events"]
+    capture = next(
+        event for event in events if event["event_type"] == "CANDIDATE_CONTEXT_CAPTURED"
+    )
+    assert capture["payload"]["matched_entry_groups"] == []
+    assert capture["payload"]["matched_flip_groups"] == ["FLIP_001"]
+    assert capture["payload"]["rule_effective_side"] == "SHORT"
+
+    freeze = next(event for event in events if event["event_type"] == "DECISION_FROZEN")
+    assert freeze["payload"]["strategy_action"] == "SHORT"
+    entered = next(event for event in events if event["event_type"] == "TRADE_ENTERED")
+    resolved = next(event for event in events if event["event_type"] == "TRADE_RESOLVED")
+    assert entered["payload"]["final_action"] == "SHORT"
+    assert resolved["payload"]["final_action"] == "SHORT"
+    assert resolved["payload"]["net_r"] == 0.95
+    assert store.read(EXPERIMENT_ID)["derived_state"]["ledgers"]["RESEARCH"]["equity"] == 1009.5
+    assert result["status"] not in {
+        "CANDIDATE_DECISION_REQUIRED",
+        "LOSS_REVIEW_REQUIRED",
+    }
 
 def test_submit_can_resolve_exact_opposite_side_when_immutable_sample_exists(tmp_path):
     control, reports, store, head = _write_reference(tmp_path, include_short=True)
