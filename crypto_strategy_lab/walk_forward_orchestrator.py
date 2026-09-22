@@ -924,6 +924,7 @@ def _monthly_batch_review_evidence(
                         WHERE NOT COALESCE(
                             CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
                         )
+                          AND CAST(exit_time AS TIMESTAMPTZ) <= ?
                     )
                     SELECT
                         s.profile,
@@ -935,14 +936,14 @@ def _monthly_batch_review_evidence(
                         SUM(s.source_net_r) AS net_r,
                         SUM(
                             CASE
-                                WHEN o.opposite_exit_time <= ? THEN 1
+                                WHEN o.candidate_id IS NOT NULL THEN 1
                                 ELSE 0
                             END
                         ) AS opposite_resolved_by_boundary,
                         SUM(
                             CASE
                                 WHEN s.source_net_r < 0
-                                 AND o.opposite_exit_time <= ?
+                                 AND o.candidate_id IS NOT NULL
                                  AND o.opposite_net_r > 0
                                 THEN 1 ELSE 0
                             END
@@ -950,7 +951,7 @@ def _monthly_batch_review_evidence(
                         SUM(
                             CASE
                                 WHEN s.source_net_r < 0
-                                 AND o.opposite_exit_time <= ?
+                                 AND o.candidate_id IS NOT NULL
                                  AND o.opposite_net_r <= 0
                                 THEN 1 ELSE 0
                             END
@@ -963,8 +964,6 @@ def _monthly_batch_review_evidence(
                     ORDER BY 1, 2
                     """,
                     [
-                        end.to_pydatetime(),
-                        end.to_pydatetime(),
                         end.to_pydatetime(),
                         start.to_pydatetime(),
                         end.to_pydatetime(),
