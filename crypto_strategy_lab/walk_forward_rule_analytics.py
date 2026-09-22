@@ -1408,7 +1408,6 @@ def summarize_walk_forward_periodic_review(
         period_offset = pd.DateOffset(months=1)
         interval_fields = {
             "review_interval_months": 1,
-            "review_cadence": "MONTHLY",
         }
     elif rule_update_mode == "WEEKLY_BATCH_OOS":
         period_offset = pd.DateOffset(weeks=1)
@@ -1420,7 +1419,6 @@ def summarize_walk_forward_periodic_review(
         period_offset = pd.DateOffset(months=review_interval_months)
         interval_fields = {
             "review_interval_months": review_interval_months,
-            "review_cadence": "MONTHLY",
         }
     cursor = _market_cursor(events)
     if cursor is None:
