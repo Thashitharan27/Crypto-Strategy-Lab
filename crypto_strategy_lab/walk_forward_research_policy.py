@@ -279,12 +279,26 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
         rule_update_mode = _upper(
             (updated.get("rule_update_policy") or {}).get("mode")
         )
-        if rule_update_mode == "MONTHLY_BATCH_OOS":
+        if rule_update_mode in {"MONTHLY_BATCH_OOS", "WEEKLY_BATCH_OOS"}:
+            weekly = rule_update_mode == "WEEKLY_BATCH_OOS"
+            period_name = "week" if weekly else "month"
             updated["methodology_prompt"] = {
-                "primary_goal": "BATCH_LEARN_FREEZE_NEXT_MONTH",
-                "rules_were_frozen_during_completed_month": True,
+                "primary_goal": (
+                    "BATCH_LEARN_FREEZE_NEXT_WEEK"
+                    if weekly
+                    else "BATCH_LEARN_FREEZE_NEXT_MONTH"
+                ),
+                (
+                    "rules_were_frozen_during_completed_week"
+                    if weekly
+                    else "rules_were_frozen_during_completed_month"
+                ): True,
                 "no_backdating": True,
-                "next_month_is_pure_oos": True,
+                (
+                    "next_week_is_pure_oos"
+                    if weekly
+                    else "next_month_is_pure_oos"
+                ): True,
                 "required_before_rule_authoring": [
                     "periodic_rule_action",
                     "periodic_rationale",
@@ -293,12 +307,12 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
                     "repeated causal structures across the completed batch",
                     "simple reusable ENTRY/VETO/FLIP families",
                     "consolidation or refinement before micro-rules",
-                    "keeping rules unchanged when monthly evidence is weak",
+                    f"keeping rules unchanged when {period_name}ly evidence is weak",
                 ],
                 "avoid": [
                     "reacting to one isolated trade",
-                    "using future-month evidence",
-                    "changing any completed-month decision",
+                    f"using future-{period_name} evidence",
+                    f"changing any completed-{period_name} decision",
                     "micro-rule accumulation",
                 ],
             }

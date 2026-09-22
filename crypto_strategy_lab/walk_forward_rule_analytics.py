@@ -1402,16 +1402,32 @@ def summarize_walk_forward_periodic_review(
     _store, readback, events = _verified_experiment(control, experiment_id)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     rule_update_policy = definition.get("rule_update_policy") or {}
-    if str(rule_update_policy.get("mode", "")).strip().upper() == "MONTHLY_BATCH_OOS":
+    rule_update_mode = str(rule_update_policy.get("mode", "")).strip().upper()
+    if rule_update_mode == "MONTHLY_BATCH_OOS":
         review_interval_months = 1
+        period_offset = pd.DateOffset(months=1)
+        interval_fields = {
+            "review_interval_months": 1,
+        }
+    elif rule_update_mode == "WEEKLY_BATCH_OOS":
+        period_offset = pd.DateOffset(weeks=1)
+        interval_fields = {
+            "review_interval_weeks": 1,
+            "review_cadence": "WEEKLY",
+        }
+    else:
+        period_offset = pd.DateOffset(months=review_interval_months)
+        interval_fields = {
+            "review_interval_months": review_interval_months,
+        }
     cursor = _market_cursor(events)
     if cursor is None:
         raise ValueError("experiment has no market-time cursor")
     records = _rule_versions(events)
     trades, attribution_warnings = _trade_history(events, records)
 
-    current_start = cursor - pd.DateOffset(months=review_interval_months)
-    previous_start = cursor - pd.DateOffset(months=2 * review_interval_months)
+    current_start = cursor - period_offset
+    previous_start = current_start - period_offset
     last_review = _last_periodic_review(events)
     last_review_time = (
         _utc(last_review["effective_market_time"], "periodic review effective_market_time")
@@ -1421,11 +1437,7 @@ def summarize_walk_forward_periodic_review(
 
     initial_anchor = _initial_periodic_anchor(definition, events, reports)
     anchor = last_review_time or initial_anchor
-    due_time = (
-        anchor + pd.DateOffset(months=review_interval_months)
-        if anchor is not None
-        else None
-    )
+    due_time = anchor + period_offset if anchor is not None else None
 
     current_trades = _window_rows(
         trades,
@@ -1568,7 +1580,7 @@ def summarize_walk_forward_periodic_review(
         "sequence": int(readback["sequence"]),
         "state_hash": str(readback["state_hash"]),
         "read_only": True,
-        "review_interval_months": review_interval_months,
+        **interval_fields,
         "rule_update_policy": deepcopy(rule_update_policy),
         "market_cursor": cursor.isoformat(),
         "review_anchor": {

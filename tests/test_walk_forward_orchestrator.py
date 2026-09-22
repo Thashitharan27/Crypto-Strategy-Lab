@@ -208,6 +208,7 @@ def _write_reference(
     include_short: bool = False,
     teachers: pd.DataFrame | None = None,
     monthly_batch: bool = False,
+    weekly_batch: bool = False,
     initial_entry: bool = True,
 ):
     project = tmp_path / "project"
@@ -218,8 +219,8 @@ def _write_reference(
     project.mkdir(parents=True)
     samples_path = artifacts / "research_sampling_trades.parquet"
     context_path = artifacts / "feature_context.parquet"
-    if monthly_batch:
-        # Keep this new mode's end-to-end regression test independent of
+    if monthly_batch or weekly_batch:
+        # Keep batch-mode end-to-end regression tests independent of
         # pandas' optional pyarrow/fastparquet extras used by older fixtures.
         with duckdb.connect(":memory:") as connection:
             samples_frame = _samples(include_short=include_short)
@@ -258,6 +259,12 @@ def _write_reference(
         definition["rule_update_policy"] = {
             "mode": "MONTHLY_BATCH_OOS",
             "interval_months": 1,
+            "freeze_between_reviews": True,
+        }
+    elif weekly_batch:
+        definition["rule_update_policy"] = {
+            "mode": "WEEKLY_BATCH_OOS",
+            "interval_weeks": 1,
             "freeze_between_reviews": True,
         }
     head = store.create(EXPERIMENT_ID, definition, "create:orch")
@@ -469,6 +476,42 @@ def test_monthly_batch_auto_executes_loss_without_mid_month_review(tmp_path):
         for event in events
     )
 
+
+
+def test_weekly_batch_auto_executes_without_mid_week_review(tmp_path):
+    control, reports, store, head = _write_reference(
+        tmp_path, weekly_batch=True
+    )
+
+    result = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:weekly-batch",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        max_transitions=20,
+    )
+
+    assert result["status"] not in {
+        "CANDIDATE_DECISION_REQUIRED",
+        "LOSS_REVIEW_REQUIRED",
+        "TEACHER_REVIEW_REQUIRED",
+        "TEACHER_LOSS_REVIEW_REQUIRED",
+    }
+    events = store.read(EXPERIMENT_ID, recent_events=100)["recent_events"]
+    first_freeze = next(
+        event for event in events if event["event_type"] == "DECISION_FROZEN"
+    )
+    assert first_freeze["source"] == "DETERMINISTIC_WEEKLY_BATCH_OOS"
+    assert first_freeze["payload"]["decision_mode"] == "WEEKLY_BATCH_OOS"
+    assert first_freeze["payload"]["chatgpt_view"] is None
+    assert not any(
+        event["event_type"] == "REVIEW_COMPLETED"
+        and str((event.get("payload") or {}).get("review_type", "")).upper()
+        == "LOSS"
+        for event in events
+    )
 
 
 def test_monthly_batch_executes_standalone_flip_without_entry(tmp_path):

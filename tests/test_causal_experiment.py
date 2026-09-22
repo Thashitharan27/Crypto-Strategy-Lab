@@ -160,6 +160,34 @@ def test_monthly_batch_oos_policy_is_normalized_and_frozen(tmp_path):
     }
 
 
+def test_weekly_batch_oos_policy_is_normalized_and_frozen(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["rule_update_policy"] = {"mode": "weekly_batch_oos"}
+
+    store.create("BTC_WEEKLY_BATCH_WF", definition, "create:weekly-batch")
+    readback = store.read("BTC_WEEKLY_BATCH_WF")
+
+    assert readback["manifest"]["definition"]["rule_update_policy"] == {
+        "mode": "WEEKLY_BATCH_OOS",
+        "interval_weeks": 1,
+        "freeze_between_reviews": True,
+    }
+
+
+def test_weekly_batch_oos_rejects_non_weekly_interval(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["rule_update_policy"] = {
+        "mode": "WEEKLY_BATCH_OOS",
+        "interval_weeks": 2,
+        "freeze_between_reviews": True,
+    }
+
+    with pytest.raises(ValueError, match="interval_weeks must be 1"):
+        store.create("BTC_BAD_WEEKLY_INTERVAL", definition, "create:bad-weekly")
+
+
 def test_monthly_batch_oos_rejects_non_monthly_interval(tmp_path):
     store = CausalExperimentStore(tmp_path / "experiments")
     definition = _definition()

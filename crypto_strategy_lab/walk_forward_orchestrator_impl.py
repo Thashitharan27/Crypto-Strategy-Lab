@@ -57,7 +57,10 @@ OUTCOME_CONTRACT = "causal_walk_forward_revealed_outcome_v1"
 SETTLEMENT_CONTRACT = "causal_walk_forward_settlement_v1"
 
 MONTHLY_BATCH_OOS_MODE = "MONTHLY_BATCH_OOS"
+WEEKLY_BATCH_OOS_MODE = "WEEKLY_BATCH_OOS"
 MONTHLY_BATCH_DEFERRED = "DEFERRED_TO_MONTHLY_BATCH"
+WEEKLY_BATCH_DEFERRED = "DEFERRED_TO_WEEKLY_BATCH"
+BATCH_OOS_MODES = frozenset({MONTHLY_BATCH_OOS_MODE, WEEKLY_BATCH_OOS_MODE})
 
 
 def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
@@ -69,17 +72,36 @@ def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
             "interval_months": 1,
             "freeze_between_reviews": True,
         }
+    if mode == WEEKLY_BATCH_OOS_MODE:
+        return {
+            "mode": WEEKLY_BATCH_OOS_MODE,
+            "interval_weeks": 1,
+            "freeze_between_reviews": True,
+        }
     return {"mode": "TRADE_BY_TRADE"}
 
 
+def _batch_oos_mode(definition: dict[str, Any]) -> str | None:
+    mode = _rule_update_policy(definition)["mode"]
+    return mode if mode in BATCH_OOS_MODES else None
+
+
+def _batch_oos_enabled(definition: dict[str, Any]) -> bool:
+    return _batch_oos_mode(definition) is not None
+
+
 def _monthly_batch_enabled(definition: dict[str, Any]) -> bool:
-    return _rule_update_policy(definition)["mode"] == MONTHLY_BATCH_OOS_MODE
+    return _batch_oos_mode(definition) == MONTHLY_BATCH_OOS_MODE
+
+
+def _weekly_batch_enabled(definition: dict[str, Any]) -> bool:
+    return _batch_oos_mode(definition) == WEEKLY_BATCH_OOS_MODE
 
 
 def _effective_review_interval(
     definition: dict[str, Any], requested_months: int
 ) -> int:
-    if _monthly_batch_enabled(definition):
+    if _batch_oos_enabled(definition):
         return 1
     return int(requested_months)
 
@@ -851,6 +873,82 @@ def _periodic_review_due(
     }
 
 
+def _weekly_review_due(
+    events: list[dict[str, Any]],
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> dict[str, Any] | None:
+    anchor = _periodic_review_anchor(events, initial_anchor)
+    if anchor is None:
+        return None
+    last_event, last_time, anchor_source = anchor
+    cursor = _max_event_time(events)
+    if cursor is None:
+        return None
+    due = last_time + pd.DateOffset(weeks=1)
+    if cursor < due:
+        return None
+
+    history = []
+    for event in events:
+        if event.get("event_type") != "TRADE_RESOLVED":
+            continue
+        raw = event.get("effective_market_time")
+        if not raw:
+            continue
+        when = _utc_timestamp(raw, "trade resolution time")
+        if last_time < when <= cursor:
+            history.append(event.get("payload") or {})
+
+    return {
+        "status": "PERIODIC_REVIEW_REQUIRED",
+        "review_interval_weeks": 1,
+        "review_cadence": "WEEKLY",
+        "previous_review_sequence": last_event["sequence"] if last_event is not None else None,
+        "previous_review_time": last_time.isoformat() if last_event is not None else None,
+        "review_anchor_source": anchor_source,
+        "review_anchor_time": last_time.isoformat(),
+        "review_due_time": due.isoformat(),
+        "current_market_cursor": cursor.isoformat(),
+        "period_trade_stats": _stats(history),
+    }
+
+
+def _review_due(
+    definition: dict[str, Any],
+    events: list[dict[str, Any]],
+    requested_months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> dict[str, Any] | None:
+    if _weekly_batch_enabled(definition):
+        return _weekly_review_due(events, initial_anchor=initial_anchor)
+    return _periodic_review_due(
+        events,
+        _effective_review_interval(definition, requested_months),
+        initial_anchor=initial_anchor,
+    )
+
+
+def _next_review_time(
+    definition: dict[str, Any],
+    events: list[dict[str, Any]],
+    requested_months: int,
+    *,
+    initial_anchor: pd.Timestamp | None = None,
+) -> pd.Timestamp | None:
+    if _weekly_batch_enabled(definition):
+        anchor = _periodic_review_anchor(events, initial_anchor)
+        if anchor is None:
+            return None
+        return anchor[1] + pd.DateOffset(weeks=1)
+    return _next_periodic_review_time(
+        events,
+        _effective_review_interval(definition, requested_months),
+        initial_anchor=initial_anchor,
+    )
+
+
 def _teacher_review_packet(
     control: Any,
     reports: Any,
@@ -1051,26 +1149,42 @@ def _append_auto_compressed_teacher(
     }
 
 
-def _append_monthly_batch_teacher(
+def _batch_boundary_label(batch_mode: str) -> str:
+    return "week-end" if batch_mode == WEEKLY_BATCH_OOS_MODE else "month-end"
+
+
+def _batch_deferred_status(batch_mode: str) -> str:
+    if batch_mode == WEEKLY_BATCH_OOS_MODE:
+        return WEEKLY_BATCH_DEFERRED
+    if batch_mode == MONTHLY_BATCH_OOS_MODE:
+        return MONTHLY_BATCH_DEFERRED
+    raise ValueError(f"unsupported batch OOS mode: {batch_mode}")
+
+
+def _append_batch_teacher(
     store: CausalExperimentStore,
     *,
     experiment_id: str,
     teacher_boundary: dict[str, Any],
     teacher_packet: dict[str, Any],
+    batch_mode: str,
     operation_id: str,
     expected_sequence: int,
     expected_state_hash: str,
 ) -> dict[str, Any]:
+    mode = str(batch_mode).strip().upper()
+    deferred_status = _batch_deferred_status(mode)
+    boundary_label = _batch_boundary_label(mode)
     resolution_raw = teacher_boundary.get("resolution_time")
     if resolution_raw in (None, ""):
-        raise ValueError("monthly batch teacher evidence requires resolution_time")
+        raise ValueError(f"{mode} teacher evidence requires resolution_time")
     resolution = _utc_timestamp(
-        resolution_raw, "monthly batch teacher resolution_time"
+        resolution_raw, f"{mode} teacher resolution_time"
     )
     payload = {
         **deepcopy(teacher_boundary),
-        "review_decision": MONTHLY_BATCH_DEFERRED,
-        "teacher_review_status": MONTHLY_BATCH_DEFERRED,
+        "review_decision": deferred_status,
+        "teacher_review_status": deferred_status,
         "validated_rule_event_count": 0,
         "batch_entry_context": deepcopy(teacher_packet.get("entry_context")),
         "batch_current_rule_coverage": deepcopy(
@@ -1079,10 +1193,11 @@ def _append_monthly_batch_teacher(
         "batch_active_rule_versions": deepcopy(
             teacher_packet.get("active_rule_versions")
         ),
+        "batch_oos_mode": mode,
         "notes": (
             "Teacher evidence and entry-time context were recorded without a rule "
-            "mutation because MONTHLY_BATCH_OOS freezes the strategy until the "
-            "month-end review."
+            f"mutation because {mode} freezes the strategy until the "
+            f"{boundary_label} review."
         ),
     }
     appended = store.append_event(
@@ -1093,7 +1208,7 @@ def _append_monthly_batch_teacher(
         int(expected_sequence),
         str(expected_state_hash),
         effective_market_time=resolution.isoformat(),
-        source="DETERMINISTIC_MONTHLY_BATCH_OOS",
+        source=f"DETERMINISTIC_{mode}",
     )
     return {
         "sequence": int(appended["sequence"]),
@@ -1101,16 +1216,20 @@ def _append_monthly_batch_teacher(
     }
 
 
-def _freeze_monthly_batch_candidate(
+def _freeze_batch_candidate(
     store: CausalExperimentStore,
     events: list[dict[str, Any]],
     *,
     experiment_id: str,
     candidate_id: str,
+    batch_mode: str,
     operation_id: str,
     expected_sequence: int,
     expected_state_hash: str,
 ) -> dict[str, Any]:
+    mode = str(batch_mode).strip().upper()
+    if mode not in BATCH_OOS_MODES:
+        raise ValueError(f"unsupported batch OOS mode: {mode}")
     candidate = _candidate_capture(events, candidate_id).get("payload") or {}
     strategy_action = str(
         candidate.get("strategy_action")
@@ -1120,7 +1239,7 @@ def _freeze_monthly_batch_candidate(
     ).strip().upper()
     if strategy_action not in {"LONG", "SHORT"}:
         raise ValueError(
-            "MONTHLY_BATCH_OOS candidate has no valid executable strategy action"
+            f"{mode} candidate has no valid executable strategy action"
         )
     frozen = store.append_event(
         experiment_id,
@@ -1138,7 +1257,7 @@ def _freeze_monthly_batch_candidate(
             "strategy_snapshot_sha256": candidate.get(
                 "strategy_snapshot_sha256"
             ),
-            "decision_mode": MONTHLY_BATCH_OOS_MODE,
+            "decision_mode": mode,
         },
         operation_id,
         int(expected_sequence),
@@ -1146,7 +1265,7 @@ def _freeze_monthly_batch_candidate(
         effective_market_time=str(
             candidate.get("decision_available_at") or candidate.get("entry_time")
         ),
-        source="DETERMINISTIC_MONTHLY_BATCH_OOS",
+        source=f"DETERMINISTIC_{mode}",
     )
     return {
         "sequence": int(frozen["sequence"]),
@@ -1189,22 +1308,21 @@ def advance_walk_forward(
     for step in range(int(max_transitions)):
         store, readback, events = _verified(control, experiment_id, sequence, state_hash)
         definition = (readback.get("manifest") or {}).get("definition") or {}
-        monthly_batch = _monthly_batch_enabled(definition)
-        effective_review_interval = _effective_review_interval(
-            definition, int(review_interval_months)
-        )
+        batch_mode = _batch_oos_mode(definition)
+        batch_oos = batch_mode is not None
         unresolved = _open_candidate(events)
         if unresolved is not None:
             candidate_id, state = unresolved
             if state == "ENTRY_CONTEXT_CAPTURED":
-                if monthly_batch:
-                    frozen = _freeze_monthly_batch_candidate(
+                if batch_oos:
+                    frozen = _freeze_batch_candidate(
                         store,
                         events,
                         experiment_id=experiment_id,
                         candidate_id=candidate_id,
+                        batch_mode=str(batch_mode),
                         operation_id=_operation(
-                            operation_id, f"monthly-freeze-{step}-{candidate_id}"
+                            operation_id, f"batch-freeze-{step}-{candidate_id}"
                         ),
                         expected_sequence=sequence,
                         expected_state_hash=state_hash,
@@ -1232,7 +1350,7 @@ def advance_walk_forward(
                 sequence, state_hash = int(settled["sequence"]), str(settled["state_hash"])
                 if (
                     str((settled.get("settlement") or {}).get("result")) == "LOSS"
-                    and not monthly_batch
+                    and not batch_oos
                 ):
                     packet = build_loss_review_packet(
                         control, experiment_id=experiment_id, candidate_id=candidate_id
@@ -1241,7 +1359,7 @@ def advance_walk_forward(
                     return packet
                 continue
 
-        if not monthly_batch:
+        if not batch_oos:
             loss = _unreviewed_loss(events)
             if loss is not None:
                 candidate_id = str((loss.get("payload") or {}).get("candidate_id"))
@@ -1254,9 +1372,10 @@ def advance_walk_forward(
         initial_review_anchor = _initial_periodic_review_anchor(
             reports, definition, events
         )
-        periodic = _periodic_review_due(
+        periodic = _review_due(
+            definition,
             events,
-            effective_review_interval,
+            int(review_interval_months),
             initial_anchor=initial_review_anchor,
         )
         if periodic is not None:
@@ -1272,19 +1391,30 @@ def advance_walk_forward(
                 state_hash=state_hash,
                 rule_update_policy=_rule_update_policy(definition),
             )
-            if monthly_batch:
-                periodic["monthly_batch_oos"] = {
-                    "mode": MONTHLY_BATCH_OOS_MODE,
+            if batch_oos:
+                batch_packet = {
+                    "mode": str(batch_mode),
+                    "cadence": (
+                        "WEEKLY"
+                        if batch_mode == WEEKLY_BATCH_OOS_MODE
+                        else "MONTHLY"
+                    ),
                     "rules_frozen_during_period": True,
                     "mid_period_teacher_mutation_allowed": False,
                     "mid_period_loss_mutation_allowed": False,
                     "per_trade_chatgpt_decision_required": False,
                 }
+                periodic["batch_oos"] = batch_packet
+                if batch_mode == MONTHLY_BATCH_OOS_MODE:
+                    periodic["monthly_batch_oos"] = deepcopy(batch_packet)
+                else:
+                    periodic["weekly_batch_oos"] = deepcopy(batch_packet)
             return periodic
 
-        next_review_time = _next_periodic_review_time(
+        next_review_time = _next_review_time(
+            definition,
             events,
-            effective_review_interval,
+            int(review_interval_months),
             initial_anchor=initial_review_anchor,
         )
         scan = get_next_walk_forward_candidate(
@@ -1322,7 +1452,7 @@ def advance_walk_forward(
             state_hash = str(checkpoint["state_hash"])
             continue
         if status == "CANDIDATE_CAPTURED":
-            if monthly_batch:
+            if batch_oos:
                 sequence = int(scan["sequence"])
                 state_hash = str(scan["state_hash"])
                 continue
@@ -1339,7 +1469,7 @@ def advance_walk_forward(
                 "outcome_exposed": False,
             }
         if status == "TEACHER_DUE_FIRST":
-            if monthly_batch:
+            if batch_oos:
                 teacher_packet = _teacher_review_packet(
                     control,
                     reports,
@@ -1348,13 +1478,14 @@ def advance_walk_forward(
                     expected_state_hash=state_hash,
                     teacher_boundary=scan["teacher_boundary"],
                 )
-                deferred = _append_monthly_batch_teacher(
+                deferred = _append_batch_teacher(
                     store,
                     experiment_id=experiment_id,
                     teacher_boundary=scan["teacher_boundary"],
                     teacher_packet=teacher_packet,
+                    batch_mode=str(batch_mode),
                     operation_id=_operation(
-                        operation_id, f"monthly-teacher-{step}-{sequence}"
+                        operation_id, f"batch-teacher-{step}-{sequence}"
                     ),
                     expected_sequence=sequence,
                     expected_state_hash=state_hash,
