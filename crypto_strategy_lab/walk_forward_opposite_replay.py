@@ -248,6 +248,7 @@ def _simulate_simple_one_r(
     side: str,
     entry_price: float,
     stop_distance: float,
+    account_r_distance: float | None = None,
     slippage: float,
     tie_policy: str,
     entry_fee_rate: float,
@@ -258,6 +259,13 @@ def _simulate_simple_one_r(
         raise ValueError("opposite replay side must be LONG or SHORT")
     if stop_distance <= 0:
         raise ValueError("opposite replay stop distance must be positive")
+    r_denominator = (
+        float(account_r_distance)
+        if account_r_distance is not None
+        else float(stop_distance)
+    )
+    if r_denominator <= 0:
+        raise ValueError("opposite replay account-R distance must be positive")
     sign = 1.0 if side == "LONG" else -1.0
     stop_price = entry_price - sign * stop_distance
     target_price = entry_price + sign * stop_distance
@@ -274,13 +282,13 @@ def _simulate_simple_one_r(
         raw_exit = target_price if use_tp else stop_price
         execution_exit = raw_exit * (1.0 - slippage if side == "LONG" else 1.0 + slippage)
         gross_r = (
-            (execution_exit - entry_price) / stop_distance
+            (execution_exit - entry_price) / r_denominator
             if side == "LONG"
-            else (entry_price - execution_exit) / stop_distance
+            else (entry_price - execution_exit) / r_denominator
         )
         fee_r = (
             entry_price * entry_fee_rate + execution_exit * exit_fee_rate
-        ) / stop_distance
+        ) / r_denominator
         net_r = gross_r - fee_r
         result = "WIN" if net_r > 0 else ("LOSS" if net_r < 0 else "BREAKEVEN")
         return {
@@ -298,6 +306,7 @@ def _simulate_simple_one_r(
             "exit_reason": "TP" if use_tp else "SL",
             "ambiguous_same_1m_bar": ambiguous,
             "tie_policy": tie,
+            "account_r_distance": float(r_denominator),
         }
     return None
 
@@ -359,6 +368,20 @@ def replay_opposite_one_r(
         stop_distance = atr * atr_multiplier * stop_multiple
         if stop_distance <= 0:
             raise ValueError("immutable ATR stop distance is not positive")
+        sizing_override = bool(
+            profile_cfg.get("position_sizing_stop_override_enabled", False)
+        )
+        sizing_stop_multiple = float(
+            profile_cfg.get("position_sizing_stop_multiple", stop_multiple)
+            or stop_multiple
+        )
+        account_r_distance = (
+            atr * atr_multiplier * sizing_stop_multiple
+            if sizing_override
+            else stop_distance
+        )
+        if account_r_distance <= 0:
+            raise ValueError("immutable position-sizing stop distance is not positive")
 
         frame, provenance = _verified_intrabar_frame(
             control,
@@ -380,6 +403,7 @@ def replay_opposite_one_r(
             side=opposite,
             entry_price=opposite_entry,
             stop_distance=stop_distance,
+            account_r_distance=account_r_distance,
             slippage=slippage,
             tie_policy=str(execution.get("tie_policy", "PESSIMISTIC")),
             entry_fee_rate=entry_fee_rate,
@@ -407,6 +431,9 @@ def replay_opposite_one_r(
                 "atr_at_entry": float(atr),
                 "atr_multiplier": float(atr_multiplier),
                 "stop_loss_multiple": float(stop_multiple),
+                "position_sizing_stop_override_enabled": sizing_override,
+                "position_sizing_stop_multiple": float(sizing_stop_multiple),
+                "position_sizing_reference_distance": float(account_r_distance),
                 "reward_risk_ratio": 1.0,
                 "source_teacher_side": source_side,
                 "source_teacher_entry_price": float(source_entry),
