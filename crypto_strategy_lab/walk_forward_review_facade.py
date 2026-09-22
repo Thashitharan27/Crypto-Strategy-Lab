@@ -18,6 +18,7 @@ from crypto_strategy_lab.walk_forward_orchestrator import (
     _decorate_teacher_loss_packet,
 )
 from crypto_strategy_lab.walk_forward_rule_validation import (
+    PERIODIC_RULE_EVENT_TYPES,
     append_events_atomic,
     preflight_rule_events,
     rule_event_schema,
@@ -189,11 +190,12 @@ def record_walk_forward_review(
             raise ValueError(f"loss review must resolve pending candidate {pending_id}")
 
     effective_iso = effective.isoformat()
-    allowed = (
-        {"VETO_LEARNED", "ENTRY_REFINED", "FLIP_LEARNED"}
-        if kind == "LOSS"
-        else set(_impl.RULE_EVENT_TYPES)
-    )
+    if kind == "LOSS":
+        allowed = {"VETO_LEARNED", "ENTRY_REFINED", "FLIP_LEARNED"}
+    elif kind in {"PERIODIC", "QUARTERLY"}:
+        allowed = set(PERIODIC_RULE_EVENT_TYPES)
+    else:
+        allowed = set(_impl.RULE_EVENT_TYPES)
     evidence_source = "BOOTSTRAP" if kind == "BOOTSTRAP" else "PROSPECTIVE_WF"
     preflight = preflight_rule_events(
         control,
