@@ -278,7 +278,7 @@ def update_latest(output_root: Path, run_dir: Path) -> None:
 
 TRADE_R_COLUMN_METADATA = {
     "distance_unit_price": "Entry-time price-distance unit selected by the configured distance basis (for example ATR × multiplier).",
-    "trade_r_price_distance": "Full initial stop distance in price units. This is the price meaning of 1 trade R.",
+    "trade_r_price_distance": "Actual full initial stop distance in price units. In separate-sizing mode this can be smaller than the sizing-R reference distance.",
     "configured_account_risk_percentage": "Legacy-compatible base risk setting. In separate-sizing mode this is a sizing input, not the actual full-stop loss.",
     "configured_sizing_budget_percentage": "Effective equity budget used to size quantity after the profile risk multiplier.",
     "position_sizing_stop_override_enabled": "Whether a separate sizing-stop reference was requested by the profile.",
@@ -291,10 +291,10 @@ TRADE_R_COLUMN_METADATA = {
     "planned_gross_stop_loss": "Gross currency loss if the configured initial stop plan fully executes, before fees and slippage.",
     "planned_gross_stop_risk_percentage": "Gross planned stop loss divided by equity before the trade.",
     "estimated_all_in_stop_risk_percentage": "Estimated account-equity loss at stop after entry fee, stop-exit fee, and configured slippage.",
-    "*_price_r": "Realized price movement divided by the full initial stop distance; 1.0 means one trade R of favourable price movement.",
-    "*_account_r": "Realized account PnL divided by planned account risk at entry; 1.0 means one configured account-risk unit.",
+    "*_price_r": "Realized price movement divided by the actual full initial stop distance; this is physical stop-relative R.",
+    "*_account_r": "Realized account PnL divided by the configured sizing budget at entry; 1.0 means one sizing-budget R.",
     "*_effective_leverage": "Entry notional divided by equity at the moment that leg was sized.",
-    "pair_account_r": "Pair-level realized account PnL divided by the pair planned account risk at entry.",
+    "pair_account_r": "Pair-level realized account PnL divided by the pair sizing budget at entry.",
 }
 
 
