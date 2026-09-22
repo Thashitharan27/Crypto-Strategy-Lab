@@ -138,6 +138,10 @@ Large 15m paired Walk Forward source-candidate histories can exceed the secure-t
 
 If that bounded slice contains no candidate or earlier teacher boundary, the orchestrator appends a `CHECKPOINT_CREATED` event with checkpoint type `CANDIDATE_SCAN_CURSOR_V1` and returns `SCAN_CHECKPOINTED`. The cursor stores the exact deterministic sort key:
 
+`(decision_available_at, entry_time, research_signal_index, side)`
+
+The decision timestamp is the primary causal watermark. This prevents a teacher resolution from skipping a candidate that entered earlier but was not yet decision-available.
+
 ```text
 (entry_time, research_signal_index, side)
 ```
