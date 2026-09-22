@@ -75,7 +75,7 @@ PHASES = {"BOOTSTRAP_RESEARCH", "RESEARCH_WF", "VALIDATED", "SHADOW", "LIVE", "R
 LEDGERS = {"RESEARCH", "SHADOW", "LIVE"}
 EVIDENCE_SOURCES = {"BOOTSTRAP", "TEACHER", "PROSPECTIVE_WF", "SHADOW", "LIVE"}
 RESEARCH_PROTOCOL_MODES = {"COLD_START", "BOOTSTRAP_THEN_WF"}
-RULE_UPDATE_MODES = {"TRADE_BY_TRADE", "MONTHLY_BATCH_OOS"}
+RULE_UPDATE_MODES = {"TRADE_BY_TRADE", "MONTHLY_BATCH_OOS", "WEEKLY_BATCH_OOS"}
 
 DEFAULT_PERIODIC_REVIEW_POLICY = {"initial_anchor": "REFERENCE_PERIOD_START"}
 DEFAULT_RULE_UPDATE_POLICY = {"mode": "TRADE_BY_TRADE"}
@@ -218,28 +218,40 @@ class CausalExperimentStore:
             mode = str(rule_update_policy.get("mode", "")).strip().upper()
             if mode not in RULE_UPDATE_MODES:
                 raise ValueError(
-                    "rule_update_policy.mode must be TRADE_BY_TRADE or MONTHLY_BATCH_OOS"
+                    "rule_update_policy.mode must be TRADE_BY_TRADE, MONTHLY_BATCH_OOS, or WEEKLY_BATCH_OOS"
                 )
             rule_update_policy["mode"] = mode
-            if mode == "MONTHLY_BATCH_OOS":
-                interval = rule_update_policy.get("interval_months", 1)
+            if mode in {"MONTHLY_BATCH_OOS", "WEEKLY_BATCH_OOS"}:
+                interval_key = (
+                    "interval_months"
+                    if mode == "MONTHLY_BATCH_OOS"
+                    else "interval_weeks"
+                )
+                other_interval_key = (
+                    "interval_weeks"
+                    if mode == "MONTHLY_BATCH_OOS"
+                    else "interval_months"
+                )
+                interval = rule_update_policy.get(interval_key, 1)
                 if isinstance(interval, bool):
-                    raise ValueError("MONTHLY_BATCH_OOS interval_months must be 1")
+                    raise ValueError(f"{mode} {interval_key} must be 1")
                 try:
                     interval = int(interval)
                 except (TypeError, ValueError) as exc:
-                    raise ValueError("MONTHLY_BATCH_OOS interval_months must be 1") from exc
+                    raise ValueError(f"{mode} {interval_key} must be 1") from exc
                 if interval != 1:
-                    raise ValueError("MONTHLY_BATCH_OOS interval_months must be 1")
+                    raise ValueError(f"{mode} {interval_key} must be 1")
                 freeze = rule_update_policy.get("freeze_between_reviews", True)
                 if freeze is not True:
                     raise ValueError(
-                        "MONTHLY_BATCH_OOS requires freeze_between_reviews=true"
+                        f"{mode} requires freeze_between_reviews=true"
                     )
-                rule_update_policy["interval_months"] = 1
+                rule_update_policy[interval_key] = 1
+                rule_update_policy.pop(other_interval_key, None)
                 rule_update_policy["freeze_between_reviews"] = True
             else:
                 rule_update_policy.pop("interval_months", None)
+                rule_update_policy.pop("interval_weeks", None)
                 rule_update_policy.pop("freeze_between_reviews", None)
         return value
 
