@@ -61,7 +61,7 @@ def _definition() -> dict:
     }
 
 
-def _environment(tmp_path: Path):
+def _environment(tmp_path: Path, *, monthly_batch: bool = False):
     project = tmp_path / "project"
     output = tmp_path / "output"
     run_dir = output / REFERENCE_RUN
@@ -77,7 +77,14 @@ def _environment(tmp_path: Path):
     control = SimpleNamespace(project_root=project, output_root=output)
     reports = FakeReports(run_dir, manifest)
     store = CausalExperimentStore(project / "walk_forward_experiments")
-    head = store.create(EXPERIMENT_ID, _definition(), "create:rule-preflight")
+    definition = _definition()
+    if monthly_batch:
+        definition["rule_update_policy"] = {
+            "mode": "MONTHLY_BATCH_OOS",
+            "interval_months": 1,
+            "freeze_between_reviews": True,
+        }
+    head = store.create(EXPERIMENT_ID, definition, "create:rule-preflight")
     return control, reports, store, head
 
 
@@ -114,6 +121,45 @@ def _canonical_di_ratio_rule() -> list[dict]:
                 ],
             },
         }
+    ]
+
+
+def test_monthly_batch_blocks_mid_month_teacher_and_loss_review_writes(tmp_path):
+    control, reports, store, head = _environment(tmp_path, monthly_batch=True)
+
+    with pytest.raises(ValueError, match="defers all teacher-driven rule changes"):
+        record_walk_forward_teacher_review(
+            control,
+            reports,
+            experiment_id=EXPERIMENT_ID,
+            teacher_pair_id="1",
+            decision="NO_CHANGE",
+            notes="Must wait for the monthly batch boundary.",
+            operation_id="monthly:teacher:blocked",
+            expected_sequence=head["sequence"],
+            expected_state_hash=head["state_hash"],
+            auto_advance=False,
+        )
+
+    with pytest.raises(ValueError, match="mid-month loss reviews"):
+        record_walk_forward_review(
+            control,
+            reports,
+            experiment_id=EXPERIMENT_ID,
+            review_type="LOSS",
+            decision="NO_CHANGE",
+            notes="Must wait for the monthly batch boundary.",
+            operation_id="monthly:loss:blocked",
+            expected_sequence=head["sequence"],
+            expected_state_hash=head["state_hash"],
+            loss_diagnosis="NO_CLEAR_CAUSAL_LESSON",
+            auto_advance=False,
+        )
+
+    unchanged = store.read(EXPERIMENT_ID, recent_events=10)
+    assert unchanged["sequence"] == head["sequence"]
+    assert [event["event_type"] for event in unchanged["recent_events"]] == [
+        "WF_CREATED"
     ]
 
 
