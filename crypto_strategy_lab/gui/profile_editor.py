@@ -85,8 +85,11 @@ class StrategyProfilesWidget(QWidget):
         self.controls["position_sizing_stop_multiple"].setToolTip(
             "Reference stop used only for quantity calculation. It does not move the actual stop or profit target."
         )
-        self.controls["reward_risk_ratio"].setSuffix(" x stop (R)")
-        self.controls["reward_risk_ratio"].setToolTip("Fixed final target as a multiple of the full initial stop distance. 1R equals the initial full stop distance. Disabled while partial take-profit is active.")
+        self.controls["reward_risk_ratio"].setSuffix(" R")
+        self.controls["reward_risk_ratio"].setToolTip(
+            "Fixed target in trade R. Normally 1R equals the actual full stop; "
+            "with a separate position-sizing stop, 1R equals the sizing reference distance."
+        )
 
         self._subsection("Stop Loss","Optional staged loss handling.")
         self._check("partial_stop_enabled","Use partial stop-loss")
