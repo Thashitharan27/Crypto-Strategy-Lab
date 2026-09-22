@@ -48,6 +48,9 @@ def test_create_read_and_list_experiment(tmp_path):
     assert readback["manifest"]["definition"]["periodic_review_policy"] == {
         "initial_anchor": "REFERENCE_PERIOD_START"
     }
+    assert readback["manifest"]["definition"]["rule_update_policy"] == {
+        "mode": "TRADE_BY_TRADE"
+    }
     assert readback["sequence"] == 1
     assert readback["state_hash"] == created["state_hash"]
     assert readback["derived_state"]["phase"] == "RESEARCH_WF"
@@ -141,6 +144,47 @@ def test_bootstrap_protocol_rejects_invalid_training_window(tmp_path):
 
     with pytest.raises(ValueError, match="bootstrap_start must be before"):
         store.create("BTC_BAD_BOOTSTRAP_WF", definition, "create:bad-bootstrap")
+
+def test_monthly_batch_oos_policy_is_normalized_and_frozen(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["rule_update_policy"] = {"mode": "monthly_batch_oos"}
+
+    store.create("BTC_MONTHLY_BATCH_WF", definition, "create:monthly-batch")
+    readback = store.read("BTC_MONTHLY_BATCH_WF")
+
+    assert readback["manifest"]["definition"]["rule_update_policy"] == {
+        "mode": "MONTHLY_BATCH_OOS",
+        "interval_months": 1,
+        "freeze_between_reviews": True,
+    }
+
+
+def test_monthly_batch_oos_rejects_non_monthly_interval(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["rule_update_policy"] = {
+        "mode": "MONTHLY_BATCH_OOS",
+        "interval_months": 2,
+        "freeze_between_reviews": True,
+    }
+
+    with pytest.raises(ValueError, match="interval_months must be 1"):
+        store.create("BTC_BAD_MONTHLY_INTERVAL", definition, "create:bad-monthly")
+
+
+def test_monthly_batch_oos_rejects_unfrozen_rules(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["rule_update_policy"] = {
+        "mode": "MONTHLY_BATCH_OOS",
+        "interval_months": 1,
+        "freeze_between_reviews": False,
+    }
+
+    with pytest.raises(ValueError, match="freeze_between_reviews=true"):
+        store.create("BTC_BAD_MONTHLY_FREEZE", definition, "create:bad-freeze")
+
 
 def test_definition_requires_experiment_identity_fields(tmp_path):
     store = CausalExperimentStore(tmp_path / "experiments")
