@@ -1063,6 +1063,10 @@ def summarize_walk_forward_rule_performance(
         raise ValueError("include_veto_effectiveness must be boolean")
 
     _store, readback, events = _verified_experiment(control, experiment_id)
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    rule_update_policy = definition.get("rule_update_policy") or {}
+    if str(rule_update_policy.get("mode", "")).strip().upper() == "MONTHLY_BATCH_OOS":
+        review_interval_months = 1
     cursor = _market_cursor(events)
     records = _rule_versions(events)
     trades, attribution_warnings = _trade_history(events, records)
@@ -1415,7 +1419,6 @@ def summarize_walk_forward_periodic_review(
         else None
     )
 
-    definition = (readback.get("manifest") or {}).get("definition") or {}
     initial_anchor = _initial_periodic_anchor(definition, events, reports)
     anchor = last_review_time or initial_anchor
     due_time = (
@@ -1566,6 +1569,7 @@ def summarize_walk_forward_periodic_review(
         "state_hash": str(readback["state_hash"]),
         "read_only": True,
         "review_interval_months": review_interval_months,
+        "rule_update_policy": deepcopy(rule_update_policy),
         "market_cursor": cursor.isoformat(),
         "review_anchor": {
             "source": "LAST_PERIODIC_REVIEW" if last_review_time is not None else (
