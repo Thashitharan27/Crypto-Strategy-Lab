@@ -12,6 +12,7 @@ from crypto_strategy_lab.data_lake_config import ResearchRunConfig
 from crypto_strategy_lab.run_manifest import file_sha256
 from crypto_strategy_lab.walk_forward_candidate_engine import get_next_walk_forward_candidate
 from crypto_strategy_lab.walk_forward_orchestrator import (
+    _batch_review_evidence,
     advance_walk_forward,
     freeze_and_reveal_walk_forward_candidate,
     record_walk_forward_review,
@@ -476,6 +477,28 @@ def test_monthly_batch_auto_executes_loss_without_mid_month_review(tmp_path):
         for event in events
     )
 
+
+
+def test_weekly_batch_evidence_uses_scheduled_boundary_not_late_cursor(tmp_path):
+    control, reports, _store, _head = _write_reference(
+        tmp_path, weekly_batch=True
+    )
+    evidence = _batch_review_evidence(
+        control,
+        reports,
+        EXPERIMENT_ID,
+        {
+            "rule_update_policy": {"mode": "WEEKLY_BATCH_OOS"},
+            "review_anchor_time": "2025-01-01T00:00:00+00:00",
+            "review_due_time": "2025-01-08T00:00:00+00:00",
+            "current_market_cursor": "2025-01-21T13:25:00+00:00",
+        },
+    )
+
+    assert evidence["window"] == {
+        "start_exclusive": "2025-01-01T00:00:00+00:00",
+        "end_inclusive": "2025-01-08T00:00:00+00:00",
+    }
 
 
 def test_weekly_batch_auto_executes_without_mid_week_review(tmp_path):
