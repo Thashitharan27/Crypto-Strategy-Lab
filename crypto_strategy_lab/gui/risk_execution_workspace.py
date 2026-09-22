@@ -149,10 +149,13 @@ class RiskExecutionWorkspace(QWidget):
 
         self.account_card = FormCard(
             "2. Account Risk & Position Sizing",
-            note="These controls define the account risk budget and how many positions may be open at once.",
+            note=(
+                "The sizing budget determines quantity. With the optional separate sizing stop, "
+                "the actual stop loss can be smaller than this budget."
+            ),
         )
         self.account_card.add_field("initial_equity", "Starting Equity", self.account["initial_equity"])
-        self.account_card.add_field("risk_per_leg", "Risk Per Trade", self.account["risk_per_leg"])
+        self.account_card.add_field("risk_per_leg", "Sizing Budget Per Trade", self.account["risk_per_leg"])
         self.account_card.add_field("max_active_pairs", "Maximum Active Trades", self.account["max_active_pairs"])
         layout.addWidget(self.account_card)
 
@@ -376,7 +379,44 @@ class RiskExecutionWorkspace(QWidget):
                 and self.trade["position_sizing_stop_override_enabled"].isChecked(),
             )
 
+        sizing_override_active = bool(
+            not ema_920
+            and not structural_stop
+            and self.trade["position_sizing_stop_override_enabled"].isChecked()
+        )
+        if (ema_920 or structural_stop) and self.trade[
+            "position_sizing_stop_override_enabled"
+        ].isChecked():
+            self.trade["position_sizing_stop_override_enabled"].setChecked(False)
+            sizing_override_active = False
+
+        incompatible_toggles = (
+            "break_even_enabled",
+            "trailing_enabled",
+            "partial_profit_enabled",
+            "partial_stop_enabled",
+            "r_step_trailing_enabled",
+            "atr_checkpoint_tp_extension_enabled",
+        )
+        for name in incompatible_toggles:
+            widget = self.trade[name]
+            if sizing_override_active and widget.isChecked():
+                widget.setChecked(False)
+            widget.setEnabled(not sizing_override_active)
+
         target_mode = str(self.account["sr_take_profit_mode"].currentData() or "FIXED_R")
+        if sizing_override_active and target_mode != "FIXED_R":
+            fixed_index = self.account["sr_take_profit_mode"].findData("FIXED_R")
+            self.account["sr_take_profit_mode"].setCurrentIndex(fixed_index)
+            target_mode = "FIXED_R"
+        self.account["sr_take_profit_mode"].setEnabled(not sizing_override_active)
+        target_label = self.target_card.rows["reward_risk_ratio"][0]
+        if target_label is not None:
+            target_label.setText(
+                "Profit Target (Sizing-R)"
+                if sizing_override_active
+                else "Base Profit Target"
+            )
         sr_target = target_mode in ("SR_CAPPED_R", "SR_LEVEL")
         for name in ("ema_920_target_method", "ema_920_target_value"):
             self.target_card.set_row_visible(name, ema_920)
