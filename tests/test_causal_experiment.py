@@ -48,6 +48,7 @@ def test_create_read_and_list_experiment(tmp_path):
     assert readback["manifest"]["definition"]["periodic_review_policy"] == {
         "initial_anchor": "REFERENCE_PERIOD_START"
     }
+    assert readback["manifest"]["definition"]["learning_mode"] == "TRADE_BY_TRADE"
     assert readback["sequence"] == 1
     assert readback["state_hash"] == created["state_hash"]
     assert readback["derived_state"]["phase"] == "RESEARCH_WF"
@@ -66,6 +67,34 @@ def test_create_read_and_list_experiment(tmp_path):
         }
     ]
 
+
+
+def test_monthly_batch_oos_policy_is_normalized_and_frozen(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["learning_mode"] = "monthly_batch_oos"
+
+    store.create("BTC_MONTHLY_BATCH", definition, "create:monthly-batch")
+    readback = store.read("BTC_MONTHLY_BATCH")
+    frozen = readback["manifest"]["definition"]
+
+    assert frozen["learning_mode"] == "MONTHLY_BATCH_OOS"
+    assert frozen["monthly_batch_policy"] == {
+        "interval_months": 1,
+        "freeze_between_reviews": True,
+        "defer_teacher_learning": True,
+        "defer_loss_learning": True,
+    }
+
+
+def test_monthly_batch_oos_rejects_non_monthly_interval(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["learning_mode"] = "MONTHLY_BATCH_OOS"
+    definition["monthly_batch_policy"] = {"interval_months": 2}
+
+    with pytest.raises(ValueError, match="requires interval_months=1"):
+        store.create("BTC_BAD_MONTHLY_BATCH", definition, "create:bad-monthly-batch")
 
 def test_manual_periodic_review_anchor_policy_is_preserved(tmp_path):
     store = CausalExperimentStore(tmp_path / "experiments")
