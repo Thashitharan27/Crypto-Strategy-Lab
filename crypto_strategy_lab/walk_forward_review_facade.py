@@ -148,6 +148,7 @@ def record_walk_forward_review(
     phase = str(((readback.get("derived_state") or {}).get("phase") or "")).upper()
     batch_mode = _impl._batch_oos_mode(definition)
     batch_oos = batch_mode is not None
+    batch_due = None
     if batch_oos and kind == "LOSS":
         period_name = "week" if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE else "month"
         boundary_name = "week-end" if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
@@ -159,13 +160,13 @@ def record_walk_forward_review(
         initial_anchor = _impl._initial_periodic_review_anchor(
             reports, definition, events
         )
-        due = _impl._review_due(
+        batch_due = _impl._review_due(
             definition,
             events,
             int(review_interval_months),
             initial_anchor=initial_anchor,
         )
-        if due is None:
+        if batch_due is None:
             boundary_name = "week-end" if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
             raise ValueError(
                 f"{batch_mode} rules are frozen until the next {boundary_name} "
@@ -181,6 +182,10 @@ def record_walk_forward_review(
         if raw_start in (None, ""):
             raise ValueError("bootstrap protocol has no walk_forward_start")
         effective = _impl._utc_timestamp(raw_start, "research_protocol.walk_forward_start")
+    elif batch_due is not None and kind in {"PERIODIC", "QUARTERLY"}:
+        effective = _impl._utc_timestamp(
+            batch_due["review_due_time"], "batch OOS scheduled review boundary"
+        )
     else:
         effective = _impl._max_event_time(events)
         if effective is None:
@@ -247,6 +252,11 @@ def record_walk_forward_review(
         "rule_event_schema_contract": preflight["rule_event_schema"]["contract"],
         **methodology,
     }
+    if batch_due is not None:
+        payload["scheduled_review_due_time"] = str(batch_due["review_due_time"])
+        payload["review_observed_market_cursor"] = str(
+            batch_due.get("current_market_cursor") or batch_due["review_due_time"]
+        )
     specs = [
         {
             "event_type": "REVIEW_COMPLETED",
