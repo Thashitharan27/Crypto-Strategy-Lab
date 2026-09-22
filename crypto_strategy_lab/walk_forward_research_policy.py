@@ -276,14 +276,41 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
         }
 
     elif status == "PERIODIC_REVIEW_REQUIRED":
-        updated["methodology_prompt"] = {
-            "primary_goal": "SIMPLIFY_CONSOLIDATE_AND_DIAGNOSE",
-            "avoid": "MICRO_RULE_ACCUMULATION",
-            "required_before_rule_authoring": [
-                "periodic_rule_action",
-                "periodic_rationale",
-            ],
-        }
+        rule_update_mode = _upper(
+            (updated.get("rule_update_policy") or {}).get("mode")
+        )
+        if rule_update_mode == "MONTHLY_BATCH_OOS":
+            updated["methodology_prompt"] = {
+                "primary_goal": "BATCH_LEARN_FREEZE_NEXT_MONTH",
+                "rules_were_frozen_during_completed_month": True,
+                "no_backdating": True,
+                "next_month_is_pure_oos": True,
+                "required_before_rule_authoring": [
+                    "periodic_rule_action",
+                    "periodic_rationale",
+                ],
+                "prefer": [
+                    "repeated causal structures across the completed batch",
+                    "simple reusable ENTRY/VETO/FLIP families",
+                    "consolidation or refinement before micro-rules",
+                    "keeping rules unchanged when monthly evidence is weak",
+                ],
+                "avoid": [
+                    "reacting to one isolated trade",
+                    "using future-month evidence",
+                    "changing any completed-month decision",
+                    "micro-rule accumulation",
+                ],
+            }
+        else:
+            updated["methodology_prompt"] = {
+                "primary_goal": "SIMPLIFY_CONSOLIDATE_AND_DIAGNOSE",
+                "avoid": "MICRO_RULE_ACCUMULATION",
+                "required_before_rule_authoring": [
+                    "periodic_rule_action",
+                    "periodic_rationale",
+                ],
+            }
 
     return updated
 
