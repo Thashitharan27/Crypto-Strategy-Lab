@@ -73,7 +73,12 @@ def _profile_exit_labels(config: BacktestConfig) -> tuple[str, str]:
             f"-TP{_format_number(profile.tp2_r)}"
         )
     else:
-        target = f"TP{_format_number(profile.stop_loss_multiple * profile.reward_risk_ratio)}"
+        target_reference = (
+            profile.position_sizing_stop_multiple
+            if profile.position_sizing_stop_override_enabled
+            else profile.stop_loss_multiple
+        )
+        target = f"TP{_format_number(target_reference * profile.reward_risk_ratio)}"
     return stop, target
 
 
