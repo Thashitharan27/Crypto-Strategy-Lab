@@ -54,8 +54,20 @@ def replay_flipped_candidate_one_r(
 
     atr_multiplier = float(execution.get("atr_multiplier", 1.0) or 1.0)
     stop_multiple = float(profile_cfg.get("stop_loss_multiple", 1.0) or 1.0)
-    if abs((atr_multiplier * stop_multiple) - 1.0) > 1e-12:
-        raise ValueError("prospective FLIP replay is limited to an exact 1 ATR stop")
+    sizing_override = bool(
+        profile_cfg.get("position_sizing_stop_override_enabled", False)
+    )
+    sizing_stop_multiple = float(
+        profile_cfg.get("position_sizing_stop_multiple", stop_multiple)
+        or stop_multiple
+    )
+    account_r_multiple = (
+        sizing_stop_multiple if sizing_override else stop_multiple
+    )
+    if abs((atr_multiplier * account_r_multiple) - 1.0) > 1e-12:
+        raise ValueError(
+            "prospective FLIP replay is limited to an exact 1 ATR sizing-R reference"
+        )
     tie_policy = str(execution.get("tie_policy", "PESSIMISTIC")).strip().upper()
     if tie_policy != "PESSIMISTIC":
         raise ValueError("prospective FLIP replay requires pessimistic same-bar tie handling")
@@ -90,6 +102,7 @@ def replay_flipped_candidate_one_r(
         1.0 + slippage if flipped_side == "LONG" else 1.0 - slippage
     )
     stop_distance = atr * atr_multiplier * stop_multiple
+    account_r_distance = atr * atr_multiplier * account_r_multiple
 
     request = manifest.get("request") or {}
     run_end_raw = request.get("end")
@@ -125,6 +138,7 @@ def replay_flipped_candidate_one_r(
         side=flipped_side,
         entry_price=replay_entry,
         stop_distance=stop_distance,
+        account_r_distance=account_r_distance,
         slippage=slippage,
         tie_policy=tie_policy,
         entry_fee_rate=entry_fee_rate,
@@ -149,7 +163,13 @@ def replay_flipped_candidate_one_r(
             "atr_at_entry": float(atr),
             "atr_multiplier": float(atr_multiplier),
             "stop_loss_multiple": float(stop_multiple),
-            "reward_risk_ratio": 1.0,
+            "position_sizing_stop_override_enabled": sizing_override,
+            "position_sizing_stop_multiple": float(sizing_stop_multiple),
+            "position_sizing_reference_distance": float(account_r_distance),
+            "reward_risk_ratio": float(
+                profile_cfg.get("reward_risk_ratio", 1.0) or 1.0
+            ),
+            "physical_reward_risk_ratio": 1.0,
             "reference_run_end": _utc(run_end_raw, "reference run end").isoformat(),
             **provenance,
         }
