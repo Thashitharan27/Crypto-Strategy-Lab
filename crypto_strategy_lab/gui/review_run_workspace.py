@@ -74,10 +74,10 @@ class ReviewRunWorkspace(QWidget):
         for row, (key, label) in enumerate(
             (
                 ("equity", "Starting Equity"),
-                ("risk", "Base Risk / Trade"),
+                ("risk", "Base Sizing Budget / Trade"),
                 ("stop_target", "Stop / Target"),
                 ("max_trades", "Maximum Active Trades"),
-                ("concurrent", "Base Planned Concurrent Risk"),
+                ("concurrent", "Base Planned Concurrent Sizing Budget"),
             )
         ):
             title = QLabel(label)
@@ -255,9 +255,23 @@ class ReviewRunWorkspace(QWidget):
         self.risk_values["risk"].setText(
             f"{display_percentage(risk_pct)} · ${risk_dollars:,.2f}"
         )
-        self.risk_values["stop_target"].setText(
-            f"{base_execution.stop_loss_multiple:g} distance units · {base_execution.reward_risk_ratio:g}R"
-        )
+        if base_execution.position_sizing_stop_override_enabled:
+            physical_rr = (
+                float(base_execution.reward_risk_ratio)
+                * float(base_execution.position_sizing_stop_multiple)
+                / float(base_execution.stop_loss_multiple)
+            )
+            self.risk_values["stop_target"].setText(
+                f"size {base_execution.position_sizing_stop_multiple:g} · "
+                f"stop {base_execution.stop_loss_multiple:g} · "
+                f"target {base_execution.reward_risk_ratio:g} sizing-R · "
+                f"physical {physical_rr:g}:1"
+            )
+        else:
+            self.risk_values["stop_target"].setText(
+                f"{base_execution.stop_loss_multiple:g} distance units · "
+                f"{base_execution.reward_risk_ratio:g}R"
+            )
         self.risk_values["max_trades"].setText(str(max_trades))
         self.risk_values["concurrent"].setText(
             f"{display_percentage(concurrent_pct)} · ${concurrent_dollars:,.2f}"
