@@ -206,6 +206,7 @@ def _write_reference(
     *,
     include_short: bool = False,
     teachers: pd.DataFrame | None = None,
+    learning_mode: str | None = None,
 ):
     project = tmp_path / "project"
     output = tmp_path / "output"
@@ -235,7 +236,10 @@ def _write_reference(
     control = SimpleNamespace(project_root=project, output_root=output)
     reports = FakeReports(run_dir, manifest)
     store = CausalExperimentStore(project / "walk_forward_experiments")
-    head = store.create(EXPERIMENT_ID, _definition(), "create:orch")
+    definition = _definition()
+    if learning_mode is not None:
+        definition["learning_mode"] = learning_mode
+    head = store.create(EXPERIMENT_ID, definition, "create:orch")
     head = store.append_event(
         EXPERIMENT_ID,
         "ENTRY_LEARNED",
@@ -468,3 +472,70 @@ def test_teacher_review_is_a_judgment_boundary_and_never_changes_equity(tmp_path
     assert recorded["status"] == "TEACHER_REVIEW_RECORDED"
     equity_after = store.read(EXPERIMENT_ID)["derived_state"]["ledgers"]["RESEARCH"]["equity"]
     assert equity_after == equity_before == 1000.0
+
+
+def test_monthly_batch_loss_is_deferred_without_midmonth_rule_mutation(tmp_path):
+    control, reports, store, head = _write_reference(
+        tmp_path, learning_mode="MONTHLY_BATCH_OOS"
+    )
+    first = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:monthly-loss",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+    )
+    assert first["status"] == "CANDIDATE_DECISION_REQUIRED"
+
+    next_point = submit_walk_forward_decision(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        candidate_id=first["candidate_id"],
+        candidate_token=first["candidate_token"],
+        final_action="LONG",
+        confidence_pct=70,
+        reasoning="Valid long setup.",
+        operation_id="decision:monthly-loss",
+        expected_sequence=first["sequence"],
+        expected_state_hash=first["state_hash"],
+    )
+
+    assert next_point["status"] != "LOSS_REVIEW_REQUIRED"
+    events = store.read(EXPERIMENT_ID, recent_events=100)["recent_events"]
+    deferred = [
+        event for event in events
+        if event["event_type"] == "REVIEW_COMPLETED"
+        and (event.get("payload") or {}).get("monthly_batch_deferred") is True
+    ]
+    assert len(deferred) == 1
+    assert deferred[0]["payload"]["decision"] == "BATCH_DEFERRED"
+    rule_events = [
+        event for event in events
+        if event["event_type"] in {"ENTRY_LEARNED", "ENTRY_REFINED", "VETO_LEARNED", "FLIP_LEARNED"}
+    ]
+    assert len(rule_events) == 1
+
+
+def test_monthly_batch_forces_one_month_review_boundary(tmp_path):
+    control, reports, store, head = _write_reference(
+        tmp_path, learning_mode="MONTHLY_BATCH_OOS"
+    )
+    reports.manifest["request"]["start"] = "2024-12-02T00:00:00Z"
+
+    result = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:monthly-boundary",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+    )
+
+    assert result["status"] == "PERIODIC_REVIEW_REQUIRED"
+    assert result["review_interval_months"] == 1
+    assert result["review_due_time"] == "2025-01-02T00:00:00+00:00"
+    assert result["periodic_review_summary"]["learning_mode"] == "MONTHLY_BATCH_OOS"
+    assert result["periodic_review_summary"]["rules_frozen_during_period"] is True
+
