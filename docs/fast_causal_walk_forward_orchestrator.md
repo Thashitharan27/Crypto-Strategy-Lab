@@ -174,6 +174,8 @@ When the next reference winner resolves before a prospective candidate, `advance
 
 ## Periodic review
 
+For experiments with `learning_mode=MONTHLY_BATCH_OOS`, the orchestrator overrides the operational review interval to one month. Teacher and prospective-loss judgment boundaries are converted into persisted deferred evidence with zero rule mutations, so deterministic scanning continues until the monthly boundary. The periodic packet exposes `monthly_batch_evidence` and `rules_frozen_during_period=true`; any rules authored by that review become effective only after the boundary and therefore belong to the next OOS month.
+
 New experiments store an immutable `periodic_review_policy.initial_anchor` policy. The default is `REFERENCE_PERIOD_START`, so before the first review exists, `advance_walk_forward` derives the anchor from the immutable reference period start and stops at `PERIODIC_REVIEW_REQUIRED` once the market cursor reaches the configured interval (default 3 months).
 
 After a periodic/quarterly `REVIEW_COMPLETED` event exists, that review time becomes the anchor for the next interval.
