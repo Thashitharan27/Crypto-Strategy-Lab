@@ -206,6 +206,7 @@ def _write_reference(
     *,
     include_short: bool = False,
     teachers: pd.DataFrame | None = None,
+    monthly_batch: bool = False,
 ):
     project = tmp_path / "project"
     output = tmp_path / "output"
@@ -235,7 +236,14 @@ def _write_reference(
     control = SimpleNamespace(project_root=project, output_root=output)
     reports = FakeReports(run_dir, manifest)
     store = CausalExperimentStore(project / "walk_forward_experiments")
-    head = store.create(EXPERIMENT_ID, _definition(), "create:orch")
+    definition = _definition()
+    if monthly_batch:
+        definition["rule_update_policy"] = {
+            "mode": "MONTHLY_BATCH_OOS",
+            "interval_months": 1,
+            "freeze_between_reviews": True,
+        }
+    head = store.create(EXPERIMENT_ID, definition, "create:orch")
     head = store.append_event(
         EXPERIMENT_ID,
         "ENTRY_LEARNED",
@@ -401,6 +409,47 @@ def test_submit_loss_returns_review_and_review_then_advances(tmp_path):
     assert next_point["status"] == "CANDIDATE_DECISION_REQUIRED"
     assert next_point["candidate"]["research_signal_index"] == 11
     assert store.read(EXPERIMENT_ID)["derived_state"]["ledgers"]["RESEARCH"]["equity"] == 990.0
+
+
+def test_monthly_batch_auto_executes_loss_without_mid_month_review(tmp_path):
+    control, reports, store, head = _write_reference(
+        tmp_path, monthly_batch=True
+    )
+
+    result = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:monthly-batch",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        max_transitions=20,
+    )
+
+    assert result["status"] not in {
+        "CANDIDATE_DECISION_REQUIRED",
+        "LOSS_REVIEW_REQUIRED",
+        "TEACHER_REVIEW_REQUIRED",
+        "TEACHER_LOSS_REVIEW_REQUIRED",
+    }
+    events = store.read(EXPERIMENT_ID, recent_events=100)["recent_events"]
+    first_freeze = next(
+        event for event in events if event["event_type"] == "DECISION_FROZEN"
+    )
+    assert first_freeze["source"] == "DETERMINISTIC_MONTHLY_BATCH_OOS"
+    assert first_freeze["payload"]["decision_mode"] == "MONTHLY_BATCH_OOS"
+    assert first_freeze["payload"]["chatgpt_view"] is None
+    assert any(
+        event["event_type"] == "TRADE_RESOLVED"
+        and float((event.get("payload") or {}).get("net_r", 0.0)) < 0
+        for event in events
+    )
+    assert not any(
+        event["event_type"] == "REVIEW_COMPLETED"
+        and str((event.get("payload") or {}).get("review_type", "")).upper()
+        == "LOSS"
+        for event in events
+    )
 
 
 def test_submit_can_resolve_exact_opposite_side_when_immutable_sample_exists(tmp_path):
