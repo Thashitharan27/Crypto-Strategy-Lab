@@ -997,7 +997,10 @@ class BacktestEngine:
         )
         uncapped = risk_amt / sizing_stop
         qty, capped = self._cap_qty(uncapped, entry, self.current_equity)
-        target_distance = stop * active_profile.reward_risk_ratio
+        target_reference_distance = (
+            sizing_stop if sizing_override_applied else stop
+        )
+        target_distance = target_reference_distance * active_profile.reward_risk_ratio
         sl = entry - side_sign * stop
         tp = entry + side_sign * target_distance
         entry_fee_rate = self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
