@@ -124,6 +124,88 @@ def _canonical_di_ratio_rule() -> list[dict]:
     ]
 
 
+def test_periodic_review_can_atomically_retire_active_rule(tmp_path):
+    control, reports, store, head = _environment(tmp_path)
+    head = store.append_event(
+        EXPERIMENT_ID,
+        "ENTRY_LEARNED",
+        {
+            "rule_id": "ENTRY_001",
+            "rule_version": "1",
+            "effective_from": "2020-06-01T00:00:00+00:00",
+            "reason": "initial reusable entry",
+            "evidence_source": "TEACHER",
+            "profile": "bull_long",
+            "conditions": [
+                {
+                    "indicator": "DIRECTIONAL_DI_RATIO",
+                    "condition": "GTE",
+                    "value": 1.25,
+                }
+            ],
+        },
+        "rule:entry:before-retire",
+        head["sequence"],
+        head["state_hash"],
+        effective_market_time="2020-06-01T00:00:00+00:00",
+        source="CHATGPT_RESEARCH",
+    )
+    head = store.append_event(
+        EXPERIMENT_ID,
+        "CHECKPOINT_CREATED",
+        {"checkpoint_type": "TEST_PERIODIC_BOUNDARY"},
+        "checkpoint:before-retire",
+        head["sequence"],
+        head["state_hash"],
+        effective_market_time="2020-07-01T00:00:00+00:00",
+        source="DETERMINISTIC_ORCHESTRATOR",
+    )
+
+    recorded = record_walk_forward_review(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        review_type="PERIODIC",
+        decision="RETIRE_STALE_RULE",
+        notes="The completed review no longer supports this entry family.",
+        operation_id="periodic:retire-entry-001",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        rule_events=[
+            {
+                "event_type": "RULE_RETIRED",
+                "payload": {
+                    "rule_id": "ENTRY_001",
+                    "rule_version": "1",
+                },
+            }
+        ],
+        periodic_rule_action="RETIRE_OR_PROMOTE",
+        periodic_rationale=(
+            "The rule is stale and should not remain active in the next frozen period."
+        ),
+        auto_advance=False,
+    )
+
+    readback = store.read(EXPERIMENT_ID, recent_events=20)
+    assert [event["event_type"] for event in readback["recent_events"]][-2:] == [
+        "REVIEW_COMPLETED",
+        "RULE_RETIRED",
+    ]
+    retired = readback["recent_events"][-1]["payload"]
+    assert retired["rule_id"] == "ENTRY_001"
+    assert retired["rule_version"] == "1"
+
+    snapshot = materialize_walk_forward_strategy(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        expected_sequence=recorded["sequence"],
+        expected_state_hash=recorded["state_hash"],
+    )
+    assert snapshot["active_rule_versions"] == []
+
+
 def test_monthly_batch_blocks_mid_month_teacher_and_loss_review_writes(tmp_path):
     control, reports, store, head = _environment(tmp_path, monthly_batch=True)
 
