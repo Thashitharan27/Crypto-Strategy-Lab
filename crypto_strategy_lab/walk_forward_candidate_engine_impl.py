@@ -513,9 +513,16 @@ def _candidate_rows(
         ]
         params: list[Any] = []
         if cursor is not None:
+            # Candidate chronology is based on when the decision is actually
+            # available, not on the historical entry timestamp. A teacher can
+            # resolve after entry_time but before decision_available_at; using
+            # entry_time here would permanently skip that still-unseen
+            # prospective opportunity after the teacher event advances time.
+            #
             # >= is intentional. Seen identities are removed later, preserving a
-            # second opportunity at the same timestamp as the previous event.
-            conditions.append("CAST(t.entry_time AS TIMESTAMPTZ) >= ?")
+            # second opportunity at the same decision timestamp as the previous
+            # event.
+            conditions.append("CAST(c.decision_available_at AS TIMESTAMPTZ) >= ?")
             params.append(cursor.to_pydatetime())
         where = "WHERE " + " AND ".join(conditions)
 
@@ -533,8 +540,10 @@ def _candidate_rows(
               ON CAST(t.research_signal_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)
             {prev_join}
             {where}
-            ORDER BY CAST(t.entry_time AS TIMESTAMPTZ),
-                     CAST(t.research_signal_index AS BIGINT), UPPER(CAST(t.side AS VARCHAR))
+            ORDER BY CAST(c.decision_available_at AS TIMESTAMPTZ),
+                     CAST(t.entry_time AS TIMESTAMPTZ),
+                     CAST(t.research_signal_index AS BIGINT),
+                     UPPER(CAST(t.side AS VARCHAR))
             LIMIT {int(limit)}
         """
         return connection.execute(sql, params).fetchdf()
