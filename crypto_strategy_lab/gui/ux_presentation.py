@@ -27,7 +27,13 @@ class FieldPresentation:
 PERCENT_FIELDS = {"risk_per_leg", "maker_fee", "taker_fee", "slippage", "percent_r"}
 FIELDS = {
     "initial_equity": FieldPresentation("Starting Equity", unit="$", decimals=2),
-    "risk_per_leg": FieldPresentation("Base Risk Per Trade", "Fraction of equity risked at a full stop.", "%", 100, 4),
+    "risk_per_leg": FieldPresentation(
+        "Base Sizing Budget Per Trade",
+        "Fraction of equity used to size quantity. With a separate sizing stop, actual gross stop exposure can be smaller.",
+        "%",
+        100,
+        4,
+    ),
     "maker_fee": FieldPresentation("Maker Fee", unit="%", scale=100, decimals=4),
     "taker_fee": FieldPresentation("Taker Fee", unit="%", scale=100, decimals=4),
     "slippage": FieldPresentation("Slippage", unit="%", scale=100, decimals=4),
