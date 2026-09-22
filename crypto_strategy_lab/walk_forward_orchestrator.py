@@ -329,11 +329,13 @@ def _assert_chatgpt_view_allowed(
         return
     readback = _impl._store(control).read(experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
-    if _impl._monthly_batch_enabled(definition):
+    batch_mode = _impl._batch_oos_mode(definition)
+    if batch_mode is not None:
+        boundary = "week-end" if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
         raise ValueError(
-            "MONTHLY_BATCH_OOS does not accept per-trade ChatGPT views; use "
+            f"{batch_mode} does not accept per-trade ChatGPT views; use "
             "advance_walk_forward so the frozen strategy_action executes "
-            "deterministically until the month-end batch review"
+            f"deterministically until the {boundary} batch review"
         )
 
 
@@ -500,12 +502,12 @@ def submit_walk_forward_view(
         if key in {"strategy_action", "chatgpt_view", "chatgpt_agrees_with_strategy"}
     })
 
-    monthly_batch = False
+    batch_oos = False
     if control is not None:
         readback = _impl._store(control).read(experiment_id, recent_events=0)
         definition = (readback.get("manifest") or {}).get("definition") or {}
-        monthly_batch = _impl._monthly_batch_enabled(definition)
-    if str(settlement.get("result")) == "LOSS" and not monthly_batch:
+        batch_oos = _impl._batch_oos_enabled(definition)
+    if str(settlement.get("result")) == "LOSS" and not batch_oos:
         packet = _ORIGINAL_BUILD_LOSS_REVIEW_PACKET(
             control, experiment_id=experiment_id, candidate_id=candidate_id
         )
@@ -775,24 +777,36 @@ def _decorate_teacher_loss_packet(
     updated["flip_activation_allowed"] = result == "WIN"
     return updated
 
-def _monthly_batch_review_evidence(
+def _batch_review_evidence(
     control: Any,
     reports: Any,
     experiment_id: str,
     result: dict[str, Any],
 ) -> dict[str, Any]:
-    """Assemble the completed frozen month for one batch review."""
+    """Assemble the completed frozen period for one batch OOS review."""
+    mode = str(
+        (result.get("rule_update_policy") or {}).get("mode", "")
+    ).strip().upper()
+    if mode not in _impl.BATCH_OOS_MODES:
+        raise ValueError("batch review evidence requires a batch OOS mode")
+    period_name = "week" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "month"
+    boundary_name = "week-end" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
+    deferred_status = (
+        _impl.WEEKLY_BATCH_DEFERRED
+        if mode == _impl.WEEKLY_BATCH_OOS_MODE
+        else _impl.MONTHLY_BATCH_DEFERRED
+    )
     store = _impl._store(control)
     events = _impl._events(store, experiment_id)
     start_raw = result.get("review_anchor_time")
     end_raw = result.get("current_market_cursor") or result.get("review_due_time")
     start = (
-        _impl._utc_timestamp(start_raw, "monthly batch review anchor")
+        _impl._utc_timestamp(start_raw, "batch OOS review anchor")
         if start_raw not in (None, "")
         else None
     )
     end = (
-        _impl._utc_timestamp(end_raw, "monthly batch review end")
+        _impl._utc_timestamp(end_raw, "batch OOS review end")
         if end_raw not in (None, "")
         else None
     )
@@ -801,7 +815,7 @@ def _monthly_batch_review_evidence(
         raw = event.get("effective_market_time")
         if raw in (None, ""):
             return False
-        when = _impl._utc_timestamp(raw, "monthly batch event time")
+        when = _impl._utc_timestamp(raw, "batch OOS event time")
         if start is not None and when <= start:
             return False
         if end is not None and when > end:
@@ -826,7 +840,7 @@ def _monthly_batch_review_evidence(
         if (
             event_type == "TEACHER_RESOLVED"
             and str(payload.get("teacher_review_status") or "").upper()
-            == _impl.MONTHLY_BATCH_DEFERRED
+            == deferred_status
             and in_window(event)
         ):
             teachers.append(
@@ -1014,7 +1028,7 @@ def _monthly_batch_review_evidence(
                 "causal_window_basis": "source outcome resolved in completed batch",
                 "opposite_outcome_rule": (
                     "counted only when the opposite row also resolved by the "
-                    "month-end boundary; later opposite outcomes remain hidden"
+                    f"{boundary_name} boundary; later opposite outcomes remain hidden"
                 ),
                 "overall": totals,
                 "by_profile_side": by_profile_side,
@@ -1026,7 +1040,8 @@ def _monthly_batch_review_evidence(
         }
 
     return {
-        "mode": _impl.MONTHLY_BATCH_OOS_MODE,
+        "mode": mode,
+        "cadence": "WEEKLY" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "MONTHLY",
         "window": {
             "start_exclusive": start.isoformat() if start is not None else None,
             "end_inclusive": end.isoformat() if end is not None else None,
@@ -1038,9 +1053,9 @@ def _monthly_batch_review_evidence(
         "teacher_observations": teachers,
         "prospective_trades": prospective,
         "review_instruction": (
-            "Judge the completed month as one evidence batch. Do not backdate any "
+            f"Judge the completed {period_name} as one evidence batch. Do not backdate any "
             "change. ENTRY/VETO/FLIP changes recorded now become active only for "
-            "the next frozen OOS month; prefer repeated causal structures and "
+            f"the next frozen OOS {period_name}; prefer repeated causal structures and "
             "consolidation over single-trade micro-rules. Before authoring new "
             "threshold rules, use the immutable reference run and completed "
             "window for feature-level winner/loss comparison when the aggregate "
