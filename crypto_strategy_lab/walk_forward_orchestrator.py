@@ -799,7 +799,10 @@ def _batch_review_evidence(
     store = _impl._store(control)
     events = _impl._events(store, experiment_id)
     start_raw = result.get("review_anchor_time")
-    end_raw = result.get("current_market_cursor") or result.get("review_due_time")
+    # Batch learning is always bounded by the scheduled OOS boundary. The
+    # market cursor may be later when WAIT_UNTIL_CLOSED delays when the review
+    # can be processed, but post-boundary outcomes belong to a later batch.
+    end_raw = result.get("review_due_time") or result.get("current_market_cursor")
     start = (
         _impl._utc_timestamp(start_raw, "batch OOS review anchor")
         if start_raw not in (None, "")

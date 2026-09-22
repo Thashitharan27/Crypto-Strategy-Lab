@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
 from crypto_strategy_lab.causal_experiment import CausalExperimentStore
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
 from crypto_strategy_lab.walk_forward_materialization import materialize_walk_forward_strategy
@@ -215,6 +216,85 @@ def test_periodic_review_can_atomically_retire_active_rule(tmp_path):
         expected_state_hash=recorded["state_hash"],
     )
     assert snapshot["active_rule_versions"] == []
+
+
+def test_weekly_batch_review_records_scheduled_boundary_not_late_market_cursor(tmp_path):
+    control, reports, store, _ = _environment(tmp_path)
+    reports.manifest["request"]["start"] = "2025-01-01T00:00:00Z"
+
+    experiment_id = "BTCUSDT_15M_WF_WEEKLY_BOUNDARY_TEST"
+    definition = _definition()
+    definition["periodic_review_policy"] = {
+        "enabled": True,
+        "interval_months": 3,
+        "initial_anchor": "REFERENCE_PERIOD_START",
+    }
+    definition["rule_update_policy"] = {
+        "mode": "WEEKLY_BATCH_OOS",
+        "interval_weeks": 1,
+        "freeze_between_reviews": True,
+    }
+    head = store.create(experiment_id, definition, "create:weekly-boundary")
+    head = store.append_event(
+        experiment_id,
+        "CHECKPOINT_CREATED",
+        {"checkpoint_type": "LATE_WAIT_UNTIL_CLOSED_RESOLUTION_CURSOR"},
+        "cursor:late-weekly-review",
+        head["sequence"],
+        head["state_hash"],
+        effective_market_time="2025-01-08T23:20:00Z",
+        source="DETERMINISTIC_ORCHESTRATOR",
+    )
+
+    recorded = record_walk_forward_review(
+        control,
+        reports,
+        experiment_id=experiment_id,
+        review_type="PERIODIC",
+        decision="NO_CHANGE",
+        notes="Completed week had no reusable new rule.",
+        operation_id="weekly:review:jan8",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        auto_advance=False,
+    )
+
+    readback = store.read(experiment_id, recent_events=20)
+    review = next(
+        event
+        for event in readback["recent_events"]
+        if event["event_type"] == "REVIEW_COMPLETED"
+    )
+    assert review["effective_market_time"] == "2025-01-08T00:00:00+00:00"
+    assert review["payload"]["scheduled_review_due_time"] == "2025-01-08T00:00:00+00:00"
+    assert review["payload"]["review_observed_market_cursor"] == "2025-01-08T23:20:00+00:00"
+
+    # The late processing time must not shift the cadence. The next due boundary
+    # remains Jan 15 00:00, exactly seven days after the scheduled Jan 8 review.
+    head = store.append_event(
+        experiment_id,
+        "CHECKPOINT_CREATED",
+        {"checkpoint_type": "NEXT_WEEK_CURSOR"},
+        "cursor:next-week",
+        recorded["sequence"],
+        recorded["state_hash"],
+        effective_market_time="2025-01-15T01:00:00Z",
+        source="DETERMINISTIC_ORCHESTRATOR",
+    )
+    events = _impl._events(store, experiment_id)
+    current_definition = store.read(experiment_id, recent_events=0)["manifest"]["definition"]
+    initial_anchor = _impl._initial_periodic_review_anchor(
+        reports, current_definition, events
+    )
+    due = _impl._review_due(
+        current_definition,
+        events,
+        3,
+        initial_anchor=initial_anchor,
+    )
+    assert due is not None
+    assert due["review_anchor_time"] == "2025-01-08T00:00:00+00:00"
+    assert due["review_due_time"] == "2025-01-15T00:00:00+00:00"
 
 
 def test_monthly_batch_blocks_mid_month_teacher_and_loss_review_writes(tmp_path):

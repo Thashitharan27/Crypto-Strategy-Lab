@@ -88,6 +88,41 @@ def test_weekly_batch_review_is_due_exactly_one_week_from_anchor():
     assert result["period_trade_stats"]["trades"] == 2
 
 
+def test_weekly_batch_review_caps_completed_batch_at_scheduled_due_time():
+    definition = {
+        **_definition(),
+        "rule_update_policy": {
+            "mode": "WEEKLY_BATCH_OOS",
+            "interval_weeks": 1,
+            "freeze_between_reviews": True,
+        },
+    }
+    events = [
+        _resolved(2, "2025-01-07T23:00:00+00:00", 1.0),
+        # This later resolution advances the market cursor, but belongs to the
+        # following OOS week and must not leak into the Jan 8 batch review.
+        _resolved(3, "2025-01-08T12:00:00+00:00", -1.0),
+    ]
+    anchor_time = _initial_periodic_review_anchor(
+        FakeReports(), definition, events
+    )
+
+    result = _review_due(
+        definition,
+        events,
+        3,
+        initial_anchor=anchor_time,
+    )
+
+    assert result is not None
+    assert result["review_due_time"] == "2025-01-08T00:00:00+00:00"
+    assert result["review_window_end"] == "2025-01-08T00:00:00+00:00"
+    assert result["current_market_cursor"] == "2025-01-08T12:00:00+00:00"
+    assert result["period_trade_stats"]["trades"] == 1
+    assert result["period_trade_stats"]["wins"] == 1
+    assert result["period_trade_stats"]["losses"] == 0
+
+
 def test_first_periodic_review_is_not_due_before_three_months():
     events = [_resolved(2, "2025-03-31T23:59:59+00:00", 1.0)]
     anchor = _initial_periodic_review_anchor(FakeReports(), _definition(), events)
