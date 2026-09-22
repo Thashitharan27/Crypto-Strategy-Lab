@@ -8,6 +8,7 @@ from crypto_strategy_lab import walk_forward_orchestrator as orchestrator
 from crypto_strategy_lab.walk_forward_candidate_engine import (
     SCAN_CHECKPOINT_TYPE,
     _StreamingCandidateRows,
+    _rule_decision,
     _scan_checkpoint,
 )
 
@@ -160,6 +161,38 @@ def test_stream_cursor_resumes_exactly_after_same_timestamp_key(tmp_path):
 
 
 
+
+
+def test_standalone_flip_remains_executable_without_entry():
+    decision = _rule_decision(
+        {"mean_reversion_state": "STRONGLY_ABOVE_MEAN"},
+        "bull_long",
+        "LONG",
+        {
+            "ENTRY": [],
+            "VETO": [],
+            "FLIP": [
+                {
+                    "id": "FLIP_001",
+                    "enabled": True,
+                    "conditions": [
+                        {
+                            "indicator": "MR_STATE",
+                            "condition": "EQUALS",
+                            "value": "STRONGLY_ABOVE_MEAN",
+                        }
+                    ],
+                }
+            ],
+        },
+        {"strategy": {"profiles": {"bull_long": {"enabled": True}}}},
+    )
+
+    assert decision["eligible"] is True
+    assert decision["reason"] == "FLIP_MATCHED_WITHOUT_ENTRY"
+    assert decision["matched_entry_groups"] == []
+    assert decision["matched_flip_groups"] == ["FLIP_001"]
+    assert decision["rule_effective_side"] == "SHORT"
 
 def test_stream_keeps_candidate_entered_before_teacher_but_decidable_after_teacher(tmp_path):
     samples_path, context_path = _parquets(
