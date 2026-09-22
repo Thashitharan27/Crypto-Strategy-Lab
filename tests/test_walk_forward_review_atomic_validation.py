@@ -281,7 +281,7 @@ def test_weekly_batch_review_records_scheduled_boundary_not_late_market_cursor(t
         effective_market_time="2025-01-15T01:00:00Z",
         source="DETERMINISTIC_ORCHESTRATOR",
     )
-    events = store._load_events(experiment_id)
+    events = _impl._events(store, experiment_id)
     current_definition = store.read(experiment_id, recent_events=0)["manifest"]["definition"]
     initial_anchor = _impl._initial_periodic_review_anchor(
         reports, current_definition, events
