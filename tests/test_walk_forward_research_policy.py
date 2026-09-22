@@ -228,6 +228,29 @@ def test_monthly_batch_periodic_packet_preserves_batch_methodology():
     ]
 
 
+def test_weekly_batch_periodic_packet_preserves_batch_methodology():
+    packet = decorate_review_packet(
+        {
+            "status": "PERIODIC_REVIEW_REQUIRED",
+            "rule_update_policy": {
+                "mode": "WEEKLY_BATCH_OOS",
+                "interval_weeks": 1,
+                "freeze_between_reviews": True,
+            },
+        }
+    )
+    prompt = packet["methodology_prompt"]
+
+    assert prompt["primary_goal"] == "BATCH_LEARN_FREEZE_NEXT_WEEK"
+    assert prompt["rules_were_frozen_during_completed_week"] is True
+    assert prompt["no_backdating"] is True
+    assert prompt["next_week_is_pure_oos"] is True
+    assert prompt["required_before_rule_authoring"] == [
+        "periodic_rule_action",
+        "periodic_rationale",
+    ]
+
+
 def test_periodic_rule_writing_requires_strategic_action_and_rationale():
     with pytest.raises(ValueError, match="periodic_rule_action"):
         validate_periodic_methodology(
