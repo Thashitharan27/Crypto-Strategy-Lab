@@ -933,6 +933,15 @@ class MainWindow(LegacyMainWindow):
                 ", ".join(item.replace("_", " ").title() for item in permissions)
                 or "None"
             )
+            review_risk_text = (
+                f"Sizing Reference: {base_execution.position_sizing_stop_multiple:g} distance units · "
+                f"Actual Stop: {base_execution.stop_loss_multiple:g} · "
+                f"Target: {base_execution.reward_risk_ratio:g} sizing-R\n"
+                if sizing_override
+                else
+                f"Stop: {base_execution.stop_loss_multiple:g} distance units · "
+                f"Target: {base_execution.reward_risk_ratio:g}R\n"
+            )
             self.review_summary.setText(
                 f"{self.symbol.currentText() or 'BTCUSDT'} — "
                 f"{TIMEFRAME_LABELS[timeframe_label(config.data.strategy_timeframe_minutes)]} Research\n\n"
@@ -945,15 +954,7 @@ class MainWindow(LegacyMainWindow):
                 f"Support / Resistance: {sr_text}\n\n"
                 f"Starting Equity: ${config.execution.initial_equity:,.2f}\n"
                 f"Base Sizing Budget: {risk}\n"
-                + (
-                    f"Sizing Reference: {base_execution.position_sizing_stop_multiple:g} distance units · "
-                    f"Actual Stop: {base_execution.stop_loss_multiple:g} · "
-                    f"Target: {base_execution.reward_risk_ratio:g} sizing-R\n"
-                    if sizing_override
-                    else
-                    f"Stop: {base_execution.stop_loss_multiple:g} distance units · "
-                    f"Target: {base_execution.reward_risk_ratio:g}R\n"
-                )
+                f"{review_risk_text}"
                 f"Maximum Active Trades: {config.execution.max_active_pairs}\n"
                 f"Reports: {config.reporting.analysis_level}\n\n"
                 f"DATA STATUS: {self._data_state()}"
