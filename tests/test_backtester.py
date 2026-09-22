@@ -194,6 +194,14 @@ def test_separate_position_sizing_stop_preserves_fee_drag_on_small_target():
     assert row.long_exit_reason == "TP"
     assert row.pair_gross_r > 0
     assert row.pair_net_r < row.pair_gross_r
+    expected_gross_target = (
+        abs(row.long_tp - row.long_entry_price) * row.long_quantity
+    )
+    assert row.expected_gross_winning_pair_pnl == pytest.approx(expected_gross_target)
+    assert row.expected_gross_winning_pair_pnl == pytest.approx(10.0)
+    assert row.fees_as_percentage_of_expected_winning_profit == pytest.approx(
+        row.pair_total_fees / row.expected_gross_winning_pair_pnl * 100
+    )
     assert row.estimated_all_in_stop_risk_percentage > row.planned_gross_stop_risk_percentage
 
 
