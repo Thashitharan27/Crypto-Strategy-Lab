@@ -1385,6 +1385,76 @@ def _period_comparison(
     return rows
 
 
+
+def _monthly_batch_evidence(
+    events: list[dict[str, Any]],
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict[str, Any]:
+    teachers: list[dict[str, Any]] = []
+    losses: list[dict[str, Any]] = []
+    teacher_results: Counter[str] = Counter()
+    teacher_profiles: Counter[str] = Counter()
+
+    for event in events:
+        when = _event_time(event)
+        if when is None or when <= start or when > end:
+            continue
+        payload = event.get("payload") or {}
+        if not bool(payload.get("monthly_batch_deferred")):
+            continue
+        event_type = str(event.get("event_type") or "")
+        if event_type == "TEACHER_RESOLVED":
+            result = str(payload.get("result") or "UNKNOWN").upper()
+            profile = str(payload.get("strategy_profile_key") or "UNKNOWN").lower()
+            teacher_results[result] += 1
+            teacher_profiles[profile] += 1
+            teachers.append(
+                {
+                    "pair_id": payload.get("pair_id"),
+                    "walk_forward_candidate_id": payload.get("walk_forward_candidate_id"),
+                    "research_signal_index": payload.get("research_signal_index"),
+                    "entry_time": payload.get("entry_time"),
+                    "resolution_time": payload.get("resolution_time")
+                    or event.get("effective_market_time"),
+                    "strategy_profile_key": payload.get("strategy_profile_key"),
+                    "side": payload.get("side"),
+                    "result": result,
+                    "pair_net_r": payload.get("pair_net_r"),
+                    "teacher_learning_mode": payload.get("teacher_learning_mode"),
+                    "paired_opposite_side": payload.get("paired_opposite_side"),
+                    "paired_opposite_net_r": payload.get("paired_opposite_net_r"),
+                }
+            )
+        elif event_type == "REVIEW_COMPLETED" and str(
+            payload.get("review_type") or ""
+        ).upper() == "LOSS":
+            losses.append(
+                {
+                    "candidate_id": payload.get("candidate_id"),
+                    "resolution_time": event.get("effective_market_time"),
+                    "decision": payload.get("decision"),
+                }
+            )
+
+    return {
+        "contract": "monthly_batch_oos_evidence_v1",
+        "period_start_exclusive": start.isoformat(),
+        "period_end": end.isoformat(),
+        "rules_frozen_during_period": True,
+        "deferred_teacher_count": len(teachers),
+        "deferred_teacher_results": dict(sorted(teacher_results.items())),
+        "deferred_teacher_profiles": dict(sorted(teacher_profiles.items())),
+        "deferred_teacher_observations": teachers,
+        "deferred_loss_count": len(losses),
+        "deferred_losses": losses,
+        "review_instruction": (
+            "Use this complete deferred evidence together with OOS trade/rule analytics. "
+            "Any ENTRY/VETO/FLIP changes become effective only after this month-end review."
+        ),
+    }
+
 def summarize_walk_forward_periodic_review(
     control: Any,
     reports: Any,
@@ -1416,6 +1486,12 @@ def summarize_walk_forward_periodic_review(
     )
 
     definition = (readback.get("manifest") or {}).get("definition") or {}
+    learning_mode = str(definition.get("learning_mode", "TRADE_BY_TRADE")).strip().upper()
+    batch_evidence = (
+        _monthly_batch_evidence(events, start=current_start, end=cursor)
+        if learning_mode == "MONTHLY_BATCH_OOS"
+        else None
+    )
     initial_anchor = _initial_periodic_anchor(definition, events, reports)
     anchor = last_review_time or initial_anchor
     due_time = (
@@ -1565,6 +1641,9 @@ def summarize_walk_forward_periodic_review(
         "sequence": int(readback["sequence"]),
         "state_hash": str(readback["state_hash"]),
         "read_only": True,
+        "learning_mode": learning_mode,
+        "rules_frozen_during_period": learning_mode == "MONTHLY_BATCH_OOS",
+        "monthly_batch_evidence": batch_evidence,
         "review_interval_months": review_interval_months,
         "market_cursor": cursor.isoformat(),
         "review_anchor": {
