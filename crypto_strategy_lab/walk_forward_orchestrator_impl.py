@@ -1036,6 +1036,103 @@ def _judgment_candidate(events: list[dict[str, Any]], candidate_id: str) -> dict
     }
 
 
+
+def _learning_mode(definition: dict[str, Any]) -> str:
+    return str(definition.get("learning_mode", "TRADE_BY_TRADE")).strip().upper()
+
+
+def _monthly_batch_oos(definition: dict[str, Any]) -> bool:
+    return _learning_mode(definition) == "MONTHLY_BATCH_OOS"
+
+
+def _effective_review_interval_months(
+    definition: dict[str, Any], requested_months: int
+) -> int:
+    if not _monthly_batch_oos(definition):
+        return int(requested_months)
+    policy = definition.get("monthly_batch_policy") or {}
+    return int(policy.get("interval_months", 1))
+
+
+def _append_monthly_deferred_loss(
+    store: CausalExperimentStore,
+    *,
+    experiment_id: str,
+    loss_event: dict[str, Any],
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+) -> dict[str, Any]:
+    payload = loss_event.get("payload") or {}
+    candidate_id = str(payload.get("candidate_id") or "").strip()
+    if not candidate_id:
+        raise ValueError("monthly batch loss deferral requires candidate_id")
+    effective = (
+        loss_event.get("effective_market_time")
+        or loss_event.get("event_time")
+        or loss_event.get("recorded_at")
+    )
+    if not effective:
+        raise ValueError("monthly batch loss deferral requires a causal market time")
+    return store.append_event(
+        experiment_id,
+        "REVIEW_COMPLETED",
+        {
+            "review_type": "LOSS",
+            "candidate_id": candidate_id,
+            "decision": "BATCH_DEFERRED",
+            "notes": (
+                "Prospective loss retained as monthly batch evidence; "
+                "no ENTRY/VETO/FLIP mutation is allowed before the month-end review."
+            ),
+            "monthly_batch_deferred": True,
+            "learning_mode": "MONTHLY_BATCH_OOS",
+            "rule_mutation_count": 0,
+        },
+        _operation(operation_id, f"monthly-defer-loss-{candidate_id}"),
+        int(expected_sequence),
+        str(expected_state_hash),
+        effective_market_time=str(effective),
+        source="DETERMINISTIC_MONTHLY_BATCH",
+    )
+
+
+def _append_monthly_deferred_teacher(
+    store: CausalExperimentStore,
+    *,
+    experiment_id: str,
+    teacher_boundary: dict[str, Any],
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+) -> dict[str, Any]:
+    boundary = deepcopy(teacher_boundary)
+    resolution_time = boundary.get("resolution_time")
+    if resolution_time in (None, ""):
+        raise ValueError("monthly batch teacher deferral requires resolution_time")
+    boundary["result"] = str(boundary.get("result", "WIN")).upper()
+    boundary["review_decision"] = "BATCH_DEFERRED"
+    boundary["teacher_review_status"] = "BATCH_DEFERRED"
+    boundary["monthly_batch_deferred"] = True
+    boundary["learning_mode"] = "MONTHLY_BATCH_OOS"
+    boundary["notes"] = (
+        "Teacher observation retained for month-end batch learning; "
+        "no rule mutation was applied intra-month."
+    )
+    return store.append_event(
+        experiment_id,
+        "TEACHER_RESOLVED",
+        boundary,
+        _operation(
+            operation_id,
+            "monthly-defer-teacher-" + str(boundary.get("pair_id") or "unknown"),
+        ),
+        int(expected_sequence),
+        str(expected_state_hash),
+        effective_market_time=str(resolution_time),
+        source="DETERMINISTIC_MONTHLY_BATCH",
+    )
+
 def advance_walk_forward(
     control: Any,
     reports: Any,
@@ -1058,6 +1155,11 @@ def advance_walk_forward(
 
     for step in range(int(max_transitions)):
         store, readback, events = _verified(control, experiment_id, sequence, state_hash)
+        definition = (readback.get("manifest") or {}).get("definition") or {}
+        monthly_batch = _monthly_batch_oos(definition)
+        effective_review_interval = _effective_review_interval_months(
+            definition, int(review_interval_months)
+        )
         unresolved = _open_candidate(events)
         if unresolved is not None:
             candidate_id, state = unresolved
@@ -1081,6 +1183,20 @@ def advance_walk_forward(
                 )
                 sequence, state_hash = int(settled["sequence"]), str(settled["state_hash"])
                 if str((settled.get("settlement") or {}).get("result")) == "LOSS":
+                    if monthly_batch:
+                        loss_event = _existing_resolution(events=_events(store, experiment_id), candidate_id=candidate_id)
+                        if loss_event is None:
+                            raise ValueError("settled monthly batch loss could not be recovered")
+                        deferred = _append_monthly_deferred_loss(
+                            store,
+                            experiment_id=experiment_id,
+                            loss_event=loss_event,
+                            operation_id=_operation(operation_id, f"defer-loss-{step}"),
+                            expected_sequence=sequence,
+                            expected_state_hash=state_hash,
+                        )
+                        sequence, state_hash = int(deferred["sequence"]), str(deferred["state_hash"])
+                        continue
                     packet = build_loss_review_packet(
                         control, experiment_id=experiment_id, candidate_id=candidate_id
                     )
@@ -1091,19 +1207,29 @@ def advance_walk_forward(
         loss = _unreviewed_loss(events)
         if loss is not None:
             candidate_id = str((loss.get("payload") or {}).get("candidate_id"))
+            if monthly_batch:
+                deferred = _append_monthly_deferred_loss(
+                    store,
+                    experiment_id=experiment_id,
+                    loss_event=loss,
+                    operation_id=_operation(operation_id, f"defer-pending-loss-{step}"),
+                    expected_sequence=sequence,
+                    expected_state_hash=state_hash,
+                )
+                sequence, state_hash = int(deferred["sequence"]), str(deferred["state_hash"])
+                continue
             packet = build_loss_review_packet(
                 control, experiment_id=experiment_id, candidate_id=candidate_id
             )
             packet.update(sequence=sequence, state_hash=state_hash)
             return packet
 
-        definition = (readback.get("manifest") or {}).get("definition") or {}
         initial_review_anchor = _initial_periodic_review_anchor(
             reports, definition, events
         )
         periodic = _periodic_review_due(
             events,
-            int(review_interval_months),
+            int(effective_review_interval),
             initial_anchor=initial_review_anchor,
         )
         if periodic is not None:
@@ -1122,7 +1248,7 @@ def advance_walk_forward(
 
         next_review_time = _next_periodic_review_time(
             events,
-            int(review_interval_months),
+            int(effective_review_interval),
             initial_anchor=initial_review_anchor,
         )
         scan = get_next_walk_forward_candidate(
@@ -1173,6 +1299,17 @@ def advance_walk_forward(
                 "outcome_exposed": False,
             }
         if status == "TEACHER_DUE_FIRST":
+            if monthly_batch:
+                deferred = _append_monthly_deferred_teacher(
+                    store,
+                    experiment_id=experiment_id,
+                    teacher_boundary=scan["teacher_boundary"],
+                    operation_id=_operation(operation_id, f"defer-teacher-{step}"),
+                    expected_sequence=sequence,
+                    expected_state_hash=state_hash,
+                )
+                sequence, state_hash = int(deferred["sequence"]), str(deferred["state_hash"])
+                continue
             packet = _teacher_review_packet(
                 control, reports,
                 experiment_id=experiment_id,
@@ -1264,11 +1401,14 @@ def submit_walk_forward_decision(
     )
     settlement = settled.get("settlement") or {}
     if str(settlement.get("result")) == "LOSS":
-        packet = build_loss_review_packet(
-            control, experiment_id=experiment_id, candidate_id=candidate_id
-        )
-        packet.update(sequence=settled["sequence"], state_hash=settled["state_hash"])
-        return packet
+        readback = _store(control).read(experiment_id, recent_events=0)
+        definition = (readback.get("manifest") or {}).get("definition") or {}
+        if not _monthly_batch_oos(definition):
+            packet = build_loss_review_packet(
+                control, experiment_id=experiment_id, candidate_id=candidate_id
+            )
+            packet.update(sequence=settled["sequence"], state_hash=settled["state_hash"])
+            return packet
     if not auto_advance:
         return {
             "contract": ORCHESTRATOR_CONTRACT,
