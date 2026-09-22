@@ -92,6 +92,25 @@ class StrategyProfile:
             raise ValueError(f"{key}: stop-loss multiple must be positive")
         if self.position_sizing_stop_multiple <= 0:
             raise ValueError(f"{key}: position-sizing stop multiple must be positive")
+        if self.position_sizing_stop_override_enabled:
+            incompatible = [
+                name
+                for name, enabled in (
+                    ("partial stop", self.partial_stop_enabled),
+                    ("partial take-profit", self.partial_profit_enabled),
+                    ("break-even", self.break_even_enabled),
+                    ("trailing stop", self.trailing_enabled),
+                    ("R-step trailing", self.r_step_trailing_enabled),
+                    ("ATR checkpoint extension", self.atr_checkpoint_tp_extension_enabled),
+                )
+                if enabled
+            ]
+            if incompatible:
+                raise ValueError(
+                    f"{key}: separate position-sizing stop currently supports only "
+                    "simple fixed stop/target execution; disable "
+                    + ", ".join(incompatible)
+                )
         if self.sl1_r <= 0 or self.sl2_r <= self.sl1_r:
             raise ValueError(f"{key}: SL2 must be greater than SL1")
         if self.tp1_r <= 0 or self.tp2_r <= self.tp1_r:
