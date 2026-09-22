@@ -82,6 +82,33 @@ def test_v3_defaults_match_current_research_defaults():
     assert config.reporting.create_standard_charts is True
 
 
+def test_execution_profile_defaults_keep_legacy_stop_sizing_coupled():
+    profile = ExecutionProfileConfig()
+    assert profile.position_sizing_stop_override_enabled is False
+    assert profile.position_sizing_stop_multiple == pytest.approx(1.0)
+
+
+def test_execution_profile_accepts_explicit_separate_sizing_stop():
+    config = normalize_data_lake_config(
+        {
+            "config_version": 3,
+            "execution": {
+                "profiles": {
+                    "bull_long": {
+                        "stop_loss_multiple": 0.2,
+                        "position_sizing_stop_override_enabled": True,
+                        "position_sizing_stop_multiple": 1.0,
+                    }
+                }
+            },
+        }
+    )
+    profile = config.execution.profiles["bull_long"]
+    assert profile.stop_loss_multiple == pytest.approx(0.2)
+    assert profile.position_sizing_stop_override_enabled is True
+    assert profile.position_sizing_stop_multiple == pytest.approx(1.0)
+
+
 def test_strategy_and_execution_profiles_are_separate_authoritative_types():
     config = ResearchRunConfig()
     strategy_profile = config.strategy.profiles["bull_long"]
