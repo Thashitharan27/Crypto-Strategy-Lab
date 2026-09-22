@@ -205,6 +205,29 @@ def test_candidate_decision_packet_requires_explicit_ichimoku_review():
     assert packet["methodology_prompt"]["do_not_change_strategy_action"] is True
 
 
+def test_monthly_batch_periodic_packet_preserves_batch_methodology():
+    packet = decorate_review_packet(
+        {
+            "status": "PERIODIC_REVIEW_REQUIRED",
+            "rule_update_policy": {
+                "mode": "MONTHLY_BATCH_OOS",
+                "interval_months": 1,
+                "freeze_between_reviews": True,
+            },
+        }
+    )
+    prompt = packet["methodology_prompt"]
+
+    assert prompt["primary_goal"] == "BATCH_LEARN_FREEZE_NEXT_MONTH"
+    assert prompt["rules_were_frozen_during_completed_month"] is True
+    assert prompt["no_backdating"] is True
+    assert prompt["next_month_is_pure_oos"] is True
+    assert prompt["required_before_rule_authoring"] == [
+        "periodic_rule_action",
+        "periodic_rationale",
+    ]
+
+
 def test_periodic_rule_writing_requires_strategic_action_and_rationale():
     with pytest.raises(ValueError, match="periodic_rule_action"):
         validate_periodic_methodology(
