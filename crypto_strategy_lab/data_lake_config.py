@@ -567,7 +567,8 @@ class ResearchRunConfig:
         structural_stop = execution.risk_mode == "SR_STRUCTURE"
         sr_target = execution.sr_take_profit_mode in {"SR_CAPPED_R", "SR_LEVEL"}
         separate_sizing = any(
-            execution.profiles[key].position_sizing_stop_override_enabled
+            strategy.profiles[key].enabled
+            and execution.profiles[key].position_sizing_stop_override_enabled
             for key in execution.profiles
         )
         if separate_sizing and (structural_stop or sr_target):
