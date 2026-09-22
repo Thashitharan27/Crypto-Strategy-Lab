@@ -847,6 +847,7 @@ def _periodic_review_due(
     months: int,
     *,
     initial_anchor: pd.Timestamp | None = None,
+    cap_history_at_due: bool = False,
 ) -> dict[str, Any] | None:
     anchor = _periodic_review_anchor(events, initial_anchor)
     if anchor is None:
@@ -860,6 +861,7 @@ def _periodic_review_due(
     if cursor < due:
         return None
 
+    history_end = due if cap_history_at_due else cursor
     history = []
     for event in events:
         if event.get("event_type") != "TRADE_RESOLVED":
@@ -868,7 +870,7 @@ def _periodic_review_due(
         if not raw:
             continue
         when = _utc_timestamp(raw, "trade resolution time")
-        if last_time < when <= cursor:
+        if last_time < when <= history_end:
             history.append(event.get("payload") or {})
 
     return {
@@ -879,6 +881,7 @@ def _periodic_review_due(
         "review_anchor_source": anchor_source,
         "review_anchor_time": last_time.isoformat(),
         "review_due_time": due.isoformat(),
+        "review_window_end": history_end.isoformat(),
         "current_market_cursor": cursor.isoformat(),
         "period_trade_stats": _stats(history),
     }
@@ -900,6 +903,7 @@ def _weekly_review_due(
     if cursor < due:
         return None
 
+    history_end = due
     history = []
     for event in events:
         if event.get("event_type") != "TRADE_RESOLVED":
@@ -908,7 +912,7 @@ def _weekly_review_due(
         if not raw:
             continue
         when = _utc_timestamp(raw, "trade resolution time")
-        if last_time < when <= cursor:
+        if last_time < when <= history_end:
             history.append(event.get("payload") or {})
 
     return {
@@ -920,6 +924,7 @@ def _weekly_review_due(
         "review_anchor_source": anchor_source,
         "review_anchor_time": last_time.isoformat(),
         "review_due_time": due.isoformat(),
+        "review_window_end": history_end.isoformat(),
         "current_market_cursor": cursor.isoformat(),
         "period_trade_stats": _stats(history),
     }
@@ -938,6 +943,7 @@ def _review_due(
         events,
         _effective_review_interval(definition, requested_months),
         initial_anchor=initial_anchor,
+        cap_history_at_due=_batch_oos_enabled(definition),
     )
 
 
@@ -1690,9 +1696,29 @@ def record_walk_forward_review(
     text = str(notes).strip()
     if not str(decision).strip():
         raise ValueError("decision cannot be empty")
-    effective = _max_event_time(events)
-    if effective is None:
-        raise ValueError("review requires an established market-time cursor")
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    batch_due = None
+    if _batch_oos_enabled(definition) and kind in {"PERIODIC", "QUARTERLY"}:
+        initial_anchor = _initial_periodic_review_anchor(
+            reports, definition, events
+        )
+        batch_due = _review_due(
+            definition,
+            events,
+            int(review_interval_months),
+            initial_anchor=initial_anchor,
+        )
+        if batch_due is None:
+            raise ValueError(
+                "batch OOS periodic review cannot be recorded before its scheduled boundary"
+            )
+        effective = _utc_timestamp(
+            batch_due["review_due_time"], "batch OOS scheduled review boundary"
+        )
+    else:
+        effective = _max_event_time(events)
+        if effective is None:
+            raise ValueError("review requires an established market-time cursor")
     subject = str(candidate_id or "").strip()
     if kind == "LOSS":
         pending = _unreviewed_loss(events)
@@ -1724,6 +1750,11 @@ def record_walk_forward_review(
         "reviewed_state_hash": str(expected_state_hash),
         **methodology,
     }
+    if batch_due is not None:
+        payload["scheduled_review_due_time"] = str(batch_due["review_due_time"])
+        payload["review_observed_market_cursor"] = str(
+            batch_due.get("current_market_cursor") or batch_due["review_due_time"]
+        )
     reviewed = store.append_event(
         experiment_id,
         "REVIEW_COMPLETED",
