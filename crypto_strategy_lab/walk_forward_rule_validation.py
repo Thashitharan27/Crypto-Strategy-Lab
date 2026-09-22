@@ -22,6 +22,7 @@ from crypto_strategy_lab import walk_forward_materialization as materialization
 
 
 RULE_EVENT_SCHEMA_CONTRACT = "causal_walk_forward_rule_event_schema_v1"
+PERIODIC_RULE_EVENT_TYPES = frozenset({*RULE_EVENT_TYPES, "RULE_RETIRED"})
 
 
 def rule_event_schema() -> dict[str, Any]:
@@ -31,9 +32,12 @@ def rule_event_schema() -> dict[str, Any]:
         "event_types": {
             "teacher_review": ["ENTRY_LEARNED", "ENTRY_REFINED"],
             "loss_review": ["VETO_LEARNED", "ENTRY_REFINED", "FLIP_LEARNED"],
-            "periodic_review": sorted(RULE_EVENT_TYPES),
+            "periodic_review": sorted(PERIODIC_RULE_EVENT_TYPES),
         },
         "payload_required": ["rule_id", "rule_version", "profile", "conditions"],
+        "lifecycle_payload_required": {
+            "RULE_RETIRED": ["rule_id", "rule_version"],
+        },
         "condition_canonical": {
             "required": ["indicator", "condition"],
             "indicator": (
@@ -284,12 +288,44 @@ def preflight_rule_events(
         if not isinstance(item, dict):
             raise ValueError("rule_events must contain objects")
         event_type = str(item.get("event_type", "")).strip().upper()
-        if event_type not in allowed_types or event_type not in RULE_EVENT_TYPES:
+        if event_type not in allowed_types or event_type not in PERIODIC_RULE_EVENT_TYPES:
             raise ValueError(f"unsupported rule event for this review: {event_type}")
         payload = _friendly_payload(item.get("payload") or {})
         payload.setdefault("evidence_source", evidence_source)
         payload.setdefault("effective_from", effective_from)
         payload.setdefault("reason", default_reason or "walk-forward review")
+
+        if event_type == "RULE_RETIRED":
+            rule_id = str(payload.get("rule_id", "")).strip()
+            rule_version = str(payload.get("rule_version", "")).strip()
+            if not rule_id or not rule_version:
+                raise ValueError(
+                    "RULE_RETIRED requires payload.rule_id and payload.rule_version"
+                )
+            active_keys = {
+                (str(row.get("rule_id")), str(row.get("rule_version")))
+                for row in materialization._active_rule_versions(projected)
+            }
+            if (rule_id, rule_version) not in active_keys:
+                raise ValueError(
+                    f"RULE_RETIRED target is not currently active: "
+                    f"{rule_id}@{rule_version}"
+                )
+            store._validate_event_semantics(projected, event_type, payload)
+            synthetic = {
+                "sequence": len(projected) + 1,
+                "event_type": event_type,
+                "payload": deepcopy(payload),
+            }
+            projected.append(synthetic)
+            canonical_events.append(
+                {
+                    "event_type": event_type,
+                    "payload": payload,
+                    "index": index + 1,
+                }
+            )
+            continue
 
         # Validate metadata/lifecycle first, then compile/canonicalize the rule.
         store._validate_event_semantics(projected, event_type, payload)
