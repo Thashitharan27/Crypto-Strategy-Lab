@@ -483,16 +483,19 @@ def submit_walk_forward_view(
     })
 
     if str(settlement.get("result")) == "LOSS":
-        packet = _ORIGINAL_BUILD_LOSS_REVIEW_PACKET(
-            control, experiment_id=experiment_id, candidate_id=candidate_id
-        )
-        packet.update(
-            sequence=settled["sequence"],
-            state_hash=settled["state_hash"],
-            settlement=settlement,
-            **research,
-        )
-        return decorate_review_packet(packet)
+        readback = _impl._store(control).read(experiment_id, recent_events=0)
+        definition = (readback.get("manifest") or {}).get("definition") or {}
+        if not _impl._monthly_batch_oos(definition):
+            packet = _ORIGINAL_BUILD_LOSS_REVIEW_PACKET(
+                control, experiment_id=experiment_id, candidate_id=candidate_id
+            )
+            packet.update(
+                sequence=settled["sequence"],
+                state_hash=settled["state_hash"],
+                settlement=settlement,
+                **research,
+            )
+            return decorate_review_packet(packet)
     if not auto_advance:
         return {
             "contract": _impl.ORCHESTRATOR_CONTRACT,
