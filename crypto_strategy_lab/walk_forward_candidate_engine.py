@@ -7,8 +7,9 @@ semantics and outcome firewall unchanged while making large scans bounded:
 * DuckDB rows are delivered in small pandas batches instead of one huge frame;
 * a pending teacher boundary stops scanning as soon as market time reaches it,
   even when no ENTRY rule currently matches;
-* accelerated callers can resume a scan from an exact (time, signal, side)
-  checkpoint without skipping same-timestamp opportunities;
+* accelerated callers can resume a scan from an exact
+  (decision_available_at, entry_time, signal, side) checkpoint without skipping
+  same-decision-time opportunities;
 * teacher losses are considered only inside an explicit teacher-loss FLIP
   policy, and paired losses become due only after both immutable sides resolve.
 """
