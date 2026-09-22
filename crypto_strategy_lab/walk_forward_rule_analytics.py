@@ -1153,7 +1153,7 @@ def summarize_walk_forward_rule_performance(
             readback,
             events,
             records,
-            cursor=cursor,
+            cursor=review_end,
         )
         eligible_vetos = [record for record in eligible_records if record["family"] == "VETO"]
         for record in eligible_vetos:
@@ -1426,8 +1426,6 @@ def summarize_walk_forward_periodic_review(
     records = _rule_versions(events)
     trades, attribution_warnings = _trade_history(events, records)
 
-    current_start = cursor - period_offset
-    previous_start = current_start - period_offset
     last_review = _last_periodic_review(events)
     last_review_time = (
         _utc(last_review["effective_market_time"], "periodic review effective_market_time")
@@ -1438,11 +1436,23 @@ def summarize_walk_forward_periodic_review(
     initial_anchor = _initial_periodic_anchor(definition, events, reports)
     anchor = last_review_time or initial_anchor
     due_time = anchor + period_offset if anchor is not None else None
+    batch_oos = rule_update_mode in {"MONTHLY_BATCH_OOS", "WEEKLY_BATCH_OOS"}
+    review_end = (
+        due_time
+        if batch_oos and due_time is not None and cursor >= due_time
+        else cursor
+    )
+    current_start = (
+        anchor
+        if batch_oos and anchor is not None
+        else review_end - period_offset
+    )
+    previous_start = current_start - period_offset
 
     current_trades = _window_rows(
         trades,
         start=current_start,
-        end=cursor,
+        end=review_end,
         time_key="resolved_time",
         start_exclusive=True,
     )
@@ -1453,16 +1463,17 @@ def summarize_walk_forward_periodic_review(
         time_key="resolved_time",
         start_exclusive=True,
     )
-    since_review_trades = (
-        _window_rows(
-            trades,
-            start=last_review_time,
-            end=cursor,
-            time_key="resolved_time",
-            start_exclusive=True,
-        )
+    since_review_start = (
+        last_review_time
         if last_review_time is not None
-        else trades
+        else (initial_anchor if batch_oos else None)
+    )
+    since_review_trades = _window_rows(
+        trades,
+        start=since_review_start,
+        end=review_end,
+        time_key="resolved_time",
+        start_exclusive=True,
     )
 
     comparison = _period_comparison(
@@ -1471,7 +1482,7 @@ def summarize_walk_forward_periodic_review(
         current_start=current_start,
         previous_start=previous_start,
         split=current_start,
-        end=cursor,
+        end=review_end,
     )
     deteriorating = [
         row for row in comparison if row["direction"] == "DETERIORATING_AVERAGE_R"
@@ -1483,7 +1494,7 @@ def summarize_walk_forward_periodic_review(
     newly_learned = [
         _public_rule_record(record)
         for record in records
-        if current_start < record["_effective_from_ts"] <= cursor
+        if current_start < record["_effective_from_ts"] <= review_end
     ]
 
     current_rule_samples = []
@@ -1494,7 +1505,7 @@ def summarize_walk_forward_periodic_review(
             _window_rows(
                 _rule_trade_rows(trades, record["rule_ref"], record["family"]),
                 start=current_start,
-                end=cursor,
+                end=review_end,
                 time_key="resolved_time",
                 start_exclusive=True,
             )
@@ -1531,7 +1542,7 @@ def summarize_walk_forward_periodic_review(
                 _window_rows(
                     own,
                     start=current_start,
-                    end=cursor,
+                    end=review_end,
                     time_key="time",
                     start_exclusive=True,
                 )
@@ -1600,12 +1611,12 @@ def summarize_walk_forward_periodic_review(
             },
             "current": {
                 "start_exclusive": current_start.isoformat(),
-                "end": cursor.isoformat(),
+                "end": review_end.isoformat(),
                 "performance": overall_current,
             },
             "since_last_periodic_review": {
-                "start_exclusive": _iso(last_review_time),
-                "end": cursor.isoformat(),
+                "start_exclusive": _iso(since_review_start),
+                "end": review_end.isoformat(),
                 "performance": _performance(since_review_trades),
             },
         },
@@ -1613,14 +1624,14 @@ def summarize_walk_forward_periodic_review(
         "monthly_performance": _monthly_performance(
             trades,
             start=previous_start,
-            end=cursor,
+            end=review_end,
         ),
         "profile_performance": {
             "previous": _group_performance(
                 trades, start=previous_start, end=current_start, key="profile"
             ),
             "current": _group_performance(
-                trades, start=current_start, end=cursor, key="profile"
+                trades, start=current_start, end=review_end, key="profile"
             ),
         },
         "regime_performance": {
@@ -1628,7 +1639,7 @@ def summarize_walk_forward_periodic_review(
                 trades, start=previous_start, end=current_start, key="regime"
             ),
             "current": _group_performance(
-                trades, start=current_start, end=cursor, key="regime"
+                trades, start=current_start, end=review_end, key="regime"
             ),
         },
         "rule_period_comparison": comparison,
