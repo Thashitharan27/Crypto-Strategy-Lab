@@ -109,6 +109,45 @@ def test_execution_profile_accepts_explicit_separate_sizing_stop():
     assert profile.position_sizing_stop_multiple == pytest.approx(1.0)
 
 
+def test_separate_sizing_stop_rejects_r_based_management_mix():
+    with pytest.raises(ValueError, match="simple fixed stop/target execution"):
+        normalize_data_lake_config(
+            {
+                "config_version": 3,
+                "execution": {
+                    "profiles": {
+                        "bull_long": {
+                            "stop_loss_multiple": 0.2,
+                            "position_sizing_stop_override_enabled": True,
+                            "position_sizing_stop_multiple": 1.0,
+                            "break_even_enabled": True,
+                        }
+                    }
+                },
+            }
+        )
+
+
+def test_separate_sizing_stop_rejects_dynamic_sr_target_mode():
+    with pytest.raises(ValueError, match="FIXED_R take-profit mode"):
+        normalize_data_lake_config(
+            {
+                "config_version": 3,
+                "features": {"enable_support_resistance_analysis": True},
+                "execution": {
+                    "sr_take_profit_mode": "SR_CAPPED_R",
+                    "profiles": {
+                        "bull_long": {
+                            "stop_loss_multiple": 0.2,
+                            "position_sizing_stop_override_enabled": True,
+                            "position_sizing_stop_multiple": 1.0,
+                        }
+                    },
+                },
+            }
+        )
+
+
 def test_strategy_and_execution_profiles_are_separate_authoritative_types():
     config = ResearchRunConfig()
     strategy_profile = config.strategy.profiles["bull_long"]
