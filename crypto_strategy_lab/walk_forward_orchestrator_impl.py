@@ -1150,26 +1150,42 @@ def _append_auto_compressed_teacher(
     }
 
 
-def _append_monthly_batch_teacher(
+def _batch_boundary_label(batch_mode: str) -> str:
+    return "week-end" if batch_mode == WEEKLY_BATCH_OOS_MODE else "month-end"
+
+
+def _batch_deferred_status(batch_mode: str) -> str:
+    if batch_mode == WEEKLY_BATCH_OOS_MODE:
+        return WEEKLY_BATCH_DEFERRED
+    if batch_mode == MONTHLY_BATCH_OOS_MODE:
+        return MONTHLY_BATCH_DEFERRED
+    raise ValueError(f"unsupported batch OOS mode: {batch_mode}")
+
+
+def _append_batch_teacher(
     store: CausalExperimentStore,
     *,
     experiment_id: str,
     teacher_boundary: dict[str, Any],
     teacher_packet: dict[str, Any],
+    batch_mode: str,
     operation_id: str,
     expected_sequence: int,
     expected_state_hash: str,
 ) -> dict[str, Any]:
+    mode = str(batch_mode).strip().upper()
+    deferred_status = _batch_deferred_status(mode)
+    boundary_label = _batch_boundary_label(mode)
     resolution_raw = teacher_boundary.get("resolution_time")
     if resolution_raw in (None, ""):
-        raise ValueError("monthly batch teacher evidence requires resolution_time")
+        raise ValueError(f"{mode} teacher evidence requires resolution_time")
     resolution = _utc_timestamp(
-        resolution_raw, "monthly batch teacher resolution_time"
+        resolution_raw, f"{mode} teacher resolution_time"
     )
     payload = {
         **deepcopy(teacher_boundary),
-        "review_decision": MONTHLY_BATCH_DEFERRED,
-        "teacher_review_status": MONTHLY_BATCH_DEFERRED,
+        "review_decision": deferred_status,
+        "teacher_review_status": deferred_status,
         "validated_rule_event_count": 0,
         "batch_entry_context": deepcopy(teacher_packet.get("entry_context")),
         "batch_current_rule_coverage": deepcopy(
@@ -1178,10 +1194,11 @@ def _append_monthly_batch_teacher(
         "batch_active_rule_versions": deepcopy(
             teacher_packet.get("active_rule_versions")
         ),
+        "batch_oos_mode": mode,
         "notes": (
             "Teacher evidence and entry-time context were recorded without a rule "
-            "mutation because MONTHLY_BATCH_OOS freezes the strategy until the "
-            "month-end review."
+            f"mutation because {mode} freezes the strategy until the "
+            f"{boundary_label} review."
         ),
     }
     appended = store.append_event(
@@ -1192,7 +1209,7 @@ def _append_monthly_batch_teacher(
         int(expected_sequence),
         str(expected_state_hash),
         effective_market_time=resolution.isoformat(),
-        source="DETERMINISTIC_MONTHLY_BATCH_OOS",
+        source=f"DETERMINISTIC_{mode}",
     )
     return {
         "sequence": int(appended["sequence"]),
@@ -1200,16 +1217,20 @@ def _append_monthly_batch_teacher(
     }
 
 
-def _freeze_monthly_batch_candidate(
+def _freeze_batch_candidate(
     store: CausalExperimentStore,
     events: list[dict[str, Any]],
     *,
     experiment_id: str,
     candidate_id: str,
+    batch_mode: str,
     operation_id: str,
     expected_sequence: int,
     expected_state_hash: str,
 ) -> dict[str, Any]:
+    mode = str(batch_mode).strip().upper()
+    if mode not in BATCH_OOS_MODES:
+        raise ValueError(f"unsupported batch OOS mode: {mode}")
     candidate = _candidate_capture(events, candidate_id).get("payload") or {}
     strategy_action = str(
         candidate.get("strategy_action")
@@ -1219,7 +1240,7 @@ def _freeze_monthly_batch_candidate(
     ).strip().upper()
     if strategy_action not in {"LONG", "SHORT"}:
         raise ValueError(
-            "MONTHLY_BATCH_OOS candidate has no valid executable strategy action"
+            f"{mode} candidate has no valid executable strategy action"
         )
     frozen = store.append_event(
         experiment_id,
@@ -1237,7 +1258,7 @@ def _freeze_monthly_batch_candidate(
             "strategy_snapshot_sha256": candidate.get(
                 "strategy_snapshot_sha256"
             ),
-            "decision_mode": MONTHLY_BATCH_OOS_MODE,
+            "decision_mode": mode,
         },
         operation_id,
         int(expected_sequence),
@@ -1245,7 +1266,7 @@ def _freeze_monthly_batch_candidate(
         effective_market_time=str(
             candidate.get("decision_available_at") or candidate.get("entry_time")
         ),
-        source="DETERMINISTIC_MONTHLY_BATCH_OOS",
+        source=f"DETERMINISTIC_{mode}",
     )
     return {
         "sequence": int(frozen["sequence"]),
