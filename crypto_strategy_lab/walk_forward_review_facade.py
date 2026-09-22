@@ -145,6 +145,24 @@ def record_walk_forward_review(
         raise ValueError("decision cannot be empty")
     definition = (readback.get("manifest") or {}).get("definition") or {}
     phase = str(((readback.get("derived_state") or {}).get("phase") or "")).upper()
+    monthly_batch = _impl._monthly_batch_enabled(definition)
+    if monthly_batch and kind == "LOSS":
+        raise ValueError(
+            "MONTHLY_BATCH_OOS defers prospective losses to the month-end batch "
+            "review; mid-month loss reviews and rule mutations are not allowed"
+        )
+    if monthly_batch and kind in {"PERIODIC", "QUARTERLY"}:
+        initial_anchor = _impl._initial_periodic_review_anchor(
+            reports, definition, events
+        )
+        due = _impl._periodic_review_due(
+            events, 1, initial_anchor=initial_anchor
+        )
+        if due is None:
+            raise ValueError(
+                "MONTHLY_BATCH_OOS rules are frozen until the next month-end "
+                "review boundary; a periodic review cannot be recorded yet"
+            )
     if kind == "BOOTSTRAP":
         protocol = definition.get("research_protocol") or {}
         if phase != "BOOTSTRAP_RESEARCH":
@@ -268,7 +286,9 @@ def record_walk_forward_review(
         experiment_id=experiment_id,
         operation_id=operation_id,
         batch=batch,
-        review_interval_months=review_interval_months,
+        review_interval_months=_impl._effective_review_interval(
+            definition, review_interval_months
+        ),
         autonomous_mode=autonomous_mode,
         max_scan_slices=max_scan_slices,
     )
@@ -299,6 +319,11 @@ def record_walk_forward_teacher_review(
         store, experiment_id, expected_sequence, expected_state_hash
     )
     definition = (readback.get("manifest") or {}).get("definition") or {}
+    if _impl._monthly_batch_enabled(definition):
+        raise ValueError(
+            "MONTHLY_BATCH_OOS records teacher observations automatically and "
+            "defers all teacher-driven rule changes to the month-end batch review"
+        )
     reference_run = str(definition.get("reference_run", ""))
     manifest = reports.get_run_manifest(reference_run)
     run_dir = reports.resolve_run(reference_run)
@@ -506,7 +531,9 @@ def record_walk_forward_teacher_review(
         experiment_id=experiment_id,
         operation_id=operation_id,
         batch=batch,
-        review_interval_months=review_interval_months,
+        review_interval_months=_impl._effective_review_interval(
+            definition, review_interval_months
+        ),
         autonomous_mode=autonomous_mode,
         max_scan_slices=max_scan_slices,
     )
