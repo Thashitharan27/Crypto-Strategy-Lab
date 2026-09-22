@@ -75,8 +75,10 @@ PHASES = {"BOOTSTRAP_RESEARCH", "RESEARCH_WF", "VALIDATED", "SHADOW", "LIVE", "R
 LEDGERS = {"RESEARCH", "SHADOW", "LIVE"}
 EVIDENCE_SOURCES = {"BOOTSTRAP", "TEACHER", "PROSPECTIVE_WF", "SHADOW", "LIVE"}
 RESEARCH_PROTOCOL_MODES = {"COLD_START", "BOOTSTRAP_THEN_WF"}
+RULE_UPDATE_MODES = {"TRADE_BY_TRADE", "MONTHLY_BATCH_OOS"}
 
 DEFAULT_PERIODIC_REVIEW_POLICY = {"initial_anchor": "REFERENCE_PERIOD_START"}
+DEFAULT_RULE_UPDATE_POLICY = {"mode": "TRADE_BY_TRADE"}
 
 
 def _utc_now() -> str:
@@ -208,6 +210,37 @@ class CausalExperimentStore:
                         "WALK_FORWARD_START periodic anchor requires BOOTSTRAP_THEN_WF"
                     )
             policy["initial_anchor"] = anchor
+
+        rule_update_policy = value.get("rule_update_policy")
+        if rule_update_policy is not None:
+            if not isinstance(rule_update_policy, dict):
+                raise ValueError("rule_update_policy must be an object")
+            mode = str(rule_update_policy.get("mode", "")).strip().upper()
+            if mode not in RULE_UPDATE_MODES:
+                raise ValueError(
+                    "rule_update_policy.mode must be TRADE_BY_TRADE or MONTHLY_BATCH_OOS"
+                )
+            rule_update_policy["mode"] = mode
+            if mode == "MONTHLY_BATCH_OOS":
+                interval = rule_update_policy.get("interval_months", 1)
+                if isinstance(interval, bool):
+                    raise ValueError("MONTHLY_BATCH_OOS interval_months must be 1")
+                try:
+                    interval = int(interval)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("MONTHLY_BATCH_OOS interval_months must be 1") from exc
+                if interval != 1:
+                    raise ValueError("MONTHLY_BATCH_OOS interval_months must be 1")
+                freeze = rule_update_policy.get("freeze_between_reviews", True)
+                if freeze is not True:
+                    raise ValueError(
+                        "MONTHLY_BATCH_OOS requires freeze_between_reviews=true"
+                    )
+                rule_update_policy["interval_months"] = 1
+                rule_update_policy["freeze_between_reviews"] = True
+            else:
+                rule_update_policy.pop("interval_months", None)
+                rule_update_policy.pop("freeze_between_reviews", None)
         return value
 
     @staticmethod
@@ -527,6 +560,10 @@ class CausalExperimentStore:
                 {"initial_anchor": "WALK_FORWARD_START"}
                 if bootstrap_mode
                 else deepcopy(DEFAULT_PERIODIC_REVIEW_POLICY),
+            )
+            definition.setdefault(
+                "rule_update_policy",
+                deepcopy(DEFAULT_RULE_UPDATE_POLICY),
             )
             definition = self._validate_definition(definition)
         operation_id = self._validate_operation_id(operation_id)
