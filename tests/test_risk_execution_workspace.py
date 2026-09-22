@@ -131,9 +131,11 @@ def test_separate_sizing_stop_shows_actual_gross_stop_exposure():
         sizing_stop = window.base_execution_form.widgets[
             "position_sizing_stop_multiple"
         ]
+        target = window.base_execution_form.widgets["reward_risk_ratio"]
 
         risk.setValue(5.0)
         actual_stop.setValue(0.2)
+        target.setValue(0.2)
         override.setChecked(True)
         sizing_stop.setValue(1.0)
         app.processEvents()
@@ -146,12 +148,48 @@ def test_separate_sizing_stop_shows_actual_gross_stop_exposure():
         assert "separate 1× reference stop" in summary
         assert "about 1.00%" in summary
         assert "gross stop exposure before fees/slippage" in summary
+        assert "Fixed target = 0.20 sizing-R" in summary
+        assert "physical target:stop = 1:1" in summary
+        target_label = workspace.target_card.rows["reward_risk_ratio"][0]
+        assert target_label is not None
+        assert target_label.text() == "Profit Target (Sizing-R)"
 
         override.setChecked(False)
         app.processEvents()
         workspace.refresh_visibility()
         assert sizing_stop.isHidden()
         assert "gross stop exposure before fees/slippage" not in workspace.summary_label.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_separate_sizing_mode_disables_incompatible_r_based_management():
+    app, window = _window()
+    try:
+        workspace = window.risk_execution_workspace
+        break_even = window.base_execution_form.widgets["break_even_enabled"]
+        override = window.base_execution_form.widgets[
+            "position_sizing_stop_override_enabled"
+        ]
+        target_mode = window.execution_form.widgets["sr_take_profit_mode"]
+
+        break_even.setChecked(True)
+        target_mode.setCurrentIndex(target_mode.findData("SR_CAPPED_R"))
+        override.setChecked(True)
+        app.processEvents()
+        workspace.refresh_visibility()
+
+        assert break_even.isChecked() is False
+        assert break_even.isEnabled() is False
+        assert target_mode.currentData() == "FIXED_R"
+        assert target_mode.isEnabled() is False
+
+        override.setChecked(False)
+        app.processEvents()
+        workspace.refresh_visibility()
+        assert break_even.isEnabled() is True
+        assert target_mode.isEnabled() is True
     finally:
         window.close()
         app.processEvents()
