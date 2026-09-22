@@ -535,7 +535,11 @@ class RiskExecutionWorkspace(QWidget):
                     f"safety cap {execution.sr_take_profit_maximum_r:g}R)"
                 )
             else:
-                target = f"fixed {base.reward_risk_ratio:g}R target"
+                target = (
+                    f"fixed {base.reward_risk_ratio:g} sizing-R target"
+                    if sizing_override
+                    else f"fixed {base.reward_risk_ratio:g}R target"
+                )
 
         multiplier = (
             f" · risk multiplier {base.risk_multiplier:g}×"
@@ -566,12 +570,15 @@ class RiskExecutionWorkspace(QWidget):
                 not base.partial_profit_enabled
                 and str(execution.sr_take_profit_mode).upper() == "FIXED_R"
             ):
-                target_as_sizing_r = (
-                    stop_mult * float(base.reward_risk_ratio) / sizing_stop_mult
+                target_as_sizing_r = float(base.reward_risk_ratio)
+                physical_ratio = (
+                    target_as_sizing_r * sizing_stop_mult / stop_mult
+                    if stop_mult > 0
+                    else float("nan")
                 )
                 geometry += (
                     f" Fixed target = {target_as_sizing_r:.2f} sizing-R; "
-                    f"physical target:stop = {float(base.reward_risk_ratio):g}:1."
+                    f"physical target:stop = {physical_ratio:g}:1."
                 )
             sizing_description = (
                 f" Position size uses a separate {sizing_stop_mult:g}× reference stop; "
