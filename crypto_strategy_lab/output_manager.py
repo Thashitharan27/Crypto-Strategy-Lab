@@ -211,7 +211,7 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
         f"Symbol: {infer_symbol(config)}",
         f"Strategy timeframe: {config.strategy_timeframe_minutes}m",
         f"Stop distance basis: {config.risk_mode.value}",
-        f"Base account risk per trade: {config.risk_per_leg * 100:g}%",
+        f"Base sizing budget per trade: {config.risk_per_leg * 100:g}%",
         f"ATR distance-unit period/multiplier: {config.atr_period} / {config.atr_multiplier}",
         "Strategy Profiles: " + (", ".join(enabled_profiles) if enabled_profiles else "none enabled"),
         f"Strategy Profile run mode: {config.strategy_profile_run_mode}",
