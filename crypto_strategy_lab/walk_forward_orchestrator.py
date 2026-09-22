@@ -1178,7 +1178,12 @@ def advance_walk_forward(
     if not isinstance(cursor, dict):
         return _decorate_advance_result(control, reports, experiment_id, result)
 
-    required = ("entry_time", "research_signal_index", "side")
+    required = (
+        "decision_available_at",
+        "entry_time",
+        "research_signal_index",
+        "side",
+    )
     if any(cursor.get(name) in (None, "") for name in required):
         raise ValueError("candidate scan returned an incomplete resumable cursor")
 
@@ -1188,6 +1193,7 @@ def advance_walk_forward(
         "CHECKPOINT_CREATED",
         {
             "checkpoint_type": SCAN_CHECKPOINT_TYPE,
+            "decision_available_at": str(cursor["decision_available_at"]),
             "entry_time": str(cursor["entry_time"]),
             "research_signal_index": int(cursor["research_signal_index"]),
             "side": str(cursor["side"]).upper(),
@@ -1202,7 +1208,7 @@ def advance_walk_forward(
         ),
         int(result["sequence"]),
         str(result["state_hash"]),
-        effective_market_time=str(cursor["entry_time"]),
+        effective_market_time=str(cursor["decision_available_at"]),
         source="DETERMINISTIC_CANDIDATE_ENGINE",
     )
     return {
