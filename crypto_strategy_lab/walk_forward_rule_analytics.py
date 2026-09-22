@@ -1153,7 +1153,7 @@ def summarize_walk_forward_rule_performance(
             readback,
             events,
             records,
-            cursor=review_end,
+            cursor=cursor,
         )
         eligible_vetos = [record for record in eligible_records if record["family"] == "VETO"]
         for record in eligible_vetos:
