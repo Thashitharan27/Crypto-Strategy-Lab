@@ -1883,9 +1883,17 @@ class BacktestEngine:
 
         if partial_tp:
             winning_trade_r = (tp1_pct/100.0) * tp1_r + (1-tp1_pct/100.0) * tp2_r
+            expected_profit = (
+                winning_trade_r * primary.risk * primary.quantity
+                if np.isfinite(winning_trade_r)
+                else np.nan
+            )
         else:
             winning_trade_r = applied_rr if np.isfinite(applied_rr) else np.nan
-        expected_profit = winning_trade_r * primary.risk * primary.quantity if np.isfinite(winning_trade_r) else np.nan
+            # Use the actual configured target geometry rather than assuming
+            # reward_risk_ratio is always based on the physical stop. In
+            # separate-sizing mode the fixed target is measured from sizing-R.
+            expected_profit = final_target_distance * primary.quantity
         estimated_fees = entry_notional * (
             (self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)
             + (self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)
