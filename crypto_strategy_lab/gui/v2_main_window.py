@@ -138,7 +138,10 @@ STRATEGY_PROFILE_GROUPS = (
 )
 
 EXECUTION_PROFILE_GROUPS = (
-    ("Risk", ("risk_multiplier",), None),
+    ("Risk", (
+        "risk_multiplier", "position_sizing_stop_override_enabled",
+        "position_sizing_stop_multiple",
+    ), None),
     ("Stop Loss", ("stop_loss_multiple",), None),
     ("Take Profit", ("reward_risk_ratio",), None),
     ("Break-even", (
@@ -385,6 +388,7 @@ class DataclassForm(QWidget):
                 "sr_hold_confirmation_bars", "sr_hold_confirmation_atr", "sr_break_tolerance_atr",
                 "sr_break_basis",
             ),
+            "position_sizing_stop_override_enabled": ("position_sizing_stop_multiple",),
             "break_even_enabled": ("break_even_activation_r", "break_even_offset_r"),
             "trailing_enabled": ("trailing_activation_r", "trailing_distance_r"),
             "partial_profit_enabled": ("tp1_r", "tp1_close_pct", "tp2_r"),
