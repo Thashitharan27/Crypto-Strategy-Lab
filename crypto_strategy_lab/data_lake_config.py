@@ -258,6 +258,8 @@ class ExecutionProfileConfig:
     reward_risk_ratio: float = 1.0
     risk_multiplier: float = 1.0
     stop_loss_multiple: float = 2.0
+    position_sizing_stop_override_enabled: bool = False
+    position_sizing_stop_multiple: float = 1.0
     partial_stop_enabled: bool = False
     sl1_r: float = 0.5
     sl1_close_pct: float = 50.0
@@ -466,6 +468,13 @@ class ResearchRunConfig:
         )):
             raise ValueError("at least one DI pressure state must be allowed")
         for key, profile in strategy.profiles.items():
+            execution_profile = execution.profiles[key]
+            if execution_profile.stop_loss_multiple <= 0:
+                raise ValueError(f"{key}: stop-loss multiple must be positive")
+            if execution_profile.position_sizing_stop_multiple <= 0:
+                raise ValueError(
+                    f"{key}: position-sizing stop multiple must be positive"
+                )
             if profile.rsi_period <= 0 or profile.momentum_lookback_hours <= 0:
                 raise ValueError(f"{key}: profile feature periods must be positive")
             if profile.rsi_period != features.mean_reversion_rsi_period:
