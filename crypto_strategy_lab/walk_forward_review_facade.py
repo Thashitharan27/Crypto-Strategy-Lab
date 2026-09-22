@@ -146,22 +146,29 @@ def record_walk_forward_review(
         raise ValueError("decision cannot be empty")
     definition = (readback.get("manifest") or {}).get("definition") or {}
     phase = str(((readback.get("derived_state") or {}).get("phase") or "")).upper()
-    monthly_batch = _impl._monthly_batch_enabled(definition)
-    if monthly_batch and kind == "LOSS":
+    batch_mode = _impl._batch_oos_mode(definition)
+    batch_oos = batch_mode is not None
+    if batch_oos and kind == "LOSS":
+        period_name = "week" if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE else "month"
+        boundary_name = "week-end" if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
         raise ValueError(
-            "MONTHLY_BATCH_OOS defers prospective losses to the month-end batch "
-            "review; mid-month loss reviews and rule mutations are not allowed"
+            f"{batch_mode} defers prospective losses to the {boundary_name} batch "
+            f"review; mid-{period_name} loss reviews and rule mutations are not allowed"
         )
-    if monthly_batch and kind in {"PERIODIC", "QUARTERLY"}:
+    if batch_oos and kind in {"PERIODIC", "QUARTERLY"}:
         initial_anchor = _impl._initial_periodic_review_anchor(
             reports, definition, events
         )
-        due = _impl._periodic_review_due(
-            events, 1, initial_anchor=initial_anchor
+        due = _impl._review_due(
+            definition,
+            events,
+            int(review_interval_months),
+            initial_anchor=initial_anchor,
         )
         if due is None:
+            boundary_name = "week-end" if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
             raise ValueError(
-                "MONTHLY_BATCH_OOS rules are frozen until the next month-end "
+                f"{batch_mode} rules are frozen until the next {boundary_name} "
                 "review boundary; a periodic review cannot be recorded yet"
             )
     if kind == "BOOTSTRAP":
@@ -321,10 +328,12 @@ def record_walk_forward_teacher_review(
         store, experiment_id, expected_sequence, expected_state_hash
     )
     definition = (readback.get("manifest") or {}).get("definition") or {}
-    if _impl._monthly_batch_enabled(definition):
+    batch_mode = _impl._batch_oos_mode(definition)
+    if batch_mode is not None:
+        boundary_name = "week-end" if batch_mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
         raise ValueError(
-            "MONTHLY_BATCH_OOS records teacher observations automatically and "
-            "defers all teacher-driven rule changes to the month-end batch review"
+            f"{batch_mode} records teacher observations automatically and "
+            f"defers all teacher-driven rule changes to the {boundary_name} batch review"
         )
     reference_run = str(definition.get("reference_run", ""))
     manifest = reports.get_run_manifest(reference_run)
