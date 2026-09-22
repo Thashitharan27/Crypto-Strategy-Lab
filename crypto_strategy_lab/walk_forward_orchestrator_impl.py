@@ -863,7 +863,6 @@ def _periodic_review_due(
     return {
         "status": "PERIODIC_REVIEW_REQUIRED",
         "review_interval_months": int(months),
-        "review_cadence": "MONTHLY",
         "previous_review_sequence": last_event["sequence"] if last_event is not None else None,
         "previous_review_time": last_time.isoformat() if last_event is not None else None,
         "review_anchor_source": anchor_source,
