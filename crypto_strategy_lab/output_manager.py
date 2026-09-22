@@ -44,6 +44,8 @@ def _profile_exit_labels(config: BacktestConfig) -> tuple[str, str]:
             profile.sl1_close_pct,
             profile.sl2_r,
             profile.stop_loss_multiple,
+            profile.position_sizing_stop_override_enabled,
+            profile.position_sizing_stop_multiple,
             profile.partial_profit_enabled,
             profile.tp1_r,
             profile.tp1_close_pct,
@@ -63,13 +65,20 @@ def _profile_exit_labels(config: BacktestConfig) -> tuple[str, str]:
         )
     else:
         stop = f"SL{_format_number(profile.stop_loss_multiple)}"
+    if profile.position_sizing_stop_override_enabled:
+        stop += f"-SIZE{_format_number(profile.position_sizing_stop_multiple)}"
     if profile.partial_profit_enabled:
         target = (
             f"PTP{_format_number(profile.tp1_r)}x{_format_number(profile.tp1_close_pct)}"
             f"-TP{_format_number(profile.tp2_r)}"
         )
     else:
-        target = f"TP{_format_number(profile.stop_loss_multiple * profile.reward_risk_ratio)}"
+        target_reference = (
+            profile.position_sizing_stop_multiple
+            if profile.position_sizing_stop_override_enabled
+            else profile.stop_loss_multiple
+        )
+        target = f"TP{_format_number(target_reference * profile.reward_risk_ratio)}"
     return stop, target
 
 
@@ -202,7 +211,7 @@ def write_run_info(config: BacktestConfig, summary: dict[str, Any], run_dir: Pat
         f"Symbol: {infer_symbol(config)}",
         f"Strategy timeframe: {config.strategy_timeframe_minutes}m",
         f"Stop distance basis: {config.risk_mode.value}",
-        f"Base account risk per trade: {config.risk_per_leg * 100:g}%",
+        f"Base sizing budget per trade: {config.risk_per_leg * 100:g}%",
         f"ATR distance-unit period/multiplier: {config.atr_period} / {config.atr_multiplier}",
         "Strategy Profiles: " + (", ".join(enabled_profiles) if enabled_profiles else "none enabled"),
         f"Strategy Profile run mode: {config.strategy_profile_run_mode}",
@@ -269,13 +278,23 @@ def update_latest(output_root: Path, run_dir: Path) -> None:
 
 TRADE_R_COLUMN_METADATA = {
     "distance_unit_price": "Entry-time price-distance unit selected by the configured distance basis (for example ATR × multiplier).",
-    "trade_r_price_distance": "Full initial stop distance in price units. This is the price meaning of 1 trade R.",
-    "configured_account_risk_percentage": "Configured account-equity percentage planned to be lost at the initial full stop before fees and slippage.",
+    "trade_r_price_distance": "Actual full initial stop distance in price units. In separate-sizing mode this can be smaller than the sizing-R reference distance.",
+    "configured_account_risk_percentage": "Legacy-compatible base risk setting. In separate-sizing mode this is a sizing input, not the actual full-stop loss.",
+    "configured_sizing_budget_percentage": "Effective equity budget used to size quantity after the profile risk multiplier.",
+    "position_sizing_stop_override_enabled": "Whether a separate sizing-stop reference was requested by the profile.",
+    "position_sizing_stop_override_applied": "Whether the separate sizing-stop reference actually controlled quantity for this trade.",
+    "position_sizing_stop_multiple": "Sizing-stop reference multiplier in the selected price-distance unit.",
+    "position_sizing_reference_distance": "Price distance used only to calculate quantity; it does not move the execution stop.",
+    "actual_stop_as_sizing_r": "Actual full-stop price distance divided by the position-sizing reference distance.",
+    "final_target_as_sizing_r": "Final target price distance divided by the position-sizing reference distance.",
+    "physical_reward_risk_ratio": "Final target distance divided by the actual full-stop distance.",
+    "planned_gross_stop_loss": "Gross currency loss if the configured initial stop plan fully executes, before fees and slippage.",
+    "planned_gross_stop_risk_percentage": "Gross planned stop loss divided by equity before the trade.",
     "estimated_all_in_stop_risk_percentage": "Estimated account-equity loss at stop after entry fee, stop-exit fee, and configured slippage.",
-    "*_price_r": "Realized price movement divided by the full initial stop distance; 1.0 means one trade R of favourable price movement.",
-    "*_account_r": "Realized account PnL divided by planned account risk at entry; 1.0 means one configured account-risk unit.",
+    "*_price_r": "Realized price movement divided by the actual full initial stop distance; this is physical stop-relative R.",
+    "*_account_r": "Realized account PnL divided by the configured sizing budget at entry; 1.0 means one sizing-budget R.",
     "*_effective_leverage": "Entry notional divided by equity at the moment that leg was sized.",
-    "pair_account_r": "Pair-level realized account PnL divided by the pair planned account risk at entry.",
+    "pair_account_r": "Pair-level realized account PnL divided by the pair sizing budget at entry.",
 }
 
 

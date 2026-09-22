@@ -141,6 +141,90 @@ def test_position_sizing_fees_and_net_r_for_selected_side():
     assert row.pair_net_r < row.pair_gross_r
 
 
+def test_separate_position_sizing_stop_keeps_five_percent_budget_but_one_percent_gross_stop():
+    data = candles([(100, 100, 100, 100), (100, 100, 97, 100)])
+    profiles = profile_set(
+        stop_loss_multiple=0.2,
+        reward_risk_ratio=0.2,
+        position_sizing_stop_override_enabled=True,
+        position_sizing_stop_multiple=1.0,
+    )
+    row = prepared_engine(
+        data,
+        cfg(risk_per_leg=0.05, fixed_r=10, strategy_profiles=profiles),
+    ).run().iloc[0]
+
+    assert row.long_risk_amount == pytest.approx(50.0)
+    assert row.long_quantity == pytest.approx(5.0)
+    assert row.trade_r_price_distance == pytest.approx(2.0)
+    assert row.position_sizing_reference_distance == pytest.approx(10.0)
+    assert row.position_sizing_stop_multiple == pytest.approx(1.0)
+    assert row.position_sizing_stop_override_applied is True
+    assert row.configured_sizing_budget_percentage == pytest.approx(0.05)
+    assert row.planned_gross_stop_loss == pytest.approx(10.0)
+    assert row.planned_gross_stop_risk_percentage == pytest.approx(0.01)
+    assert row.actual_stop_as_sizing_r == pytest.approx(0.2)
+    assert row.final_target_as_sizing_r == pytest.approx(0.2)
+    assert row.physical_reward_risk_ratio == pytest.approx(1.0)
+    assert row.pair_gross_r == pytest.approx(-0.2)
+    assert row.pair_net_r == pytest.approx(-0.2)
+    assert row.equity_after_trade == pytest.approx(990.0)
+
+
+def test_separate_position_sizing_stop_preserves_fee_drag_on_small_target():
+    data = candles([(100, 100, 100, 100), (100, 103, 99, 100)])
+    profiles = profile_set(
+        stop_loss_multiple=0.2,
+        reward_risk_ratio=0.2,
+        position_sizing_stop_override_enabled=True,
+        position_sizing_stop_multiple=1.0,
+    )
+    row = prepared_engine(
+        data,
+        cfg(
+            risk_per_leg=0.05,
+            fixed_r=10,
+            taker_fee=0.0005,
+            slippage=0.0005,
+            tie_policy=TiePolicy.OPTIMISTIC,
+            strategy_profiles=profiles,
+        ),
+    ).run().iloc[0]
+
+    assert row.long_exit_reason == "TP"
+    assert row.pair_gross_r > 0
+    assert row.pair_net_r < row.pair_gross_r
+    expected_gross_target = (
+        abs(row.long_tp - row.long_entry_price) * row.long_quantity
+    )
+    assert row.expected_gross_winning_pair_pnl == pytest.approx(expected_gross_target)
+    assert row.expected_gross_winning_pair_pnl == pytest.approx(10.0)
+    assert row.fees_as_percentage_of_expected_winning_profit == pytest.approx(
+        row.pair_total_fees / row.expected_gross_winning_pair_pnl * 100
+    )
+    assert row.estimated_all_in_stop_risk_percentage > row.planned_gross_stop_risk_percentage
+
+
+def test_disabled_sizing_override_keeps_legacy_full_stop_sizing():
+    data = candles([(100, 100, 100, 100), (100, 100, 97, 100)])
+    profiles = profile_set(
+        stop_loss_multiple=0.2,
+        reward_risk_ratio=1.0,
+        position_sizing_stop_override_enabled=False,
+        position_sizing_stop_multiple=1.0,
+    )
+    row = prepared_engine(
+        data,
+        cfg(risk_per_leg=0.05, fixed_r=10, strategy_profiles=profiles),
+    ).run().iloc[0]
+
+    assert row.long_quantity == pytest.approx(25.0)
+    assert row.position_sizing_reference_distance == pytest.approx(2.0)
+    assert row.position_sizing_stop_override_applied is False
+    assert row.planned_gross_stop_risk_percentage == pytest.approx(0.05)
+    assert row.pair_gross_r == pytest.approx(-1.0)
+
+
 def test_same_candle_tie_policy_applies_to_selected_side():
     data = candles([(100, 100, 100, 100), (100, 111, 89, 100)])
     pess = prepared_engine(data, cfg(tie_policy=TiePolicy.PESSIMISTIC)).run().iloc[0]

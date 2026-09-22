@@ -149,10 +149,13 @@ class RiskExecutionWorkspace(QWidget):
 
         self.account_card = FormCard(
             "2. Account Risk & Position Sizing",
-            note="These controls define the account risk budget and how many positions may be open at once.",
+            note=(
+                "The sizing budget determines quantity. With the optional separate sizing stop, "
+                "the actual stop loss can be smaller than this budget."
+            ),
         )
         self.account_card.add_field("initial_equity", "Starting Equity", self.account["initial_equity"])
-        self.account_card.add_field("risk_per_leg", "Risk Per Trade", self.account["risk_per_leg"])
+        self.account_card.add_field("risk_per_leg", "Sizing Budget Per Trade", self.account["risk_per_leg"])
         self.account_card.add_field("max_active_pairs", "Maximum Active Trades", self.account["max_active_pairs"])
         layout.addWidget(self.account_card)
 
@@ -168,7 +171,16 @@ class RiskExecutionWorkspace(QWidget):
         self.stop_card.add_field("sr_stop_buffer_atr", "Buffer Beyond S/R", self.account["sr_stop_buffer_atr"])
         self.stop_card.add_field("sr_stop_maximum_atr", "Maximum Structural Stop", self.account["sr_stop_maximum_atr"])
         self.stop_card.add_field("sr_stop_no_level_policy", "If No Valid S/R Exists", self.account["sr_stop_no_level_policy"])
-        self.stop_card.add_field("stop_loss_multiple", "Stop Multiplier", self.trade["stop_loss_multiple"])
+        self.stop_card.add_field("stop_loss_multiple", "Actual Stop Multiplier", self.trade["stop_loss_multiple"])
+        self.stop_card.add_control(
+            "position_sizing_stop_override_enabled",
+            self.trade["position_sizing_stop_override_enabled"],
+        )
+        self.stop_card.add_field(
+            "position_sizing_stop_multiple",
+            "Position-Sizing Stop Multiplier",
+            self.trade["position_sizing_stop_multiple"],
+        )
 
         self.ema_stop_method = QLabel("EMA 9/20 Micro-Swing — Automatic")
         self.ema_stop_method.setStyleSheet("font-weight:600")
@@ -276,6 +288,7 @@ class RiskExecutionWorkspace(QWidget):
         if builder is not None:
             builder.direction_mode.currentIndexChanged.connect(self.refresh_visibility)
         for name in (
+            "position_sizing_stop_override_enabled",
             "break_even_enabled", "trailing_enabled", "partial_profit_enabled",
             "partial_stop_enabled", "timeout_enabled", "r_step_trailing_enabled",
             "atr_checkpoint_tp_extension_enabled",
@@ -287,6 +300,7 @@ class RiskExecutionWorkspace(QWidget):
 
     def _prepare_widgets(self) -> None:
         for name, text in {
+            "position_sizing_stop_override_enabled": "Use separate position-sizing stop",
             "break_even_enabled": "Enable break-even",
             "trailing_enabled": "Enable trailing stop",
             "partial_profit_enabled": "Enable partial profit-taking",
@@ -306,6 +320,8 @@ class RiskExecutionWorkspace(QWidget):
         # "distance units" wording and do not affect stored native values.
         if hasattr(self.trade["stop_loss_multiple"], "setSuffix"):
             self.trade["stop_loss_multiple"].setSuffix(" ×")
+        if hasattr(self.trade["position_sizing_stop_multiple"], "setSuffix"):
+            self.trade["position_sizing_stop_multiple"].setSuffix(" ×")
         if hasattr(self.account["atr_multiplier"], "setSuffix"):
             self.account["atr_multiplier"].setSuffix(" × ATR")
 
@@ -334,6 +350,8 @@ class RiskExecutionWorkspace(QWidget):
                 "risk_mode", "atr_multiplier", "percent_r", "fixed_r",
                 "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
                 "sr_stop_maximum_atr", "sr_stop_no_level_policy", "stop_loss_multiple",
+                "position_sizing_stop_override_enabled",
+                "position_sizing_stop_multiple",
             ):
                 self.stop_card.set_row_visible(name, False)
         else:
@@ -350,8 +368,55 @@ class RiskExecutionWorkspace(QWidget):
             # multiplier remains preserved in the profile but is not a user-facing
             # input for the final structural stop.
             self.stop_card.set_row_visible("stop_loss_multiple", not structural_stop)
+            sizing_override_available = not structural_stop
+            self.stop_card.set_row_visible(
+                "position_sizing_stop_override_enabled",
+                sizing_override_available,
+            )
+            self.stop_card.set_row_visible(
+                "position_sizing_stop_multiple",
+                sizing_override_available
+                and self.trade["position_sizing_stop_override_enabled"].isChecked(),
+            )
+
+        sizing_override_active = bool(
+            not ema_920
+            and not structural_stop
+            and self.trade["position_sizing_stop_override_enabled"].isChecked()
+        )
+        if (ema_920 or structural_stop) and self.trade[
+            "position_sizing_stop_override_enabled"
+        ].isChecked():
+            self.trade["position_sizing_stop_override_enabled"].setChecked(False)
+            sizing_override_active = False
+
+        incompatible_toggles = (
+            "break_even_enabled",
+            "trailing_enabled",
+            "partial_profit_enabled",
+            "partial_stop_enabled",
+            "r_step_trailing_enabled",
+            "atr_checkpoint_tp_extension_enabled",
+        )
+        for name in incompatible_toggles:
+            widget = self.trade[name]
+            if sizing_override_active and widget.isChecked():
+                widget.setChecked(False)
+            widget.setEnabled(not sizing_override_active)
 
         target_mode = str(self.account["sr_take_profit_mode"].currentData() or "FIXED_R")
+        if sizing_override_active and target_mode != "FIXED_R":
+            fixed_index = self.account["sr_take_profit_mode"].findData("FIXED_R")
+            self.account["sr_take_profit_mode"].setCurrentIndex(fixed_index)
+            target_mode = "FIXED_R"
+        self.account["sr_take_profit_mode"].setEnabled(not sizing_override_active)
+        target_label = self.target_card.rows["reward_risk_ratio"][0]
+        if target_label is not None:
+            target_label.setText(
+                "Profit Target (Sizing-R)"
+                if sizing_override_active
+                else "Base Profit Target"
+            )
         sr_target = target_mode in ("SR_CAPPED_R", "SR_LEVEL")
         for name in ("ema_920_target_method", "ema_920_target_value"):
             self.target_card.set_row_visible(name, ema_920)
@@ -456,6 +521,29 @@ class RiskExecutionWorkspace(QWidget):
         risk_dollars = float(execution.initial_equity) * effective_risk
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
         ema_920 = self._ema_920_selected()
+        sizing_override = bool(
+            base.position_sizing_stop_override_enabled
+            and not ema_920
+            and str(execution.risk_mode).upper() != "SR_STRUCTURE"
+        )
+        sizing_stop_mult = (
+            float(base.position_sizing_stop_multiple)
+            if sizing_override
+            else stop_mult
+        )
+        if base.partial_stop_enabled:
+            first_fraction = float(base.sl1_close_pct) / 100.0
+            gross_stop_mult = (
+                first_fraction * float(base.sl1_r)
+                + (1.0 - first_fraction) * float(base.sl2_r)
+            )
+        else:
+            gross_stop_mult = stop_mult
+        gross_stop_exposure = (
+            effective_risk * gross_stop_mult / sizing_stop_mult
+            if sizing_stop_mult > 0
+            else effective_risk
+        )
 
         timing = str(getattr(execution, "entry_timing_mode", "SIGNAL_CLOSE")).upper()
         entry_fill = (
@@ -487,7 +575,11 @@ class RiskExecutionWorkspace(QWidget):
                     f"safety cap {execution.sr_take_profit_maximum_r:g}R)"
                 )
             else:
-                target = f"fixed {base.reward_risk_ratio:g}R target"
+                target = (
+                    f"fixed {base.reward_risk_ratio:g} sizing-R target"
+                    if sizing_override
+                    else f"fixed {base.reward_risk_ratio:g}R target"
+                )
 
         multiplier = (
             f" · risk multiplier {base.risk_multiplier:g}×"
@@ -507,12 +599,41 @@ class RiskExecutionWorkspace(QWidget):
                 f"with a {stop_mult:g}× stop multiplier. "
             )
 
+        sizing_description = ""
+        if sizing_override:
+            gross_stop_dollars = float(execution.initial_equity) * gross_stop_exposure
+            stop_as_sizing_r = stop_mult / sizing_stop_mult
+            geometry = (
+                f" Actual full stop = {stop_as_sizing_r:.2f} sizing-R."
+            )
+            if (
+                not base.partial_profit_enabled
+                and str(execution.sr_take_profit_mode).upper() == "FIXED_R"
+            ):
+                target_as_sizing_r = float(base.reward_risk_ratio)
+                physical_ratio = (
+                    target_as_sizing_r * sizing_stop_mult / stop_mult
+                    if stop_mult > 0
+                    else float("nan")
+                )
+                geometry += (
+                    f" Fixed target = {target_as_sizing_r:.2f} sizing-R; "
+                    f"physical target:stop = {physical_ratio:g}:1."
+                )
+            sizing_description = (
+                f" Position size uses a separate {sizing_stop_mult:g}× reference stop; "
+                f"the configured actual stop implies about {gross_stop_exposure * 100:.2f}% "
+                f"(${gross_stop_dollars:,.2f}) gross stop exposure before fees/slippage."
+                f"{geometry}"
+            )
+
         self.summary_label.setText(
-            f"${execution.initial_equity:,.2f} equity · base risk {execution.risk_per_leg * 100:.2f}%"
-            f"{multiplier} → effective risk budget {effective_risk * 100:.2f}% (${risk_dollars:,.2f}). "
+            f"${execution.initial_equity:,.2f} equity · sizing budget {execution.risk_per_leg * 100:.2f}%"
+            f"{multiplier} → effective sizing budget {effective_risk * 100:.2f}% (${risk_dollars:,.2f}). "
             f"Entry fill: {entry_fill}. "
             f"{stop_description}"
-            f"Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
+            f"{sizing_description}"
+            f" Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
             f"Management: {self._management_description(base)}."
         )
 

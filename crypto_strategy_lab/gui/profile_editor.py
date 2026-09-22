@@ -66,14 +66,30 @@ class StrategyProfilesWidget(QWidget):
         self._section("Exit Strategy")
         self._subsection("Base Exit","The normal stop and fixed target used when optional exit methods are disabled.")
         self._number("stop_loss_multiple",2,.001,1000)
+        self._check(
+            "position_sizing_stop_override_enabled",
+            "Use separate position-sizing stop",
+        )
+        self._number("position_sizing_stop_multiple",1,.001,1000)
         self._number("reward_risk_ratio",1,.01,100)
-        self.form.labelForField(self.controls["stop_loss_multiple"]).setText("Stop Distance")
+        self.form.labelForField(self.controls["stop_loss_multiple"]).setText("Actual Stop Distance")
+        self.form.labelForField(
+            self.controls["position_sizing_stop_multiple"]
+        ).setText("Position-Sizing Stop")
         self.form.labelForField(self.controls["reward_risk_ratio"]).setText("Profit Target")
         self.controls["stop_loss_multiple"].setDecimals(3)
         self.controls["stop_loss_multiple"].setSuffix(" distance units")
-        self.controls["stop_loss_multiple"].setToolTip("Distance from entry measured in the Backtest Setup distance unit. With ATR basis, 2.0 means 2 × the configured ATR volatility unit.")
-        self.controls["reward_risk_ratio"].setSuffix(" x stop (R)")
-        self.controls["reward_risk_ratio"].setToolTip("Fixed final target as a multiple of the full initial stop distance. 1R equals the initial full stop distance. Disabled while partial take-profit is active.")
+        self.controls["stop_loss_multiple"].setToolTip("Actual execution stop measured in the Backtest Setup distance unit.")
+        self.controls["position_sizing_stop_multiple"].setDecimals(3)
+        self.controls["position_sizing_stop_multiple"].setSuffix(" distance units")
+        self.controls["position_sizing_stop_multiple"].setToolTip(
+            "Reference stop used only for quantity calculation. It does not move the actual stop or profit target."
+        )
+        self.controls["reward_risk_ratio"].setSuffix(" R")
+        self.controls["reward_risk_ratio"].setToolTip(
+            "Fixed target in trade R. Normally 1R equals the actual full stop; "
+            "with a separate position-sizing stop, 1R equals the sizing reference distance."
+        )
 
         self._subsection("Stop Loss","Optional staged loss handling.")
         self._check("partial_stop_enabled","Use partial stop-loss")
@@ -161,7 +177,7 @@ class StrategyProfilesWidget(QWidget):
         copy_btn.clicked.connect(lambda:setattr(self,"clipboard",deepcopy(self.profiles[self.current]))); paste_btn.clicked.connect(self._paste); reset_btn.clicked.connect(self._reset); copy_strategy_btn.clicked.connect(self._apply_strategy_to_all); self.list.currentRowChanged.connect(self._select); self.mode.currentTextChanged.connect(self.changed); self.mode.currentIndexChanged.connect(self._update_mode_help)
         for widget in (self.regime_lookback,self.bull_threshold,self.structural_sma_days,self.structural_slope_days,self.adx_period,self.bb_period,self.bb_stddevs): widget.valueChanged.connect(self.changed)
         self.regime_method.currentIndexChanged.connect(self._update_regime_controls); self.regime_method.currentIndexChanged.connect(self.changed)
-        for key in ("partial_stop_enabled","partial_profit_enabled","trailing_enabled","break_even_enabled","timeout_enabled","r_step_trailing_enabled","atr_checkpoint_tp_extension_enabled"): self.controls[key].toggled.connect(self._update_management_controls)
+        for key in ("position_sizing_stop_override_enabled","partial_stop_enabled","partial_profit_enabled","trailing_enabled","break_even_enabled","timeout_enabled","r_step_trailing_enabled","atr_checkpoint_tp_extension_enabled"): self.controls[key].toggled.connect(self._update_management_controls)
         self.add_rule_btn.clicked.connect(self._add_entry_rule); self.remove_rule_btn.clicked.connect(self._remove_entry_rule)
         self._update_mode_help(); self._update_regime_controls(); self._refresh_list(); self.list.setCurrentRow(0)
     def _update_regime_controls(self,*_):
@@ -232,6 +248,22 @@ class StrategyProfilesWidget(QWidget):
         self.entry_rules_table.setRowCount(0)
         for rule in rules: self._add_entry_rule(rule=rule)
     def _update_management_controls(self,*_):
+        sizing_override=self.controls["position_sizing_stop_override_enabled"].isChecked()
+        self._show_control("position_sizing_stop_multiple",sizing_override)
+        incompatible=(
+            "partial_stop_enabled","partial_profit_enabled","trailing_enabled",
+            "break_even_enabled","r_step_trailing_enabled",
+            "atr_checkpoint_tp_extension_enabled",
+        )
+        if sizing_override:
+            for key in incompatible:
+                if self.controls[key].isChecked():
+                    self.controls[key].setChecked(False)
+                self.controls[key].setEnabled(False)
+        else:
+            for key in incompatible:
+                self.controls[key].setEnabled(True)
+
         partial_stop=self.controls["partial_stop_enabled"].isChecked()
         for key in ("sl1_r","sl1_close_pct","sl2_r"):
             self._show_control(key,partial_stop)

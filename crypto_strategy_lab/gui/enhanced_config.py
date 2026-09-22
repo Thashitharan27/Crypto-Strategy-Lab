@@ -161,6 +161,15 @@ class EnhancedBacktestConfig(BacktestConfig):
 
         structural_stop = getattr(self.risk_mode, "value", self.risk_mode) == "SR_STRUCTURE"
         sr_target = tp_mode in ("SR_CAPPED_R", "SR_LEVEL")
+        separate_sizing = any(
+            p.enabled and getattr(p, "position_sizing_stop_override_enabled", False)
+            for p in self.strategy_profiles.values()
+        )
+        if separate_sizing and (structural_stop or sr_target):
+            raise ValueError(
+                "separate position-sizing stop requires a fixed-distance stop basis "
+                "and FIXED_R take-profit mode"
+            )
         if (structural_stop or sr_target) and not self.enable_support_resistance_analysis:
             raise ValueError("S/R analysis must be enabled when a structural S/R stop or target is selected")
         if sr_target:

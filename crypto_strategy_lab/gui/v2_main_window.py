@@ -138,7 +138,10 @@ STRATEGY_PROFILE_GROUPS = (
 )
 
 EXECUTION_PROFILE_GROUPS = (
-    ("Risk", ("risk_multiplier",), None),
+    ("Risk", (
+        "risk_multiplier", "position_sizing_stop_override_enabled",
+        "position_sizing_stop_multiple",
+    ), None),
     ("Stop Loss", ("stop_loss_multiple",), None),
     ("Take Profit", ("reward_risk_ratio",), None),
     ("Break-even", (
@@ -385,6 +388,7 @@ class DataclassForm(QWidget):
                 "sr_hold_confirmation_bars", "sr_hold_confirmation_atr", "sr_break_tolerance_atr",
                 "sr_break_basis",
             ),
+            "position_sizing_stop_override_enabled": ("position_sizing_stop_multiple",),
             "break_even_enabled": ("break_even_activation_r", "break_even_offset_r"),
             "trailing_enabled": ("trailing_activation_r", "trailing_distance_r"),
             "partial_profit_enabled": ("tp1_r", "tp1_close_pct", "tp2_r"),
@@ -1658,15 +1662,16 @@ class MainWindow(QMainWindow):
             f"MR Context  {'ANALYZE' if config.strategy.enable_mean_reversion_analysis else 'OFF'}\n"
             f"Trade Flow  {'ANALYZE' if config.features.trade_flow_enabled else 'OFF'}\n"
             f"Order Book  {'ANALYZE' if config.features.order_book_enabled else 'OFF'}\n\n"
-            f"Base risk  {risk}\nMax trades  {config.execution.max_active_pairs}\n\n"
+            f"Base sizing budget  {risk}\nMax trades  {config.execution.max_active_pairs}\n\n"
             f"Data  {self._data_state()}"
         )
         self.current_research.setText(text)
         self.risk_explanation.setText(
-            f"Base Risk: {risk}\nAt ${config.execution.initial_equity:,.2f}, planned "
-            f"base full-stop loss is "
+            f"Base Sizing Budget: {risk}\nAt ${config.execution.initial_equity:,.2f}, "
+            f"the base quantity-sizing budget is "
             f"${config.execution.initial_equity * config.execution.risk_per_leg:,.2f}. "
-            "Profile multipliers use the existing execution configuration."
+            "When a profile uses a separate sizing stop, its actual stop exposure "
+            "is reported independently."
         )
         if hasattr(self, "review_summary"):
             mode = ENUM_LABELS["strategy_profile_run_mode"].get(
@@ -1702,7 +1707,7 @@ class MainWindow(QMainWindow):
                 f"Support / Resistance: {sr_text}\n\n"
                 f"Profile Test: {mode}\n"
                 f"Starting Equity: ${config.execution.initial_equity:,.2f}\n"
-                f"Base Risk: {risk}\n"
+                f"Base Sizing Budget: {risk}\n"
                 f"Maximum Active Trades: {config.execution.max_active_pairs}\n"
                 f"Reports: {config.reporting.analysis_level}\n\n"
                 f"DATA STATUS: {self._data_state()}"

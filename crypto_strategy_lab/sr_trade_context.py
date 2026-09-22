@@ -170,7 +170,19 @@ def planned_trade_distances(profile: Any, risk_unit: Any) -> tuple[float | None,
     reward_risk = _finite(_profile_value(profile, "reward_risk_ratio", None))
     if reward_risk is None or reward_risk <= 0:
         return stop_distance, None
-    return stop_distance, stop_distance * reward_risk
+    sizing_override = bool(
+        _profile_value(profile, "position_sizing_stop_override_enabled", False)
+    )
+    if sizing_override:
+        sizing_multiple = _finite(
+            _profile_value(profile, "position_sizing_stop_multiple", None)
+        )
+        if sizing_multiple is None or sizing_multiple <= 0:
+            return stop_distance, None
+        target_reference_distance = unit * sizing_multiple
+    else:
+        target_reference_distance = stop_distance
+    return stop_distance, target_reference_distance * reward_risk
 
 
 def _side_fields(direction: str) -> tuple[str, str]:

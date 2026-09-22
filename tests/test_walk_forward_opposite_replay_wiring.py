@@ -32,6 +32,34 @@ def test_simple_one_r_replay_resolves_short_target_from_one_minute_bars():
     assert outcome["exit_time"] == "2026-01-01T00:01:00+00:00"
 
 
+def test_replay_uses_sizing_reference_for_account_r_when_stop_is_tighter():
+    frame = pd.DataFrame(
+        {
+            "period_start": pd.to_datetime(
+                ["2026-01-01T00:00:00Z", "2026-01-01T00:01:00Z"], utc=True
+            ),
+            "high": [100.1, 100.3],
+            "low": [99.9, 99.9],
+        }
+    )
+    outcome = _simulate_simple_one_r(
+        frame,
+        side="LONG",
+        entry_price=100.0,
+        stop_distance=0.2,
+        account_r_distance=1.0,
+        slippage=0.0,
+        tie_policy="OPTIMISTIC",
+        entry_fee_rate=0.0,
+        exit_fee_rate=0.0,
+    )
+    assert outcome is not None
+    assert outcome["exit_reason"] == "TP"
+    assert outcome["gross_r"] == 0.2
+    assert outcome["net_r"] == 0.2
+    assert outcome["account_r_distance"] == 1.0
+
+
 def test_teacher_loss_packet_falls_back_to_immutable_replay(monkeypatch):
     base = {
         "status": "TEACHER_LOSS_REVIEW_REQUIRED",

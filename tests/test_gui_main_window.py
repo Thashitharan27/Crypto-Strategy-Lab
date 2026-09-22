@@ -788,10 +788,10 @@ def test_risk_ui_separates_account_risk_distance_units_and_trade_r():
         editor=window.profile_editor; controls=editor.controls
         assert editor.control_forms["risk_multiplier"].labelForField(controls["risk_multiplier"]).text()=="Profile Risk Multiplier"
         assert controls["risk_multiplier"].suffix().strip()=="x"
-        assert editor.control_forms["stop_loss_multiple"].labelForField(controls["stop_loss_multiple"]).text()=="Stop Distance"
+        assert editor.control_forms["stop_loss_multiple"].labelForField(controls["stop_loss_multiple"]).text()=="Actual Stop Distance"
         assert "distance units" in controls["stop_loss_multiple"].suffix()
         assert editor.control_forms["reward_risk_ratio"].labelForField(controls["reward_risk_ratio"]).text()=="Profit Target"
-        assert "stop (R)" in controls["reward_risk_ratio"].suffix()
+        assert controls["reward_risk_ratio"].suffix().strip()=="R"
         assert "distance units" in controls["sl1_r"].suffix()
         assert controls["tp1_r"].suffix().strip()=="R"
         assert controls["break_even_activation_r"].suffix().strip()=="R"

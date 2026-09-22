@@ -904,6 +904,47 @@ class BacktestEngine:
         if self.config.max_combined_effective_leverage is not None: cap_qty=min(cap_qty, self.config.max_combined_effective_leverage*equity/(self._entry_leg_count()*entry_price))
         capped=cap_qty < qty - 1e-12
         return cap_qty,capped
+    def _position_sizing_stop_distance(self, profile, risk_unit, actual_stop):
+        """Return the price distance used only for quantity sizing.
+
+        Existing behavior is preserved unless the profile explicitly enables a
+        separate sizing stop. Structural S/R and EMA 9/20 micro-swing stops own
+        their full stop geometry, so the override is intentionally inactive for
+        those dynamic-stop modes.
+        """
+        enabled = bool(
+            getattr(profile, "position_sizing_stop_override_enabled", False)
+        )
+        risk_mode = str(
+            getattr(
+                getattr(self.config, "risk_mode", None),
+                "value",
+                getattr(self.config, "risk_mode", ""),
+            )
+        ).upper()
+        dynamic_stop = (
+            risk_mode == "SR_STRUCTURE"
+            or str(getattr(self, "signal_strategy_mode", "")).upper()
+            == "EMA_9_20_PULLBACK"
+        )
+        if enabled and not dynamic_stop:
+            multiple = float(
+                getattr(profile, "position_sizing_stop_multiple", 1.0)
+            )
+            distance = float(risk_unit) * multiple
+            if not np.isfinite(distance) or distance <= 0:
+                raise ValueError(
+                    "position-sizing stop distance must be finite and positive"
+                )
+            return distance, multiple, True
+
+        actual_multiple = (
+            float(actual_stop) / float(risk_unit)
+            if np.isfinite(risk_unit) and float(risk_unit) > 0
+            else np.nan
+        )
+        return float(actual_stop), actual_multiple, False
+
     def _entry_leg_count(self):
         return 1
     def _active_positions(self, pair):
@@ -951,9 +992,15 @@ class BacktestEngine:
         stop_mult = sl2_r if partial_sl_enabled else active_profile.stop_loss_multiple
         stop = stop_mult * r
         risk_amt = self.current_equity * self.config.risk_per_leg * active_profile.risk_multiplier
-        uncapped = risk_amt / stop
+        sizing_stop, sizing_stop_mult, sizing_override_applied = (
+            self._position_sizing_stop_distance(active_profile, r, stop)
+        )
+        uncapped = risk_amt / sizing_stop
         qty, capped = self._cap_qty(uncapped, entry, self.current_equity)
-        target_distance = stop * active_profile.reward_risk_ratio
+        target_reference_distance = (
+            sizing_stop if sizing_override_applied else stop
+        )
+        target_distance = target_reference_distance * active_profile.reward_risk_ratio
         sl = entry - side_sign * stop
         tp = entry + side_sign * target_distance
         entry_fee_rate = self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
@@ -961,7 +1008,14 @@ class BacktestEngine:
         pos = Position(
             side, entry_timestamp, i, entry, stop, sl, tp, qty, risk_amt, entry * qty,
             float(self.atr_values[ind_i]), uncapped, qty * entry / self.current_equity,
-            distance_unit=r, entry_fee=entry_fee, fees=entry_fee, original_sl=sl,
+            distance_unit=r,
+            position_sizing_stop_override_enabled=bool(
+                getattr(active_profile, "position_sizing_stop_override_enabled", False)
+            ),
+            position_sizing_stop_override_applied=sizing_override_applied,
+            position_sizing_stop_multiple=float(sizing_stop_mult),
+            position_sizing_reference_distance=float(sizing_stop),
+            entry_fee=entry_fee, fees=entry_fee, original_sl=sl,
             be_enabled=active_profile.break_even_enabled,
             be_mode="R_OFFSET" if active_profile.break_even_offset_r else "ENTRY_PRICE",
             be_offset_r=active_profile.break_even_offset_r,
@@ -1780,6 +1834,38 @@ class BacktestEngine:
         gross = sum(pos.gross_pnl for pos in positions)
         net = sum(pos.net_pnl for pos in positions)
         risk_base = sum(pos.risk_amount for pos in positions)
+        planned_gross_stop_loss = sum(
+            self._planned_gross_stop_loss(pos) for pos in positions
+        )
+        sizing_budget_pct = (
+            risk_base / p.equity_before_trade if p.equity_before_trade else np.nan
+        )
+        gross_stop_risk_pct = (
+            planned_gross_stop_loss / p.equity_before_trade
+            if p.equity_before_trade
+            else np.nan
+        )
+        sizing_reference_distance = float(
+            getattr(primary, "position_sizing_reference_distance", primary.risk)
+        )
+        actual_stop_as_sizing_r = (
+            float(primary.risk) / sizing_reference_distance
+            if sizing_reference_distance > 0
+            else np.nan
+        )
+        final_target_distance = abs(
+            float(primary.tp) - float(primary.entry_price)
+        )
+        final_target_as_sizing_r = (
+            final_target_distance / sizing_reference_distance
+            if sizing_reference_distance > 0
+            else np.nan
+        )
+        physical_reward_risk_ratio = (
+            final_target_distance / float(primary.risk)
+            if float(primary.risk) > 0
+            else np.nan
+        )
         exit_t = max(pd.Timestamp(pos.exit_time) for pos in positions)
         hold = exit_t - pd.Timestamp(p.strategy_entry_time)
         entry_notional = sum(pos.entry_notional for pos in positions)
@@ -1797,9 +1883,17 @@ class BacktestEngine:
 
         if partial_tp:
             winning_trade_r = (tp1_pct/100.0) * tp1_r + (1-tp1_pct/100.0) * tp2_r
+            expected_profit = (
+                winning_trade_r * primary.risk * primary.quantity
+                if np.isfinite(winning_trade_r)
+                else np.nan
+            )
         else:
             winning_trade_r = applied_rr if np.isfinite(applied_rr) else np.nan
-        expected_profit = winning_trade_r * primary.risk * primary.quantity if np.isfinite(winning_trade_r) else np.nan
+            # Use the actual configured target geometry rather than assuming
+            # reward_risk_ratio is always based on the physical stop. In
+            # separate-sizing mode the fixed target is measured from sizing-R.
+            expected_profit = final_target_distance * primary.quantity
         estimated_fees = entry_notional * (
             (self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee)
             + (self.config.maker_fee if self.config.use_maker_exit else self.config.taker_fee)
@@ -1861,6 +1955,22 @@ class BacktestEngine:
             "profile_timeout_triggered": bool(getattr(p, "profile_timeout_triggered", False)),
             "profile_timeout_exit_time": getattr(p, "timeout_exit_time", None),
             "configured_account_risk_percentage": self.config.risk_per_leg,
+            "configured_sizing_budget_percentage": sizing_budget_pct,
+            "position_sizing_stop_override_enabled": bool(
+                getattr(primary, "position_sizing_stop_override_enabled", False)
+            ),
+            "position_sizing_stop_override_applied": bool(
+                getattr(primary, "position_sizing_stop_override_applied", False)
+            ),
+            "position_sizing_stop_multiple": float(
+                getattr(primary, "position_sizing_stop_multiple", stop_mult)
+            ),
+            "position_sizing_reference_distance": sizing_reference_distance,
+            "actual_stop_as_sizing_r": actual_stop_as_sizing_r,
+            "final_target_as_sizing_r": final_target_as_sizing_r,
+            "physical_reward_risk_ratio": physical_reward_risk_ratio,
+            "planned_gross_stop_loss": planned_gross_stop_loss,
+            "planned_gross_stop_risk_percentage": gross_stop_risk_pct,
             "estimated_all_in_stop_risk_percentage": estimated_stop_risk,
             "strategy_candle_open_time": p.strategy_candle_open_time,
             "strategy_entry_time": p.strategy_entry_time,
@@ -2060,6 +2170,16 @@ class BacktestEngine:
             active = bool(pos and pos.trailing_active)
             row.update({f"{prefix}_trailing_enabled":enabled, f"{prefix}_trailing_active":active, f"{prefix}_trailing_activation_price":pos.trailing_activation_price if enabled else np.nan, f"{prefix}_current_trailing_stop":pos.trailing_stop if active else np.nan, f"{prefix}_current_active_stop":pos.sl if pos and pos.is_open else np.nan, f"{prefix}_{'highest' if is_long else 'lowest'}_price_since_entry":pos.favourable_price if enabled else np.nan, f"{prefix}_distance_to_activation_r":((pos.trailing_activation_price-close) if is_long else (close-pos.trailing_activation_price))/pos.risk if enabled and pos.risk else np.nan, f"{prefix}_distance_to_trailing_stop_r":((close-pos.trailing_stop) if is_long else (pos.trailing_stop-close))/pos.risk if active and pos.risk else np.nan, f"{prefix}_unrealized_profit_r":((close-pos.entry_price) if is_long else (pos.entry_price-close))/pos.risk if pos and pos.is_open and pos.risk else np.nan, f"{prefix}_original_quantity":pos.original_quantity if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_remaining_quantity":pos.remaining_quantity if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_tp1_hit":bool(pos and pos.tp1_hit), f"{prefix}_tp2_hit":bool(pos and pos.tp2_hit), f"{prefix}_tp1_price":pos.tp1_price if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_tp2_price":pos.tp2_price if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_realized_pnl":pos.realized_pnl-pos.entry_fee if pos and pos.partial_tp_enabled else 0.0, f"{prefix}_total_current_pnl":(pos.realized_pnl-pos.entry_fee+self._unrealized(pos,close)+pos.fees if pos and pos.partial_tp_enabled else row.get(f"{prefix}_unrealized_pnl",0.0))})
         self.telemetry_rows.append(row)
+
+    def _planned_gross_stop_loss(self, pos):
+        """Gross PnL loss if the configured initial stop plan fully executes."""
+        if pos.partial_sl_enabled:
+            first = float(pos.sl1_quantity)
+            remainder = float(pos.original_quantity) - first
+            first_distance = abs(float(pos.entry_price) - float(pos.sl1_price))
+            final_distance = abs(float(pos.entry_price) - float(pos.sl2_price))
+            return first_distance * first + final_distance * remainder
+        return float(pos.risk) * float(pos.quantity)
 
     def _estimated_stop_loss(self,pos):
         if pos.partial_sl_enabled:

@@ -205,6 +205,19 @@ def test_planned_trade_distances_follow_runtime_final_target_contract():
     assert stop == 100.0
     assert target == 300.0
 
+    decoupled = SimpleNamespace(
+        partial_stop_enabled=False,
+        stop_loss_multiple=0.2,
+        position_sizing_stop_override_enabled=True,
+        position_sizing_stop_multiple=1.0,
+        partial_profit_enabled=False,
+        reward_risk_ratio=0.2,
+        r_step_trailing_enabled=False,
+    )
+    stop, target = planned_trade_distances(decoupled, 100.0)
+    assert stop == pytest.approx(20.0)
+    assert target == pytest.approx(20.0)
+
     partial = {
         "partial_stop_enabled": True,
         "sl2_r": 1.5,

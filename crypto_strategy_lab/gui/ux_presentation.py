@@ -27,13 +27,34 @@ class FieldPresentation:
 PERCENT_FIELDS = {"risk_per_leg", "maker_fee", "taker_fee", "slippage", "percent_r"}
 FIELDS = {
     "initial_equity": FieldPresentation("Starting Equity", unit="$", decimals=2),
-    "risk_per_leg": FieldPresentation("Base Risk Per Trade", "Fraction of equity risked at a full stop.", "%", 100, 4),
+    "risk_per_leg": FieldPresentation(
+        "Base Sizing Budget Per Trade",
+        "Fraction of equity used to size quantity. With a separate sizing stop, actual gross stop exposure can be smaller.",
+        "%",
+        100,
+        4,
+    ),
     "maker_fee": FieldPresentation("Maker Fee", unit="%", scale=100, decimals=4),
     "taker_fee": FieldPresentation("Taker Fee", unit="%", scale=100, decimals=4),
     "slippage": FieldPresentation("Slippage", unit="%", scale=100, decimals=4),
     "percent_r": FieldPresentation("Price Distance", unit="%", scale=100, decimals=4),
     "reward_risk_ratio": FieldPresentation("Profit Target", unit=" R", decimals=2),
-    "stop_loss_multiple": FieldPresentation("Stop Distance", unit=" distance units", decimals=2),
+    "stop_loss_multiple": FieldPresentation(
+        "Actual Stop Multiplier",
+        "Actual execution stop measured in the selected distance unit.",
+        unit=" ×",
+        decimals=3,
+    ),
+    "position_sizing_stop_override_enabled": FieldPresentation(
+        "Use Separate Position-Sizing Stop",
+        "When enabled, quantity is sized from a separate reference stop while the actual execution stop remains unchanged.",
+    ),
+    "position_sizing_stop_multiple": FieldPresentation(
+        "Position-Sizing Stop Multiplier",
+        "Reference stop used only to calculate quantity. It does not move the actual stop or target.",
+        unit=" ×",
+        decimals=3,
+    ),
     "sr_stop_timeframe_minutes": FieldPresentation("S/R Stop Timeframe", "Independent S/R context used for structural stop placement."),
     "sr_stop_buffer_atr": FieldPresentation("Buffer Beyond S/R", "Extra distance beyond the outer edge of the S/R zone, measured in strategy ATR.", unit=" × ATR", decimals=2),
     "sr_stop_maximum_atr": FieldPresentation("Maximum Structural Stop", "Reject structural stops farther than this many strategy ATR from entry.", unit=" × ATR", decimals=2),
