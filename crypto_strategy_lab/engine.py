@@ -1842,6 +1842,27 @@ class BacktestEngine:
             if p.equity_before_trade
             else np.nan
         )
+        sizing_reference_distance = float(
+            getattr(primary, "position_sizing_reference_distance", primary.risk)
+        )
+        actual_stop_as_sizing_r = (
+            float(primary.risk) / sizing_reference_distance
+            if sizing_reference_distance > 0
+            else np.nan
+        )
+        final_target_distance = abs(
+            float(primary.tp) - float(primary.entry_price)
+        )
+        final_target_as_sizing_r = (
+            final_target_distance / sizing_reference_distance
+            if sizing_reference_distance > 0
+            else np.nan
+        )
+        physical_reward_risk_ratio = (
+            final_target_distance / float(primary.risk)
+            if float(primary.risk) > 0
+            else np.nan
+        )
         exit_t = max(pd.Timestamp(pos.exit_time) for pos in positions)
         hold = exit_t - pd.Timestamp(p.strategy_entry_time)
         entry_notional = sum(pos.entry_notional for pos in positions)
@@ -1933,9 +1954,10 @@ class BacktestEngine:
             "position_sizing_stop_multiple": float(
                 getattr(primary, "position_sizing_stop_multiple", stop_mult)
             ),
-            "position_sizing_reference_distance": float(
-                getattr(primary, "position_sizing_reference_distance", primary.risk)
-            ),
+            "position_sizing_reference_distance": sizing_reference_distance,
+            "actual_stop_as_sizing_r": actual_stop_as_sizing_r,
+            "final_target_as_sizing_r": final_target_as_sizing_r,
+            "physical_reward_risk_ratio": physical_reward_risk_ratio,
             "planned_gross_stop_loss": planned_gross_stop_loss,
             "planned_gross_stop_risk_percentage": gross_stop_risk_pct,
             "estimated_all_in_stop_risk_percentage": estimated_stop_risk,
