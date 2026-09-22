@@ -7,8 +7,9 @@ semantics and outcome firewall unchanged while making large scans bounded:
 * DuckDB rows are delivered in small pandas batches instead of one huge frame;
 * a pending teacher boundary stops scanning as soon as market time reaches it,
   even when no ENTRY rule currently matches;
-* accelerated callers can resume a scan from an exact (time, signal, side)
-  checkpoint without skipping same-timestamp opportunities;
+* accelerated callers can resume a scan from an exact
+  (decision_available_at, entry_time, signal, side) checkpoint without skipping
+  same-decision-time opportunities;
 * teacher losses are considered only inside an explicit teacher-loss FLIP
   policy, and paired losses become due only after both immutable sides resolve.
 """
@@ -83,13 +84,22 @@ def _scan_checkpoint(event: dict[str, Any] | None) -> dict[str, Any] | None:
     payload = event.get("payload") or {}
     if payload.get("checkpoint_type") != SCAN_CHECKPOINT_TYPE:
         return None
-    required = ("entry_time", "research_signal_index", "side")
+    # New checkpoints persist the causal decision watermark. Older checkpoints
+    # used entry_time only; treat those as legacy and fall back to the event-time
+    # watermark rather than resuming with an incompatible sort key.
+    required = (
+        "decision_available_at",
+        "entry_time",
+        "research_signal_index",
+        "side",
+    )
     if any(payload.get(name) in (None, "") for name in required):
         return None
     side = str(payload["side"]).upper()
     if side not in {"LONG", "SHORT"}:
         return None
     return {
+        "decision_available_at": _as_utc(payload["decision_available_at"]),
         "entry_time": _as_utc(payload["entry_time"]),
         "research_signal_index": int(payload["research_signal_index"]),
         "side": side,
@@ -122,7 +132,7 @@ def _tracking_max_event_time(events: list[dict[str, Any]]) -> pd.Timestamp | Non
         return _ORIGINAL_MAX_EVENT_TIME(events)
 
     base_cursor = _ORIGINAL_MAX_EVENT_TIME(events[:-1])
-    checkpoint_time = checkpoint["entry_time"]
+    checkpoint_time = checkpoint["decision_available_at"]
     if base_cursor is not None and checkpoint_time < base_cursor:
         _SCAN_CONTEXT.scan_key = None
         return base_cursor
@@ -202,29 +212,46 @@ class _StreamingCandidateRows:
             where = ""
             params: list[Any] = []
             if self.scan_key is not None:
-                cursor_time = _as_utc(self.scan_key["entry_time"]).to_pydatetime()
+                decision_cursor = _as_utc(
+                    self.scan_key["decision_available_at"]
+                ).to_pydatetime()
+                entry_cursor = _as_utc(self.scan_key["entry_time"]).to_pydatetime()
                 cursor_index = int(self.scan_key["research_signal_index"])
                 cursor_side = str(self.scan_key["side"]).upper()
                 where = """
                     WHERE (
-                        CAST(t.entry_time AS TIMESTAMPTZ) > ?
+                        CAST(c.decision_available_at AS TIMESTAMPTZ) > ?
                         OR (
-                            CAST(t.entry_time AS TIMESTAMPTZ) = ?
+                            CAST(c.decision_available_at AS TIMESTAMPTZ) = ?
                             AND (
-                                CAST(t.research_signal_index AS BIGINT) > ?
+                                CAST(t.entry_time AS TIMESTAMPTZ) > ?
                                 OR (
-                                    CAST(t.research_signal_index AS BIGINT) = ?
-                                    AND UPPER(CAST(t.side AS VARCHAR)) > ?
+                                    CAST(t.entry_time AS TIMESTAMPTZ) = ?
+                                    AND (
+                                        CAST(t.research_signal_index AS BIGINT) > ?
+                                        OR (
+                                            CAST(t.research_signal_index AS BIGINT) = ?
+                                            AND UPPER(CAST(t.side AS VARCHAR)) > ?
+                                        )
+                                    )
                                 )
                             )
                         )
                     )
                 """
                 params.extend(
-                    [cursor_time, cursor_time, cursor_index, cursor_index, cursor_side]
+                    [
+                        decision_cursor,
+                        decision_cursor,
+                        entry_cursor,
+                        entry_cursor,
+                        cursor_index,
+                        cursor_index,
+                        cursor_side,
+                    ]
                 )
             elif self.market_cursor is not None:
-                where = "WHERE CAST(t.entry_time AS TIMESTAMPTZ) >= ?"
+                where = "WHERE CAST(c.decision_available_at AS TIMESTAMPTZ) >= ?"
                 params.append(self.market_cursor.to_pydatetime())
 
             source_filter = (
@@ -249,7 +276,8 @@ class _StreamingCandidateRows:
                   ON CAST(t.research_signal_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)
                 {prev_join}
                 {where}
-                ORDER BY CAST(t.entry_time AS TIMESTAMPTZ),
+                ORDER BY CAST(c.decision_available_at AS TIMESTAMPTZ),
+                         CAST(t.entry_time AS TIMESTAMPTZ),
                          CAST(t.research_signal_index AS BIGINT),
                          UPPER(CAST(t.side AS VARCHAR))
                 LIMIT {self.limit}
@@ -293,6 +321,7 @@ class _StreamingCandidateRows:
 
                     entry_time = _as_utc(series["entry_time"])
                     self.last_cursor = {
+                        "decision_available_at": decision_time.isoformat(),
                         "entry_time": entry_time.isoformat(),
                         "research_signal_index": int(series["research_signal_index"]),
                         "side": str(series["side"]).upper(),

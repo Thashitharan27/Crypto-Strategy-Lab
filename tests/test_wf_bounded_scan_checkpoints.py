@@ -8,6 +8,8 @@ from crypto_strategy_lab import walk_forward_orchestrator as orchestrator
 from crypto_strategy_lab.walk_forward_candidate_engine import (
     SCAN_CHECKPOINT_TYPE,
     _StreamingCandidateRows,
+    _rule_decision,
+    _scan_checkpoint,
 )
 
 
@@ -35,8 +37,10 @@ def _parquets(tmp_path, rows):
         }
     )
     unique_context = {}
-    for signal_index, timestamp, _side in rows:
-        unique_context.setdefault(signal_index, timestamp)
+    for row in rows:
+        signal_index, timestamp, _side = row[:3]
+        decision_time = row[3] if len(row) > 3 else timestamp
+        unique_context.setdefault(signal_index, decision_time)
     context_items = list(unique_context.items())
     context = pd.DataFrame(
         {
@@ -142,6 +146,7 @@ def test_stream_cursor_resumes_exactly_after_same_timestamp_key(tmp_path):
         pd.Timestamp(timestamp),
         100,
         scan_key={
+            "decision_available_at": timestamp,
             "entry_time": timestamp,
             "research_signal_index": 2,
             "side": "LONG",
@@ -154,6 +159,69 @@ def test_stream_cursor_resumes_exactly_after_same_timestamp_key(tmp_path):
         for _, series in rows
     ] == [(2, "SHORT"), (3, "LONG")]
 
+
+
+
+
+def test_standalone_flip_remains_executable_without_entry():
+    decision = _rule_decision(
+        {"mean_reversion_state": "STRONGLY_ABOVE_MEAN"},
+        "bull_long",
+        "LONG",
+        {
+            "ENTRY": [],
+            "VETO": [],
+            "FLIP": [
+                {
+                    "id": "FLIP_001",
+                    "enabled": True,
+                    "conditions": [
+                        {
+                            "indicator": "MR_STATE",
+                            "condition": "EQUALS",
+                            "value": "STRONGLY_ABOVE_MEAN",
+                        }
+                    ],
+                }
+            ],
+        },
+        {"strategy": {"profiles": {"bull_long": {"enabled": True}}}},
+    )
+
+    assert decision["eligible"] is True
+    assert decision["reason"] == "FLIP_MATCHED_WITHOUT_ENTRY"
+    assert decision["matched_entry_groups"] == []
+    assert decision["matched_flip_groups"] == ["FLIP_001"]
+    assert decision["rule_effective_side"] == "SHORT"
+
+def test_stream_keeps_candidate_entered_before_teacher_but_decidable_after_teacher(tmp_path):
+    samples_path, context_path = _parquets(
+        tmp_path,
+        [
+            (
+                7,
+                "2025-07-01T04:00:00Z",
+                "LONG",
+                "2025-07-01T08:00:00Z",
+            ),
+        ],
+    )
+
+    # A teacher resolved at 06:00. The candidate entered at 04:00, but its
+    # decision was not causally available until 08:00. An entry-time cursor
+    # would incorrectly drop this prospective opportunity.
+    stream = _StreamingCandidateRows(
+        samples_path,
+        context_path,
+        pd.Timestamp("2025-07-01T06:00:00Z"),
+        10,
+    )
+    rows = list(stream.iterrows())
+
+    assert len(rows) == 1
+    assert int(rows[0][1]["research_signal_index"]) == 7
+    assert stream.last_cursor["decision_available_at"] == "2025-07-01T08:00:00+00:00"
+    assert stream.last_cursor["entry_time"] == "2025-07-01T04:00:00+00:00"
 
 def test_stream_marks_bounded_slice_exhausted_before_future_teacher(tmp_path):
     samples_path, context_path = _parquets(
@@ -194,6 +262,22 @@ def _definition():
     }
 
 
+
+def test_legacy_entry_time_only_checkpoint_falls_back_safely():
+    event = {
+        "event_type": "CHECKPOINT_CREATED",
+        "payload": {
+            "checkpoint_type": SCAN_CHECKPOINT_TYPE,
+            "entry_time": "2025-01-05T00:00:00+00:00",
+            "research_signal_index": 8123,
+            "side": "SHORT",
+        },
+    }
+
+    # The old entry-time key is not comparable with the new decision-time sort
+    # key. Ignoring it causes a safe causal re-scan instead of skipping rows.
+    assert _scan_checkpoint(event) is None
+
 def test_accelerated_orchestrator_persists_resumable_checkpoint(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
@@ -213,6 +297,7 @@ def test_accelerated_orchestrator_persists_resumable_checkpoint(tmp_path, monkey
             "scan": {
                 "rows_scanned": 4096,
                 "scan_cursor": {
+                    "decision_available_at": "2025-01-05T04:00:00+00:00",
                     "entry_time": "2025-01-05T00:00:00+00:00",
                     "research_signal_index": 8123,
                     "side": "SHORT",
@@ -242,4 +327,5 @@ def test_accelerated_orchestrator_persists_resumable_checkpoint(tmp_path, monkey
     assert event["payload"]["checkpoint_type"] == SCAN_CHECKPOINT_TYPE
     assert event["payload"]["research_signal_index"] == 8123
     assert event["payload"]["side"] == "SHORT"
-    assert event["effective_market_time"] == "2025-01-05T00:00:00+00:00"
+    assert event["payload"]["decision_available_at"] == "2025-01-05T04:00:00+00:00"
+    assert event["effective_market_time"] == "2025-01-05T04:00:00+00:00"

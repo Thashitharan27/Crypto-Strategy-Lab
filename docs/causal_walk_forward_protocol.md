@@ -848,8 +848,10 @@ Autonomous results explicitly separate user involvement from ChatGPT judgment:
 Bounded scan cursors must preserve exact ordering such as:
 
 ```text
-(entry_time, research_signal_index, side)
+(decision_available_at, entry_time, research_signal_index, side)
 ```
+
+Candidate chronology is keyed by `decision_available_at`, not merely by historical `entry_time`. A teacher resolution that occurs after a row's entry timestamp but before its decision becomes available must not consume or suppress that prospective opportunity.
 
 A rule/teacher/trade/review mutation invalidates an older cursor when necessary so chronology is recomputed from the new authoritative state.
 
