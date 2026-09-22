@@ -1831,6 +1831,17 @@ class BacktestEngine:
         gross = sum(pos.gross_pnl for pos in positions)
         net = sum(pos.net_pnl for pos in positions)
         risk_base = sum(pos.risk_amount for pos in positions)
+        planned_gross_stop_loss = sum(
+            self._planned_gross_stop_loss(pos) for pos in positions
+        )
+        sizing_budget_pct = (
+            risk_base / p.equity_before_trade if p.equity_before_trade else np.nan
+        )
+        gross_stop_risk_pct = (
+            planned_gross_stop_loss / p.equity_before_trade
+            if p.equity_before_trade
+            else np.nan
+        )
         exit_t = max(pd.Timestamp(pos.exit_time) for pos in positions)
         hold = exit_t - pd.Timestamp(p.strategy_entry_time)
         entry_notional = sum(pos.entry_notional for pos in positions)
@@ -1912,6 +1923,21 @@ class BacktestEngine:
             "profile_timeout_triggered": bool(getattr(p, "profile_timeout_triggered", False)),
             "profile_timeout_exit_time": getattr(p, "timeout_exit_time", None),
             "configured_account_risk_percentage": self.config.risk_per_leg,
+            "configured_sizing_budget_percentage": sizing_budget_pct,
+            "position_sizing_stop_override_enabled": bool(
+                getattr(primary, "position_sizing_stop_override_enabled", False)
+            ),
+            "position_sizing_stop_override_applied": bool(
+                getattr(primary, "position_sizing_stop_override_applied", False)
+            ),
+            "position_sizing_stop_multiple": float(
+                getattr(primary, "position_sizing_stop_multiple", stop_mult)
+            ),
+            "position_sizing_reference_distance": float(
+                getattr(primary, "position_sizing_reference_distance", primary.risk)
+            ),
+            "planned_gross_stop_loss": planned_gross_stop_loss,
+            "planned_gross_stop_risk_percentage": gross_stop_risk_pct,
             "estimated_all_in_stop_risk_percentage": estimated_stop_risk,
             "strategy_candle_open_time": p.strategy_candle_open_time,
             "strategy_entry_time": p.strategy_entry_time,
@@ -2111,6 +2137,16 @@ class BacktestEngine:
             active = bool(pos and pos.trailing_active)
             row.update({f"{prefix}_trailing_enabled":enabled, f"{prefix}_trailing_active":active, f"{prefix}_trailing_activation_price":pos.trailing_activation_price if enabled else np.nan, f"{prefix}_current_trailing_stop":pos.trailing_stop if active else np.nan, f"{prefix}_current_active_stop":pos.sl if pos and pos.is_open else np.nan, f"{prefix}_{'highest' if is_long else 'lowest'}_price_since_entry":pos.favourable_price if enabled else np.nan, f"{prefix}_distance_to_activation_r":((pos.trailing_activation_price-close) if is_long else (close-pos.trailing_activation_price))/pos.risk if enabled and pos.risk else np.nan, f"{prefix}_distance_to_trailing_stop_r":((close-pos.trailing_stop) if is_long else (pos.trailing_stop-close))/pos.risk if active and pos.risk else np.nan, f"{prefix}_unrealized_profit_r":((close-pos.entry_price) if is_long else (pos.entry_price-close))/pos.risk if pos and pos.is_open and pos.risk else np.nan, f"{prefix}_original_quantity":pos.original_quantity if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_remaining_quantity":pos.remaining_quantity if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_tp1_hit":bool(pos and pos.tp1_hit), f"{prefix}_tp2_hit":bool(pos and pos.tp2_hit), f"{prefix}_tp1_price":pos.tp1_price if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_tp2_price":pos.tp2_price if pos and pos.partial_tp_enabled else np.nan, f"{prefix}_realized_pnl":pos.realized_pnl-pos.entry_fee if pos and pos.partial_tp_enabled else 0.0, f"{prefix}_total_current_pnl":(pos.realized_pnl-pos.entry_fee+self._unrealized(pos,close)+pos.fees if pos and pos.partial_tp_enabled else row.get(f"{prefix}_unrealized_pnl",0.0))})
         self.telemetry_rows.append(row)
+
+    def _planned_gross_stop_loss(self, pos):
+        """Gross PnL loss if the configured initial stop plan fully executes."""
+        if pos.partial_sl_enabled:
+            first = float(pos.sl1_quantity)
+            remainder = float(pos.original_quantity) - first
+            first_distance = abs(float(pos.entry_price) - float(pos.sl1_price))
+            final_distance = abs(float(pos.entry_price) - float(pos.sl2_price))
+            return first_distance * first + final_distance * remainder
+        return float(pos.risk) * float(pos.quantity)
 
     def _estimated_stop_loss(self,pos):
         if pos.partial_sl_enabled:
