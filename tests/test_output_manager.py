@@ -33,7 +33,7 @@ def test_run_folder_name_marks_separate_position_sizing_stop():
         stop_loss_multiple=0.2,
         position_sizing_stop_override_enabled=True,
         position_sizing_stop_multiple=1.0,
-        reward_risk_ratio=1.0,
+        reward_risk_ratio=0.2,
     )
     name = run_folder_name(cfg, datetime(2026, 7, 23, 12, 34, 56))
     assert "_SL0p2-SIZE1_TP0p2_" in name
