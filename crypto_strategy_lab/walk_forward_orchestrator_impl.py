@@ -56,6 +56,33 @@ DECISION_CONTRACT = "causal_walk_forward_frozen_decision_v1"
 OUTCOME_CONTRACT = "causal_walk_forward_revealed_outcome_v1"
 SETTLEMENT_CONTRACT = "causal_walk_forward_settlement_v1"
 
+MONTHLY_BATCH_OOS_MODE = "MONTHLY_BATCH_OOS"
+MONTHLY_BATCH_DEFERRED = "DEFERRED_TO_MONTHLY_BATCH"
+
+
+def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
+    raw = definition.get("rule_update_policy") or {}
+    mode = str(raw.get("mode", "TRADE_BY_TRADE")).strip().upper()
+    if mode == MONTHLY_BATCH_OOS_MODE:
+        return {
+            "mode": MONTHLY_BATCH_OOS_MODE,
+            "interval_months": 1,
+            "freeze_between_reviews": True,
+        }
+    return {"mode": "TRADE_BY_TRADE"}
+
+
+def _monthly_batch_enabled(definition: dict[str, Any]) -> bool:
+    return _rule_update_policy(definition)["mode"] == MONTHLY_BATCH_OOS_MODE
+
+
+def _effective_review_interval(
+    definition: dict[str, Any], requested_months: int
+) -> int:
+    if _monthly_batch_enabled(definition):
+        return 1
+    return int(requested_months)
+
 _OUTCOME_FIELDS = (
     "research_sample_id",
     "research_signal_index",
@@ -1024,6 +1051,100 @@ def _append_auto_compressed_teacher(
     }
 
 
+def _append_monthly_batch_teacher(
+    store: CausalExperimentStore,
+    *,
+    experiment_id: str,
+    teacher_boundary: dict[str, Any],
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+) -> dict[str, Any]:
+    resolution_raw = teacher_boundary.get("resolution_time")
+    if resolution_raw in (None, ""):
+        raise ValueError("monthly batch teacher evidence requires resolution_time")
+    resolution = _utc_timestamp(
+        resolution_raw, "monthly batch teacher resolution_time"
+    )
+    payload = {
+        **deepcopy(teacher_boundary),
+        "review_decision": MONTHLY_BATCH_DEFERRED,
+        "teacher_review_status": MONTHLY_BATCH_DEFERRED,
+        "validated_rule_event_count": 0,
+        "notes": (
+            "Teacher evidence recorded without a rule mutation because "
+            "MONTHLY_BATCH_OOS freezes the strategy until the month-end review."
+        ),
+    }
+    appended = store.append_event(
+        experiment_id,
+        "TEACHER_RESOLVED",
+        payload,
+        operation_id,
+        int(expected_sequence),
+        str(expected_state_hash),
+        effective_market_time=resolution.isoformat(),
+        source="DETERMINISTIC_MONTHLY_BATCH_OOS",
+    )
+    return {
+        "sequence": int(appended["sequence"]),
+        "state_hash": str(appended["state_hash"]),
+    }
+
+
+def _freeze_monthly_batch_candidate(
+    store: CausalExperimentStore,
+    events: list[dict[str, Any]],
+    *,
+    experiment_id: str,
+    candidate_id: str,
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+) -> dict[str, Any]:
+    candidate = _candidate_capture(events, candidate_id).get("payload") or {}
+    strategy_action = str(
+        candidate.get("strategy_action")
+        or candidate.get("rule_effective_side")
+        or candidate.get("source_side")
+        or ""
+    ).strip().upper()
+    if strategy_action not in {"LONG", "SHORT"}:
+        raise ValueError(
+            "MONTHLY_BATCH_OOS candidate has no valid executable strategy action"
+        )
+    frozen = store.append_event(
+        experiment_id,
+        "DECISION_FROZEN",
+        {
+            "candidate_id": candidate_id,
+            "candidate_token": candidate.get("candidate_token"),
+            "final_action": strategy_action,
+            "strategy_action": strategy_action,
+            "chatgpt_view": None,
+            "chatgpt_confidence_pct": None,
+            "chatgpt_reasoning": None,
+            "state_hash_at_decision": str(expected_state_hash),
+            "feature_hash": candidate.get("feature_hash"),
+            "strategy_snapshot_sha256": candidate.get(
+                "strategy_snapshot_sha256"
+            ),
+            "decision_mode": MONTHLY_BATCH_OOS_MODE,
+        },
+        operation_id,
+        int(expected_sequence),
+        str(expected_state_hash),
+        effective_market_time=str(
+            candidate.get("decision_available_at") or candidate.get("entry_time")
+        ),
+        source="DETERMINISTIC_MONTHLY_BATCH_OOS",
+    )
+    return {
+        "sequence": int(frozen["sequence"]),
+        "state_hash": str(frozen["state_hash"]),
+    }
+
+
 def _judgment_candidate(events: list[dict[str, Any]], candidate_id: str) -> dict[str, Any]:
     capture = _candidate_capture(events, candidate_id).get("payload") or {}
     return {
@@ -1058,10 +1179,30 @@ def advance_walk_forward(
 
     for step in range(int(max_transitions)):
         store, readback, events = _verified(control, experiment_id, sequence, state_hash)
+        definition = (readback.get("manifest") or {}).get("definition") or {}
+        monthly_batch = _monthly_batch_enabled(definition)
+        effective_review_interval = _effective_review_interval(
+            definition, int(review_interval_months)
+        )
         unresolved = _open_candidate(events)
         if unresolved is not None:
             candidate_id, state = unresolved
             if state == "ENTRY_CONTEXT_CAPTURED":
+                if monthly_batch:
+                    frozen = _freeze_monthly_batch_candidate(
+                        store,
+                        events,
+                        experiment_id=experiment_id,
+                        candidate_id=candidate_id,
+                        operation_id=_operation(
+                            operation_id, f"monthly-freeze-{step}-{candidate_id}"
+                        ),
+                        expected_sequence=sequence,
+                        expected_state_hash=state_hash,
+                    )
+                    sequence = int(frozen["sequence"])
+                    state_hash = str(frozen["state_hash"])
+                    continue
                 result = _judgment_candidate(events, candidate_id)
                 result.update(sequence=sequence, state_hash=state_hash)
                 return result
@@ -1080,7 +1221,10 @@ def advance_walk_forward(
                     expected_sequence=sequence, expected_state_hash=state_hash,
                 )
                 sequence, state_hash = int(settled["sequence"]), str(settled["state_hash"])
-                if str((settled.get("settlement") or {}).get("result")) == "LOSS":
+                if (
+                    str((settled.get("settlement") or {}).get("result")) == "LOSS"
+                    and not monthly_batch
+                ):
                     packet = build_loss_review_packet(
                         control, experiment_id=experiment_id, candidate_id=candidate_id
                     )
@@ -1088,22 +1232,22 @@ def advance_walk_forward(
                     return packet
                 continue
 
-        loss = _unreviewed_loss(events)
-        if loss is not None:
-            candidate_id = str((loss.get("payload") or {}).get("candidate_id"))
-            packet = build_loss_review_packet(
-                control, experiment_id=experiment_id, candidate_id=candidate_id
-            )
-            packet.update(sequence=sequence, state_hash=state_hash)
-            return packet
+        if not monthly_batch:
+            loss = _unreviewed_loss(events)
+            if loss is not None:
+                candidate_id = str((loss.get("payload") or {}).get("candidate_id"))
+                packet = build_loss_review_packet(
+                    control, experiment_id=experiment_id, candidate_id=candidate_id
+                )
+                packet.update(sequence=sequence, state_hash=state_hash)
+                return packet
 
-        definition = (readback.get("manifest") or {}).get("definition") or {}
         initial_review_anchor = _initial_periodic_review_anchor(
             reports, definition, events
         )
         periodic = _periodic_review_due(
             events,
-            int(review_interval_months),
+            effective_review_interval,
             initial_anchor=initial_review_anchor,
         )
         if periodic is not None:
@@ -1117,12 +1261,21 @@ def advance_walk_forward(
                 experiment_id=experiment_id,
                 sequence=sequence,
                 state_hash=state_hash,
+                rule_update_policy=_rule_update_policy(definition),
             )
+            if monthly_batch:
+                periodic["monthly_batch_oos"] = {
+                    "mode": MONTHLY_BATCH_OOS_MODE,
+                    "rules_frozen_during_period": True,
+                    "mid_period_teacher_mutation_allowed": False,
+                    "mid_period_loss_mutation_allowed": False,
+                    "per_trade_chatgpt_decision_required": False,
+                }
             return periodic
 
         next_review_time = _next_periodic_review_time(
             events,
-            int(review_interval_months),
+            effective_review_interval,
             initial_anchor=initial_review_anchor,
         )
         scan = get_next_walk_forward_candidate(
@@ -1160,6 +1313,10 @@ def advance_walk_forward(
             state_hash = str(checkpoint["state_hash"])
             continue
         if status == "CANDIDATE_CAPTURED":
+            if monthly_batch:
+                sequence = int(scan["sequence"])
+                state_hash = str(scan["state_hash"])
+                continue
             return {
                 "contract": ORCHESTRATOR_CONTRACT,
                 "status": "CANDIDATE_DECISION_REQUIRED",
@@ -1173,6 +1330,20 @@ def advance_walk_forward(
                 "outcome_exposed": False,
             }
         if status == "TEACHER_DUE_FIRST":
+            if monthly_batch:
+                deferred = _append_monthly_batch_teacher(
+                    store,
+                    experiment_id=experiment_id,
+                    teacher_boundary=scan["teacher_boundary"],
+                    operation_id=_operation(
+                        operation_id, f"monthly-teacher-{step}-{sequence}"
+                    ),
+                    expected_sequence=sequence,
+                    expected_state_hash=state_hash,
+                )
+                sequence = int(deferred["sequence"])
+                state_hash = str(deferred["state_hash"])
+                continue
             packet = _teacher_review_packet(
                 control, reports,
                 experiment_id=experiment_id,
@@ -1263,7 +1434,12 @@ def submit_walk_forward_decision(
         expected_state_hash=str(revealed["state_hash"]),
     )
     settlement = settled.get("settlement") or {}
-    if str(settlement.get("result")) == "LOSS":
+    readback = _store(control).read(experiment_id, recent_events=0)
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    if (
+        str(settlement.get("result")) == "LOSS"
+        and not _monthly_batch_enabled(definition)
+    ):
         packet = build_loss_review_packet(
             control, experiment_id=experiment_id, candidate_id=candidate_id
         )
