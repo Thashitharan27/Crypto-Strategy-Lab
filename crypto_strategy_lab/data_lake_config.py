@@ -475,6 +475,28 @@ class ResearchRunConfig:
                 raise ValueError(
                     f"{key}: position-sizing stop multiple must be positive"
                 )
+            if execution_profile.position_sizing_stop_override_enabled:
+                incompatible = [
+                    name
+                    for name, enabled in (
+                        ("partial stop", execution_profile.partial_stop_enabled),
+                        ("partial take-profit", execution_profile.partial_profit_enabled),
+                        ("break-even", execution_profile.break_even_enabled),
+                        ("trailing stop", execution_profile.trailing_enabled),
+                        ("R-step trailing", execution_profile.r_step_trailing_enabled),
+                        (
+                            "ATR checkpoint extension",
+                            execution_profile.atr_checkpoint_tp_extension_enabled,
+                        ),
+                    )
+                    if enabled
+                ]
+                if incompatible:
+                    raise ValueError(
+                        f"{key}: separate position-sizing stop currently supports only "
+                        "simple fixed stop/target execution; disable "
+                        + ", ".join(incompatible)
+                    )
             if profile.rsi_period <= 0 or profile.momentum_lookback_hours <= 0:
                 raise ValueError(f"{key}: profile feature periods must be positive")
             if profile.rsi_period != features.mean_reversion_rsi_period:
@@ -544,6 +566,15 @@ class ResearchRunConfig:
             raise ValueError("S/R take-profit buffer cannot be negative")
         structural_stop = execution.risk_mode == "SR_STRUCTURE"
         sr_target = execution.sr_take_profit_mode in {"SR_CAPPED_R", "SR_LEVEL"}
+        separate_sizing = any(
+            execution.profiles[key].position_sizing_stop_override_enabled
+            for key in execution.profiles
+        )
+        if separate_sizing and (structural_stop or sr_target):
+            raise ValueError(
+                "separate position-sizing stop requires a fixed-distance stop basis "
+                "and FIXED_R take-profit mode"
+            )
         if (structural_stop or sr_target) and not features.enable_support_resistance_analysis:
             raise ValueError("S/R analysis must be enabled by structural S/R execution policies")
         if sr_target and any(
