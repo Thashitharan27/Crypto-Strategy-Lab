@@ -558,10 +558,26 @@ class RiskExecutionWorkspace(QWidget):
         sizing_description = ""
         if sizing_override:
             gross_stop_dollars = float(execution.initial_equity) * gross_stop_exposure
+            stop_as_sizing_r = stop_mult / sizing_stop_mult
+            geometry = (
+                f" Actual full stop = {stop_as_sizing_r:.2f} sizing-R."
+            )
+            if (
+                not base.partial_profit_enabled
+                and str(execution.sr_take_profit_mode).upper() == "FIXED_R"
+            ):
+                target_as_sizing_r = (
+                    stop_mult * float(base.reward_risk_ratio) / sizing_stop_mult
+                )
+                geometry += (
+                    f" Fixed target = {target_as_sizing_r:.2f} sizing-R; "
+                    f"physical target:stop = {float(base.reward_risk_ratio):g}:1."
+                )
             sizing_description = (
                 f" Position size uses a separate {sizing_stop_mult:g}× reference stop; "
                 f"the configured actual stop implies about {gross_stop_exposure * 100:.2f}% "
                 f"(${gross_stop_dollars:,.2f}) gross stop exposure before fees/slippage."
+                f"{geometry}"
             )
 
         self.summary_label.setText(
