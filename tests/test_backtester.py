@@ -145,7 +145,7 @@ def test_separate_position_sizing_stop_keeps_five_percent_budget_but_one_percent
     data = candles([(100, 100, 100, 100), (100, 100, 97, 100)])
     profiles = profile_set(
         stop_loss_multiple=0.2,
-        reward_risk_ratio=1.0,
+        reward_risk_ratio=0.2,
         position_sizing_stop_override_enabled=True,
         position_sizing_stop_multiple=1.0,
     )
@@ -163,6 +163,9 @@ def test_separate_position_sizing_stop_keeps_five_percent_budget_but_one_percent
     assert row.configured_sizing_budget_percentage == pytest.approx(0.05)
     assert row.planned_gross_stop_loss == pytest.approx(10.0)
     assert row.planned_gross_stop_risk_percentage == pytest.approx(0.01)
+    assert row.actual_stop_as_sizing_r == pytest.approx(0.2)
+    assert row.final_target_as_sizing_r == pytest.approx(0.2)
+    assert row.physical_reward_risk_ratio == pytest.approx(1.0)
     assert row.pair_gross_r == pytest.approx(-0.2)
     assert row.pair_net_r == pytest.approx(-0.2)
     assert row.equity_after_trade == pytest.approx(990.0)
@@ -172,7 +175,7 @@ def test_separate_position_sizing_stop_preserves_fee_drag_on_small_target():
     data = candles([(100, 100, 100, 100), (100, 103, 99, 100)])
     profiles = profile_set(
         stop_loss_multiple=0.2,
-        reward_risk_ratio=1.0,
+        reward_risk_ratio=0.2,
         position_sizing_stop_override_enabled=True,
         position_sizing_stop_multiple=1.0,
     )
