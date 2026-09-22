@@ -77,6 +77,41 @@ The low-level interactive workflow remains available:
 
 No autonomous action invents a LONG/SHORT view, teacher rule, loss veto, FLIP, or periodic-review decision. Those remain ChatGPT judgment.
 
+## Monthly batch OOS mode
+
+Fresh experiments may opt into:
+
+```json
+{
+  "rule_update_policy": {
+    "mode": "MONTHLY_BATCH_OOS",
+    "interval_months": 1,
+    "freeze_between_reviews": true
+  }
+}
+```
+
+The default remains `TRADE_BY_TRADE`.
+
+In monthly batch mode the accelerated orchestrator consumes prospective
+candidate execution, settlements, and teacher observations deterministically
+until the one-month boundary. It does not request per-trade ChatGPT direction,
+teacher-rule, or prospective-loss judgments. The current
+`strategy_action` is durably frozen before outcome reveal, while the rule
+snapshot remains unchanged for the entire month.
+
+At `PERIODIC_REVIEW_REQUIRED` the response becomes the batch-learning
+boundary. It includes the completed month's prospective trades, deferred
+teacher contexts, rule-performance analytics, and a causal aggregate of all
+source observations whose source outcome resolved during the month. An
+opposite-side outcome contributes to that aggregate only if it had also
+resolved by the boundary.
+
+Any rule events recorded by that monthly review become effective at the
+boundary and therefore apply only to the next frozen OOS month. Direct
+per-trade ChatGPT-view calls and mid-month loss/teacher review writes are
+rejected for this mode.
+
 ## Autonomous research and context safety
 
 Autonomous mode is designed to maximize useful work per ChatGPT turn without making the conversation transcript the source of truth.
