@@ -320,6 +320,19 @@ def _reveal_strategy_action_candidate(
     }
 
 
+def _assert_chatgpt_view_allowed(
+    control: Any, experiment_id: str
+) -> None:
+    readback = _impl._store(control).read(experiment_id, recent_events=0)
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    if _impl._monthly_batch_enabled(definition):
+        raise ValueError(
+            "MONTHLY_BATCH_OOS does not accept per-trade ChatGPT views; use "
+            "advance_walk_forward so the frozen strategy_action executes "
+            "deterministically until the month-end batch review"
+        )
+
+
 def freeze_and_reveal_walk_forward_view(
     control: Any,
     reports: Any,
@@ -341,6 +354,7 @@ def freeze_and_reveal_walk_forward_view(
     interpreted as ``chatgpt_view``. The executable side is derived solely from
     the captured candidate's ENTRY/VETO/FLIP evaluation.
     """
+    _assert_chatgpt_view_allowed(control, experiment_id)
     if chatgpt_view is not None and final_action is not None:
         if str(chatgpt_view).strip().upper() != str(final_action).strip().upper():
             raise ValueError("chatgpt_view and legacy final_action disagree")
