@@ -61,7 +61,12 @@ def _definition() -> dict:
     }
 
 
-def _environment(tmp_path: Path, *, monthly_batch: bool = False):
+def _environment(
+    tmp_path: Path,
+    *,
+    monthly_batch: bool = False,
+    weekly_batch: bool = False,
+):
     project = tmp_path / "project"
     output = tmp_path / "output"
     run_dir = output / REFERENCE_RUN
@@ -82,6 +87,12 @@ def _environment(tmp_path: Path, *, monthly_batch: bool = False):
         definition["rule_update_policy"] = {
             "mode": "MONTHLY_BATCH_OOS",
             "interval_months": 1,
+            "freeze_between_reviews": True,
+        }
+    elif weekly_batch:
+        definition["rule_update_policy"] = {
+            "mode": "WEEKLY_BATCH_OOS",
+            "interval_weeks": 1,
             "freeze_between_reviews": True,
         }
     head = store.create(EXPERIMENT_ID, definition, "create:rule-preflight")
@@ -232,6 +243,45 @@ def test_monthly_batch_blocks_mid_month_teacher_and_loss_review_writes(tmp_path)
             decision="NO_CHANGE",
             notes="Must wait for the monthly batch boundary.",
             operation_id="monthly:loss:blocked",
+            expected_sequence=head["sequence"],
+            expected_state_hash=head["state_hash"],
+            loss_diagnosis="NO_CLEAR_CAUSAL_LESSON",
+            auto_advance=False,
+        )
+
+    unchanged = store.read(EXPERIMENT_ID, recent_events=10)
+    assert unchanged["sequence"] == head["sequence"]
+    assert [event["event_type"] for event in unchanged["recent_events"]] == [
+        "WF_CREATED"
+    ]
+
+
+def test_weekly_batch_blocks_mid_week_teacher_and_loss_review_writes(tmp_path):
+    control, reports, store, head = _environment(tmp_path, weekly_batch=True)
+
+    with pytest.raises(ValueError, match="defers all teacher-driven rule changes"):
+        record_walk_forward_teacher_review(
+            control,
+            reports,
+            experiment_id=EXPERIMENT_ID,
+            teacher_pair_id="1",
+            decision="NO_CHANGE",
+            notes="Must wait for the weekly batch boundary.",
+            operation_id="weekly:teacher:blocked",
+            expected_sequence=head["sequence"],
+            expected_state_hash=head["state_hash"],
+            auto_advance=False,
+        )
+
+    with pytest.raises(ValueError, match="mid-week loss reviews"):
+        record_walk_forward_review(
+            control,
+            reports,
+            experiment_id=EXPERIMENT_ID,
+            review_type="LOSS",
+            decision="NO_CHANGE",
+            notes="Must wait for the weekly batch boundary.",
+            operation_id="weekly:loss:blocked",
             expected_sequence=head["sequence"],
             expected_state_hash=head["state_hash"],
             loss_diagnosis="NO_CLEAR_CAUSAL_LESSON",
