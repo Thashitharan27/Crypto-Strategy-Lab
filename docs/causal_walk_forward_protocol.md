@@ -640,6 +640,36 @@ Primarily validates the current rule state prospectively. Do not automatically a
 
 ---
 
+## 17.1 Optional monthly batch OOS learning mode
+
+Fresh experiments may opt into an immutable learning cadence:
+
+```json
+{
+  "learning_mode": "MONTHLY_BATCH_OOS",
+  "monthly_batch_policy": {
+    "interval_months": 1,
+    "freeze_between_reviews": true,
+    "defer_teacher_learning": true,
+    "defer_loss_learning": true
+  }
+}
+```
+
+`TRADE_BY_TRADE` remains the default and preserves existing causal behavior.
+
+In `MONTHLY_BATCH_OOS`:
+
+- the first month is a batch learning window: teacher/reference observations are accumulated but cannot mutate ENTRY/VETO/FLIP rules intra-month;
+- at the first month-end review, ChatGPT receives the month's deferred teacher evidence plus any prospective trade analytics and may create the initial frozen rule snapshot;
+- the following month is pure OOS for that snapshot: teacher winners, actionable teacher losses, and prospective losses are recorded as deferred evidence only;
+- no ENTRY/VETO/FLIP mutation is allowed between month-end review boundaries;
+- at month end, ChatGPT reviews the complete accumulated evidence and may keep, learn, refine, consolidate, flip, veto, or retire rules prospectively;
+- all rule changes become effective only after the completed month-end review and therefore affect the next month, never the month that produced the evidence;
+- prospective trades still use the normal outcome firewall, settlement, `WAIT_UNTIL_CLOSED`, frozen ChatGPT view, and RESEARCH equity accounting.
+
+This mode is intended as a direct A/B methodology comparison against trade-by-trade adaptation. Existing experiments must never be migrated into it silently; create a fresh experiment because the learning cadence changes causal rule chronology.
+
 ## 18. Review cadence
 
 ### 18.1 Three-month / quarterly operational review
