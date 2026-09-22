@@ -674,6 +674,80 @@ Experiments may explicitly use `MANUAL` as the initial-anchor policy when automa
 
 Migrated/older experiments with no valid review anchor must not invent a historical review boundary.
 
+### 18.1A Opt-in monthly batch OOS rule updates
+
+Experiments may opt into a second causal learning cadence:
+
+```json
+{
+  "rule_update_policy": {
+    "mode": "MONTHLY_BATCH_OOS",
+    "interval_months": 1,
+    "freeze_between_reviews": true
+  }
+}
+```
+
+The default remains `TRADE_BY_TRADE`. `MONTHLY_BATCH_OOS` is a different
+experiment methodology and must never be silently enabled on an existing
+trade-by-trade chain.
+
+Its chronology is:
+
+```text
+completed month N evidence
+        |
+        v
+MONTH-END BATCH REVIEW
+        |
+        +--> KEEP / learn / refine ENTRY / VETO / FLIP
+        |
+        v
+freeze exact rule snapshot R(N+1)
+        |
+        v
+month N+1 PURE OOS under R(N+1)
+        |
+        +--> no teacher-driven rule mutation
+        +--> no prospective-loss rule mutation
+        +--> no per-trade ChatGPT direction decision
+        +--> deterministic strategy_action is frozen before outcome reveal
+        |
+        v
+next month-end batch review
+```
+
+Rules are immutable throughout the OOS month. A loss, teacher winner, or paired
+teacher-loss observation may be persisted as evidence, but it cannot activate or
+refine a rule until the month-end boundary. Rules authored by that batch review
+use the boundary time as their causal `effective_from` and therefore apply only
+to the following month.
+
+The first month may act as a learning month even when the experiment has no
+active ENTRY rule yet. Immutable teacher/reference observations are collected
+with their entry-time context during that month; they do not alter RESEARCH
+equity. At the first monthly boundary ChatGPT reviews the completed batch and may
+freeze the initial reusable rule set. The next month is then the first pure OOS
+month for that snapshot.
+
+Prospective trades admitted by an already-frozen rule snapshot continue to
+settle normally against RESEARCH equity. In this batch mode ChatGPT's per-trade
+`chatgpt_view` is intentionally absent; the purpose is to test the frozen
+strategy rather than an adaptive per-trade research opinion. Outcome revelation
+still obeys the hard firewall: the deterministic executable
+`strategy_action` is durably frozen before outcome-bearing data is opened.
+
+The month-end packet contains completed prospective trades, deferred teacher
+observations with entry-time context, rule attribution, and periodic
+rule-performance analytics. ChatGPT should reason over the batch as a
+population, prefer repeated causal structures and simplification over
+single-trade micro-rules, and leave the rule set unchanged when evidence is
+weak.
+
+This mode is intended for direct A/B comparison with `TRADE_BY_TRADE` using
+the same immutable reference run, starting equity, risk model, TP/SL, feature
+semantics, and market period.
+
 ### 18.2 Monthly live continuation
 
 After deployment, process only data after the existing cursor. Continue the same causal chronology; do not start a second research history.
