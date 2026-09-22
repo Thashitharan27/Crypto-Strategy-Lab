@@ -555,12 +555,22 @@ class RiskExecutionWorkspace(QWidget):
                 f"with a {stop_mult:g}× stop multiplier. "
             )
 
+        sizing_description = ""
+        if sizing_override:
+            gross_stop_dollars = float(execution.initial_equity) * gross_stop_exposure
+            sizing_description = (
+                f" Position size uses a separate {sizing_stop_mult:g}× reference stop; "
+                f"the configured actual stop implies about {gross_stop_exposure * 100:.2f}% "
+                f"(${gross_stop_dollars:,.2f}) gross stop exposure before fees/slippage."
+            )
+
         self.summary_label.setText(
-            f"${execution.initial_equity:,.2f} equity · base risk {execution.risk_per_leg * 100:.2f}%"
-            f"{multiplier} → effective risk budget {effective_risk * 100:.2f}% (${risk_dollars:,.2f}). "
+            f"${execution.initial_equity:,.2f} equity · sizing budget {execution.risk_per_leg * 100:.2f}%"
+            f"{multiplier} → effective sizing budget {effective_risk * 100:.2f}% (${risk_dollars:,.2f}). "
             f"Entry fill: {entry_fill}. "
             f"{stop_description}"
-            f"Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
+            f"{sizing_description}"
+            f" Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
             f"Management: {self._management_description(base)}."
         )
 
