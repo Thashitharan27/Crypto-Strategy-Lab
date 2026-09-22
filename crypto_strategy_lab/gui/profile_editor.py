@@ -250,6 +250,19 @@ class StrategyProfilesWidget(QWidget):
     def _update_management_controls(self,*_):
         sizing_override=self.controls["position_sizing_stop_override_enabled"].isChecked()
         self._show_control("position_sizing_stop_multiple",sizing_override)
+        incompatible=(
+            "partial_stop_enabled","partial_profit_enabled","trailing_enabled",
+            "break_even_enabled","r_step_trailing_enabled",
+            "atr_checkpoint_tp_extension_enabled",
+        )
+        if sizing_override:
+            for key in incompatible:
+                if self.controls[key].isChecked():
+                    self.controls[key].setChecked(False)
+                self.controls[key].setEnabled(False)
+        else:
+            for key in incompatible:
+                self.controls[key].setEnabled(True)
 
         partial_stop=self.controls["partial_stop_enabled"].isChecked()
         for key in ("sl1_r","sl1_close_pct","sl2_r"):
