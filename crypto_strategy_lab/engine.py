@@ -904,6 +904,47 @@ class BacktestEngine:
         if self.config.max_combined_effective_leverage is not None: cap_qty=min(cap_qty, self.config.max_combined_effective_leverage*equity/(self._entry_leg_count()*entry_price))
         capped=cap_qty < qty - 1e-12
         return cap_qty,capped
+    def _position_sizing_stop_distance(self, profile, risk_unit, actual_stop):
+        """Return the price distance used only for quantity sizing.
+
+        Existing behavior is preserved unless the profile explicitly enables a
+        separate sizing stop. Structural S/R and EMA 9/20 micro-swing stops own
+        their full stop geometry, so the override is intentionally inactive for
+        those dynamic-stop modes.
+        """
+        enabled = bool(
+            getattr(profile, "position_sizing_stop_override_enabled", False)
+        )
+        risk_mode = str(
+            getattr(
+                getattr(self.config, "risk_mode", None),
+                "value",
+                getattr(self.config, "risk_mode", ""),
+            )
+        ).upper()
+        dynamic_stop = (
+            risk_mode == "SR_STRUCTURE"
+            or str(getattr(self, "signal_strategy_mode", "")).upper()
+            == "EMA_9_20_PULLBACK"
+        )
+        if enabled and not dynamic_stop:
+            multiple = float(
+                getattr(profile, "position_sizing_stop_multiple", 1.0)
+            )
+            distance = float(risk_unit) * multiple
+            if not np.isfinite(distance) or distance <= 0:
+                raise ValueError(
+                    "position-sizing stop distance must be finite and positive"
+                )
+            return distance, multiple, True
+
+        actual_multiple = (
+            float(actual_stop) / float(risk_unit)
+            if np.isfinite(risk_unit) and float(risk_unit) > 0
+            else np.nan
+        )
+        return float(actual_stop), actual_multiple, False
+
     def _entry_leg_count(self):
         return 1
     def _active_positions(self, pair):
@@ -951,7 +992,10 @@ class BacktestEngine:
         stop_mult = sl2_r if partial_sl_enabled else active_profile.stop_loss_multiple
         stop = stop_mult * r
         risk_amt = self.current_equity * self.config.risk_per_leg * active_profile.risk_multiplier
-        uncapped = risk_amt / stop
+        sizing_stop, sizing_stop_mult, sizing_override_applied = (
+            self._position_sizing_stop_distance(active_profile, r, stop)
+        )
+        uncapped = risk_amt / sizing_stop
         qty, capped = self._cap_qty(uncapped, entry, self.current_equity)
         target_distance = stop * active_profile.reward_risk_ratio
         sl = entry - side_sign * stop
@@ -961,7 +1005,14 @@ class BacktestEngine:
         pos = Position(
             side, entry_timestamp, i, entry, stop, sl, tp, qty, risk_amt, entry * qty,
             float(self.atr_values[ind_i]), uncapped, qty * entry / self.current_equity,
-            distance_unit=r, entry_fee=entry_fee, fees=entry_fee, original_sl=sl,
+            distance_unit=r,
+            position_sizing_stop_override_enabled=bool(
+                getattr(active_profile, "position_sizing_stop_override_enabled", False)
+            ),
+            position_sizing_stop_override_applied=sizing_override_applied,
+            position_sizing_stop_multiple=float(sizing_stop_mult),
+            position_sizing_reference_distance=float(sizing_stop),
+            entry_fee=entry_fee, fees=entry_fee, original_sl=sl,
             be_enabled=active_profile.break_even_enabled,
             be_mode="R_OFFSET" if active_profile.break_even_offset_r else "ENTRY_PRICE",
             be_offset_r=active_profile.break_even_offset_r,
