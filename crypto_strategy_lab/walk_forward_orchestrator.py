@@ -771,6 +771,7 @@ def _decorate_teacher_loss_packet(
 
 def _monthly_batch_review_evidence(
     control: Any,
+    reports: Any,
     experiment_id: str,
     result: dict[str, Any],
 ) -> dict[str, Any]:
@@ -883,6 +884,142 @@ def _monthly_batch_review_evidence(
                 }
             )
 
+    reference_population: dict[str, Any] = {
+        "available": False,
+        "reason": "reference population summary unavailable",
+    }
+    try:
+        import duckdb
+
+        readback = store.read(experiment_id, recent_events=0)
+        definition = (readback.get("manifest") or {}).get("definition") or {}
+        reference_run = str(definition.get("reference_run") or "").strip()
+        manifest = reports.get_run_manifest(reference_run)
+        run_dir = reports.resolve_run(reference_run)
+        samples_path = _impl._artifact(
+            manifest, run_dir, "research_sampling_trades"
+        )
+        if start is not None and end is not None:
+            with duckdb.connect(":memory:") as connection:
+                rows = connection.execute(
+                    f"""
+                    WITH source_rows AS (
+                        SELECT
+                            CAST(walk_forward_candidate_id AS VARCHAR) AS candidate_id,
+                            LOWER(CAST(strategy_profile_key AS VARCHAR)) AS profile,
+                            UPPER(CAST(side AS VARCHAR)) AS side,
+                            CAST(exit_time AS TIMESTAMPTZ) AS source_exit_time,
+                            CAST(pair_net_r AS DOUBLE) AS source_net_r
+                        FROM read_parquet('{_impl._quote(samples_path)}')
+                        WHERE COALESCE(
+                            CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
+                        )
+                    ),
+                    opposite_rows AS (
+                        SELECT
+                            CAST(walk_forward_candidate_id AS VARCHAR) AS candidate_id,
+                            CAST(exit_time AS TIMESTAMPTZ) AS opposite_exit_time,
+                            CAST(pair_net_r AS DOUBLE) AS opposite_net_r
+                        FROM read_parquet('{_impl._quote(samples_path)}')
+                        WHERE NOT COALESCE(
+                            CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
+                        )
+                    )
+                    SELECT
+                        s.profile,
+                        s.side,
+                        COUNT(*) AS observations,
+                        SUM(CASE WHEN s.source_net_r > 0 THEN 1 ELSE 0 END) AS wins,
+                        SUM(CASE WHEN s.source_net_r < 0 THEN 1 ELSE 0 END) AS losses,
+                        SUM(CASE WHEN s.source_net_r = 0 THEN 1 ELSE 0 END) AS breakevens,
+                        SUM(s.source_net_r) AS net_r,
+                        SUM(
+                            CASE
+                                WHEN o.opposite_exit_time <= ? THEN 1
+                                ELSE 0
+                            END
+                        ) AS opposite_resolved_by_boundary,
+                        SUM(
+                            CASE
+                                WHEN s.source_net_r < 0
+                                 AND o.opposite_exit_time <= ?
+                                 AND o.opposite_net_r > 0
+                                THEN 1 ELSE 0
+                            END
+                        ) AS source_loss_opposite_win,
+                        SUM(
+                            CASE
+                                WHEN s.source_net_r < 0
+                                 AND o.opposite_exit_time <= ?
+                                 AND o.opposite_net_r <= 0
+                                THEN 1 ELSE 0
+                            END
+                        ) AS source_loss_opposite_nonwin
+                    FROM source_rows s
+                    LEFT JOIN opposite_rows o USING(candidate_id)
+                    WHERE s.source_exit_time > ?
+                      AND s.source_exit_time <= ?
+                    GROUP BY 1, 2
+                    ORDER BY 1, 2
+                    """,
+                    [
+                        end.to_pydatetime(),
+                        end.to_pydatetime(),
+                        end.to_pydatetime(),
+                        start.to_pydatetime(),
+                        end.to_pydatetime(),
+                    ],
+                ).fetchall()
+
+            by_profile_side = []
+            totals = {
+                "observations": 0,
+                "wins": 0,
+                "losses": 0,
+                "breakevens": 0,
+                "net_r": 0.0,
+                "opposite_resolved_by_boundary": 0,
+                "source_loss_opposite_win": 0,
+                "source_loss_opposite_nonwin": 0,
+            }
+            for row in rows:
+                item = {
+                    "strategy_profile_key": row[0],
+                    "side": row[1],
+                    "observations": int(row[2] or 0),
+                    "wins": int(row[3] or 0),
+                    "losses": int(row[4] or 0),
+                    "breakevens": int(row[5] or 0),
+                    "net_r": float(row[6] or 0.0),
+                    "opposite_resolved_by_boundary": int(row[7] or 0),
+                    "source_loss_opposite_win": int(row[8] or 0),
+                    "source_loss_opposite_nonwin": int(row[9] or 0),
+                }
+                by_profile_side.append(item)
+                for key in totals:
+                    totals[key] += item[key]
+            totals["win_rate_pct"] = (
+                round(100.0 * totals["wins"] / totals["observations"], 2)
+                if totals["observations"]
+                else None
+            )
+            reference_population = {
+                "available": True,
+                "reference_run": reference_run,
+                "causal_window_basis": "source outcome resolved in completed batch",
+                "opposite_outcome_rule": (
+                    "counted only when the opposite row also resolved by the "
+                    "month-end boundary; later opposite outcomes remain hidden"
+                ),
+                "overall": totals,
+                "by_profile_side": by_profile_side,
+            }
+    except Exception as exc:
+        reference_population = {
+            "available": False,
+            "reason": str(exc)[:1000],
+        }
+
     return {
         "mode": _impl.MONTHLY_BATCH_OOS_MODE,
         "window": {
@@ -892,13 +1029,17 @@ def _monthly_batch_review_evidence(
         "rules_frozen_during_period": True,
         "teacher_observation_count": len(teachers),
         "prospective_trade_count": len(prospective),
+        "reference_population_summary": reference_population,
         "teacher_observations": teachers,
         "prospective_trades": prospective,
         "review_instruction": (
             "Judge the completed month as one evidence batch. Do not backdate any "
             "change. ENTRY/VETO/FLIP changes recorded now become active only for "
             "the next frozen OOS month; prefer repeated causal structures and "
-            "consolidation over single-trade micro-rules."
+            "consolidation over single-trade micro-rules. Before authoring new "
+            "threshold rules, use the immutable reference run and completed "
+            "window for feature-level winner/loss comparison when the aggregate "
+            "population shows meaningful sample size."
         ),
     }
 
@@ -943,7 +1084,7 @@ def _decorate_advance_result(
             == _impl.MONTHLY_BATCH_OOS_MODE
         ):
             updated["monthly_batch_evidence"] = _monthly_batch_review_evidence(
-                control, experiment_id, updated
+                control, reports, experiment_id, updated
             )
             updated["methodology_prompt"] = {
                 "primary_goal": "BATCH_LEARN_FREEZE_NEXT_MONTH",
