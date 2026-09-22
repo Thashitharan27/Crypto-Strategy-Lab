@@ -1126,8 +1126,9 @@ def advance_walk_forward(
     """Advance one bounded deterministic slice, checkpointing long no-match scans.
 
     No historical opportunity is skipped: the checkpoint stores the exact
-    ``(entry_time, research_signal_index, side)`` sort key and the candidate
-    engine resumes strictly after that key on the next call. Teacher boundaries,
+    ``(decision_available_at, entry_time, research_signal_index, side)`` sort
+    key and the candidate engine resumes strictly after that key on the next
+    call. Teacher boundaries,
     rule mutations, reviews and trades invalidate an older cursor automatically.
     """
     if isinstance(max_scan_rows, bool) or not isinstance(max_scan_rows, int):
