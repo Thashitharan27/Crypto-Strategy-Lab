@@ -297,14 +297,6 @@ def build_adaptive_source_history(
     primary_weeks = int(policy["primary_lookback_weeks"])
     context_start = end - pd.DateOffset(weeks=context_weeks)
     primary_start = end - pd.DateOffset(weeks=primary_weeks)
-    context_rows = _reference_rows(
-        samples_path, context_path, start=context_start, end=end
-    )
-    primary_rows = [
-        pair
-        for pair in context_rows
-        if _utc(pair[0].get("exit_time"), "source exit_time") > primary_start
-    ]
     recent_records = [
         record
         for record in records
@@ -314,17 +306,36 @@ def build_adaptive_source_history(
             and record["_effective_until_ts"] > context_start
         )
     ]
+    earliest_start = context_start
+    for record in recent_records:
+        candidate_start = record["_effective_from_ts"] - pd.DateOffset(weeks=1)
+        if candidate_start < earliest_start:
+            earliest_start = candidate_start
+    all_rows = _reference_rows(
+        samples_path, context_path, start=earliest_start, end=end
+    )
+    context_rows = [
+        pair
+        for pair in all_rows
+        if _utc(pair[0].get("exit_time"), "source exit_time") > context_start
+    ]
+    primary_rows = [
+        pair
+        for pair in context_rows
+        if _utc(pair[0].get("exit_time"), "source exit_time") > primary_start
+    ]
 
     rule_rows: list[dict[str, Any]] = []
     for record in recent_records:
         learned_at = record["_effective_from_ts"]
         learning_start = learned_at - pd.DateOffset(weeks=1)
-        learning_rows = _reference_rows(
-            samples_path,
-            context_path,
-            start=learning_start,
-            end=learned_at,
-        )
+        learning_rows = [
+            pair
+            for pair in all_rows
+            if learning_start
+            < _utc(pair[0].get("exit_time"), "source exit_time")
+            <= learned_at
+        ]
         learning_matches, learning_available = _rule_matches(
             learning_rows,
             record=record,
