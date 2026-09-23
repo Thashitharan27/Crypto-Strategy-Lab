@@ -45,6 +45,7 @@ def build_browser_visualizer_html(
         "sessionBase": f"/session/{session_token}",
         "defaultVisibleCandles": BROWSER_DEFAULT_VISIBLE_CANDLES,
         "maxVisibleCandles": MAX_VISIBLE_CANDLES,
+        "chartTimeframes": model.available_chart_timeframes(),
         "trades": [
             {"index": index, "label": model.trade_label(index)}
             for index in range(model.trade_count)
@@ -53,6 +54,7 @@ def build_browser_visualizer_html(
             "runId": str(model.manifest.get("run_id") or model.run_dir.name),
             "symbol": request.symbol,
             "timeframe": request.strategy_timeframe,
+            "strategyTimeframe": request.strategy_timeframe,
             "tradeCount": model.trade_count,
         },
     }
@@ -169,6 +171,9 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     <button id="prev-trade" title="Previous trade">◀</button>
     <select id="trade-select" title="Completed trade"></select>
     <button id="next-trade" title="Next trade">▶</button>
+    <label>Chart TF
+      <select id="chart-tf"></select>
+    </label>
     <label>Window
       <select id="window-size"></select>
     </label>
@@ -263,6 +268,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const errorBox = $('error');
   const readout = $('readout');
   const tradeSelect = $('trade-select');
+  const chartTf = $('chart-tf');
   const windowSize = $('window-size');
   const viewMode = $('view-mode');
   const srTf = $('sr-tf');
@@ -278,9 +284,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   let focusedZone = null;
   let lastInspection = null;
 
-  $('run-badge').textContent =
-    boot.run.symbol + ' · ' + boot.run.timeframe + ' · ' +
-    boot.run.tradeCount.toLocaleString() + ' trades';
+  function updateRunBadge() {
+    const selected = chartTf.value || boot.run.strategyTimeframe;
+    $('run-badge').textContent =
+      boot.run.symbol + ' · Strategy ' + boot.run.strategyTimeframe +
+      ' · Chart ' + selected + ' · ' +
+      boot.run.tradeCount.toLocaleString() + ' trades';
+  }
 
   for (const item of boot.trades) {
     const option = document.createElement('option');
@@ -288,6 +298,25 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     option.textContent = item.label;
     tradeSelect.appendChild(option);
   }
+
+  for (const item of (boot.chartTimeframes || [])) {
+    const option = document.createElement('option');
+    option.value = String(item.interval);
+    option.textContent = String(item.interval).toUpperCase() +
+      (item.strategyTimeframe ? ' · strategy' : '') +
+      (item.coverage === 'partial' ? ' · partial coverage' : '');
+    option.disabled = item.coverage === 'partial';
+    if (String(item.interval) === String(boot.run.strategyTimeframe))
+      option.selected = true;
+    chartTf.appendChild(option);
+  }
+  if (!chartTf.options.length) {
+    const option = document.createElement('option');
+    option.value = String(boot.run.strategyTimeframe);
+    option.textContent = String(boot.run.strategyTimeframe).toUpperCase() + ' · strategy';
+    chartTf.appendChild(option);
+  }
+  updateRunBadge();
 
   const windowChoices = [240, 500, 1000, 2000, 5000]
     .filter(value => value <= Number(boot.maxVisibleCandles));
@@ -523,9 +552,14 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     if (direct !== null && direct !== undefined) return direct;
     const range = chart.timeScale().getVisibleRange();
     if (!range) return null;
-    if (Number(time) <= Number(range.from)) return 0;
-    if (Number(time) >= Number(range.to)) return chartWrap.clientWidth;
-    return startSide ? 0 : chartWrap.clientWidth;
+    const target = Number(time);
+    const from = Number(range.from);
+    const to = Number(range.to);
+    if (!Number.isFinite(target) || !Number.isFinite(from) || !Number.isFinite(to) || to <= from)
+      return null;
+    if (target <= from) return 0;
+    if (target >= to) return chartWrap.clientWidth;
+    return ((target - from) / (to - from)) * chartWrap.clientWidth;
   }
   function drawZones() {
     if (!payload || !chart || !candle) return;
@@ -610,7 +644,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       payload?.selectedTradeCandleTime
     ) {
       result.push({
-        time:payload.selectedTradeCandleTime, position:'belowBar', shape:'circle',
+        time:payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime,
+        position:'belowBar', shape:'circle',
         text:'S/R SNAPSHOT', kind:'sr-snapshot',
       });
     }
@@ -731,19 +766,28 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       const fullRun = windowSize.value === 'full';
       payload = await fetchJson(api('/api/payload',{
         trade_index:String(trade),
+        chart_timeframe:chartTf.value || boot.run.strategyTimeframe,
         visible_candles:fullRun ? String(boot.defaultVisibleCandles) : windowSize.value,
         full_run:fullRun ? '1' : '0',
         show_rejections:showRejections.checked ? '1' : '0',
       }));
       renderTrade(payload.selectedTrade || {});
+      updateRunBadge();
       renderChart(true);
-      readout.textContent = (payload.fullRun
+      const referenceNote = payload.chartTimeframe !== payload.run.strategyTimeframe
+        ? 'Reference candles: ' + String(payload.chartTimeframe).toUpperCase() +
+          ' from current canonical cache; strategy evidence remains ' +
+          String(payload.run.strategyTimeframe).toUpperCase() + '. '
+        : '';
+      readout.textContent = referenceNote + (payload.fullRun
         ? 'Full run loaded · ' + (payload.candles || []).length.toLocaleString() + ' candles. '
         : (payload.candles || []).length.toLocaleString() + ' candles loaded. ') +
-        'Pan/zoom freely. Click any candle for exact persisted rule and S/R evidence.';
+        'Pan/zoom freely. Click aligned strategy candles for exact persisted rule and S/R evidence.';
       if (payload.selectedTradeCandleTime) {
-        inspectedTime = Number(payload.selectedTradeCandleTime);
         await inspectTime(payload.selectedTradeCandleTime,false);
+        inspectedTime = Number(
+          payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
+        );
       }
       updateTradeButtons();
     } catch (error) {
@@ -778,13 +822,21 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   $('prev-trade').addEventListener('click',() => setTrade(currentTrade-1));
   $('next-trade').addEventListener('click',() => setTrade(currentTrade+1));
   tradeSelect.addEventListener('change',() => setTrade(Number(tradeSelect.value)));
+  chartTf.addEventListener('change',() => {
+    focusedZone = null;
+    inspectedTime = null;
+    updateRunBadge();
+    loadPayload();
+  });
   windowSize.addEventListener('change',loadPayload);
   showRejections.addEventListener('change',loadPayload);
   function centerSelectedTrade() {
     if (!chart || !payload?.selectedTradeCandleTime) return;
     const candles = payload.candles || [];
     if (!candles.length) return;
-    const target = Number(payload.selectedTradeCandleTime);
+    const target = Number(
+      payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
+    );
     let index = candles.findIndex(item => Number(item.time) >= target);
     if (index < 0) index = candles.length - 1;
     const radius = 120;
@@ -934,6 +986,10 @@ class StrategyVisualizerBrowserServer:
                             ])[0]
                         )
                         visible = max(60, min(MAX_VISIBLE_CANDLES, visible))
+                        chart_timeframe = (
+                            (query.get("chart_timeframe") or [""])[0].strip()
+                            or None
+                        )
                         full_run = (
                             (query.get("full_run") or ["0"])[0]
                             in {"1", "true", "yes", "on"}
@@ -948,6 +1004,7 @@ class StrategyVisualizerBrowserServer:
                                 visible_candles=visible,
                                 show_rejections=show_rejections,
                                 full_run=full_run,
+                                chart_timeframe=chart_timeframe,
                             )
                         self._json(result)
                         return
