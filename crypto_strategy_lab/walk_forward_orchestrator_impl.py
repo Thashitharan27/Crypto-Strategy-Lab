@@ -193,8 +193,11 @@ def _verified(
             "walk-forward experiment changed since it was read; read the verified chain head again"
         )
     events = _events(store, experiment_id)
-    sequence, state_hash = store._verify_chain(events)
-    if sequence != int(expected_sequence) or state_hash != wanted_hash:
+    confirmed = store.read_fast(experiment_id, recent_events=0)
+    if (
+        int(confirmed["sequence"]) != int(expected_sequence)
+        or str(confirmed["state_hash"]) != wanted_hash
+    ):
         raise ValueError("walk-forward event chain changed during orchestration")
     return store, readback, events
 
