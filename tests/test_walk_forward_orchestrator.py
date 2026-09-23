@@ -556,6 +556,17 @@ def test_adaptive_weekly_evidence_exposes_rule_lifecycle_and_true_raw_benchmark(
     assert "ending_equity_delta" in benchmark["adaptive_value_added"]
     assert "adaptive_value_added" in benchmark
     assert evidence["reference_population_summary"]["available"] is True
+    populations = evidence["adaptive_populations"]
+    assert populations["A_frozen_adaptive_oos"]["summary"] is not None
+    assert populations["B_raw_strategy_benchmark"]["benchmark_kind"] == (
+        "RAW_REFERENCE_PORTFOLIO"
+    )
+    assert populations["C_teacher_reference_population"]["completed_batch"][
+        "available"
+    ] is True
+    assert populations["C_teacher_reference_population"]["recent_windows"][
+        "context"
+    ]["weeks"] == 4
 
 
 def test_weekly_batch_auto_executes_without_mid_week_review(tmp_path):
