@@ -56,6 +56,72 @@ _AUTONOMOUS_TERMINAL_STATUSES = frozenset({
 _ORIGINAL_ADVANCE_WALK_FORWARD = _impl.advance_walk_forward
 _ORIGINAL_BUILD_LOSS_REVIEW_PACKET = _impl.build_loss_review_packet
 
+_SELF_STALE_HEAD_HANDOFF_LIMIT = 4
+
+
+def _advance_with_internal_head_handoff(
+    control: Any,
+    reports: Any,
+    *,
+    experiment_id: str,
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+    review_interval_months: int,
+    max_scan_rows: int,
+    max_transitions: int,
+) -> dict[str, Any]:
+    """Resume only when this same request advanced its own causal head.
+
+    This fixes fresh batch ingestion where deterministic sub-steps can commit
+    before a later sub-step observes the caller's original head. Foreign tail
+    events are never adopted and still raise the normal stale-head error.
+    """
+    sequence = int(expected_sequence)
+    state_hash = str(expected_state_hash)
+    prefix = str(operation_id).strip() + ":"
+
+    for _attempt in range(_SELF_STALE_HEAD_HANDOFF_LIMIT):
+        try:
+            return _ORIGINAL_ADVANCE_WALK_FORWARD(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                operation_id=operation_id,
+                expected_sequence=sequence,
+                expected_state_hash=state_hash,
+                review_interval_months=review_interval_months,
+                max_scan_rows=max_scan_rows,
+                max_transitions=max_transitions,
+            )
+        except ValueError as exc:
+            if "walk-forward experiment changed since it was read" not in str(exc):
+                raise
+            store = _impl._store(control)
+            current = _impl._read_store(store, experiment_id, recent_events=0)
+            current_sequence = int(current["sequence"])
+            current_hash = str(current["state_hash"])
+            if current_sequence <= sequence:
+                raise
+            tail = [
+                event
+                for event in _impl._events(store, experiment_id)
+                if sequence < int(event.get("sequence", 0)) <= current_sequence
+            ]
+            if not tail:
+                raise
+            for event in tail:
+                event_operation = str(event.get("operation_id") or "")
+                if event_operation != operation_id and not event_operation.startswith(prefix):
+                    raise
+            sequence = current_sequence
+            state_hash = current_hash
+
+    raise ValueError(
+        "walk-forward internal head changed repeatedly during one advance request"
+    )
+
+
 
 def _candidate_strategy_action(candidate: dict[str, Any]) -> str:
     side = str(
@@ -1249,7 +1315,7 @@ def advance_walk_forward(
         }
 
     bounded_rows = min(int(max_scan_rows), ACCELERATED_SCAN_ROWS)
-    result = _ORIGINAL_ADVANCE_WALK_FORWARD(
+    result = _advance_with_internal_head_handoff(
         control,
         reports,
         experiment_id=experiment_id,
