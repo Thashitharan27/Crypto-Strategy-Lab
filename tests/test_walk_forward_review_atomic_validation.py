@@ -14,7 +14,7 @@ from crypto_strategy_lab.walk_forward_review_facade import (
     record_walk_forward_review,
     record_walk_forward_teacher_review,
 )
-from crypto_strategy_lab.walk_forward_rule_validation import rule_event_schema
+from crypto_strategy_lab.walk_forward_rule_validation import append_events_atomic, rule_event_schema
 
 
 EXPERIMENT_ID = "BTCUSDT_15M_WF_RULE_PREFLIGHT_TEST"
@@ -768,3 +768,45 @@ def test_bootstrap_review_freezes_base_rules_and_transitions_atomically(tmp_path
     assert phase["payload"]["phase"] == "RESEARCH_WF"
     assert phase["effective_market_time"] == cutoff
     assert not any(event["event_type"] == "TRADE_RESOLVED" for event in readback["recent_events"])
+
+
+def test_atomic_review_batch_appends_only_new_bytes_and_keeps_chain_valid(tmp_path):
+    _control, _reports, store, head = _environment(tmp_path)
+    events_path = (
+        tmp_path
+        / "project"
+        / "walk_forward_experiments"
+        / EXPERIMENT_ID
+        / "events.jsonl"
+    )
+    before = events_path.read_bytes()
+
+    batch = append_events_atomic(
+        store,
+        experiment_id=EXPERIMENT_ID,
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        specs=[
+            {
+                "event_type": "REVIEW_COMPLETED",
+                "payload": {
+                    "review_type": "PERIODIC",
+                    "decision": "NO_CHANGE",
+                    "notes": "append-only regression",
+                },
+                "operation_id": "review:append-only-regression",
+                "effective_market_time": "2020-06-07T00:00:00+00:00",
+                "source": "CHATGPT_RESEARCH",
+            }
+        ],
+    )
+
+    after = events_path.read_bytes()
+    assert after.startswith(before)
+    assert len(after) > len(before)
+    assert batch["fast_index_status"] == "CURRENT"
+
+    audited = store.read(EXPERIMENT_ID, recent_events=10)
+    assert audited["sequence"] == batch["sequence"]
+    assert audited["state_hash"] == batch["state_hash"]
+    assert audited["recent_events"][-1]["operation_id"] == "review:append-only-regression"
