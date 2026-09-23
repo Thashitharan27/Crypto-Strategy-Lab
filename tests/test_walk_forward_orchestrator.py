@@ -501,9 +501,9 @@ def test_weekly_batch_evidence_uses_scheduled_boundary_not_late_cursor(tmp_path)
     }
 
 
-def test_adaptive_weekly_evidence_exposes_recent_windows_and_raw_benchmark(tmp_path):
+def test_adaptive_weekly_evidence_exposes_rule_lifecycle_and_true_raw_benchmark(tmp_path):
     control, reports, _store, _head = _write_reference(
-        tmp_path, weekly_batch=True
+        tmp_path, weekly_batch=True, teachers=_samples()
     )
     evidence = _batch_review_evidence(
         control,
@@ -512,10 +512,18 @@ def test_adaptive_weekly_evidence_exposes_recent_windows_and_raw_benchmark(tmp_p
         {
             "rule_update_policy": {
                 "mode": "WEEKLY_BATCH_OOS",
-                "adaptive": True,
-                "primary_lookback_weeks": 4,
-                "context_lookback_weeks": 12,
-                "benchmark_raw_strategy": True,
+                "adaptive": {
+                    "enabled": True,
+                    "primary_lookback_weeks": 1,
+                    "context_lookback_weeks": 4,
+                    "objective": "NEXT_WEEK_OOS",
+                    "allow_keep": True,
+                    "allow_refine": True,
+                    "allow_retire": True,
+                    "allow_replace": True,
+                    "allow_flip": True,
+                    "benchmark_raw_strategy": True,
+                },
             },
             "review_anchor_time": "2025-01-01T00:00:00+00:00",
             "review_due_time": "2025-01-08T00:00:00+00:00",
@@ -524,13 +532,41 @@ def test_adaptive_weekly_evidence_exposes_recent_windows_and_raw_benchmark(tmp_p
     )
 
     assert evidence["adaptive_weekly"] is True
-    assert evidence["adaptive_source_history"]["available"] is True
-    assert evidence["adaptive_source_history"]["primary"]["weeks"] == 4
-    assert evidence["adaptive_source_history"]["context"]["weeks"] == 12
-    assert evidence["raw_strategy_benchmark"]["available"] is True
-    assert evidence["raw_strategy_benchmark"]["benchmark_scope"] == (
-        "completed frozen OOS week"
+    assert evidence["adaptive_policy"]["primary_lookback_weeks"] == 1
+    history = evidence["adaptive_source_history"]
+    assert history["available"] is True
+    assert history["primary_lookback_weeks"] == 1
+    assert history["context_lookback_weeks"] == 4
+    assert history["rules"][0]["rule_id"] == "ENTRY_001"
+    assert history["rules"][0]["status"] in {
+        "ACTIVE_SUPPORTED",
+        "ACTIVE_WEAKENING",
+        "DORMANT_NO_EXPOSURE",
+        "DECAYING",
+        "CONTRADICTED",
+    }
+
+    benchmark = evidence["raw_strategy_benchmark"]
+    assert benchmark["available"] is True
+    assert benchmark["benchmark_kind"] == "RAW_REFERENCE_PORTFOLIO"
+    assert benchmark["raw_strategy"]["trades"] == 2
+    assert benchmark["execution_contract"]["benchmark_starting_equity"] == 1000.0
+    assert benchmark["execution_contract"]["applied_risk_fraction"] == 0.01
+    assert benchmark["raw_strategy"]["equity"]["starting_equity"] == 1000.0
+    assert "ending_equity_delta" in benchmark["adaptive_value_added"]
+    assert "adaptive_value_added" in benchmark
+    assert evidence["reference_population_summary"]["available"] is True
+    populations = evidence["adaptive_populations"]
+    assert populations["A_frozen_adaptive_oos"]["summary"] is not None
+    assert populations["B_raw_strategy_benchmark"]["benchmark_kind"] == (
+        "RAW_REFERENCE_PORTFOLIO"
     )
+    assert populations["C_teacher_reference_population"]["completed_batch"][
+        "available"
+    ] is True
+    assert populations["C_teacher_reference_population"]["recent_windows"][
+        "context"
+    ]["weeks"] == 4
 
 
 def test_weekly_batch_auto_executes_without_mid_week_review(tmp_path):

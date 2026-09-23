@@ -38,6 +38,7 @@ from crypto_strategy_lab.walk_forward_candidate_engine import (
     get_next_walk_forward_candidate,
 )
 from crypto_strategy_lab.walk_forward_materialization import materialize_walk_forward_strategy
+from crypto_strategy_lab.walk_forward_adaptive_policy import adaptive_weekly_policy
 from crypto_strategy_lab.walk_forward_research_policy import (
     validate_loss_methodology,
     validate_periodic_methodology,
@@ -72,36 +73,15 @@ def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
             "interval_months": 1,
             "freeze_between_reviews": True,
         }
-    if mode == WEEKLY_BATCH_OOS_MODE:
+    if mode in {WEEKLY_BATCH_OOS_MODE, "ADAPTIVE_WEEKLY"}:
         policy = {
             "mode": WEEKLY_BATCH_OOS_MODE,
             "interval_weeks": 1,
             "freeze_between_reviews": True,
         }
-        if bool(raw.get("adaptive", False)):
-            policy["adaptive"] = True
-            policy.update(
-                {
-                    "primary_lookback_weeks": int(
-                        raw.get("primary_lookback_weeks", 4)
-                    ),
-                    "context_lookback_weeks": int(
-                        raw.get("context_lookback_weeks", 12)
-                    ),
-                    "expire_unconfirmed_after_weeks": int(
-                        raw.get("expire_unconfirmed_after_weeks", 12)
-                    ),
-                    "benchmark_raw_strategy": bool(
-                        raw.get("benchmark_raw_strategy", True)
-                    ),
-                    "track_adaptation_lag": bool(
-                        raw.get("track_adaptation_lag", True)
-                    ),
-                    "track_rule_half_life": bool(
-                        raw.get("track_rule_half_life", True)
-                    ),
-                }
-            )
+        adaptive = adaptive_weekly_policy(raw)
+        if adaptive is not None:
+            policy["adaptive"] = adaptive
         return policy
     return {"mode": "TRADE_BY_TRADE"}
 

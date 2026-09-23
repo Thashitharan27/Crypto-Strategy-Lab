@@ -19,6 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 from crypto_strategy_lab.causal_event_index import CausalEventIndex
+from crypto_strategy_lab.walk_forward_adaptive_policy import normalize_adaptive_weekly
 
 
 _SCHEMA_VERSION = 1
@@ -214,15 +215,48 @@ class CausalExperimentStore:
                     )
             policy["initial_anchor"] = anchor
 
+        alias_adaptive_weekly = value.pop("adaptive_weekly", None)
+        alias_adaptive_policy = value.pop("adaptive_policy", None)
         rule_update_policy = value.get("rule_update_policy")
+        if rule_update_policy is None and (
+            alias_adaptive_weekly is True or isinstance(alias_adaptive_policy, dict)
+        ):
+            rule_update_policy = {
+                "mode": "WEEKLY_BATCH_OOS",
+                "adaptive": (
+                    deepcopy(alias_adaptive_policy)
+                    if isinstance(alias_adaptive_policy, dict)
+                    else {"enabled": True}
+                ),
+            }
+            value["rule_update_policy"] = rule_update_policy
+
         if rule_update_policy is not None:
             if not isinstance(rule_update_policy, dict):
                 raise ValueError("rule_update_policy must be an object")
+            alias_requests_adaptive = (
+                alias_adaptive_weekly is True
+                or isinstance(alias_adaptive_policy, dict)
+            )
             mode = str(rule_update_policy.get("mode", "")).strip().upper()
+            if alias_requests_adaptive and mode in {"", "TRADE_BY_TRADE"}:
+                mode = "WEEKLY_BATCH_OOS"
+            if mode == "ADAPTIVE_WEEKLY":
+                mode = "WEEKLY_BATCH_OOS"
+                rule_update_policy.setdefault("adaptive", {"enabled": True})
             if mode not in RULE_UPDATE_MODES:
                 raise ValueError(
-                    "rule_update_policy.mode must be TRADE_BY_TRADE, MONTHLY_BATCH_OOS, or WEEKLY_BATCH_OOS"
+                    "rule_update_policy.mode must be TRADE_BY_TRADE, MONTHLY_BATCH_OOS, "
+                    "WEEKLY_BATCH_OOS, or ADAPTIVE_WEEKLY"
                 )
+            if alias_adaptive_weekly is True and "adaptive" not in rule_update_policy:
+                rule_update_policy["adaptive"] = (
+                    deepcopy(alias_adaptive_policy)
+                    if isinstance(alias_adaptive_policy, dict)
+                    else {"enabled": True}
+                )
+            elif isinstance(alias_adaptive_policy, dict) and "adaptive" not in rule_update_policy:
+                rule_update_policy["adaptive"] = deepcopy(alias_adaptive_policy)
             rule_update_policy["mode"] = mode
             if mode in {"MONTHLY_BATCH_OOS", "WEEKLY_BATCH_OOS"}:
                 interval_key = (
@@ -257,10 +291,8 @@ class CausalExperimentStore:
                 rule_update_policy.pop("interval_weeks", None)
                 rule_update_policy.pop("freeze_between_reviews", None)
 
-            adaptive = rule_update_policy.get("adaptive", False)
-            if not isinstance(adaptive, bool):
-                raise ValueError("rule_update_policy.adaptive must be boolean")
-            adaptive_keys = {
+            adaptive_input = rule_update_policy.get("adaptive")
+            legacy_adaptive_keys = {
                 "primary_lookback_weeks",
                 "context_lookback_weeks",
                 "expire_unconfirmed_after_weeks",
@@ -268,54 +300,38 @@ class CausalExperimentStore:
                 "track_adaptation_lag",
                 "track_rule_half_life",
             }
-            if adaptive:
-                if mode != "WEEKLY_BATCH_OOS":
-                    raise ValueError(
-                        "adaptive rule updates require rule_update_policy.mode=WEEKLY_BATCH_OOS"
-                    )
-                numeric_defaults = {
-                    "primary_lookback_weeks": 4,
-                    "context_lookback_weeks": 12,
-                    "expire_unconfirmed_after_weeks": 12,
+            if adaptive_input is True:
+                # Historical bool activation remains valid, but normalize it into
+                # the native object contract instead of leaving two active shapes.
+                adaptive_input = {
+                    "enabled": True,
+                    "primary_lookback_weeks": rule_update_policy.get(
+                        "primary_lookback_weeks", 4
+                    ),
+                    "context_lookback_weeks": rule_update_policy.get(
+                        "context_lookback_weeks", 12
+                    ),
+                    "benchmark_raw_strategy": rule_update_policy.get(
+                        "benchmark_raw_strategy", True
+                    ),
+                    "track_adaptation_lag": rule_update_policy.get(
+                        "track_adaptation_lag", True
+                    ),
+                    "track_rule_half_life": rule_update_policy.get(
+                        "track_rule_half_life", True
+                    ),
                 }
-                normalized_numeric: dict[str, int] = {}
-                for key, default in numeric_defaults.items():
-                    raw = rule_update_policy.get(key, default)
-                    if isinstance(raw, bool):
-                        raise ValueError(f"rule_update_policy.{key} must be an integer")
-                    try:
-                        number = int(raw)
-                    except (TypeError, ValueError) as exc:
-                        raise ValueError(
-                            f"rule_update_policy.{key} must be an integer"
-                        ) from exc
-                    if number < 1 or number > 104:
-                        raise ValueError(
-                            f"rule_update_policy.{key} must be between 1 and 104"
-                        )
-                    normalized_numeric[key] = number
-                if (
-                    normalized_numeric["context_lookback_weeks"]
-                    < normalized_numeric["primary_lookback_weeks"]
-                ):
-                    raise ValueError(
-                        "context_lookback_weeks must be >= primary_lookback_weeks"
-                    )
-                rule_update_policy.update(normalized_numeric)
-                for key in (
-                    "benchmark_raw_strategy",
-                    "track_adaptation_lag",
-                    "track_rule_half_life",
-                ):
-                    raw = rule_update_policy.get(key, True)
-                    if not isinstance(raw, bool):
-                        raise ValueError(f"rule_update_policy.{key} must be boolean")
-                    rule_update_policy[key] = raw
-                rule_update_policy["adaptive"] = True
-            else:
+            adaptive = normalize_adaptive_weekly(adaptive_input)
+            if adaptive is not None and mode != "WEEKLY_BATCH_OOS":
+                raise ValueError(
+                    "adaptive rule updates require rule_update_policy.mode=WEEKLY_BATCH_OOS"
+                )
+            for key in legacy_adaptive_keys:
+                rule_update_policy.pop(key, None)
+            if adaptive is None:
                 rule_update_policy.pop("adaptive", None)
-                for key in adaptive_keys:
-                    rule_update_policy.pop(key, None)
+            else:
+                rule_update_policy["adaptive"] = adaptive
         return value
 
     @staticmethod

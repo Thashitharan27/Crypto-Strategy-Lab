@@ -190,14 +190,63 @@ def test_adaptive_weekly_oos_policy_normalizes_recent_windows(tmp_path):
         "mode": "WEEKLY_BATCH_OOS",
         "interval_weeks": 1,
         "freeze_between_reviews": True,
-        "adaptive": True,
-        "primary_lookback_weeks": 4,
-        "context_lookback_weeks": 12,
-        "expire_unconfirmed_after_weeks": 12,
-        "benchmark_raw_strategy": True,
-        "track_adaptation_lag": True,
-        "track_rule_half_life": True,
+        "adaptive": {
+            "enabled": True,
+            "primary_lookback_weeks": 4,
+            "context_lookback_weeks": 12,
+            "objective": "NEXT_WEEK_OOS",
+            "allow_keep": True,
+            "allow_refine": True,
+            "allow_retire": True,
+            "allow_replace": True,
+            "allow_flip": True,
+            "benchmark_raw_strategy": True,
+            "track_adaptation_lag": True,
+            "track_rule_half_life": True,
+        },
     }
+
+
+def test_native_adaptive_weekly_object_contract_and_aliases(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["rule_update_policy"] = {
+        "mode": "ADAPTIVE_WEEKLY",
+        "adaptive": {
+            "enabled": True,
+            "primary_lookback_weeks": 1,
+            "context_lookback_weeks": 4,
+            "objective": "NEXT_WEEK_OOS",
+            "allow_keep": True,
+            "allow_refine": True,
+            "allow_retire": True,
+            "allow_replace": True,
+            "allow_flip": True,
+            "benchmark_raw_strategy": True,
+        },
+    }
+    store.create("BTC_NATIVE_ADAPTIVE", definition, "create:native-adaptive")
+    policy = store.read("BTC_NATIVE_ADAPTIVE")["manifest"]["definition"][
+        "rule_update_policy"
+    ]
+    assert policy["mode"] == "WEEKLY_BATCH_OOS"
+    assert policy["adaptive"]["enabled"] is True
+    assert policy["adaptive"]["primary_lookback_weeks"] == 1
+    assert policy["adaptive"]["context_lookback_weeks"] == 4
+
+    alias_definition = _definition()
+    alias_definition["adaptive_weekly"] = True
+    alias_definition["adaptive_policy"] = {
+        "primary_lookback_weeks": 1,
+        "context_lookback_weeks": 4,
+        "objective": "NEXT_WEEK_OOS",
+    }
+    store.create("BTC_ALIAS_ADAPTIVE", alias_definition, "create:alias-adaptive")
+    normalized = store.read("BTC_ALIAS_ADAPTIVE")["manifest"]["definition"]
+    assert "adaptive_weekly" not in normalized
+    assert "adaptive_policy" not in normalized
+    assert normalized["rule_update_policy"]["mode"] == "WEEKLY_BATCH_OOS"
+    assert normalized["rule_update_policy"]["adaptive"]["enabled"] is True
 
 
 def test_adaptive_policy_requires_weekly_batch_oos(tmp_path):

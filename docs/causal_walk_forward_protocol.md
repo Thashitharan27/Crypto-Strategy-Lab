@@ -751,8 +751,8 @@ semantics, and market period.
 
 ### 18.1B Opt-in adaptive weekly OOS rule updates
 
-For experiments testing whether adaptation itself is the edge, use weekly batch
-OOS with the adaptive policy enabled:
+For experiments testing whether **rapid adaptation itself is the edge**, use the
+weekly batch cadence with the native adaptive object enabled:
 
 ```json
 {
@@ -760,16 +760,26 @@ OOS with the adaptive policy enabled:
     "mode": "WEEKLY_BATCH_OOS",
     "interval_weeks": 1,
     "freeze_between_reviews": true,
-    "adaptive": true,
-    "primary_lookback_weeks": 4,
-    "context_lookback_weeks": 12,
-    "expire_unconfirmed_after_weeks": 12,
-    "benchmark_raw_strategy": true,
-    "track_adaptation_lag": true,
-    "track_rule_half_life": true
+    "adaptive": {
+      "enabled": true,
+      "primary_lookback_weeks": 1,
+      "context_lookback_weeks": 4,
+      "objective": "NEXT_WEEK_OOS",
+      "allow_keep": true,
+      "allow_refine": true,
+      "allow_retire": true,
+      "allow_replace": true,
+      "allow_flip": true,
+      "benchmark_raw_strategy": true
+    }
   }
 }
 ```
+
+`ADAPTIVE_WEEKLY` is accepted only as an input convenience alias and is
+normalized to `WEEKLY_BATCH_OOS` plus the adaptive object. Legacy
+`adaptive: true` definitions remain readable, but new experiments should use
+the object contract so adaptive intent cannot be silently ignored.
 
 The chronology is:
 
@@ -779,12 +789,11 @@ completed week N evidence
         v
 WEEK-END ADAPTIVE REVIEW
         |
-        +--> KEEP / REFINE / RETIRE / REPLACE / FLIP
+        +--> ChatGPT decides KEEP / REFINE / RETIRE / REPLACE / FLIP
         |
-        +--> weight newest week most heavily
-        +--> use prior 4 weeks as primary supporting evidence
-        +--> use prior 12 weeks as secondary context
-        +--> compare with unchanged raw reference strategy
+        +--> newest completed week is the primary evidence
+        +--> recent context is secondary evidence
+        +--> compare against unchanged raw reference portfolio
         |
         v
 freeze exact rule snapshot R(N+1)
@@ -793,40 +802,86 @@ freeze exact rule snapshot R(N+1)
 week N+1 PURE OOS under R(N+1)
 ```
 
-The objective is not to find rules that remain optimal for years. The objective
-is to test whether a causal recent-information process can build a rule snapshot
-that improves the next week's OOS behavior. Older evidence remains available as
-context, but it must not dominate contradictory recent evidence merely because
-it has a larger historical sample.
+The objective is not to find a permanent rule set. The objective is to test
+whether a causal recent-information process can produce a rule snapshot that
+improves the **next** week's OOS behavior.
 
-Adaptive weekly reviews should explicitly reconsider every active rule rather
-than accumulating rules indefinitely. A stale rule should be kept only when
-recent evidence reconfirms its thesis; otherwise the review should refine,
-replace, flip, or retire it. The configured
-`expire_unconfirmed_after_weeks` is surfaced as a lifecycle-review threshold;
-it does not retroactively alter already completed trades.
+The server is deliberately descriptive rather than an automatic optimizer. It
+may calculate:
 
-Each adaptive weekly review packet includes:
+- last-week and recent-window performance;
+- rule age;
+- weekly rule history;
+- match counts;
+- wins/losses/net R;
+- support and contradiction counts;
+- regime/profile availability;
+- raw-strategy comparison.
 
-- the just-completed frozen OOS week;
-- immutable raw-reference performance for that same week;
-- recent raw-reference summaries over the primary and context lookback windows;
-- the exact frozen rule snapshot and rule attribution already available to
-  periodic review analytics.
+It must **not** search indicator threshold grids, choose the best recent
+threshold, automatically author rules, or automatically retire rules. ChatGPT
+remains responsible for every structural KEEP / REFINE / RETIRE / REPLACE /
+FLIP judgment.
 
-The raw-reference benchmark is critical. Adaptive performance must be compared
-with the unchanged source strategy over the same calendar window so the learner
-cannot claim success merely by moving losses between weeks.
+Every adaptive review keeps three populations distinct:
 
-Two diagnostics are part of the adaptive research objective:
+**A. Frozen adaptive OOS strategy** — the trades actually admitted by the rule
+snapshot frozen for the completed week.
 
-- **adaptation lag:** how many losses or adverse OOS decisions occur after a
-  behavior change before a later weekly review changes the rule set;
-- **rule half-life:** how rule performance behaves in the first, second, third,
-  and later weeks after learning/refinement.
+**B. Raw strategy benchmark** — the immutable reference run's actual portfolio
+trades over the same calendar week. Because this uses the reference portfolio
+rather than the paired teacher population, it preserves the configured
+`WAIT_UNTIL_CLOSED`, shared-capital/profile behavior, risk assumptions, fees
+and slippage already embodied in that run.
 
-These diagnostics are descriptive and causal. They must never inspect future
-weeks when making the current week's rule decision.
+**C. Teacher/reference population** — all causally completed immutable source
+observations available for learning, including paired opposite-side evidence
+when it is causally resolved.
+
+These populations must not be substituted for one another.
+
+Adaptive per-rule evidence exposes lifecycle states:
+
+```text
+ACTIVE_SUPPORTED
+ACTIVE_WEAKENING
+DORMANT_NO_EXPOSURE
+DECAYING
+CONTRADICTED
+RETIRED
+```
+
+`DORMANT_NO_EXPOSURE` means that the recent window supplied no qualifying
+matches for that rule. It is not negative evidence and must never cause
+automatic retirement. `DECAYING` and `CONTRADICTED` require actual resolved
+contrary evidence. A rule that worked strongly in its learning week but turns
+negative in a later week can therefore be surfaced explicitly as decay rather
+than being hidden inside lifetime statistics.
+
+Per-rule source history should expose at least:
+
+- rule ID/version/family/profile;
+- learned-at boundary and age in weeks;
+- learning-window performance;
+- weekly post-learning history;
+- recent matches, wins, losses and net R;
+- support and contradiction counts;
+- regime/profile availability;
+- last match;
+- descriptive lifecycle state.
+
+Rule half-life is therefore observable directly through the weekly history.
+Adaptation lag may be derived retrospectively from rule-change events and OOS
+results, but no future week may be used to decide the current review.
+
+Fresh batch advancement is one causal request even when it performs many
+internal deterministic transitions. After each successful append, later steps
+inside that same request must consume the newly returned sequence/state hash.
+If a stale-head condition is caused solely by tail events written by the same
+request, the orchestrator may adopt that verified self-authored head and
+continue. Any foreign tail event remains a real concurrency conflict and must
+fail closed.
+
 
 ### 18.2 Monthly live continuation
 

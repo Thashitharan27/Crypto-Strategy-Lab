@@ -26,6 +26,11 @@ from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
 from crypto_strategy_lab.walk_forward_candidate_engine import SCAN_CHECKPOINT_TYPE
 from crypto_strategy_lab.walk_forward_teacher_learning import TEACHER_LOSS_FLIP_MODE
 from crypto_strategy_lab.walk_forward_research_policy import decorate_review_packet
+from crypto_strategy_lab.walk_forward_adaptive_policy import adaptive_weekly_policy
+from crypto_strategy_lab.walk_forward_adaptive_weekly import (
+    build_adaptive_source_history,
+    build_raw_strategy_benchmark,
+)
 
 
 ACCELERATED_SCAN_ROWS = 4096
@@ -50,6 +55,72 @@ _AUTONOMOUS_TERMINAL_STATUSES = frozenset({
 })
 _ORIGINAL_ADVANCE_WALK_FORWARD = _impl.advance_walk_forward
 _ORIGINAL_BUILD_LOSS_REVIEW_PACKET = _impl.build_loss_review_packet
+
+_SELF_STALE_HEAD_HANDOFF_LIMIT = 4
+
+
+def _advance_with_internal_head_handoff(
+    control: Any,
+    reports: Any,
+    *,
+    experiment_id: str,
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+    review_interval_months: int,
+    max_scan_rows: int,
+    max_transitions: int,
+) -> dict[str, Any]:
+    """Resume only when this same request advanced its own causal head.
+
+    This fixes fresh batch ingestion where deterministic sub-steps can commit
+    before a later sub-step observes the caller's original head. Foreign tail
+    events are never adopted and still raise the normal stale-head error.
+    """
+    sequence = int(expected_sequence)
+    state_hash = str(expected_state_hash)
+    prefix = str(operation_id).strip() + ":"
+
+    for _attempt in range(_SELF_STALE_HEAD_HANDOFF_LIMIT):
+        try:
+            return _ORIGINAL_ADVANCE_WALK_FORWARD(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                operation_id=operation_id,
+                expected_sequence=sequence,
+                expected_state_hash=state_hash,
+                review_interval_months=review_interval_months,
+                max_scan_rows=max_scan_rows,
+                max_transitions=max_transitions,
+            )
+        except ValueError as exc:
+            if "walk-forward experiment changed since it was read" not in str(exc):
+                raise
+            store = _impl._store(control)
+            current = _impl._read_store(store, experiment_id, recent_events=0)
+            current_sequence = int(current["sequence"])
+            current_hash = str(current["state_hash"])
+            if current_sequence <= sequence:
+                raise
+            tail = [
+                event
+                for event in _impl._events(store, experiment_id)
+                if sequence < int(event.get("sequence", 0)) <= current_sequence
+            ]
+            if not tail:
+                raise
+            for event in tail:
+                event_operation = str(event.get("operation_id") or "")
+                if event_operation != operation_id and not event_operation.startswith(prefix):
+                    raise
+            sequence = current_sequence
+            state_hash = current_hash
+
+    raise ValueError(
+        "walk-forward internal head changed repeatedly during one advance request"
+    )
+
 
 
 def _candidate_strategy_action(candidate: dict[str, Any]) -> str:
@@ -788,15 +859,9 @@ def _batch_review_evidence(
     mode = str(rule_update_policy.get("mode", "")).strip().upper()
     if mode not in _impl.BATCH_OOS_MODES:
         raise ValueError("batch review evidence requires a batch OOS mode")
+    adaptive_policy = adaptive_weekly_policy(rule_update_policy)
     adaptive_weekly = (
-        mode == _impl.WEEKLY_BATCH_OOS_MODE
-        and bool(rule_update_policy.get("adaptive", False))
-    )
-    primary_lookback_weeks = int(
-        rule_update_policy.get("primary_lookback_weeks", 4)
-    )
-    context_lookback_weeks = int(
-        rule_update_policy.get("context_lookback_weeks", 12)
+        mode == _impl.WEEKLY_BATCH_OOS_MODE and adaptive_policy is not None
     )
     period_name = "week" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "month"
     boundary_name = "week-end" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
@@ -1054,104 +1119,119 @@ def _batch_review_evidence(
                 "by_profile_side": by_profile_side,
             }
 
-            if (
-                adaptive_weekly
-                and end is not None
-                and bool(rule_update_policy.get("benchmark_raw_strategy", True))
-            ):
-                raw_strategy_benchmark = {
-                    **deepcopy(reference_population),
-                    "benchmark_kind": (
-                        "RAW_DI_REFERENCE"
-                        if str(definition.get("strategy") or "").upper()
-                        == "DI_DIRECTION"
-                        else "RAW_REFERENCE_STRATEGY"
-                    ),
-                    "benchmark_scope": "completed frozen OOS week",
-                }
-
-            if adaptive_weekly and end is not None:
-                def summarize_source_window(weeks: int) -> dict[str, Any]:
-                    window_start = end - _impl.pd.DateOffset(weeks=int(weeks))
-                    with duckdb.connect(":memory:") as history_connection:
-                        history_rows = history_connection.execute(
-                            f"""
-                            SELECT
-                                LOWER(CAST(strategy_profile_key AS VARCHAR)) AS profile,
-                                UPPER(CAST(side AS VARCHAR)) AS side,
-                                COUNT(*) AS observations,
-                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) > 0 THEN 1 ELSE 0 END) AS wins,
-                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) < 0 THEN 1 ELSE 0 END) AS losses,
-                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) = 0 THEN 1 ELSE 0 END) AS breakevens,
-                                SUM(CAST(pair_net_r AS DOUBLE)) AS net_r
-                            FROM read_parquet('{_impl._quote(samples_path)}')
-                            WHERE COALESCE(
-                                CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
-                            )
-                              AND CAST(exit_time AS TIMESTAMPTZ) > ?
-                              AND CAST(exit_time AS TIMESTAMPTZ) <= ?
-                            GROUP BY 1, 2
-                            ORDER BY 1, 2
-                            """,
-                            [
-                                window_start.to_pydatetime(),
-                                end.to_pydatetime(),
-                            ],
-                        ).fetchall()
-                    rows_out: list[dict[str, Any]] = []
-                    summary = {
-                        "observations": 0,
-                        "wins": 0,
-                        "losses": 0,
-                        "breakevens": 0,
-                        "net_r": 0.0,
-                    }
-                    for history_row in history_rows:
-                        item = {
-                            "strategy_profile_key": history_row[0],
-                            "side": history_row[1],
-                            "observations": int(history_row[2] or 0),
-                            "wins": int(history_row[3] or 0),
-                            "losses": int(history_row[4] or 0),
-                            "breakevens": int(history_row[5] or 0),
-                            "net_r": float(history_row[6] or 0.0),
-                        }
-                        rows_out.append(item)
-                        for key in summary:
-                            summary[key] += item[key]
-                    summary["win_rate_pct"] = (
-                        round(
-                            100.0
-                            * summary["wins"]
-                            / summary["observations"],
-                            2,
-                        )
-                        if summary["observations"]
-                        else None
-                    )
-                    return {
-                        "weeks": int(weeks),
-                        "start_exclusive": window_start.isoformat(),
-                        "end_inclusive": end.isoformat(),
-                        "overall": summary,
-                        "by_profile_side": rows_out,
-                    }
-
-                adaptive_source_history = {
-                    "available": True,
-                    "basis": (
-                        "immutable source-side outcomes resolved by the scheduled "
-                        "weekly boundary; recent evidence is descriptive and never "
-                        "changes the completed week"
-                    ),
-                    "primary": summarize_source_window(primary_lookback_weeks),
-                    "context": summarize_source_window(context_lookback_weeks),
-                }
     except Exception as exc:
         reference_population = {
             "available": False,
             "reason": str(exc)[:1000],
         }
+
+    if adaptive_weekly and start is not None and end is not None:
+        assert adaptive_policy is not None
+        try:
+            adaptive_source_history = build_adaptive_source_history(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                end=end,
+                policy=adaptive_policy,
+            )
+        except Exception as exc:
+            adaptive_source_history = {
+                "available": False,
+                "reason": str(exc)[:1000],
+            }
+        if bool(adaptive_policy.get("benchmark_raw_strategy", True)):
+            try:
+                readback = _impl._read_store(store, experiment_id, recent_events=0)
+                definition = (readback.get("manifest") or {}).get("definition") or {}
+                risk_model = definition.get("risk_model")
+                if isinstance(risk_model, dict):
+                    starting_equity_raw = risk_model.get("initial_equity")
+                else:
+                    starting_equity_raw = None
+                if starting_equity_raw in (None, ""):
+                    starting_equity_raw = definition.get("initial_equity")
+                if starting_equity_raw in (None, ""):
+                    raise ValueError(
+                        "raw benchmark requires experiment initial equity"
+                    )
+                starting_equity = float(starting_equity_raw)
+                for history_event in events:
+                    if history_event.get("event_type") != "TRADE_RESOLVED":
+                        continue
+                    history_payload = history_event.get("payload") or {}
+                    if str(history_payload.get("ledger", "RESEARCH")).upper() != "RESEARCH":
+                        continue
+                    raw_time = history_event.get("effective_market_time")
+                    if raw_time in (None, ""):
+                        continue
+                    when = _impl._utc_timestamp(
+                        raw_time, "raw benchmark prior settlement time"
+                    )
+                    if when <= start and history_payload.get("equity_after") not in (None, ""):
+                        starting_equity = float(history_payload["equity_after"])
+                raw_strategy_benchmark = build_raw_strategy_benchmark(
+                    reports,
+                    definition=definition,
+                    start=start,
+                    end=end,
+                    adaptive_prospective=prospective,
+                    starting_equity=starting_equity,
+                )
+            except Exception as exc:
+                raw_strategy_benchmark = {
+                    "available": False,
+                    "reason": str(exc)[:1000],
+                }
+
+
+    prospective_values = [
+        float(row["net_r"])
+        for row in prospective
+        if row.get("net_r") is not None
+    ]
+    frozen_adaptive_summary = {
+        "trades": len(prospective_values),
+        "wins": sum(value > 0 for value in prospective_values),
+        "losses": sum(value < 0 for value in prospective_values),
+        "breakevens": sum(value == 0 for value in prospective_values),
+        "win_rate_pct": (
+            round(
+                100.0
+                * sum(value > 0 for value in prospective_values)
+                / len(prospective_values),
+                2,
+            )
+            if prospective_values
+            else None
+        ),
+        "net_r": round(sum(prospective_values), 10)
+        if prospective_values
+        else 0.0,
+    }
+    adaptive_populations = (
+        {
+            "A_frozen_adaptive_oos": {
+                "summary": frozen_adaptive_summary,
+                "trades": deepcopy(prospective),
+                "purpose": "What the rules frozen for the completed week actually produced.",
+            },
+            "B_raw_strategy_benchmark": deepcopy(raw_strategy_benchmark),
+            "C_teacher_reference_population": {
+                "completed_batch": deepcopy(reference_population),
+                "recent_windows": deepcopy(
+                    (adaptive_source_history or {}).get("reference_windows")
+                ),
+                "purpose": (
+                    "Causally completed immutable source observations available "
+                    "for learning; distinct from both executed adaptive OOS trades "
+                    "and the raw portfolio benchmark."
+                ),
+            },
+        }
+        if adaptive_weekly
+        else None
+    )
 
     return {
         "mode": mode,
@@ -1166,7 +1246,7 @@ def _batch_review_evidence(
         "reference_population_summary": reference_population,
         "adaptive_weekly": adaptive_weekly,
         "adaptive_policy": (
-            deepcopy(rule_update_policy) if adaptive_weekly else None
+            deepcopy(adaptive_policy) if adaptive_weekly else None
         ),
         "adaptive_source_history": (
             adaptive_source_history if adaptive_weekly else None
@@ -1174,6 +1254,7 @@ def _batch_review_evidence(
         "raw_strategy_benchmark": (
             raw_strategy_benchmark if adaptive_weekly else None
         ),
+        "adaptive_populations": adaptive_populations,
         "teacher_observations": teachers,
         "prospective_trades": prospective,
         "review_instruction": (
@@ -1183,7 +1264,10 @@ def _batch_review_evidence(
             "consolidation over single-trade micro-rules. Before authoring new "
             "threshold rules, use the immutable reference run and completed "
             "window for feature-level winner/loss comparison when the aggregate "
-            "population shows meaningful sample size."
+            "population shows meaningful sample size. The server must remain "
+            "descriptive: it may calculate recent performance, age, contradictions, "
+            "regime availability and raw comparison, but it must not search threshold "
+            "grids or automatically KEEP/REFINE/RETIRE/REPLACE/FLIP rules."
         ),
     }
 
@@ -1310,7 +1394,7 @@ def advance_walk_forward(
         }
 
     bounded_rows = min(int(max_scan_rows), ACCELERATED_SCAN_ROWS)
-    result = _ORIGINAL_ADVANCE_WALK_FORWARD(
+    result = _advance_with_internal_head_handoff(
         control,
         reports,
         experiment_id=experiment_id,
