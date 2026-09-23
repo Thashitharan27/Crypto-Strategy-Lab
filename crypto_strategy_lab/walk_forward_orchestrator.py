@@ -784,11 +784,20 @@ def _batch_review_evidence(
     result: dict[str, Any],
 ) -> dict[str, Any]:
     """Assemble the completed frozen period for one batch OOS review."""
-    mode = str(
-        (result.get("rule_update_policy") or {}).get("mode", "")
-    ).strip().upper()
+    rule_update_policy = result.get("rule_update_policy") or {}
+    mode = str(rule_update_policy.get("mode", "")).strip().upper()
     if mode not in _impl.BATCH_OOS_MODES:
         raise ValueError("batch review evidence requires a batch OOS mode")
+    adaptive_weekly = (
+        mode == _impl.WEEKLY_BATCH_OOS_MODE
+        and bool(rule_update_policy.get("adaptive", False))
+    )
+    primary_lookback_weeks = int(
+        rule_update_policy.get("primary_lookback_weeks", 4)
+    )
+    context_lookback_weeks = int(
+        rule_update_policy.get("context_lookback_weeks", 12)
+    )
     period_name = "week" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "month"
     boundary_name = "week-end" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
     deferred_status = (
@@ -910,6 +919,14 @@ def _batch_review_evidence(
     reference_population: dict[str, Any] = {
         "available": False,
         "reason": "reference population summary unavailable",
+    }
+    adaptive_source_history: dict[str, Any] = {
+        "available": False,
+        "reason": "adaptive weekly source history disabled",
+    }
+    raw_strategy_benchmark: dict[str, Any] = {
+        "available": False,
+        "reason": "raw strategy benchmark disabled",
     }
     try:
         import duckdb
@@ -1036,6 +1053,100 @@ def _batch_review_evidence(
                 "overall": totals,
                 "by_profile_side": by_profile_side,
             }
+
+            if (
+                adaptive_weekly
+                and end is not None
+                and bool(rule_update_policy.get("benchmark_raw_strategy", True))
+            ):
+                raw_strategy_benchmark = {
+                    **deepcopy(reference_population),
+                    "benchmark_kind": (
+                        "RAW_DI_REFERENCE"
+                        if str(definition.get("strategy") or "").upper()
+                        == "DI_DIRECTION"
+                        else "RAW_REFERENCE_STRATEGY"
+                    ),
+                    "benchmark_scope": "completed frozen OOS week",
+                }
+
+            if adaptive_weekly and end is not None:
+                def summarize_source_window(weeks: int) -> dict[str, Any]:
+                    window_start = end - _impl.pd.DateOffset(weeks=int(weeks))
+                    with duckdb.connect(":memory:") as history_connection:
+                        history_rows = history_connection.execute(
+                            f"""
+                            SELECT
+                                LOWER(CAST(strategy_profile_key AS VARCHAR)) AS profile,
+                                UPPER(CAST(side AS VARCHAR)) AS side,
+                                COUNT(*) AS observations,
+                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) > 0 THEN 1 ELSE 0 END) AS wins,
+                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) < 0 THEN 1 ELSE 0 END) AS losses,
+                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) = 0 THEN 1 ELSE 0 END) AS breakevens,
+                                SUM(CAST(pair_net_r AS DOUBLE)) AS net_r
+                            FROM read_parquet('{_impl._quote(samples_path)}')
+                            WHERE COALESCE(
+                                CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
+                            )
+                              AND CAST(exit_time AS TIMESTAMPTZ) > ?
+                              AND CAST(exit_time AS TIMESTAMPTZ) <= ?
+                            GROUP BY 1, 2
+                            ORDER BY 1, 2
+                            """,
+                            [
+                                window_start.to_pydatetime(),
+                                end.to_pydatetime(),
+                            ],
+                        ).fetchall()
+                    rows_out: list[dict[str, Any]] = []
+                    summary = {
+                        "observations": 0,
+                        "wins": 0,
+                        "losses": 0,
+                        "breakevens": 0,
+                        "net_r": 0.0,
+                    }
+                    for history_row in history_rows:
+                        item = {
+                            "strategy_profile_key": history_row[0],
+                            "side": history_row[1],
+                            "observations": int(history_row[2] or 0),
+                            "wins": int(history_row[3] or 0),
+                            "losses": int(history_row[4] or 0),
+                            "breakevens": int(history_row[5] or 0),
+                            "net_r": float(history_row[6] or 0.0),
+                        }
+                        rows_out.append(item)
+                        for key in summary:
+                            summary[key] += item[key]
+                    summary["win_rate_pct"] = (
+                        round(
+                            100.0
+                            * summary["wins"]
+                            / summary["observations"],
+                            2,
+                        )
+                        if summary["observations"]
+                        else None
+                    )
+                    return {
+                        "weeks": int(weeks),
+                        "start_exclusive": window_start.isoformat(),
+                        "end_inclusive": end.isoformat(),
+                        "overall": summary,
+                        "by_profile_side": rows_out,
+                    }
+
+                adaptive_source_history = {
+                    "available": True,
+                    "basis": (
+                        "immutable source-side outcomes resolved by the scheduled "
+                        "weekly boundary; recent evidence is descriptive and never "
+                        "changes the completed week"
+                    ),
+                    "primary": summarize_source_window(primary_lookback_weeks),
+                    "context": summarize_source_window(context_lookback_weeks),
+                }
     except Exception as exc:
         reference_population = {
             "available": False,
@@ -1053,6 +1164,16 @@ def _batch_review_evidence(
         "teacher_observation_count": len(teachers),
         "prospective_trade_count": len(prospective),
         "reference_population_summary": reference_population,
+        "adaptive_weekly": adaptive_weekly,
+        "adaptive_policy": (
+            deepcopy(rule_update_policy) if adaptive_weekly else None
+        ),
+        "adaptive_source_history": (
+            adaptive_source_history if adaptive_weekly else None
+        ),
+        "raw_strategy_benchmark": (
+            raw_strategy_benchmark if adaptive_weekly else None
+        ),
         "teacher_observations": teachers,
         "prospective_trades": prospective,
         "review_instruction": (
