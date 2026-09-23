@@ -528,6 +528,8 @@ def build_raw_strategy_benchmark(
     end: pd.Timestamp,
     adaptive_prospective: list[dict[str, Any]],
     starting_equity: float,
+    eligible_opportunities: int | None = None,
+    zero_trade_week_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     reference_run = str(definition.get("reference_run") or "").strip()
     manifest = reports.get_run_manifest(reference_run)
@@ -613,6 +615,51 @@ def build_raw_strategy_benchmark(
         6,
     )
 
+    adaptive_trade_count = int(adaptive["trades"])
+    raw_trade_count = int(raw["trades"])
+    eligible_count = (
+        int(eligible_opportunities)
+        if eligible_opportunities is not None
+        else None
+    )
+    participation_rate = (
+        round(100.0 * adaptive_trade_count / eligible_count, 2)
+        if eligible_count is not None and eligible_count > 0
+        else None
+    )
+    participation_rate_vs_raw = (
+        round(100.0 * adaptive_trade_count / raw_trade_count, 2)
+        if raw_trade_count > 0
+        else None
+    )
+    zero_summary = deepcopy(zero_trade_week_summary or {})
+    participation = {
+        "adaptive_trade_count": adaptive_trade_count,
+        "raw_trade_count": raw_trade_count,
+        "eligible_opportunities": eligible_count,
+        "executed_opportunities": adaptive_trade_count,
+        "participation_rate_pct": participation_rate,
+        "participation_rate_vs_raw_trades_pct": participation_rate_vs_raw,
+        "current_week_zero_adaptive_trades": adaptive_trade_count == 0,
+        "weeks_with_zero_adaptive_trades": int(
+            zero_summary.get("weeks_with_zero_adaptive_trades", 0)
+        ),
+        "completed_adaptive_weeks_observed": int(
+            zero_summary.get("completed_adaptive_weeks_observed", 0)
+        ),
+        "weekly_participation_history": deepcopy(
+            zero_summary.get("weekly_participation_history") or []
+        ),
+        "eligible_opportunity_semantics": (
+            "causally completed source-side reference opportunities in the "
+            "same frozen OOS week, before adaptive rule admission"
+        ),
+        "raw_trade_semantics": (
+            "actual immutable raw portfolio trades after WAIT_UNTIL_CLOSED, "
+            "shared-capital and profile constraints"
+        ),
+    }
+
     def find_config(key: str, node: Any) -> Any:
         if isinstance(node, dict):
             if key in node:
@@ -651,6 +698,7 @@ def build_raw_strategy_benchmark(
             **adaptive,
             "equity": adaptive_equity,
         },
+        "participation": participation,
         "adaptive_value_added": {
             "trade_count_delta": adaptive["trades"] - raw["trades"],
             "net_r_delta": round(
@@ -676,6 +724,8 @@ def build_raw_strategy_benchmark(
         "note": (
             "Raw uses the reference run's actual portfolio trades, not the paired "
             "teacher population, so its WAIT_UNTIL_CLOSED/capital/profile behavior "
-            "and configured fees/slippage are preserved."
+            "and configured fees/slippage are preserved. Value-added and participation "
+            "are reported separately so capital preservation from inactivity is not "
+            "mistaken for predictive edge."
         ),
     }
