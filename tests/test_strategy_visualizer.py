@@ -43,6 +43,21 @@ def _fixture(tmp_path: Path):
             "volume": np.full(len(times), 100.0),
         }
     )
+    hourly = (
+        market.set_index("period_start")
+        .resample("1h")
+        .agg(
+            {
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
+            }
+        )
+        .dropna()
+        .reset_index()
+    )
 
     trade_time = times[300]
     exit_time = times[308]
@@ -364,14 +379,43 @@ def _fixture(tmp_path: Path):
         def artifact_path(root, raw_manifest, name):
             return Path(root) / raw_manifest["artifacts"][name]["path"]
 
+    class Catalog:
+        @staticmethod
+        def inventory(_raw_root, *, market):
+            del market
+            return [
+                {
+                    "exchange": "binance",
+                    "symbol": "BTCUSDT",
+                    "dataset": "klines",
+                    "interval": "15m",
+                    "first_period": times[0],
+                    "last_period": times[-1] + pd.Timedelta(minutes=15),
+                    "archive_count": 1,
+                },
+                {
+                    "exchange": "binance",
+                    "symbol": "BTCUSDT",
+                    "dataset": "klines",
+                    "interval": "1h",
+                    "first_period": times[0],
+                    "last_period": times[-1] + pd.Timedelta(minutes=15),
+                    "archive_count": 1,
+                },
+            ]
+
     class Store:
+        raw_root = tmp_path
+        catalog = Catalog()
+
         def __init__(self):
             self.calls = []
 
         def load_dataset(self, request, dataset, *, interval=None):
             self.calls.append((request, dataset, interval))
-            starts = market["period_start"]
-            return market[
+            source = hourly if interval == "1h" else market
+            starts = source["period_start"]
+            return source[
                 (starts >= pd.Timestamp(request.start))
                 & (starts < pd.Timestamp(request.end))
             ].copy()
@@ -481,6 +525,37 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
     assert pd.Timestamp(request.start) > pd.Timestamp(manifest["request"]["start"])
 
 
+
+
+def test_completed_run_visualizer_loads_alternate_cached_chart_timeframe(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+
+    available = {
+        item["interval"]: item
+        for item in model.available_chart_timeframes()
+    }
+    assert available["15m"]["strategyTimeframe"] is True
+    assert available["1h"]["coverage"] == "full"
+
+    payload = model.build_payload(
+        trade_index=0,
+        visible_candles=60,
+        chart_timeframe="1h",
+    )
+
+    assert payload["run"]["strategyTimeframe"] == "15m"
+    assert payload["run"]["chartTimeframe"] == "1h"
+    assert payload["run"]["chartSourceMode"] == "current-canonical-cache-reference"
+    assert payload["chartTimeframe"] == "1h"
+    assert service.store.calls[-1][2] == "1h"
+    assert payload["candles"]
+    overlay_names = {item["name"] for item in payload["overlays"]}
+    assert {"EMA 50", "EMA 100", "EMA 200"} <= overlay_names
+    assert "VWAP" not in overlay_names
+    candle_times = {item["time"] for item in payload["candles"]}
+    assert all(marker["time"] in candle_times for marker in payload["markers"])
+    assert all(event["time"] in candle_times for event in payload["srEvents"])
 
 
 def test_completed_run_visualizer_full_run_bypasses_window_limit(tmp_path):
