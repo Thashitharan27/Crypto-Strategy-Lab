@@ -434,10 +434,12 @@ def test_accelerated_orchestrator_propagates_head_across_many_internal_transitio
     experiment_id = "BTCUSDT_15M_WF_MULTI_HEAD"
     head = store.create(experiment_id, _definition(), "create:multi-head")
     observed_sequences = []
+    observed_operation_ids = []
 
     def fake_advance(*args, **kwargs):
         current = store.read_fast(experiment_id, recent_events=0)
         observed_sequences.append(kwargs["expected_sequence"])
+        observed_operation_ids.append(kwargs["operation_id"])
         assert kwargs["expected_sequence"] == current["sequence"]
         assert kwargs["expected_state_hash"] == current["state_hash"]
         assert kwargs["max_transitions"] == 1
@@ -489,6 +491,11 @@ def test_accelerated_orchestrator_propagates_head_across_many_internal_transitio
     )
 
     assert observed_sequences == [1, 2, 3, 4, 5, 6, 7]
+    assert len(observed_operation_ids) == len(set(observed_operation_ids))
+    assert observed_operation_ids == [
+        f"advance:multi-head:transition-from-{sequence}"
+        for sequence in observed_sequences
+    ]
     assert result["status"] == "NO_MORE_ACTION_IN_SCAN"
     assert result["sequence"] == 7
     assert result["state_hash"] == store.read_fast(
