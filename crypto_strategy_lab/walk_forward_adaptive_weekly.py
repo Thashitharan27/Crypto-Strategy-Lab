@@ -638,7 +638,17 @@ def build_raw_strategy_benchmark(
         "raw_trade_count": raw_trade_count,
         "eligible_opportunities": eligible_count,
         "executed_opportunities": adaptive_trade_count,
+        "participation_rate": (
+            round(adaptive_trade_count / eligible_count, 6)
+            if eligible_count is not None and eligible_count > 0
+            else None
+        ),
         "participation_rate_pct": participation_rate,
+        "participation_rate_vs_raw_trades": (
+            round(adaptive_trade_count / raw_trade_count, 6)
+            if raw_trade_count > 0
+            else None
+        ),
         "participation_rate_vs_raw_trades_pct": participation_rate_vs_raw,
         "current_week_zero_adaptive_trades": adaptive_trade_count == 0,
         "weeks_with_zero_adaptive_trades": int(
