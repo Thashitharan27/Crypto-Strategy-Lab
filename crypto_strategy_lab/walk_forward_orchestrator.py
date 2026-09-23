@@ -89,12 +89,20 @@ def _advance_with_internal_head_handoff(
     self_handoffs = 0
 
     while transitions_used < int(max_transitions):
+        # The core is intentionally invoked with max_transitions=1, so its local
+        # step counter restarts at zero on every call. Give each core invocation
+        # a deterministic identity anchored to the causal head; otherwise
+        # sub-operation ids such as resume-0:reveal can collide across different
+        # candidates and replay an older event.
+        transition_operation_id = _impl._operation(
+            operation_id, f"transition-from-{sequence}"
+        )
         try:
             result = _ORIGINAL_ADVANCE_WALK_FORWARD(
                 control,
                 reports,
                 experiment_id=experiment_id,
-                operation_id=operation_id,
+                operation_id=transition_operation_id,
                 expected_sequence=sequence,
                 expected_state_hash=state_hash,
                 review_interval_months=review_interval_months,
