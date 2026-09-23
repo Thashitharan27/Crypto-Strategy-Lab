@@ -251,6 +251,43 @@ def test_weekly_batch_periodic_packet_preserves_batch_methodology():
     ]
 
 
+def test_adaptive_weekly_packet_requires_recent_rule_lifecycle_review():
+    packet = decorate_review_packet(
+        {
+            "status": "PERIODIC_REVIEW_REQUIRED",
+            "rule_update_policy": {
+                "mode": "WEEKLY_BATCH_OOS",
+                "interval_weeks": 1,
+                "freeze_between_reviews": True,
+                "adaptive": True,
+                "primary_lookback_weeks": 4,
+                "context_lookback_weeks": 12,
+                "expire_unconfirmed_after_weeks": 12,
+                "benchmark_raw_strategy": True,
+                "track_adaptation_lag": True,
+                "track_rule_half_life": True,
+            },
+        }
+    )
+    prompt = packet["methodology_prompt"]
+
+    assert prompt["primary_goal"] == "ADAPTIVE_WEEKLY_REASSESS_FREEZE_NEXT_WEEK"
+    assert prompt["adaptive_weekly"] is True
+    assert prompt["primary_lookback_weeks"] == 4
+    assert prompt["context_lookback_weeks"] == 12
+    assert prompt["rules_expire_without_reconfirmation_after_weeks"] == 12
+    assert prompt["rule_lifecycle_actions"] == [
+        "KEEP",
+        "REFINE",
+        "RETIRE",
+        "REPLACE",
+        "FLIP",
+    ]
+    assert prompt["benchmark_raw_strategy"] is True
+    assert prompt["track_adaptation_lag"] is True
+    assert prompt["track_rule_half_life"] is True
+
+
 def test_periodic_rule_writing_requires_strategic_action_and_rationale():
     with pytest.raises(ValueError, match="periodic_rule_action"):
         validate_periodic_methodology(
