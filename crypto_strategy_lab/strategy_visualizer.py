@@ -1588,6 +1588,8 @@ class CompletedRunVisualizer:
         market: pd.DataFrame,
         context: pd.DataFrame,
         visible_start: pd.Timestamp,
+        *,
+        chart_timeframe: str | None = None,
     ) -> list[dict[str, Any]]:
         overlays: list[dict[str, Any]] = []
         if market.empty:
@@ -1609,7 +1611,9 @@ class CompletedRunVisualizer:
                     }
                 )
 
-        if not context.empty:
+        strategy_timeframe = str(self.seed.request.strategy_timeframe)
+        selected_chart_timeframe = str(chart_timeframe or strategy_timeframe)
+        if not context.empty and selected_chart_timeframe == strategy_timeframe:
             times = context["strategy_candle_open_time"]
             mask = times >= visible_start
             for column, name, kind in (
@@ -1832,6 +1836,11 @@ class CompletedRunVisualizer:
                 }
             )
         entry_snapshot = self.selected_trade_candle_time(trade_index)
+        entry_chart_snapshot = (
+            self._snap_to_candle(entry_snapshot, visible)
+            if entry_snapshot is not None
+            else None
+        )
         sr_zones: list[dict[str, Any]] = []
         sr_events: list[dict[str, Any]] = []
         if not zone_inventory.empty:
@@ -1908,8 +1917,14 @@ class CompletedRunVisualizer:
             "selectedTradeCandleTime": (
                 _unix_seconds(entry_snapshot) if entry_snapshot is not None else None
             ),
+            "selectedTradeChartCandleTime": entry_chart_snapshot,
             "candles": candles,
-            "overlays": self._overlays(market, context, visible_start),
+            "overlays": self._overlays(
+                market,
+                context,
+                visible_start,
+                chart_timeframe=chart_timeframe,
+            ),
             "srZones": sr_zones,
             "srEvents": sr_events,
             "markers": self._markers(signals, trade_index, show_rejections, visible),
