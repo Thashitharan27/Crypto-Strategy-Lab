@@ -149,6 +149,8 @@ def _reveal_strategy_action_with_flip_replay(
     experiment_id: str,
     candidate_id: str,
     operation_id: str,
+    expected_sequence: int | None = None,
+    expected_state_hash: str | None = None,
 ) -> dict[str, Any]:
     """Reveal EVE normally, with immutable 1m fallback only for active FLIP trades."""
     try:
@@ -158,6 +160,8 @@ def _reveal_strategy_action_with_flip_replay(
             experiment_id=experiment_id,
             candidate_id=candidate_id,
             operation_id=operation_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
         )
     except ValueError as exc:
         if (
@@ -177,6 +181,8 @@ def _reveal_strategy_action_with_flip_replay(
             experiment_id=experiment_id,
             candidate_id=candidate_id,
             operation_id=operation_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
         )
     if store._candidate_state(events, candidate_id) != "DECISION_FROZEN":
         raise ValueError("prospective FLIP replay requires a durably frozen decision")
@@ -213,7 +219,15 @@ def _reveal_strategy_action_with_flip_replay(
         frozen.get("chatgpt_view") or frozen.get("final_action") or ""
     ).strip().upper()
 
-    readback = store.read_fast(experiment_id, recent_events=0)
+    if expected_sequence is not None and expected_state_hash not in (None, ""):
+        store, readback, events = _wf_orchestrator._impl._verified(
+            control,
+            experiment_id,
+            int(expected_sequence),
+            str(expected_state_hash),
+        )
+    else:
+        readback = store.read_fast(experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
