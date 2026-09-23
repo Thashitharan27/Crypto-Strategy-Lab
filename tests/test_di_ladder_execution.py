@@ -127,6 +127,8 @@ def test_di_ladder_s1_reversal_is_plus_10_minus_20():
     assert list(trades.ladder_layer) == ["INITIAL", "S1"]
     s1 = trades.loc[trades.ladder_layer == "S1"].iloc[0]
     assert s1.ladder_frozen_quantity == pytest.approx(5.0)
+    assert pd.Timestamp(s1.actual_entry_timestamp).tzinfo is not None
+    assert pd.Timestamp(s1.ladder_trigger_timestamp).tzinfo is not None
     assert s1.pair_gross_pnl == pytest.approx(-20.0)
     assert trades.iloc[0].pair_gross_pnl == pytest.approx(10.0)
     assert trades.iloc[0].ladder_episode_gross_pnl == pytest.approx(-10.0)
