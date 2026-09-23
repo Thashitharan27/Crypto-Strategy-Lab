@@ -289,7 +289,11 @@ class DILadderExecutionMixin:
         entry_fee = entry * qty * entry_fee_rate
         pos = Position(
             side=side,
-            entry_time=self._ladder_utc_timestamp(timestamp),
+            # Position timestamps are execution-internal. Preserve the runtime's
+            # native timezone representation (Data Lake uses tz-naive datetime64)
+            # so intrabar comparisons never mix tz-naive and tz-aware values.
+            # TradePair/public ladder timestamps are normalized to UTC below.
+            entry_time=pd.Timestamp(timestamp),
             entry_index=int(execution_i),
             entry_price=float(entry),
             risk=float(risk_distance),
