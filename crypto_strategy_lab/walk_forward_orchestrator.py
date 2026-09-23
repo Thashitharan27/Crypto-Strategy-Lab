@@ -145,46 +145,35 @@ def _advance_with_internal_head_handoff(
     max_scan_rows: int,
     max_transitions: int,
 ) -> dict[str, Any]:
-    """Drive deterministic advancement one transition/head at a time.
+    """Advance one bounded core slice, recovering only verified self-authored tails.
 
-    The caller's expected head protects entry into this operation. After that,
-    every deterministic transition consumes the head returned by the previous
-    transition. If a lower-level transition durably appends before surfacing a
-    stale-head error, the facade may adopt that newer head only when every tail
-    event is proven to belong to this same operation id. Foreign/concurrent tail
-    events still fail closed.
+    The core now owns internal head propagation across its transition loop. This
+    facade must not split a 40-transition weekly ingestion into 40 separate core
+    calls, because each call revalidates state and reopens scan/materialization
+    paths. A retry is performed only after a same-operation stale exception.
     """
     if isinstance(max_transitions, bool) or not 1 <= int(max_transitions) <= 100:
         raise ValueError("max_transitions must be between 1 and 100")
 
     sequence = int(expected_sequence)
     state_hash = str(expected_state_hash)
-    prefix = str(operation_id).strip() + ":"
-    transitions_used = 0
+    public_operation = str(operation_id).strip()
+    prefix = public_operation + ":"
     self_handoffs = 0
+    attempt_operation = public_operation
 
-    while transitions_used < int(max_transitions):
-        # The core is intentionally invoked with max_transitions=1, so its local
-        # step counter restarts at zero on every call. Give each core invocation
-        # a deterministic identity anchored to the causal head; otherwise
-        # sub-operation ids such as resume-0:reveal can collide across different
-        # candidates and replay an older event.
-        transition_operation_id = _impl._operation(
-            operation_id, f"transition-from-{sequence}"
-        )
+    for _attempt in range(4):
         try:
             result = _ORIGINAL_ADVANCE_WALK_FORWARD(
                 control,
                 reports,
                 experiment_id=experiment_id,
-                operation_id=transition_operation_id,
+                operation_id=attempt_operation,
                 expected_sequence=sequence,
                 expected_state_hash=state_hash,
                 review_interval_months=review_interval_months,
                 max_scan_rows=max_scan_rows,
-                # One deterministic transition per call makes the returned head
-                # authoritative for the next transition.
-                max_transitions=1,
+                max_transitions=int(max_transitions),
             )
         except ValueError as exc:
             if "walk-forward experiment changed since it was read" not in str(exc):
@@ -204,45 +193,39 @@ def _advance_with_internal_head_handoff(
                 raise
             for event in tail:
                 event_operation = str(event.get("operation_id") or "")
-                if event_operation != operation_id and not event_operation.startswith(prefix):
+                if (
+                    event_operation != public_operation
+                    and not event_operation.startswith(prefix)
+                ):
                     raise
-            # A same-request lower-level transition made durable causal progress.
-            # Adopt that head and continue; never reuse the caller's original head.
             sequence = current_sequence
             state_hash = current_hash
-            transitions_used += 1
             self_handoffs += 1
+            attempt_operation = _impl._operation(
+                public_operation, f"resume-from-{sequence}"
+            )
             continue
 
         returned_sequence = int(result.get("sequence", sequence))
         returned_hash = str(result.get("state_hash") or state_hash)
         if returned_sequence < sequence:
-            raise ValueError("walk-forward advance returned a regressed causal sequence")
+            raise ValueError(
+                "walk-forward advance returned a regressed causal sequence"
+            )
         if returned_sequence > sequence and returned_hash == state_hash:
-            raise ValueError("walk-forward advance changed sequence without changing state hash")
-        sequence = returned_sequence
-        state_hash = returned_hash
-
-        if str(result.get("status") or "") == "TRANSITION_LIMIT_REACHED":
-            transitions_used += 1
-            continue
-
+            raise ValueError(
+                "walk-forward advance changed sequence without changing state hash"
+            )
         updated = deepcopy(result)
-        updated["sequence"] = sequence
-        updated["state_hash"] = state_hash
+        updated["sequence"] = returned_sequence
+        updated["state_hash"] = returned_hash
         if self_handoffs:
             updated["internal_head_handoffs"] = self_handoffs
         return updated
 
-    return {
-        "contract": _impl.ORCHESTRATOR_CONTRACT,
-        "status": "TRANSITION_LIMIT_REACHED",
-        "experiment_id": experiment_id,
-        "sequence": sequence,
-        "state_hash": state_hash,
-        "max_transitions": int(max_transitions),
-        "internal_head_handoffs": self_handoffs,
-    }
+    raise ValueError(
+        "walk-forward same-operation head changed repeatedly during one advance request"
+    )
 
 
 def _candidate_strategy_action(candidate: dict[str, Any]) -> str:
@@ -1185,6 +1168,23 @@ def _batch_review_evidence(
                     "entry_context": deepcopy(capture.get("context")),
                 }
             )
+
+    if adaptive_weekly and teachers:
+        try:
+            teachers = _impl.hydrate_batch_teacher_contexts(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                expected_sequence=int(result["sequence"]),
+                expected_state_hash=str(result["state_hash"]),
+                teachers=teachers,
+            )
+        except Exception as exc:
+            # Keep immutable teacher identities/outcomes available even if
+            # optional context hydration fails; expose the failure explicitly.
+            for teacher in teachers:
+                if teacher.get("entry_context") is None:
+                    teacher["context_hydration_error"] = str(exc)[:500]
 
     reference_population: dict[str, Any] = {
         "available": False,
