@@ -8,6 +8,7 @@ from crypto_strategy_core.candles import directional_di_ratio
 from crypto_strategy_lab.atr import atr
 from crypto_strategy_lab.adx import adx
 from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy, DailyEntryMissedPolicy
+from crypto_strategy_lab.di_ladder import DILadderExecutionMixin
 from crypto_strategy_lab.indicators import bollinger_bands, lag, rsi
 from crypto_strategy_lab.mean_reversion import ema, distance_from_mean_atr, classify_state, classify_motion, classify_alignment, classify_strength
 from crypto_strategy_lab.strategy_profiles import profile_key
@@ -54,7 +55,7 @@ def _price_vs_ema_stack_code(price: float, ema_50: float, ema_100: float, ema_20
     return np.nan  # Exactly on an outer boundary is none of the three states.
 
 
-class BacktestEngine:
+class BacktestEngine(DILadderExecutionMixin):
     def __init__(self, data: pd.DataFrame, config: BacktestConfig, intrabar_data: pd.DataFrame | None = None, progress_callback: Callable[[int, int, int, int], None] | None = None, progress_interval: int = 50):
         self.data=data.reset_index(drop=True); self.intrabar_data=intrabar_data.reset_index(drop=True) if intrabar_data is not None else None; self.config=config; self.progress_callback=progress_callback; self.progress_interval=max(1, int(progress_interval))
         self.high=self.data.high.to_numpy(float); self.low=self.data.low.to_numpy(float); self.close=self.data.close.to_numpy(float); self.open=self.data.open.to_numpy(float); self.volume=self.data["volume"].to_numpy(float) if "volume" in self.data else np.ones(len(self.data),float); self.times=self.data.timestamp.to_numpy()
@@ -62,6 +63,7 @@ class BacktestEngine:
         self._configure_signal_features()
         self.signal_strategy_mode=self._infer_signal_strategy_mode()
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.strategy_rule_trace_rows=[]; self._strategy_rule_trace_keys=set(); self._strategy_rule_trace_active=None; self.skipped_daily_entries=[]; self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_next_open_entry=None; self.next_pair_id=1; self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self._initialize_di_ladder_state()
         self.entry_delta=pd.Timedelta(minutes=config.strategy_timeframe_minutes)
         self.session_vwap=self._utc_session_vwap()
         self.mean_reversion_mean=ema(self.close,config.mean_reversion_period)
@@ -1231,6 +1233,7 @@ class BacktestEngine:
         pair.entry_filter_passed = entry_filter_passed
         pair.entry_filter_reason = entry_filter_reason
         self.active_pairs.append(pair)
+        self._maybe_start_di_ladder_episode(pair, active_profile)
         self._record_pair_telemetry(pair, i)
         self.next_pair_id += 1
 
@@ -1240,6 +1243,8 @@ class BacktestEngine:
             setattr(pair, name, float(arr[i]) if np.isfinite(arr[i]) else np.nan)
         pair.short_vwap_distance_atr = ((pair.utc_session_vwap-float(self.close[i]))/float(self.atr_values[i])) if np.isfinite(pair.utc_session_vwap) and np.isfinite(self.atr_values[i]) and self.atr_values[i] > 0 else np.nan
     def _update_positions_to_strategy_index(self,i):
+        if self._update_di_ladder_positions_to_strategy_index(i):
+            return
         for pair in self.active_pairs:
             first = pair.positions()[0]
             if i > first.entry_index:
@@ -1819,6 +1824,7 @@ class BacktestEngine:
                 self.current_equity+=sum(pos.net_pnl for pos in p.positions()); p.equity_after_trade=self.current_equity; self.completed_pairs.append(p)
             else: still.append(p)
         self.active_pairs=still
+        self._update_di_ladder_episode_lifecycle()
     def _result_rows_for_pair(self, p):
         positions = list(p.positions())
         if not positions:
@@ -2086,7 +2092,7 @@ class BacktestEngine:
         prefix = primary.side.value.lower()
         row.update(self._pos_cols(prefix, primary))
         row.update(self._partial_sl_cols(prefix, primary))
-        return row
+        return self._decorate_ladder_result_row(p, row)
 
     def results_frame(self):
         rows=[]
@@ -2113,6 +2119,7 @@ class BacktestEngine:
             frame["signals_skipped_by_adx"] = sum(("ADX unavailable" in str(x.get("entry_filter_reason", x.get("adx_filter_reason", "")))) or str(x.get("entry_filter_reason", x.get("adx_filter_reason", ""))).startswith("ADX ") for x in self.skipped_signals)
             frame["signals_skipped_by_filters"] = len(self.skipped_signals)
             frame["signals_traded"] = len(frame)
+        frame = self._decorate_ladder_results_frame(frame)
         frame.attrs["skipped_signals"] = self.skipped_signals
         frame.attrs["skipped_daily_entries"] = self.skipped_daily_entries
         frame.attrs["daily_schedule_stats"] = {"scheduled_entry_opportunities": self.daily_entry_opportunities, "trades_opened_on_schedule": self.daily_entries_on_schedule, "scheduled_entries_opened_next_available": self.daily_entries_next_available}
