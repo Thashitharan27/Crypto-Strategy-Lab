@@ -385,7 +385,7 @@ def test_review_packet_cache_is_invalid_after_authoritative_head_moves(tmp_path)
             )
 
 
-def test_mcp_advance_recovers_same_operation_self_stale_in_one_call(tmp_path):
+def test_mcp_advance_recovers_exact_seq1_to40_to43_self_stale_pattern(tmp_path):
     control = SimpleNamespace(project_root=tmp_path / "project")
     store = CausalExperimentStore(
         control.project_root / "walk_forward_experiments"
@@ -398,32 +398,59 @@ def test_mcp_advance_recovers_same_operation_self_stale_in_one_call(tmp_path):
     )
     calls = {"count": 0}
 
+    def append_same_operation_batch(kwargs, count):
+        current = store.read_fast(experiment_id, recent_events=0)
+        for offset in range(count):
+            appended = store.append_event(
+                experiment_id,
+                "CHECKPOINT_CREATED",
+                {
+                    "checkpoint_type": "MCP_SELF_STALE_TEST",
+                    "batch_call": calls["count"],
+                    "offset": offset + 1,
+                },
+                (
+                    kwargs["operation_id"]
+                    + f":internal-{calls['count']}-{offset + 1}"
+                ),
+                current["sequence"],
+                current["state_hash"],
+                effective_market_time=(
+                    f"2025-01-{min(28, 2 + offset):02d}T"
+                    f"{min(23, offset):02d}:00:00+00:00"
+                ),
+                source="DETERMINISTIC_ORCHESTRATOR",
+            )
+            current = {
+                "sequence": appended["sequence"],
+                "state_hash": appended["state_hash"],
+            }
+        return current
+
     def fake_action(*args, **kwargs):
         calls["count"] += 1
         current = store.read_fast(experiment_id, recent_events=0)
         assert int(kwargs["expected_sequence"]) == int(current["sequence"])
         assert str(kwargs["expected_state_hash"]) == str(current["state_hash"])
 
-        if calls["count"] <= 2:
-            appended = store.append_event(
-                experiment_id,
-                "CHECKPOINT_CREATED",
-                {
-                    "checkpoint_type": "MCP_SELF_STALE_TEST",
-                    "attempt": calls["count"],
-                },
-                kwargs["operation_id"] + f":internal-{calls['count']}",
-                current["sequence"],
-                current["state_hash"],
-                effective_market_time=f"2025-01-0{calls['count'] + 1}T00:00:00+00:00",
-                source="DETERMINISTIC_ORCHESTRATOR",
-            )
-            assert appended["sequence"] == current["sequence"] + 1
+        if calls["count"] == 1:
+            advanced = append_same_operation_batch(kwargs, 39)
+            assert advanced["sequence"] == 40
             raise ValueError(
                 "walk-forward experiment changed since it was read; "
                 "read the verified chain head again"
             )
 
+        if calls["count"] == 2:
+            advanced = append_same_operation_batch(kwargs, 3)
+            assert advanced["sequence"] == 43
+            raise ValueError(
+                "walk-forward experiment changed since it was read; "
+                "read the verified chain head again"
+            )
+
+        current = store.read_fast(experiment_id, recent_events=0)
+        assert current["sequence"] == 43
         return {
             "status": "PERIODIC_REVIEW_REQUIRED",
             "experiment_id": experiment_id,
@@ -450,7 +477,7 @@ def test_mcp_advance_recovers_same_operation_self_stale_in_one_call(tmp_path):
     assert result["status"] == "PERIODIC_REVIEW_REQUIRED"
     assert result["mcp_internal_head_handoffs"] == 2
     persisted = store.read_fast(experiment_id, recent_events=0)
-    assert result["sequence"] == persisted["sequence"] == 3
+    assert result["sequence"] == persisted["sequence"] == 43
     assert result["state_hash"] == persisted["state_hash"]
 
 
