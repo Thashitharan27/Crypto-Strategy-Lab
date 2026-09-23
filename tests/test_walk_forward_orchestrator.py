@@ -550,6 +550,10 @@ def test_adaptive_weekly_evidence_exposes_rule_lifecycle_and_true_raw_benchmark(
     assert benchmark["available"] is True
     assert benchmark["benchmark_kind"] == "RAW_REFERENCE_PORTFOLIO"
     assert benchmark["raw_strategy"]["trades"] == 2
+    assert benchmark["execution_contract"]["benchmark_starting_equity"] == 1000.0
+    assert benchmark["execution_contract"]["applied_risk_fraction"] == 0.01
+    assert benchmark["raw_strategy"]["equity"]["starting_equity"] == 1000.0
+    assert "ending_equity_delta" in benchmark["adaptive_value_added"]
     assert "adaptive_value_added" in benchmark
     assert evidence["reference_population_summary"]["available"] is True
 
