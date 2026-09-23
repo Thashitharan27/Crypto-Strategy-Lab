@@ -71,19 +71,27 @@ def _advance_with_internal_head_handoff(
     max_scan_rows: int,
     max_transitions: int,
 ) -> dict[str, Any]:
-    """Resume only when this same request advanced its own causal head.
+    """Drive deterministic advancement one transition/head at a time.
 
-    This fixes fresh batch ingestion where deterministic sub-steps can commit
-    before a later sub-step observes the caller's original head. Foreign tail
-    events are never adopted and still raise the normal stale-head error.
+    The caller's expected head protects entry into this operation. After that,
+    every deterministic transition consumes the head returned by the previous
+    transition. If a lower-level transition durably appends before surfacing a
+    stale-head error, the facade may adopt that newer head only when every tail
+    event is proven to belong to this same operation id. Foreign/concurrent tail
+    events still fail closed.
     """
+    if isinstance(max_transitions, bool) or not 1 <= int(max_transitions) <= 100:
+        raise ValueError("max_transitions must be between 1 and 100")
+
     sequence = int(expected_sequence)
     state_hash = str(expected_state_hash)
     prefix = str(operation_id).strip() + ":"
+    transitions_used = 0
+    self_handoffs = 0
 
-    for _attempt in range(_SELF_STALE_HEAD_HANDOFF_LIMIT):
+    while transitions_used < int(max_transitions):
         try:
-            return _ORIGINAL_ADVANCE_WALK_FORWARD(
+            result = _ORIGINAL_ADVANCE_WALK_FORWARD(
                 control,
                 reports,
                 experiment_id=experiment_id,
@@ -92,7 +100,9 @@ def _advance_with_internal_head_handoff(
                 expected_state_hash=state_hash,
                 review_interval_months=review_interval_months,
                 max_scan_rows=max_scan_rows,
-                max_transitions=max_transitions,
+                # One deterministic transition per call makes the returned head
+                # authoritative for the next transition.
+                max_transitions=1,
             )
         except ValueError as exc:
             if "walk-forward experiment changed since it was read" not in str(exc):
@@ -114,13 +124,43 @@ def _advance_with_internal_head_handoff(
                 event_operation = str(event.get("operation_id") or "")
                 if event_operation != operation_id and not event_operation.startswith(prefix):
                     raise
+            # A same-request lower-level transition made durable causal progress.
+            # Adopt that head and continue; never reuse the caller's original head.
             sequence = current_sequence
             state_hash = current_hash
+            transitions_used += 1
+            self_handoffs += 1
+            continue
 
-    raise ValueError(
-        "walk-forward internal head changed repeatedly during one advance request"
-    )
+        returned_sequence = int(result.get("sequence", sequence))
+        returned_hash = str(result.get("state_hash") or state_hash)
+        if returned_sequence < sequence:
+            raise ValueError("walk-forward advance returned a regressed causal sequence")
+        if returned_sequence > sequence and returned_hash == state_hash:
+            raise ValueError("walk-forward advance changed sequence without changing state hash")
+        sequence = returned_sequence
+        state_hash = returned_hash
 
+        if str(result.get("status") or "") == "TRANSITION_LIMIT_REACHED":
+            transitions_used += 1
+            continue
+
+        updated = deepcopy(result)
+        updated["sequence"] = sequence
+        updated["state_hash"] = state_hash
+        if self_handoffs:
+            updated["internal_head_handoffs"] = self_handoffs
+        return updated
+
+    return {
+        "contract": _impl.ORCHESTRATOR_CONTRACT,
+        "status": "TRANSITION_LIMIT_REACHED",
+        "experiment_id": experiment_id,
+        "sequence": sequence,
+        "state_hash": state_hash,
+        "max_transitions": int(max_transitions),
+        "internal_head_handoffs": self_handoffs,
+    }
 
 
 def _candidate_strategy_action(candidate: dict[str, Any]) -> str:
