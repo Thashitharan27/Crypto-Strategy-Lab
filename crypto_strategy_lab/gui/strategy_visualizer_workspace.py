@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+import webbrowser
 
 import pandas as pd
 
@@ -33,6 +34,9 @@ from crypto_strategy_lab.strategy_visualizer import (
     MAX_VISIBLE_CANDLES,
     MIN_VISIBLE_CANDLES,
     build_visualizer_html,
+)
+from crypto_strategy_lab.strategy_visualizer_browser import (
+    StrategyVisualizerBrowserServer,
 )
 
 try:
@@ -67,6 +71,7 @@ class StrategyVisualizerWorkspace(QWidget):
         self._web_channel = None
         self._chart_bridge = None
         self._inspected_candle_time = None
+        self._browser_server = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
@@ -85,10 +90,13 @@ class StrategyVisualizerWorkspace(QWidget):
         self.load_current.clicked.connect(self.load_current_run)
         self.open_run = QPushButton("Open Completed Run…")
         self.open_run.clicked.connect(self.open_completed_run)
+        self.open_browser = QPushButton("Open in Browser")
+        self.open_browser.clicked.connect(self._open_browser_visualizer)
         self.run_label = QLabel("No run loaded")
         self.run_label.setWordWrap(True)
         run_row.addWidget(self.load_current)
         run_row.addWidget(self.open_run)
+        run_row.addWidget(self.open_browser)
         run_row.addWidget(self.run_label, 1)
         outer.addLayout(run_row)
 
@@ -310,6 +318,7 @@ class StrategyVisualizerWorkspace(QWidget):
         self.next_trade.setEnabled(enabled)
         self.visible_candles.setEnabled(enabled or self.model is not None)
         self.refresh_button.setEnabled(self.model is not None)
+        self.open_browser.setEnabled(self.model is not None)
 
     def _ensure_browser(self):
         if self._browser is not None:
@@ -371,6 +380,7 @@ class StrategyVisualizerWorkspace(QWidget):
 
     def _load_model(self, run_dir: Path, manifest):
         self.status.setText("Loading completed-run artifacts…")
+        self._stop_browser_visualizer()
         try:
             self.model = CompletedRunVisualizer.load(
                 self.window.service, run_dir, manifest
@@ -391,6 +401,34 @@ class StrategyVisualizerWorkspace(QWidget):
             self._set_navigation_enabled(False)
             self.status.setText(f"Could not load run: {exc}")
             QMessageBox.critical(self, "Strategy Visualizer", str(exc))
+
+    def _stop_browser_visualizer(self):
+        server = self._browser_server
+        self._browser_server = None
+        if server is not None:
+            server.stop()
+
+    def _open_browser_visualizer(self):
+        if self.model is None:
+            return
+        try:
+            if self._browser_server is None:
+                self._browser_server = StrategyVisualizerBrowserServer(self.model)
+            url = self._browser_server.start()
+            opened = webbrowser.open(url, new=2)
+            self.status.setText(
+                "Browser Strategy Visualizer opened on local loopback. "
+                "The desktop visualizer remains available as a fallback."
+                if opened
+                else f"Browser visualizer is ready at {url}"
+            )
+        except Exception as exc:
+            self.status.setText(f"Could not open browser visualizer: {exc}")
+            QMessageBox.critical(self, "Strategy Visualizer", str(exc))
+
+    def closeEvent(self, event):
+        self._stop_browser_visualizer()
+        super().closeEvent(event)
 
     def _populate_trade_selector(self):
         self.trade_selector.blockSignals(True)
