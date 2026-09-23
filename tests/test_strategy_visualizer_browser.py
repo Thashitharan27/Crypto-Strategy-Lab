@@ -80,6 +80,19 @@ class _FakeVisualizer:
             "srEvents": [],
             "markers": [],
             "priceLines": [],
+            "positionBox": {
+                "enabled": True,
+                "side": "LONG",
+                "entry": 100.0,
+                "stop": 95.0,
+                "target": 110.0,
+                "entryTime": 1_700_000_000,
+                "entryChartTime": 1_700_000_000,
+                "exitTime": 1_700_003_600,
+                "exitChartTime": 1_700_003_600,
+                "open": False,
+                "visibleEnd": 1_701_000_000,
+            },
             "candleContext": {},
             "visibleStart": 1_699_000_000,
             "visibleEnd": 1_701_000_000,
@@ -117,6 +130,8 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert 'id="sr-tf"' in html
     assert 'id="sr-snapshot"' in html
     assert 'id="nearest-only"' in html
+    assert 'id="show-position-box"' in html
+    assert 'id="position-box-layer"' in html
     assert "Pan/zoom freely" in html
     assert "Click a zone below to isolate it on the chart" in html
     assert "/session/test-token" in html
@@ -128,6 +143,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "full_run" in html
     assert "chart_timeframe" in html
     assert "current canonical cache" in html
+    assert "drawPositionBox" in html
+    assert "position-box reward" in html
+    assert "position-box risk" in html
 
 
 def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():
