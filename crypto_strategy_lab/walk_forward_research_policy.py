@@ -327,41 +327,57 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
             }
             if adaptive_weekly:
                 prompt = updated["methodology_prompt"]
+                assert adaptive_policy is not None
+                lifecycle_actions = [
+                    action
+                    for action, key in (
+                        ("KEEP", "allow_keep"),
+                        ("REFINE", "allow_refine"),
+                        ("RETIRE", "allow_retire"),
+                        ("REPLACE", "allow_replace"),
+                        ("FLIP", "allow_flip"),
+                    )
+                    if bool(adaptive_policy.get(key, True))
+                ]
                 prompt.update(
                     {
                         "adaptive_weekly": True,
+                        "adaptive_policy": deepcopy(adaptive_policy),
                         "primary_lookback_weeks": int(
-                            rule_update_policy.get("primary_lookback_weeks", 4)
+                            adaptive_policy["primary_lookback_weeks"]
                         ),
                         "context_lookback_weeks": int(
-                            rule_update_policy.get("context_lookback_weeks", 12)
+                            adaptive_policy["context_lookback_weeks"]
                         ),
-                        "rules_expire_without_reconfirmation_after_weeks": int(
-                            rule_update_policy.get(
-                                "expire_unconfirmed_after_weeks", 12
-                            )
-                        ),
-                        "rule_lifecycle_actions": [
-                            "KEEP",
-                            "REFINE",
-                            "RETIRE",
-                            "REPLACE",
-                            "FLIP",
+                        "rule_lifecycle_actions": lifecycle_actions,
+                        "lifecycle_states": [
+                            "ACTIVE_SUPPORTED",
+                            "ACTIVE_WEAKENING",
+                            "DORMANT_NO_EXPOSURE",
+                            "DECAYING",
+                            "CONTRADICTED",
+                            "RETIRED",
                         ],
                         "benchmark_raw_strategy": bool(
-                            rule_update_policy.get("benchmark_raw_strategy", True)
+                            adaptive_policy.get("benchmark_raw_strategy", True)
                         ),
                         "track_adaptation_lag": bool(
-                            rule_update_policy.get("track_adaptation_lag", True)
+                            adaptive_policy.get("track_adaptation_lag", True)
                         ),
                         "track_rule_half_life": bool(
-                            rule_update_policy.get("track_rule_half_life", True)
+                            adaptive_policy.get("track_rule_half_life", True)
                         ),
+                        "server_role": "DESCRIPTIVE_EVIDENCE_ONLY",
+                        "chatgpt_decides_rule_changes": True,
+                        "automatic_threshold_search_allowed": False,
+                        "automatic_rule_retirement_allowed": False,
                         "decision_rule": (
                             "Treat the completed week as the newest evidence, the primary "
                             "lookback as the main supporting sample, and the longer context "
-                            "window only as secondary context. Do not preserve a rule merely "
-                            "because it worked far in the past."
+                            "window only as secondary context. DORMANT_NO_EXPOSURE means the "
+                            "rule lacked qualifying exposure; it is not evidence that the rule "
+                            "became invalid. DECAYING/CONTRADICTED requires actual contrary "
+                            "resolved evidence. ChatGPT decides every structural rule change."
                         ),
                     }
                 )
@@ -369,14 +385,15 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
                     [
                         "explicit keep/refine/retire/replace/flip decisions for active rules",
                         "recent evidence over distant historical evidence when they conflict",
-                        "retiring stale rules that are no longer reconfirmed",
-                        "comparing adaptive OOS results with the unchanged raw strategy",
+                        "distinguishing dormant no-exposure rules from contradicted rules",
+                        "comparing frozen adaptive OOS with the unchanged raw strategy",
                     ]
                 )
                 prompt["avoid"].extend(
                     [
                         "indefinite rule accumulation",
-                        "keeping stale rules by inertia",
+                        "automatic retirement only because a rule did not fire",
+                        "server-side threshold grid search or automatic optimization",
                         "optimizing the just-completed week retroactively",
                     ]
                 )
