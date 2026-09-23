@@ -120,7 +120,7 @@ def _decorate_teacher_loss_with_replay(control, reports, experiment_id, result):
     opposite = "SHORT" if side == "LONG" else "LONG"
 
     store = _wf_orchestrator._impl._store(control)
-    readback = store.read(experiment_id, recent_events=0)
+    readback = store.read_fast(experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(definition.get("reference_run", "")).strip()
     if not reference_run:
@@ -213,7 +213,7 @@ def _reveal_strategy_action_with_flip_replay(
         frozen.get("chatgpt_view") or frozen.get("final_action") or ""
     ).strip().upper()
 
-    readback = store.read(experiment_id, recent_events=0)
+    readback = store.read_fast(experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
@@ -370,7 +370,7 @@ def _review_packet_cache_head(
     sequence: int,
     state_hash: str,
 ) -> None:
-    readback = store.read(experiment_id, recent_events=0)
+    readback = store.read_fast(experiment_id, recent_events=0)
     if (
         int(readback.get("sequence", -1)) != int(sequence)
         or str(readback.get("state_hash") or "").lower() != str(state_hash).lower()

@@ -167,7 +167,7 @@ def _reveal_frozen_candidate(
     frozen = frozen_event.get("payload") or {}
     frozen_side = str(frozen.get("final_action", "")).upper()
 
-    readback = store.read(experiment_id, recent_events=0)
+    readback = _impl._read_store(store, experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
@@ -266,7 +266,7 @@ def _reveal_strategy_action_candidate(
         frozen.get("chatgpt_view") or frozen.get("final_action") or ""
     ).strip().upper()
 
-    readback = store.read(experiment_id, recent_events=0)
+    readback = _impl._read_store(store, experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
@@ -327,7 +327,7 @@ def _assert_chatgpt_view_allowed(
     # provide it, so monthly-mode enforcement still fails closed in production.
     if control is None:
         return
-    readback = _impl._store(control).read(experiment_id, recent_events=0)
+    readback = _impl._read_store(_impl._store(control), experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     batch_mode = _impl._batch_oos_mode(definition)
     if batch_mode is not None:
@@ -504,7 +504,7 @@ def submit_walk_forward_view(
 
     batch_oos = False
     if control is not None:
-        readback = _impl._store(control).read(experiment_id, recent_events=0)
+        readback = _impl._read_store(_impl._store(control), experiment_id, recent_events=0)
         definition = (readback.get("manifest") or {}).get("definition") or {}
         batch_oos = _impl._batch_oos_enabled(definition)
     if str(settlement.get("result")) == "LOSS" and not batch_oos:
@@ -685,7 +685,7 @@ def _decorate_teacher_loss_packet(
         )
 
     store = _impl._store(control)
-    readback = store.read(experiment_id, recent_events=0)
+    readback = _impl._read_store(store, experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(definition.get("reference_run", "")).strip()
     opposite = "SHORT" if side == "LONG" else "LONG"
@@ -931,7 +931,7 @@ def _batch_review_evidence(
     try:
         import duckdb
 
-        readback = store.read(experiment_id, recent_events=0)
+        readback = _impl._read_store(store, experiment_id, recent_events=0)
         definition = (readback.get("manifest") or {}).get("definition") or {}
         reference_run = str(definition.get("reference_run") or "").strip()
         manifest = reports.get_run_manifest(reference_run)

@@ -200,11 +200,9 @@ def _utc_timestamp(value: Any, name: str) -> pd.Timestamp:
 
 
 def _events(store: CausalExperimentStore, experiment_id: str) -> list[dict[str, Any]]:
-    _value, directory, _manifest, events_path = store._paths(experiment_id)
-    store._assert_safe_dir(directory, must_exist=True)
-    rows = store._read_all_events(events_path)
-    store._verify_chain(rows)
-    return rows
+    """Return the rebuildable indexed event view; JSONL remains authoritative."""
+    store.read_fast(experiment_id, recent_events=0)
+    return store.indexed_events(experiment_id)
 
 
 def _verified_head(
@@ -1135,7 +1133,9 @@ def _safe_context(
 
 
 def _next_teacher(
-    manifest: dict[str, Any], run_dir: Path, events: list[dict[str, Any]]
+    manifest: dict[str, Any],
+    run_dir: Path,
+    events: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], pd.Timestamp] | None:
     if "trades" not in (manifest.get("artifacts") or {}):
         return None
@@ -1200,15 +1200,22 @@ def get_next_walk_forward_candidate(
         raise ValueError(f"max_scan_rows must be between 1 and {MAX_SCAN_ROWS}")
 
     store = CausalExperimentStore(Path(control.project_root) / "walk_forward_experiments")
-    current_events = _events(store, experiment_id)
-    replay = _existing_operation(current_events, operation_id)
+    replay = store.indexed_operation(experiment_id, operation_id)
     if replay is not None:
+        if (
+            replay.get("event_type") != "CANDIDATE_CONTEXT_CAPTURED"
+            or replay.get("source") != "DETERMINISTIC_CANDIDATE_ENGINE"
+        ):
+            raise ValueError("operation_id was already used for a different causal mutation")
         return _idempotent_candidate(replay)
 
-    readback, events = _verified_head(
-        store, experiment_id, expected_sequence, expected_state_hash
-    )
-    unresolved = _open_candidate(events)
+    readback = store.read_fast(experiment_id, recent_events=0)
+    wanted_hash = str(expected_state_hash).strip().lower()
+    if int(readback["sequence"]) != int(expected_sequence) or str(readback["state_hash"]) != wanted_hash:
+        raise ValueError(
+            "walk-forward experiment changed since it was read; read the verified chain head again"
+        )
+    unresolved = store.indexed_open_candidate(experiment_id)
     if unresolved is not None:
         candidate_id, state = unresolved
         raise ValueError(
@@ -1236,8 +1243,16 @@ def get_next_walk_forward_candidate(
     samples_path = _artifact(reference_manifest, run_dir, "research_sampling_trades")
     context_path = _artifact(reference_manifest, run_dir, "feature_context")
 
-    teacher = _next_teacher(reference_manifest, run_dir, events)
-    cursor = _max_event_time(events)
+    teacher_events = store.indexed_events(
+        experiment_id, event_types={"TEACHER_RESOLVED"}
+    )
+    teacher = _next_teacher(reference_manifest, run_dir, teacher_events)
+    cursor_raw = store.indexed_max_effective_market_time(experiment_id)
+    cursor = (
+        _utc_timestamp(cursor_raw, "effective_market_time")
+        if cursor_raw not in (None, "")
+        else None
+    )
     scan_columns = _rule_scan_columns(groups_by_profile, config)
     frame = _candidate_rows(
         samples_path,
@@ -1246,7 +1261,7 @@ def get_next_walk_forward_candidate(
         max_scan_rows,
         required_columns=scan_columns,
     )
-    seen_samples, seen_identities = _seen_keys(events)
+    seen_samples, seen_identities = store.indexed_seen_candidate_keys(experiment_id)
     counters = {
         "rows_scanned": 0, "skipped_seen": 0,
         "skipped_disabled_profiles": 0, "rejected_by_current_rules": 0,
@@ -1326,7 +1341,7 @@ def get_next_walk_forward_candidate(
         sample_id = str(row.get("research_sample_id", "") or "").strip()
 
         candidate_id = f"{signal_index}-{source_side.lower()}"
-        if CausalExperimentStore._candidate_state(events, candidate_id) != "UNSEEN":
+        if store.indexed_candidate_state(experiment_id, candidate_id) != "UNSEEN":
             suffix = hashlib.sha256(f"{sample_id}:{profile}".encode()).hexdigest()[:8]
             candidate_id = f"{candidate_id}-{suffix}"
         safe = _safe_context(

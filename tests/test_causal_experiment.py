@@ -455,3 +455,75 @@ def test_hash_chain_detects_manual_event_tampering(tmp_path):
 
     with pytest.raises(ValueError, match="hash"):
         store.read("BTCUSDT_1D_DI_1R_WF001")
+
+
+def test_fast_index_matches_audit_and_hot_append_avoids_full_rescan(tmp_path, monkeypatch):
+    store, created = _create(tmp_path)
+    experiment_id = "BTCUSDT_1D_DI_1R_WF001"
+
+    fast = store.read_fast(experiment_id, recent_events=10)
+    audit = store.read(experiment_id, recent_events=10)
+    assert fast["sequence"] == audit["sequence"] == 1
+    assert fast["state_hash"] == audit["state_hash"]
+    assert fast["derived_state"] == audit["derived_state"]
+
+    directory = tmp_path / "experiments" / experiment_id
+    assert (directory / "event_index.sqlite3").is_file()
+    assert (directory / "head.json").is_file()
+    assert (directory / "checkpoint.json").is_file()
+
+    def fail_full_scan(_path):
+        raise AssertionError("hot append unexpectedly rescanned the full JSONL chain")
+
+    monkeypatch.setattr(store, "_read_all_events", fail_full_scan)
+    appended = store.append_event(
+        experiment_id,
+        "REVIEW_COMPLETED",
+        {"cadence": "WEEKLY", "period": "2021-W18"},
+        "review:fast-index",
+        created["sequence"],
+        created["state_hash"],
+        effective_market_time="2021-05-09T23:59:59Z",
+    )
+
+    assert appended["sequence"] == 2
+    assert appended["fast_index_status"] == "CURRENT"
+    assert store.read_fast(experiment_id, recent_events=1)["recent_events"][0]["operation_id"] == "review:fast-index"
+
+
+def test_fast_index_invalidates_on_authoritative_event_tampering(tmp_path):
+    store, _ = _create(tmp_path)
+    experiment_id = "BTCUSDT_1D_DI_1R_WF001"
+    store.read_fast(experiment_id)
+
+    events_path = tmp_path / "experiments" / experiment_id / "events.jsonl"
+    rows = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["payload"]["initial_phase"] = "LIVE"
+    events_path.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="hash"):
+        store.read_fast(experiment_id)
+
+
+def test_review_event_forces_fast_checkpoint_to_current_head(tmp_path):
+    store, created = _create(tmp_path)
+    experiment_id = "BTCUSDT_1D_DI_1R_WF001"
+
+    appended = store.append_event(
+        experiment_id,
+        "REVIEW_COMPLETED",
+        {"cadence": "WEEKLY", "period": "2021-W18"},
+        "review:checkpoint",
+        created["sequence"],
+        created["state_hash"],
+        effective_market_time="2021-05-09T23:59:59Z",
+    )
+
+    checkpoint_path = tmp_path / "experiments" / experiment_id / "checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    assert checkpoint["sequence"] == appended["sequence"]
+    assert checkpoint["state_hash"] == appended["state_hash"]
+    assert checkpoint["derived_state"]["last_review"]["sequence"] == appended["sequence"]
