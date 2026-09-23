@@ -159,12 +159,17 @@ class CausalEventIndex:
             size, mtime_ns = self._signature(events_path)
             with self._connect() as connection:
                 meta = self._read_meta(connection)
+                last = connection.execute(
+                    "SELECT sequence, resulting_state_hash FROM events ORDER BY sequence DESC LIMIT 1"
+                ).fetchone()
             return (
-                int(meta.get("schema_version", -1)) == INDEX_SCHEMA_VERSION
+                last is not None
+                and int(meta.get("schema_version", -1)) == INDEX_SCHEMA_VERSION
                 and str(meta.get("definition_sha256", "")) == str(definition_sha256)
                 and int(meta.get("events_file_size", -1)) == size
                 and int(meta.get("events_file_mtime_ns", -1)) == mtime_ns
-                and int(meta.get("sequence", 0)) >= 1
+                and int(meta.get("sequence", 0)) == int(last["sequence"])
+                and str(meta.get("state_hash", "")) == str(last["resulting_state_hash"])
                 and len(str(meta.get("state_hash", ""))) == 64
                 and isinstance(meta.get("derived_state"), dict)
             )
@@ -353,32 +358,53 @@ class CausalEventIndex:
         definition_sha256: str,
         force_checkpoint: bool = False,
     ) -> None:
+        self.record_batch_appended(
+            events=[event],
+            derived_state=derived_state,
+            events_path=events_path,
+            definition_sha256=definition_sha256,
+            force_checkpoint=force_checkpoint,
+        )
+
+    def record_batch_appended(
+        self,
+        *,
+        events: list[dict[str, Any]],
+        derived_state: dict[str, Any],
+        events_path: Path,
+        definition_sha256: str,
+        force_checkpoint: bool = False,
+    ) -> None:
+        if not events:
+            return
         size, mtime_ns = self._signature(events_path)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """
-                INSERT INTO events(
-                    sequence,event_type,operation_id,effective_market_time,
-                    candidate_id,rule_id,rule_version,reference_sample_id,
-                    research_signal_index,source_side,resulting_state_hash,event_json
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                self._event_values(event),
-            )
-            transition = self._candidate_transition(event)
-            if transition:
-                candidate_id, state = transition
+            for event in events:
                 connection.execute(
                     """
-                    INSERT INTO candidates(candidate_id,state,last_sequence)
-                    VALUES (?,?,?)
-                    ON CONFLICT(candidate_id) DO UPDATE SET
-                        state=excluded.state,
-                        last_sequence=excluded.last_sequence
+                    INSERT INTO events(
+                        sequence,event_type,operation_id,effective_market_time,
+                        candidate_id,rule_id,rule_version,reference_sample_id,
+                        research_signal_index,source_side,resulting_state_hash,event_json
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
-                    (candidate_id, state, int(event["sequence"])),
+                    self._event_values(event),
                 )
+                transition = self._candidate_transition(event)
+                if transition:
+                    candidate_id, state = transition
+                    connection.execute(
+                        """
+                        INSERT INTO candidates(candidate_id,state,last_sequence)
+                        VALUES (?,?,?)
+                        ON CONFLICT(candidate_id) DO UPDATE SET
+                            state=excluded.state,
+                            last_sequence=excluded.last_sequence
+                        """,
+                        (candidate_id, state, int(event["sequence"])),
+                    )
+            last = events[-1]
             self._write_meta(
                 connection,
                 {
@@ -386,14 +412,14 @@ class CausalEventIndex:
                     "definition_sha256": definition_sha256,
                     "events_file_size": size,
                     "events_file_mtime_ns": mtime_ns,
-                    "sequence": int(event["sequence"]),
-                    "state_hash": str(event["resulting_state_hash"]),
+                    "sequence": int(last["sequence"]),
+                    "state_hash": str(last["resulting_state_hash"]),
                     "derived_state": deepcopy(derived_state),
                 },
             )
             connection.commit()
-        sequence = int(event["sequence"])
-        state_hash = str(event["resulting_state_hash"])
+        sequence = int(events[-1]["sequence"])
+        state_hash = str(events[-1]["resulting_state_hash"])
         self._write_head(sequence, state_hash, size, mtime_ns)
         if force_checkpoint or sequence % CHECKPOINT_INTERVAL_EVENTS == 0:
             self.write_checkpoint(sequence, state_hash, derived_state)
