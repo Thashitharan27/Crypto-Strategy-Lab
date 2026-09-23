@@ -12,6 +12,7 @@ from crypto_strategy_lab.data_lake_config import ResearchRunConfig
 from crypto_strategy_lab.run_manifest import file_sha256
 from crypto_strategy_lab.walk_forward_candidate_engine import (
     _ema_stack,
+    _group_match,
     _price_vs_ema,
     _rule_scan_columns,
     _safe_context,
@@ -317,6 +318,59 @@ def test_rule_scan_projection_tracks_only_active_rule_dependencies():
         {"indicator": "ADX_CHANGE", "condition": "GTE", "value": 0}
     )
     assert "__wf_prev_adx" in _rule_scan_columns(groups, config)
+
+def test_walk_forward_ichimoku_conditions_keep_timeframe_identity():
+    config = _config()
+    config["data"]["strategy_timeframe_minutes"] = 240
+    group = {
+        "id": "FLIP_007",
+        "enabled": True,
+        "match_mode": "ALL",
+        "conditions": [
+            {
+                "id": "tk-4h",
+                "indicator": "ICH_TK_STATE",
+                "condition": "EQUALS",
+                "value": "BULLISH",
+                "sr_timeframe_minutes": 240,
+            },
+            {
+                "id": "tk-1d",
+                "indicator": "ICH_TK_STATE",
+                "condition": "EQUALS",
+                "value": "BULLISH",
+                "sr_timeframe_minutes": 1440,
+            },
+        ],
+    }
+    groups = {
+        "bull_long": {
+            "ENTRY": [],
+            "VETO": [],
+            "FLIP": [group],
+        }
+    }
+
+    projected = _rule_scan_columns(groups, config)
+    assert "tk_state" in projected
+    assert "ich_1d_tk_state" in projected
+
+    matched, details = _group_match(
+        {
+            "tk_state": "BULLISH",
+            "ich_1d_tk_state": "BEARISH",
+        },
+        "LONG",
+        "bull_long",
+        group,
+        config,
+    )
+
+    assert matched is False
+    assert [item["sr_timeframe_minutes"] for item in details] == [240, 1440]
+    assert [item["observed"] for item in details] == ["BULLISH", "BEARISH"]
+    assert [item["matched"] for item in details] == [True, False]
+
 
 def test_walk_forward_context_replaces_raw_sr_with_trade_relative_v2_units():
     config = _config()
