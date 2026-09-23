@@ -82,7 +82,7 @@ def _advance_after_batch(
     sequence = int(batch["sequence"])
     state_hash = str(batch["state_hash"])
     if bool(batch.get("idempotent_replay")):
-        current = _impl._store(control).read(experiment_id, recent_events=0)
+        current = _impl._store(control).read_fast(experiment_id, recent_events=0)
         sequence = int(current["sequence"])
         state_hash = str(current["state_hash"])
     if autonomous_mode:
