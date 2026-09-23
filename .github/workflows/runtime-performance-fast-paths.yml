@@ -72,11 +72,18 @@ jobs:
           crypto_strategy_lab/walk_forward_candidate_engine.py
           crypto_strategy_lab/walk_forward_candidate_engine_impl.py
           crypto_strategy_lab/walk_forward_orchestrator_impl.py
+          crypto_strategy_lab/walk_forward_orchestrator.py
+          crypto_strategy_lab/walk_forward_adaptive_policy.py
+          crypto_strategy_lab/walk_forward_adaptive_weekly.py
+          crypto_strategy_lab/walk_forward_research_policy.py
           crypto_strategy_lab/walk_forward_rule_validation.py
           tests/test_causal_experiment.py
           tests/test_walk_forward_review_atomic_validation.py
           tests/test_walk_forward_candidate_engine.py
           tests/test_walk_forward_teacher_learning.py
+          tests/test_walk_forward_orchestrator.py
+          tests/test_walk_forward_research_policy.py
+          tests/test_walk_forward_adaptive_weekly.py
           tests/test_wf_bounded_scan_checkpoints.py
       - name: Run walk-forward event fast-path tests
         env:
