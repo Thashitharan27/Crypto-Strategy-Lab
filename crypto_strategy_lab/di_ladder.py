@@ -156,10 +156,10 @@ class DILadderExecutionMixin:
 
     def _ladder_filter_result(self, decision_i: int, episode, layer):
         rules = tuple(layer.get("entry_rules") or ())
-        if not rules:
-            return True, "Mechanical ladder entry", None
         child_direction = str(episode["child_direction"])
         key, profile = self._ladder_child_profile(decision_i, child_direction)
+        if not rules:
+            return True, "Mechanical ladder entry", key
         if profile is None:
             return False, "Ladder filter evidence unavailable during regime warm-up", key
         matches = []
@@ -616,6 +616,13 @@ class DILadderExecutionMixin:
             getattr(initial_reason, "value", str(initial_reason))
             if initial_reason is not None else None
         )
+        if episode["initial_exit_reason"] == "SL":
+            initial_stop_level = float(
+                getattr(episode["initial_pair"], "ladder_stop_level", 0.0)
+            )
+            episode["deepest_reached_level"] = min(
+                float(episode["deepest_reached_level"]), initial_stop_level
+            )
         exits = [
             pd.Timestamp(pair.position.exit_time)
             for pair in self.completed_pairs
