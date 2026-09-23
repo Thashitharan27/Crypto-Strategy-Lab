@@ -232,6 +232,8 @@ def _reveal_frozen_candidate(
     experiment_id: str,
     candidate_id: str,
     operation_id: str,
+    expected_sequence: int | None = None,
+    expected_state_hash: str | None = None,
 ) -> dict[str, Any]:
     """Legacy reveal path with immutable-definition reference-run fallback.
 
@@ -277,7 +279,15 @@ def _reveal_frozen_candidate(
     frozen = frozen_event.get("payload") or {}
     frozen_side = str(frozen.get("final_action", "")).upper()
 
-    readback = _impl._read_store(store, experiment_id, recent_events=0)
+    if expected_sequence is not None and expected_state_hash not in (None, ""):
+        store, readback, events = _impl._verified(
+            control,
+            experiment_id,
+            int(expected_sequence),
+            str(expected_state_hash),
+        )
+    else:
+        readback = _impl._read_store(store, experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
@@ -327,6 +337,8 @@ def _reveal_strategy_action_candidate(
     experiment_id: str,
     candidate_id: str,
     operation_id: str,
+    expected_sequence: int | None = None,
+    expected_state_hash: str | None = None,
 ) -> dict[str, Any]:
     """Reveal only the strategy's executable side after ChatGPT view is frozen."""
     store = _impl._store(control)
@@ -376,7 +388,15 @@ def _reveal_strategy_action_candidate(
         frozen.get("chatgpt_view") or frozen.get("final_action") or ""
     ).strip().upper()
 
-    readback = _impl._read_store(store, experiment_id, recent_events=0)
+    if expected_sequence is not None and expected_state_hash not in (None, ""):
+        store, readback, events = _impl._verified(
+            control,
+            experiment_id,
+            int(expected_sequence),
+            str(expected_state_hash),
+        )
+    else:
+        readback = _impl._read_store(store, experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
