@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from crypto_strategy_lab.causal_experiment import CausalExperimentStore
+from crypto_strategy_lab import walk_forward_orchestrator_impl as orchestrator_impl
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
 from crypto_strategy_lab.run_manifest import file_sha256
 from crypto_strategy_lab.walk_forward_candidate_engine import get_next_walk_forward_candidate
@@ -689,7 +690,7 @@ def test_fresh_adaptive_weekly_advances_from_sequence_one_to_first_review(tmp_pa
     control, reports, store, head = _fresh_adaptive_multiweek_environment(tmp_path)
     assert head["sequence"] == 1
 
-    result = advance_walk_forward(
+    result = orchestrator_impl.advance_walk_forward(
         control,
         reports,
         experiment_id=EXPERIMENT_ID,
