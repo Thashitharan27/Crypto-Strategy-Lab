@@ -26,6 +26,11 @@ from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
 from crypto_strategy_lab.walk_forward_candidate_engine import SCAN_CHECKPOINT_TYPE
 from crypto_strategy_lab.walk_forward_teacher_learning import TEACHER_LOSS_FLIP_MODE
 from crypto_strategy_lab.walk_forward_research_policy import decorate_review_packet
+from crypto_strategy_lab.walk_forward_adaptive_policy import adaptive_weekly_policy
+from crypto_strategy_lab.walk_forward_adaptive_weekly import (
+    build_adaptive_source_history,
+    build_raw_strategy_benchmark,
+)
 
 
 ACCELERATED_SCAN_ROWS = 4096
@@ -788,15 +793,9 @@ def _batch_review_evidence(
     mode = str(rule_update_policy.get("mode", "")).strip().upper()
     if mode not in _impl.BATCH_OOS_MODES:
         raise ValueError("batch review evidence requires a batch OOS mode")
+    adaptive_policy = adaptive_weekly_policy(rule_update_policy)
     adaptive_weekly = (
-        mode == _impl.WEEKLY_BATCH_OOS_MODE
-        and bool(rule_update_policy.get("adaptive", False))
-    )
-    primary_lookback_weeks = int(
-        rule_update_policy.get("primary_lookback_weeks", 4)
-    )
-    context_lookback_weeks = int(
-        rule_update_policy.get("context_lookback_weeks", 12)
+        mode == _impl.WEEKLY_BATCH_OOS_MODE and adaptive_policy is not None
     )
     period_name = "week" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "month"
     boundary_name = "week-end" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "month-end"
@@ -1054,104 +1053,44 @@ def _batch_review_evidence(
                 "by_profile_side": by_profile_side,
             }
 
-            if (
-                adaptive_weekly
-                and end is not None
-                and bool(rule_update_policy.get("benchmark_raw_strategy", True))
-            ):
-                raw_strategy_benchmark = {
-                    **deepcopy(reference_population),
-                    "benchmark_kind": (
-                        "RAW_DI_REFERENCE"
-                        if str(definition.get("strategy") or "").upper()
-                        == "DI_DIRECTION"
-                        else "RAW_REFERENCE_STRATEGY"
-                    ),
-                    "benchmark_scope": "completed frozen OOS week",
-                }
-
-            if adaptive_weekly and end is not None:
-                def summarize_source_window(weeks: int) -> dict[str, Any]:
-                    window_start = end - _impl.pd.DateOffset(weeks=int(weeks))
-                    with duckdb.connect(":memory:") as history_connection:
-                        history_rows = history_connection.execute(
-                            f"""
-                            SELECT
-                                LOWER(CAST(strategy_profile_key AS VARCHAR)) AS profile,
-                                UPPER(CAST(side AS VARCHAR)) AS side,
-                                COUNT(*) AS observations,
-                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) > 0 THEN 1 ELSE 0 END) AS wins,
-                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) < 0 THEN 1 ELSE 0 END) AS losses,
-                                SUM(CASE WHEN CAST(pair_net_r AS DOUBLE) = 0 THEN 1 ELSE 0 END) AS breakevens,
-                                SUM(CAST(pair_net_r AS DOUBLE)) AS net_r
-                            FROM read_parquet('{_impl._quote(samples_path)}')
-                            WHERE COALESCE(
-                                CAST(walk_forward_candidate_source AS BOOLEAN), FALSE
-                            )
-                              AND CAST(exit_time AS TIMESTAMPTZ) > ?
-                              AND CAST(exit_time AS TIMESTAMPTZ) <= ?
-                            GROUP BY 1, 2
-                            ORDER BY 1, 2
-                            """,
-                            [
-                                window_start.to_pydatetime(),
-                                end.to_pydatetime(),
-                            ],
-                        ).fetchall()
-                    rows_out: list[dict[str, Any]] = []
-                    summary = {
-                        "observations": 0,
-                        "wins": 0,
-                        "losses": 0,
-                        "breakevens": 0,
-                        "net_r": 0.0,
-                    }
-                    for history_row in history_rows:
-                        item = {
-                            "strategy_profile_key": history_row[0],
-                            "side": history_row[1],
-                            "observations": int(history_row[2] or 0),
-                            "wins": int(history_row[3] or 0),
-                            "losses": int(history_row[4] or 0),
-                            "breakevens": int(history_row[5] or 0),
-                            "net_r": float(history_row[6] or 0.0),
-                        }
-                        rows_out.append(item)
-                        for key in summary:
-                            summary[key] += item[key]
-                    summary["win_rate_pct"] = (
-                        round(
-                            100.0
-                            * summary["wins"]
-                            / summary["observations"],
-                            2,
-                        )
-                        if summary["observations"]
-                        else None
-                    )
-                    return {
-                        "weeks": int(weeks),
-                        "start_exclusive": window_start.isoformat(),
-                        "end_inclusive": end.isoformat(),
-                        "overall": summary,
-                        "by_profile_side": rows_out,
-                    }
-
-                adaptive_source_history = {
-                    "available": True,
-                    "basis": (
-                        "immutable source-side outcomes resolved by the scheduled "
-                        "weekly boundary; recent evidence is descriptive and never "
-                        "changes the completed week"
-                    ),
-                    "primary": summarize_source_window(primary_lookback_weeks),
-                    "context": summarize_source_window(context_lookback_weeks),
-                }
     except Exception as exc:
         reference_population = {
             "available": False,
             "reason": str(exc)[:1000],
         }
+
+    if adaptive_weekly and start is not None and end is not None:
+        assert adaptive_policy is not None
+        try:
+            adaptive_source_history = build_adaptive_source_history(
+                control,
+                reports,
+                experiment_id=experiment_id,
+                end=end,
+                policy=adaptive_policy,
+            )
+        except Exception as exc:
+            adaptive_source_history = {
+                "available": False,
+                "reason": str(exc)[:1000],
+            }
+        if bool(adaptive_policy.get("benchmark_raw_strategy", True)):
+            try:
+                readback = _impl._read_store(store, experiment_id, recent_events=0)
+                definition = (readback.get("manifest") or {}).get("definition") or {}
+                raw_strategy_benchmark = build_raw_strategy_benchmark(
+                    reports,
+                    definition=definition,
+                    start=start,
+                    end=end,
+                    adaptive_prospective=prospective,
+                )
+            except Exception as exc:
+                raw_strategy_benchmark = {
+                    "available": False,
+                    "reason": str(exc)[:1000],
+                }
+
 
     return {
         "mode": mode,
@@ -1166,7 +1105,7 @@ def _batch_review_evidence(
         "reference_population_summary": reference_population,
         "adaptive_weekly": adaptive_weekly,
         "adaptive_policy": (
-            deepcopy(rule_update_policy) if adaptive_weekly else None
+            deepcopy(adaptive_policy) if adaptive_weekly else None
         ),
         "adaptive_source_history": (
             adaptive_source_history if adaptive_weekly else None
