@@ -282,11 +282,17 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
         if rule_update_mode in {"MONTHLY_BATCH_OOS", "WEEKLY_BATCH_OOS"}:
             weekly = rule_update_mode == "WEEKLY_BATCH_OOS"
             period_name = "week" if weekly else "month"
+            rule_update_policy = updated.get("rule_update_policy") or {}
+            adaptive_weekly = weekly and bool(rule_update_policy.get("adaptive", False))
             updated["methodology_prompt"] = {
                 "primary_goal": (
-                    "BATCH_LEARN_FREEZE_NEXT_WEEK"
-                    if weekly
-                    else "BATCH_LEARN_FREEZE_NEXT_MONTH"
+                    "ADAPTIVE_WEEKLY_REASSESS_FREEZE_NEXT_WEEK"
+                    if adaptive_weekly
+                    else (
+                        "BATCH_LEARN_FREEZE_NEXT_WEEK"
+                        if weekly
+                        else "BATCH_LEARN_FREEZE_NEXT_MONTH"
+                    )
                 ),
                 (
                     "rules_were_frozen_during_completed_week"
@@ -316,6 +322,61 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
                     "micro-rule accumulation",
                 ],
             }
+            if adaptive_weekly:
+                prompt = updated["methodology_prompt"]
+                prompt.update(
+                    {
+                        "adaptive_weekly": True,
+                        "primary_lookback_weeks": int(
+                            rule_update_policy.get("primary_lookback_weeks", 4)
+                        ),
+                        "context_lookback_weeks": int(
+                            rule_update_policy.get("context_lookback_weeks", 12)
+                        ),
+                        "rules_expire_without_reconfirmation_after_weeks": int(
+                            rule_update_policy.get(
+                                "expire_unconfirmed_after_weeks", 12
+                            )
+                        ),
+                        "rule_lifecycle_actions": [
+                            "KEEP",
+                            "REFINE",
+                            "RETIRE",
+                            "REPLACE",
+                            "FLIP",
+                        ],
+                        "benchmark_raw_strategy": bool(
+                            rule_update_policy.get("benchmark_raw_strategy", True)
+                        ),
+                        "track_adaptation_lag": bool(
+                            rule_update_policy.get("track_adaptation_lag", True)
+                        ),
+                        "track_rule_half_life": bool(
+                            rule_update_policy.get("track_rule_half_life", True)
+                        ),
+                        "decision_rule": (
+                            "Treat the completed week as the newest evidence, the primary "
+                            "lookback as the main supporting sample, and the longer context "
+                            "window only as secondary context. Do not preserve a rule merely "
+                            "because it worked far in the past."
+                        ),
+                    }
+                )
+                prompt["prefer"].extend(
+                    [
+                        "explicit keep/refine/retire/replace/flip decisions for active rules",
+                        "recent evidence over distant historical evidence when they conflict",
+                        "retiring stale rules that are no longer reconfirmed",
+                        "comparing adaptive OOS results with the unchanged raw strategy",
+                    ]
+                )
+                prompt["avoid"].extend(
+                    [
+                        "indefinite rule accumulation",
+                        "keeping stale rules by inertia",
+                        "optimizing the just-completed week retroactively",
+                    ]
+                )
         else:
             updated["methodology_prompt"] = {
                 "primary_goal": "SIMPLIFY_CONSOLIDATE_AND_DIAGNOSE",
