@@ -561,7 +561,7 @@ class DILadderExecutionMixin:
         return incomplete, gaps, rows
 
     def _update_di_ladder_positions_to_strategy_index(self, i: int) -> bool:
-        episode = self._di_ladder_episode
+        episode = getattr(self, "_di_ladder_episode", None)
         if episode is None:
             return False
         initial = episode["initial_pair"].position
@@ -600,7 +600,7 @@ class DILadderExecutionMixin:
         return True
 
     def _update_di_ladder_episode_lifecycle(self) -> None:
-        episode = self._di_ladder_episode
+        episode = getattr(self, "_di_ladder_episode", None)
         if episode is None:
             return
         episode_id = episode["episode_id"]
@@ -688,7 +688,7 @@ class DILadderExecutionMixin:
         ]
         deepest = {
             int(episode_id): float(episode.get("deepest_reached_level", 0.0))
-            for episode_id, episode in self._di_ladder_episode_history.items()
+            for episode_id, episode in getattr(self, "_di_ladder_episode_history", {}).items()
         }
         frame["ladder_deepest_reached_level"] = frame["ladder_episode_id"].map(deepest)
         frame["ladder_episode_summary_row"] = frame["ladder_is_initial"].astype(bool)
