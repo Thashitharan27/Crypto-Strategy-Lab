@@ -555,6 +555,16 @@ def test_adaptive_weekly_evidence_exposes_rule_lifecycle_and_true_raw_benchmark(
     assert benchmark["raw_strategy"]["equity"]["starting_equity"] == 1000.0
     assert "ending_equity_delta" in benchmark["adaptive_value_added"]
     assert "adaptive_value_added" in benchmark
+    participation = benchmark["participation"]
+    assert participation["adaptive_trade_count"] == 0
+    assert participation["raw_trade_count"] == 2
+    assert participation["eligible_opportunities"] == 2
+    assert participation["executed_opportunities"] == 0
+    assert participation["participation_rate_pct"] == 0.0
+    assert participation["participation_rate_vs_raw_trades_pct"] == 0.0
+    assert participation["current_week_zero_adaptive_trades"] is True
+    assert participation["weeks_with_zero_adaptive_trades"] == 1
+    assert participation["completed_adaptive_weeks_observed"] == 1
     assert evidence["reference_population_summary"]["available"] is True
     populations = evidence["adaptive_populations"]
     assert populations["A_frozen_adaptive_oos"]["summary"] is not None
