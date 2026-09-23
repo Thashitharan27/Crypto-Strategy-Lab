@@ -17,6 +17,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Iterable
 
+from crypto_strategy_lab.walk_forward_adaptive_policy import adaptive_weekly_policy
+
 
 RESEARCH_POLICY_CONTRACT = "causal_walk_forward_entry_veto_flip_method_v2"
 
@@ -283,7 +285,8 @@ def decorate_review_packet(packet: dict[str, Any]) -> dict[str, Any]:
             weekly = rule_update_mode == "WEEKLY_BATCH_OOS"
             period_name = "week" if weekly else "month"
             rule_update_policy = updated.get("rule_update_policy") or {}
-            adaptive_weekly = weekly and bool(rule_update_policy.get("adaptive", False))
+            adaptive_policy = adaptive_weekly_policy(rule_update_policy)
+            adaptive_weekly = weekly and adaptive_policy is not None
             updated["methodology_prompt"] = {
                 "primary_goal": (
                     "ADAPTIVE_WEEKLY_REASSESS_FREEZE_NEXT_WEEK"
