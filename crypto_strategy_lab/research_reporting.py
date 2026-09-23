@@ -680,6 +680,78 @@ class CsvManifestReporter:
         _validate_signal_artifact(signals_path, context_path, len(result.trades))
         finish_phase("signals", phase_started)
 
+        ladder_episode_path = None
+        ladder_layer_path = None
+        ladder_episode_frame = pd.DataFrame()
+        ladder_layer_frame = pd.DataFrame()
+        if "ladder_episode_id" in result.trades.columns:
+            initial_rows = result.trades[
+                result.trades.get("ladder_episode_summary_row", False).astype(bool)
+            ].copy()
+            if not initial_rows.empty:
+                ladder_episode_frame = initial_rows[
+                    [
+                        "ladder_episode_id",
+                        "ladder_initial_direction",
+                        "ladder_deepest_reached_level",
+                        "ladder_episode_trade_count",
+                        "ladder_episode_gross_pnl",
+                        "ladder_episode_total_fees",
+                        "ladder_episode_net_pnl",
+                        "ladder_episode_net_r",
+                        "entry_time",
+                        "exit_time",
+                    ]
+                ].copy()
+                ladder_episode_frame["episode_outcome"] = ladder_episode_frame[
+                    "ladder_episode_net_pnl"
+                ].map(lambda value: "WIN" if value > 0 else "LOSS" if value < 0 else "FLAT")
+                ladder_episode_path = run_dir / "ladder_episode_summary.csv"
+                ladder_episode_frame.to_csv(ladder_episode_path, index=False)
+
+                layer_signals = signals[
+                    signals["ladder_layer"].notna()
+                    & signals["ladder_layer"].astype(str).ne("INITIAL")
+                ].copy()
+                child_trades = result.trades[
+                    result.trades.get("ladder_is_child", False).astype(bool)
+                ].copy()
+                layer_rows = []
+                ordered_layers = list(dict.fromkeys(layer_signals["ladder_layer"].astype(str)))
+                for layer_name in ordered_layers:
+                    sig = layer_signals[layer_signals["ladder_layer"].astype(str) == layer_name]
+                    traded = child_trades[
+                        child_trades["ladder_layer"].astype(str) == layer_name
+                    ]
+                    skip_mask = sig["ladder_decision"].astype(str).eq("SKIP")
+                    skipped = sig[skip_mask]
+                    correct = skipped["ladder_skip_correct"] if "ladder_skip_correct" in skipped else pd.Series(dtype="boolean")
+                    known = correct.dropna()
+                    net = pd.to_numeric(traded.get("pair_net_pnl"), errors="coerce")
+                    gross = pd.to_numeric(traded.get("pair_gross_pnl"), errors="coerce")
+                    fees = pd.to_numeric(traded.get("pair_total_fees"), errors="coerce")
+                    layer_rows.append(
+                        {
+                            "ladder_layer": layer_name,
+                            "reached": int(len(sig)),
+                            "entered": int((sig["ladder_decision"].astype(str) == "ENTER").sum()),
+                            "skipped": int(skip_mask.sum()),
+                            "correct_skips": int((known == True).sum()),
+                            "wrong_skips": int((known == False).sum()),
+                            "unknown_skips": int(correct.isna().sum()),
+                            "skip_precision": float((known == True).mean()) if len(known) else float("nan"),
+                            "entered_wins": int((net > 0).sum()) if len(net) else 0,
+                            "entered_losses": int((net < 0).sum()) if len(net) else 0,
+                            "entered_win_rate": float((net > 0).mean()) if len(net) else float("nan"),
+                            "gross_pnl": float(gross.sum()) if len(gross) else 0.0,
+                            "fees": float(fees.sum()) if len(fees) else 0.0,
+                            "net_pnl": float(net.sum()) if len(net) else 0.0,
+                        }
+                    )
+                ladder_layer_frame = pd.DataFrame(layer_rows)
+                ladder_layer_path = run_dir / "ladder_layer_summary.csv"
+                ladder_layer_frame.to_csv(ladder_layer_path, index=False)
+
         phase_started = time.perf_counter()
         rule_trace = _strategy_rule_trace_frame(
             getattr(result, "rule_trace", None)
@@ -743,6 +815,21 @@ class CsvManifestReporter:
         summary["net_pnl"] = (
             float(summary.get("ending_equity", initial_equity)) - initial_equity
         )
+        if not ladder_episode_frame.empty:
+            episode_net = pd.to_numeric(
+                ladder_episode_frame["ladder_episode_net_pnl"], errors="coerce"
+            )
+            episode_r = pd.to_numeric(
+                ladder_episode_frame["ladder_episode_net_r"], errors="coerce"
+            )
+            summary.update(
+                ladder_episode_count=int(len(ladder_episode_frame)),
+                ladder_episode_wins=int((episode_net > 0).sum()),
+                ladder_episode_losses=int((episode_net < 0).sum()),
+                ladder_episode_win_rate=float((episode_net > 0).mean()),
+                ladder_episode_net_pnl=float(episode_net.sum()),
+                ladder_episode_net_r=float(episode_r.sum()),
+            )
         summary_path = run_dir / "summary.json"
         atomic_json(summary_path, summary)
         quality_path = run_dir / "data_quality.json"
@@ -847,6 +934,14 @@ class CsvManifestReporter:
                 quality_path, run_dir, "json", None
             ),
         }
+        if ladder_episode_path is not None:
+            artifacts["ladder_episode_summary"] = _catalog_entry(
+                ladder_episode_path, run_dir, "csv", len(ladder_episode_frame)
+            )
+        if ladder_layer_path is not None:
+            artifacts["ladder_layer_summary"] = _catalog_entry(
+                ladder_layer_path, run_dir, "csv", len(ladder_layer_frame)
+            )
         finish_phase("artifact_catalog", phase_started)
 
         phase_started = time.perf_counter()
