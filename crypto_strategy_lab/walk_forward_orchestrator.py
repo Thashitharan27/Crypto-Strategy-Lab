@@ -57,8 +57,6 @@ _AUTONOMOUS_TERMINAL_STATUSES = frozenset({
 _ORIGINAL_ADVANCE_WALK_FORWARD = _impl.advance_walk_forward
 _ORIGINAL_BUILD_LOSS_REVIEW_PACKET = _impl.build_loss_review_packet
 
-_SELF_STALE_HEAD_HANDOFF_LIMIT = 4
-
 
 def _advance_with_internal_head_handoff(
     control: Any,
@@ -1367,6 +1365,13 @@ def _batch_review_evidence(
         ),
         "raw_strategy_benchmark": (
             raw_strategy_benchmark if adaptive_weekly else None
+        ),
+        "adaptive_participation": (
+            deepcopy(raw_strategy_benchmark.get("participation"))
+            if adaptive_weekly
+            and isinstance(raw_strategy_benchmark, dict)
+            and raw_strategy_benchmark.get("available") is True
+            else None
         ),
         "adaptive_populations": adaptive_populations,
         "teacher_observations": teachers,
