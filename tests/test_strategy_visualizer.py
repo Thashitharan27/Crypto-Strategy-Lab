@@ -499,6 +499,16 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
     assert any(line["kind"] == "entry" for line in payload["priceLines"])
     assert any(line["kind"] == "stop" for line in payload["priceLines"])
     assert any(line["kind"] == "target" for line in payload["priceLines"])
+    position = payload["positionBox"]
+    assert position["enabled"] is True
+    assert position["side"] == "LONG"
+    assert position["entry"] == payload["selectedTrade"]["Entry"]
+    assert position["stop"] == payload["selectedTrade"]["Stop"]
+    assert position["target"] == payload["selectedTrade"]["Target"]
+    assert position["stop"] < position["entry"] < position["target"]
+    assert position["entryChartTime"] is not None
+    assert position["exitChartTime"] is not None
+    assert position["open"] is False
 
     overlay_names = {item["name"] for item in payload["overlays"]}
     assert {"EMA 50", "EMA 100", "EMA 200", "VWAP"} <= overlay_names
@@ -556,6 +566,8 @@ def test_completed_run_visualizer_loads_alternate_cached_chart_timeframe(tmp_pat
     candle_times = {item["time"] for item in payload["candles"]}
     assert all(marker["time"] in candle_times for marker in payload["markers"])
     assert all(event["time"] in candle_times for event in payload["srEvents"])
+    assert payload["positionBox"]["entryChartTime"] in candle_times
+    assert payload["positionBox"]["exitChartTime"] in candle_times
 
 
 def test_completed_run_visualizer_full_run_bypasses_window_limit(tmp_path):
@@ -848,6 +860,26 @@ def test_rejected_signal_markers_are_explicit_opt_in(tmp_path):
     reject = [marker for marker in payload["markers"] if marker["kind"] == "reject"]
     assert len(reject) == 1
     assert "ADX below threshold" in reject[0]["text"]
+
+
+def test_position_box_preserves_short_risk_reward_structure(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    entry = float(model.trades.loc[0, "entry_price"])
+    model.trades.loc[0, "side"] = "SHORT"
+    model.trades.loc[0, "short_original_sl"] = entry + 3.0
+    model.trades.loc[0, "short_tp"] = entry - 6.0
+
+    payload = model.build_payload(
+        trade_index=0,
+        visible_candles=120,
+    )
+
+    position = payload["positionBox"]
+    assert position["side"] == "SHORT"
+    assert position["stop"] > position["entry"] > position["target"]
+    assert position["entryChartTime"] is not None
+    assert position["exitChartTime"] is not None
 
 
 def test_trade_stop_target_prefers_original_entry_structure():

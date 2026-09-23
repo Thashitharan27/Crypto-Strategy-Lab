@@ -101,10 +101,21 @@ label{display:flex;align-items:center;gap:5px;color:#b7c2cf;font-size:12px;white
 #main.inspector-collapsed{grid-template-columns:minmax(0,1fr) 0}
 #chart-wrap{position:relative;min-width:0;min-height:0;background:#0f1720}
 #chart{position:absolute;inset:0;z-index:1}
-#zone-layer,#zone-label-layer{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#zone-layer,#zone-label-layer,#position-box-layer{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 #zone-layer{z-index:2}
+#position-box-layer{z-index:3}
 #zone-label-layer{z-index:4}
 .zone-band{position:absolute;box-sizing:border-box;border-radius:2px}
+.position-box{position:absolute;box-sizing:border-box;border-radius:2px}
+.position-box.reward{background:rgba(53,180,119,.18);border:1px solid rgba(86,214,151,.62)}
+.position-box.risk{background:rgba(220,80,80,.17);border:1px solid rgba(240,110,110,.62)}
+.position-label{
+  position:absolute;min-width:82px;padding:2px 6px;border-radius:3px;
+  font-size:11px;font-weight:650;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35)
+}
+.position-label.entry{background:rgba(43,108,176,.96);color:#fff}
+.position-label.stop{background:rgba(184,50,50,.96);color:#fff}
+.position-label.target{background:rgba(47,133,90,.96);color:#fff}
 .zone-label{
   position:absolute;right:72px;max-width:260px;padding:2px 6px;border-radius:3px;
   font-size:11px;font-weight:600;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35)
@@ -192,6 +203,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       <label><input type="checkbox" data-overlay="vwap" checked>VWAP</label>
       <label><input type="checkbox" data-overlay="bb">BB</label>
       <label><input type="checkbox" id="show-rejections">Rejected</label>
+      <label><input type="checkbox" id="show-position-box" checked>Position box</label>
     </div>
     <div class="layer-group">
       <label>View
@@ -230,6 +242,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     <div id="chart-wrap">
       <div id="chart"></div>
       <div id="zone-layer"></div>
+      <div id="position-box-layer"></div>
       <div id="zone-label-layer"></div>
       <div id="readout">Loading completed-run chart…</div>
       <div id="error"></div>
@@ -264,6 +277,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const main = $('main');
   const chartWrap = $('chart-wrap');
   const zoneLayer = $('zone-layer');
+  const positionBoxLayer = $('position-box-layer');
   const zoneLabelLayer = $('zone-label-layer');
   const errorBox = $('error');
   const readout = $('readout');
@@ -276,6 +290,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const srDetails = $('sr-details');
   const nearestOnly = $('nearest-only');
   const showRejections = $('show-rejections');
+  const showPositionBox = $('show-position-box');
   let payload = null;
   let chart = null;
   let candle = null;
@@ -561,6 +576,64 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     if (target >= to) return chartWrap.clientWidth;
     return ((target - from) / (to - from)) * chartWrap.clientWidth;
   }
+  function addPositionLabel(left, y, type, text) {
+    const label = document.createElement('div');
+    label.className = 'position-label ' + type;
+    const maxLeft = Math.max(4, chartWrap.clientWidth - 118);
+    label.style.left = Math.min(maxLeft, Math.max(4, left)) + 'px';
+    label.style.top = Math.max(4, Math.min(chartWrap.clientHeight - 24, y - 10)) + 'px';
+    label.textContent = text;
+    positionBoxLayer.appendChild(label);
+  }
+
+  function drawPositionBox() {
+    positionBoxLayer.replaceChildren();
+    if (!showPositionBox.checked || !payload || !chart || !candle) return;
+    const box = payload.positionBox;
+    if (!box || !box.enabled) return;
+
+    const startTime = Number(box.entryChartTime || box.entryTime);
+    const endTime = Number(
+      box.exitChartTime || box.exitTime || box.visibleEnd || payload.visibleEnd
+    );
+    const x1 = xForTime(startTime,true);
+    const x2 = xForTime(endTime,false);
+    const entryY = candle.priceToCoordinate(Number(box.entry));
+    const stopY = box.stop == null ? null : candle.priceToCoordinate(Number(box.stop));
+    const targetY = box.target == null ? null : candle.priceToCoordinate(Number(box.target));
+    if ([x1,x2,entryY].some(v => v == null || !Number.isFinite(Number(v)))) return;
+
+    const left = Math.min(Number(x1),Number(x2));
+    const right = Math.max(Number(x1),Number(x2));
+    const width = Math.max(2,right-left);
+
+    function addRect(className, firstY, secondY) {
+      if ([firstY,secondY].some(v => v == null || !Number.isFinite(Number(v)))) return;
+      const rect = document.createElement('div');
+      rect.className = 'position-box ' + className;
+      rect.style.left = left + 'px';
+      rect.style.width = width + 'px';
+      rect.style.top = Math.min(Number(firstY),Number(secondY)) + 'px';
+      rect.style.height = Math.max(2,Math.abs(Number(secondY)-Number(firstY))) + 'px';
+      positionBoxLayer.appendChild(rect);
+    }
+
+    if (String(box.side).toUpperCase() === 'SHORT') {
+      addRect('risk',entryY,stopY);
+      addRect('reward',entryY,targetY);
+    } else {
+      addRect('risk',entryY,stopY);
+      addRect('reward',entryY,targetY);
+    }
+
+    const labelLeft = right + 6;
+    addPositionLabel(labelLeft,entryY,'entry','Entry ' + fmt(box.entry,6));
+    if (stopY != null && Number.isFinite(Number(stopY)))
+      addPositionLabel(labelLeft,stopY,'stop','Stop ' + fmt(box.stop,6));
+    if (targetY != null && Number.isFinite(Number(targetY)))
+      addPositionLabel(labelLeft,targetY,'target','Target ' + fmt(box.target,6));
+  }
+
   function drawZones() {
     if (!payload || !chart || !candle) return;
     zoneLayer.replaceChildren();
@@ -659,6 +732,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       : null;
     if (chart) chart.remove();
     zoneLayer.replaceChildren();
+    positionBoxLayer.replaceChildren();
     zoneLabelLayer.replaceChildren();
     $('chart').replaceChildren();
 
@@ -734,8 +808,14 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       if (param.sourceEvent && param.sourceEvent.type === 'mousemove')
         showAt(param.time,param.seriesData.get(candle));
     });
-    chart.timeScale().subscribeVisibleTimeRangeChange(() => drawZones());
-    if (window.ResizeObserver) new ResizeObserver(() => drawZones()).observe(chartWrap);
+    chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+      drawZones();
+      drawPositionBox();
+    });
+    if (window.ResizeObserver) new ResizeObserver(() => {
+      drawZones();
+      drawPositionBox();
+    }).observe(chartWrap);
 
     if (previousRange) {
       chart.timeScale().setVisibleRange(previousRange);
@@ -744,7 +824,10 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     } else {
       chart.timeScale().fitContent();
     }
-    requestAnimationFrame(() => drawZones());
+    requestAnimationFrame(() => {
+      drawZones();
+      drawPositionBox();
+    });
   }
 
   function showAt(time,bar) {
@@ -816,7 +899,10 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     main.classList.toggle('inspector-collapsed');
     $('toggle-inspector').textContent =
       main.classList.contains('inspector-collapsed') ? 'Show inspector' : 'Hide inspector';
-    setTimeout(() => { drawZones(); },50);
+    setTimeout(() => {
+      drawZones();
+      drawPositionBox();
+    },50);
   }
 
   $('prev-trade').addEventListener('click',() => setTrade(currentTrade-1));
@@ -830,6 +916,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   });
   windowSize.addEventListener('change',loadPayload);
   showRejections.addEventListener('change',loadPayload);
+  showPositionBox.addEventListener('change',drawPositionBox);
   function centerSelectedTrade() {
     if (!chart || !payload?.selectedTradeCandleTime) return;
     const candles = payload.candles || [];
