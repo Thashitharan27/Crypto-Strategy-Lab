@@ -186,7 +186,7 @@ def _verified(
     expected_state_hash: str,
 ) -> tuple[CausalExperimentStore, dict[str, Any], list[dict[str, Any]]]:
     store = _store(control)
-    readback = store.read(experiment_id, recent_events=0)
+    readback = store.read_fast(experiment_id, recent_events=0)
     wanted_hash = str(expected_state_hash).strip().lower()
     if int(readback["sequence"]) != int(expected_sequence) or readback["state_hash"] != wanted_hash:
         raise ValueError(
@@ -440,7 +440,7 @@ def _reveal_frozen_candidate(
     # OUTCOME FIREWALL: the outcome-bearing artifact is first opened here, after
     # DECISION_FROZEN has already been appended+fsynced by CausalExperimentStore.
     outcome = _outcome_row_after_decision(reports, reference_run, candidate, frozen_side)
-    readback = store.read(experiment_id, recent_events=0)
+    readback = store.read_fast(experiment_id, recent_events=0)
     exit_time = outcome.get("exit_time")
     appended = store.append_event(
         experiment_id,
@@ -618,7 +618,7 @@ def resolve_walk_forward_trade(
     current_events = _events(store, experiment_id)
     entered = _event_for_candidate(current_events, "TRADE_ENTERED", candidate_id)
     if entered is None:
-        current = store.read(experiment_id, recent_events=0)
+        current = store.read_fast(experiment_id, recent_events=0)
         store.append_event(
             experiment_id,
             "TRADE_ENTERED",
@@ -638,7 +638,7 @@ def resolve_walk_forward_trade(
             source="DETERMINISTIC_LEDGER",
         )
 
-    current = store.read(experiment_id, recent_events=0)
+    current = store.read_fast(experiment_id, recent_events=0)
     resolved = store.append_event(
         experiment_id,
         "TRADE_RESOLVED",
@@ -1625,7 +1625,7 @@ def submit_walk_forward_decision(
         expected_state_hash=str(revealed["state_hash"]),
     )
     settlement = settled.get("settlement") or {}
-    readback = _store(control).read(experiment_id, recent_events=0)
+    readback = _store(control).read_fast(experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     if (
         str(settlement.get("result")) == "LOSS"
