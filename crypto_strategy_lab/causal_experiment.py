@@ -13,9 +13,12 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import threading
 from typing import Any
 from uuid import uuid4
+
+from crypto_strategy_lab.causal_event_index import CausalEventIndex
 
 
 _SCHEMA_VERSION = 1
@@ -335,6 +338,32 @@ class CausalExperimentStore:
         value, directory = self._dir(experiment_id)
         return value, directory, directory / "manifest.json", directory / "events.jsonl"
 
+    def _event_index(self, directory: Path) -> CausalEventIndex:
+        return CausalEventIndex(directory)
+
+    def _ensure_event_index(
+        self,
+        manifest: dict[str, Any],
+        events_path: Path,
+    ) -> CausalEventIndex:
+        directory = events_path.parent
+        index = self._event_index(directory)
+        definition_sha256 = str(manifest.get("definition_sha256", ""))
+        if index.is_current(events_path, definition_sha256):
+            return index
+        events = self._read_all_events(events_path)
+        sequence, state_hash = self._verify_chain(events)
+        derived_state = self._derive_state(manifest, events)
+        index.rebuild(
+            events_path=events_path,
+            definition_sha256=definition_sha256,
+            events=events,
+            sequence=sequence,
+            state_hash=state_hash,
+            derived_state=derived_state,
+        )
+        return index
+
     def _assert_safe_dir(self, directory: Path, *, must_exist: bool) -> None:
         if directory.parent.resolve() != self.root:
             raise ValueError("experiment path escapes the allowed experiment directory")
@@ -534,79 +563,86 @@ class CausalExperimentStore:
                 raise ValueError(f"phase must be one of: {', '.join(sorted(PHASES))}")
 
     @staticmethod
-    def _derive_state(manifest: dict[str, Any], events: list[dict[str, Any]]) -> dict[str, Any]:
-        phase = str(manifest.get("initial_phase", "RESEARCH_WF"))
-        rules: dict[str, dict[str, Any]] = {}
-        candidates: dict[str, str] = {}
-        ledgers: dict[str, dict[str, Any]] = {
-            "RESEARCH": {"equity": manifest.get("definition", {}).get("initial_equity")},
-            "SHADOW": {"equity": None},
-            "LIVE": {"equity": None},
-        }
-        last_review: dict[str, Any] | None = None
-
-        for event in events:
-            event_type = event.get("event_type")
-            payload = event.get("payload") or {}
-            candidate_id = payload.get("candidate_id")
-            if candidate_id:
-                if event_type == "CANDIDATE_CONTEXT_CAPTURED":
-                    candidates[str(candidate_id)] = "ENTRY_CONTEXT_CAPTURED"
-                elif event_type == "FEATURE_CONTEXT_INVALID":
-                    candidates[str(candidate_id)] = "INVALID"
-                elif event_type == "DECISION_FROZEN":
-                    candidates[str(candidate_id)] = "DECISION_FROZEN"
-                elif event_type == "OUTCOME_REVEALED":
-                    candidates[str(candidate_id)] = "OUTCOME_REVEALED"
-                elif event_type == "TRADE_RESOLVED":
-                    candidates[str(candidate_id)] = "COMPLETE"
-
-            if event_type == "PHASE_CHANGED":
-                phase = str(payload["phase"]).upper()
-
-            if event_type in RULE_EVENT_TYPES:
-                key = f"{payload['rule_id']}@{payload['rule_version']}"
-                rules[key] = {
-                    "rule_id": payload["rule_id"],
-                    "rule_version": payload["rule_version"],
-                    "family": event_type.split("_", 1)[0],
-                    "effective_from": payload["effective_from"],
-                    "evidence_source": payload["evidence_source"],
-                    "deployment_status": "RESEARCH_ONLY",
-                    "learned_sequence": event["sequence"],
-                    "supersedes_version": payload.get("supersedes_version"),
-                }
-
-            if event_type in {"RULE_PROMOTED_TO_SHADOW", "RULE_PROMOTED_TO_LIVE", "RULE_RETIRED"}:
-                key = f"{payload['rule_id']}@{payload['rule_version']}"
-                if key in rules:
-                    status = {
-                        "RULE_PROMOTED_TO_SHADOW": "SHADOW",
-                        "RULE_PROMOTED_TO_LIVE": "LIVE_ACTIVE",
-                        "RULE_RETIRED": "RETIRED",
-                    }[event_type]
-                    rules[key]["deployment_status"] = status
-
-            if event_type == "TRADE_RESOLVED":
-                ledger = str(payload.get("ledger", "RESEARCH")).upper()
-                if "equity_after" in payload:
-                    ledgers[ledger]["equity"] = payload["equity_after"]
-                ledgers[ledger]["last_trade_sequence"] = event["sequence"]
-
-            if event_type == "REVIEW_COMPLETED":
-                last_review = {
-                    "sequence": event["sequence"],
-                    "effective_market_time": event.get("effective_market_time"),
-                    "payload": payload,
-                }
-
+    def _initial_derived_state(manifest: dict[str, Any]) -> dict[str, Any]:
         return {
-            "phase": phase,
-            "rules": rules,
-            "candidate_states": candidates,
-            "ledgers": ledgers,
-            "last_review": last_review,
+            "phase": str(manifest.get("initial_phase", "RESEARCH_WF")),
+            "rules": {},
+            "candidate_states": {},
+            "ledgers": {
+                "RESEARCH": {"equity": manifest.get("definition", {}).get("initial_equity")},
+                "SHADOW": {"equity": None},
+                "LIVE": {"equity": None},
+            },
+            "last_review": None,
         }
+
+    @staticmethod
+    def _apply_event_to_derived_state(
+        state: dict[str, Any], event: dict[str, Any]
+    ) -> dict[str, Any]:
+        event_type = event.get("event_type")
+        payload = event.get("payload") or {}
+        candidate_id = payload.get("candidate_id")
+        if candidate_id:
+            if event_type == "CANDIDATE_CONTEXT_CAPTURED":
+                state["candidate_states"][str(candidate_id)] = "ENTRY_CONTEXT_CAPTURED"
+            elif event_type == "FEATURE_CONTEXT_INVALID":
+                state["candidate_states"][str(candidate_id)] = "INVALID"
+            elif event_type == "DECISION_FROZEN":
+                state["candidate_states"][str(candidate_id)] = "DECISION_FROZEN"
+            elif event_type == "OUTCOME_REVEALED":
+                state["candidate_states"][str(candidate_id)] = "OUTCOME_REVEALED"
+            elif event_type == "TRADE_RESOLVED":
+                state["candidate_states"][str(candidate_id)] = "COMPLETE"
+
+        if event_type == "PHASE_CHANGED":
+            state["phase"] = str(payload["phase"]).upper()
+
+        if event_type in RULE_EVENT_TYPES:
+            key = f"{payload['rule_id']}@{payload['rule_version']}"
+            state["rules"][key] = {
+                "rule_id": payload["rule_id"],
+                "rule_version": payload["rule_version"],
+                "family": event_type.split("_", 1)[0],
+                "effective_from": payload["effective_from"],
+                "evidence_source": payload["evidence_source"],
+                "deployment_status": "RESEARCH_ONLY",
+                "learned_sequence": event["sequence"],
+                "supersedes_version": payload.get("supersedes_version"),
+            }
+
+        if event_type in {"RULE_PROMOTED_TO_SHADOW", "RULE_PROMOTED_TO_LIVE", "RULE_RETIRED"}:
+            key = f"{payload['rule_id']}@{payload['rule_version']}"
+            if key in state["rules"]:
+                status = {
+                    "RULE_PROMOTED_TO_SHADOW": "SHADOW",
+                    "RULE_PROMOTED_TO_LIVE": "LIVE_ACTIVE",
+                    "RULE_RETIRED": "RETIRED",
+                }[event_type]
+                state["rules"][key]["deployment_status"] = status
+
+        if event_type == "TRADE_RESOLVED":
+            ledger = str(payload.get("ledger", "RESEARCH")).upper()
+            if "equity_after" in payload:
+                state["ledgers"][ledger]["equity"] = payload["equity_after"]
+            state["ledgers"][ledger]["last_trade_sequence"] = event["sequence"]
+
+        if event_type == "REVIEW_COMPLETED":
+            state["last_review"] = {
+                "sequence": event["sequence"],
+                "effective_market_time": event.get("effective_market_time"),
+                "payload": payload,
+            }
+        return state
+
+    @classmethod
+    def _derive_state(
+        cls, manifest: dict[str, Any], events: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        state = cls._initial_derived_state(manifest)
+        for event in events:
+            cls._apply_event_to_derived_state(state, event)
+        return state
 
     def create(
         self,
@@ -699,6 +735,18 @@ class CausalExperimentStore:
             }
             base_event["resulting_state_hash"] = self._event_hash(base_event)
             self._append_record(events_path, base_event)
+            try:
+                index = self._event_index(directory)
+                index.rebuild(
+                    events_path=events_path,
+                    definition_sha256=str(manifest["definition_sha256"]),
+                    events=[base_event],
+                    sequence=1,
+                    state_hash=base_event["resulting_state_hash"],
+                    derived_state=self._derive_state(manifest, [base_event]),
+                )
+            except (OSError, ValueError):
+                pass
             return {
                 "experiment_id": value,
                 "definition_sha256": manifest["definition_sha256"],
@@ -736,6 +784,111 @@ class CausalExperimentStore:
                 "derived_state": self._derive_state(manifest, events),
                 "recent_events": tail,
             }
+
+    def read_fast(self, experiment_id: str, recent_events: int = 100) -> dict[str, Any]:
+        """Read through the rebuildable sidecar index instead of rescanning full JSONL."""
+        if isinstance(recent_events, bool) or not isinstance(recent_events, int):
+            raise ValueError("recent_events must be an integer")
+        if not 0 <= recent_events <= _MAX_RECENT_EVENTS:
+            raise ValueError(f"recent_events must be between 0 and {_MAX_RECENT_EVENTS}")
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            if manifest_path.is_symlink() or events_path.is_symlink():
+                raise ValueError("symlinked experiment files are not allowed")
+            if not manifest_path.is_file() or not events_path.is_file():
+                raise ValueError("causal experiment files are incomplete")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            if manifest.get("definition_sha256") != _sha256_json(manifest.get("definition")):
+                raise ValueError("experiment definition hash mismatch")
+            index = self._ensure_event_index(manifest, events_path)
+            snapshot = index.snapshot()
+            return {
+                "experiment_id": value,
+                "manifest": manifest,
+                "sequence": snapshot["sequence"],
+                "state_hash": snapshot["state_hash"],
+                "derived_state": snapshot["derived_state"],
+                "recent_events": index.recent_events(recent_events),
+                "fast_index": True,
+            }
+
+    def indexed_events(
+        self,
+        experiment_id: str,
+        *,
+        event_types: set[str] | frozenset[str] | None = None,
+        candidate_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            index = self._ensure_event_index(manifest, events_path)
+            return index.events(event_types=event_types, candidate_id=candidate_id)
+
+    def indexed_operation(self, experiment_id: str, operation_id: str) -> dict[str, Any] | None:
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            index = self._ensure_event_index(manifest, events_path)
+            return index.operation(operation_id)
+
+    def indexed_open_candidate(self, experiment_id: str) -> tuple[str, str] | None:
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            return self._ensure_event_index(manifest, events_path).open_candidate()
+
+    def indexed_candidate_state(self, experiment_id: str, candidate_id: str) -> str:
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            return self._ensure_event_index(manifest, events_path).candidate_state(candidate_id)
+
+    def indexed_seen_candidate_keys(
+        self, experiment_id: str
+    ) -> tuple[set[str], set[tuple[int, str]]]:
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            return self._ensure_event_index(manifest, events_path).seen_candidate_keys()
+
+    def indexed_max_effective_market_time(self, experiment_id: str) -> str | None:
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            return self._ensure_event_index(manifest, events_path).max_effective_market_time()
+
+    def indexed_latest_effective_time_for_type(
+        self, experiment_id: str, event_type: str
+    ) -> str | None:
+        value, directory, manifest_path, events_path = self._paths(experiment_id)
+        with self._lock:
+            self._assert_safe_dir(directory, must_exist=True)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("experiment_id") != value:
+                raise ValueError("experiment manifest identity mismatch")
+            return self._ensure_event_index(manifest, events_path).latest_effective_time_for_type(event_type)
 
     def summarize_monthly(
         self,
@@ -1074,7 +1227,7 @@ class CausalExperimentStore:
         event_time: str | None = None,
         source: str = "CHATGPT_RESEARCH",
     ) -> dict[str, Any]:
-        """Append one idempotent causal event after optimistic sequence/hash validation."""
+        """Append one causal event using the verified rebuildable fast index."""
         event_type = self._validate_event_type(event_type)
         payload = _json_object(payload, "payload", _MAX_EVENT_BYTES)
         operation_id = self._validate_operation_id(operation_id)
@@ -1111,10 +1264,14 @@ class CausalExperimentStore:
             if manifest_path.is_symlink() or events_path.is_symlink():
                 raise ValueError("symlinked experiment files are not allowed")
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            events = self._read_all_events(events_path)
-            sequence, state_hash = self._verify_chain(events)
+            if manifest.get("definition_sha256") != _sha256_json(manifest.get("definition")):
+                raise ValueError("experiment definition hash mismatch")
+            index = self._ensure_event_index(manifest, events_path)
+            snapshot = index.snapshot()
+            sequence = int(snapshot["sequence"])
+            state_hash = str(snapshot["state_hash"])
 
-            existing = self._find_operation(events, operation_id)
+            existing = index.operation(operation_id)
             if existing is not None:
                 if existing.get("operation_fingerprint") != operation_fingerprint:
                     raise ValueError("operation_id was already used for a different causal mutation")
@@ -1138,7 +1295,31 @@ class CausalExperimentStore:
                         "DECISION_FROZEN state_hash_at_decision must equal the current experiment state hash"
                     )
 
-            self._validate_event_semantics(events, event_type, payload)
+            if event_type in {
+                "CANDIDATE_CONTEXT_CAPTURED",
+                "FEATURE_CONTEXT_INVALID",
+                "DECISION_FROZEN",
+                "OUTCOME_REVEALED",
+                "TRADE_ENTERED",
+                "TRADE_RESOLVED",
+            }:
+                candidate_id = str(payload.get("candidate_id", "")).strip()
+                semantic_events = (
+                    index.events(candidate_id=candidate_id) if candidate_id else []
+                )
+            elif event_type in RULE_EVENT_TYPES or event_type in {
+                "RULE_PROMOTED_TO_SHADOW",
+                "RULE_PROMOTED_TO_LIVE",
+                "RULE_RETIRED",
+            }:
+                semantic_events = index.events(
+                    event_types=RULE_EVENT_TYPES
+                    | {"RULE_PROMOTED_TO_SHADOW", "RULE_PROMOTED_TO_LIVE", "RULE_RETIRED"}
+                )
+            else:
+                semantic_events = []
+            self._validate_event_semantics(semantic_events, event_type, payload)
+
             recorded_at = _utc_now()
             record = {
                 "schema_version": _SCHEMA_VERSION,
@@ -1156,8 +1337,20 @@ class CausalExperimentStore:
                 "payload": payload,
             }
             record["resulting_state_hash"] = self._event_hash(record)
+            next_state = deepcopy(snapshot["derived_state"])
+            self._apply_event_to_derived_state(next_state, record)
             self._append_record(events_path, record)
-            new_events = [*events, record]
+            fast_index_status = "CURRENT"
+            try:
+                index.record_appended(
+                    event=record,
+                    derived_state=next_state,
+                    events_path=events_path,
+                    definition_sha256=str(manifest["definition_sha256"]),
+                    force_checkpoint=(event_type == "REVIEW_COMPLETED"),
+                )
+            except (OSError, sqlite3.Error, ValueError):
+                fast_index_status = "STALE_REBUILD_REQUIRED"
             return {
                 "experiment_id": value,
                 "idempotent_replay": False,
@@ -1165,5 +1358,7 @@ class CausalExperimentStore:
                 "previous_state_hash": state_hash,
                 "state_hash": record["resulting_state_hash"],
                 "event": record,
-                "derived_state": self._derive_state(manifest, new_events),
+                "derived_state": next_state,
+                "fast_index_status": fast_index_status,
             }
+
