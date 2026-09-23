@@ -1222,6 +1222,151 @@ def _teacher_review_packet(
     return packet
 
 
+def hydrate_batch_teacher_contexts(
+    control: Any,
+    reports: Any,
+    *,
+    experiment_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+    teachers: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Hydrate deferred batch teacher contexts in one bounded Parquet read.
+
+    Adaptive weekly ingestion records only immutable teacher identity/outcome
+    during the hot advance loop. At the review boundary, rules are still frozen,
+    so one materialized snapshot can safely evaluate every teacher observation.
+    """
+    pending = [
+        teacher
+        for teacher in teachers
+        if teacher.get("entry_context") is None
+        and teacher.get("research_signal_index") not in (None, "")
+        and str(teacher.get("side") or "").upper() in {"LONG", "SHORT"}
+    ]
+    if not pending:
+        return teachers
+
+    store, readback, _events = _verified(
+        control,
+        experiment_id,
+        expected_sequence,
+        expected_state_hash,
+    )
+    del store, _events
+    definition = (readback.get("manifest") or {}).get("definition") or {}
+    reference_run = str(definition.get("reference_run") or "").strip()
+    if not reference_run:
+        return teachers
+    manifest = reports.get_run_manifest(reference_run)
+    run_dir = reports.resolve_run(reference_run)
+    if _sampling_mode(manifest) != "WALK_FORWARD":
+        return teachers
+
+    samples_path = _artifact(manifest, run_dir, "research_sampling_trades")
+    context_path = _artifact(manifest, run_dir, "feature_context")
+    snapshot = materialize_walk_forward_strategy(
+        control,
+        reports,
+        experiment_id=experiment_id,
+        expected_sequence=expected_sequence,
+        expected_state_hash=expected_state_hash,
+        include_config=True,
+    )
+    config = snapshot.get("materialized_config") or {}
+    groups_by_profile = snapshot.get("groups_by_profile") or {}
+
+    identities = {
+        (int(item["research_signal_index"]), str(item["side"]).upper())
+        for item in pending
+    }
+    signal_indices = sorted({identity[0] for identity in identities})
+    placeholders = ",".join("?" for _ in signal_indices)
+
+    with duckdb.connect(":memory:") as connection:
+        context_columns = [
+            str(row[0])
+            for row in connection.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{_quote(context_path)}')"
+            ).fetchall()
+        ]
+        context_select = []
+        for name in context_columns:
+            escaped = name.replace('"', '""')
+            alias = ("__ctx_" + name).replace('"', "")
+            context_select.append(f'c."{escaped}" AS "{alias}"')
+        rows = connection.execute(
+            f"""
+            SELECT t.*, {', '.join(context_select)}, prev.adx AS __wf_prev_adx
+            FROM read_parquet('{_quote(samples_path)}') t
+            JOIN read_parquet('{_quote(context_path)}') c
+              ON CAST(t.research_signal_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)
+            LEFT JOIN read_parquet('{_quote(context_path)}') prev
+              ON CAST(prev.strategy_index AS BIGINT)=CAST(c.strategy_index AS BIGINT)-1
+            WHERE COALESCE(CAST(t.walk_forward_candidate_source AS BOOLEAN), FALSE)
+              AND CAST(t.research_signal_index AS BIGINT) IN ({placeholders})
+            ORDER BY CAST(t.research_signal_index AS BIGINT),
+                     UPPER(CAST(t.side AS VARCHAR))
+            """,
+            signal_indices,
+        ).fetchdf()
+
+    hydrated: dict[tuple[int, str], tuple[dict[str, Any], dict[str, Any]]] = {}
+    for _, series in rows.iterrows():
+        row, context = _row_maps(series)
+        key = (
+            int(row.get("research_signal_index")),
+            str(row.get("side") or "").upper(),
+        )
+        if key in identities:
+            hydrated[key] = (row, context)
+
+    result: list[dict[str, Any]] = []
+    for teacher in teachers:
+        updated = deepcopy(teacher)
+        signal_index = teacher.get("research_signal_index")
+        side = str(teacher.get("side") or "").upper()
+        if signal_index in (None, "") or side not in {"LONG", "SHORT"}:
+            result.append(updated)
+            continue
+        pair = hydrated.get((int(signal_index), side))
+        if pair is None:
+            result.append(updated)
+            continue
+        row, context = pair
+        profile = str(
+            teacher.get("strategy_profile_key")
+            or row.get("strategy_profile_key")
+            or ""
+        ).lower()
+        groups = groups_by_profile.get(profile)
+        if groups is not None:
+            updated["rule_coverage_at_observation"] = _rule_decision(
+                row, profile, side, groups, config
+            )
+        updated["entry_context"] = _safe_context(
+            row,
+            context,
+            direction=side,
+            profile=profile,
+            config=config,
+        )
+        trade_context = (updated["entry_context"] or {}).get(
+            "trade_entry_context"
+        )
+        if isinstance(trade_context, dict):
+            entry_number = trade_context.pop(
+                "research_episode_entry_number", None
+            )
+            trade_context.pop("research_episode_viable_entries", None)
+            if entry_number is not None:
+                trade_context[
+                    "research_episode_entries_seen_so_far"
+                ] = entry_number
+        result.append(updated)
+    return result
+
+
 def _teacher_phase_metadata(
     packet: dict[str, Any],
     events: list[dict[str, Any]],
@@ -1317,7 +1462,7 @@ def _append_batch_teacher(
     *,
     experiment_id: str,
     teacher_boundary: dict[str, Any],
-    teacher_packet: dict[str, Any],
+    teacher_packet: dict[str, Any] | None,
     batch_mode: str,
     operation_id: str,
     expected_sequence: int,
@@ -1332,17 +1477,23 @@ def _append_batch_teacher(
     resolution = _utc_timestamp(
         resolution_raw, f"{mode} teacher resolution_time"
     )
+    packet = teacher_packet or {}
     payload = {
         **deepcopy(teacher_boundary),
         "review_decision": deferred_status,
         "teacher_review_status": deferred_status,
         "validated_rule_event_count": 0,
-        "batch_entry_context": deepcopy(teacher_packet.get("entry_context")),
+        "batch_entry_context": deepcopy(packet.get("entry_context")),
         "batch_current_rule_coverage": deepcopy(
-            teacher_packet.get("current_rule_coverage")
+            packet.get("current_rule_coverage")
         ),
         "batch_active_rule_versions": deepcopy(
-            teacher_packet.get("active_rule_versions")
+            packet.get("active_rule_versions")
+        ),
+        "batch_context_hydration": (
+            "INLINE"
+            if teacher_packet is not None
+            else "DEFERRED_TO_BATCH_REVIEW"
         ),
         "batch_oos_mode": mode,
         "notes": (
@@ -1661,14 +1812,21 @@ def advance_walk_forward(
 
         if status == "TEACHER_DUE_FIRST":
             if batch_oos:
-                teacher_packet = _teacher_review_packet(
-                    control,
-                    reports,
-                    experiment_id=experiment_id,
-                    expected_sequence=head.sequence,
-                    expected_state_hash=head.state_hash,
-                    teacher_boundary=scan["teacher_boundary"],
+                policy = _rule_update_policy(definition)
+                adaptive_batch = (
+                    str(batch_mode) == WEEKLY_BATCH_OOS_MODE
+                    and adaptive_weekly_policy(policy) is not None
                 )
+                teacher_packet = None
+                if not adaptive_batch:
+                    teacher_packet = _teacher_review_packet(
+                        control,
+                        reports,
+                        experiment_id=experiment_id,
+                        expected_sequence=head.sequence,
+                        expected_state_hash=head.state_hash,
+                        teacher_boundary=scan["teacher_boundary"],
+                    )
                 deferred = _append_batch_teacher(
                     store,
                     experiment_id=experiment_id,
