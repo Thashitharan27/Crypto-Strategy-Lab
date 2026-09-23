@@ -1144,12 +1144,39 @@ def _batch_review_evidence(
             try:
                 readback = _impl._read_store(store, experiment_id, recent_events=0)
                 definition = (readback.get("manifest") or {}).get("definition") or {}
+                risk_model = definition.get("risk_model")
+                if isinstance(risk_model, dict):
+                    starting_equity_raw = risk_model.get("initial_equity")
+                else:
+                    starting_equity_raw = None
+                if starting_equity_raw in (None, ""):
+                    starting_equity_raw = definition.get("initial_equity")
+                if starting_equity_raw in (None, ""):
+                    raise ValueError(
+                        "raw benchmark requires experiment initial equity"
+                    )
+                starting_equity = float(starting_equity_raw)
+                for history_event in events:
+                    if history_event.get("event_type") != "TRADE_RESOLVED":
+                        continue
+                    history_payload = history_event.get("payload") or {}
+                    if str(history_payload.get("ledger", "RESEARCH")).upper() != "RESEARCH":
+                        continue
+                    raw_time = history_event.get("effective_market_time")
+                    if raw_time in (None, ""):
+                        continue
+                    when = _impl._utc_timestamp(
+                        raw_time, "raw benchmark prior settlement time"
+                    )
+                    if when <= start and history_payload.get("equity_after") not in (None, ""):
+                        starting_equity = float(history_payload["equity_after"])
                 raw_strategy_benchmark = build_raw_strategy_benchmark(
                     reports,
                     definition=definition,
                     start=start,
                     end=end,
                     adaptive_prospective=prospective,
+                    starting_equity=starting_equity,
                 )
             except Exception as exc:
                 raw_strategy_benchmark = {
