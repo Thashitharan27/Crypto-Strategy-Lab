@@ -929,20 +929,15 @@ class CausalExperimentStore:
         requested_start = validate_month(start_month, "start_month")
         requested_end = validate_month(end_month, "end_month")
 
-        value, directory, manifest_path, events_path = self._paths(experiment_id)
-        with self._lock:
-            self._assert_safe_dir(directory, must_exist=True)
-            if manifest_path.is_symlink() or events_path.is_symlink():
-                raise ValueError("symlinked experiment files are not allowed")
-            if not manifest_path.is_file() or not events_path.is_file():
-                raise ValueError("causal experiment files are incomplete")
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if manifest.get("experiment_id") != value:
-                raise ValueError("experiment manifest identity mismatch")
-            if manifest.get("definition_sha256") != _sha256_json(manifest.get("definition")):
-                raise ValueError("experiment definition hash mismatch")
-            events = self._read_all_events(events_path)
-            sequence, state_hash = self._verify_chain(events)
+        readback = self.read_fast(experiment_id, recent_events=0)
+        value = str(readback["experiment_id"])
+        manifest = readback["manifest"]
+        sequence = int(readback["sequence"])
+        state_hash = str(readback["state_hash"])
+        events = self.indexed_events(
+            experiment_id,
+            event_types={"TRADE_RESOLVED"},
+        )
 
         definition = manifest.get("definition") or {}
         reference = definition.get("reference_provenance") or {}
@@ -952,17 +947,15 @@ class CausalExperimentStore:
         initial_equity = float(initial_equity) if initial_equity not in (None, "") else None
 
         aggregates: dict[str, dict[str, Any]] = {}
-        latest_market_time: str | None = None
+        latest_market_time = self.indexed_max_effective_market_time(experiment_id)
+        if latest_market_time:
+            latest_market_time = _parse_iso(
+                str(latest_market_time), "effective_market_time"
+            )
         first_trade_month: str | None = None
         last_trade_month: str | None = None
 
         for event in events:
-            effective = event.get("effective_market_time")
-            if effective:
-                normalized = _parse_iso(str(effective), "effective_market_time")
-                if latest_market_time is None or normalized > latest_market_time:
-                    latest_market_time = normalized
-
             if event.get("event_type") != "TRADE_RESOLVED":
                 continue
             payload = event.get("payload") or {}
