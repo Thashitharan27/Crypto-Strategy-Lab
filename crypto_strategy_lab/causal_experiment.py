@@ -253,6 +253,66 @@ class CausalExperimentStore:
                 rule_update_policy.pop("interval_months", None)
                 rule_update_policy.pop("interval_weeks", None)
                 rule_update_policy.pop("freeze_between_reviews", None)
+
+            adaptive = rule_update_policy.get("adaptive", False)
+            if not isinstance(adaptive, bool):
+                raise ValueError("rule_update_policy.adaptive must be boolean")
+            adaptive_keys = {
+                "primary_lookback_weeks",
+                "context_lookback_weeks",
+                "expire_unconfirmed_after_weeks",
+                "benchmark_raw_strategy",
+                "track_adaptation_lag",
+                "track_rule_half_life",
+            }
+            if adaptive:
+                if mode != "WEEKLY_BATCH_OOS":
+                    raise ValueError(
+                        "adaptive rule updates require rule_update_policy.mode=WEEKLY_BATCH_OOS"
+                    )
+                numeric_defaults = {
+                    "primary_lookback_weeks": 4,
+                    "context_lookback_weeks": 12,
+                    "expire_unconfirmed_after_weeks": 12,
+                }
+                normalized_numeric: dict[str, int] = {}
+                for key, default in numeric_defaults.items():
+                    raw = rule_update_policy.get(key, default)
+                    if isinstance(raw, bool):
+                        raise ValueError(f"rule_update_policy.{key} must be an integer")
+                    try:
+                        number = int(raw)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f"rule_update_policy.{key} must be an integer"
+                        ) from exc
+                    if number < 1 or number > 104:
+                        raise ValueError(
+                            f"rule_update_policy.{key} must be between 1 and 104"
+                        )
+                    normalized_numeric[key] = number
+                if (
+                    normalized_numeric["context_lookback_weeks"]
+                    < normalized_numeric["primary_lookback_weeks"]
+                ):
+                    raise ValueError(
+                        "context_lookback_weeks must be >= primary_lookback_weeks"
+                    )
+                rule_update_policy.update(normalized_numeric)
+                for key in (
+                    "benchmark_raw_strategy",
+                    "track_adaptation_lag",
+                    "track_rule_half_life",
+                ):
+                    raw = rule_update_policy.get(key, True)
+                    if not isinstance(raw, bool):
+                        raise ValueError(f"rule_update_policy.{key} must be boolean")
+                    rule_update_policy[key] = raw
+                rule_update_policy["adaptive"] = True
+            else:
+                rule_update_policy["adaptive"] = False
+                for key in adaptive_keys:
+                    rule_update_policy.pop(key, None)
         return value
 
     @staticmethod
