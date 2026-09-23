@@ -164,6 +164,12 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
         "proposed_entry",
         "proposed_stop",
         "proposed_target",
+        "ladder_episode_id",
+        "ladder_layer",
+        "ladder_decision",
+        "ladder_entry_level",
+        "ladder_target_level",
+        "ladder_stop_level",
     ]
 
     prepared_times = pd.to_datetime(prepared.timestamp, utc=True)
@@ -187,8 +193,8 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
             ) from exc
         plus_di = pd.to_numeric(raw.get("plus_di"), errors="coerce")
         minus_di = pd.to_numeric(raw.get("minus_di"), errors="coerce")
-        side = None
-        if pd.notna(plus_di) and pd.notna(minus_di) and plus_di != minus_di:
+        side = raw.get("side")
+        if side is None and pd.notna(plus_di) and pd.notna(minus_di) and plus_di != minus_di:
             side = "LONG" if plus_di > minus_di else "SHORT"
         rows.append(
             {
@@ -201,8 +207,14 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
                 "decision": "REJECT",
                 "reason_code": raw.get("entry_filter_reason") or raw.get("reason"),
                 "proposed_entry": raw.get("strategy_entry_price"),
-                "proposed_stop": None,
-                "proposed_target": None,
+                "proposed_stop": raw.get("proposed_stop"),
+                "proposed_target": raw.get("proposed_target"),
+                "ladder_episode_id": raw.get("ladder_episode_id"),
+                "ladder_layer": raw.get("ladder_layer"),
+                "ladder_decision": raw.get("ladder_decision"),
+                "ladder_entry_level": raw.get("ladder_entry_level"),
+                "ladder_target_level": raw.get("ladder_target_level"),
+                "ladder_stop_level": raw.get("ladder_stop_level"),
             }
         )
 
@@ -248,6 +260,12 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
                     "proposed_entry": trade.get("strategy_entry_price"),
                     "proposed_stop": trade.get("initial_stop_price"),
                     "proposed_target": trade.get("initial_target_price"),
+                    "ladder_episode_id": trade.get("ladder_episode_id"),
+                    "ladder_layer": trade.get("ladder_layer"),
+                    "ladder_decision": trade.get("ladder_filter_decision"),
+                    "ladder_entry_level": trade.get("ladder_entry_level"),
+                    "ladder_target_level": trade.get("ladder_target_level"),
+                    "ladder_stop_level": trade.get("ladder_stop_level"),
                 }
             )
 
@@ -265,6 +283,12 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
                 "proposed_entry": pd.Series(dtype="float64"),
                 "proposed_stop": pd.Series(dtype="float64"),
                 "proposed_target": pd.Series(dtype="float64"),
+                "ladder_episode_id": pd.Series(dtype="Int64"),
+                "ladder_layer": pd.Series(dtype="string"),
+                "ladder_decision": pd.Series(dtype="string"),
+                "ladder_entry_level": pd.Series(dtype="float64"),
+                "ladder_target_level": pd.Series(dtype="float64"),
+                "ladder_stop_level": pd.Series(dtype="float64"),
             }
         )
     result = pd.DataFrame(rows, columns=columns)
