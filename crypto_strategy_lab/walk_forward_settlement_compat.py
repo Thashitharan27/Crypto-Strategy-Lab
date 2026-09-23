@@ -152,7 +152,7 @@ def resolve_walk_forward_trade(
     current_events = _impl._events(store, experiment_id)
     entered = _impl._event_for_candidate(current_events, "TRADE_ENTERED", candidate_id)
     if entered is None:
-        current = store.read_fast(experiment_id, recent_events=0)
+        current = _impl._read_store(store, experiment_id, recent_events=0)
         store.append_event(
             experiment_id,
             "TRADE_ENTERED",
@@ -175,7 +175,7 @@ def resolve_walk_forward_trade(
             source="DETERMINISTIC_LEDGER",
         )
 
-    current = store.read_fast(experiment_id, recent_events=0)
+    current = _impl._read_store(store, experiment_id, recent_events=0)
     resolved = store.append_event(
         experiment_id,
         "TRADE_RESOLVED",
