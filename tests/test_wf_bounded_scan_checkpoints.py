@@ -424,7 +424,7 @@ def test_accelerated_orchestrator_rejects_foreign_tail_on_stale_head(tmp_path, m
         )
 
 
-def test_accelerated_orchestrator_propagates_head_across_many_internal_transitions(
+def test_accelerated_orchestrator_uses_one_bounded_core_slice(
     tmp_path, monkeypatch
 ):
     project = tmp_path / "project"
@@ -433,40 +433,38 @@ def test_accelerated_orchestrator_propagates_head_across_many_internal_transitio
     store = CausalExperimentStore(project / "walk_forward_experiments")
     experiment_id = "BTCUSDT_15M_WF_MULTI_HEAD"
     head = store.create(experiment_id, _definition(), "create:multi-head")
-    observed_sequences = []
-    observed_operation_ids = []
+    observed = {"calls": 0}
 
     def fake_advance(*args, **kwargs):
-        current = store.read_fast(experiment_id, recent_events=0)
-        observed_sequences.append(kwargs["expected_sequence"])
-        observed_operation_ids.append(kwargs["operation_id"])
-        assert kwargs["expected_sequence"] == current["sequence"]
-        assert kwargs["expected_state_hash"] == current["state_hash"]
-        assert kwargs["max_transitions"] == 1
+        observed["calls"] += 1
+        assert kwargs["expected_sequence"] == head["sequence"]
+        assert kwargs["expected_state_hash"] == head["state_hash"]
+        assert kwargs["operation_id"] == "advance:multi-head"
+        assert kwargs["max_transitions"] == 10
 
-        if len(observed_sequences) <= 6:
+        current = {
+            "sequence": head["sequence"],
+            "state_hash": head["state_hash"],
+        }
+        for transition in range(6):
             appended = store.append_event(
                 experiment_id,
                 "CHECKPOINT_CREATED",
                 {
                     "checkpoint_type": "MULTI_HEAD_TEST",
-                    "transition": len(observed_sequences),
+                    "transition": transition + 1,
                 },
-                kwargs["operation_id"] + f":transition-{len(observed_sequences)}",
+                f"advance:multi-head:internal-{transition + 1}",
                 current["sequence"],
                 current["state_hash"],
                 effective_market_time=(
-                    f"2025-01-0{len(observed_sequences) + 1}T00:00:00+00:00"
+                    f"2025-01-0{transition + 2}T00:00:00+00:00"
                 ),
                 source="DETERMINISTIC_ORCHESTRATOR",
             )
-            return {
-                "contract": "causal_walk_forward_orchestrator_v1",
-                "status": "TRANSITION_LIMIT_REACHED",
-                "experiment_id": experiment_id,
+            current = {
                 "sequence": appended["sequence"],
                 "state_hash": appended["state_hash"],
-                "max_transitions": 1,
             }
 
         return {
@@ -490,14 +488,10 @@ def test_accelerated_orchestrator_propagates_head_across_many_internal_transitio
         max_transitions=10,
     )
 
-    assert observed_sequences == [1, 2, 3, 4, 5, 6, 7]
-    assert len(observed_operation_ids) == len(set(observed_operation_ids))
-    assert observed_operation_ids == [
-        f"advance:multi-head:transition-from-{sequence}"
-        for sequence in observed_sequences
-    ]
+    assert observed["calls"] == 1
     assert result["status"] == "NO_MORE_ACTION_IN_SCAN"
     assert result["sequence"] == 7
     assert result["state_hash"] == store.read_fast(
         experiment_id, recent_events=0
     )["state_hash"]
+
