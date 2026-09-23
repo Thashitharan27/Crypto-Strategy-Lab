@@ -105,6 +105,30 @@ def adaptive_weekly_policy(rule_update_policy: dict[str, Any] | None) -> dict[st
     if not isinstance(rule_update_policy, dict):
         return None
     mode = str(rule_update_policy.get("mode") or "").strip().upper()
+    if mode == "ADAPTIVE_WEEKLY":
+        mode = "WEEKLY_BATCH_OOS"
     if mode != "WEEKLY_BATCH_OOS":
         return None
-    return normalize_adaptive_weekly(rule_update_policy.get("adaptive"))
+
+    raw = rule_update_policy.get("adaptive")
+    if raw is True:
+        # Preserve the historical bool contract for already-created experiments.
+        raw = {
+            "enabled": True,
+            "primary_lookback_weeks": int(
+                rule_update_policy.get("primary_lookback_weeks", 4)
+            ),
+            "context_lookback_weeks": int(
+                rule_update_policy.get("context_lookback_weeks", 12)
+            ),
+            "benchmark_raw_strategy": bool(
+                rule_update_policy.get("benchmark_raw_strategy", True)
+            ),
+            "track_adaptation_lag": bool(
+                rule_update_policy.get("track_adaptation_lag", True)
+            ),
+            "track_rule_half_life": bool(
+                rule_update_policy.get("track_rule_half_life", True)
+            ),
+        }
+    return normalize_adaptive_weekly(raw)
