@@ -615,6 +615,9 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
 
   function renderChart(resetRange=true) {
     if (!payload || !window.LightweightCharts) return;
+    const previousRange = (!resetRange && chart)
+      ? chart.timeScale().getVisibleRange()
+      : null;
     if (chart) chart.remove();
     zoneLayer.replaceChildren();
     zoneLabelLayer.replaceChildren();
@@ -695,7 +698,9 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     chart.timeScale().subscribeVisibleTimeRangeChange(() => drawZones());
     if (window.ResizeObserver) new ResizeObserver(() => drawZones()).observe(chartWrap);
 
-    if (resetRange && payload.visibleStart && payload.visibleEnd) {
+    if (previousRange) {
+      chart.timeScale().setVisibleRange(previousRange);
+    } else if (resetRange && payload.visibleStart && payload.visibleEnd) {
       chart.timeScale().setVisibleRange({from:payload.visibleStart,to:payload.visibleEnd});
     } else {
       chart.timeScale().fitContent();
@@ -758,7 +763,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     main.classList.toggle('inspector-collapsed');
     $('toggle-inspector').textContent =
       main.classList.contains('inspector-collapsed') ? 'Show inspector' : 'Hide inspector';
-    setTimeout(() => { if (chart) chart.timeScale().fitContent(); drawZones(); },50);
+    setTimeout(() => { drawZones(); },50);
   }
 
   $('prev-trade').addEventListener('click',() => setTrade(currentTrade-1));
