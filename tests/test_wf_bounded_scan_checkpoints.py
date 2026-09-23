@@ -329,3 +329,96 @@ def test_accelerated_orchestrator_persists_resumable_checkpoint(tmp_path, monkey
     assert event["payload"]["side"] == "SHORT"
     assert event["payload"]["decision_available_at"] == "2025-01-05T04:00:00+00:00"
     assert event["effective_market_time"] == "2025-01-05T04:00:00+00:00"
+
+
+def test_accelerated_orchestrator_adopts_only_its_own_self_advanced_head(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    control = SimpleNamespace(project_root=project)
+    store = CausalExperimentStore(project / "walk_forward_experiments")
+    head = store.create("BTCUSDT_15M_WF_SELF_STALE", _definition(), "create:self-stale")
+    calls = {"count": 0}
+
+    def fake_advance(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            appended = store.append_event(
+                "BTCUSDT_15M_WF_SELF_STALE",
+                "CHECKPOINT_CREATED",
+                {"checkpoint_type": "SELF_STALE_TEST"},
+                kwargs["operation_id"] + ":internal",
+                kwargs["expected_sequence"],
+                kwargs["expected_state_hash"],
+                effective_market_time="2025-01-02T00:00:00+00:00",
+                source="DETERMINISTIC_ORCHESTRATOR",
+            )
+            assert appended["sequence"] == 2
+            raise ValueError(
+                "walk-forward experiment changed since it was read; "
+                "read the verified chain head again"
+            )
+        assert kwargs["expected_sequence"] == 2
+        current = store.read_fast("BTCUSDT_15M_WF_SELF_STALE", recent_events=0)
+        assert kwargs["expected_state_hash"] == current["state_hash"]
+        return {
+            "contract": "causal_walk_forward_orchestrator_v1",
+            "status": "NO_MORE_ACTION_IN_SCAN",
+            "experiment_id": "BTCUSDT_15M_WF_SELF_STALE",
+            "sequence": current["sequence"],
+            "state_hash": current["state_hash"],
+            "scan": {},
+            "outcome_exposed": False,
+        }
+
+    monkeypatch.setattr(orchestrator, "_ORIGINAL_ADVANCE_WALK_FORWARD", fake_advance)
+    result = orchestrator.advance_walk_forward(
+        control,
+        None,
+        experiment_id="BTCUSDT_15M_WF_SELF_STALE",
+        operation_id="advance:self-stale",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+    )
+
+    assert calls["count"] == 2
+    assert result["sequence"] == 2
+    assert result["state_hash"] == store.read_fast(
+        "BTCUSDT_15M_WF_SELF_STALE", recent_events=0
+    )["state_hash"]
+
+
+def test_accelerated_orchestrator_rejects_foreign_tail_on_stale_head(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    control = SimpleNamespace(project_root=project)
+    store = CausalExperimentStore(project / "walk_forward_experiments")
+    head = store.create("BTCUSDT_15M_WF_FOREIGN_STALE", _definition(), "create:foreign-stale")
+
+    def fake_advance(*args, **kwargs):
+        store.append_event(
+            "BTCUSDT_15M_WF_FOREIGN_STALE",
+            "CHECKPOINT_CREATED",
+            {"checkpoint_type": "FOREIGN_STALE_TEST"},
+            "another-request:internal",
+            kwargs["expected_sequence"],
+            kwargs["expected_state_hash"],
+            effective_market_time="2025-01-02T00:00:00+00:00",
+            source="DETERMINISTIC_ORCHESTRATOR",
+        )
+        raise ValueError(
+            "walk-forward experiment changed since it was read; "
+            "read the verified chain head again"
+        )
+
+    monkeypatch.setattr(orchestrator, "_ORIGINAL_ADVANCE_WALK_FORWARD", fake_advance)
+    import pytest
+
+    with pytest.raises(ValueError, match="changed since it was read"):
+        orchestrator.advance_walk_forward(
+            control,
+            None,
+            experiment_id="BTCUSDT_15M_WF_FOREIGN_STALE",
+            operation_id="advance:foreign-stale",
+            expected_sequence=head["sequence"],
+            expected_state_hash=head["state_hash"],
+        )
