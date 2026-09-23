@@ -1158,6 +1158,44 @@ def _batch_review_evidence(
                 }
 
 
+    prospective_values = [
+        float(row["net_r"])
+        for row in prospective
+        if row.get("net_r") is not None
+    ]
+    frozen_adaptive_summary = {
+        "trades": len(prospective_values),
+        "wins": sum(value > 0 for value in prospective_values),
+        "losses": sum(value < 0 for value in prospective_values),
+        "breakevens": sum(value == 0 for value in prospective_values),
+        "win_rate_pct": (
+            round(
+                100.0
+                * sum(value > 0 for value in prospective_values)
+                / len(prospective_values),
+                2,
+            )
+            if prospective_values
+            else None
+        ),
+        "net_r": round(sum(prospective_values), 10)
+        if prospective_values
+        else 0.0,
+    }
+    adaptive_populations = (
+        {
+            "A_frozen_adaptive_oos": {
+                "summary": frozen_adaptive_summary,
+                "trades": deepcopy(prospective),
+                "purpose": "What the rules frozen for the completed week actually produced.",
+            },
+            "B_raw_strategy_benchmark": deepcopy(raw_strategy_benchmark),
+            "C_teacher_reference_population": deepcopy(reference_population),
+        }
+        if adaptive_weekly
+        else None
+    )
+
     return {
         "mode": mode,
         "cadence": "WEEKLY" if mode == _impl.WEEKLY_BATCH_OOS_MODE else "MONTHLY",
@@ -1179,6 +1217,7 @@ def _batch_review_evidence(
         "raw_strategy_benchmark": (
             raw_strategy_benchmark if adaptive_weekly else None
         ),
+        "adaptive_populations": adaptive_populations,
         "teacher_observations": teachers,
         "prospective_trades": prospective,
         "review_instruction": (
@@ -1188,7 +1227,10 @@ def _batch_review_evidence(
             "consolidation over single-trade micro-rules. Before authoring new "
             "threshold rules, use the immutable reference run and completed "
             "window for feature-level winner/loss comparison when the aggregate "
-            "population shows meaningful sample size."
+            "population shows meaningful sample size. The server must remain "
+            "descriptive: it may calculate recent performance, age, contradictions, "
+            "regime availability and raw comparison, but it must not search threshold "
+            "grids or automatically KEEP/REFINE/RETIRE/REPLACE/FLIP rules."
         ),
     }
 
