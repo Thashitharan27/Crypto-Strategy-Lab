@@ -78,11 +78,12 @@ def _verified_experiment(
 ) -> tuple[CausalExperimentStore, dict[str, Any], list[dict[str, Any]]]:
     store = CausalExperimentStore(Path(control.project_root) / "walk_forward_experiments")
     readback = store.read_fast(experiment_id, recent_events=0)
-    _value, directory, _manifest_path, events_path = store._paths(experiment_id)
-    store._assert_safe_dir(directory, must_exist=True)
-    events = store._read_all_events(events_path)
-    sequence, state_hash = store._verify_chain(events)
-    if sequence != int(readback["sequence"]) or state_hash != str(readback["state_hash"]):
+    events = store.indexed_events(experiment_id)
+    confirmed = store.read_fast(experiment_id, recent_events=0)
+    if (
+        int(confirmed["sequence"]) != int(readback["sequence"])
+        or str(confirmed["state_hash"]) != str(readback["state_hash"])
+    ):
         raise ValueError("walk-forward event chain changed during analytics")
     return store, readback, events
 
