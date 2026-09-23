@@ -404,12 +404,11 @@ def get_next_walk_forward_candidate(*args, **kwargs) -> dict[str, Any]:
                 )
                 readback = store.read_fast(experiment_id, recent_events=0)
                 operation_id = str(kwargs.get("operation_id") or "").strip()
-                replay = None
-                if operation_id:
-                    replay = _impl._existing_operation(
-                        _impl._events(store, experiment_id),
-                        operation_id,
-                    )
+                replay = (
+                    store.indexed_operation(experiment_id, operation_id)
+                    if operation_id
+                    else None
+                )
                 if replay is not None:
                     return _ORIGINAL_GET_NEXT_CANDIDATE(*args, **kwargs)
 
