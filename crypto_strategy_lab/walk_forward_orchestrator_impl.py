@@ -73,11 +73,36 @@ def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
             "freeze_between_reviews": True,
         }
     if mode == WEEKLY_BATCH_OOS_MODE:
-        return {
+        policy = {
             "mode": WEEKLY_BATCH_OOS_MODE,
             "interval_weeks": 1,
             "freeze_between_reviews": True,
+            "adaptive": bool(raw.get("adaptive", False)),
         }
+        if policy["adaptive"]:
+            policy.update(
+                {
+                    "primary_lookback_weeks": int(
+                        raw.get("primary_lookback_weeks", 4)
+                    ),
+                    "context_lookback_weeks": int(
+                        raw.get("context_lookback_weeks", 12)
+                    ),
+                    "expire_unconfirmed_after_weeks": int(
+                        raw.get("expire_unconfirmed_after_weeks", 12)
+                    ),
+                    "benchmark_raw_strategy": bool(
+                        raw.get("benchmark_raw_strategy", True)
+                    ),
+                    "track_adaptation_lag": bool(
+                        raw.get("track_adaptation_lag", True)
+                    ),
+                    "track_rule_half_life": bool(
+                        raw.get("track_rule_half_life", True)
+                    ),
+                }
+            )
+        return policy
     return {"mode": "TRADE_BY_TRADE"}
 
 
