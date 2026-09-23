@@ -1179,7 +1179,7 @@ class CausalExperimentStore:
         }
 
     def list_experiments(self) -> list[dict[str, Any]]:
-        """List experiment identities without exposing arbitrary directory traversal."""
+        """List experiment heads through rebuildable indexes, not full-chain scans."""
         rows: list[dict[str, Any]] = []
         with self._lock:
             for directory in sorted(self.root.iterdir(), key=lambda p: p.name):
@@ -1187,13 +1187,22 @@ class CausalExperimentStore:
                     continue
                 manifest_path = directory / "manifest.json"
                 events_path = directory / "events.jsonl"
-                if not manifest_path.is_file() or not events_path.is_file():
+                if (
+                    not manifest_path.is_file()
+                    or manifest_path.is_symlink()
+                    or not events_path.is_file()
+                    or events_path.is_symlink()
+                ):
                     continue
                 try:
                     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                    events = self._read_all_events(events_path)
-                    sequence, state_hash = self._verify_chain(events)
-                except (OSError, ValueError, json.JSONDecodeError):
+                    if manifest.get("experiment_id") != directory.name:
+                        continue
+                    if manifest.get("definition_sha256") != _sha256_json(manifest.get("definition")):
+                        continue
+                    index = self._ensure_event_index(manifest, events_path)
+                    snapshot = index.snapshot()
+                except (OSError, sqlite3.Error, ValueError, json.JSONDecodeError):
                     continue
                 rows.append(
                     {
@@ -1202,12 +1211,13 @@ class CausalExperimentStore:
                         "definition_sha256": manifest.get("definition_sha256"),
                         "symbol": (manifest.get("definition") or {}).get("symbol"),
                         "strategy_timeframe": (manifest.get("definition") or {}).get("strategy_timeframe"),
-                        "sequence": sequence,
-                        "state_hash": state_hash,
-                        "phase": self._derive_state(manifest, events)["phase"],
+                        "sequence": int(snapshot["sequence"]),
+                        "state_hash": str(snapshot["state_hash"]),
+                        "phase": (snapshot.get("derived_state") or {}).get("phase"),
                     }
                 )
         return rows
+
 
     def append_event(
         self,
