@@ -686,9 +686,20 @@ def _fresh_adaptive_multiweek_environment(tmp_path):
     )
 
 
-def test_fresh_adaptive_weekly_advances_from_sequence_one_to_first_review(tmp_path):
+def test_fresh_adaptive_weekly_advances_from_sequence_one_to_first_review(
+    tmp_path, monkeypatch
+):
     control, reports, store, head = _fresh_adaptive_multiweek_environment(tmp_path)
     assert head["sequence"] == 1
+
+    def forbidden_teacher_packet(*args, **kwargs):
+        raise AssertionError(
+            "adaptive batch ingestion must defer expensive teacher context hydration"
+        )
+
+    monkeypatch.setattr(
+        orchestrator_impl, "_teacher_review_packet", forbidden_teacher_packet
+    )
 
     result = orchestrator_impl.advance_walk_forward(
         control,
@@ -706,6 +717,66 @@ def test_fresh_adaptive_weekly_advances_from_sequence_one_to_first_review(tmp_pa
     persisted = store.read_fast(EXPERIMENT_ID, recent_events=0)
     assert result["sequence"] == persisted["sequence"]
     assert result["state_hash"] == persisted["state_hash"]
+
+
+    teacher_events = [
+        event
+        for event in store.indexed_events(EXPERIMENT_ID)
+        if event["event_type"] == "TEACHER_RESOLVED"
+    ]
+    assert teacher_events
+    assert all(
+        (event.get("payload") or {}).get("batch_context_hydration")
+        == "DEFERRED_TO_BATCH_REVIEW"
+        for event in teacher_events
+    )
+
+
+def test_deferred_adaptive_teacher_contexts_bulk_hydrate_at_review(tmp_path):
+    control, reports, store, head = _fresh_adaptive_multiweek_environment(tmp_path)
+    result = orchestrator_impl.advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:bulk-hydrate",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        max_transitions=100,
+    )
+    events = store.indexed_events(EXPERIMENT_ID)
+    teachers = []
+    for event in events:
+        if event["event_type"] != "TEACHER_RESOLVED":
+            continue
+        payload = event.get("payload") or {}
+        teachers.append(
+            {
+                "research_signal_index": payload.get("research_signal_index"),
+                "side": payload.get("side"),
+                "strategy_profile_key": payload.get("strategy_profile_key"),
+                "entry_time": payload.get("entry_time"),
+                "entry_context": payload.get("batch_entry_context"),
+                "rule_coverage_at_observation": payload.get(
+                    "batch_current_rule_coverage"
+                ),
+            }
+        )
+
+    hydrated = orchestrator_impl.hydrate_batch_teacher_contexts(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        expected_sequence=result["sequence"],
+        expected_state_hash=result["state_hash"],
+        teachers=teachers,
+    )
+
+    assert hydrated
+    assert all(item["entry_context"] is not None for item in hydrated)
+    assert any(
+        item["rule_coverage_at_observation"] is not None
+        for item in hydrated
+    )
 
 
 def test_adaptive_week_two_uses_post_review_head_for_all_internal_writes(tmp_path):
