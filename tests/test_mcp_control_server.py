@@ -383,3 +383,174 @@ def test_review_packet_cache_is_invalid_after_authoritative_head_moves(tmp_path)
                 args,
                 kwargs,
             )
+
+
+def test_mcp_advance_recovers_same_operation_self_stale_in_one_call(tmp_path):
+    control = SimpleNamespace(project_root=tmp_path / "project")
+    store = CausalExperimentStore(
+        control.project_root / "walk_forward_experiments"
+    )
+    experiment_id = "BTCUSDT_15M_WF_MCP_SELF_STALE"
+    head = store.create(
+        experiment_id,
+        _review_cache_definition(),
+        "create:mcp-self-stale",
+    )
+    calls = {"count": 0}
+
+    def fake_action(*args, **kwargs):
+        calls["count"] += 1
+        current = store.read_fast(experiment_id, recent_events=0)
+        assert int(kwargs["expected_sequence"]) == int(current["sequence"])
+        assert str(kwargs["expected_state_hash"]) == str(current["state_hash"])
+
+        if calls["count"] <= 2:
+            appended = store.append_event(
+                experiment_id,
+                "CHECKPOINT_CREATED",
+                {
+                    "checkpoint_type": "MCP_SELF_STALE_TEST",
+                    "attempt": calls["count"],
+                },
+                kwargs["operation_id"] + f":internal-{calls['count']}",
+                current["sequence"],
+                current["state_hash"],
+                effective_market_time=f"2025-01-0{calls['count'] + 1}T00:00:00+00:00",
+                source="DETERMINISTIC_ORCHESTRATOR",
+            )
+            assert appended["sequence"] == current["sequence"] + 1
+            raise ValueError(
+                "walk-forward experiment changed since it was read; "
+                "read the verified chain head again"
+            )
+
+        return {
+            "status": "PERIODIC_REVIEW_REQUIRED",
+            "experiment_id": experiment_id,
+            "sequence": current["sequence"],
+            "state_hash": current["state_hash"],
+            "review_interval_months": 3,
+        }
+
+    args = (control, object())
+    kwargs = {
+        "experiment_id": experiment_id,
+        "operation_id": "advance:mcp-self-stale",
+        "expected_sequence": head["sequence"],
+        "expected_state_hash": head["state_hash"],
+        "review_interval_months": 3,
+        "max_transitions": 100,
+    }
+
+    result = control_server_module._with_create_advance_grace(
+        fake_action, *args, **kwargs
+    )
+
+    assert calls["count"] == 3
+    assert result["status"] == "PERIODIC_REVIEW_REQUIRED"
+    assert result["mcp_internal_head_handoffs"] == 2
+    persisted = store.read_fast(experiment_id, recent_events=0)
+    assert result["sequence"] == persisted["sequence"] == 3
+    assert result["state_hash"] == persisted["state_hash"]
+
+
+def test_mcp_review_packet_reconciles_same_operation_tail_before_cache(tmp_path):
+    control = SimpleNamespace(project_root=tmp_path / "project")
+    store = CausalExperimentStore(
+        control.project_root / "walk_forward_experiments"
+    )
+    experiment_id = "BTCUSDT_15M_WF_MCP_STALE_PACKET"
+    head = store.create(
+        experiment_id,
+        _review_cache_definition(),
+        "create:mcp-stale-packet",
+    )
+
+    appended = store.append_event(
+        experiment_id,
+        "CHECKPOINT_CREATED",
+        {"checkpoint_type": "MCP_PACKET_TAIL"},
+        "advance:mcp-packet:boundary",
+        head["sequence"],
+        head["state_hash"],
+        effective_market_time="2025-01-02T00:00:00+00:00",
+        source="DETERMINISTIC_ORCHESTRATOR",
+    )
+
+    args = (control, object())
+    kwargs = {
+        "experiment_id": experiment_id,
+        "operation_id": "advance:mcp-packet",
+        "expected_sequence": head["sequence"],
+        "expected_state_hash": head["state_hash"],
+        "review_interval_months": 3,
+    }
+    stale_packet = {
+        "status": "PERIODIC_REVIEW_REQUIRED",
+        "experiment_id": experiment_id,
+        "sequence": head["sequence"],
+        "state_hash": head["state_hash"],
+        "review_interval_months": 3,
+    }
+
+    reconciled = control_server_module._reconcile_review_result_head(
+        args, kwargs, stale_packet
+    )
+    assert reconciled["sequence"] == appended["sequence"]
+    assert reconciled["state_hash"] == appended["state_hash"]
+    assert reconciled["post_action_head_reconciliation"]["same_operation_only"] is True
+
+    persisted = control_server_module._persist_review_packet(
+        control_server_module._ORIGINAL_ADVANCE_WALK_FORWARD,
+        args,
+        kwargs,
+        stale_packet,
+    )
+    assert persisted["sequence"] == appended["sequence"]
+    assert persisted["state_hash"] == appended["state_hash"]
+    assert persisted["review_packet_cache"]["persisted"] is True
+
+
+def test_mcp_self_stale_recovery_rejects_foreign_tail(tmp_path):
+    control = SimpleNamespace(project_root=tmp_path / "project")
+    store = CausalExperimentStore(
+        control.project_root / "walk_forward_experiments"
+    )
+    experiment_id = "BTCUSDT_15M_WF_MCP_FOREIGN"
+    head = store.create(
+        experiment_id,
+        _review_cache_definition(),
+        "create:mcp-foreign",
+    )
+
+    def fake_action(*args, **kwargs):
+        current = store.read_fast(experiment_id, recent_events=0)
+        store.append_event(
+            experiment_id,
+            "CHECKPOINT_CREATED",
+            {"checkpoint_type": "FOREIGN_MUTATION"},
+            "another-operation:boundary",
+            current["sequence"],
+            current["state_hash"],
+            effective_market_time="2025-01-02T00:00:00+00:00",
+            source="DETERMINISTIC_ORCHESTRATOR",
+        )
+        raise ValueError(
+            "walk-forward experiment changed since it was read; "
+            "read the verified chain head again"
+        )
+
+    args = (control, object())
+    kwargs = {
+        "experiment_id": experiment_id,
+        "operation_id": "advance:mcp-foreign",
+        "expected_sequence": head["sequence"],
+        "expected_state_hash": head["state_hash"],
+        "review_interval_months": 3,
+        "max_transitions": 100,
+    }
+
+    with pytest.raises(ValueError, match="changed since it was read"):
+        control_server_module._with_create_advance_grace(
+            fake_action, *args, **kwargs
+        )
