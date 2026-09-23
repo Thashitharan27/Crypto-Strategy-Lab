@@ -19,6 +19,15 @@ from crypto_strategy_lab.trade import ExitSource, Position, Side, TradePair
 class DILadderExecutionMixin:
     """Execution helpers mixed into BacktestEngine; inert unless explicitly enabled."""
 
+    @staticmethod
+    def _ladder_utc_timestamp(value):
+        timestamp = pd.Timestamp(value)
+        return (
+            timestamp.tz_localize("UTC")
+            if timestamp.tzinfo is None
+            else timestamp.tz_convert("UTC")
+        )
+
     def _initialize_di_ladder_state(self) -> None:
         self._di_ladder_episode = None
         self._di_ladder_episode_history = {}
@@ -122,7 +131,7 @@ class DILadderExecutionMixin:
         pair.ladder_frozen_quantity = float(position.quantity)
         pair.ladder_sizing_budget_dollars = float(position.risk_amount)
         pair.ladder_decision_strategy_index = int(position.entry_index)
-        pair.ladder_trigger_timestamp = pair.strategy_entry_time
+        pair.ladder_trigger_timestamp = self._ladder_utc_timestamp(pair.strategy_entry_time)
 
     def _ladder_level_price(self, episode, level: float) -> float:
         return float(episode["anchor_price"]) + (
@@ -217,7 +226,7 @@ class DILadderExecutionMixin:
         target_price = self._ladder_level_price(episode, float(layer["target_level"]))
         row = {
             "strategy_candle_open_time": self.times[decision_i],
-            "strategy_entry_time": pd.Timestamp(timestamp),
+            "strategy_entry_time": self._ladder_utc_timestamp(timestamp),
             "strategy_entry_price": float(trigger_price),
             "side": child_direction,
             "strategy_profile_key": profile_key_value,
@@ -280,7 +289,7 @@ class DILadderExecutionMixin:
         entry_fee = entry * qty * entry_fee_rate
         pos = Position(
             side=side,
-            entry_time=pd.Timestamp(timestamp),
+            entry_time=self._ladder_utc_timestamp(timestamp),
             entry_index=int(execution_i),
             entry_price=float(entry),
             risk=float(risk_distance),
@@ -310,7 +319,7 @@ class DILadderExecutionMixin:
             short,
             self.current_equity,
             pd.Timestamp(self.times[decision_i]),
-            pd.Timestamp(timestamp),
+            self._ladder_utc_timestamp(timestamp),
             float(raw_fill),
             False,
         )
@@ -327,7 +336,7 @@ class DILadderExecutionMixin:
         pair.scheduled_entry_time = None
         pair.scheduled_entry_timezone = None
         pair.scheduled_entry_timestamp = None
-        pair.actual_entry_timestamp = pd.Timestamp(timestamp)
+        pair.actual_entry_timestamp = self._ladder_utc_timestamp(timestamp)
         pair.entry_schedule_status = "LADDER_TRIGGER"
         pair.strategy_profile_key = profile_key_value
         pair.applied_stop_loss_multiple = (
@@ -399,7 +408,7 @@ class DILadderExecutionMixin:
         pair.ladder_frozen_quantity = qty
         pair.ladder_sizing_budget_dollars = risk_amount
         pair.ladder_decision_strategy_index = int(decision_i)
-        pair.ladder_trigger_timestamp = pd.Timestamp(timestamp)
+        pair.ladder_trigger_timestamp = self._ladder_utc_timestamp(timestamp)
 
         self.active_pairs.append(pair)
         attach = getattr(self, "_attach_research_features_to_pair", None)
@@ -412,7 +421,7 @@ class DILadderExecutionMixin:
             "ladder_layer": str(layer.get("name")),
             "ladder_decision": "ENTER",
             "strategy_candle_open_time": self.times[decision_i],
-            "strategy_entry_time": pd.Timestamp(timestamp),
+            "strategy_entry_time": self._ladder_utc_timestamp(timestamp),
             "strategy_entry_price": float(raw_fill),
         })
         return pair
@@ -432,7 +441,7 @@ class DILadderExecutionMixin:
             if not self._ladder_trigger_crossed(episode, layer, high, low):
                 continue
             layer["reached"] = True
-            layer["trigger_timestamp"] = pd.Timestamp(timestamp)
+            layer["trigger_timestamp"] = self._ladder_utc_timestamp(timestamp)
             entry_level = float(layer["entry_level"])
             episode["deepest_reached_level"] = min(
                 float(episode["deepest_reached_level"]), entry_level
