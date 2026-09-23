@@ -12,6 +12,7 @@ already-frozen decision and can never replace it.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import hashlib
 from pathlib import Path
@@ -62,6 +63,46 @@ WEEKLY_BATCH_OOS_MODE = "WEEKLY_BATCH_OOS"
 MONTHLY_BATCH_DEFERRED = "DEFERRED_TO_MONTHLY_BATCH"
 WEEKLY_BATCH_DEFERRED = "DEFERRED_TO_WEEKLY_BATCH"
 BATCH_OOS_MODES = frozenset({MONTHLY_BATCH_OOS_MODE, WEEKLY_BATCH_OOS_MODE})
+
+@dataclass(frozen=True)
+class WalkForwardHead:
+    """Authoritative causal head carried across one accepted advance request."""
+
+    sequence: int
+    state_hash: str
+
+    @classmethod
+    def from_expected(cls, sequence: int, state_hash: str) -> "WalkForwardHead":
+        return cls(int(sequence), str(state_hash))
+
+    def advance_from(
+        self,
+        result: dict[str, Any],
+        *,
+        mutation: str,
+        require_progress: bool = True,
+    ) -> "WalkForwardHead":
+        next_sequence = int(result.get("sequence", self.sequence))
+        next_hash = str(result.get("state_hash") or self.state_hash)
+        if next_sequence < self.sequence:
+            raise ValueError(
+                f"{mutation} returned a regressed causal sequence "
+                f"{next_sequence} < {self.sequence}"
+            )
+        if require_progress and next_sequence == self.sequence:
+            raise ValueError(f"{mutation} did not advance the causal sequence")
+        if next_sequence > self.sequence and next_hash == self.state_hash:
+            raise ValueError(
+                f"{mutation} advanced the causal sequence without changing the state hash"
+            )
+        return WalkForwardHead(next_sequence, next_hash)
+
+    def fields(self) -> dict[str, Any]:
+        return {
+            "sequence": self.sequence,
+            "state_hash": self.state_hash,
+        }
+
 
 
 def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
@@ -1332,20 +1373,32 @@ def advance_walk_forward(
     max_scan_rows: int = 250000,
     max_transitions: int = 20,
 ) -> dict[str, Any]:
-    """Advance deterministic work until the next genuine judgment point."""
+    """Advance deterministic work until the next genuine judgment point.
+
+    The caller's expected sequence/hash is an optimistic-concurrency guard only
+    for entry into this request. Once accepted, every internal mutation advances
+    one authoritative WalkForwardHead, and the next mutation must consume that
+    returned head.
+    """
     if isinstance(max_transitions, bool) or not 1 <= int(max_transitions) <= 100:
         raise ValueError("max_transitions must be between 1 and 100")
     if isinstance(review_interval_months, bool) or not 1 <= int(review_interval_months) <= 24:
         raise ValueError("review_interval_months must be between 1 and 24")
-    sequence = int(expected_sequence)
-    state_hash = str(expected_state_hash)
+
+    head = WalkForwardHead.from_expected(expected_sequence, expected_state_hash)
 
     for step in range(int(max_transitions)):
-        store, readback, events = _verified(control, experiment_id, sequence, state_hash)
+        store, readback, events = _verified(
+            control,
+            experiment_id,
+            head.sequence,
+            head.state_hash,
+        )
         definition = (readback.get("manifest") or {}).get("definition") or {}
         batch_mode = _batch_oos_mode(definition)
         batch_oos = batch_mode is not None
         unresolved = _open_candidate(events)
+
         if unresolved is not None:
             candidate_id, state = unresolved
             if state == "ENTRY_CONTEXT_CAPTURED":
@@ -1359,38 +1412,52 @@ def advance_walk_forward(
                         operation_id=_operation(
                             operation_id, f"batch-freeze-{step}-{candidate_id}"
                         ),
-                        expected_sequence=sequence,
-                        expected_state_hash=state_hash,
+                        expected_sequence=head.sequence,
+                        expected_state_hash=head.state_hash,
                     )
-                    sequence = int(frozen["sequence"])
-                    state_hash = str(frozen["state_hash"])
+                    head = head.advance_from(
+                        frozen, mutation="batch candidate freeze"
+                    )
                     continue
                 result = _judgment_candidate(events, candidate_id)
-                result.update(sequence=sequence, state_hash=state_hash)
+                result.update(**head.fields())
                 return result
+
             if state == "DECISION_FROZEN":
                 revealed = _reveal_frozen_candidate(
-                    control, reports, experiment_id=experiment_id,
+                    control,
+                    reports,
+                    experiment_id=experiment_id,
                     candidate_id=candidate_id,
                     operation_id=_operation(operation_id, f"resume-{step}"),
                 )
-                sequence, state_hash = int(revealed["sequence"]), str(revealed["state_hash"])
+                head = head.advance_from(
+                    revealed, mutation="candidate outcome reveal"
+                )
                 continue
+
             if state == "OUTCOME_REVEALED":
                 settled = resolve_walk_forward_trade(
-                    control, experiment_id=experiment_id, candidate_id=candidate_id,
+                    control,
+                    experiment_id=experiment_id,
+                    candidate_id=candidate_id,
                     operation_id=_operation(operation_id, f"settle-{step}"),
-                    expected_sequence=sequence, expected_state_hash=state_hash,
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                 )
-                sequence, state_hash = int(settled["sequence"]), str(settled["state_hash"])
+                head = head.advance_from(
+                    settled, mutation="candidate settlement"
+                )
                 if (
                     str((settled.get("settlement") or {}).get("result")) == "LOSS"
                     and not batch_oos
                 ):
                     packet = build_loss_review_packet(
-                        control, experiment_id=experiment_id, candidate_id=candidate_id
+                        control,
+                        experiment_id=experiment_id,
+                        candidate_id=candidate_id,
                     )
-                    packet.update(sequence=sequence, state_hash=state_hash)
+                    packet.update(**head.fields())
                     return packet
                 continue
 
@@ -1399,9 +1466,11 @@ def advance_walk_forward(
             if loss is not None:
                 candidate_id = str((loss.get("payload") or {}).get("candidate_id"))
                 packet = build_loss_review_packet(
-                    control, experiment_id=experiment_id, candidate_id=candidate_id
+                    control,
+                    experiment_id=experiment_id,
+                    candidate_id=candidate_id,
                 )
-                packet.update(sequence=sequence, state_hash=state_hash)
+                packet.update(**head.fields())
                 return packet
 
         initial_review_anchor = _initial_periodic_review_anchor(
@@ -1417,13 +1486,15 @@ def advance_walk_forward(
             if periodic.get("previous_review_sequence") is None:
                 policy = definition.get("periodic_review_policy") or {}
                 periodic["review_anchor_source"] = str(
-                    policy.get("initial_anchor", periodic.get("review_anchor_source"))
+                    policy.get(
+                        "initial_anchor",
+                        periodic.get("review_anchor_source"),
+                    )
                 ).strip().upper()
             periodic.update(
                 contract=ORCHESTRATOR_CONTRACT,
                 experiment_id=experiment_id,
-                sequence=sequence,
-                state_hash=state_hash,
+                **head.fields(),
                 rule_update_policy=_rule_update_policy(definition),
             )
             if batch_oos:
@@ -1453,11 +1524,14 @@ def advance_walk_forward(
             initial_anchor=initial_review_anchor,
         )
         scan = get_next_walk_forward_candidate(
-            control, reports,
+            control,
+            reports,
             experiment_id=experiment_id,
-            operation_id=_operation(operation_id, f"scan-{step}-{sequence}"),
-            expected_sequence=sequence,
-            expected_state_hash=state_hash,
+            operation_id=_operation(
+                operation_id, f"scan-{step}-{head.sequence}"
+            ),
+            expected_sequence=head.sequence,
+            expected_state_hash=head.state_hash,
             max_scan_rows=max_scan_rows,
             stop_before_time=(
                 next_review_time.isoformat()
@@ -1466,6 +1540,7 @@ def advance_walk_forward(
             ),
         )
         status = scan.get("status")
+
         if status == "TIME_BOUNDARY_DUE_FIRST":
             boundary_time = _utc_timestamp(
                 scan.get("boundary_time"), "periodic review scan boundary"
@@ -1478,39 +1553,43 @@ def advance_walk_forward(
                     "review_due_time": boundary_time.isoformat(),
                 },
                 _operation(operation_id, f"periodic-boundary-{step}"),
-                sequence,
-                state_hash,
+                head.sequence,
+                head.state_hash,
                 effective_market_time=boundary_time.isoformat(),
                 source="DETERMINISTIC_ORCHESTRATOR",
             )
-            sequence = int(checkpoint["sequence"])
-            state_hash = str(checkpoint["state_hash"])
+            head = head.advance_from(
+                checkpoint, mutation="periodic review boundary checkpoint"
+            )
             continue
+
         if status == "CANDIDATE_CAPTURED":
+            captured_head = head.advance_from(
+                scan, mutation="candidate capture"
+            )
             if batch_oos:
-                sequence = int(scan["sequence"])
-                state_hash = str(scan["state_hash"])
+                head = captured_head
                 continue
             return {
                 "contract": ORCHESTRATOR_CONTRACT,
                 "status": "CANDIDATE_DECISION_REQUIRED",
                 "experiment_id": experiment_id,
-                "sequence": scan["sequence"],
-                "state_hash": scan["state_hash"],
+                **captured_head.fields(),
                 "candidate": scan["candidate"],
                 "candidate_id": scan["candidate"]["candidate_id"],
                 "candidate_token": scan["candidate"].get("candidate_token"),
                 "scan": scan.get("scan"),
                 "outcome_exposed": False,
             }
+
         if status == "TEACHER_DUE_FIRST":
             if batch_oos:
                 teacher_packet = _teacher_review_packet(
                     control,
                     reports,
                     experiment_id=experiment_id,
-                    expected_sequence=sequence,
-                    expected_state_hash=state_hash,
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                     teacher_boundary=scan["teacher_boundary"],
                 )
                 deferred = _append_batch_teacher(
@@ -1520,19 +1599,23 @@ def advance_walk_forward(
                     teacher_packet=teacher_packet,
                     batch_mode=str(batch_mode),
                     operation_id=_operation(
-                        operation_id, f"batch-teacher-{step}-{sequence}"
+                        operation_id,
+                        f"batch-teacher-{step}-{head.sequence}",
                     ),
-                    expected_sequence=sequence,
-                    expected_state_hash=state_hash,
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                 )
-                sequence = int(deferred["sequence"])
-                state_hash = str(deferred["state_hash"])
+                head = head.advance_from(
+                    deferred, mutation="batch teacher append"
+                )
                 continue
+
             packet = _teacher_review_packet(
-                control, reports,
+                control,
+                reports,
                 experiment_id=experiment_id,
-                expected_sequence=sequence,
-                expected_state_hash=state_hash,
+                expected_sequence=head.sequence,
+                expected_state_hash=head.state_hash,
                 teacher_boundary=scan["teacher_boundary"],
             )
             phase_decision = teacher_compression_decision(packet, events)
@@ -1543,39 +1626,40 @@ def advance_walk_forward(
                     packet=packet,
                     decision=phase_decision,
                     operation_id=_operation(
-                        operation_id, f"teacher-compress-{step}-{sequence}"
+                        operation_id,
+                        f"teacher-compress-{step}-{head.sequence}",
                     ),
-                    expected_sequence=sequence,
-                    expected_state_hash=state_hash,
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                 )
-                sequence = int(compressed["sequence"])
-                state_hash = str(compressed["state_hash"])
+                head = head.advance_from(
+                    compressed, mutation="teacher compression append"
+                )
                 continue
             packet.update(
-                sequence=sequence,
-                state_hash=state_hash,
+                **head.fields(),
                 scan=scan.get("scan"),
                 **_teacher_phase_metadata(packet, events),
             )
             return packet
+
         if status == "NO_ELIGIBLE_CANDIDATE_IN_SCAN":
             return {
                 "contract": ORCHESTRATOR_CONTRACT,
                 "status": "NO_MORE_ACTION_IN_SCAN",
                 "experiment_id": experiment_id,
-                "sequence": sequence,
-                "state_hash": state_hash,
+                **head.fields(),
                 "scan": scan.get("scan"),
                 "outcome_exposed": False,
             }
+
         raise ValueError(f"unexpected candidate scanner status: {status}")
 
     return {
         "contract": ORCHESTRATOR_CONTRACT,
         "status": "TRANSITION_LIMIT_REACHED",
         "experiment_id": experiment_id,
-        "sequence": sequence,
-        "state_hash": state_hash,
+        **head.fields(),
         "max_transitions": int(max_transitions),
     }
 
