@@ -310,7 +310,7 @@ class CausalExperimentStore:
                     rule_update_policy[key] = raw
                 rule_update_policy["adaptive"] = True
             else:
-                rule_update_policy["adaptive"] = False
+                rule_update_policy.pop("adaptive", None)
                 for key in adaptive_keys:
                     rule_update_policy.pop(key, None)
         return value
