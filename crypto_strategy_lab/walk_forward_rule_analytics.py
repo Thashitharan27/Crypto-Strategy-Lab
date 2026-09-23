@@ -77,7 +77,7 @@ def _verified_experiment(
     experiment_id: str,
 ) -> tuple[CausalExperimentStore, dict[str, Any], list[dict[str, Any]]]:
     store = CausalExperimentStore(Path(control.project_root) / "walk_forward_experiments")
-    readback = store.read(experiment_id, recent_events=0)
+    readback = store.read_fast(experiment_id, recent_events=0)
     _value, directory, _manifest_path, events_path = store._paths(experiment_id)
     store._assert_safe_dir(directory, must_exist=True)
     events = store._read_all_events(events_path)
