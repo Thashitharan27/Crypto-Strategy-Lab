@@ -519,8 +519,24 @@ def _sr_zone_inventory_frame(
     return frame, tuple(consumed)
 
 
+def _normalize_datetime_object_columns(frame: pd.DataFrame) -> pd.DataFrame:
+    """Normalize mixed naive/aware datetime object columns before DuckDB registration."""
+    result = frame.copy()
+    for name in result.columns:
+        series = result[name]
+        if series.dtype != object:
+            continue
+        values = series.dropna()
+        if values.empty:
+            continue
+        if values.map(lambda value: isinstance(value, (datetime, pd.Timestamp))).all():
+            result[name] = pd.to_datetime(series, utc=True, errors="raise")
+    return result
+
+
 def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    frame = _normalize_datetime_object_columns(frame)
     fd, name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".parquet", dir=path.parent
     )
