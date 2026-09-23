@@ -413,7 +413,8 @@ class CompletedRunVisualizer:
         if catalog is None or raw_root is None or not hasattr(catalog, "inventory"):
             return list(available.values())
         try:
-            rows = catalog.inventory(raw_root, market=request.market)
+            canonical_request = request.to_data_request((DatasetKind.KLINES,))
+            rows = catalog.inventory(raw_root, market=canonical_request.market)
         except Exception:
             return list(available.values())
 

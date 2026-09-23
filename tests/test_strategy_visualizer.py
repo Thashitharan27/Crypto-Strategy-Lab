@@ -9,7 +9,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from crypto_strategy_lab.data import DatasetKind
+from crypto_strategy_lab.data import DatasetKind, MarketKind
 from crypto_strategy_lab.data.source_identity import SourceSignature
 from crypto_strategy_lab.data_lake_config import DataConfig, ResearchRunConfig
 from crypto_strategy_lab.gui.completed_run_research import research_seed_from_manifest
@@ -382,7 +382,7 @@ def _fixture(tmp_path: Path):
     class Catalog:
         @staticmethod
         def inventory(_raw_root, *, market):
-            del market
+            assert market is MarketKind.FUTURES_UM
             return [
                 {
                     "exchange": "binance",
