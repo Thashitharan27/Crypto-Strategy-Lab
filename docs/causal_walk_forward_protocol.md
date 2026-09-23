@@ -749,6 +749,85 @@ This mode is intended for direct A/B comparison with `TRADE_BY_TRADE` using
 the same immutable reference run, starting equity, risk model, TP/SL, feature
 semantics, and market period.
 
+### 18.1B Opt-in adaptive weekly OOS rule updates
+
+For experiments testing whether adaptation itself is the edge, use weekly batch
+OOS with the adaptive policy enabled:
+
+```json
+{
+  "rule_update_policy": {
+    "mode": "WEEKLY_BATCH_OOS",
+    "interval_weeks": 1,
+    "freeze_between_reviews": true,
+    "adaptive": true,
+    "primary_lookback_weeks": 4,
+    "context_lookback_weeks": 12,
+    "expire_unconfirmed_after_weeks": 12,
+    "benchmark_raw_strategy": true,
+    "track_adaptation_lag": true,
+    "track_rule_half_life": true
+  }
+}
+```
+
+The chronology is:
+
+```text
+completed week N evidence
+        |
+        v
+WEEK-END ADAPTIVE REVIEW
+        |
+        +--> KEEP / REFINE / RETIRE / REPLACE / FLIP
+        |
+        +--> weight newest week most heavily
+        +--> use prior 4 weeks as primary supporting evidence
+        +--> use prior 12 weeks as secondary context
+        +--> compare with unchanged raw reference strategy
+        |
+        v
+freeze exact rule snapshot R(N+1)
+        |
+        v
+week N+1 PURE OOS under R(N+1)
+```
+
+The objective is not to find rules that remain optimal for years. The objective
+is to test whether a causal recent-information process can build a rule snapshot
+that improves the next week's OOS behavior. Older evidence remains available as
+context, but it must not dominate contradictory recent evidence merely because
+it has a larger historical sample.
+
+Adaptive weekly reviews should explicitly reconsider every active rule rather
+than accumulating rules indefinitely. A stale rule should be kept only when
+recent evidence reconfirms its thesis; otherwise the review should refine,
+replace, flip, or retire it. The configured
+`expire_unconfirmed_after_weeks` is surfaced as a lifecycle-review threshold;
+it does not retroactively alter already completed trades.
+
+Each adaptive weekly review packet includes:
+
+- the just-completed frozen OOS week;
+- immutable raw-reference performance for that same week;
+- recent raw-reference summaries over the primary and context lookback windows;
+- the exact frozen rule snapshot and rule attribution already available to
+  periodic review analytics.
+
+The raw-reference benchmark is critical. Adaptive performance must be compared
+with the unchanged source strategy over the same calendar window so the learner
+cannot claim success merely by moving losses between weeks.
+
+Two diagnostics are part of the adaptive research objective:
+
+- **adaptation lag:** how many losses or adverse OOS decisions occur after a
+  behavior change before a later weekly review changes the rule set;
+- **rule half-life:** how rule performance behaves in the first, second, third,
+  and later weeks after learning/refinement.
+
+These diagnostics are descriptive and causal. They must never inspect future
+weeks when making the current week's rule decision.
+
 ### 18.2 Monthly live continuation
 
 After deployment, process only data after the existing cursor. Continue the same causal chronology; do not start a second research history.
