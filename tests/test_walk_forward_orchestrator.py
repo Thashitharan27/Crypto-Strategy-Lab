@@ -210,7 +210,11 @@ def _write_reference(
     teachers: pd.DataFrame | None = None,
     monthly_batch: bool = False,
     weekly_batch: bool = False,
+    adaptive_weekly: bool = False,
     initial_entry: bool = True,
+    samples_frame: pd.DataFrame | None = None,
+    context_frame: pd.DataFrame | None = None,
+    period_start: str | None = None,
 ):
     project = tmp_path / "project"
     output = tmp_path / "output"
@@ -224,10 +228,18 @@ def _write_reference(
         # Keep batch-mode end-to-end regression tests independent of
         # pandas' optional pyarrow/fastparquet extras used by older fixtures.
         with duckdb.connect(":memory:") as connection:
-            samples_frame = _samples(include_short=include_short)
-            context_frame = _context()
-            connection.register("samples_frame", samples_frame)
-            connection.register("context_frame", context_frame)
+            selected_samples = (
+                samples_frame.copy()
+                if samples_frame is not None
+                else _samples(include_short=include_short)
+            )
+            selected_context = (
+                context_frame.copy()
+                if context_frame is not None
+                else _context()
+            )
+            connection.register("samples_frame", selected_samples)
+            connection.register("context_frame", selected_context)
             connection.execute(
                 f"COPY samples_frame TO '{samples_path.as_posix()}' (FORMAT PARQUET)"
             )
@@ -235,8 +247,16 @@ def _write_reference(
                 f"COPY context_frame TO '{context_path.as_posix()}' (FORMAT PARQUET)"
             )
     else:
-        _samples(include_short=include_short).to_parquet(samples_path, index=False)
-        _context().to_parquet(context_path, index=False)
+        (
+            samples_frame.copy()
+            if samples_frame is not None
+            else _samples(include_short=include_short)
+        ).to_parquet(samples_path, index=False)
+        (
+            context_frame.copy()
+            if context_frame is not None
+            else _context()
+        ).to_parquet(context_path, index=False)
     artifact_map = {
         "research_sampling_trades": _catalog(samples_path, run_dir),
         "feature_context": _catalog(context_path, run_dir),
@@ -262,11 +282,31 @@ def _write_reference(
             "interval_months": 1,
             "freeze_between_reviews": True,
         }
-    elif weekly_batch:
+    elif weekly_batch or adaptive_weekly:
         definition["rule_update_policy"] = {
             "mode": "WEEKLY_BATCH_OOS",
             "interval_weeks": 1,
             "freeze_between_reviews": True,
+        }
+        if adaptive_weekly:
+            definition["rule_update_policy"]["adaptive"] = {
+                "enabled": True,
+                "primary_lookback_weeks": 1,
+                "context_lookback_weeks": 4,
+                "objective": "NEXT_WEEK_OOS",
+                "allow_keep": True,
+                "allow_refine": True,
+                "allow_retire": True,
+                "allow_replace": True,
+                "allow_flip": True,
+                "benchmark_raw_strategy": True,
+            }
+    if period_start is not None:
+        definition["periodic_review_policy"] = {
+            "initial_anchor": "REFERENCE_PERIOD_START",
+        }
+        definition["reference_provenance"] = {
+            "period_start": period_start,
         }
     head = store.create(EXPERIMENT_ID, definition, "create:orch")
     if initial_entry:
@@ -288,6 +328,57 @@ def _write_reference(
             effective_market_time="2025-01-01T00:00:00Z",
         )
     return control, reports, store, head
+
+
+def _multiweek_samples() -> pd.DataFrame:
+    base = _samples(include_short=False).to_dict("records")
+    template = dict(base[-1])
+    additions = []
+    for signal_index, day, price, net_r in (
+        (12, "2025-01-09", 120.0, 0.9),
+        (13, "2025-01-10", 125.0, -1.0),
+        (14, "2025-01-16", 130.0, 0.8),
+    ):
+        row = dict(template)
+        row.update(
+            {
+                "research_sample_id": f"{signal_index}-LONG-e1",
+                "research_signal_index": signal_index,
+                "walk_forward_candidate_id": f"wf-{signal_index}-long",
+                "entry_time": f"{day}T00:00:00Z",
+                "signal_available_at": f"{day}T00:00:00Z",
+                "signal_close_price": price,
+                "pair_net_r": net_r,
+                "pair_net_pnl": net_r * 10.0,
+                "exit_time": f"{day}T12:00:00Z",
+            }
+        )
+        additions.append(row)
+    return pd.DataFrame(base + additions)
+
+
+def _multiweek_context() -> pd.DataFrame:
+    base = _context().to_dict("records")
+    template = dict(base[-1])
+    additions = []
+    for signal_index, day, adx, close in (
+        (12, "2025-01-09", 35.0, 120.0),
+        (13, "2025-01-10", 38.0, 125.0),
+        (14, "2025-01-16", 36.0, 130.0),
+    ):
+        row = dict(template)
+        row.update(
+            {
+                "strategy_index": signal_index,
+                "strategy_candle_open_time": f"{day}T00:00:00Z",
+                "decision_available_at": f"{day}T00:00:00Z",
+                "adx": adx,
+                "close": close,
+                "session_vwap": close - 1.0,
+            }
+        )
+        additions.append(row)
+    return pd.DataFrame(base + additions)
 
 
 def _capture(control, reports, head):
