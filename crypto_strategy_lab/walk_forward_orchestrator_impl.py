@@ -429,6 +429,8 @@ def _reveal_frozen_candidate(
     experiment_id: str,
     candidate_id: str,
     operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
 ) -> dict[str, Any]:
     store = _store(control)
     events = _events(store, experiment_id)
@@ -461,6 +463,14 @@ def _reveal_frozen_candidate(
     if state != "DECISION_FROZEN":
         raise ValueError("outcome can only be read after the decision is durably frozen")
 
+    # Validate the exact head supplied by the accepted operation. Do not reread
+    # and adopt whatever head happens to exist now.
+    store, readback, events = _verified(
+        control,
+        experiment_id,
+        expected_sequence,
+        expected_state_hash,
+    )
     capture_event = _candidate_capture(events, candidate_id)
     candidate = capture_event.get("payload") or {}
     frozen_event = _event_for_candidate(events, "DECISION_FROZEN", candidate_id)
@@ -472,9 +482,10 @@ def _reveal_frozen_candidate(
         raise ValueError("captured candidate has no reference_run")
 
     # OUTCOME FIREWALL: the outcome-bearing artifact is first opened here, after
-    # DECISION_FROZEN has already been appended+fsynced by CausalExperimentStore.
-    outcome = _outcome_row_after_decision(reports, reference_run, candidate, frozen_side)
-    readback = _read_store(store, experiment_id, recent_events=0)
+    # DECISION_FROZEN is durable and the exact causal head has been verified.
+    outcome = _outcome_row_after_decision(
+        reports, reference_run, candidate, frozen_side
+    )
     exit_time = outcome.get("exit_time")
     appended = store.append_event(
         experiment_id,
@@ -489,7 +500,11 @@ def _reveal_frozen_candidate(
         reveal_op,
         int(readback["sequence"]),
         str(readback["state_hash"]),
-        effective_market_time=str(exit_time) if exit_time else str(candidate.get("entry_time")),
+        effective_market_time=(
+            str(exit_time)
+            if exit_time
+            else str(candidate.get("entry_time"))
+        ),
         source="DETERMINISTIC_OUTCOME_FIREWALL",
     )
     return {
@@ -536,8 +551,13 @@ def freeze_and_reveal_walk_forward_candidate(
             reasoning=text,
         )
         return _reveal_frozen_candidate(
-            control, reports, experiment_id=experiment_id,
-            candidate_id=candidate_id, operation_id=operation_id,
+            control,
+            reports,
+            experiment_id=experiment_id,
+            candidate_id=candidate_id,
+            operation_id=operation_id,
+            expected_sequence=int(existing_freeze["sequence"]),
+            expected_state_hash=str(existing_freeze["resulting_state_hash"]),
         )
 
     store, readback, events = _verified(
@@ -571,8 +591,13 @@ def freeze_and_reveal_walk_forward_candidate(
     )
     # CausalExperimentStore fsyncs the event before returning from append_event.
     return _reveal_frozen_candidate(
-        control, reports, experiment_id=experiment_id,
-        candidate_id=candidate_id, operation_id=operation_id,
+        control,
+        reports,
+        experiment_id=experiment_id,
+        candidate_id=candidate_id,
+        operation_id=operation_id,
+        expected_sequence=int(frozen["sequence"]),
+        expected_state_hash=str(frozen["state_hash"]),
     )
 
 
@@ -603,7 +628,7 @@ def resolve_walk_forward_trade(
     expected_sequence: int,
     expected_state_hash: str,
 ) -> dict[str, Any]:
-    """Settle one revealed research trade from current ledger equity and immutable net R."""
+    """Settle one revealed research trade with strict internal head chaining."""
     store = _store(control)
     events = _events(store, experiment_id)
     existing = _existing_resolution(events, candidate_id)
@@ -619,11 +644,47 @@ def resolve_walk_forward_trade(
             "idempotent_replay": True,
         }
 
-    store, readback, events = _verified(
-        control, experiment_id, expected_sequence, expected_state_hash
-    )
+    entered_op = _operation(operation_id, "entered")
+    existing_entered = store._find_operation(events, entered_op)
+
+    if existing_entered is None:
+        store, readback, events = _verified(
+            control, experiment_id, expected_sequence, expected_state_hash
+        )
+        head = WalkForwardHead(
+            int(readback["sequence"]),
+            str(readback["state_hash"]),
+        )
+    else:
+        # Resume only the exact sub-operation that this caller previously
+        # committed. The original expected head must either be the parent of
+        # TRADE_ENTERED or the TRADE_ENTERED head itself.
+        previous_hash = str(existing_entered.get("previous_state_hash") or "")
+        entered_sequence = int(existing_entered["sequence"])
+        entered_hash = str(existing_entered["resulting_state_hash"])
+        expected_matches_parent = (
+            entered_sequence == int(expected_sequence) + 1
+            and previous_hash == str(expected_state_hash)
+        )
+        expected_matches_entered = (
+            entered_sequence == int(expected_sequence)
+            and entered_hash == str(expected_state_hash)
+        )
+        if not (expected_matches_parent or expected_matches_entered):
+            raise ValueError(
+                "idempotent settlement retry does not match the committed "
+                "TRADE_ENTERED causal parent/head"
+            )
+        # Fail closed if any foreign or later event appeared after the durable
+        # TRADE_ENTERED sub-operation.
+        store, readback, events = _verified(
+            control, experiment_id, entered_sequence, entered_hash
+        )
+        head = WalkForwardHead(entered_sequence, entered_hash)
+
     if store._candidate_state(events, candidate_id) != "OUTCOME_REVEALED":
         raise ValueError("trade can only be settled after its outcome is revealed")
+
     capture = (_candidate_capture(events, candidate_id).get("payload") or {})
     frozen_event = _event_for_candidate(events, "DECISION_FROZEN", candidate_id)
     revealed_event = _event_for_candidate(events, "OUTCOME_REVEALED", candidate_id)
@@ -631,29 +692,39 @@ def resolve_walk_forward_trade(
     frozen = frozen_event.get("payload") or {}
     revealed = revealed_event.get("payload") or {}
     outcome = revealed.get("outcome") or {}
-    net_r = _decimal(outcome.get("net_r", outcome.get("pair_net_r")), "outcome net_r")
+    net_r = _decimal(
+        outcome.get("net_r", outcome.get("pair_net_r")),
+        "outcome net_r",
+    )
 
     definition = (readback.get("manifest") or {}).get("definition") or {}
     risk_pct_raw = definition.get("risk_pct")
     if risk_pct_raw in (None, ""):
-        raise ValueError("immutable experiment definition has no risk_pct; cannot settle equity deterministically")
+        raise ValueError(
+            "immutable experiment definition has no risk_pct; "
+            "cannot settle equity deterministically"
+        )
     risk_pct = _decimal(risk_pct_raw, "risk_pct")
-    equity_raw = ((readback.get("derived_state") or {}).get("ledgers") or {}).get("RESEARCH", {}).get("equity")
+    equity_raw = (
+        ((readback.get("derived_state") or {}).get("ledgers") or {})
+        .get("RESEARCH", {})
+        .get("equity")
+    )
     if equity_raw in (None, ""):
         equity_raw = definition.get("initial_equity")
     equity_before = _decimal(equity_raw, "research equity")
     risk_amount = equity_before * risk_pct / Decimal("100")
     net_pnl = risk_amount * net_r
     equity_after = equity_before + net_pnl
-    result = "WIN" if net_r > 0 else ("LOSS" if net_r < 0 else "BREAKEVEN")
+    result = (
+        "WIN"
+        if net_r > 0
+        else ("LOSS" if net_r < 0 else "BREAKEVEN")
+    )
     exit_time = outcome.get("exit_time") or capture.get("entry_time")
 
-    entered_op = _operation(operation_id, "entered")
-    current_events = _events(store, experiment_id)
-    entered = _event_for_candidate(current_events, "TRADE_ENTERED", candidate_id)
-    if entered is None:
-        current = _read_store(store, experiment_id, recent_events=0)
-        store.append_event(
+    if existing_entered is None:
+        entered = store.append_event(
             experiment_id,
             "TRADE_ENTERED",
             {
@@ -666,13 +737,15 @@ def resolve_walk_forward_trade(
                 "risk_amount": _money(risk_amount),
             },
             entered_op,
-            int(current["sequence"]),
-            str(current["state_hash"]),
+            head.sequence,
+            head.state_hash,
             effective_market_time=str(capture.get("entry_time")),
             source="DETERMINISTIC_LEDGER",
         )
+        head = head.advance_from(
+            entered, mutation="trade entered"
+        )
 
-    current = _read_store(store, experiment_id, recent_events=0)
     resolved = store.append_event(
         experiment_id,
         "TRADE_RESOLVED",
@@ -692,16 +765,18 @@ def resolve_walk_forward_trade(
             "settlement_contract": SETTLEMENT_CONTRACT,
         },
         _operation(operation_id, "resolved"),
-        int(current["sequence"]),
-        str(current["state_hash"]),
+        head.sequence,
+        head.state_hash,
         effective_market_time=str(exit_time),
         source="DETERMINISTIC_LEDGER",
+    )
+    resolved_head = head.advance_from(
+        resolved, mutation="trade resolved"
     )
     return {
         "contract": SETTLEMENT_CONTRACT,
         "experiment_id": experiment_id,
-        "sequence": resolved["sequence"],
-        "state_hash": resolved["state_hash"],
+        **resolved_head.fields(),
         "candidate_id": candidate_id,
         "settlement": resolved["event"]["payload"],
         "idempotent_replay": False,
@@ -1430,6 +1505,8 @@ def advance_walk_forward(
                     experiment_id=experiment_id,
                     candidate_id=candidate_id,
                     operation_id=_operation(operation_id, f"resume-{step}"),
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                 )
                 head = head.advance_from(
                     revealed, mutation="candidate outcome reveal"
