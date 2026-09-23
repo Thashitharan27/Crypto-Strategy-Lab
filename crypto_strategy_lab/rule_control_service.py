@@ -293,7 +293,7 @@ class RuleAwareBacktestControlService(BacktestControlService):
         """Read an experiment definition, verified chain head, and derived causal state."""
         return self._safe_persistence_call(
             "read_walk_forward_experiment",
-            lambda: self._causal_experiment_store().read(experiment_id, recent_events),
+            lambda: self._causal_experiment_store().read_fast(experiment_id, recent_events),
         )
 
     def summarize_walk_forward_monthly(
