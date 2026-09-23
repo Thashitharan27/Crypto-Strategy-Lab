@@ -347,6 +347,8 @@ class CausalExperimentStore:
         events_path: Path,
     ) -> CausalEventIndex:
         directory = events_path.parent
+        if events_path.is_symlink() or not events_path.is_file():
+            raise ValueError("causal experiment event stream is missing or unsafe")
         index = self._event_index(directory)
         definition_sha256 = str(manifest.get("definition_sha256", ""))
         if index.is_current(events_path, definition_sha256):
@@ -745,7 +747,7 @@ class CausalExperimentStore:
                     state_hash=base_event["resulting_state_hash"],
                     derived_state=self._derive_state(manifest, [base_event]),
                 )
-            except (OSError, ValueError):
+            except (OSError, sqlite3.Error, ValueError):
                 pass
             return {
                 "experiment_id": value,
