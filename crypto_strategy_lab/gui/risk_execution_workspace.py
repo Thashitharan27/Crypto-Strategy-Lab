@@ -219,8 +219,27 @@ class RiskExecutionWorkspace(QWidget):
         self.target_card.layout().addWidget(self.sr_dependency_note)
         layout.addWidget(self.target_card)
 
+        self.ladder_card = FormCard(
+            "5. DI Ladder / Reversal Filters",
+            note=(
+                "Optional opposite-side ladder linked to one initial DI trade. "
+                "Level size is measured in the initial trade's sizing-R. "
+                "Each layer can contain positive continuation-entry rules; if they fail, that layer is skipped while deeper layers remain eligible."
+            ),
+        )
+        self.ladder_card.add_control(
+            "di_ladder_enabled", self.account["di_ladder_enabled"]
+        )
+        self.ladder_card.add_field(
+            "di_ladder_level_r", "Ladder Level Size", self.account["di_ladder_level_r"]
+        )
+        self.ladder_card.add_field(
+            "di_ladder_layers", "Layer Definitions", self.account["di_ladder_layers"]
+        )
+        layout.addWidget(self.ladder_card)
+
         self.management_card = FormCard(
-            "5. Trade Management",
+            "6. Trade Management",
             note="Optional management stays compact while disabled. Enabling a feature reveals only its relevant settings.",
         )
         self.management_card.add_control("break_even_enabled", self.trade["break_even_enabled"])
@@ -284,6 +303,7 @@ class RiskExecutionWorkspace(QWidget):
         self.account["risk_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["sr_take_profit_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["entry_timing_mode"].currentIndexChanged.connect(self.refresh_summary_from_widgets)
+        self.account["di_ladder_enabled"].toggled.connect(self.refresh_visibility)
         builder = getattr(self.window, "rule_builder", None)
         if builder is not None:
             builder.direction_mode.currentIndexChanged.connect(self.refresh_visibility)
@@ -311,6 +331,7 @@ class RiskExecutionWorkspace(QWidget):
             "use_maker_entry": "Assume maker entry",
             "use_maker_exit": "Assume maker exit",
             "zero_cost_comparison": "Also calculate zero-cost comparison",
+            "di_ladder_enabled": "Enable DI ladder / reversal-filter execution",
         }.items():
             widget = self.trade.get(name) or self.account.get(name)
             if isinstance(widget, QCheckBox):
@@ -324,6 +345,10 @@ class RiskExecutionWorkspace(QWidget):
             self.trade["position_sizing_stop_multiple"].setSuffix(" ×")
         if hasattr(self.account["atr_multiplier"], "setSuffix"):
             self.account["atr_multiplier"].setSuffix(" × ATR")
+        if hasattr(self.account["di_ladder_level_r"], "setSuffix"):
+            self.account["di_ladder_level_r"].setSuffix(" R")
+        if hasattr(self.account["di_ladder_layers"], "setMaximumHeight"):
+            self.account["di_ladder_layers"].setMaximumHeight(260)
 
     def _signal_strategy_mode(self) -> str:
         builder = getattr(self.window, "rule_builder", None)
@@ -338,6 +363,9 @@ class RiskExecutionWorkspace(QWidget):
         ema_920 = self._ema_920_selected()
         mode = str(self.account["risk_mode"].currentData() or "ATR")
         structural_stop = mode == "SR_STRUCTURE"
+        ladder_enabled = bool(self.account["di_ladder_enabled"].isChecked())
+        self.ladder_card.set_row_visible("di_ladder_level_r", ladder_enabled)
+        self.ladder_card.set_row_visible("di_ladder_layers", ladder_enabled)
 
         ema_stop_fields = (
             "ema_920_stop_method", "ema_920_stop_confirmation",
@@ -634,7 +662,13 @@ class RiskExecutionWorkspace(QWidget):
             f"{stop_description}"
             f"{sizing_description}"
             f" Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
-            f"Management: {self._management_description(base)}."
+            + (
+                f"DI ladder enabled at {execution.di_ladder_level_r:g} sizing-R per level with "
+                f"{sum(1 for layer in execution.di_ladder_layers if layer.get('enabled', True))} enabled layers. "
+                if execution.di_ladder_enabled else
+                "DI ladder disabled. "
+            )
+            + f"Management: {self._management_description(base)}."
         )
 
     def refresh_summary_from_widgets(self) -> None:
