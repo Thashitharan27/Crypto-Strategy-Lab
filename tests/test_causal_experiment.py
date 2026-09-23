@@ -175,6 +175,43 @@ def test_weekly_batch_oos_policy_is_normalized_and_frozen(tmp_path):
     }
 
 
+def test_adaptive_weekly_oos_policy_normalizes_recent_windows(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["rule_update_policy"] = {
+        "mode": "weekly_batch_oos",
+        "adaptive": True,
+    }
+
+    store.create("BTC_ADAPTIVE_WEEKLY_WF", definition, "create:adaptive-weekly")
+    readback = store.read("BTC_ADAPTIVE_WEEKLY_WF")
+
+    assert readback["manifest"]["definition"]["rule_update_policy"] == {
+        "mode": "WEEKLY_BATCH_OOS",
+        "interval_weeks": 1,
+        "freeze_between_reviews": True,
+        "adaptive": True,
+        "primary_lookback_weeks": 4,
+        "context_lookback_weeks": 12,
+        "expire_unconfirmed_after_weeks": 12,
+        "benchmark_raw_strategy": True,
+        "track_adaptation_lag": True,
+        "track_rule_half_life": True,
+    }
+
+
+def test_adaptive_policy_requires_weekly_batch_oos(tmp_path):
+    store = CausalExperimentStore(tmp_path / "experiments")
+    definition = _definition()
+    definition["rule_update_policy"] = {
+        "mode": "MONTHLY_BATCH_OOS",
+        "adaptive": True,
+    }
+
+    with pytest.raises(ValueError, match="adaptive rule updates require"):
+        store.create("BTC_BAD_ADAPTIVE_MONTHLY", definition, "create:bad-adaptive")
+
+
 def test_weekly_batch_oos_rejects_non_weekly_interval(tmp_path):
     store = CausalExperimentStore(tmp_path / "experiments")
     definition = _definition()
