@@ -673,6 +673,175 @@ def test_adaptive_weekly_evidence_exposes_rule_lifecycle_and_true_raw_benchmark(
     ]["weeks"] == 4
 
 
+def _fresh_adaptive_multiweek_environment(tmp_path):
+    return _write_reference(
+        tmp_path,
+        adaptive_weekly=True,
+        initial_entry=False,
+        samples_frame=_multiweek_samples(),
+        context_frame=_multiweek_context(),
+        teachers=_multiweek_samples(),
+        period_start="2025-01-01T00:00:00Z",
+    )
+
+
+def test_fresh_adaptive_weekly_advances_from_sequence_one_to_first_review(tmp_path):
+    control, reports, store, head = _fresh_adaptive_multiweek_environment(tmp_path)
+    assert head["sequence"] == 1
+
+    result = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:fresh-week1",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        max_transitions=100,
+    )
+
+    assert result["status"] == "PERIODIC_REVIEW_REQUIRED"
+    assert result["review_due_time"] == "2025-01-08T00:00:00+00:00"
+    assert result["sequence"] > 1
+    persisted = store.read_fast(EXPERIMENT_ID, recent_events=0)
+    assert result["sequence"] == persisted["sequence"]
+    assert result["state_hash"] == persisted["state_hash"]
+
+
+def test_adaptive_week_two_uses_post_review_head_for_all_internal_writes(tmp_path):
+    control, reports, store, head = _fresh_adaptive_multiweek_environment(tmp_path)
+    week1 = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:week1",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        max_transitions=100,
+    )
+    assert week1["status"] == "PERIODIC_REVIEW_REQUIRED"
+
+    reviewed = store.append_event(
+        EXPERIMENT_ID,
+        "REVIEW_COMPLETED",
+        {
+            "review_type": "PERIODIC",
+            "decision": "RULES_UPDATED",
+            "notes": "Week 1 adaptive review.",
+            "scheduled_review_due_time": "2025-01-08T00:00:00+00:00",
+        },
+        "week1:review",
+        week1["sequence"],
+        week1["state_hash"],
+        effective_market_time="2025-01-08T00:00:00+00:00",
+        source="CHATGPT_RESEARCH",
+    )
+    learned = store.append_event(
+        EXPERIMENT_ID,
+        "ENTRY_LEARNED",
+        {
+            "rule_id": "ENTRY_001",
+            "rule_version": "1",
+            "effective_from": "2025-01-08T00:00:00+00:00",
+            "reason": "Week 1 reusable bullish directional setup.",
+            "evidence_source": "PROSPECTIVE_WF",
+            "profile": "bull_long",
+            "conditions": [
+                {"indicator": "ADX", "condition": "GTE", "value": 30}
+            ],
+        },
+        "week1:rule:entry",
+        reviewed["sequence"],
+        reviewed["state_hash"],
+        effective_market_time="2025-01-08T00:00:00+00:00",
+        source="CHATGPT_RESEARCH",
+    )
+
+    week2 = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:week2",
+        expected_sequence=learned["sequence"],
+        expected_state_hash=learned["state_hash"],
+        max_transitions=100,
+    )
+
+    assert week2["status"] == "PERIODIC_REVIEW_REQUIRED"
+    assert week2["review_due_time"] == "2025-01-15T00:00:00+00:00"
+    assert week2["sequence"] > learned["sequence"]
+    events = store.indexed_events(EXPERIMENT_ID)
+    operation_ids = [str(event["operation_id"]) for event in events]
+    assert len(operation_ids) == len(set(operation_ids))
+    persisted = store.read_fast(EXPERIMENT_ID, recent_events=0)
+    assert week2["sequence"] == persisted["sequence"]
+    assert week2["state_hash"] == persisted["state_hash"]
+
+
+def test_advance_rejects_genuine_external_stale_head(tmp_path):
+    control, reports, store, head = _fresh_adaptive_multiweek_environment(tmp_path)
+    stale_sequence = head["sequence"]
+    stale_hash = head["state_hash"]
+
+    store.append_event(
+        EXPERIMENT_ID,
+        "CHECKPOINT_CREATED",
+        {"checkpoint_type": "EXTERNAL_CONCURRENCY_TEST"},
+        "external:mutation",
+        stale_sequence,
+        stale_hash,
+        effective_market_time="2025-01-01T06:00:00+00:00",
+        source="DETERMINISTIC_ORCHESTRATOR",
+    )
+
+    with pytest.raises(ValueError, match="changed since it was read"):
+        advance_walk_forward(
+            control,
+            reports,
+            experiment_id=EXPERIMENT_ID,
+            operation_id="advance:must-stale",
+            expected_sequence=stale_sequence,
+            expected_state_hash=stale_hash,
+            max_transitions=100,
+        )
+
+
+def test_advance_same_operation_retry_is_idempotent_after_response_loss(tmp_path):
+    control, reports, store, head = _fresh_adaptive_multiweek_environment(tmp_path)
+    original_sequence = head["sequence"]
+    original_hash = head["state_hash"]
+
+    first = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:idempotent",
+        expected_sequence=original_sequence,
+        expected_state_hash=original_hash,
+        max_transitions=100,
+    )
+    assert first["status"] == "PERIODIC_REVIEW_REQUIRED"
+    events_after_first = store.indexed_events(EXPERIMENT_ID)
+
+    retry = advance_walk_forward(
+        control,
+        reports,
+        experiment_id=EXPERIMENT_ID,
+        operation_id="advance:idempotent",
+        expected_sequence=original_sequence,
+        expected_state_hash=original_hash,
+        max_transitions=100,
+    )
+    events_after_retry = store.indexed_events(EXPERIMENT_ID)
+
+    assert retry["status"] == first["status"]
+    assert retry["sequence"] == first["sequence"]
+    assert retry["state_hash"] == first["state_hash"]
+    assert len(events_after_retry) == len(events_after_first)
+    assert [event["operation_id"] for event in events_after_retry] == [
+        event["operation_id"] for event in events_after_first
+    ]
+
+
 def test_weekly_batch_auto_executes_without_mid_week_review(tmp_path):
     control, reports, store, head = _write_reference(
         tmp_path, weekly_batch=True
