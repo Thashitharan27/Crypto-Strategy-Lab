@@ -218,7 +218,7 @@ def _adaptive_status(
     learning: dict[str, Any],
     recent: dict[str, Any],
 ) -> str:
-    if lifecycle_status == "RETIRED":
+    if lifecycle_status in {"RETIRED", "SUPERSEDED"}:
         return "RETIRED"
     if int(recent["matches"]) == 0:
         return "DORMANT_NO_EXPOSURE"
