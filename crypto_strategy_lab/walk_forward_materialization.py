@@ -229,18 +229,19 @@ def _verified_experiment(
     expected_state_hash: str,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
     store = CausalExperimentStore(Path(project_root) / "walk_forward_experiments")
-    readback = store.read(experiment_id, recent_events=0)
+    readback = store.read_fast(experiment_id, recent_events=0)
     sequence = int(readback["sequence"])
     state_hash = str(readback["state_hash"])
     if sequence != int(expected_sequence) or state_hash != str(expected_state_hash).strip().lower():
         raise ValueError(
             "walk-forward experiment changed since it was read; read the verified chain head again before materializing"
         )
-    _value, directory, _manifest_path, events_path = store._paths(experiment_id)
-    store._assert_safe_dir(directory, must_exist=True)
-    events = store._read_all_events(events_path)
-    verified_sequence, verified_hash = store._verify_chain(events)
-    if verified_sequence != sequence or verified_hash != state_hash:
+    events = store.indexed_events(
+        experiment_id,
+        event_types=RULE_EVENT_TYPES | set(_PROMOTION_STATUS),
+    )
+    confirmed = store.read_fast(experiment_id, recent_events=0)
+    if int(confirmed["sequence"]) != sequence or str(confirmed["state_hash"]) != state_hash:
         raise ValueError("walk-forward event chain changed during materialization")
     return readback["manifest"], events, state_hash
 
