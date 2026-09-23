@@ -422,3 +422,75 @@ def test_accelerated_orchestrator_rejects_foreign_tail_on_stale_head(tmp_path, m
             expected_sequence=head["sequence"],
             expected_state_hash=head["state_hash"],
         )
+
+
+def test_accelerated_orchestrator_propagates_head_across_many_internal_transitions(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    control = SimpleNamespace(project_root=project)
+    store = CausalExperimentStore(project / "walk_forward_experiments")
+    experiment_id = "BTCUSDT_15M_WF_MULTI_HEAD"
+    head = store.create(experiment_id, _definition(), "create:multi-head")
+    observed_sequences = []
+
+    def fake_advance(*args, **kwargs):
+        current = store.read_fast(experiment_id, recent_events=0)
+        observed_sequences.append(kwargs["expected_sequence"])
+        assert kwargs["expected_sequence"] == current["sequence"]
+        assert kwargs["expected_state_hash"] == current["state_hash"]
+        assert kwargs["max_transitions"] == 1
+
+        if len(observed_sequences) <= 6:
+            appended = store.append_event(
+                experiment_id,
+                "CHECKPOINT_CREATED",
+                {
+                    "checkpoint_type": "MULTI_HEAD_TEST",
+                    "transition": len(observed_sequences),
+                },
+                kwargs["operation_id"] + f":transition-{len(observed_sequences)}",
+                current["sequence"],
+                current["state_hash"],
+                effective_market_time=(
+                    f"2025-01-0{len(observed_sequences) + 1}T00:00:00+00:00"
+                ),
+                source="DETERMINISTIC_ORCHESTRATOR",
+            )
+            return {
+                "contract": "causal_walk_forward_orchestrator_v1",
+                "status": "TRANSITION_LIMIT_REACHED",
+                "experiment_id": experiment_id,
+                "sequence": appended["sequence"],
+                "state_hash": appended["state_hash"],
+                "max_transitions": 1,
+            }
+
+        return {
+            "contract": "causal_walk_forward_orchestrator_v1",
+            "status": "NO_MORE_ACTION_IN_SCAN",
+            "experiment_id": experiment_id,
+            "sequence": current["sequence"],
+            "state_hash": current["state_hash"],
+            "scan": {},
+            "outcome_exposed": False,
+        }
+
+    monkeypatch.setattr(orchestrator, "_ORIGINAL_ADVANCE_WALK_FORWARD", fake_advance)
+    result = orchestrator.advance_walk_forward(
+        control,
+        None,
+        experiment_id=experiment_id,
+        operation_id="advance:multi-head",
+        expected_sequence=head["sequence"],
+        expected_state_hash=head["state_hash"],
+        max_transitions=10,
+    )
+
+    assert observed_sequences == [1, 2, 3, 4, 5, 6, 7]
+    assert result["status"] == "NO_MORE_ACTION_IN_SCAN"
+    assert result["sequence"] == 7
+    assert result["state_hash"] == store.read_fast(
+        experiment_id, recent_events=0
+    )["state_hash"]

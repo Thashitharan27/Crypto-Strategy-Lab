@@ -840,6 +840,40 @@ when it is causally resolved.
 
 These populations must not be substituted for one another.
 
+
+Adaptive value-added must be read together with an explicit participation block.
+A frozen adaptive strategy can preserve capital simply by taking fewer or zero
+trades during a losing raw week; that is economically useful but scientifically
+different from selecting better trades.
+
+The canonical exposure fields are:
+
+```text
+adaptive_trade_count
+raw_trade_count
+eligible_opportunities
+executed_opportunities
+participation_rate_pct
+participation_rate_vs_raw_trades_pct
+current_week_zero_adaptive_trades
+weeks_with_zero_adaptive_trades
+completed_adaptive_weeks_observed
+```
+
+`participation_rate_pct` is opportunity-based:
+
+```text
+adaptive executed trades
+------------------------ × 100
+causally completed source opportunities
+```
+
+The raw-trade participation rate is reported separately because the immutable
+raw portfolio may admit fewer trades than the source-opportunity population
+after `WAIT_UNTIL_CLOSED`, shared-capital, max-active-pair and profile
+constraints.
+
+
 Adaptive per-rule evidence exposes lifecycle states:
 
 ```text

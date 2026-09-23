@@ -20,6 +20,7 @@ causal FLIP rule already changed the candidate's strategy action.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timedelta
 from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
@@ -56,8 +57,6 @@ _AUTONOMOUS_TERMINAL_STATUSES = frozenset({
 _ORIGINAL_ADVANCE_WALK_FORWARD = _impl.advance_walk_forward
 _ORIGINAL_BUILD_LOSS_REVIEW_PACKET = _impl.build_loss_review_packet
 
-_SELF_STALE_HEAD_HANDOFF_LIMIT = 4
-
 
 def _advance_with_internal_head_handoff(
     control: Any,
@@ -71,19 +70,27 @@ def _advance_with_internal_head_handoff(
     max_scan_rows: int,
     max_transitions: int,
 ) -> dict[str, Any]:
-    """Resume only when this same request advanced its own causal head.
+    """Drive deterministic advancement one transition/head at a time.
 
-    This fixes fresh batch ingestion where deterministic sub-steps can commit
-    before a later sub-step observes the caller's original head. Foreign tail
-    events are never adopted and still raise the normal stale-head error.
+    The caller's expected head protects entry into this operation. After that,
+    every deterministic transition consumes the head returned by the previous
+    transition. If a lower-level transition durably appends before surfacing a
+    stale-head error, the facade may adopt that newer head only when every tail
+    event is proven to belong to this same operation id. Foreign/concurrent tail
+    events still fail closed.
     """
+    if isinstance(max_transitions, bool) or not 1 <= int(max_transitions) <= 100:
+        raise ValueError("max_transitions must be between 1 and 100")
+
     sequence = int(expected_sequence)
     state_hash = str(expected_state_hash)
     prefix = str(operation_id).strip() + ":"
+    transitions_used = 0
+    self_handoffs = 0
 
-    for _attempt in range(_SELF_STALE_HEAD_HANDOFF_LIMIT):
+    while transitions_used < int(max_transitions):
         try:
-            return _ORIGINAL_ADVANCE_WALK_FORWARD(
+            result = _ORIGINAL_ADVANCE_WALK_FORWARD(
                 control,
                 reports,
                 experiment_id=experiment_id,
@@ -92,7 +99,9 @@ def _advance_with_internal_head_handoff(
                 expected_state_hash=state_hash,
                 review_interval_months=review_interval_months,
                 max_scan_rows=max_scan_rows,
-                max_transitions=max_transitions,
+                # One deterministic transition per call makes the returned head
+                # authoritative for the next transition.
+                max_transitions=1,
             )
         except ValueError as exc:
             if "walk-forward experiment changed since it was read" not in str(exc):
@@ -114,13 +123,43 @@ def _advance_with_internal_head_handoff(
                 event_operation = str(event.get("operation_id") or "")
                 if event_operation != operation_id and not event_operation.startswith(prefix):
                     raise
+            # A same-request lower-level transition made durable causal progress.
+            # Adopt that head and continue; never reuse the caller's original head.
             sequence = current_sequence
             state_hash = current_hash
+            transitions_used += 1
+            self_handoffs += 1
+            continue
 
-    raise ValueError(
-        "walk-forward internal head changed repeatedly during one advance request"
-    )
+        returned_sequence = int(result.get("sequence", sequence))
+        returned_hash = str(result.get("state_hash") or state_hash)
+        if returned_sequence < sequence:
+            raise ValueError("walk-forward advance returned a regressed causal sequence")
+        if returned_sequence > sequence and returned_hash == state_hash:
+            raise ValueError("walk-forward advance changed sequence without changing state hash")
+        sequence = returned_sequence
+        state_hash = returned_hash
 
+        if str(result.get("status") or "") == "TRANSITION_LIMIT_REACHED":
+            transitions_used += 1
+            continue
+
+        updated = deepcopy(result)
+        updated["sequence"] = sequence
+        updated["state_hash"] = state_hash
+        if self_handoffs:
+            updated["internal_head_handoffs"] = self_handoffs
+        return updated
+
+    return {
+        "contract": _impl.ORCHESTRATOR_CONTRACT,
+        "status": "TRANSITION_LIMIT_REACHED",
+        "experiment_id": experiment_id,
+        "sequence": sequence,
+        "state_hash": state_hash,
+        "max_transitions": int(max_transitions),
+        "internal_head_handoffs": self_handoffs,
+    }
 
 
 def _candidate_strategy_action(candidate: dict[str, Any]) -> str:
@@ -848,6 +887,69 @@ def _decorate_teacher_loss_packet(
     updated["flip_activation_allowed"] = result == "WIN"
     return updated
 
+def _adaptive_zero_trade_week_summary(
+    events: list[dict[str, Any]],
+    *,
+    current_boundary: Any,
+) -> dict[str, Any]:
+    """Summarize weekly adaptive execution exposure through the current boundary."""
+    boundary = _impl._utc_timestamp(
+        current_boundary, "adaptive participation current boundary"
+    )
+    boundaries: dict[str, Any] = {boundary.isoformat(): boundary}
+
+    for event in events:
+        if event.get("event_type") != "REVIEW_COMPLETED":
+            continue
+        payload = event.get("payload") or {}
+        if str(payload.get("review_type") or "").upper() not in {"PERIODIC", "QUARTERLY"}:
+            continue
+        raw = payload.get("scheduled_review_due_time") or event.get("effective_market_time")
+        if raw in (None, ""):
+            continue
+        when = _impl._utc_timestamp(raw, "adaptive prior review boundary")
+        if when <= boundary:
+            boundaries[when.isoformat()] = when
+
+    trade_times: list[Any] = []
+    for event in events:
+        if event.get("event_type") != "TRADE_RESOLVED":
+            continue
+        payload = event.get("payload") or {}
+        if str(payload.get("ledger", "RESEARCH")).upper() != "RESEARCH":
+            continue
+        raw = event.get("effective_market_time")
+        if raw in (None, ""):
+            continue
+        trade_times.append(_impl._utc_timestamp(raw, "adaptive trade resolution time"))
+
+    history: list[dict[str, Any]] = []
+    zero_weeks = 0
+    for week_end in sorted(boundaries.values()):
+        week_start = week_end - timedelta(days=7)
+        trade_count = sum(
+            week_start < trade_time <= week_end
+            for trade_time in trade_times
+        )
+        is_zero = trade_count == 0
+        if is_zero:
+            zero_weeks += 1
+        history.append(
+            {
+                "start_exclusive": week_start.isoformat(),
+                "end_inclusive": week_end.isoformat(),
+                "adaptive_trade_count": int(trade_count),
+                "zero_adaptive_trades": is_zero,
+            }
+        )
+
+    return {
+        "completed_adaptive_weeks_observed": len(history),
+        "weeks_with_zero_adaptive_trades": zero_weeks,
+        "weekly_participation_history": history,
+    }
+
+
 def _batch_review_evidence(
     control: Any,
     reports: Any,
@@ -1170,6 +1272,14 @@ def _batch_review_evidence(
                     )
                     if when <= start and history_payload.get("equity_after") not in (None, ""):
                         starting_equity = float(history_payload["equity_after"])
+                eligible_opportunities = None
+                if reference_population.get("available") is True:
+                    overall = reference_population.get("overall") or {}
+                    eligible_opportunities = int(overall.get("observations") or 0)
+                zero_trade_week_summary = _adaptive_zero_trade_week_summary(
+                    events,
+                    current_boundary=end,
+                )
                 raw_strategy_benchmark = build_raw_strategy_benchmark(
                     reports,
                     definition=definition,
@@ -1177,6 +1287,8 @@ def _batch_review_evidence(
                     end=end,
                     adaptive_prospective=prospective,
                     starting_equity=starting_equity,
+                    eligible_opportunities=eligible_opportunities,
+                    zero_trade_week_summary=zero_trade_week_summary,
                 )
             except Exception as exc:
                 raw_strategy_benchmark = {
@@ -1253,6 +1365,13 @@ def _batch_review_evidence(
         ),
         "raw_strategy_benchmark": (
             raw_strategy_benchmark if adaptive_weekly else None
+        ),
+        "adaptive_participation": (
+            deepcopy(raw_strategy_benchmark.get("participation"))
+            if adaptive_weekly
+            and isinstance(raw_strategy_benchmark, dict)
+            and raw_strategy_benchmark.get("available") is True
+            else None
         ),
         "adaptive_populations": adaptive_populations,
         "teacher_observations": teachers,
