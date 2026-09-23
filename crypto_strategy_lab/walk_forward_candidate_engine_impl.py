@@ -1135,12 +1135,12 @@ def _safe_context(
 def _next_teacher(
     manifest: dict[str, Any],
     run_dir: Path,
-    last_teacher_time: pd.Timestamp | None,
+    events: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], pd.Timestamp] | None:
     if "trades" not in (manifest.get("artifacts") or {}):
         return None
     path = artifact_path(run_dir, manifest, "trades", verify=True)
-    last = last_teacher_time
+    last = _last_teacher_time(events)
     with duckdb.connect(":memory:") as connection:
         columns = set(_columns(connection, path))
         required = {"pair_id", "pair_net_r", "exit_time"}
@@ -1243,15 +1243,10 @@ def get_next_walk_forward_candidate(
     samples_path = _artifact(reference_manifest, run_dir, "research_sampling_trades")
     context_path = _artifact(reference_manifest, run_dir, "feature_context")
 
-    last_teacher_raw = store.indexed_latest_effective_time_for_type(
-        experiment_id, "TEACHER_RESOLVED"
+    teacher_events = store.indexed_events(
+        experiment_id, event_types={"TEACHER_RESOLVED"}
     )
-    last_teacher_time = (
-        _utc_timestamp(last_teacher_raw, "teacher effective_market_time")
-        if last_teacher_raw not in (None, "")
-        else None
-    )
-    teacher = _next_teacher(reference_manifest, run_dir, last_teacher_time)
+    teacher = _next_teacher(reference_manifest, run_dir, teacher_events)
     cursor_raw = store.indexed_max_effective_market_time(experiment_id)
     cursor = (
         _utc_timestamp(cursor_raw, "effective_market_time")
