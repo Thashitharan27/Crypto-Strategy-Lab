@@ -225,7 +225,7 @@ class DILadderExecutionMixin:
         stop_price = self._ladder_level_price(episode, float(layer["stop_level"]))
         target_price = self._ladder_level_price(episode, float(layer["target_level"]))
         row = {
-            "strategy_candle_open_time": self.times[decision_i],
+            "strategy_candle_open_time": self._ladder_utc_timestamp(self.times[decision_i]),
             "strategy_entry_time": self._ladder_utc_timestamp(timestamp),
             "strategy_entry_price": float(trigger_price),
             "side": child_direction,
@@ -326,8 +326,10 @@ class DILadderExecutionMixin:
         pair.trade_direction = child_direction
         pair.signal_strategy_mode = "DI_LADDER"
         pair.entry_timing_mode = "LADDER_INTRABAR"
-        pair.signal_candle_time = pd.Timestamp(self.times[decision_i])
-        pair.signal_available_at = pd.Timestamp(self.times[decision_i]) + self.entry_delta
+        pair.signal_candle_time = self._ladder_utc_timestamp(self.times[decision_i])
+        pair.signal_available_at = (
+            self._ladder_utc_timestamp(self.times[decision_i]) + self.entry_delta
+        )
         pair.signal_close_price = float(self.close[decision_i])
         pair.next_bar_open_price = np.nan
         pair.entry_gap_pct = 0.0
@@ -420,7 +422,7 @@ class DILadderExecutionMixin:
             "ladder_episode_id": int(episode["episode_id"]),
             "ladder_layer": str(layer.get("name")),
             "ladder_decision": "ENTER",
-            "strategy_candle_open_time": self.times[decision_i],
+            "strategy_candle_open_time": self._ladder_utc_timestamp(self.times[decision_i]),
             "strategy_entry_time": self._ladder_utc_timestamp(timestamp),
             "strategy_entry_price": float(raw_fill),
         })
