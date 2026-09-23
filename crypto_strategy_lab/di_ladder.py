@@ -87,6 +87,7 @@ class DILadderExecutionMixin:
                     "decision": None,
                     "decision_reason": None,
                     "trigger_timestamp": None,
+                    "skip_outcome": None,
                 }
                 for layer in layers
             ],
@@ -466,6 +467,26 @@ class DILadderExecutionMixin:
             layer["decision_reason"] = reason
             episode["entered_layers"].append(str(layer.get("name")))
 
+    def _update_skipped_ladder_outcomes(self, episode, high: float, low: float) -> None:
+        """Set the hypothetical result of each skipped short/long using the same tie policy."""
+        child_long = episode["child_direction"] == "LONG"
+        for layer in episode["layers"]:
+            if not layer.get("skipped") or layer.get("skip_outcome") is not None:
+                continue
+            target = self._ladder_level_price(episode, float(layer["target_level"]))
+            stop = self._ladder_level_price(episode, float(layer["stop_level"]))
+            hit_tp = float(high) >= target if child_long else float(low) <= target
+            hit_sl = float(low) <= stop if child_long else float(high) >= stop
+            if not (hit_tp or hit_sl):
+                continue
+            if hit_tp and hit_sl:
+                hypothetical_win = self.config.tie_policy == TiePolicy.OPTIMISTIC
+            else:
+                hypothetical_win = hit_tp
+            layer["skip_outcome"] = (
+                "WRONG_CONTINUATION" if hypothetical_win else "CORRECT_REVERSAL"
+            )
+
     def _process_ladder_intrabar_row(
         self, episode, execution_i: int, j: int, timestamp,
         raw_open: float, high: float, low: float
@@ -492,6 +513,7 @@ class DILadderExecutionMixin:
         self._trigger_ladder_layers(
             episode, execution_i, timestamp, raw_open, high, low
         )
+        self._update_skipped_ladder_outcomes(episode, high, low)
 
         for pair in list(self.active_pairs):
             if getattr(pair, "ladder_episode_id", None) != episode["episode_id"]:
@@ -589,6 +611,11 @@ class DILadderExecutionMixin:
         if still_open:
             return
         episode["finished"] = True
+        initial_reason = episode["initial_pair"].position.exit_reason
+        episode["initial_exit_reason"] = (
+            getattr(initial_reason, "value", str(initial_reason))
+            if initial_reason is not None else None
+        )
         exits = [
             pd.Timestamp(pair.position.exit_time)
             for pair in self.completed_pairs
