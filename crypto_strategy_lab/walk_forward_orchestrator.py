@@ -20,6 +20,7 @@ causal FLIP rule already changed the candidate's strategy action.
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timedelta
 from typing import Any
 
 from crypto_strategy_lab import walk_forward_orchestrator_impl as _impl
@@ -888,6 +889,69 @@ def _decorate_teacher_loss_packet(
     updated["flip_activation_allowed"] = result == "WIN"
     return updated
 
+def _adaptive_zero_trade_week_summary(
+    events: list[dict[str, Any]],
+    *,
+    current_boundary: Any,
+) -> dict[str, Any]:
+    """Summarize weekly adaptive execution exposure through the current boundary."""
+    boundary = _impl._utc_timestamp(
+        current_boundary, "adaptive participation current boundary"
+    )
+    boundaries: dict[str, Any] = {boundary.isoformat(): boundary}
+
+    for event in events:
+        if event.get("event_type") != "REVIEW_COMPLETED":
+            continue
+        payload = event.get("payload") or {}
+        if str(payload.get("review_type") or "").upper() not in {"PERIODIC", "QUARTERLY"}:
+            continue
+        raw = payload.get("scheduled_review_due_time") or event.get("effective_market_time")
+        if raw in (None, ""):
+            continue
+        when = _impl._utc_timestamp(raw, "adaptive prior review boundary")
+        if when <= boundary:
+            boundaries[when.isoformat()] = when
+
+    trade_times: list[Any] = []
+    for event in events:
+        if event.get("event_type") != "TRADE_RESOLVED":
+            continue
+        payload = event.get("payload") or {}
+        if str(payload.get("ledger", "RESEARCH")).upper() != "RESEARCH":
+            continue
+        raw = event.get("effective_market_time")
+        if raw in (None, ""):
+            continue
+        trade_times.append(_impl._utc_timestamp(raw, "adaptive trade resolution time"))
+
+    history: list[dict[str, Any]] = []
+    zero_weeks = 0
+    for week_end in sorted(boundaries.values()):
+        week_start = week_end - timedelta(days=7)
+        trade_count = sum(
+            week_start < trade_time <= week_end
+            for trade_time in trade_times
+        )
+        is_zero = trade_count == 0
+        if is_zero:
+            zero_weeks += 1
+        history.append(
+            {
+                "start_exclusive": week_start.isoformat(),
+                "end_inclusive": week_end.isoformat(),
+                "adaptive_trade_count": int(trade_count),
+                "zero_adaptive_trades": is_zero,
+            }
+        )
+
+    return {
+        "completed_adaptive_weeks_observed": len(history),
+        "weeks_with_zero_adaptive_trades": zero_weeks,
+        "weekly_participation_history": history,
+    }
+
+
 def _batch_review_evidence(
     control: Any,
     reports: Any,
@@ -1210,6 +1274,14 @@ def _batch_review_evidence(
                     )
                     if when <= start and history_payload.get("equity_after") not in (None, ""):
                         starting_equity = float(history_payload["equity_after"])
+                eligible_opportunities = None
+                if reference_population.get("available") is True:
+                    overall = reference_population.get("overall") or {}
+                    eligible_opportunities = int(overall.get("observations") or 0)
+                zero_trade_week_summary = _adaptive_zero_trade_week_summary(
+                    events,
+                    current_boundary=end,
+                )
                 raw_strategy_benchmark = build_raw_strategy_benchmark(
                     reports,
                     definition=definition,
@@ -1217,6 +1289,8 @@ def _batch_review_evidence(
                     end=end,
                     adaptive_prospective=prospective,
                     starting_equity=starting_equity,
+                    eligible_opportunities=eligible_opportunities,
+                    zero_trade_week_summary=zero_trade_week_summary,
                 )
             except Exception as exc:
                 raw_strategy_benchmark = {
