@@ -22,6 +22,7 @@ from crypto_strategy_lab.gui.research_feature_ownership import (
 from crypto_strategy_lab.gui.risk_execution_install import (
     apply_risk_execution_workspace,
 )
+from crypto_strategy_lab.gui.ladder_rule_install import apply_ladder_rule_workspace
 from crypto_strategy_lab.gui.reports_diagnostics_install import (
     apply_reports_diagnostics_workspace,
 )
@@ -93,6 +94,7 @@ def main() -> int:
         window = MainWindow(startup_status=status)
         apply_research_feature_ownership(window)
         apply_risk_execution_workspace(window)
+        apply_ladder_rule_workspace(window)
         apply_reports_diagnostics_workspace(window)
         install_run_progress(window)
         apply_review_run_workspace(window)
