@@ -234,3 +234,35 @@ def test_di_ladder_mirrors_for_initial_short():
     assert initial.pair_gross_pnl == pytest.approx(-50.0)
     assert list(children.pair_gross_pnl) == pytest.approx([10.0, 10.0, 10.0, 10.0])
     assert initial.ladder_episode_gross_pnl == pytest.approx(-10.0)
+
+
+
+def test_di_ladder_preserves_naive_internal_times_but_publishes_utc():
+    strategy = _strategy_candles().copy()
+    strategy["timestamp"] = strategy["timestamp"].dt.tz_localize(None)
+    intrabar = _intrabar(
+        [
+            (100, 100, 98, 98),
+            (98, 102, 98, 102),
+        ]
+    ).copy()
+    intrabar["timestamp"] = intrabar["timestamp"].dt.tz_localize(None)
+
+    engine = BacktestEngine(strategy, _config(), intrabar)
+    engine.market_regime_values[:] = "SIDEWAYS"
+    engine.plus_di_values[:] = 50.0
+    engine.minus_di_values[:] = 10.0
+    engine.di_spread[:] = 40.0
+    engine.adx_values[:] = 25.0
+
+    trades = engine.run()
+
+    child = next(
+        pair for pair in engine.completed_pairs
+        if getattr(pair, "ladder_is_child", False)
+    )
+    assert pd.Timestamp(child.position.entry_time).tzinfo is None
+    child_row = trades.loc[trades.ladder_layer == "S1"].iloc[0]
+    assert pd.Timestamp(child_row.strategy_entry_time).tzinfo is not None
+    assert pd.Timestamp(child_row.actual_entry_timestamp).tzinfo is not None
+    assert child_row.pair_gross_pnl == pytest.approx(-20.0)
