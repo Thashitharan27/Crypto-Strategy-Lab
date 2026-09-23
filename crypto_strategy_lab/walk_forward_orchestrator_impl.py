@@ -77,9 +77,9 @@ def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
             "mode": WEEKLY_BATCH_OOS_MODE,
             "interval_weeks": 1,
             "freeze_between_reviews": True,
-            "adaptive": bool(raw.get("adaptive", False)),
         }
-        if policy["adaptive"]:
+        if bool(raw.get("adaptive", False)):
+            policy["adaptive"] = True
             policy.update(
                 {
                     "primary_lookback_weeks": int(
