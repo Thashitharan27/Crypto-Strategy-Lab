@@ -130,6 +130,35 @@ def _opposite_net_r(
     return float(rows[0][0])
 
 
+def _source_population_summary(
+    rows: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> dict[str, Any]:
+    values: list[float] = []
+    grouped: dict[tuple[str, str], list[float]] = {}
+    for row, _context in rows:
+        raw = row.get("pair_net_r")
+        if raw is None or pd.isna(raw):
+            continue
+        value = float(raw)
+        values.append(value)
+        key = (
+            str(row.get("strategy_profile_key") or "unknown").lower(),
+            str(row.get("side") or "UNKNOWN").upper(),
+        )
+        grouped.setdefault(key, []).append(value)
+    return {
+        "overall": _stats(values),
+        "by_profile_side": [
+            {
+                "strategy_profile_key": profile,
+                "side": side,
+                **_stats(group_values),
+            }
+            for (profile, side), group_values in sorted(grouped.items())
+        ],
+    }
+
+
 def _rule_matches(
     rows: list[tuple[dict[str, Any], dict[str, Any]]],
     *,
@@ -271,6 +300,11 @@ def build_adaptive_source_history(
     context_rows = _reference_rows(
         samples_path, context_path, start=context_start, end=end
     )
+    primary_rows = [
+        pair
+        for pair in context_rows
+        if _utc(pair[0].get("exit_time"), "source exit_time") > primary_start
+    ]
     recent_records = [
         record
         for record in records
@@ -412,6 +446,20 @@ def build_adaptive_source_history(
         ),
         "primary_lookback_weeks": primary_weeks,
         "context_lookback_weeks": context_weeks,
+        "reference_windows": {
+            "primary": {
+                "weeks": primary_weeks,
+                "start_exclusive": primary_start.isoformat(),
+                "end_inclusive": end.isoformat(),
+                **_source_population_summary(primary_rows),
+            },
+            "context": {
+                "weeks": context_weeks,
+                "start_exclusive": context_start.isoformat(),
+                "end_inclusive": end.isoformat(),
+                **_source_population_summary(context_rows),
+            },
+        },
         "rules": rule_rows,
         "status_values": [
             "ACTIVE_SUPPORTED",
