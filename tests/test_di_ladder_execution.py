@@ -151,7 +151,7 @@ def test_di_ladder_full_adverse_path_reduces_five_level_loss_to_one_level():
     assert initial.pair_gross_pnl == pytest.approx(-50.0)
     assert list(children.pair_gross_pnl) == pytest.approx([10.0, 10.0, 10.0, 10.0])
     assert initial.ladder_episode_gross_pnl == pytest.approx(-10.0)
-    assert initial.ladder_deepest_reached_level == pytest.approx(-4.0)
+    assert initial.ladder_deepest_reached_level == pytest.approx(-5.0)
 
 
 def test_skipping_s1_then_continuing_makes_the_later_reversal_10_dollars_worse():
