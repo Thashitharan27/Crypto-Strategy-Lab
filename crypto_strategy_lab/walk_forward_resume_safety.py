@@ -206,6 +206,8 @@ def resume_safe_freeze_and_reveal_walk_forward_view(
             experiment_id=experiment_id,
             candidate_id=candidate_id,
             operation_id=operation_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
         )
     return orchestrator._reveal_frozen_candidate(
         control,
@@ -213,6 +215,8 @@ def resume_safe_freeze_and_reveal_walk_forward_view(
         experiment_id=experiment_id,
         candidate_id=candidate_id,
         operation_id=operation_id,
+        expected_sequence=expected_sequence,
+        expected_state_hash=expected_state_hash,
     )
 
 

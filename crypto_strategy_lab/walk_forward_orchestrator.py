@@ -58,6 +58,81 @@ _ORIGINAL_ADVANCE_WALK_FORWARD = _impl.advance_walk_forward
 _ORIGINAL_BUILD_LOSS_REVIEW_PACKET = _impl.build_loss_review_packet
 
 
+def _verified_entry_head(
+    control: Any,
+    experiment_id: str,
+    operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
+) -> tuple[Any, dict[str, Any], list[dict[str, Any]], int, str]:
+    """Validate caller head, or resume only this exact operation's durable tail."""
+    try:
+        store, readback, events = _impl._verified(
+            control,
+            experiment_id,
+            expected_sequence,
+            expected_state_hash,
+        )
+        return (
+            store,
+            readback,
+            events,
+            int(readback["sequence"]),
+            str(readback["state_hash"]),
+        )
+    except ValueError as exc:
+        if "walk-forward experiment changed since it was read" not in str(exc):
+            raise
+
+    store = _impl._store(control)
+    current = _impl._read_store(store, experiment_id, recent_events=0)
+    current_sequence = int(current["sequence"])
+    current_hash = str(current["state_hash"])
+    start_sequence = int(expected_sequence)
+    start_hash = str(expected_state_hash).strip().lower()
+    operation = str(operation_id or "").strip()
+    if not operation or current_sequence <= start_sequence:
+        raise ValueError(
+            "walk-forward experiment changed since it was read; "
+            "read the verified chain head again"
+        )
+
+    events = _impl._events(store, experiment_id)
+    if start_sequence < 1 or start_sequence > len(events):
+        raise ValueError(
+            "walk-forward experiment changed since it was read; "
+            "read the verified chain head again"
+        )
+    if (
+        str(events[start_sequence - 1].get("resulting_state_hash") or "").lower()
+        != start_hash
+    ):
+        raise ValueError(
+            "walk-forward experiment changed since it was read; "
+            "read the verified chain head again"
+        )
+
+    prefix = operation + ":"
+    for event in events:
+        sequence = int(event.get("sequence", 0))
+        if not start_sequence < sequence <= current_sequence:
+            continue
+        event_operation = str(event.get("operation_id") or "")
+        if event_operation != operation and not event_operation.startswith(prefix):
+            raise ValueError(
+                "walk-forward experiment changed since it was read; "
+                "read the verified chain head again"
+            )
+
+    store, readback, events = _impl._verified(
+        control,
+        experiment_id,
+        current_sequence,
+        current_hash,
+    )
+    return store, readback, events, current_sequence, current_hash
+
+
 def _advance_with_internal_head_handoff(
     control: Any,
     reports: Any,
@@ -89,12 +164,20 @@ def _advance_with_internal_head_handoff(
     self_handoffs = 0
 
     while transitions_used < int(max_transitions):
+        # The core is intentionally invoked with max_transitions=1, so its local
+        # step counter restarts at zero on every call. Give each core invocation
+        # a deterministic identity anchored to the causal head; otherwise
+        # sub-operation ids such as resume-0:reveal can collide across different
+        # candidates and replay an older event.
+        transition_operation_id = _impl._operation(
+            operation_id, f"transition-from-{sequence}"
+        )
         try:
             result = _ORIGINAL_ADVANCE_WALK_FORWARD(
                 control,
                 reports,
                 experiment_id=experiment_id,
-                operation_id=operation_id,
+                operation_id=transition_operation_id,
                 expected_sequence=sequence,
                 expected_state_hash=state_hash,
                 review_interval_months=review_interval_months,
@@ -232,6 +315,8 @@ def _reveal_frozen_candidate(
     experiment_id: str,
     candidate_id: str,
     operation_id: str,
+    expected_sequence: int | None = None,
+    expected_state_hash: str | None = None,
 ) -> dict[str, Any]:
     """Legacy reveal path with immutable-definition reference-run fallback.
 
@@ -277,7 +362,15 @@ def _reveal_frozen_candidate(
     frozen = frozen_event.get("payload") or {}
     frozen_side = str(frozen.get("final_action", "")).upper()
 
-    readback = _impl._read_store(store, experiment_id, recent_events=0)
+    if expected_sequence is not None and expected_state_hash not in (None, ""):
+        store, readback, events = _impl._verified(
+            control,
+            experiment_id,
+            int(expected_sequence),
+            str(expected_state_hash),
+        )
+    else:
+        readback = _impl._read_store(store, experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
@@ -327,6 +420,8 @@ def _reveal_strategy_action_candidate(
     experiment_id: str,
     candidate_id: str,
     operation_id: str,
+    expected_sequence: int | None = None,
+    expected_state_hash: str | None = None,
 ) -> dict[str, Any]:
     """Reveal only the strategy's executable side after ChatGPT view is frozen."""
     store = _impl._store(control)
@@ -376,7 +471,15 @@ def _reveal_strategy_action_candidate(
         frozen.get("chatgpt_view") or frozen.get("final_action") or ""
     ).strip().upper()
 
-    readback = _impl._read_store(store, experiment_id, recent_events=0)
+    if expected_sequence is not None and expected_state_hash not in (None, ""):
+        store, readback, events = _impl._verified(
+            control,
+            experiment_id,
+            int(expected_sequence),
+            str(expected_state_hash),
+        )
+    else:
+        readback = _impl._read_store(store, experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
@@ -1489,8 +1592,18 @@ def advance_walk_forward(
     if max_scan_rows < 1:
         raise ValueError("max_scan_rows must be positive")
 
-    store, readback, events = _impl._verified(
-        control, experiment_id, expected_sequence, expected_state_hash
+    (
+        store,
+        readback,
+        events,
+        accepted_sequence,
+        accepted_state_hash,
+    ) = _verified_entry_head(
+        control,
+        experiment_id,
+        operation_id,
+        expected_sequence,
+        expected_state_hash,
     )
     phase = str(((readback.get("derived_state") or {}).get("phase") or "")).upper()
     if phase == "BOOTSTRAP_RESEARCH":
@@ -1500,8 +1613,8 @@ def advance_walk_forward(
             "contract": _impl.ORCHESTRATOR_CONTRACT,
             "status": "BOOTSTRAP_RESEARCH_REQUIRED",
             "experiment_id": experiment_id,
-            "sequence": int(expected_sequence),
-            "state_hash": str(expected_state_hash),
+            "sequence": int(accepted_sequence),
+            "state_hash": str(accepted_state_hash),
             "bootstrap_start": protocol.get("bootstrap_start"),
             "walk_forward_start": protocol.get("walk_forward_start"),
             "reference_run": definition.get("reference_run"),
@@ -1518,8 +1631,8 @@ def advance_walk_forward(
         reports,
         experiment_id=experiment_id,
         operation_id=operation_id,
-        expected_sequence=expected_sequence,
-        expected_state_hash=expected_state_hash,
+        expected_sequence=accepted_sequence,
+        expected_state_hash=accepted_state_hash,
         review_interval_months=review_interval_months,
         max_scan_rows=bounded_rows,
         max_transitions=max_transitions,

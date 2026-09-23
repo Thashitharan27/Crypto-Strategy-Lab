@@ -149,6 +149,8 @@ def _reveal_strategy_action_with_flip_replay(
     experiment_id: str,
     candidate_id: str,
     operation_id: str,
+    expected_sequence: int | None = None,
+    expected_state_hash: str | None = None,
 ) -> dict[str, Any]:
     """Reveal EVE normally, with immutable 1m fallback only for active FLIP trades."""
     try:
@@ -158,6 +160,8 @@ def _reveal_strategy_action_with_flip_replay(
             experiment_id=experiment_id,
             candidate_id=candidate_id,
             operation_id=operation_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
         )
     except ValueError as exc:
         if (
@@ -177,6 +181,8 @@ def _reveal_strategy_action_with_flip_replay(
             experiment_id=experiment_id,
             candidate_id=candidate_id,
             operation_id=operation_id,
+            expected_sequence=expected_sequence,
+            expected_state_hash=expected_state_hash,
         )
     if store._candidate_state(events, candidate_id) != "DECISION_FROZEN":
         raise ValueError("prospective FLIP replay requires a durably frozen decision")
@@ -213,7 +219,15 @@ def _reveal_strategy_action_with_flip_replay(
         frozen.get("chatgpt_view") or frozen.get("final_action") or ""
     ).strip().upper()
 
-    readback = store.read_fast(experiment_id, recent_events=0)
+    if expected_sequence is not None and expected_state_hash not in (None, ""):
+        store, readback, events = _wf_orchestrator._impl._verified(
+            control,
+            experiment_id,
+            int(expected_sequence),
+            str(expected_state_hash),
+        )
+    else:
+        readback = store.read_fast(experiment_id, recent_events=0)
     definition = (readback.get("manifest") or {}).get("definition") or {}
     reference_run = str(
         candidate.get("reference_run") or definition.get("reference_run") or ""
@@ -316,7 +330,7 @@ _ORIGINAL_CONTINUE_WALK_FORWARD_AUTONOMOUS = _impl._continue_walk_forward_autono
 _CREATE_ADVANCE_GRACE_ATTEMPTS = 20
 _CREATE_ADVANCE_GRACE_SECONDS = 0.1
 
-_REVIEW_PACKET_CACHE_VERSION = 3
+_REVIEW_PACKET_CACHE_VERSION = 4
 _RECOVERABLE_REVIEW_STATUSES = frozenset({
     "TEACHER_REVIEW_REQUIRED",
     "TEACHER_LOSS_REVIEW_REQUIRED",
@@ -378,6 +392,122 @@ def _review_packet_cache_head(
         raise ValueError(
             "walk-forward experiment changed since it was read; read the verified chain head again"
         )
+
+
+def _same_operation_advanced_head(
+    control: Any,
+    experiment_id: str,
+    *,
+    from_sequence: int,
+    from_state_hash: str,
+    operation_id: str,
+) -> tuple[int, str] | None:
+    """Return a newer head only when every tail event belongs to this operation.
+
+    This is the MCP-level recovery guard for a request that durably advanced its
+    own causal chain before surfacing a stale-head error or stale response head.
+    It never adopts foreign/concurrent mutations.
+    """
+    operation = str(operation_id or "").strip()
+    if not operation:
+        return None
+    store = _wf_orchestrator._impl._store(control)
+    current = store.read_fast(experiment_id, recent_events=0)
+    current_sequence = int(current.get("sequence", -1))
+    current_hash = str(current.get("state_hash") or "").lower()
+    start_sequence = int(from_sequence)
+    start_hash = str(from_state_hash or "").lower()
+
+    if current_sequence == start_sequence and current_hash == start_hash:
+        return None
+    if current_sequence <= start_sequence:
+        raise ValueError(
+            "walk-forward experiment changed since it was read; "
+            "read the verified chain head again"
+        )
+
+    events = _wf_orchestrator._impl._events(store, experiment_id)
+    if start_sequence < 1 or start_sequence > len(events):
+        raise ValueError(
+            "walk-forward experiment changed since it was read; "
+            "read the verified chain head again"
+        )
+    start_event = events[start_sequence - 1]
+    if str(start_event.get("resulting_state_hash") or "").lower() != start_hash:
+        raise ValueError(
+            "walk-forward experiment changed since it was read; "
+            "read the verified chain head again"
+        )
+
+    prefix = operation + ":"
+    tail = [
+        event
+        for event in events
+        if start_sequence < int(event.get("sequence", 0)) <= current_sequence
+    ]
+    if not tail:
+        return None
+    for event in tail:
+        event_operation = str(event.get("operation_id") or "")
+        if event_operation != operation and not event_operation.startswith(prefix):
+            raise ValueError(
+                "walk-forward experiment changed since it was read; "
+                "read the verified chain head again"
+            )
+    return current_sequence, current_hash
+
+
+def _reconcile_review_result_head(args, kwargs, result):
+    """Align a returned review packet with same-operation durable tail writes."""
+    if not isinstance(result, dict):
+        return result
+    status = str(result.get("status") or "")
+    if status not in _RECOVERABLE_REVIEW_STATUSES:
+        return result
+    control = args[0] if args else kwargs.get("control")
+    experiment_id = str(
+        result.get("experiment_id") or kwargs.get("experiment_id") or ""
+    ).strip()
+    operation_id = str(kwargs.get("operation_id") or "").strip()
+    sequence = result.get("sequence")
+    state_hash = str(result.get("state_hash") or "").strip().lower()
+    if (
+        control is None
+        or not experiment_id
+        or not operation_id
+        or sequence is None
+        or not state_hash
+    ):
+        return result
+
+    store = _wf_orchestrator._impl._store(control)
+    current = store.read_fast(experiment_id, recent_events=0)
+    current_sequence = int(current.get("sequence", -1))
+    current_hash = str(current.get("state_hash") or "").lower()
+    if current_sequence == int(sequence) and current_hash == state_hash:
+        return result
+
+    advanced = _same_operation_advanced_head(
+        control,
+        experiment_id,
+        from_sequence=int(sequence),
+        from_state_hash=state_hash,
+        operation_id=operation_id,
+    )
+    if advanced is None:
+        return result
+    next_sequence, next_hash = advanced
+    updated = deepcopy(result)
+    updated["sequence"] = next_sequence
+    updated["state_hash"] = next_hash
+    updated["post_action_head_reconciliation"] = {
+        "same_operation_only": True,
+        "from_sequence": int(sequence),
+        "from_state_hash": state_hash,
+        "to_sequence": next_sequence,
+        "to_state_hash": next_hash,
+    }
+    return updated
 
 
 def _review_packet_json_safe(value: Any) -> Any:
@@ -467,6 +597,7 @@ def _load_cached_review_packet(action, args, kwargs):
 
 
 def _persist_review_packet(action, args, kwargs, result):
+    result = _reconcile_review_result_head(args, kwargs, result)
     if not isinstance(result, dict):
         return result
     status = str(result.get("status") or "")
@@ -605,19 +736,73 @@ def _with_create_advance_grace(action, *args, **kwargs):
     if cached is not None:
         return cached
 
+    call_kwargs = dict(kwargs)
     last_error: ValueError | None = None
-    for attempt in range(_CREATE_ADVANCE_GRACE_ATTEMPTS):
+    self_stale_handoffs = 0
+    max_self_stale_handoffs = max(
+        4,
+        min(100, int(call_kwargs.get("max_transitions", 20)) + 4),
+    )
+
+    for attempt in range(
+        _CREATE_ADVANCE_GRACE_ATTEMPTS + max_self_stale_handoffs
+    ):
         try:
-            result = _with_rule_schema(action(*args, **kwargs))
-            return _persist_review_packet(action, args, kwargs, result)
+            raw_result = action(*args, **call_kwargs)
+            result = _with_rule_schema(raw_result)
+            result = _reconcile_review_result_head(args, call_kwargs, result)
+            if self_stale_handoffs and isinstance(result, dict):
+                result = deepcopy(result)
+                result["mcp_internal_head_handoffs"] = self_stale_handoffs
+            return _persist_review_packet(action, args, call_kwargs, result)
         except ValueError as exc:
-            if "causal experiment does not exist:" not in str(exc):
+            message = str(exc)
+            if "causal experiment does not exist:" in message:
+                last_error = exc
+                if attempt + 1 < _CREATE_ADVANCE_GRACE_ATTEMPTS:
+                    time.sleep(_CREATE_ADVANCE_GRACE_SECONDS)
+                    continue
                 raise
-            last_error = exc
-            if attempt + 1 < _CREATE_ADVANCE_GRACE_ATTEMPTS:
-                time.sleep(_CREATE_ADVANCE_GRACE_SECONDS)
-    assert last_error is not None
-    raise last_error
+
+            if "walk-forward experiment changed since it was read" not in message:
+                raise
+
+            control = args[0] if args else call_kwargs.get("control")
+            experiment_id = str(call_kwargs.get("experiment_id") or "").strip()
+            operation_id = str(call_kwargs.get("operation_id") or "").strip()
+            expected_sequence = call_kwargs.get("expected_sequence")
+            expected_hash = str(
+                call_kwargs.get("expected_state_hash") or ""
+            ).strip().lower()
+            if (
+                control is None
+                or not experiment_id
+                or not operation_id
+                or expected_sequence is None
+                or not expected_hash
+                or self_stale_handoffs >= max_self_stale_handoffs
+            ):
+                raise
+
+            advanced = _same_operation_advanced_head(
+                control,
+                experiment_id,
+                from_sequence=int(expected_sequence),
+                from_state_hash=expected_hash,
+                operation_id=operation_id,
+            )
+            if advanced is None:
+                raise
+            call_kwargs["expected_sequence"] = int(advanced[0])
+            call_kwargs["expected_state_hash"] = str(advanced[1])
+            self_stale_handoffs += 1
+            continue
+
+    if last_error is not None:
+        raise last_error
+    raise ValueError(
+        "walk-forward internal same-operation head handoff limit exceeded"
+    )
 
 
 def _advance_walk_forward_with_create_grace(*args, **kwargs):
