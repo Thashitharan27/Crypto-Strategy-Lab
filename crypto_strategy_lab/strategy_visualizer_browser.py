@@ -301,6 +301,10 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     if (value === Number(boot.defaultVisibleCandles)) option.selected = true;
     windowSize.appendChild(option);
   }
+  const fullRunOption = document.createElement('option');
+  fullRunOption.value = 'full';
+  fullRunOption.textContent = 'Full run';
+  windowSize.appendChild(fullRunOption);
 
   function api(path, params={}) {
     const query = new URLSearchParams(params);
@@ -724,14 +728,19 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     readout.textContent = 'Loading completed-run chart…';
     const trade = boot.trades.length ? currentTrade : '';
     try {
+      const fullRun = windowSize.value === 'full';
       payload = await fetchJson(api('/api/payload',{
         trade_index:String(trade),
-        visible_candles:windowSize.value,
+        visible_candles:fullRun ? String(boot.defaultVisibleCandles) : windowSize.value,
+        full_run:fullRun ? '1' : '0',
         show_rejections:showRejections.checked ? '1' : '0',
       }));
       renderTrade(payload.selectedTrade || {});
       renderChart(true);
-      readout.textContent = 'Pan/zoom freely. Click any candle for exact persisted rule and S/R evidence.';
+      readout.textContent = (payload.fullRun
+        ? 'Full run loaded · ' + (payload.candles || []).length.toLocaleString() + ' candles. '
+        : (payload.candles || []).length.toLocaleString() + ' candles loaded. ') +
+        'Pan/zoom freely. Click any candle for exact persisted rule and S/R evidence.';
       if (payload.selectedTradeCandleTime) {
         inspectedTime = Number(payload.selectedTradeCandleTime);
         await inspectTime(payload.selectedTradeCandleTime,false);
@@ -771,8 +780,22 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   tradeSelect.addEventListener('change',() => setTrade(Number(tradeSelect.value)));
   windowSize.addEventListener('change',loadPayload);
   showRejections.addEventListener('change',loadPayload);
+  function centerSelectedTrade() {
+    if (!chart || !payload?.selectedTradeCandleTime) return;
+    const candles = payload.candles || [];
+    if (!candles.length) return;
+    const target = Number(payload.selectedTradeCandleTime);
+    let index = candles.findIndex(item => Number(item.time) >= target);
+    if (index < 0) index = candles.length - 1;
+    const radius = 120;
+    const from = Number(candles[Math.max(0,index-radius)]?.time);
+    const to = Number(candles[Math.min(candles.length-1,index+radius)]?.time);
+    if (Number.isFinite(from) && Number.isFinite(to) && from < to)
+      chart.timeScale().setVisibleRange({from,to});
+  }
   $('center-trade').addEventListener('click',() => {
-    if (chart && payload?.visibleStart && payload?.visibleEnd)
+    if (payload?.fullRun) centerSelectedTrade();
+    else if (chart && payload?.visibleStart && payload?.visibleEnd)
       chart.timeScale().setVisibleRange({from:payload.visibleStart,to:payload.visibleEnd});
   });
   $('fit-chart').addEventListener('click',() => chart?.timeScale().fitContent());
@@ -911,6 +934,10 @@ class StrategyVisualizerBrowserServer:
                             ])[0]
                         )
                         visible = max(60, min(MAX_VISIBLE_CANDLES, visible))
+                        full_run = (
+                            (query.get("full_run") or ["0"])[0]
+                            in {"1", "true", "yes", "on"}
+                        )
                         show_rejections = (
                             (query.get("show_rejections") or ["0"])[0]
                             in {"1", "true", "yes", "on"}
@@ -920,6 +947,7 @@ class StrategyVisualizerBrowserServer:
                                 trade_index=trade_index,
                                 visible_candles=visible,
                                 show_rejections=show_rejections,
+                                full_run=full_run,
                             )
                         self._json(result)
                         return
