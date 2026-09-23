@@ -302,10 +302,11 @@ def build_adaptive_source_history(
             learning_matches, profile_available=learning_available
         )
 
+        recent_start = max(primary_start, learned_at)
         recent_rows = [
             pair
             for pair in context_rows
-            if _utc(pair[0].get("exit_time"), "source exit_time") > primary_start
+            if _utc(pair[0].get("exit_time"), "source exit_time") > recent_start
         ]
         recent_matches, recent_available = _rule_matches(
             recent_rows,
@@ -375,7 +376,7 @@ def build_adaptive_source_history(
                 "weekly_history": weekly_history,
                 "recent_window": {
                     "weeks": primary_weeks,
-                    "start_exclusive": primary_start.isoformat(),
+                    "start_exclusive": recent_start.isoformat(),
                     "end_inclusive": end.isoformat(),
                     **recent,
                 },
