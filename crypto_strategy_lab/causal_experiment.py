@@ -299,20 +299,20 @@ class CausalExperimentStore:
                 # the native object contract instead of leaving two active shapes.
                 adaptive_input = {
                     "enabled": True,
-                    "primary_lookback_weeks": int(
-                        rule_update_policy.get("primary_lookback_weeks", 4)
+                    "primary_lookback_weeks": rule_update_policy.get(
+                        "primary_lookback_weeks", 4
                     ),
-                    "context_lookback_weeks": int(
-                        rule_update_policy.get("context_lookback_weeks", 12)
+                    "context_lookback_weeks": rule_update_policy.get(
+                        "context_lookback_weeks", 12
                     ),
-                    "benchmark_raw_strategy": bool(
-                        rule_update_policy.get("benchmark_raw_strategy", True)
+                    "benchmark_raw_strategy": rule_update_policy.get(
+                        "benchmark_raw_strategy", True
                     ),
-                    "track_adaptation_lag": bool(
-                        rule_update_policy.get("track_adaptation_lag", True)
+                    "track_adaptation_lag": rule_update_policy.get(
+                        "track_adaptation_lag", True
                     ),
-                    "track_rule_half_life": bool(
-                        rule_update_policy.get("track_rule_half_life", True)
+                    "track_rule_half_life": rule_update_policy.get(
+                        "track_rule_half_life", True
                     ),
                 }
             adaptive = normalize_adaptive_weekly(adaptive_input)
