@@ -38,6 +38,33 @@ SR_HTF_DEFAULTS: dict[str, Any] = {
     "sr_timeframe_minutes": 0,
 }
 
+DI_LADDER_DEFAULTS: dict[str, Any] = {
+    "di_ladder_enabled": False,
+    "di_ladder_level_r": 0.20,
+    "di_ladder_layers": (
+        {
+            "name": "S1", "enabled": True, "entry_level": -1.0,
+            "target_level": -2.0, "stop_level": 1.0,
+            "filter_match_mode": "ALL", "entry_rules": [],
+        },
+        {
+            "name": "S2", "enabled": True, "entry_level": -2.0,
+            "target_level": -3.0, "stop_level": 1.0,
+            "filter_match_mode": "ALL", "entry_rules": [],
+        },
+        {
+            "name": "S3", "enabled": True, "entry_level": -3.0,
+            "target_level": -4.0, "stop_level": 1.0,
+            "filter_match_mode": "ALL", "entry_rules": [],
+        },
+        {
+            "name": "S4", "enabled": True, "entry_level": -4.0,
+            "target_level": -5.0, "stop_level": 1.0,
+            "filter_match_mode": "ALL", "entry_rules": [],
+        },
+    ),
+}
+
 SR_DYNAMIC_TP_DEFAULTS: dict[str, Any] = {
     # Structural stop defaults are inert unless risk_mode == SR_STRUCTURE.
     "sr_stop_timeframe_minutes": 0,
@@ -58,6 +85,7 @@ ENHANCED_DEFAULTS: dict[str, Any] = {
     **DI_PRESSURE_FILTER_DEFAULTS,
     **MEAN_REVERSION_V2_DEFAULTS,
     **SR_HTF_DEFAULTS,
+    **DI_LADDER_DEFAULTS,
     **SR_DYNAMIC_TP_DEFAULTS,
 }
 
@@ -78,6 +106,9 @@ class EnhancedBacktestConfig(BacktestConfig):
     mean_reversion_track_atr_distance: bool = True
     mean_reversion_track_motion: bool = True
     sr_timeframe_minutes: int = 0
+    di_ladder_enabled: bool = False
+    di_ladder_level_r: float = 0.20
+    di_ladder_layers: tuple = DI_LADDER_DEFAULTS["di_ladder_layers"]
     sr_stop_timeframe_minutes: int = 0
     sr_stop_buffer_atr: float = 0.25
     sr_stop_maximum_atr: float = 3.0
@@ -110,6 +141,13 @@ class EnhancedBacktestConfig(BacktestConfig):
         overbought = float(self.mean_reversion_rsi_overbought)
         if not 0 <= oversold < overbought <= 100:
             raise ValueError("RSI thresholds must satisfy 0 <= oversold < overbought <= 100")
+
+        if self.di_ladder_level_r <= 0:
+            raise ValueError("di_ladder_level_r must be positive")
+        if isinstance(self.di_ladder_layers, list):
+            object.__setattr__(self, "di_ladder_layers", tuple(self.di_ladder_layers))
+        if self.di_ladder_enabled and not self.di_ladder_layers:
+            raise ValueError("DI ladder execution requires at least one configured layer")
 
         sr_tf = int(self.sr_timeframe_minutes)
         object.__setattr__(self, "sr_timeframe_minutes", sr_tf)

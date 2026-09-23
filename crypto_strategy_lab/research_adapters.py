@@ -164,6 +164,14 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
         "proposed_entry",
         "proposed_stop",
         "proposed_target",
+        "ladder_episode_id",
+        "ladder_layer",
+        "ladder_decision",
+        "ladder_entry_level",
+        "ladder_target_level",
+        "ladder_stop_level",
+        "ladder_skip_outcome",
+        "ladder_skip_correct",
     ]
 
     prepared_times = pd.to_datetime(prepared.timestamp, utc=True)
@@ -187,8 +195,8 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
             ) from exc
         plus_di = pd.to_numeric(raw.get("plus_di"), errors="coerce")
         minus_di = pd.to_numeric(raw.get("minus_di"), errors="coerce")
-        side = None
-        if pd.notna(plus_di) and pd.notna(minus_di) and plus_di != minus_di:
+        side = raw.get("side")
+        if side is None and pd.notna(plus_di) and pd.notna(minus_di) and plus_di != minus_di:
             side = "LONG" if plus_di > minus_di else "SHORT"
         rows.append(
             {
@@ -201,8 +209,16 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
                 "decision": "REJECT",
                 "reason_code": raw.get("entry_filter_reason") or raw.get("reason"),
                 "proposed_entry": raw.get("strategy_entry_price"),
-                "proposed_stop": None,
-                "proposed_target": None,
+                "proposed_stop": raw.get("proposed_stop"),
+                "proposed_target": raw.get("proposed_target"),
+                "ladder_episode_id": raw.get("ladder_episode_id"),
+                "ladder_layer": raw.get("ladder_layer"),
+                "ladder_decision": raw.get("ladder_decision"),
+                "ladder_entry_level": raw.get("ladder_entry_level"),
+                "ladder_target_level": raw.get("ladder_target_level"),
+                "ladder_stop_level": raw.get("ladder_stop_level"),
+                "ladder_skip_outcome": raw.get("ladder_skip_outcome"),
+                "ladder_skip_correct": raw.get("ladder_skip_correct"),
             }
         )
 
@@ -248,6 +264,14 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
                     "proposed_entry": trade.get("strategy_entry_price"),
                     "proposed_stop": trade.get("initial_stop_price"),
                     "proposed_target": trade.get("initial_target_price"),
+                    "ladder_episode_id": trade.get("ladder_episode_id"),
+                    "ladder_layer": trade.get("ladder_layer"),
+                    "ladder_decision": trade.get("ladder_filter_decision"),
+                    "ladder_entry_level": trade.get("ladder_entry_level"),
+                    "ladder_target_level": trade.get("ladder_target_level"),
+                    "ladder_stop_level": trade.get("ladder_stop_level"),
+                    "ladder_skip_outcome": None,
+                    "ladder_skip_correct": None,
                 }
             )
 
@@ -265,6 +289,14 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
                 "proposed_entry": pd.Series(dtype="float64"),
                 "proposed_stop": pd.Series(dtype="float64"),
                 "proposed_target": pd.Series(dtype="float64"),
+                "ladder_episode_id": pd.Series(dtype="Int64"),
+                "ladder_layer": pd.Series(dtype="string"),
+                "ladder_decision": pd.Series(dtype="string"),
+                "ladder_entry_level": pd.Series(dtype="float64"),
+                "ladder_target_level": pd.Series(dtype="float64"),
+                "ladder_stop_level": pd.Series(dtype="float64"),
+                "ladder_skip_outcome": pd.Series(dtype="string"),
+                "ladder_skip_correct": pd.Series(dtype="boolean"),
             }
         )
     result = pd.DataFrame(rows, columns=columns)
@@ -280,6 +312,47 @@ def _signal_frame(prepared, trades: pd.DataFrame, skipped_signals) -> pd.DataFra
     return result.sort_values(
         ["strategy_index", "decision", "signal_id"], kind="stable"
     ).reset_index(drop=True)
+
+
+def _annotate_ladder_signal_outcomes(signals: pd.DataFrame, engine) -> pd.DataFrame:
+    """Attach ex-post labels to causal SKIP decisions without changing the decision itself."""
+    if signals.empty or "ladder_episode_id" not in signals.columns:
+        return signals
+    history = getattr(engine, "_di_ladder_episode_history", {}) or {}
+    if not history:
+        return signals
+    result = signals.copy()
+    outcomes = []
+    correct = []
+    for _, row in result.iterrows():
+        if str(row.get("ladder_decision") or "").upper() != "SKIP":
+            outcomes.append(row.get("ladder_skip_outcome"))
+            correct.append(row.get("ladder_skip_correct"))
+            continue
+        episode_raw = row.get("ladder_episode_id")
+        layer_name = row.get("ladder_layer")
+        try:
+            episode_id = int(episode_raw)
+        except (TypeError, ValueError, OverflowError):
+            outcomes.append(None)
+            correct.append(pd.NA)
+            continue
+        episode = history.get(episode_id)
+        state = None if episode is None else next(
+            (layer for layer in episode.get("layers", ()) if str(layer.get("name")) == str(layer_name)),
+            None,
+        )
+        outcome = None if state is None else state.get("skip_outcome")
+        outcomes.append(outcome)
+        if outcome == "CORRECT_REVERSAL":
+            correct.append(True)
+        elif outcome == "WRONG_CONTINUATION":
+            correct.append(False)
+        else:
+            correct.append(pd.NA)
+    result["ladder_skip_outcome"] = pd.Series(outcomes, index=result.index, dtype="string")
+    result["ladder_skip_correct"] = pd.Series(correct, index=result.index, dtype="boolean")
+    return result
 
 
 RULE_TRACE_COLUMNS = (
@@ -478,7 +551,9 @@ class NativeSimulator:
         started = time.perf_counter()
         self.last_signals = run_stage(
             "signal capture",
-            lambda: _signal_frame(prepared, trades, skipped_signals),
+            lambda: _annotate_ladder_signal_outcomes(
+                _signal_frame(prepared, trades, skipped_signals), engine
+            ),
         )
         self.last_rule_trace = run_stage(
             "strategy rule trace capture",

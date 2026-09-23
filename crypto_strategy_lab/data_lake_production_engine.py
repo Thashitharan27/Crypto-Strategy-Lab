@@ -233,6 +233,7 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
         self.active_pairs=[]; self.completed_pairs=[]; self.telemetry_rows=[]; self.skipped_signals=[]; self.skipped_daily_entries=[]
         self.signals_evaluated=0; self.daily_entry_opportunities=0; self.daily_entries_on_schedule=0; self.daily_entries_next_available=0; self.pending_daily_entry=None; self.pending_next_open_entry=None; self.next_pair_id=1
         self.current_equity=config.initial_equity; self.missing_intrabar_intervals=[]; self.fallback_reasons=[]
+        self._initialize_di_ladder_state()
         self.entry_delta=prepared.strategy_interval
         sr_block = next((block for block in prepared.research if block.name == "support_resistance"), None)
         if config.enable_support_resistance_analysis and sr_block is None:
@@ -558,6 +559,8 @@ class DataLakeProductionBacktestEngine(DataLakeBacktestEngine, SRDynamicTPBackte
 
     def _update_positions_to_strategy_index(self, i):
         """Advance each active directional trade without rebuilding a pair tuple."""
+        if self._update_di_ladder_positions_to_strategy_index(i):
+            return
         for pair in self.active_pairs:
             position = pair.position
             if i > position.entry_index:

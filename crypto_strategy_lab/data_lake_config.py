@@ -297,6 +297,48 @@ def _execution_profiles() -> dict[str, ExecutionProfileConfig]:
     return {key: ExecutionProfileConfig() for key in PROFILE_KEYS}
 
 
+def _default_di_ladder_layers() -> tuple[dict[str, Any], ...]:
+    """Default opposite-side ladder expressed in initial-trade sizing-R levels."""
+    return (
+        {
+            "name": "S1",
+            "enabled": True,
+            "entry_level": -1.0,
+            "target_level": -2.0,
+            "stop_level": 1.0,
+            "filter_match_mode": "ALL",
+            "entry_rules": [],
+        },
+        {
+            "name": "S2",
+            "enabled": True,
+            "entry_level": -2.0,
+            "target_level": -3.0,
+            "stop_level": 1.0,
+            "filter_match_mode": "ALL",
+            "entry_rules": [],
+        },
+        {
+            "name": "S3",
+            "enabled": True,
+            "entry_level": -3.0,
+            "target_level": -4.0,
+            "stop_level": 1.0,
+            "filter_match_mode": "ALL",
+            "entry_rules": [],
+        },
+        {
+            "name": "S4",
+            "enabled": True,
+            "entry_level": -4.0,
+            "target_level": -5.0,
+            "stop_level": 1.0,
+            "filter_match_mode": "ALL",
+            "entry_rules": [],
+        },
+    )
+
+
 @dataclass(frozen=True)
 class StrategyConfig:
     profiles: Mapping[str, StrategyProfileConfig] = field(default_factory=_strategy_profiles)
@@ -348,6 +390,9 @@ class ExecutionConfig:
     tie_policy: str = "PESSIMISTIC"
     max_active_pairs: int = 1
     zero_cost_comparison: bool = False
+    di_ladder_enabled: bool = False
+    di_ladder_level_r: float = 0.20
+    di_ladder_layers: tuple = field(default_factory=_default_di_ladder_layers)
     sr_take_profit_timeframe_minutes: int = -1
     sr_take_profit_mode: str = "FIXED_R"
     sr_take_profit_maximum_r: float = 3.0
@@ -589,6 +634,90 @@ class ResearchRunConfig:
             raise ValueError("max active pairs must be positive")
         if min(execution.maker_fee, execution.taker_fee, execution.slippage) < 0:
             raise ValueError("fees/slippage must be non-negative")
+        if execution.di_ladder_level_r <= 0:
+            raise ValueError("DI ladder level size must be positive")
+        if execution.di_ladder_enabled:
+            if not data.use_intrabar_data or data.intrabar_timeframe_minutes != 1:
+                raise ValueError("DI ladder execution requires 1-minute intrabar data")
+            if strategy.entry_mode != "WAIT_UNTIL_CLOSED":
+                raise ValueError("DI ladder execution currently requires WAIT_UNTIL_CLOSED")
+            if strategy.enable_daily_entry_schedule:
+                raise ValueError("DI ladder execution does not support scheduled daily entries")
+            if execution.entry_timing_mode != "SIGNAL_CLOSE":
+                raise ValueError("DI ladder execution currently requires SIGNAL_CLOSE entry timing")
+            if execution.risk_mode == "SR_STRUCTURE" or execution.sr_take_profit_mode != "FIXED_R":
+                raise ValueError("DI ladder execution requires fixed-distance stop and FIXED_R target geometry")
+            if reporting.research_sampling_mode == "WALK_FORWARD":
+                raise ValueError("DI ladder execution is not yet supported by walk-forward sampling")
+            enabled_layers = []
+            seen_names = set()
+            seen_entries = set()
+            for number, layer in enumerate(execution.di_ladder_layers, start=1):
+                if not isinstance(layer, Mapping):
+                    raise ValueError(f"DI ladder layer {number} must be an object")
+                name = str(layer.get("name") or f"S{number}").strip()
+                if not name or name in seen_names:
+                    raise ValueError("DI ladder layer names must be non-empty and unique")
+                seen_names.add(name)
+                if not bool(layer.get("enabled", True)):
+                    continue
+                try:
+                    entry_level = float(layer["entry_level"])
+                    target_level = float(layer["target_level"])
+                    stop_level = float(layer["stop_level"])
+                except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(f"{name}: ladder entry/target/stop levels must be numeric") from exc
+                if not all(map(lambda value: value == value and abs(value) != float("inf"), (entry_level, target_level, stop_level))):
+                    raise ValueError(f"{name}: ladder levels must be finite")
+                if entry_level >= 0:
+                    raise ValueError(f"{name}: entry_level must be adverse to the initial trade (< 0)")
+                if target_level >= entry_level:
+                    raise ValueError(f"{name}: target_level must be deeper than entry_level")
+                if stop_level <= entry_level:
+                    raise ValueError(f"{name}: stop_level must be above entry_level")
+                if entry_level in seen_entries:
+                    raise ValueError("DI ladder entry levels must be unique")
+                seen_entries.add(entry_level)
+                match_mode = str(layer.get("filter_match_mode", "ALL")).upper()
+                if match_mode not in {"ALL", "ANY"}:
+                    raise ValueError(f"{name}: filter_match_mode must be ALL or ANY")
+                rules = layer.get("entry_rules", ())
+                if not isinstance(rules, (list, tuple)):
+                    raise ValueError(f"{name}: entry_rules must be a list")
+                for rule in rules:
+                    if not isinstance(rule, Mapping):
+                        raise ValueError(f"{name}: every entry rule must be an object")
+                    for required in ("indicator", "minimum", "maximum"):
+                        if required not in rule:
+                            raise ValueError(f"{name}: entry rule is missing {required}")
+                enabled_layers.append((entry_level, name))
+            if not enabled_layers:
+                raise ValueError("DI ladder execution requires at least one enabled layer")
+            ordered_entries = [value for value, _name in enabled_layers]
+            if ordered_entries != sorted(ordered_entries, reverse=True):
+                raise ValueError("DI ladder layers must be ordered from shallowest to deepest entry")
+            for key in strategy.profiles:
+                if not strategy.profiles[key].enabled:
+                    continue
+                profile = execution.profiles[key]
+                incompatible = [
+                    label
+                    for label, active in (
+                        ("partial stop", profile.partial_stop_enabled),
+                        ("partial take-profit", profile.partial_profit_enabled),
+                        ("break-even", profile.break_even_enabled),
+                        ("trailing stop", profile.trailing_enabled),
+                        ("R-step trailing", profile.r_step_trailing_enabled),
+                        ("ATR checkpoint extension", profile.atr_checkpoint_tp_extension_enabled),
+                        ("timeout", profile.timeout_enabled),
+                    )
+                    if active
+                ]
+                if incompatible:
+                    raise ValueError(
+                        f"{key}: DI ladder v1 supports only simple fixed stop/target execution; disable "
+                        + ", ".join(incompatible)
+                    )
         if reporting.research_sampling_mode not in {
             "PORTFOLIO", "EVERY_VIABLE_ENTRY", "WALK_FORWARD", "FIXED_INTERVAL", "EPISODE_FIRST"
         }:
@@ -639,6 +768,8 @@ def _strict(cls, raw, label):
         values["entry_rules"] = tuple(values["entry_rules"])
     if cls is ReportingConfig and isinstance(values.get("lifecycle_early_checkpoints"), list):
         values["lifecycle_early_checkpoints"] = tuple(values["lifecycle_early_checkpoints"])
+    if cls is ExecutionConfig and isinstance(values.get("di_ladder_layers"), list):
+        values["di_ladder_layers"] = tuple(values["di_ladder_layers"])
     if cls is FeatureConfig and isinstance(values.get("trade_flow_windows"), list):
         values["trade_flow_windows"] = tuple(values["trade_flow_windows"])
     return cls(**values)
