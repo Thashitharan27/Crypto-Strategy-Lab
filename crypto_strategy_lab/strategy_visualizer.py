@@ -1775,6 +1775,62 @@ class CompletedRunVisualizer:
                 result.append({"title": title, "price": value, "kind": kind})
         return result
 
+    def _position_box(
+        self,
+        trade_index: int | None,
+        market: pd.DataFrame,
+        *,
+        visible_end: pd.Timestamp,
+    ) -> dict[str, Any] | None:
+        """Return exact selected-trade risk/reward geometry for display only."""
+        if trade_index is None or not self.trade_count:
+            return None
+        row = self._trade_row(trade_index)
+        side = _trade_side(row)
+        if side not in {"LONG", "SHORT"}:
+            return None
+
+        entry = _finite(
+            _first_value(
+                row,
+                ("entry_price", "actual_entry_price", "strategy_entry_price"),
+            )
+        )
+        stop, target = trade_stop_target(row)
+        entry_time_raw = _first_value(
+            row,
+            ("entry_time", "strategy_entry_time", "actual_entry_timestamp"),
+        )
+        if entry is None or entry_time_raw is None or (stop is None and target is None):
+            return None
+
+        entry_time = _utc(entry_time_raw)
+        exit_time_raw = _first_value(
+            row,
+            ("exit_time", "actual_exit_timestamp", "strategy_exit_time"),
+        )
+        exit_time = _utc(exit_time_raw) if exit_time_raw is not None else None
+        entry_chart_time = self._snap_to_candle(entry_time, market)
+        exit_chart_time = (
+            self._snap_to_candle(exit_time, market)
+            if exit_time is not None
+            else None
+        )
+
+        return {
+            "enabled": True,
+            "side": side,
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "entryTime": _unix_seconds(entry_time),
+            "entryChartTime": entry_chart_time,
+            "exitTime": _unix_seconds(exit_time) if exit_time is not None else None,
+            "exitChartTime": exit_chart_time,
+            "open": exit_time is None,
+            "visibleEnd": _unix_seconds(visible_end),
+        }
+
     def build_payload(
         self,
         *,
@@ -1930,6 +1986,11 @@ class CompletedRunVisualizer:
             "srEvents": sr_events,
             "markers": self._markers(signals, trade_index, show_rejections, visible),
             "priceLines": self._price_lines(trade_index),
+            "positionBox": self._position_box(
+                trade_index,
+                visible,
+                visible_end=visible_end,
+            ),
             "candleContext": self._context_by_time(context, visible_start),
             "visibleStart": _unix_seconds(visible_start),
             "visibleEnd": _unix_seconds(visible_end),
