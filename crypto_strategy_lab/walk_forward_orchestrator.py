@@ -1217,7 +1217,17 @@ def _batch_review_evidence(
                 "purpose": "What the rules frozen for the completed week actually produced.",
             },
             "B_raw_strategy_benchmark": deepcopy(raw_strategy_benchmark),
-            "C_teacher_reference_population": deepcopy(reference_population),
+            "C_teacher_reference_population": {
+                "completed_batch": deepcopy(reference_population),
+                "recent_windows": deepcopy(
+                    (adaptive_source_history or {}).get("reference_windows")
+                ),
+                "purpose": (
+                    "Causally completed immutable source observations available "
+                    "for learning; distinct from both executed adaptive OOS trades "
+                    "and the raw portfolio benchmark."
+                ),
+            },
         }
         if adaptive_weekly
         else None
