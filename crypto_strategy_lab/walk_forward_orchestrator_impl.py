@@ -12,6 +12,7 @@ already-frozen decision and can never replace it.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 import hashlib
 from pathlib import Path
@@ -62,6 +63,46 @@ WEEKLY_BATCH_OOS_MODE = "WEEKLY_BATCH_OOS"
 MONTHLY_BATCH_DEFERRED = "DEFERRED_TO_MONTHLY_BATCH"
 WEEKLY_BATCH_DEFERRED = "DEFERRED_TO_WEEKLY_BATCH"
 BATCH_OOS_MODES = frozenset({MONTHLY_BATCH_OOS_MODE, WEEKLY_BATCH_OOS_MODE})
+
+@dataclass(frozen=True)
+class WalkForwardHead:
+    """Authoritative causal head carried across one accepted advance request."""
+
+    sequence: int
+    state_hash: str
+
+    @classmethod
+    def from_expected(cls, sequence: int, state_hash: str) -> "WalkForwardHead":
+        return cls(int(sequence), str(state_hash))
+
+    def advance_from(
+        self,
+        result: dict[str, Any],
+        *,
+        mutation: str,
+        require_progress: bool = True,
+    ) -> "WalkForwardHead":
+        next_sequence = int(result.get("sequence", self.sequence))
+        next_hash = str(result.get("state_hash") or self.state_hash)
+        if next_sequence < self.sequence:
+            raise ValueError(
+                f"{mutation} returned a regressed causal sequence "
+                f"{next_sequence} < {self.sequence}"
+            )
+        if require_progress and next_sequence == self.sequence:
+            raise ValueError(f"{mutation} did not advance the causal sequence")
+        if next_sequence > self.sequence and next_hash == self.state_hash:
+            raise ValueError(
+                f"{mutation} advanced the causal sequence without changing the state hash"
+            )
+        return WalkForwardHead(next_sequence, next_hash)
+
+    def fields(self) -> dict[str, Any]:
+        return {
+            "sequence": self.sequence,
+            "state_hash": self.state_hash,
+        }
+
 
 
 def _rule_update_policy(definition: dict[str, Any]) -> dict[str, Any]:
@@ -388,6 +429,8 @@ def _reveal_frozen_candidate(
     experiment_id: str,
     candidate_id: str,
     operation_id: str,
+    expected_sequence: int,
+    expected_state_hash: str,
 ) -> dict[str, Any]:
     store = _store(control)
     events = _events(store, experiment_id)
@@ -420,6 +463,14 @@ def _reveal_frozen_candidate(
     if state != "DECISION_FROZEN":
         raise ValueError("outcome can only be read after the decision is durably frozen")
 
+    # Validate the exact head supplied by the accepted operation. Do not reread
+    # and adopt whatever head happens to exist now.
+    store, readback, events = _verified(
+        control,
+        experiment_id,
+        expected_sequence,
+        expected_state_hash,
+    )
     capture_event = _candidate_capture(events, candidate_id)
     candidate = capture_event.get("payload") or {}
     frozen_event = _event_for_candidate(events, "DECISION_FROZEN", candidate_id)
@@ -431,9 +482,10 @@ def _reveal_frozen_candidate(
         raise ValueError("captured candidate has no reference_run")
 
     # OUTCOME FIREWALL: the outcome-bearing artifact is first opened here, after
-    # DECISION_FROZEN has already been appended+fsynced by CausalExperimentStore.
-    outcome = _outcome_row_after_decision(reports, reference_run, candidate, frozen_side)
-    readback = _read_store(store, experiment_id, recent_events=0)
+    # DECISION_FROZEN is durable and the exact causal head has been verified.
+    outcome = _outcome_row_after_decision(
+        reports, reference_run, candidate, frozen_side
+    )
     exit_time = outcome.get("exit_time")
     appended = store.append_event(
         experiment_id,
@@ -448,7 +500,11 @@ def _reveal_frozen_candidate(
         reveal_op,
         int(readback["sequence"]),
         str(readback["state_hash"]),
-        effective_market_time=str(exit_time) if exit_time else str(candidate.get("entry_time")),
+        effective_market_time=(
+            str(exit_time)
+            if exit_time
+            else str(candidate.get("entry_time"))
+        ),
         source="DETERMINISTIC_OUTCOME_FIREWALL",
     )
     return {
@@ -495,8 +551,13 @@ def freeze_and_reveal_walk_forward_candidate(
             reasoning=text,
         )
         return _reveal_frozen_candidate(
-            control, reports, experiment_id=experiment_id,
-            candidate_id=candidate_id, operation_id=operation_id,
+            control,
+            reports,
+            experiment_id=experiment_id,
+            candidate_id=candidate_id,
+            operation_id=operation_id,
+            expected_sequence=int(existing_freeze["sequence"]),
+            expected_state_hash=str(existing_freeze["resulting_state_hash"]),
         )
 
     store, readback, events = _verified(
@@ -530,8 +591,13 @@ def freeze_and_reveal_walk_forward_candidate(
     )
     # CausalExperimentStore fsyncs the event before returning from append_event.
     return _reveal_frozen_candidate(
-        control, reports, experiment_id=experiment_id,
-        candidate_id=candidate_id, operation_id=operation_id,
+        control,
+        reports,
+        experiment_id=experiment_id,
+        candidate_id=candidate_id,
+        operation_id=operation_id,
+        expected_sequence=int(frozen["sequence"]),
+        expected_state_hash=str(frozen["state_hash"]),
     )
 
 
@@ -562,7 +628,7 @@ def resolve_walk_forward_trade(
     expected_sequence: int,
     expected_state_hash: str,
 ) -> dict[str, Any]:
-    """Settle one revealed research trade from current ledger equity and immutable net R."""
+    """Settle one revealed research trade with strict internal head chaining."""
     store = _store(control)
     events = _events(store, experiment_id)
     existing = _existing_resolution(events, candidate_id)
@@ -578,11 +644,47 @@ def resolve_walk_forward_trade(
             "idempotent_replay": True,
         }
 
-    store, readback, events = _verified(
-        control, experiment_id, expected_sequence, expected_state_hash
-    )
+    entered_op = _operation(operation_id, "entered")
+    existing_entered = store._find_operation(events, entered_op)
+
+    if existing_entered is None:
+        store, readback, events = _verified(
+            control, experiment_id, expected_sequence, expected_state_hash
+        )
+        head = WalkForwardHead(
+            int(readback["sequence"]),
+            str(readback["state_hash"]),
+        )
+    else:
+        # Resume only the exact sub-operation that this caller previously
+        # committed. The original expected head must either be the parent of
+        # TRADE_ENTERED or the TRADE_ENTERED head itself.
+        previous_hash = str(existing_entered.get("previous_state_hash") or "")
+        entered_sequence = int(existing_entered["sequence"])
+        entered_hash = str(existing_entered["resulting_state_hash"])
+        expected_matches_parent = (
+            entered_sequence == int(expected_sequence) + 1
+            and previous_hash == str(expected_state_hash)
+        )
+        expected_matches_entered = (
+            entered_sequence == int(expected_sequence)
+            and entered_hash == str(expected_state_hash)
+        )
+        if not (expected_matches_parent or expected_matches_entered):
+            raise ValueError(
+                "idempotent settlement retry does not match the committed "
+                "TRADE_ENTERED causal parent/head"
+            )
+        # Fail closed if any foreign or later event appeared after the durable
+        # TRADE_ENTERED sub-operation.
+        store, readback, events = _verified(
+            control, experiment_id, entered_sequence, entered_hash
+        )
+        head = WalkForwardHead(entered_sequence, entered_hash)
+
     if store._candidate_state(events, candidate_id) != "OUTCOME_REVEALED":
         raise ValueError("trade can only be settled after its outcome is revealed")
+
     capture = (_candidate_capture(events, candidate_id).get("payload") or {})
     frozen_event = _event_for_candidate(events, "DECISION_FROZEN", candidate_id)
     revealed_event = _event_for_candidate(events, "OUTCOME_REVEALED", candidate_id)
@@ -590,29 +692,39 @@ def resolve_walk_forward_trade(
     frozen = frozen_event.get("payload") or {}
     revealed = revealed_event.get("payload") or {}
     outcome = revealed.get("outcome") or {}
-    net_r = _decimal(outcome.get("net_r", outcome.get("pair_net_r")), "outcome net_r")
+    net_r = _decimal(
+        outcome.get("net_r", outcome.get("pair_net_r")),
+        "outcome net_r",
+    )
 
     definition = (readback.get("manifest") or {}).get("definition") or {}
     risk_pct_raw = definition.get("risk_pct")
     if risk_pct_raw in (None, ""):
-        raise ValueError("immutable experiment definition has no risk_pct; cannot settle equity deterministically")
+        raise ValueError(
+            "immutable experiment definition has no risk_pct; "
+            "cannot settle equity deterministically"
+        )
     risk_pct = _decimal(risk_pct_raw, "risk_pct")
-    equity_raw = ((readback.get("derived_state") or {}).get("ledgers") or {}).get("RESEARCH", {}).get("equity")
+    equity_raw = (
+        ((readback.get("derived_state") or {}).get("ledgers") or {})
+        .get("RESEARCH", {})
+        .get("equity")
+    )
     if equity_raw in (None, ""):
         equity_raw = definition.get("initial_equity")
     equity_before = _decimal(equity_raw, "research equity")
     risk_amount = equity_before * risk_pct / Decimal("100")
     net_pnl = risk_amount * net_r
     equity_after = equity_before + net_pnl
-    result = "WIN" if net_r > 0 else ("LOSS" if net_r < 0 else "BREAKEVEN")
+    result = (
+        "WIN"
+        if net_r > 0
+        else ("LOSS" if net_r < 0 else "BREAKEVEN")
+    )
     exit_time = outcome.get("exit_time") or capture.get("entry_time")
 
-    entered_op = _operation(operation_id, "entered")
-    current_events = _events(store, experiment_id)
-    entered = _event_for_candidate(current_events, "TRADE_ENTERED", candidate_id)
-    if entered is None:
-        current = _read_store(store, experiment_id, recent_events=0)
-        store.append_event(
+    if existing_entered is None:
+        entered = store.append_event(
             experiment_id,
             "TRADE_ENTERED",
             {
@@ -625,13 +737,15 @@ def resolve_walk_forward_trade(
                 "risk_amount": _money(risk_amount),
             },
             entered_op,
-            int(current["sequence"]),
-            str(current["state_hash"]),
+            head.sequence,
+            head.state_hash,
             effective_market_time=str(capture.get("entry_time")),
             source="DETERMINISTIC_LEDGER",
         )
+        head = head.advance_from(
+            entered, mutation="trade entered"
+        )
 
-    current = _read_store(store, experiment_id, recent_events=0)
     resolved = store.append_event(
         experiment_id,
         "TRADE_RESOLVED",
@@ -651,16 +765,18 @@ def resolve_walk_forward_trade(
             "settlement_contract": SETTLEMENT_CONTRACT,
         },
         _operation(operation_id, "resolved"),
-        int(current["sequence"]),
-        str(current["state_hash"]),
+        head.sequence,
+        head.state_hash,
         effective_market_time=str(exit_time),
         source="DETERMINISTIC_LEDGER",
+    )
+    resolved_head = head.advance_from(
+        resolved, mutation="trade resolved"
     )
     return {
         "contract": SETTLEMENT_CONTRACT,
         "experiment_id": experiment_id,
-        "sequence": resolved["sequence"],
-        "state_hash": resolved["state_hash"],
+        **resolved_head.fields(),
         "candidate_id": candidate_id,
         "settlement": resolved["event"]["payload"],
         "idempotent_replay": False,
@@ -1332,20 +1448,32 @@ def advance_walk_forward(
     max_scan_rows: int = 250000,
     max_transitions: int = 20,
 ) -> dict[str, Any]:
-    """Advance deterministic work until the next genuine judgment point."""
+    """Advance deterministic work until the next genuine judgment point.
+
+    The caller's expected sequence/hash is an optimistic-concurrency guard only
+    for entry into this request. Once accepted, every internal mutation advances
+    one authoritative WalkForwardHead, and the next mutation must consume that
+    returned head.
+    """
     if isinstance(max_transitions, bool) or not 1 <= int(max_transitions) <= 100:
         raise ValueError("max_transitions must be between 1 and 100")
     if isinstance(review_interval_months, bool) or not 1 <= int(review_interval_months) <= 24:
         raise ValueError("review_interval_months must be between 1 and 24")
-    sequence = int(expected_sequence)
-    state_hash = str(expected_state_hash)
+
+    head = WalkForwardHead.from_expected(expected_sequence, expected_state_hash)
 
     for step in range(int(max_transitions)):
-        store, readback, events = _verified(control, experiment_id, sequence, state_hash)
+        store, readback, events = _verified(
+            control,
+            experiment_id,
+            head.sequence,
+            head.state_hash,
+        )
         definition = (readback.get("manifest") or {}).get("definition") or {}
         batch_mode = _batch_oos_mode(definition)
         batch_oos = batch_mode is not None
         unresolved = _open_candidate(events)
+
         if unresolved is not None:
             candidate_id, state = unresolved
             if state == "ENTRY_CONTEXT_CAPTURED":
@@ -1359,38 +1487,54 @@ def advance_walk_forward(
                         operation_id=_operation(
                             operation_id, f"batch-freeze-{step}-{candidate_id}"
                         ),
-                        expected_sequence=sequence,
-                        expected_state_hash=state_hash,
+                        expected_sequence=head.sequence,
+                        expected_state_hash=head.state_hash,
                     )
-                    sequence = int(frozen["sequence"])
-                    state_hash = str(frozen["state_hash"])
+                    head = head.advance_from(
+                        frozen, mutation="batch candidate freeze"
+                    )
                     continue
                 result = _judgment_candidate(events, candidate_id)
-                result.update(sequence=sequence, state_hash=state_hash)
+                result.update(**head.fields())
                 return result
+
             if state == "DECISION_FROZEN":
                 revealed = _reveal_frozen_candidate(
-                    control, reports, experiment_id=experiment_id,
+                    control,
+                    reports,
+                    experiment_id=experiment_id,
                     candidate_id=candidate_id,
                     operation_id=_operation(operation_id, f"resume-{step}"),
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                 )
-                sequence, state_hash = int(revealed["sequence"]), str(revealed["state_hash"])
+                head = head.advance_from(
+                    revealed, mutation="candidate outcome reveal"
+                )
                 continue
+
             if state == "OUTCOME_REVEALED":
                 settled = resolve_walk_forward_trade(
-                    control, experiment_id=experiment_id, candidate_id=candidate_id,
+                    control,
+                    experiment_id=experiment_id,
+                    candidate_id=candidate_id,
                     operation_id=_operation(operation_id, f"settle-{step}"),
-                    expected_sequence=sequence, expected_state_hash=state_hash,
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                 )
-                sequence, state_hash = int(settled["sequence"]), str(settled["state_hash"])
+                head = head.advance_from(
+                    settled, mutation="candidate settlement"
+                )
                 if (
                     str((settled.get("settlement") or {}).get("result")) == "LOSS"
                     and not batch_oos
                 ):
                     packet = build_loss_review_packet(
-                        control, experiment_id=experiment_id, candidate_id=candidate_id
+                        control,
+                        experiment_id=experiment_id,
+                        candidate_id=candidate_id,
                     )
-                    packet.update(sequence=sequence, state_hash=state_hash)
+                    packet.update(**head.fields())
                     return packet
                 continue
 
@@ -1399,9 +1543,11 @@ def advance_walk_forward(
             if loss is not None:
                 candidate_id = str((loss.get("payload") or {}).get("candidate_id"))
                 packet = build_loss_review_packet(
-                    control, experiment_id=experiment_id, candidate_id=candidate_id
+                    control,
+                    experiment_id=experiment_id,
+                    candidate_id=candidate_id,
                 )
-                packet.update(sequence=sequence, state_hash=state_hash)
+                packet.update(**head.fields())
                 return packet
 
         initial_review_anchor = _initial_periodic_review_anchor(
@@ -1417,13 +1563,15 @@ def advance_walk_forward(
             if periodic.get("previous_review_sequence") is None:
                 policy = definition.get("periodic_review_policy") or {}
                 periodic["review_anchor_source"] = str(
-                    policy.get("initial_anchor", periodic.get("review_anchor_source"))
+                    policy.get(
+                        "initial_anchor",
+                        periodic.get("review_anchor_source"),
+                    )
                 ).strip().upper()
             periodic.update(
                 contract=ORCHESTRATOR_CONTRACT,
                 experiment_id=experiment_id,
-                sequence=sequence,
-                state_hash=state_hash,
+                **head.fields(),
                 rule_update_policy=_rule_update_policy(definition),
             )
             if batch_oos:
@@ -1453,11 +1601,14 @@ def advance_walk_forward(
             initial_anchor=initial_review_anchor,
         )
         scan = get_next_walk_forward_candidate(
-            control, reports,
+            control,
+            reports,
             experiment_id=experiment_id,
-            operation_id=_operation(operation_id, f"scan-{step}-{sequence}"),
-            expected_sequence=sequence,
-            expected_state_hash=state_hash,
+            operation_id=_operation(
+                operation_id, f"scan-{step}-{head.sequence}"
+            ),
+            expected_sequence=head.sequence,
+            expected_state_hash=head.state_hash,
             max_scan_rows=max_scan_rows,
             stop_before_time=(
                 next_review_time.isoformat()
@@ -1466,6 +1617,7 @@ def advance_walk_forward(
             ),
         )
         status = scan.get("status")
+
         if status == "TIME_BOUNDARY_DUE_FIRST":
             boundary_time = _utc_timestamp(
                 scan.get("boundary_time"), "periodic review scan boundary"
@@ -1478,39 +1630,43 @@ def advance_walk_forward(
                     "review_due_time": boundary_time.isoformat(),
                 },
                 _operation(operation_id, f"periodic-boundary-{step}"),
-                sequence,
-                state_hash,
+                head.sequence,
+                head.state_hash,
                 effective_market_time=boundary_time.isoformat(),
                 source="DETERMINISTIC_ORCHESTRATOR",
             )
-            sequence = int(checkpoint["sequence"])
-            state_hash = str(checkpoint["state_hash"])
+            head = head.advance_from(
+                checkpoint, mutation="periodic review boundary checkpoint"
+            )
             continue
+
         if status == "CANDIDATE_CAPTURED":
+            captured_head = head.advance_from(
+                scan, mutation="candidate capture"
+            )
             if batch_oos:
-                sequence = int(scan["sequence"])
-                state_hash = str(scan["state_hash"])
+                head = captured_head
                 continue
             return {
                 "contract": ORCHESTRATOR_CONTRACT,
                 "status": "CANDIDATE_DECISION_REQUIRED",
                 "experiment_id": experiment_id,
-                "sequence": scan["sequence"],
-                "state_hash": scan["state_hash"],
+                **captured_head.fields(),
                 "candidate": scan["candidate"],
                 "candidate_id": scan["candidate"]["candidate_id"],
                 "candidate_token": scan["candidate"].get("candidate_token"),
                 "scan": scan.get("scan"),
                 "outcome_exposed": False,
             }
+
         if status == "TEACHER_DUE_FIRST":
             if batch_oos:
                 teacher_packet = _teacher_review_packet(
                     control,
                     reports,
                     experiment_id=experiment_id,
-                    expected_sequence=sequence,
-                    expected_state_hash=state_hash,
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                     teacher_boundary=scan["teacher_boundary"],
                 )
                 deferred = _append_batch_teacher(
@@ -1520,19 +1676,23 @@ def advance_walk_forward(
                     teacher_packet=teacher_packet,
                     batch_mode=str(batch_mode),
                     operation_id=_operation(
-                        operation_id, f"batch-teacher-{step}-{sequence}"
+                        operation_id,
+                        f"batch-teacher-{step}-{head.sequence}",
                     ),
-                    expected_sequence=sequence,
-                    expected_state_hash=state_hash,
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                 )
-                sequence = int(deferred["sequence"])
-                state_hash = str(deferred["state_hash"])
+                head = head.advance_from(
+                    deferred, mutation="batch teacher append"
+                )
                 continue
+
             packet = _teacher_review_packet(
-                control, reports,
+                control,
+                reports,
                 experiment_id=experiment_id,
-                expected_sequence=sequence,
-                expected_state_hash=state_hash,
+                expected_sequence=head.sequence,
+                expected_state_hash=head.state_hash,
                 teacher_boundary=scan["teacher_boundary"],
             )
             phase_decision = teacher_compression_decision(packet, events)
@@ -1543,39 +1703,40 @@ def advance_walk_forward(
                     packet=packet,
                     decision=phase_decision,
                     operation_id=_operation(
-                        operation_id, f"teacher-compress-{step}-{sequence}"
+                        operation_id,
+                        f"teacher-compress-{step}-{head.sequence}",
                     ),
-                    expected_sequence=sequence,
-                    expected_state_hash=state_hash,
+                    expected_sequence=head.sequence,
+                    expected_state_hash=head.state_hash,
                 )
-                sequence = int(compressed["sequence"])
-                state_hash = str(compressed["state_hash"])
+                head = head.advance_from(
+                    compressed, mutation="teacher compression append"
+                )
                 continue
             packet.update(
-                sequence=sequence,
-                state_hash=state_hash,
+                **head.fields(),
                 scan=scan.get("scan"),
                 **_teacher_phase_metadata(packet, events),
             )
             return packet
+
         if status == "NO_ELIGIBLE_CANDIDATE_IN_SCAN":
             return {
                 "contract": ORCHESTRATOR_CONTRACT,
                 "status": "NO_MORE_ACTION_IN_SCAN",
                 "experiment_id": experiment_id,
-                "sequence": sequence,
-                "state_hash": state_hash,
+                **head.fields(),
                 "scan": scan.get("scan"),
                 "outcome_exposed": False,
             }
+
         raise ValueError(f"unexpected candidate scanner status: {status}")
 
     return {
         "contract": ORCHESTRATOR_CONTRACT,
         "status": "TRANSITION_LIMIT_REACHED",
         "experiment_id": experiment_id,
-        "sequence": sequence,
-        "state_hash": state_hash,
+        **head.fields(),
         "max_transitions": int(max_transitions),
     }
 

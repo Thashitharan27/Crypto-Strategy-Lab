@@ -90,7 +90,7 @@ def resolve_walk_forward_trade(
     expected_sequence: int,
     expected_state_hash: str,
 ) -> dict[str, Any]:
-    """Settle a revealed trade using canonical nested risk with legacy fallback."""
+    """Settle using nested risk while preserving strict causal head chaining."""
     store = _impl._store(control)
     events = _impl._events(store, experiment_id)
     existing = _impl._existing_resolution(events, candidate_id)
@@ -106,9 +106,39 @@ def resolve_walk_forward_trade(
             "idempotent_replay": True,
         }
 
-    store, readback, events = _impl._verified(
-        control, experiment_id, expected_sequence, expected_state_hash
-    )
+    entered_op = _impl._operation(operation_id, "entered")
+    existing_entered = store._find_operation(events, entered_op)
+
+    if existing_entered is None:
+        store, readback, events = _impl._verified(
+            control, experiment_id, expected_sequence, expected_state_hash
+        )
+        head = _impl.WalkForwardHead(
+            int(readback["sequence"]),
+            str(readback["state_hash"]),
+        )
+    else:
+        previous_hash = str(existing_entered.get("previous_state_hash") or "")
+        entered_sequence = int(existing_entered["sequence"])
+        entered_hash = str(existing_entered["resulting_state_hash"])
+        expected_matches_parent = (
+            entered_sequence == int(expected_sequence) + 1
+            and previous_hash == str(expected_state_hash)
+        )
+        expected_matches_entered = (
+            entered_sequence == int(expected_sequence)
+            and entered_hash == str(expected_state_hash)
+        )
+        if not (expected_matches_parent or expected_matches_entered):
+            raise ValueError(
+                "idempotent settlement retry does not match the committed "
+                "TRADE_ENTERED causal parent/head"
+            )
+        store, readback, events = _impl._verified(
+            control, experiment_id, entered_sequence, entered_hash
+        )
+        head = _impl.WalkForwardHead(entered_sequence, entered_hash)
+
     if store._candidate_state(events, candidate_id) != "OUTCOME_REVEALED":
         raise ValueError("trade can only be settled after its outcome is revealed")
 
@@ -148,12 +178,8 @@ def resolve_walk_forward_trade(
     result = "WIN" if net_r > 0 else ("LOSS" if net_r < 0 else "BREAKEVEN")
     exit_time = outcome.get("exit_time") or capture.get("entry_time")
 
-    entered_op = _impl._operation(operation_id, "entered")
-    current_events = _impl._events(store, experiment_id)
-    entered = _impl._event_for_candidate(current_events, "TRADE_ENTERED", candidate_id)
-    if entered is None:
-        current = _impl._read_store(store, experiment_id, recent_events=0)
-        store.append_event(
+    if existing_entered is None:
+        entered = store.append_event(
             experiment_id,
             "TRADE_ENTERED",
             {
@@ -162,20 +188,19 @@ def resolve_walk_forward_trade(
                 "ledger": "RESEARCH",
                 "final_action": frozen.get("final_action"),
                 "equity_before": _impl._money(equity_before),
-                # Canonical fractional value plus legacy percentage-points alias.
                 "risk_per_trade": float(risk_fraction),
                 "risk_pct": float(risk_pct),
                 "risk_source": risk_source,
                 "risk_amount": _impl._money(risk_amount),
             },
             entered_op,
-            int(current["sequence"]),
-            str(current["state_hash"]),
+            head.sequence,
+            head.state_hash,
             effective_market_time=str(capture.get("entry_time")),
             source="DETERMINISTIC_LEDGER",
         )
+        head = head.advance_from(entered, mutation="trade entered")
 
-    current = _impl._read_store(store, experiment_id, recent_events=0)
     resolved = store.append_event(
         experiment_id,
         "TRADE_RESOLVED",
@@ -197,17 +222,17 @@ def resolve_walk_forward_trade(
             "settlement_contract": _impl.SETTLEMENT_CONTRACT,
         },
         _impl._operation(operation_id, "resolved"),
-        int(current["sequence"]),
-        str(current["state_hash"]),
+        head.sequence,
+        head.state_hash,
         effective_market_time=str(exit_time),
         source="DETERMINISTIC_LEDGER",
     )
+    resolved_head = head.advance_from(resolved, mutation="trade resolved")
     payload = deepcopy(resolved.get("event") or {}).get("payload") or {}
     return {
         "contract": _impl.SETTLEMENT_CONTRACT,
         "experiment_id": experiment_id,
-        "sequence": resolved["sequence"],
-        "state_hash": resolved["state_hash"],
+        **resolved_head.fields(),
         "candidate_id": candidate_id,
         "settlement": payload,
         "idempotent_replay": False,
