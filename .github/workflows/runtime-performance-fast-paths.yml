@@ -90,14 +90,16 @@ jobs:
       - name: Run walk-forward event fast-path tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: >-
-          python -m pytest -q
-          tests/test_causal_experiment.py
-          tests/test_walk_forward_review_atomic_validation.py
-          tests/test_walk_forward_candidate_engine.py
-          tests/test_walk_forward_teacher_learning.py
-          tests/test_walk_forward_orchestrator.py
-          tests/test_walk_forward_research_policy.py
-          tests/test_walk_forward_adaptive_weekly.py
-          tests/test_wf_bounded_scan_checkpoints.py
-          tests/test_mcp_control_server.py
+        run: |
+          python -m pytest -q \
+            tests/test_causal_experiment.py \
+            tests/test_walk_forward_review_atomic_validation.py \
+            tests/test_walk_forward_candidate_engine.py \
+            tests/test_walk_forward_teacher_learning.py \
+            tests/test_walk_forward_orchestrator.py \
+            tests/test_walk_forward_research_policy.py \
+            tests/test_walk_forward_adaptive_weekly.py \
+            tests/test_wf_bounded_scan_checkpoints.py
+          python -m pytest -q \
+            tests/test_walk_forward_frozen_resume_safety.py \
+            tests/test_mcp_control_server.py
