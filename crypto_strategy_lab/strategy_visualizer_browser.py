@@ -784,8 +784,10 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         : (payload.candles || []).length.toLocaleString() + ' candles loaded. ') +
         'Pan/zoom freely. Click aligned strategy candles for exact persisted rule and S/R evidence.';
       if (payload.selectedTradeCandleTime) {
-        inspectedTime = Number(payload.selectedTradeCandleTime);
         await inspectTime(payload.selectedTradeCandleTime,false);
+        inspectedTime = Number(
+          payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
+        );
       }
       updateTradeButtons();
     } catch (error) {
@@ -832,7 +834,9 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     if (!chart || !payload?.selectedTradeCandleTime) return;
     const candles = payload.candles || [];
     if (!candles.length) return;
-    const target = Number(payload.selectedTradeCandleTime);
+    const target = Number(
+      payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
+    );
     let index = candles.findIndex(item => Number(item.time) >= target);
     if (index < 0) index = candles.length - 1;
     const radius = 120;
