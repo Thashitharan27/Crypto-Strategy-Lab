@@ -865,20 +865,27 @@ class CompletedRunVisualizer:
         return _utc(self.seed.request.period_end) - interval
 
     def _window_bounds(
-        self, trade_index: int | None, visible_candles: int
+        self,
+        trade_index: int | None,
+        visible_candles: int,
+        *,
+        full_run: bool = False,
     ) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
+        interval = pd.Timedelta(
+            interval_to_timedelta(self.seed.request.strategy_timeframe)
+        )
+        run_start = _utc(self.seed.request.period_start)
+        run_end = _utc(self.seed.request.period_end)
+        if full_run:
+            return run_start, run_start, run_end
+
         visible = max(
             MIN_VISIBLE_CANDLES,
             min(MAX_VISIBLE_CANDLES, int(visible_candles)),
         )
-        interval = pd.Timedelta(
-            interval_to_timedelta(self.seed.request.strategy_timeframe)
-        )
         center = self._center_time(trade_index)
         before = visible // 2
         after = visible - before
-        run_start = _utc(self.seed.request.period_start)
-        run_end = _utc(self.seed.request.period_end)
         visible_start = max(run_start, center - before * interval)
         visible_end = min(run_end, center + after * interval)
         calculation_start = max(
@@ -1662,6 +1669,7 @@ class CompletedRunVisualizer:
         trade_index: int | None = None,
         visible_candles: int = DEFAULT_VISIBLE_CANDLES,
         show_rejections: bool = False,
+        full_run: bool = False,
     ) -> dict[str, Any]:
         if self.trade_count:
             if trade_index is None:
@@ -1671,7 +1679,9 @@ class CompletedRunVisualizer:
             trade_index = None
 
         calculation_start, visible_start, visible_end = self._window_bounds(
-            trade_index, visible_candles
+            trade_index,
+            visible_candles,
+            full_run=full_run,
         )
         market = self._market_frame(calculation_start, visible_end)
         if market.empty:
@@ -1771,6 +1781,7 @@ class CompletedRunVisualizer:
             "candleContext": self._context_by_time(context, visible_start),
             "visibleStart": _unix_seconds(visible_start),
             "visibleEnd": _unix_seconds(visible_end),
+            "fullRun": bool(full_run),
         }
 
 

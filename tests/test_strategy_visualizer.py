@@ -483,6 +483,26 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
 
 
 
+def test_completed_run_visualizer_full_run_bypasses_window_limit(tmp_path):
+    service, run_dir, manifest, market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+
+    payload = model.build_payload(
+        trade_index=0,
+        visible_candles=60,
+        full_run=True,
+    )
+
+    assert payload["fullRun"] is True
+    assert len(payload["candles"]) == len(market)
+    assert payload["candles"][0]["time"] == int(
+        pd.Timestamp(manifest["request"]["start"]).timestamp()
+    )
+    assert payload["candles"][-1]["time"] == int(
+        market["period_start"].iloc[-1].timestamp()
+    )
+
+
 def test_compact_sr_snapshots_reconstruct_same_visualizer_evidence(tmp_path):
     service, run_dir, manifest, _market = _fixture(tmp_path)
     expanded_model = CompletedRunVisualizer.load(service, run_dir, manifest)

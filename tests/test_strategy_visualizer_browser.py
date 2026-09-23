@@ -32,9 +32,10 @@ class _FakeVisualizer:
         trade_index=None,
         visible_candles=BROWSER_DEFAULT_VISIBLE_CANDLES,
         show_rejections=False,
+        full_run=False,
     ):
         self.payload_calls.append(
-            (trade_index, visible_candles, show_rejections)
+            (trade_index, visible_candles, show_rejections, full_run)
         )
         return {
             "run": {
@@ -54,6 +55,7 @@ class _FakeVisualizer:
             "candleContext": {},
             "visibleStart": 1_699_000_000,
             "visibleEnd": 1_701_000_000,
+            "fullRun": bool(full_run),
         }
 
     def rule_inspector_at(self, timestamp):
@@ -92,6 +94,8 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "/api/inspect" in html
     assert "handleScroll" in html
     assert "handleScale" in html
+    assert "Full run" in html
+    assert "full_run" in html
 
 
 def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():
@@ -113,7 +117,16 @@ def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():
         ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         assert payload["selectedTradeIndex"] == 1
-        assert model.payload_calls[-1] == (1, 2000, True)
+        assert model.payload_calls[-1] == (1, 2000, True, False)
+
+        with urlopen(
+            url
+            + "api/payload?trade_index=0&visible_candles=1000&full_run=1",
+            timeout=5,
+        ) as response:
+            full_payload = json.loads(response.read().decode("utf-8"))
+        assert full_payload["fullRun"] is True
+        assert model.payload_calls[-1] == (0, 1000, False, True)
 
         with urlopen(
             url + "api/inspect?timestamp=1700000000",
