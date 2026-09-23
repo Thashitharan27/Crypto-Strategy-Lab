@@ -77,13 +77,17 @@ def rule_event_schema() -> dict[str, Any]:
     }
 
 
-def _full_events(store: CausalExperimentStore, experiment_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    readback = store.read(experiment_id, recent_events=0)
-    _value, directory, _manifest_path, events_path = store._paths(experiment_id)
-    store._assert_safe_dir(directory, must_exist=True)
-    events = store._read_all_events(events_path)
-    sequence, state_hash = store._verify_chain(events)
-    if sequence != int(readback["sequence"]) or state_hash != str(readback["state_hash"]):
+def _full_events(
+    store: CausalExperimentStore,
+    experiment_id: str,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    readback = store.read_fast(experiment_id, recent_events=0)
+    events = store.indexed_events(experiment_id)
+    confirmed = store.read_fast(experiment_id, recent_events=0)
+    if (
+        int(confirmed["sequence"]) != int(readback["sequence"])
+        or str(confirmed["state_hash"]) != str(readback["state_hash"])
+    ):
         raise ValueError("walk-forward event chain changed during rule preflight")
     return readback, events
 
@@ -97,15 +101,30 @@ def _verified_prefix(
     readback, events = _full_events(store, experiment_id)
     sequence = int(expected_sequence)
     wanted_hash = str(expected_state_hash).strip().lower()
-    if sequence < 1 or sequence > len(events):
+    head_sequence = int(readback["sequence"])
+    head_hash = str(readback["state_hash"])
+
+    # Normal review writes are pinned to the current head.  The sidecar has
+    # already been reconciled against the authoritative JSONL file signature, so
+    # avoid rehashing the whole chain here.
+    if sequence == head_sequence and wanted_hash == head_hash:
+        return readback, events, events
+
+    # Historical-prefix validation is rare and remains a full authoritative
+    # verification path so callers cannot materialize a stale intermediate head.
+    _value, directory, _manifest_path, events_path = store._paths(experiment_id)
+    store._assert_safe_dir(directory, must_exist=True)
+    authoritative = store._read_all_events(events_path)
+    store._verify_chain(authoritative)
+    if sequence < 1 or sequence > len(authoritative):
         raise ValueError("expected walk-forward sequence is not present in the verified chain")
-    prefix = events[:sequence]
+    prefix = authoritative[:sequence]
     prefix_sequence, prefix_hash = store._verify_chain(prefix)
     if prefix_sequence != sequence or prefix_hash != wanted_hash:
         raise ValueError(
             "walk-forward experiment changed since it was read; read the verified chain head again before recording a review"
         )
-    return readback, events, prefix
+    return readback, authoritative, prefix
 
 
 def _friendly_condition(condition: dict[str, Any]) -> dict[str, Any]:
@@ -402,7 +421,7 @@ def append_events_atomic(
     expected_state_hash: str,
     specs: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Commit a validated review+rules batch with one atomic events-file replace."""
+    """Commit a validated review+rules batch without rewriting historical JSONL."""
     if not specs:
         raise ValueError("atomic event batch cannot be empty")
     prepared = [_prepare_spec(spec) for spec in specs]
@@ -416,10 +435,15 @@ def append_events_atomic(
         if manifest_path.is_symlink() or events_path.is_symlink():
             raise ValueError("symlinked experiment files are not allowed")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        events = store._read_all_events(events_path)
-        sequence, state_hash = store._verify_chain(events)
+        if manifest.get("definition_sha256") != causal._sha256_json(manifest.get("definition")):
+            raise ValueError("experiment definition hash mismatch")
 
-        existing = [store._find_operation(events, item["operation_id"]) for item in prepared]
+        index = store._ensure_event_index(manifest, events_path)
+        snapshot = index.snapshot()
+        sequence = int(snapshot["sequence"])
+        state_hash = str(snapshot["state_hash"])
+
+        existing = [index.operation(item["operation_id"]) for item in prepared]
         if all(item is not None for item in existing):
             for found, requested in zip(existing, prepared):
                 assert found is not None
@@ -433,7 +457,7 @@ def append_events_atomic(
                 "sequence": int(last["sequence"]),
                 "state_hash": str(last["resulting_state_hash"]),
                 "events": deepcopy(existing),
-                "derived_state": store._derive_state(manifest, events),
+                "derived_state": deepcopy(snapshot["derived_state"]),
             }
         if any(item is not None for item in existing):
             raise ValueError(
@@ -444,13 +468,21 @@ def append_events_atomic(
                 "causal experiment changed since it was read; read it again before appending"
             )
 
+        # Only rule lifecycle history is needed for batch semantic validation.
+        projected_semantics = index.events(
+            event_types=RULE_EVENT_TYPES
+            | {"RULE_PROMOTED_TO_SHADOW", "RULE_PROMOTED_TO_LIVE", "RULE_RETIRED"}
+        )
         new_records: list[dict[str, Any]] = []
-        projected = list(events)
         previous_hash = state_hash
         next_sequence = sequence
+        next_state = deepcopy(snapshot["derived_state"])
+
         for requested in prepared:
             payload = requested["payload"]
-            store._validate_event_semantics(projected, requested["event_type"], payload)
+            store._validate_event_semantics(
+                projected_semantics, requested["event_type"], payload
+            )
             recorded_at = causal._utc_now()
             occurred = requested["requested_event_time"] or recorded_at
             next_sequence += 1
@@ -474,32 +506,54 @@ def append_events_atomic(
             if len(encoded.encode("utf-8")) > causal._MAX_EVENT_BYTES:
                 raise ValueError(f"event exceeds {causal._MAX_EVENT_BYTES} bytes")
             new_records.append(record)
-            projected.append(record)
+            if requested["event_type"] in RULE_EVENT_TYPES or requested["event_type"] in {
+                "RULE_PROMOTED_TO_SHADOW",
+                "RULE_PROMOTED_TO_LIVE",
+                "RULE_RETIRED",
+            }:
+                projected_semantics.append(record)
+            store._apply_event_to_derived_state(next_state, record)
             previous_hash = record["resulting_state_hash"]
 
-        temp = events_path.parent / f".{events_path.name}.{uuid4().hex}.tmp"
+        # Append the new batch only.  Roll back to the original byte length on an
+        # in-process write/fsync failure; historical bytes are never recopied.
+        original_size = events_path.stat().st_size
+        batch_text = "".join(
+            causal._canonical_json(event) + "\n" for event in new_records
+        )
         try:
-            with temp.open("w", encoding="utf-8", newline="\n") as handle:
-                for event in projected:
-                    handle.write(causal._canonical_json(event))
-                    handle.write("\n")
+            with events_path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(batch_text)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, events_path)
-        finally:
-            try:
-                temp.unlink(missing_ok=True)
-            except OSError:
-                pass
+        except Exception:
+            with events_path.open("r+b") as handle:
+                handle.truncate(original_size)
+                handle.flush()
+                os.fsync(handle.fileno())
+            raise
 
-        verified_sequence, verified_hash = store._verify_chain(store._read_all_events(events_path))
-        if verified_sequence != next_sequence or verified_hash != previous_hash:
-            raise ValueError("atomic review batch verification failed after commit")
+        try:
+            index.record_batch_appended(
+                events=new_records,
+                derived_state=next_state,
+                events_path=events_path,
+                definition_sha256=str(manifest["definition_sha256"]),
+                force_checkpoint=True,
+            )
+            fast_index_status = "CURRENT"
+        except Exception:
+            # JSONL is authoritative. A later fast read will notice the file
+            # signature mismatch and rebuild/verify the sidecar before use.
+            fast_index_status = "STALE_REBUILD_REQUIRED"
+
         return {
             "experiment_id": value,
             "idempotent_replay": False,
             "sequence": next_sequence,
             "state_hash": previous_hash,
             "events": deepcopy(new_records),
-            "derived_state": store._derive_state(manifest, projected),
+            "derived_state": next_state,
+            "fast_index_status": fast_index_status,
         }
+
