@@ -77,6 +77,7 @@ jobs:
           crypto_strategy_lab/walk_forward_adaptive_weekly.py
           crypto_strategy_lab/walk_forward_research_policy.py
           crypto_strategy_lab/walk_forward_rule_validation.py
+          mcp_server/control_server.py
           tests/test_causal_experiment.py
           tests/test_walk_forward_review_atomic_validation.py
           tests/test_walk_forward_candidate_engine.py
@@ -85,6 +86,7 @@ jobs:
           tests/test_walk_forward_research_policy.py
           tests/test_walk_forward_adaptive_weekly.py
           tests/test_wf_bounded_scan_checkpoints.py
+          tests/test_mcp_control_server.py
       - name: Run walk-forward event fast-path tests
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -95,3 +97,4 @@ jobs:
           tests/test_walk_forward_candidate_engine.py
           tests/test_walk_forward_teacher_learning.py
           tests/test_wf_bounded_scan_checkpoints.py
+          tests/test_mcp_control_server.py
