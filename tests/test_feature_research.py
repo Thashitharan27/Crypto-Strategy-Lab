@@ -17,6 +17,7 @@ from crypto_strategy_lab.feature_research import (
     ResearchQueryService,
     _sr_zone_inventory_frame,
     _validate_sr_zone_inventory,
+    _write_parquet_atomic,
     write_research_artifacts,
 )
 
@@ -581,3 +582,28 @@ def test_zero_trade_completed_run_is_still_queryable(tmp_path):
         assert result.empty
         totals = service.query({})
         assert int(totals.trades.iloc[0]) == 0
+
+
+def test_parquet_writer_normalizes_mixed_naive_and_aware_datetimes(tmp_path):
+    frame = pd.DataFrame(
+        {
+            "event_time": pd.Series(
+                [
+                    pd.Timestamp("2026-01-01 00:00:00", tz="UTC"),
+                    pd.Timestamp("2026-01-01 00:01:00"),
+                ],
+                dtype="object",
+            ),
+            "value": [1, 2],
+        }
+    )
+    path = tmp_path / "mixed_datetime.parquet"
+
+    _write_parquet_atomic(frame, path)
+
+    with duckdb.connect() as connection:
+        rows = connection.execute(
+            "SELECT count(*), count(event_time) FROM read_parquet(?)",
+            [str(path)],
+        ).fetchone()
+    assert rows == (2, 2)
