@@ -234,7 +234,13 @@ class CausalExperimentStore:
         if rule_update_policy is not None:
             if not isinstance(rule_update_policy, dict):
                 raise ValueError("rule_update_policy must be an object")
+            alias_requests_adaptive = (
+                alias_adaptive_weekly is True
+                or isinstance(alias_adaptive_policy, dict)
+            )
             mode = str(rule_update_policy.get("mode", "")).strip().upper()
+            if alias_requests_adaptive and mode in {"", "TRADE_BY_TRADE"}:
+                mode = "WEEKLY_BATCH_OOS"
             if mode == "ADAPTIVE_WEEKLY":
                 mode = "WEEKLY_BATCH_OOS"
                 rule_update_policy.setdefault("adaptive", {"enabled": True})
