@@ -259,13 +259,20 @@ def test_adaptive_weekly_packet_requires_recent_rule_lifecycle_review():
                 "mode": "WEEKLY_BATCH_OOS",
                 "interval_weeks": 1,
                 "freeze_between_reviews": True,
-                "adaptive": True,
-                "primary_lookback_weeks": 4,
-                "context_lookback_weeks": 12,
-                "expire_unconfirmed_after_weeks": 12,
-                "benchmark_raw_strategy": True,
-                "track_adaptation_lag": True,
-                "track_rule_half_life": True,
+                "adaptive": {
+                    "enabled": True,
+                    "primary_lookback_weeks": 1,
+                    "context_lookback_weeks": 4,
+                    "objective": "NEXT_WEEK_OOS",
+                    "allow_keep": True,
+                    "allow_refine": True,
+                    "allow_retire": True,
+                    "allow_replace": True,
+                    "allow_flip": True,
+                    "benchmark_raw_strategy": True,
+                    "track_adaptation_lag": True,
+                    "track_rule_half_life": True,
+                },
             },
         }
     )
@@ -273,9 +280,8 @@ def test_adaptive_weekly_packet_requires_recent_rule_lifecycle_review():
 
     assert prompt["primary_goal"] == "ADAPTIVE_WEEKLY_REASSESS_FREEZE_NEXT_WEEK"
     assert prompt["adaptive_weekly"] is True
-    assert prompt["primary_lookback_weeks"] == 4
-    assert prompt["context_lookback_weeks"] == 12
-    assert prompt["rules_expire_without_reconfirmation_after_weeks"] == 12
+    assert prompt["primary_lookback_weeks"] == 1
+    assert prompt["context_lookback_weeks"] == 4
     assert prompt["rule_lifecycle_actions"] == [
         "KEEP",
         "REFINE",
@@ -283,9 +289,21 @@ def test_adaptive_weekly_packet_requires_recent_rule_lifecycle_review():
         "REPLACE",
         "FLIP",
     ]
+    assert prompt["lifecycle_states"] == [
+        "ACTIVE_SUPPORTED",
+        "ACTIVE_WEAKENING",
+        "DORMANT_NO_EXPOSURE",
+        "DECAYING",
+        "CONTRADICTED",
+        "RETIRED",
+    ]
     assert prompt["benchmark_raw_strategy"] is True
     assert prompt["track_adaptation_lag"] is True
     assert prompt["track_rule_half_life"] is True
+    assert prompt["server_role"] == "DESCRIPTIVE_EVIDENCE_ONLY"
+    assert prompt["chatgpt_decides_rule_changes"] is True
+    assert prompt["automatic_threshold_search_allowed"] is False
+    assert prompt["automatic_rule_retirement_allowed"] is False
 
 
 def test_periodic_rule_writing_requires_strategic_action_and_rationale():
