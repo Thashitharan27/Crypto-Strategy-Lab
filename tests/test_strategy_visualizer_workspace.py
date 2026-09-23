@@ -26,6 +26,8 @@ def test_strategy_visualizer_exposes_dedicated_sr_review_controls_and_inspector(
     )
     try:
         assert workspace.view_mode.currentData() == "normal"
+        assert workspace.open_browser.text() == "Open in Browser"
+        assert not workspace.open_browser.isEnabled()
         assert workspace.sr_review_timeframe.currentData() == "strategy"
         assert workspace.sr_review_snapshot.currentData() == "live"
         assert workspace.sr_review_details.currentData() == "zones"
