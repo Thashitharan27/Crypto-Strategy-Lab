@@ -144,8 +144,10 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "chart_timeframe" in html
     assert "current canonical cache" in html
     assert "drawPositionBox" in html
-    assert "position-box reward" in html
-    assert "position-box risk" in html
+    assert ".position-box.reward" in html
+    assert ".position-box.risk" in html
+    assert "addRect('reward'" in html
+    assert "addRect('risk'" in html
 
 
 def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():
