@@ -387,6 +387,75 @@ class CompletedRunVisualizer:
                 return name
         raise ValueError("completed trades do not contain an entry timestamp")
 
+    def available_chart_timeframes(self) -> list[dict[str, Any]]:
+        """Return cached/canonical kline intervals available for visual reference.
+
+        The strategy timeframe is always present. Other intervals come from the
+        current Data Lake catalog and are reference-only; they never change the
+        completed-run strategy or its persisted evidence.
+        """
+        request = self.seed.request
+        strategy = str(request.strategy_timeframe)
+        run_start = _utc(request.period_start)
+        run_end = _utc(request.period_end)
+        available: dict[str, dict[str, Any]] = {
+            strategy: {
+                "interval": strategy,
+                "coverage": "full",
+                "strategyTimeframe": True,
+                "first": run_start.isoformat(),
+                "last": run_end.isoformat(),
+            }
+        }
+        store = getattr(self.service, "store", None)
+        catalog = getattr(store, "catalog", None)
+        raw_root = getattr(store, "raw_root", None)
+        if catalog is None or raw_root is None or not hasattr(catalog, "inventory"):
+            return list(available.values())
+        try:
+            rows = catalog.inventory(raw_root, market=request.market)
+        except Exception:
+            return list(available.values())
+
+        for row in rows:
+            if str(row.get("exchange") or "").lower() != str(request.exchange).lower():
+                continue
+            if str(row.get("symbol") or "").upper() != str(request.symbol).upper():
+                continue
+            if str(row.get("dataset") or "").lower() != DatasetKind.KLINES.value:
+                continue
+            interval = str(row.get("interval") or "").strip()
+            if not interval:
+                continue
+            first_raw = row.get("first_period")
+            last_raw = row.get("last_period")
+            if first_raw is None or last_raw is None:
+                continue
+            first = _utc(first_raw)
+            last = _utc(last_raw)
+            if last <= run_start or first >= run_end:
+                continue
+            coverage = (
+                "full"
+                if first <= run_start and last >= run_end
+                else "partial"
+            )
+            available[interval] = {
+                "interval": interval,
+                "coverage": coverage,
+                "strategyTimeframe": interval == strategy,
+                "first": first.isoformat(),
+                "last": last.isoformat(),
+            }
+
+        def order(item: dict[str, Any]):
+            try:
+                return pd.Timedelta(interval_to_timedelta(item["interval"]))
+            except Exception:
+                return pd.Timedelta.max
+
+        return sorted(available.values(), key=order)
+
     def selected_trade_candle_time(self, index: int | None) -> pd.Timestamp | None:
         if index is None or not self.trade_count:
             return None
@@ -870,9 +939,12 @@ class CompletedRunVisualizer:
         visible_candles: int,
         *,
         full_run: bool = False,
+        chart_timeframe: str | None = None,
     ) -> tuple[pd.Timestamp, pd.Timestamp, pd.Timestamp]:
         interval = pd.Timedelta(
-            interval_to_timedelta(self.seed.request.strategy_timeframe)
+            interval_to_timedelta(
+                chart_timeframe or self.seed.request.strategy_timeframe
+            )
         )
         run_start = _utc(self.seed.request.period_start)
         run_end = _utc(self.seed.request.period_end)
@@ -897,6 +969,8 @@ class CompletedRunVisualizer:
         self,
         calculation_start: pd.Timestamp,
         visible_end: pd.Timestamp,
+        *,
+        chart_timeframe: str | None = None,
     ) -> pd.DataFrame:
         base_request = self.seed.request.to_data_request((DatasetKind.KLINES,))
         request = replace(
@@ -908,7 +982,7 @@ class CompletedRunVisualizer:
         frame = self.service.store.load_dataset(
             request,
             DatasetKind.KLINES,
-            interval=self.seed.request.strategy_timeframe,
+            interval=chart_timeframe or self.seed.request.strategy_timeframe,
         )
         if frame.empty:
             return frame
@@ -1599,8 +1673,11 @@ class CompletedRunVisualizer:
                 if decision == "REJECT" and not show_rejections:
                     continue
                 side = str(row.get("side") or "").upper()
+                snapped = self._snap_to_candle(row["candle_open_time"], market)
+                if snapped is None:
+                    continue
                 marker = {
-                    "time": _unix_seconds(row["candle_open_time"]),
+                    "time": snapped,
                     "position": "belowBar" if side == "LONG" else "aboveBar",
                     "shape": (
                         "arrowUp"
@@ -1645,6 +1722,36 @@ class CompletedRunVisualizer:
         markers.sort(key=lambda item: (int(item["time"]), str(item.get("kind", ""))))
         return markers
 
+    def _snap_timed_items_to_market(
+        self,
+        items: list[dict[str, Any]],
+        market: pd.DataFrame,
+    ) -> list[dict[str, Any]]:
+        """Snap strategy-timeline visual events onto the selected chart candles."""
+        result: list[dict[str, Any]] = []
+        for item in items:
+            timestamp = item.get("time")
+            if timestamp is None:
+                continue
+            snapped = self._snap_to_candle(
+                pd.Timestamp(int(timestamp), unit="s", tz="UTC"),
+                market,
+            )
+            if snapped is None:
+                continue
+            copy = dict(item)
+            copy["time"] = snapped
+            result.append(copy)
+        result.sort(
+            key=lambda item: (
+                int(item["time"]),
+                str(item.get("timeframe", "")),
+                str(item.get("structure", "")),
+                str(item.get("event", "")),
+            )
+        )
+        return result
+
     def _price_lines(self, trade_index: int | None) -> list[dict[str, Any]]:
         if trade_index is None or not self.trade_count:
             return []
@@ -1670,6 +1777,7 @@ class CompletedRunVisualizer:
         visible_candles: int = DEFAULT_VISIBLE_CANDLES,
         show_rejections: bool = False,
         full_run: bool = False,
+        chart_timeframe: str | None = None,
     ) -> dict[str, Any]:
         if self.trade_count:
             if trade_index is None:
@@ -1678,12 +1786,30 @@ class CompletedRunVisualizer:
         else:
             trade_index = None
 
+        strategy_timeframe = str(self.seed.request.strategy_timeframe)
+        chart_timeframe = str(chart_timeframe or strategy_timeframe)
+        available_timeframes = self.available_chart_timeframes()
+        available_intervals = {
+            str(item.get("interval"))
+            for item in available_timeframes
+        }
+        if chart_timeframe not in available_intervals:
+            raise ValueError(
+                f"chart timeframe {chart_timeframe!r} is not available in the canonical Data Lake "
+                f"for {self.seed.request.symbol}; available={sorted(available_intervals)}"
+            )
+
         calculation_start, visible_start, visible_end = self._window_bounds(
             trade_index,
             visible_candles,
             full_run=full_run,
+            chart_timeframe=chart_timeframe,
         )
-        market = self._market_frame(calculation_start, visible_end)
+        market = self._market_frame(
+            calculation_start,
+            visible_end,
+            chart_timeframe=chart_timeframe,
+        )
         if market.empty:
             raise ValueError("no canonical strategy candles are available for this chart window")
         context = self._feature_context(visible_start, visible_end)
@@ -1743,6 +1869,7 @@ class CompletedRunVisualizer:
                     str(item.get("structure")),
                 ),
             )
+            sr_events = self._snap_timed_items_to_market(sr_events, visible)
         elif not context.empty:
             # Legacy completed runs contain nearest-zone context only.
             for label in SR_TIMEFRAMES:
@@ -1754,6 +1881,7 @@ class CompletedRunVisualizer:
                 sr_events.extend(
                     self._sr_lifecycle_events(context, label, visible_start)
                 )
+            sr_events = self._snap_timed_items_to_market(sr_events, visible)
 
         request = self.seed.request
         return {
@@ -1761,6 +1889,14 @@ class CompletedRunVisualizer:
                 "runId": str(self.manifest.get("run_id") or self.run_dir.name),
                 "symbol": request.symbol,
                 "timeframe": request.strategy_timeframe,
+                "strategyTimeframe": strategy_timeframe,
+                "chartTimeframe": chart_timeframe,
+                "chartSourceMode": (
+                    "completed-run-provenance"
+                    if chart_timeframe == strategy_timeframe
+                    else "current-canonical-cache-reference"
+                ),
+                "availableChartTimeframes": available_timeframes,
                 "start": _utc(request.period_start).isoformat(),
                 "end": _utc(request.period_end).isoformat(),
                 "sourceVerified": self.source_verified,
@@ -1782,6 +1918,7 @@ class CompletedRunVisualizer:
             "visibleStart": _unix_seconds(visible_start),
             "visibleEnd": _unix_seconds(visible_end),
             "fullRun": bool(full_run),
+            "chartTimeframe": chart_timeframe,
         }
 
 
