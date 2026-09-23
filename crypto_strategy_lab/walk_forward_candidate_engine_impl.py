@@ -40,7 +40,10 @@ from crypto_strategy_lab.sr_trade_context import (
     derive_trade_sr_context,
     planned_trade_distances,
 )
-from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_RULE_PRESETS
+from crypto_strategy_lab.strategy_rule_model import (
+    CATEGORICAL_RULE_PRESETS,
+    ICHIMOKU_RULE_EVIDENCE,
+)
 from crypto_strategy_lab.walk_forward_materialization import materialize_walk_forward_strategy
 
 
@@ -412,6 +415,20 @@ def _condition_required_columns(
             columns.update(
                 f"{prefix}_{side}_{field}" for side in ("long", "short")
             )
+    elif indicator in ICHIMOKU_RULE_EVIDENCE:
+        if indicator in _RESEARCH_NUMERIC_FIELDS:
+            _feature, base_column, _scale = _RESEARCH_NUMERIC_FIELDS[indicator]
+        elif indicator in _RESEARCH_CATEGORICAL_FIELDS:
+            _feature, base_column = _RESEARCH_CATEGORICAL_FIELDS[indicator]
+        else:
+            base_column = None
+        column = (
+            _ichimoku_column(config, condition, base_column)
+            if base_column is not None
+            else None
+        )
+        if column:
+            columns.add(column)
     elif indicator in _RESEARCH_NUMERIC_FIELDS:
         _feature, column, _scale = _RESEARCH_NUMERIC_FIELDS[indicator]
         columns.add(column)
@@ -675,6 +692,18 @@ def _mtf_label(config: dict[str, Any], condition: dict[str, Any]) -> str | None:
     return {60: "1h", 240: "4h", 1440: "1d"}.get(requested)
 
 
+def _ichimoku_column(
+    config: dict[str, Any],
+    condition: dict[str, Any],
+    base_column: str,
+) -> str | None:
+    """Resolve one Ichimoku rule to the same timeframe column as native execution."""
+    label = _mtf_label(config, condition)
+    if label is None:
+        return None
+    return base_column if label == "strategy" else f"ich_{label}_{base_column}"
+
+
 def _wf_profile_contract(config: dict[str, Any], profile: str) -> dict[str, Any]:
     execution = config.get("execution") or {}
     profiles = execution.get("profiles") or {}
@@ -829,6 +858,23 @@ def _evidence(
         prefix = _sr_prefix(config, condition)
         field = _SR_CATEGORICAL_FIELDS.get(indicator) or _SR_NUMERIC_FIELDS.get(indicator)
         return _present(row, f"{prefix}_{direction.lower()}_{field}") if prefix else None
+    if indicator in ICHIMOKU_RULE_EVIDENCE:
+        if indicator in _RESEARCH_NUMERIC_FIELDS:
+            _feature, base_column, scale = _RESEARCH_NUMERIC_FIELDS[indicator]
+            column = _ichimoku_column(config, condition, base_column)
+            if column is None:
+                return None
+            value = _number(_present(row, column, f"__ctx_{column}"))
+            return value * float(scale) if math.isfinite(value) else None
+        if indicator in _RESEARCH_CATEGORICAL_FIELDS:
+            _feature, base_column = _RESEARCH_CATEGORICAL_FIELDS[indicator]
+            column = _ichimoku_column(config, condition, base_column)
+            return (
+                _present(row, column, f"__ctx_{column}")
+                if column is not None
+                else None
+            )
+        return None
     if indicator in _RESEARCH_NUMERIC_FIELDS:
         _feature, column, scale = _RESEARCH_NUMERIC_FIELDS[indicator]
         value = _number(_present(row, column))
@@ -852,8 +898,11 @@ def _condition_match(
     operator = str(condition.get("condition", "EQUALS")).upper()
     indicator = str(condition.get("indicator", "")).upper()
     detail = {
-        "condition_id": condition.get("id"), "indicator": indicator,
-        "condition": operator, "observed": _json_safe(value),
+        "condition_id": condition.get("id"),
+        "indicator": indicator,
+        "sr_timeframe_minutes": condition.get("sr_timeframe_minutes"),
+        "condition": operator,
+        "observed": _json_safe(value),
     }
     if value is None:
         detail.update(matched=False, availability="MISSING_OR_UNSUPPORTED")
