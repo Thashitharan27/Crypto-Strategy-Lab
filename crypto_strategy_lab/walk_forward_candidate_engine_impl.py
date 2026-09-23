@@ -200,11 +200,9 @@ def _utc_timestamp(value: Any, name: str) -> pd.Timestamp:
 
 
 def _events(store: CausalExperimentStore, experiment_id: str) -> list[dict[str, Any]]:
-    _value, directory, _manifest, events_path = store._paths(experiment_id)
-    store._assert_safe_dir(directory, must_exist=True)
-    rows = store._read_all_events(events_path)
-    store._verify_chain(rows)
-    return rows
+    """Return the rebuildable indexed event view; JSONL remains authoritative."""
+    store.read_fast(experiment_id, recent_events=0)
+    return store.indexed_events(experiment_id)
 
 
 def _verified_head(
