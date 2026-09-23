@@ -431,6 +431,36 @@ def _pick_column(columns: set[str], choices: tuple[str, ...]) -> str | None:
     return None
 
 
+def _risk_fraction(definition: dict[str, Any]) -> float:
+    model = definition.get("risk_model")
+    if isinstance(model, dict) and model.get("risk_per_trade") not in (None, ""):
+        value = float(model["risk_per_trade"])
+    else:
+        legacy = definition.get("risk_pct")
+        if legacy in (None, ""):
+            raise ValueError("raw benchmark requires risk_model.risk_per_trade or risk_pct")
+        value = float(legacy) / 100.0
+    if not 0 < value <= 1:
+        raise ValueError("raw benchmark risk per trade must be in (0, 1]")
+    return value
+
+
+def _equity_path(starting_equity: float, values: list[float], risk_fraction: float) -> dict[str, Any]:
+    equity = float(starting_equity)
+    if equity <= 0:
+        raise ValueError("raw benchmark starting equity must be positive")
+    for value in values:
+        equity += equity * float(risk_fraction) * float(value)
+    return {
+        "starting_equity": round(float(starting_equity), 10),
+        "ending_equity": round(equity, 10),
+        "equity_change": round(equity - float(starting_equity), 10),
+        "return_pct": round(
+            100.0 * (equity / float(starting_equity) - 1.0), 6
+        ),
+    }
+
+
 def build_raw_strategy_benchmark(
     reports: Any,
     *,
@@ -438,6 +468,7 @@ def build_raw_strategy_benchmark(
     start: pd.Timestamp,
     end: pd.Timestamp,
     adaptive_prospective: list[dict[str, Any]],
+    starting_equity: float,
 ) -> dict[str, Any]:
     reference_run = str(definition.get("reference_run") or "").strip()
     manifest = reports.get_run_manifest(reference_run)
@@ -494,6 +525,34 @@ def build_raw_strategy_benchmark(
         if row.get("net_r") is not None
     ]
     adaptive = _stats(adaptive_values)
+    risk_fraction = _risk_fraction(definition)
+    raw_equity = _equity_path(starting_equity, values, risk_fraction)
+    if adaptive_prospective:
+        first_equity = adaptive_prospective[0].get("equity_before")
+        last_equity = adaptive_prospective[-1].get("equity_after")
+    else:
+        first_equity = starting_equity
+        last_equity = starting_equity
+    adaptive_equity = {
+        "starting_equity": round(float(first_equity), 10)
+        if first_equity is not None
+        else round(float(starting_equity), 10),
+        "ending_equity": round(float(last_equity), 10)
+        if last_equity is not None
+        else round(float(starting_equity), 10),
+    }
+    adaptive_equity["equity_change"] = round(
+        adaptive_equity["ending_equity"] - adaptive_equity["starting_equity"], 10
+    )
+    adaptive_equity["return_pct"] = round(
+        100.0
+        * (
+            adaptive_equity["ending_equity"]
+            / adaptive_equity["starting_equity"]
+            - 1.0
+        ),
+        6,
+    )
 
     def find_config(key: str, node: Any) -> Any:
         if isinstance(node, dict):
@@ -521,14 +580,29 @@ def build_raw_strategy_benchmark(
             ),
             "risk_model": deepcopy(definition.get("risk_model")),
             "risk_pct_legacy": definition.get("risk_pct"),
+            "applied_risk_fraction": risk_fraction,
+            "benchmark_starting_equity": round(float(starting_equity), 10),
             "fees_slippage": "inherited from immutable reference run outcomes",
         },
-        "raw_strategy": raw,
-        "frozen_adaptive_oos": adaptive,
+        "raw_strategy": {
+            **raw,
+            "equity": raw_equity,
+        },
+        "frozen_adaptive_oos": {
+            **adaptive,
+            "equity": adaptive_equity,
+        },
         "adaptive_value_added": {
             "trade_count_delta": adaptive["trades"] - raw["trades"],
             "net_r_delta": round(
                 float(adaptive["net_r"]) - float(raw["net_r"]), 10
+            ),
+            "ending_equity_delta": round(
+                adaptive_equity["ending_equity"] - raw_equity["ending_equity"],
+                10,
+            ),
+            "return_pct_delta": round(
+                adaptive_equity["return_pct"] - raw_equity["return_pct"], 6
             ),
             "win_rate_pct_delta": (
                 round(
