@@ -11,6 +11,52 @@ _SIGNAL_EMA_SAFETY_BARS = 5
 _MIN_STATE_CONTEXT_DAYS = 22
 
 
+def support_resistance_history_period(features, strategy_minutes: int) -> pd.Timedelta:
+    """Return the S/R-only history needed before the research boundary.
+
+    This deliberately excludes unrelated signal, regime, momentum and execution
+    warm-up so the S/R feature cache can keep a stable request scope when only
+    the signal strategy changes.
+    """
+    if not bool(features.enable_support_resistance_analysis):
+        return pd.Timedelta(0)
+
+    strategy_minutes = int(strategy_minutes)
+    configured_sr_minutes = int(features.sr_timeframe_minutes or strategy_minutes)
+    independent_sr_minutes = [
+        strategy_minutes,
+        *(
+            minutes
+            for minutes in (60, 240, 1440)
+            if minutes > strategy_minutes and minutes % strategy_minutes == 0
+        ),
+    ]
+    duration = pd.Timedelta(0)
+    for sr_minutes in sorted({configured_sr_minutes, *independent_sr_minutes}):
+        if hasattr(features, "sr_detection_parameters"):
+            detection = features.sr_detection_parameters(sr_minutes)
+            pivot_left = int(detection["sr_pivot_left"])
+            pivot_right = int(detection["sr_pivot_right"])
+            lookback_bars = int(detection["sr_lookback_bars"])
+        else:
+            pivot_left = int(features.sr_pivot_left)
+            pivot_right = int(features.sr_pivot_right)
+            lookback_bars = int(features.sr_lookback_bars)
+        sr_bars = (
+            lookback_bars
+            + max(pivot_left, pivot_right)
+            + int(features.atr_period)
+            + (
+                int(features.sr_hold_confirmation_bars)
+                if bool(features.enable_sr_hold_confirmation)
+                else 0
+            )
+            + 5
+        )
+        duration = max(duration, pd.Timedelta(minutes=sr_minutes * sr_bars))
+    return duration
+
+
 def strategy_warmup_period(run_config) -> pd.Timedelta:
     """Return the history required before the user-selected research start.
 
@@ -48,42 +94,10 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
     )
 
     if bool(features.enable_support_resistance_analysis):
-        configured_sr_minutes = int(
-            features.sr_timeframe_minutes or strategy_minutes
+        duration = max(
+            duration,
+            support_resistance_history_period(features, strategy_minutes),
         )
-        independent_sr_minutes = [
-            strategy_minutes,
-            *(
-                minutes
-                for minutes in (60, 240, 1440)
-                if minutes > strategy_minutes and minutes % strategy_minutes == 0
-            ),
-        ]
-        # Independent S/R outputs must be fully warmed at the research boundary.
-        # Each timeframe gets its own pivot/lookback horizon; using one shared bar
-        # count for 15m and 1d would give those settings very different meanings.
-        for sr_minutes in sorted({configured_sr_minutes, *independent_sr_minutes}):
-            if hasattr(features, "sr_detection_parameters"):
-                detection = features.sr_detection_parameters(sr_minutes)
-                pivot_left = int(detection["sr_pivot_left"])
-                pivot_right = int(detection["sr_pivot_right"])
-                lookback_bars = int(detection["sr_lookback_bars"])
-            else:
-                pivot_left = int(features.sr_pivot_left)
-                pivot_right = int(features.sr_pivot_right)
-                lookback_bars = int(features.sr_lookback_bars)
-            sr_bars = (
-                lookback_bars
-                + max(pivot_left, pivot_right)
-                + int(features.atr_period)
-                + (
-                    int(features.sr_hold_confirmation_bars)
-                    if bool(features.enable_sr_hold_confirmation)
-                    else 0
-                )
-                + 5
-            )
-            duration = max(duration, pd.Timedelta(minutes=sr_minutes * sr_bars))
 
     if str(features.market_regime_method).upper() == "ASSET_RETURN":
         duration = max(
