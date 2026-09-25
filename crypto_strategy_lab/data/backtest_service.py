@@ -1247,8 +1247,6 @@ def load_backtest_bundle(
         feature_registry if feature_registry is not None else production_feature_registry()
     )
     requested = ["production_market_context", "state_transition_daily"]
-    if enable_support_resistance_analysis:
-        requested.append("support_resistance")
     main_parameter_names = set(registry.dependency_order(requested))
     main_feature_parameters = {
         name: parameters
@@ -1256,18 +1254,6 @@ def load_backtest_bundle(
         if name in main_parameter_names
     }
     progress = getattr(store, "progress_callback", None)
-    if enable_support_resistance_analysis:
-        emit_progress(
-            progress,
-            kind="stage",
-            phase="support_resistance",
-            label=f"Preparing S/R {strategy_minutes}m",
-            detail=(
-                f"Building or loading strategy-timeframe S/R and core feature "
-                f"dependencies for {len(canonical):,} rows."
-            ),
-        )
-    main_features_started = time.perf_counter()
     frames = registry.execute(
         requested,
         request,
@@ -1276,26 +1262,31 @@ def load_backtest_bundle(
         cache=FeatureFrameCache(store.cache.root),
         progress_callback=progress,
     )
-    main_features_elapsed = time.perf_counter() - main_features_started
     directional = frames[CORE_DIRECTIONAL_FEATURE_NAME]
     context = frames["production_market_context"]
-    sr_features = frames.get("support_resistance")
     state_transition_daily = frames["state_transition_daily"]
-    if enable_support_resistance_analysis and sr_features is not None:
-        cache_state = (
-            "cache hit"
-            if bool(sr_features.attrs.get("feature_cache_hit", False))
-            else "cache built"
-        )
-        emit_progress(
-            progress,
-            kind="stage",
-            phase="support_resistance",
-            label=f"S/R {strategy_minutes}m ready",
-            detail=(
-                f"{cache_state}; {len(sr_features):,} strategy rows. "
-                f"Primary feature block completed in {main_features_elapsed:.1f}s."
-            ),
+
+    sr_features = None
+    sr_research_features: dict[str, pd.DataFrame] = {}
+    if enable_support_resistance_analysis:
+        sr_request = request
+        sr_canonical = canonical
+        if feature_config is not None and research_start is not None:
+            sr_request = _support_resistance_cache_request(
+                request,
+                research_start=research_request.start,
+                features=feature_config,
+                strategy_minutes=strategy_minutes,
+            )
+            sr_canonical = _canonical_feature_slice(store, canonical, sr_request)
+        sr_features, sr_research_features = _support_resistance_feature_set(
+            store,
+            registry,
+            sr_request,
+            sr_canonical,
+            feature_parameters,
+            strategy,
+            strategy_minutes=strategy_minutes,
         )
 
     research_features = _optional_futures_research_features(
@@ -1328,18 +1319,8 @@ def load_backtest_bundle(
                 include_higher_timeframes=ichimoku_include_higher_timeframes,
             )
         )
-    if enable_support_resistance_analysis and sr_features is not None:
-        research_features.update(
-            _independent_sr_research_features(
-                store,
-                registry,
-                request,
-                canonical,
-                feature_parameters,
-                sr_features,
-                strategy_minutes=strategy_minutes,
-            )
-        )
+    if sr_research_features:
+        research_features.update(sr_research_features)
 
     intrabar = None
     actual_intrabar_interval = None
