@@ -365,16 +365,31 @@ class RiskExecutionWorkspace(QWidget):
 
     def refresh_visibility(self, *_args) -> None:
         ema_920 = self._ema_920_selected()
-        cross_plan = ema_920 and self.account["ema_920_trade_plan"].currentData() == "EMA_20_100_CROSS"
+        cross_mode = {
+            "EMA_20_100_CROSS": "LONG",
+            "EMA_20_100_CROSS_SHORT": "SHORT",
+            "EMA_20_100_CROSS_BOTH": "BOTH",
+        }.get(self.account["ema_920_trade_plan"].currentData())
+        cross_plan = ema_920 and cross_mode is not None
         self.entry_card.set_row_visible("ema_920_trade_plan", ema_920)
         self.ema_stop_method.setText(
             "EMA 100 at Signal Close — Automatic" if cross_plan else "EMA 9/20 Micro-Swing — Automatic"
         )
-        self.ema_stop_buffer.setText("0.05 × signal ATR below EMA 100" if cross_plan else "0.05 × ATR")
-        self.stop_card.rows["ema_920_stop_buffer"][0].setText("Stop Below EMA 100" if cross_plan else "Stop Buffer")
-        self.ema_target_method.setText(
-            "EMA 20/100 Bearish Cross — Next Candle Open" if cross_plan else "EMA 9/20 Fixed 1R — Automatic"
+        stop_buffer_text = {
+            "LONG": "0.05 × signal ATR below EMA 100",
+            "SHORT": "0.05 × signal ATR above EMA 100",
+            "BOTH": "0.05 × signal ATR beyond EMA 100 (below long / above short)",
+        }.get(cross_mode, "0.05 × ATR")
+        self.ema_stop_buffer.setText(stop_buffer_text)
+        self.stop_card.rows["ema_920_stop_buffer"][0].setText(
+            "Stop vs EMA 100" if cross_plan else "Stop Buffer"
         )
+        target_method = {
+            "LONG": "EMA 20/100 Bearish Cross — Next Candle Open",
+            "SHORT": "EMA 20/100 Bullish Cross — Next Candle Open",
+            "BOTH": "Opposite EMA 20/100 Cross — Next Candle Open",
+        }.get(cross_mode, "EMA 9/20 Fixed 1R — Automatic")
+        self.ema_target_method.setText(target_method)
         self.ema_target_value.setText("No fixed target; EMA 100 stop remains active" if cross_plan else "1.00 R")
         mode = str(self.account["risk_mode"].currentData() or "ATR")
         structural_stop = mode == "SR_STRUCTURE"
@@ -598,12 +613,22 @@ class RiskExecutionWorkspace(QWidget):
         )
 
         if ema_920:
-            target = (
-                "long on EMA 20 crossing above EMA 100; exit at the next candle open after "
-                "EMA 20 crosses below EMA 100 (protective EMA 100 stop stays active)"
-                if execution.ema_920_trade_plan == "EMA_20_100_CROSS"
-                else "automatic fixed 1.00R target"
-            )
+            cross_target = {
+                "EMA_20_100_CROSS": (
+                    "long on EMA 20 crossing above EMA 100; exit at the next candle open after "
+                    "EMA 20 crosses below EMA 100 (protective EMA 100 stop stays active)"
+                ),
+                "EMA_20_100_CROSS_SHORT": (
+                    "short on EMA 20 crossing below EMA 100; exit at the next candle open after "
+                    "EMA 20 crosses above EMA 100 (protective EMA 100 stop stays active)"
+                ),
+                "EMA_20_100_CROSS_BOTH": (
+                    "trade both directions: bullish cross opens long and bearish cross opens short; "
+                    "the opposite cross exits/reverses at the next candle open "
+                    "(protective EMA 100 stop stays active)"
+                ),
+            }.get(execution.ema_920_trade_plan)
+            target = cross_target or "automatic fixed 1.00R target"
         else:
             target_mode = str(execution.sr_take_profit_mode).upper()
             if target_mode == "SR_CAPPED_R":
