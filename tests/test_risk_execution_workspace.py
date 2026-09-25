@@ -308,6 +308,17 @@ def test_ema_920_execution_plan_is_explicit_and_generic_stop_target_controls_are
         assert "confirmed micro-swing" in workspace.summary_label.text()
         assert "automatic fixed 1.00R target" in workspace.summary_label.text()
 
+        plan = window.execution_form.widgets["ema_920_trade_plan"]
+        plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS"))
+        app.processEvents()
+        assert workspace.ema_stop_method.text() == "EMA 100 at Signal Close — Automatic"
+        assert workspace.ema_stop_confirmation.isHidden()
+        assert workspace.ema_stop_lookback.isHidden()
+        assert workspace.ema_stop_maximum.isHidden()
+        assert "below EMA 100" in workspace.ema_stop_buffer.text()
+        assert "signal-candle EMA 100" in workspace.summary_label.text()
+        assert "EMA 100 stop remains active" in workspace.ema_target_value.text()
+
         # Entry timing remains deliberately editable for A/B execution testing.
         legacy_index = timing.findData("SIGNAL_CLOSE")
         timing.setCurrentIndex(legacy_index)

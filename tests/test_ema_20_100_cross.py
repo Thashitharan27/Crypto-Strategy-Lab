@@ -27,6 +27,12 @@ class Base:
     def _profile_context(self, i):
         return ("BULL", "LONG", "BULL_LONG", self.profile)
 
+    def _effective_trade_direction(self, i):
+        return "LONG"
+
+    def _expected_entry_price(self, i, execution_i, direction):
+        return self.open[execution_i] * (1 + self.config.slippage)
+
     def _strategy_profile_rule_group_match(self, i, direction, profile, action, mode):
         return self.flip_matches
 
@@ -148,6 +154,28 @@ class EmaCrossTests(unittest.TestCase):
         e._open_pair(101)
         self.assertTrue(np.isnan(pos.tp))
         self.assertIsNone(pos.ema_920_fixed_target_r)
+
+    def test_cross_stop_uses_signal_ema_100_not_micro_swing_or_1_5_atr_cap(self):
+        e = self.engine
+        e.config.strategy_timeframe_minutes = 15
+        e.ema_100_values[101] = 100.0
+        e.ema_100_values[102] = 110.0  # The execution candle is not yet known.
+        e.atr_values[101] = 2.0
+        e.open[102] = 103.0
+        plan = e._sr_stop_plan(101, 102)
+        self.assertTrue(plan["passed"])
+        self.assertEqual(plan["reason"], "EMA100_CROSS_STOP")
+        self.assertAlmostEqual(plan["stop_price"], 99.9)
+        self.assertAlmostEqual(plan["distance"], 103.0 * 1.001 - 99.9)
+        self.assertGreater(plan["distance_atr"], 1.5)
+        self.assertNotIn("micro_swing_index", plan)
+
+    def test_cross_entry_gapping_below_ema_100_stop_is_rejected(self):
+        e = self.engine
+        e.ema_100_values[101] = 100.0
+        e.atr_values[101] = 2.0
+        e.open[102] = 99.0
+        self.assertEqual(e._sr_stop_plan(101, 102)["reason"], "ENTRY_INVALIDATED_GAP_THROUGH_STOP")
 
 
 if __name__ == "__main__":
