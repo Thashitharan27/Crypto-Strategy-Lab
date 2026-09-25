@@ -269,3 +269,25 @@ def test_spot_short_replay_spot_fee_and_exhaustion_use_cash(tmp_path):
     assert summary["ending_cash_usdt"] == pytest.approx(100 - (50 - 0.1 * 110 * 0.99))
     assert ledger.iloc[0]["unfunded_from_spot_usdt"] == pytest.approx(50 - 0.1 * 110 * 0.99)
     assert summary["spot_fees_usdt"] == pytest.approx(0.11)
+
+
+def test_spot_short_replay_accepts_native_short_exit_price_without_generic_exit_price(tmp_path):
+    short = _sample("native-short", 1, "2024-01-01 10:00", "2024-01-01 11:00", 0.2, "SHORT")
+    short.update(entry_price=100, short_exit_price=90,
+                 short_exit_time=pd.Timestamp("2024-01-01 11:00", tz="UTC"))
+    run = _write_run(tmp_path, "BTCUSDT", [short])
+    summary, ledger, _ = replay_spot_short(
+        run, initial_btc=1, initial_cash=100, futures_risk_usdt=50,
+        spot_fee_percent=0, output_root=tmp_path / "results",
+    )
+    assert ledger.iloc[0]["exit_price"] == pytest.approx(90)
+    assert summary["ending_btc"] == pytest.approx(1 + 10 / 90)
+
+
+def test_spot_short_replay_rejects_fill_price_from_different_exit_time(tmp_path):
+    short = _sample("mismatch", 1, "2024-01-01 10:00", "2024-01-01 12:00", 0.2, "SHORT")
+    short.update(entry_price=100, short_exit_price=90,
+                 short_exit_time=pd.Timestamp("2024-01-01 11:00", tz="UTC"))
+    run = _write_run(tmp_path, "BTCUSDT", [short])
+    with pytest.raises(RunArtifactError, match="fill time differs"):
+        replay_spot_short(run, output_root=tmp_path / "results")
