@@ -27,6 +27,7 @@ from crypto_strategy_lab.portfolio_replay import (
     discover_resilience_runs,
     run_portfolio_replay,
 )
+from crypto_strategy_lab.spot_short_replay import replay_spot_short
 
 
 class PortfolioReplayWorkspace(QWidget):
@@ -158,10 +159,50 @@ class PortfolioReplayWorkspace(QWidget):
         self.summary.setMinimumHeight(150)
         layout.addWidget(self.summary)
 
+        spot_box = QGroupBox("BTC spot + short futures accumulation test")
+        spot_form = QFormLayout(spot_box)
+        spot_hint = QLabel(
+            "Select exactly one completed BTCUSDT Every Viable Entry run above. "
+            "Only nonoverlapping short trades are used. Net short wins buy BTC; "
+            "net losses sell BTC to fund the loss. The report compares total "
+            "portfolio value with buy and hold at trade exits."
+        )
+        spot_hint.setWordWrap(True)
+        self.spot_initial_btc = QDoubleSpinBox()
+        self.spot_initial_btc.setRange(0.00000001, 1_000_000)
+        self.spot_initial_btc.setDecimals(8)
+        self.spot_initial_btc.setValue(1.0)
+        self.spot_initial_cash = QDoubleSpinBox()
+        self.spot_initial_cash.setRange(0, 1_000_000_000)
+        self.spot_initial_cash.setPrefix("$")
+        self.spot_initial_cash.setValue(1000)
+        self.spot_futures_risk = QDoubleSpinBox()
+        self.spot_futures_risk.setRange(0.01, 1_000_000)
+        self.spot_futures_risk.setPrefix("$")
+        self.spot_futures_risk.setValue(50)
+        self.spot_fee = QDoubleSpinBox()
+        self.spot_fee.setRange(0, 99)
+        self.spot_fee.setDecimals(3)
+        self.spot_fee.setSuffix("%")
+        self.spot_fee.setValue(0.1)
+        self.spot_run_button = QPushButton("Run BTC Spot + Shorts Test")
+        self.spot_summary = QPlainTextEdit()
+        self.spot_summary.setReadOnly(True)
+        self.spot_summary.setMinimumHeight(120)
+        spot_form.addRow(spot_hint)
+        spot_form.addRow("Starting BTC", self.spot_initial_btc)
+        spot_form.addRow("Starting USDT cash", self.spot_initial_cash)
+        spot_form.addRow("Fixed futures risk per trade", self.spot_futures_risk)
+        spot_form.addRow("Spot trade fee", self.spot_fee)
+        spot_form.addRow(self.spot_run_button)
+        spot_form.addRow(self.spot_summary)
+        layout.addWidget(spot_box)
+
         self.refresh_button.clicked.connect(self.refresh_runs)
         self.latest_button.clicked.connect(self.select_latest_per_symbol)
         self.clear_button.clicked.connect(self.clear_selection)
         self.run_button.clicked.connect(self.run_replay)
+        self.spot_run_button.clicked.connect(self.run_spot_replay)
         self.open_folder_button.clicked.connect(self.open_last_output)
 
         self.refresh_runs()
@@ -307,3 +348,37 @@ class PortfolioReplayWorkspace(QWidget):
         if self._last_run_dir is None:
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_run_dir)))
+
+    def run_spot_replay(self):
+        selected = self.selected_run_dirs()
+        if len(selected) != 1:
+            QMessageBox.warning(self, "BTC Spot + Shorts", "Select exactly one completed BTCUSDT run.")
+            return
+        self.spot_run_button.setEnabled(False)
+        try:
+            summary, _ledger, output = replay_spot_short(
+                selected[0], initial_btc=self.spot_initial_btc.value(),
+                initial_cash=self.spot_initial_cash.value(),
+                futures_risk_usdt=self.spot_futures_risk.value(),
+                spot_fee_percent=self.spot_fee.value(), output_root=self._output_root(),
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "BTC Spot + Shorts Failed", str(exc))
+            self.spot_summary.setPlainText(str(exc))
+            return
+        finally:
+            self.spot_run_button.setEnabled(True)
+        self._last_run_dir = output
+        self.open_folder_button.setEnabled(True)
+        self.spot_summary.setPlainText(
+            f"Accepted shorts: {summary['accepted_shorts']:,} "
+            f"(overlaps skipped: {summary['skipped_overlapping_shorts']:,})\n"
+            f"BTC: {summary['initial_btc']:.8f} → {summary['ending_btc']:.8f}\n"
+            f"Cash: ${summary['initial_cash_usdt']:,.2f} → ${summary['ending_cash_usdt']:,.2f}\n"
+            f"Portfolio: ${summary['ending_value_usdt']:,.2f}; "
+            f"buy and hold: ${summary['buy_hold_value_usdt']:,.2f}; "
+            f"buy and hold + same shorts: ${summary['buy_hold_plus_shorts_value_usdt']:,.2f}\n"
+            f"Futures net P/L: ${summary['futures_net_pnl_usdt']:,.2f}; "
+            f"spot fees: ${summary['spot_fees_usdt']:,.2f}\n"
+            f"Saved: {output}\n{summary['limitations']}"
+        )
