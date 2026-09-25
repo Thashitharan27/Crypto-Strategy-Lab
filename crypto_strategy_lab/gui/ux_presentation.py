@@ -110,7 +110,9 @@ FIELDS = {
 ENUM_LABELS = {
     "ema_920_trade_plan": {
         "PULLBACK_1R": "9/20 Pullback + Fixed 1R",
-        "EMA_20_100_CROSS": "20/100 Cross Entry + Cross Exit (Long)",
+        "EMA_20_100_CROSS": "20/100 Cross — Long Only",
+        "EMA_20_100_CROSS_SHORT": "20/100 Cross — Short Only",
+        "EMA_20_100_CROSS_BOTH": "20/100 Cross — Long + Short",
     },
     "entry_timing_mode": {
         "SIGNAL_CLOSE": "Signal Candle Close — Legacy",

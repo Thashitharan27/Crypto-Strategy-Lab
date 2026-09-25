@@ -224,7 +224,9 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         errors.append("Invalid entry mode.")
     if values["entry_timing_mode"] not in (EntryTimingMode.SIGNAL_CLOSE.value, EntryTimingMode.NEXT_CANDLE_OPEN.value):
         errors.append("Invalid entry timing mode.")
-    if values["ema_920_trade_plan"] not in ("PULLBACK_1R", "EMA_20_100_CROSS"):
+    if values["ema_920_trade_plan"] not in (
+        "PULLBACK_1R", "EMA_20_100_CROSS", "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH"
+    ):
         errors.append("Invalid EMA 9/20 trade plan.")
     if values["risk_mode"] not in [e.value for e in RiskMode]:
         errors.append("Invalid risk mode.")

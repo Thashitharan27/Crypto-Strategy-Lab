@@ -1,4 +1,4 @@
-"""Regression checks for the optional long-only EMA 20/100 plan."""
+"""Regression checks for directional EMA 20/100 crossover plans."""
 from types import SimpleNamespace
 from dataclasses import replace
 import unittest
@@ -25,13 +25,15 @@ class Base:
         return True, "passed"
 
     def _profile_context(self, i):
-        return ("BULL", "LONG", "BULL_LONG", self.profile)
+        direction = getattr(self, "direction", "LONG")
+        return ("BULL", direction, f"BULL_{direction}", self.profile)
 
     def _effective_trade_direction(self, i):
-        return "LONG"
+        return getattr(self, "direction", "LONG")
 
     def _expected_entry_price(self, i, execution_i, direction):
-        return self.open[execution_i] * (1 + self.config.slippage)
+        slip = 1 + self.config.slippage if direction == "LONG" else 1 - self.config.slippage
+        return self.open[execution_i] * slip
 
     def _strategy_profile_rule_group_match(self, i, direction, profile, action, mode):
         return self.flip_matches
@@ -62,6 +64,21 @@ class EmaCrossTests(unittest.TestCase):
         replace(config, execution=replace(config.execution,
             entry_timing_mode="NEXT_CANDLE_OPEN",
             ema_920_trade_plan="EMA_20_100_CROSS")).validate()
+
+    def test_config_accepts_short_and_both_cross_modes(self):
+        config = ResearchRunConfig()
+        profiles = dict(config.strategy.profiles)
+        key = next(iter(profiles))
+        profiles[key] = replace(profiles[key], entry_rules=(
+            {"_strategy_direction_mode": EMA_920_MODE},
+        ))
+        config = replace(
+            config,
+            strategy=replace(config.strategy, profiles=profiles),
+            execution=replace(config.execution, entry_timing_mode="NEXT_CANDLE_OPEN"),
+        )
+        for plan in ("EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH"):
+            replace(config, execution=replace(config.execution, ema_920_trade_plan=plan)).validate()
 
     def test_config_rejects_active_flip_rules_but_ignores_muted_ones(self):
         config = ResearchRunConfig()
@@ -97,6 +114,7 @@ class EmaCrossTests(unittest.TestCase):
         engine.active_pairs = []
         engine.profile = SimpleNamespace(flip_direction=False, entry_rules=(), flip_rule_match_mode="ANY")
         engine.flip_matches = False
+        engine.direction = "LONG"
 
     def test_completed_bullish_cross_is_a_long_entry_signal_only_once(self):
         e = self.engine
@@ -105,6 +123,25 @@ class EmaCrossTests(unittest.TestCase):
         self.assertIsNone(e._selected_direction(100))
         self.assertEqual(e._selected_direction(101), "LONG")
         self.assertIsNone(e._selected_direction(102))
+
+
+    def test_short_only_plan_uses_bearish_cross_once(self):
+        e = self.engine
+        e.config.ema_920_trade_plan = "EMA_20_100_CROSS_SHORT"
+        e.direction = "SHORT"
+        e.ema_20_values[99:103] = [101, 101, 99, 98]
+        e.ema_100_values[99:103] = [100, 100, 100, 100]
+        self.assertIsNone(e._selected_direction(100))
+        self.assertEqual(e._selected_direction(101), "SHORT")
+        self.assertIsNone(e._selected_direction(102))
+
+    def test_both_plan_maps_each_cross_to_native_direction(self):
+        e = self.engine
+        e.config.ema_920_trade_plan = "EMA_20_100_CROSS_BOTH"
+        e.ema_20_values[99:103] = [99, 99, 101, 99]
+        e.ema_100_values[99:103] = [100, 100, 100, 100]
+        self.assertEqual(e._selected_direction(101), "LONG")
+        self.assertEqual(e._selected_direction(102), "SHORT")
 
     def test_bearish_cross_exits_at_next_open_even_if_bar_later_recovers(self):
         e = self.engine
@@ -127,6 +164,19 @@ class EmaCrossTests(unittest.TestCase):
         pos = SimpleNamespace(is_open=True, side=Side.LONG, sl=95.0)
         e._scan_position_exit(SimpleNamespace(position=pos), pos, 102)
         self.assertEqual(e.exits[0][2], ExitReason.EMA_20_100_CROSS)
+        self.assertEqual(e.fallback_scans, [])
+
+
+    def test_bullish_cross_exits_short_at_next_open(self):
+        e = self.engine
+        e.config.ema_920_trade_plan = "EMA_20_100_CROSS_SHORT"
+        e.ema_20_values[100:102] = [99, 101]
+        e.ema_100_values[100:102] = [100, 100]
+        e.open[102] = 102.0
+        pos = SimpleNamespace(is_open=True, side=Side.SHORT, sl=105.0)
+        e._scan_position_exit(SimpleNamespace(position=pos), pos, 102)
+        self.assertEqual(e.exits, [(102, 102.102, ExitReason.EMA_20_100_CROSS,
+                                    ExitSource.STRATEGY_OPEN, e.times[102])])
         self.assertEqual(e.fallback_scans, [])
 
     def test_runtime_filter_rejects_a_flipped_long(self):
@@ -176,6 +226,31 @@ class EmaCrossTests(unittest.TestCase):
         e.atr_values[101] = 2.0
         e.open[102] = 99.0
         self.assertEqual(e._sr_stop_plan(101, 102)["reason"], "ENTRY_INVALIDATED_GAP_THROUGH_STOP")
+
+
+    def test_short_cross_stop_uses_signal_ema_100_above_entry(self):
+        e = self.engine
+        e.config.ema_920_trade_plan = "EMA_20_100_CROSS_SHORT"
+        e.config.strategy_timeframe_minutes = 15
+        e.direction = "SHORT"
+        e.ema_100_values[101] = 100.0
+        e.atr_values[101] = 2.0
+        e.open[102] = 97.0
+        plan = e._sr_stop_plan(101, 102)
+        self.assertTrue(plan["passed"])
+        self.assertAlmostEqual(plan["stop_price"], 100.1)
+        self.assertAlmostEqual(plan["distance"], 100.1 - 97.0 * 0.999)
+
+    def test_short_cross_entry_gapping_above_ema_100_stop_is_rejected(self):
+        e = self.engine
+        e.config.ema_920_trade_plan = "EMA_20_100_CROSS_SHORT"
+        e.config.strategy_timeframe_minutes = 15
+        e.direction = "SHORT"
+        e.ema_100_values[101] = 100.0
+        e.atr_values[101] = 2.0
+        e.open[102] = 101.0
+        self.assertEqual(e._sr_stop_plan(101, 102)["reason"], "ENTRY_INVALIDATED_GAP_THROUGH_STOP")
+
 
 
 if __name__ == "__main__":

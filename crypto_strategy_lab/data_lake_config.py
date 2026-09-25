@@ -578,10 +578,15 @@ class ResearchRunConfig:
                     )
         if execution.entry_timing_mode not in {"SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"}:
             raise ValueError("invalid entry timing mode")
-        if execution.ema_920_trade_plan not in {"PULLBACK_1R", "EMA_20_100_CROSS"}:
+        ema_cross_plans = {
+            "EMA_20_100_CROSS",
+            "EMA_20_100_CROSS_SHORT",
+            "EMA_20_100_CROSS_BOTH",
+        }
+        if execution.ema_920_trade_plan not in {"PULLBACK_1R", *ema_cross_plans}:
             raise ValueError("invalid EMA 9/20 trade plan")
         ema_cross_selected = (
-            execution.ema_920_trade_plan == "EMA_20_100_CROSS"
+            execution.ema_920_trade_plan in ema_cross_plans
             and any(
                 rule.get("_strategy_direction_mode") == "EMA_9_20_PULLBACK"
                 for profile in strategy.profiles.values()
@@ -600,7 +605,7 @@ class ResearchRunConfig:
                         for rule in profile.entry_rules
                     )
                 ):
-                    raise ValueError(f"{key}: EMA 20/100 crossover is long-only; disable direction FLIP rules")
+                    raise ValueError(f"{key}: EMA 20/100 crossover uses native direction; disable direction FLIP rules")
             for key, profile in execution.profiles.items():
                 if strategy.profiles[key].enabled and any((
                     profile.partial_profit_enabled,

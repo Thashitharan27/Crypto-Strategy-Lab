@@ -161,13 +161,26 @@ class Ema920PullbackMixin:
 
     def _selected_direction(self, i):
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
-            if self._ema_920_cross_plan():
-                return "LONG" if self._ema_20_100_cross(i, upwards=True) else None
+            cross_mode = self._ema_920_cross_mode()
+            if cross_mode is not None:
+                if cross_mode in {"LONG", "BOTH"} and self._ema_20_100_cross(i, upwards=True):
+                    return "LONG"
+                if cross_mode in {"SHORT", "BOTH"} and self._ema_20_100_cross(i, upwards=False):
+                    return "SHORT"
+                return None
             return self._ema_920_direction(i)
         return super()._selected_direction(i)
 
+    def _ema_920_cross_mode(self):
+        plan = getattr(self.config, "ema_920_trade_plan", "PULLBACK_1R")
+        return {
+            "EMA_20_100_CROSS": "LONG",
+            "EMA_20_100_CROSS_SHORT": "SHORT",
+            "EMA_20_100_CROSS_BOTH": "BOTH",
+        }.get(plan)
+
     def _ema_920_cross_plan(self):
-        return getattr(self.config, "ema_920_trade_plan", "PULLBACK_1R") == "EMA_20_100_CROSS"
+        return self._ema_920_cross_mode() is not None
 
     def _ema_20_100_cross(self, i, *, upwards):
         if i < 100:
@@ -194,22 +207,35 @@ class Ema920PullbackMixin:
 
     def _close_on_ema_20_100_cross(self, positions, i):
         # At the open of candle i, only the completed candle i-1 is known.
-        if (getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE
-                and self._ema_920_cross_plan()
-                and self._ema_20_100_cross(i - 1, upwards=False)):
-            for pos in positions:
-                if not pos.is_open or pos.side != Side.LONG:
-                    continue
-                opening = float(self.open[i])
-                # A protective stop gapped through at the open takes precedence.
-                stopped = opening <= pos.sl
-                self._close_position(
-                    pos, i, opening * (1 - self.config.slippage),
-                    ExitReason.SL if stopped else ExitReason.EMA_20_100_CROSS,
-                    ExitSource.STRATEGY_OPEN, self.times[i],
-                )
-            return True
-        return False
+        if (getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE
+                or not self._ema_920_cross_plan()
+                or i <= 0):
+            return False
+        bullish_cross = self._ema_20_100_cross(i - 1, upwards=True)
+        bearish_cross = self._ema_20_100_cross(i - 1, upwards=False)
+        if not bullish_cross and not bearish_cross:
+            return False
+        closed = False
+        opening = float(self.open[i])
+        for pos in positions:
+            if not pos.is_open:
+                continue
+            should_close = (
+                (pos.side == Side.LONG and bearish_cross)
+                or (pos.side == Side.SHORT and bullish_cross)
+            )
+            if not should_close:
+                continue
+            # A protective stop gapped through at the open takes precedence.
+            stopped = opening <= pos.sl if pos.side == Side.LONG else opening >= pos.sl
+            slip = 1 - self.config.slippage if pos.side == Side.LONG else 1 + self.config.slippage
+            self._close_position(
+                pos, i, opening * slip,
+                ExitReason.SL if stopped else ExitReason.EMA_20_100_CROSS,
+                ExitSource.STRATEGY_OPEN, self.times[i],
+            )
+            closed = True
+        return closed
 
     def _entry_filter_result(self, i, execution_i=None):
         passed, reason = super()._entry_filter_result(i, execution_i)
@@ -224,13 +250,60 @@ class Ema920PullbackMixin:
                 i, direction, profile, "FLIP", profile.flip_rule_match_mode
             )
         )
-        return (False, "EMA 20/100 crossover is long-only; direction FLIP disabled") if flipped else (passed, reason)
+        return (False, "EMA 20/100 crossover uses native direction; direction FLIP disabled") if flipped else (passed, reason)
 
     def _should_enter(self, i):
-        if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
-            if self._selected_direction(i) is None:
-                return False
-        return super()._should_enter(i)
+        if getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE:
+            return super()._should_enter(i)
+        direction = self._selected_direction(i)
+        if direction is None:
+            return False
+        if super()._should_enter(i):
+            return True
+
+        # In BOTH mode, an opposite crossover is simultaneously the exit signal
+        # for the current position and the entry signal for the reverse side.
+        # Allow that signal to be queued even though the old trade is still open
+        # until the next candle's open.
+        if self._ema_920_cross_mode() != "BOTH" or len(self.active_pairs) != 1:
+            return False
+        entry_mode = str(getattr(getattr(self.config, "entry_mode", ""), "value",
+                                 getattr(self.config, "entry_mode", ""))).upper()
+        if entry_mode != "WAIT_UNTIL_CLOSED":
+            return False
+        if not np.isfinite(self.risk[i]) or self.risk[i] <= 0 or not self._in_trading_window(i):
+            return False
+        if self.last_timeout_exit_time is not None and self._entry_time(i) <= self.last_timeout_exit_time:
+            return False
+        positions = [pos for pos in self.active_pairs[0].positions() if pos.is_open]
+        if not positions:
+            return False
+        wanted = Side.LONG if direction == "LONG" else Side.SHORT
+        return all(pos.side != wanted for pos in positions)
+
+    def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
+        decision = getattr(self, "pending_next_open_entry", None)
+        if (
+            decision
+            and int(decision.get("execution_index", -1)) == i
+            and active_at_candle_start
+            and self._ema_920_cross_mode() == "BOTH"
+        ):
+            indicator_i = int(decision["indicator_index"])
+            direction = self._selected_direction(indicator_i)
+            wanted = Side.LONG if direction == "LONG" else Side.SHORT if direction == "SHORT" else None
+            positions = [
+                pos
+                for pair in self.active_pairs
+                for pos in pair.positions()
+                if pos.is_open
+            ]
+            if wanted is not None and positions and all(pos.side != wanted for pos in positions):
+                for pair in list(self.active_pairs):
+                    self._close_on_ema_20_100_cross(pair.positions(), i)
+                self._collect_closed_pairs()
+                active_at_candle_start = bool(self.active_pairs)
+        return super()._execute_pending_next_open_entry(i, active_at_candle_start)
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
         if indicator not in EMA_920_RULE_INDICATORS:
@@ -321,22 +394,29 @@ class Ema920PullbackMixin:
         }
 
     def _ema_100_cross_stop_plan(self, i: int, execution_i: int | None = None):
-        """Anchor the long stop to the EMA 100 known at the signal close."""
+        """Anchor the protective stop to the EMA 100 known at the signal close."""
+        direction = self._effective_trade_direction(i)
+        if direction not in {"LONG", "SHORT"}:
+            return {"passed": False, "applied": False, "reason": "EMA100_NO_DIRECTION", "distance": None}
         level = float(self.ema_100_values[i])
         atr = float(self.atr_values[i])
         if not np.isfinite(level) or not np.isfinite(atr) or atr <= 0:
             return {"passed": False, "applied": False, "reason": "EMA100_STOP_UNAVAILABLE", "distance": None}
-        stop_price = level - self.ema_100_stop_buffer_atr * atr
-        if execution_i is not None and execution_i > i and float(self.open[execution_i]) <= stop_price:
-            return {
-                "passed": False, "applied": False, "reason": "ENTRY_INVALIDATED_GAP_THROUGH_STOP",
-                "distance": None, "level_price": level, "boundary_price": level,
-                "stop_price": stop_price,
-                "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
-                "ema_100_stop": True,
-            }
-        entry = float(self._expected_entry_price(i, execution_i, "LONG"))
-        distance = entry - stop_price
+        buffer_price = self.ema_100_stop_buffer_atr * atr
+        stop_price = level - buffer_price if direction == "LONG" else level + buffer_price
+        if execution_i is not None and execution_i > i:
+            raw_open = float(self.open[execution_i])
+            gap_through = raw_open <= stop_price if direction == "LONG" else raw_open >= stop_price
+            if gap_through:
+                return {
+                    "passed": False, "applied": False, "reason": "ENTRY_INVALIDATED_GAP_THROUGH_STOP",
+                    "distance": None, "level_price": level, "boundary_price": level,
+                    "stop_price": stop_price,
+                    "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
+                    "ema_100_stop": True,
+                }
+        entry = float(self._expected_entry_price(i, execution_i, direction))
+        distance = entry - stop_price if direction == "LONG" else stop_price - entry
         if not np.isfinite(distance) or distance <= 0:
             return {
                 "passed": False, "applied": False, "reason": "EMA100_STOP_ON_WRONG_SIDE",

@@ -319,6 +319,18 @@ def test_ema_920_execution_plan_is_explicit_and_generic_stop_target_controls_are
         assert "signal-candle EMA 100" in workspace.summary_label.text()
         assert "EMA 100 stop remains active" in workspace.ema_target_value.text()
 
+        plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS_SHORT"))
+        app.processEvents()
+        assert "above EMA 100" in workspace.ema_stop_buffer.text()
+        assert "Bullish Cross" in workspace.ema_target_method.text()
+        assert "short on EMA 20 crossing below EMA 100" in workspace.summary_label.text()
+
+        plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS_BOTH"))
+        app.processEvents()
+        assert "below long / above short" in workspace.ema_stop_buffer.text()
+        assert "Opposite EMA 20/100 Cross" in workspace.ema_target_method.text()
+        assert "trade both directions" in workspace.summary_label.text()
+
         # Entry timing remains deliberately editable for A/B execution testing.
         legacy_index = timing.findData("SIGNAL_CLOSE")
         timing.setCurrentIndex(legacy_index)
