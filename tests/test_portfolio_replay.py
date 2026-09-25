@@ -10,6 +10,7 @@ from crypto_strategy_lab.portfolio_replay import (
     inspect_resilience_run,
     run_portfolio_replay,
 )
+from crypto_strategy_lab.spot_short_replay import replay_spot_short
 from crypto_strategy_lab.run_manifest import (
     FEATURE_RESEARCH_ARTIFACT_CONTRACT,
     FEATURE_RESEARCH_ARTIFACT_VERSION,
@@ -226,3 +227,45 @@ def test_portfolio_replay_rejects_non_every_viable_sampling_run(tmp_path):
     )
     with pytest.raises(RunArtifactError, match="Every Viable Entry"):
         inspect_resilience_run(run)
+
+
+def test_spot_short_replay_tracks_btc_and_total_value_after_win_and_loss(tmp_path):
+    first = _sample("win", 1, "2024-01-01 10:00", "2024-01-01 11:00", 0.2, "SHORT")
+    first.update(entry_price=100.0, exit_price=90.0)
+    overlap = _sample("overlap", 2, "2024-01-01 10:30", "2024-01-01 12:00", 0.2, "SHORT")
+    overlap.update(entry_price=95.0, exit_price=85.0)
+    second = _sample("loss", 3, "2024-01-02 10:00", "2024-01-02 11:00", -1.0, "SHORT")
+    second.update(entry_price=100.0, exit_price=110.0)
+    long_row = _sample("long", 4, "2024-01-03 10:00", "2024-01-03 11:00", 1.0)
+    long_row.update(entry_price=110.0, exit_price=120.0)
+    run = _write_run(tmp_path, "BTCUSDT", [first, overlap, second, long_row])
+    summary, ledger, output = replay_spot_short(
+        run, initial_btc=1, initial_cash=100, futures_risk_usdt=50,
+        spot_fee_percent=0, output_root=tmp_path / "results",
+    )
+    assert summary["accepted_shorts"] == 2
+    assert summary["skipped_overlapping_shorts"] == 1
+    assert list(ledger["sample_id"]) == ["win", "loss"]
+    # $10 net win buys 10/90 BTC; $50 loss sells 50/110 BTC.
+    expected_btc = 1 + 10 / 90 - 50 / 110
+    assert summary["ending_btc"] == pytest.approx(expected_btc)
+    assert summary["ending_cash_usdt"] == pytest.approx(100)
+    assert summary["ending_value_usdt"] == pytest.approx(100 + expected_btc * 110)
+    assert summary["buy_hold_value_usdt"] == pytest.approx(210)
+    assert summary["buy_hold_plus_shorts_value_usdt"] == pytest.approx(170)
+    assert (output / "summary.json").exists()
+    assert (output / "ledger.csv").exists()
+
+
+def test_spot_short_replay_spot_fee_and_exhaustion_use_cash(tmp_path):
+    loss = _sample("loss", 1, "2024-01-01 10:00", "2024-01-01 11:00", -1, "SHORT")
+    loss.update(entry_price=100, exit_price=110)
+    run = _write_run(tmp_path, "BTCUSDT", [loss])
+    summary, ledger, _ = replay_spot_short(
+        run, initial_btc=0.1, initial_cash=100, futures_risk_usdt=50,
+        spot_fee_percent=1, output_root=tmp_path / "results",
+    )
+    assert summary["ending_btc"] == pytest.approx(0)
+    assert summary["ending_cash_usdt"] == pytest.approx(100 - (50 - 0.1 * 110 * 0.99))
+    assert ledger.iloc[0]["unfunded_from_spot_usdt"] == pytest.approx(50 - 0.1 * 110 * 0.99)
+    assert summary["spot_fees_usdt"] == pytest.approx(0.11)

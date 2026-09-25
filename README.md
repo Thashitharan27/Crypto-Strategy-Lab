@@ -100,6 +100,12 @@ The **Portfolio** tab accepts a dynamic list of assets. Each enabled asset uses 
 - Entries that would exceed that limit are blocked and reported.
 - Portfolio output includes accepted trades, blocked candidates, realized equity, mark-to-market equity, monthly/yearly results, and component contribution.
 
+### BTC spot + short futures replay
+
+In **Portfolio Replay**, select exactly one finalized BTCUSDT run with **Every Viable Entry** research sampling, then use **BTC Spot + Shorts Test**. Set starting BTC and USDT cash, fixed USDT futures risk per short (for example $50), and the spot trading fee. The test accepts nonoverlapping SHORT outcomes in time order. Each net futures win purchases BTC at that trade's exit price; each loss sells enough BTC to fund it. If BTC is exhausted, the remaining loss reduces cash. The source run's net R includes its futures execution costs; this replay scales that R by the chosen fixed risk and does not recompute futures fees or position size.
+
+The report writes `summary.json` and `ledger.csv` under `spot_short_replays/`. It compares BTC units, cash plus BTC value, buy and hold with the same opening holdings, and buy and hold plus the same shorts. Portfolio values use each accepted trade's exit price; the first eligible short's entry price sets opening value. It does not measure intratrade drawdown or simulate futures collateral, liquidation, funding beyond the source net R, or BTC price changes after the last trade exit. Selling BTC to raise $50 is a sale of $50 worth of BTC; the entire $50 is not necessarily a realized spot gain.
+
 ## Project structure
 
 ```text
