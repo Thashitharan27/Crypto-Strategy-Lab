@@ -18,6 +18,18 @@ class Base:
     def _scan_pair_exit(self, pair, i):
         self.fallback_scans.append(i)
 
+    def _scan_position_exit(self, pair, position, i):
+        self.fallback_scans.append(i)
+
+    def _entry_filter_result(self, i, execution_i=None):
+        return True, "passed"
+
+    def _profile_context(self, i):
+        return ("BULL", "LONG", "BULL_LONG", self.profile)
+
+    def _strategy_profile_rule_group_match(self, i, direction, profile, action, mode):
+        return self.flip_matches
+
     def _close_position(self, pos, i, price, reason, source, timestamp):
         self.exits.append((i, price, reason, source, timestamp))
 
@@ -45,6 +57,22 @@ class EmaCrossTests(unittest.TestCase):
             entry_timing_mode="NEXT_CANDLE_OPEN",
             ema_920_trade_plan="EMA_20_100_CROSS")).validate()
 
+    def test_config_rejects_active_flip_rules_but_ignores_muted_ones(self):
+        config = ResearchRunConfig()
+        profiles = dict(config.strategy.profiles)
+        key = next(iter(profiles))
+        marker = {"_strategy_direction_mode": EMA_920_MODE}
+        flip = {"action": "FLIP", "_builder_group_enabled": True}
+        profiles[key] = replace(profiles[key], entry_rules=(marker, flip))
+        config = replace(config,
+            strategy=replace(config.strategy, profiles=profiles),
+            execution=replace(config.execution,
+                entry_timing_mode="NEXT_CANDLE_OPEN", ema_920_trade_plan="EMA_20_100_CROSS"))
+        with self.assertRaisesRegex(ValueError, "disable direction FLIP"):
+            config.validate()
+        profiles[key] = replace(profiles[key], entry_rules=(marker, {**flip, "_builder_group_enabled": False}))
+        replace(config, strategy=replace(config.strategy, profiles=profiles)).validate()
+
     def setUp(self):
         self.engine = Engine()
         engine = self.engine
@@ -61,6 +89,8 @@ class EmaCrossTests(unittest.TestCase):
         engine.fallback_scans = []
         engine.exits = []
         engine.active_pairs = []
+        engine.profile = SimpleNamespace(flip_direction=False, entry_rules=(), flip_rule_match_mode="ANY")
+        engine.flip_matches = False
 
     def test_completed_bullish_cross_is_a_long_entry_signal_only_once(self):
         e = self.engine
@@ -83,6 +113,24 @@ class EmaCrossTests(unittest.TestCase):
         self.assertEqual(e.fallback_scans, [])
         e._scan_pair_exit(pair, 103)
         self.assertEqual(e.fallback_scans, [103])
+
+    def test_production_position_exit_dispatches_bearish_cross(self):
+        e = self.engine
+        e.ema_20_values[100:102] = [101, 99]
+        e.ema_100_values[100:102] = [100, 100]
+        pos = SimpleNamespace(is_open=True, side=Side.LONG, sl=95.0)
+        e._scan_position_exit(SimpleNamespace(position=pos), pos, 102)
+        self.assertEqual(e.exits[0][2], ExitReason.EMA_20_100_CROSS)
+        self.assertEqual(e.fallback_scans, [])
+
+    def test_runtime_filter_rejects_a_flipped_long(self):
+        e = self.engine
+        e.profile = SimpleNamespace(flip_direction=True, entry_rules=(), flip_rule_match_mode="ANY")
+        self.assertEqual(e._entry_filter_result(101)[0], False)
+        e.profile.flip_direction = False
+        e.profile.entry_rules = ({"action": "FLIP"},)
+        e.flip_matches = True
+        self.assertEqual(e._entry_filter_result(101)[0], False)
 
     def test_gap_through_protective_stop_is_reported_as_stop(self):
         e = self.engine

@@ -592,6 +592,15 @@ class ResearchRunConfig:
                 and execution.entry_timing_mode != "NEXT_CANDLE_OPEN"):
             raise ValueError("EMA 20/100 crossover requires next-candle-open entry fills")
         if ema_cross_selected:
+            for key, profile in strategy.profiles.items():
+                if profile.enabled and (
+                    profile.flip_direction or any(
+                        rule.get("action") == "FLIP"
+                        and rule.get("_builder_group_enabled", True)
+                        for rule in profile.entry_rules
+                    )
+                ):
+                    raise ValueError(f"{key}: EMA 20/100 crossover is long-only; disable direction FLIP rules")
             for key, profile in execution.profiles.items():
                 if strategy.profiles[key].enabled and any((
                     profile.partial_profit_enabled,

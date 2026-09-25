@@ -180,11 +180,23 @@ class Ema920PullbackMixin:
         )
 
     def _scan_pair_exit(self, pair, i):
+        if self._close_on_ema_20_100_cross(pair.positions(), i):
+            return
+        return super()._scan_pair_exit(pair, i)
+
+    def _scan_position_exit(self, pair, position, i):
+        # The production Data Lake path advances a Position directly; it does
+        # not dispatch through _scan_pair_exit.
+        if self._close_on_ema_20_100_cross((position,), i):
+            return
+        return super()._scan_position_exit(pair, position, i)
+
+    def _close_on_ema_20_100_cross(self, positions, i):
         # At the open of candle i, only the completed candle i-1 is known.
         if (getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE
                 and self._ema_920_cross_plan()
                 and self._ema_20_100_cross(i - 1, upwards=False)):
-            for pos in pair.positions():
+            for pos in positions:
                 if not pos.is_open or pos.side != Side.LONG:
                     continue
                 opening = float(self.open[i])
@@ -195,8 +207,23 @@ class Ema920PullbackMixin:
                     ExitReason.SL if stopped else ExitReason.EMA_20_100_CROSS,
                     ExitSource.STRATEGY_OPEN, self.times[i],
                 )
-            return
-        return super()._scan_pair_exit(pair, i)
+            return True
+        return False
+
+    def _entry_filter_result(self, i, execution_i=None):
+        passed, reason = super()._entry_filter_result(i, execution_i)
+        if not passed or getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE or not self._ema_920_cross_plan():
+            return passed, reason
+        context = self._profile_context(i)
+        if context is None:
+            return passed, reason
+        _regime, direction, _key, profile = context
+        flipped = profile.flip_direction or bool(
+            profile.entry_rules and self._strategy_profile_rule_group_match(
+                i, direction, profile, "FLIP", profile.flip_rule_match_mode
+            )
+        )
+        return (False, "EMA 20/100 crossover is long-only; direction FLIP disabled") if flipped else (passed, reason)
 
     def _should_enter(self, i):
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
