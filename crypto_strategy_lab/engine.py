@@ -1862,6 +1862,8 @@ class BacktestEngine(DILadderExecutionMixin):
         final_target_distance = abs(
             float(primary.tp) - float(primary.entry_price)
         )
+        if not np.isfinite(final_target_distance):
+            final_target_distance = np.nan  # A signal exit has no fixed target.
         final_target_as_sizing_r = (
             final_target_distance / sizing_reference_distance
             if sizing_reference_distance > 0
@@ -1895,7 +1897,7 @@ class BacktestEngine(DILadderExecutionMixin):
                 else np.nan
             )
         else:
-            winning_trade_r = applied_rr if np.isfinite(applied_rr) else np.nan
+            winning_trade_r = applied_rr if np.isfinite(applied_rr) and np.isfinite(final_target_distance) else np.nan
             # Use the actual configured target geometry rather than assuming
             # reward_risk_ratio is always based on the physical stop. In
             # separate-sizing mode the fixed target is measured from sizing-R.

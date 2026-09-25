@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from crypto_strategy_lab.engine import _signal_ema
+from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
 
 
 EMA_920_MODE = "EMA_9_20_PULLBACK"
@@ -38,6 +39,7 @@ class Ema920PullbackMixin:
         super()._configure_signal_features()
         self.ema_9_values = _signal_ema(self.close, 9)
         self.ema_20_values = _signal_ema(self.close, 20)
+        self.ema_100_values = _signal_ema(self.close, 100)
 
         if not hasattr(self, "atr_values") or not hasattr(self, "volume"):
             return
@@ -158,8 +160,43 @@ class Ema920PullbackMixin:
 
     def _selected_direction(self, i):
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
+            if self._ema_920_cross_plan():
+                return "LONG" if self._ema_20_100_cross(i, upwards=True) else None
             return self._ema_920_direction(i)
         return super()._selected_direction(i)
+
+    def _ema_920_cross_plan(self):
+        return getattr(self.config, "ema_920_trade_plan", "PULLBACK_1R") == "EMA_20_100_CROSS"
+
+    def _ema_20_100_cross(self, i, *, upwards):
+        if i < 100:
+            return False
+        current_20, previous_20 = float(self.ema_20_values[i]), float(self.ema_20_values[i - 1])
+        current_100, previous_100 = float(self.ema_100_values[i]), float(self.ema_100_values[i - 1])
+        if not all(np.isfinite(v) for v in (current_20, previous_20, current_100, previous_100)):
+            return False
+        return (previous_20 <= previous_100 and current_20 > current_100) if upwards else (
+            previous_20 >= previous_100 and current_20 < current_100
+        )
+
+    def _scan_pair_exit(self, pair, i):
+        # At the open of candle i, only the completed candle i-1 is known.
+        if (getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE
+                and self._ema_920_cross_plan()
+                and self._ema_20_100_cross(i - 1, upwards=False)):
+            for pos in pair.positions():
+                if not pos.is_open or pos.side != Side.LONG:
+                    continue
+                opening = float(self.open[i])
+                # A protective stop gapped through at the open takes precedence.
+                stopped = opening <= pos.sl
+                self._close_position(
+                    pos, i, opening * (1 - self.config.slippage),
+                    ExitReason.SL if stopped else ExitReason.EMA_20_100_CROSS,
+                    ExitSource.STRATEGY_OPEN, self.times[i],
+                )
+            return
+        return super()._scan_pair_exit(pair, i)
 
     def _should_enter(self, i):
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
@@ -288,6 +325,11 @@ class Ema920PullbackMixin:
             return result
         pair = self.active_pairs[-1]
         for pos in pair.positions():
+            if self._ema_920_cross_plan():
+                # The crossover is the profit exit; keep the protective swing stop.
+                pos.tp = np.nan
+                pos.ema_920_fixed_target_r = None
+                continue
             side_sign = 1.0 if str(getattr(pos.side, "value", pos.side)).upper() == "LONG" else -1.0
             pos.tp = float(pos.entry_price) + side_sign * float(pos.risk)
             if getattr(pos, "partial_tp_enabled", False):

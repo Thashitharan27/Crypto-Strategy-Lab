@@ -63,6 +63,7 @@ class BacktestConfig:
 
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
     entry_timing_mode: EntryTimingMode = EntryTimingMode.SIGNAL_CLOSE
+    ema_920_trade_plan: str = "PULLBACK_1R"
     entry_interval: int = 1
     enable_di_direction_selection: bool = True
     enable_di_pressure_analysis: bool = True

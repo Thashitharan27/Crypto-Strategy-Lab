@@ -110,7 +110,7 @@ FEATURE_GROUPS = (
 )
 
 EXECUTION_GROUPS = (
-    ("Entry Fill", ("entry_timing_mode",), None),
+    ("Entry Fill", ("entry_timing_mode", "ema_920_trade_plan"), None),
     ("Risk", (
         "initial_equity", "risk_mode", "fixed_r", "percent_r", "atr_multiplier",
         "sr_stop_timeframe_minutes", "sr_stop_buffer_atr", "sr_stop_maximum_atr",
@@ -338,6 +338,7 @@ class DataclassForm(QWidget):
         "strategy_profile_run_mode": ("COMBINED_SHARED_CAPITAL", "ISOLATED_PROFILES", "BOTH"),
         "entry_mode": ("WAIT_UNTIL_CLOSED", "EVERY_N_CANDLES"),
         "entry_timing_mode": ("SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"),
+        "ema_920_trade_plan": ("PULLBACK_1R", "EMA_20_100_CROSS"),
         "sr_filter_mode": ("ANALYSIS_ONLY", "APPLY_ENTRY_RULES"),
         "sr_timeframe_minutes": (0, 60, 240, 1440),
         "daily_entry_missed_policy": ("SKIP_DAY", "NEXT_AVAILABLE_CANDLE"),
