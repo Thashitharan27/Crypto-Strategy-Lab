@@ -26,6 +26,7 @@ from crypto_strategy_lab.features.futures_positioning import (
     futures_positioning_price_resource,
 )
 from crypto_strategy_lab.progress import emit_progress
+from crypto_strategy_lab.research_warmup import support_resistance_history_period
 from crypto_strategy_lab.features.taker_flow import (
     TakerFlowContextFeatureProvider,
     taker_flow_resource,
@@ -219,6 +220,56 @@ def _sr_research_targets(strategy_minutes: int) -> tuple[tuple[int, str], ...]:
         if minutes > strategy_minutes and minutes % strategy_minutes == 0:
             targets.append((minutes, label))
     return tuple(targets)
+
+
+def _support_resistance_cache_request(
+    request: DataRequest,
+    *,
+    research_start,
+    features,
+    strategy_minutes: int,
+) -> DataRequest:
+    """Return a stable S/R-only request independent of the signal strategy.
+
+    The outer research request can be extended by EMA, regime, momentum or other
+    strategy warm-up. Reusing that wider start in the feature-cache identity makes
+    an unchanged S/R calculation look different after unrelated strategy changes.
+    This request is anchored only to the user research boundary plus the causal
+    S/R history requirement.
+    """
+    boundary = pd.Timestamp(research_start)
+    if boundary.tzinfo is None:
+        boundary = boundary.tz_localize("UTC")
+    else:
+        boundary = boundary.tz_convert("UTC")
+    strategy_minutes = int(strategy_minutes)
+    history = support_resistance_history_period(features, strategy_minutes)
+    history += pd.Timedelta(minutes=strategy_minutes * 2)
+    desired_start = boundary - history
+
+    available_start = pd.Timestamp(request.start)
+    if available_start.tzinfo is None:
+        available_start = available_start.tz_localize("UTC")
+    else:
+        available_start = available_start.tz_convert("UTC")
+    desired_start = max(desired_start, available_start)
+    return replace(request, start=desired_start.to_pydatetime())
+
+
+def _canonical_feature_slice(
+    store: MarketDataStore,
+    canonical: pd.DataFrame,
+    request: DataRequest,
+) -> pd.DataFrame:
+    """Slice a warmed canonical frame while assigning the slice's source identity."""
+    frame = _strategy_slice_for_request(canonical, request)
+    frame.attrs.update(canonical.attrs)
+    frame.attrs["canonical_source_identity"] = store.canonical_source_identity(
+        request,
+        DatasetKind.KLINES,
+        interval=request.strategy_interval,
+    ).cache_identity()
+    return frame
 
 
 def _prefix_sr_research_frame(
