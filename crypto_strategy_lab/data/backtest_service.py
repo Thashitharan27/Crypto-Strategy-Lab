@@ -26,6 +26,7 @@ from crypto_strategy_lab.features.futures_positioning import (
     futures_positioning_price_resource,
 )
 from crypto_strategy_lab.progress import emit_progress
+from crypto_strategy_lab.research_warmup import support_resistance_history_period
 from crypto_strategy_lab.features.taker_flow import (
     TakerFlowContextFeatureProvider,
     taker_flow_resource,
@@ -221,6 +222,56 @@ def _sr_research_targets(strategy_minutes: int) -> tuple[tuple[int, str], ...]:
     return tuple(targets)
 
 
+def _support_resistance_cache_request(
+    request: DataRequest,
+    *,
+    research_start,
+    features,
+    strategy_minutes: int,
+) -> DataRequest:
+    """Return a stable S/R-only request independent of the signal strategy.
+
+    The outer research request can be extended by EMA, regime, momentum or other
+    strategy warm-up. Reusing that wider start in the feature-cache identity makes
+    an unchanged S/R calculation look different after unrelated strategy changes.
+    This request is anchored only to the user research boundary plus the causal
+    S/R history requirement.
+    """
+    boundary = pd.Timestamp(research_start)
+    if boundary.tzinfo is None:
+        boundary = boundary.tz_localize("UTC")
+    else:
+        boundary = boundary.tz_convert("UTC")
+    strategy_minutes = int(strategy_minutes)
+    history = support_resistance_history_period(features, strategy_minutes)
+    history += pd.Timedelta(minutes=strategy_minutes * 2)
+    desired_start = boundary - history
+
+    available_start = pd.Timestamp(request.start)
+    if available_start.tzinfo is None:
+        available_start = available_start.tz_localize("UTC")
+    else:
+        available_start = available_start.tz_convert("UTC")
+    desired_start = max(desired_start, available_start)
+    return replace(request, start=desired_start.to_pydatetime())
+
+
+def _canonical_feature_slice(
+    store: MarketDataStore,
+    canonical: pd.DataFrame,
+    request: DataRequest,
+) -> pd.DataFrame:
+    """Slice a warmed canonical frame while assigning the slice's source identity."""
+    frame = _strategy_slice_for_request(canonical, request)
+    frame.attrs.update(canonical.attrs)
+    frame.attrs["canonical_source_identity"] = store.canonical_source_identity(
+        request,
+        DatasetKind.KLINES,
+        interval=request.strategy_interval,
+    ).cache_identity()
+    return frame
+
+
 def _prefix_sr_research_frame(
     frame: pd.DataFrame,
     *,
@@ -291,7 +342,7 @@ def _independent_sr_research_features(
                 progress,
                 kind="stage",
                 phase="support_resistance",
-                label=f"Preparing S/R {display_label}",
+                label=f"Checking S/R {display_label} cache",
                 detail=(
                     f"Building or loading independent {display_label} S/R context "
                     f"for {len(canonical):,} strategy rows."
@@ -338,6 +389,83 @@ def _independent_sr_research_features(
             timeframe_minutes=minutes,
         )
     return result
+
+
+def _support_resistance_feature_set(
+    store: MarketDataStore,
+    registry,
+    request: DataRequest,
+    canonical: pd.DataFrame,
+    feature_parameters: Mapping[str, Mapping[str, object]],
+    strategy: pd.DataFrame,
+    *,
+    strategy_minutes: int,
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Build primary and independent S/R frames from one stable S/R request."""
+    base_sr = dict(feature_parameters.get("support_resistance", {}))
+    if not base_sr:
+        raise ValueError("S/R feature parameters are required when S/R is enabled")
+
+    dependency_names = set(registry.dependency_order(["support_resistance"]))
+    parameters = {
+        name: dict(feature_parameters[name])
+        for name in dependency_names
+        if name in feature_parameters
+    }
+    parameters["support_resistance"] = base_sr
+    progress = getattr(store, "progress_callback", None)
+    primary_minutes = int(base_sr.get("sr_timeframe_minutes", 0) or strategy_minutes)
+    primary_label = {15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(
+        primary_minutes, f"{primary_minutes}m"
+    )
+    emit_progress(
+        progress,
+        kind="stage",
+        phase="support_resistance",
+        label=f"Checking S/R {primary_label} cache",
+        detail=(
+            "Checking the strategy-independent S/R cache scope and building only "
+            "when the S/R inputs themselves changed."
+        ),
+    )
+    started = time.perf_counter()
+    primary = registry.execute(
+        ["support_resistance"],
+        request,
+        {DatasetKind.KLINES: canonical},
+        parameters=parameters,
+        cache=FeatureFrameCache(store.cache.root),
+        progress_callback=progress,
+    )["support_resistance"]
+    elapsed = time.perf_counter() - started
+    cache_state = (
+        "cache hit"
+        if bool(primary.attrs.get("feature_cache_hit", False))
+        else "cache built"
+    )
+    emit_progress(
+        progress,
+        kind="stage",
+        phase="support_resistance",
+        label=f"S/R {primary_label} ready",
+        detail=f"{cache_state}; {len(primary):,} S/R-scope rows in {elapsed:.1f}s.",
+    )
+
+    independent = _independent_sr_research_features(
+        store,
+        registry,
+        request,
+        canonical,
+        feature_parameters,
+        primary,
+        strategy_minutes=strategy_minutes,
+    )
+    aligned_primary = _align_research_frame_to_strategy(primary, strategy)
+    aligned_independent = {
+        name: _align_research_frame_to_strategy(frame, strategy)
+        for name, frame in independent.items()
+    }
+    return aligned_primary, aligned_independent
 
 
 _INDEPENDENT_ICHIMOKU_TIMEFRAMES = ((60, "1h"), (240, "4h"), (1440, "1d"))
@@ -1119,8 +1247,6 @@ def load_backtest_bundle(
         feature_registry if feature_registry is not None else production_feature_registry()
     )
     requested = ["production_market_context", "state_transition_daily"]
-    if enable_support_resistance_analysis:
-        requested.append("support_resistance")
     main_parameter_names = set(registry.dependency_order(requested))
     main_feature_parameters = {
         name: parameters
@@ -1128,18 +1254,6 @@ def load_backtest_bundle(
         if name in main_parameter_names
     }
     progress = getattr(store, "progress_callback", None)
-    if enable_support_resistance_analysis:
-        emit_progress(
-            progress,
-            kind="stage",
-            phase="support_resistance",
-            label=f"Preparing S/R {strategy_minutes}m",
-            detail=(
-                f"Building or loading strategy-timeframe S/R and core feature "
-                f"dependencies for {len(canonical):,} rows."
-            ),
-        )
-    main_features_started = time.perf_counter()
     frames = registry.execute(
         requested,
         request,
@@ -1148,26 +1262,31 @@ def load_backtest_bundle(
         cache=FeatureFrameCache(store.cache.root),
         progress_callback=progress,
     )
-    main_features_elapsed = time.perf_counter() - main_features_started
     directional = frames[CORE_DIRECTIONAL_FEATURE_NAME]
     context = frames["production_market_context"]
-    sr_features = frames.get("support_resistance")
     state_transition_daily = frames["state_transition_daily"]
-    if enable_support_resistance_analysis and sr_features is not None:
-        cache_state = (
-            "cache hit"
-            if bool(sr_features.attrs.get("feature_cache_hit", False))
-            else "cache built"
-        )
-        emit_progress(
-            progress,
-            kind="stage",
-            phase="support_resistance",
-            label=f"S/R {strategy_minutes}m ready",
-            detail=(
-                f"{cache_state}; {len(sr_features):,} strategy rows. "
-                f"Primary feature block completed in {main_features_elapsed:.1f}s."
-            ),
+
+    sr_features = None
+    sr_research_features: dict[str, pd.DataFrame] = {}
+    if enable_support_resistance_analysis:
+        sr_request = request
+        sr_canonical = canonical
+        if feature_config is not None and research_start is not None:
+            sr_request = _support_resistance_cache_request(
+                request,
+                research_start=research_request.start,
+                features=feature_config,
+                strategy_minutes=strategy_minutes,
+            )
+            sr_canonical = _canonical_feature_slice(store, canonical, sr_request)
+        sr_features, sr_research_features = _support_resistance_feature_set(
+            store,
+            registry,
+            sr_request,
+            sr_canonical,
+            feature_parameters,
+            strategy,
+            strategy_minutes=strategy_minutes,
         )
 
     research_features = _optional_futures_research_features(
@@ -1200,18 +1319,8 @@ def load_backtest_bundle(
                 include_higher_timeframes=ichimoku_include_higher_timeframes,
             )
         )
-    if enable_support_resistance_analysis and sr_features is not None:
-        research_features.update(
-            _independent_sr_research_features(
-                store,
-                registry,
-                request,
-                canonical,
-                feature_parameters,
-                sr_features,
-                strategy_minutes=strategy_minutes,
-            )
-        )
+    if sr_research_features:
+        research_features.update(sr_research_features)
 
     intrabar = None
     actual_intrabar_interval = None

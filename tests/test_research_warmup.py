@@ -7,12 +7,16 @@ import numpy as np
 import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest
-from crypto_strategy_lab.data.backtest_service import _align_research_frame_to_strategy
+from crypto_strategy_lab.data.backtest_service import (
+    _align_research_frame_to_strategy,
+    _support_resistance_cache_request,
+)
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
 from crypto_strategy_lab.research_adapters import native_simulator_config
 from crypto_strategy_lab.research_warmup import (
     expand_strategy_request,
     strategy_warmup_period,
+    support_resistance_history_period,
 )
 
 
@@ -119,6 +123,46 @@ def test_v6_sr_warmup_covers_each_timeframe_structural_horizon() -> None:
     assert config.features.sr_detection_parameters(60)["sr_lookback_bars"] == 720
     assert config.features.sr_detection_parameters(240)["sr_lookback_bars"] == 540
     assert config.features.sr_detection_parameters(1440)["sr_lookback_bars"] == 365
+
+
+def test_sr_cache_scope_is_independent_of_unrelated_outer_warmup() -> None:
+    base = ResearchRunConfig()
+    config = replace(
+        base,
+        data=replace(base.data, strategy_timeframe_minutes=15),
+        features=replace(base.features, enable_support_resistance_analysis=True),
+    )
+    research_start = datetime(2026, 6, 1, tzinfo=UTC)
+    end = datetime(2026, 7, 1, tzinfo=UTC)
+    outer_a = DataRequest(
+        symbol="BTCUSDT",
+        start=datetime(2024, 1, 1, tzinfo=UTC),
+        end=end,
+        strategy_interval="15m",
+    )
+    outer_b = replace(outer_a, start=datetime(2025, 1, 1, tzinfo=UTC))
+
+    scoped_a = _support_resistance_cache_request(
+        outer_a,
+        research_start=research_start,
+        features=config.features,
+        strategy_minutes=15,
+    )
+    scoped_b = _support_resistance_cache_request(
+        outer_b,
+        research_start=research_start,
+        features=config.features,
+        strategy_minutes=15,
+    )
+
+    expected = (
+        pd.Timestamp(research_start)
+        - support_resistance_history_period(config.features, 15)
+        - pd.Timedelta(minutes=30)
+    )
+    assert pd.Timestamp(scoped_a.start) == expected
+    assert scoped_a.start == scoped_b.start
+    assert scoped_a.end == scoped_b.end == end
 
 
 def test_expanded_strategy_request_clamps_to_available_history() -> None:
