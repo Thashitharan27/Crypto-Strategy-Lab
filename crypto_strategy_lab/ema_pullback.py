@@ -34,6 +34,7 @@ class Ema920PullbackMixin:
     ema_920_swing_lookback = 20
     ema_920_stop_buffer_atr = 0.05
     ema_920_stop_maximum_atr = 1.50
+    ema_100_stop_buffer_atr = 0.05
 
     def _configure_signal_features(self):
         super()._configure_signal_features()
@@ -319,13 +320,53 @@ class Ema920PullbackMixin:
             "micro_swing_index": swing_i, "micro_swing": True,
         }
 
+    def _ema_100_cross_stop_plan(self, i: int, execution_i: int | None = None):
+        """Anchor the long stop to the EMA 100 known at the signal close."""
+        level = float(self.ema_100_values[i])
+        atr = float(self.atr_values[i])
+        if not np.isfinite(level) or not np.isfinite(atr) or atr <= 0:
+            return {"passed": False, "applied": False, "reason": "EMA100_STOP_UNAVAILABLE", "distance": None}
+        stop_price = level - self.ema_100_stop_buffer_atr * atr
+        if execution_i is not None and execution_i > i and float(self.open[execution_i]) <= stop_price:
+            return {
+                "passed": False, "applied": False, "reason": "ENTRY_INVALIDATED_GAP_THROUGH_STOP",
+                "distance": None, "level_price": level, "boundary_price": level,
+                "stop_price": stop_price,
+                "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
+                "ema_100_stop": True,
+            }
+        entry = float(self._expected_entry_price(i, execution_i, "LONG"))
+        distance = entry - stop_price
+        if not np.isfinite(distance) or distance <= 0:
+            return {
+                "passed": False, "applied": False, "reason": "EMA100_STOP_ON_WRONG_SIDE",
+                "distance": None, "level_price": level, "boundary_price": level,
+                "stop_price": stop_price,
+                "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
+                "ema_100_stop": True,
+            }
+        return {
+            "passed": True, "applied": True, "reason": "EMA100_CROSS_STOP",
+            "distance": distance, "distance_atr": distance / atr,
+            "level_price": level, "boundary_price": level, "stop_price": stop_price,
+            "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
+            "ema_100_stop": True,
+        }
+
     def _sr_stop_plan(self, i: int, execution_i: int | None = None):
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
+            if self._ema_920_cross_plan():
+                return self._ema_100_cross_stop_plan(i, execution_i)
             return self._ema_920_micro_swing_stop_plan(i, execution_i)
         return super()._sr_stop_plan(i, execution_i)
 
     def _annotate_sr_stop(self, positions, plan):
         super()._annotate_sr_stop(positions, plan)
+        if plan.get("ema_100_stop"):
+            for pos in positions:
+                pos.ema_100_stop_level = plan.get("level_price", np.nan)
+                pos.ema_100_stop_price = plan.get("stop_price", np.nan)
+                pos.ema_100_stop_distance_atr = plan.get("distance_atr", np.nan)
         if not plan.get("micro_swing"):
             return
         for pos in positions:
@@ -343,6 +384,9 @@ class Ema920PullbackMixin:
         row["micro_swing_level_price"] = getattr(pos, "micro_swing_level_price", np.nan) if pos is not None else np.nan
         row["micro_swing_stop_price"] = getattr(pos, "micro_swing_stop_price", np.nan) if pos is not None else np.nan
         row["micro_swing_stop_distance_atr"] = getattr(pos, "micro_swing_stop_distance_atr", np.nan) if pos is not None else np.nan
+        row["ema_100_stop_level"] = getattr(pos, "ema_100_stop_level", np.nan) if pos is not None else np.nan
+        row["ema_100_stop_price"] = getattr(pos, "ema_100_stop_price", np.nan) if pos is not None else np.nan
+        row["ema_100_stop_distance_atr"] = getattr(pos, "ema_100_stop_distance_atr", np.nan) if pos is not None else np.nan
         return row
 
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):
@@ -353,7 +397,7 @@ class Ema920PullbackMixin:
         pair = self.active_pairs[-1]
         for pos in pair.positions():
             if self._ema_920_cross_plan():
-                # The crossover is the profit exit; keep the protective swing stop.
+                # The crossover is the profit exit; retain the fixed EMA 100 stop.
                 pos.tp = np.nan
                 pos.ema_920_fixed_target_r = None
                 continue

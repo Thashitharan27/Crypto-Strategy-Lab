@@ -367,10 +367,15 @@ class RiskExecutionWorkspace(QWidget):
         ema_920 = self._ema_920_selected()
         cross_plan = ema_920 and self.account["ema_920_trade_plan"].currentData() == "EMA_20_100_CROSS"
         self.entry_card.set_row_visible("ema_920_trade_plan", ema_920)
+        self.ema_stop_method.setText(
+            "EMA 100 at Signal Close — Automatic" if cross_plan else "EMA 9/20 Micro-Swing — Automatic"
+        )
+        self.ema_stop_buffer.setText("0.05 × signal ATR below EMA 100" if cross_plan else "0.05 × ATR")
+        self.stop_card.rows["ema_920_stop_buffer"][0].setText("Stop Below EMA 100" if cross_plan else "Stop Buffer")
         self.ema_target_method.setText(
             "EMA 20/100 Bearish Cross — Next Candle Open" if cross_plan else "EMA 9/20 Fixed 1R — Automatic"
         )
-        self.ema_target_value.setText("No fixed target; micro-swing stop remains active" if cross_plan else "1.00 R")
+        self.ema_target_value.setText("No fixed target; EMA 100 stop remains active" if cross_plan else "1.00 R")
         mode = str(self.account["risk_mode"].currentData() or "ATR")
         structural_stop = mode == "SR_STRUCTURE"
         ladder_enabled = bool(self.account["di_ladder_enabled"].isChecked())
@@ -383,6 +388,8 @@ class RiskExecutionWorkspace(QWidget):
         )
         for name in ema_stop_fields:
             self.stop_card.set_row_visible(name, ema_920)
+        for name in ("ema_920_stop_confirmation", "ema_920_stop_lookback", "ema_920_stop_maximum"):
+            self.stop_card.set_row_visible(name, ema_920 and not cross_plan)
         if ema_920:
             for name in (
                 "risk_mode", "atr_multiplier", "percent_r", "fixed_r",
@@ -593,7 +600,7 @@ class RiskExecutionWorkspace(QWidget):
         if ema_920:
             target = (
                 "long on EMA 20 crossing above EMA 100; exit at the next candle open after "
-                "EMA 20 crosses below EMA 100 (protective micro-swing stop stays active)"
+                "EMA 20 crosses below EMA 100 (protective EMA 100 stop stays active)"
                 if execution.ema_920_trade_plan == "EMA_20_100_CROSS"
                 else "automatic fixed 1.00R target"
             )
@@ -631,6 +638,9 @@ class RiskExecutionWorkspace(QWidget):
         )
         if ema_920:
             stop_description = (
+                "Stop: signal-candle EMA 100 minus 0.05× signal ATR, fixed at entry; "
+                "size from the full stop distance. "
+                if execution.ema_920_trade_plan == "EMA_20_100_CROSS" else
                 "Stop: EMA 9/20 confirmed micro-swing (2-left / 2-right, "
                 "20-bar lookback, 0.05× ATR buffer, maximum 1.50× ATR). "
             )
