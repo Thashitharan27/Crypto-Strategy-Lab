@@ -370,6 +370,7 @@ class StrategyConfig:
 class ExecutionConfig:
     profiles: Mapping[str, ExecutionProfileConfig] = field(default_factory=_execution_profiles)
     entry_timing_mode: str = "SIGNAL_CLOSE"
+    ema_920_trade_plan: str = "PULLBACK_1R"
     initial_equity: float = 1000.0
     risk_mode: str = "ATR"
     fixed_r: float = 100.0
@@ -577,6 +578,40 @@ class ResearchRunConfig:
                     )
         if execution.entry_timing_mode not in {"SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"}:
             raise ValueError("invalid entry timing mode")
+        if execution.ema_920_trade_plan not in {"PULLBACK_1R", "EMA_20_100_CROSS"}:
+            raise ValueError("invalid EMA 9/20 trade plan")
+        ema_cross_selected = (
+            execution.ema_920_trade_plan == "EMA_20_100_CROSS"
+            and any(
+                rule.get("_strategy_direction_mode") == "EMA_9_20_PULLBACK"
+                for profile in strategy.profiles.values()
+                for rule in profile.entry_rules
+            )
+        )
+        if (ema_cross_selected
+                and execution.entry_timing_mode != "NEXT_CANDLE_OPEN"):
+            raise ValueError("EMA 20/100 crossover requires next-candle-open entry fills")
+        if ema_cross_selected:
+            for key, profile in strategy.profiles.items():
+                if profile.enabled and (
+                    profile.flip_direction or any(
+                        rule.get("action") == "FLIP"
+                        and rule.get("_builder_group_enabled", True)
+                        for rule in profile.entry_rules
+                    )
+                ):
+                    raise ValueError(f"{key}: EMA 20/100 crossover is long-only; disable direction FLIP rules")
+            for key, profile in execution.profiles.items():
+                if strategy.profiles[key].enabled and any((
+                    profile.partial_profit_enabled,
+                    profile.partial_stop_enabled,
+                    profile.r_step_trailing_enabled,
+                    profile.atr_checkpoint_tp_extension_enabled,
+                )):
+                    raise ValueError(
+                        f"{key}: EMA 20/100 crossover requires full-position exits; "
+                        "disable partials and target extensions"
+                    )
         if execution.initial_equity <= 0 or execution.fixed_r <= 0 or execution.percent_r <= 0:
             raise ValueError("execution equity/risk settings must be positive")
         if not 0 < execution.risk_per_leg < 1:

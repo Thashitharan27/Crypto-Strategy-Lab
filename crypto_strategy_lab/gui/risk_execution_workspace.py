@@ -145,6 +145,9 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.add_field(
             "entry_timing_mode", "Entry Fill Timing", self.account["entry_timing_mode"]
         )
+        self.entry_card.add_field(
+            "ema_920_trade_plan", "EMA 9/20 Trade Plan", self.account["ema_920_trade_plan"]
+        )
         layout.addWidget(self.entry_card)
 
         self.account_card = FormCard(
@@ -303,6 +306,7 @@ class RiskExecutionWorkspace(QWidget):
         self.account["risk_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["sr_take_profit_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["entry_timing_mode"].currentIndexChanged.connect(self.refresh_summary_from_widgets)
+        self.account["ema_920_trade_plan"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["di_ladder_enabled"].toggled.connect(self.refresh_visibility)
         builder = getattr(self.window, "rule_builder", None)
         if builder is not None:
@@ -361,6 +365,12 @@ class RiskExecutionWorkspace(QWidget):
 
     def refresh_visibility(self, *_args) -> None:
         ema_920 = self._ema_920_selected()
+        cross_plan = ema_920 and self.account["ema_920_trade_plan"].currentData() == "EMA_20_100_CROSS"
+        self.entry_card.set_row_visible("ema_920_trade_plan", ema_920)
+        self.ema_target_method.setText(
+            "EMA 20/100 Bearish Cross — Next Candle Open" if cross_plan else "EMA 9/20 Fixed 1R — Automatic"
+        )
+        self.ema_target_value.setText("No fixed target; micro-swing stop remains active" if cross_plan else "1.00 R")
         mode = str(self.account["risk_mode"].currentData() or "ATR")
         structural_stop = mode == "SR_STRUCTURE"
         ladder_enabled = bool(self.account["di_ladder_enabled"].isChecked())
@@ -581,7 +591,12 @@ class RiskExecutionWorkspace(QWidget):
         )
 
         if ema_920:
-            target = "automatic fixed 1.00R target"
+            target = (
+                "long on EMA 20 crossing above EMA 100; exit at the next candle open after "
+                "EMA 20 crosses below EMA 100 (protective micro-swing stop stays active)"
+                if execution.ema_920_trade_plan == "EMA_20_100_CROSS"
+                else "automatic fixed 1.00R target"
+            )
         else:
             target_mode = str(execution.sr_take_profit_mode).upper()
             if target_mode == "SR_CAPPED_R":
