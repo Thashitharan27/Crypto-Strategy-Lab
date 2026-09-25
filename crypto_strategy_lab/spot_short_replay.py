@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-import json
 import math
 
 import duckdb
@@ -50,15 +49,28 @@ def replay_spot_short(
         raise ValueError("Spot/short replay requires a BTCUSDT completed run")
     with duckdb.connect() as con:
         frame = con.execute("SELECT * FROM read_parquet(?)", [str(metadata["samples_path"])]).fetchdf()
-    required = {"side", "entry_time", "exit_time", "entry_price", "exit_price", "pair_net_r", "research_sample_id"}
+    required = {"side", "entry_time", "exit_time", "entry_price", "pair_net_r", "research_sample_id"}
     missing = required - set(frame.columns)
     if missing:
         raise RunArtifactError(f"Spot/short replay requires trade columns: {', '.join(sorted(missing))}")
+    # Native completed runs store the position's fill as short_exit_price.
+    # Some imported/simplified trade artifacts instead expose exit_price.
+    exit_column = "short_exit_price" if "short_exit_price" in frame.columns else "exit_price"
+    if exit_column not in frame.columns:
+        raise RunArtifactError("Spot/short replay requires short_exit_price or exit_price")
     frame = frame.loc[frame["side"].astype(str).str.upper().eq("SHORT")].copy()
     if frame.empty:
         raise ValueError("The completed run contains no short candidates")
     for column in ("entry_time", "exit_time"):
         frame[column] = pd.to_datetime(frame[column], utc=True, errors="raise")
+    if exit_column == "short_exit_price" and "short_exit_time" in frame.columns:
+        short_exits = pd.to_datetime(frame["short_exit_time"], utc=True, errors="raise")
+        if not short_exits.eq(frame["exit_time"]).all():
+            raise RunArtifactError(
+                "Short fill time differs from trade exit time; cannot price spot "
+                "at the final exit from this artifact"
+            )
+    frame["exit_price"] = frame[exit_column]
     for column in ("entry_price", "exit_price", "pair_net_r"):
         frame[column] = pd.to_numeric(frame[column], errors="raise")
     if (frame["exit_time"] < frame["entry_time"]).any():
