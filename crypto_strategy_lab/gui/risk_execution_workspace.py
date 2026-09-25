@@ -662,10 +662,22 @@ class RiskExecutionWorkspace(QWidget):
             else ""
         )
         if ema_920:
-            stop_description = (
-                "Stop: signal-candle EMA 100 minus 0.05× signal ATR, fixed at entry; "
-                "size from the full stop distance. "
-                if execution.ema_920_trade_plan == "EMA_20_100_CROSS" else
+            cross_stop = {
+                "EMA_20_100_CROSS": (
+                    "Stop: signal-candle EMA 100 minus 0.05× signal ATR, fixed at entry; "
+                    "size from the full stop distance. "
+                ),
+                "EMA_20_100_CROSS_SHORT": (
+                    "Stop: signal-candle EMA 100 plus 0.05× signal ATR, fixed at entry; "
+                    "size from the full stop distance. "
+                ),
+                "EMA_20_100_CROSS_BOTH": (
+                    "Stop: signal-candle EMA 100 with a 0.05× signal ATR buffer beyond it "
+                    "(below EMA 100 for long, above EMA 100 for short), fixed at entry; "
+                    "size from the full stop distance. "
+                ),
+            }.get(execution.ema_920_trade_plan)
+            stop_description = cross_stop or (
                 "Stop: EMA 9/20 confirmed micro-swing (2-left / 2-right, "
                 "20-bar lookback, 0.05× ATR buffer, maximum 1.50× ATR). "
             )
