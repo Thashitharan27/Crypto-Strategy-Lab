@@ -342,7 +342,7 @@ def _independent_sr_research_features(
                 progress,
                 kind="stage",
                 phase="support_resistance",
-                label=f"Preparing S/R {display_label}",
+                label=f"Checking S/R {display_label} cache",
                 detail=(
                     f"Building or loading independent {display_label} S/R context "
                     f"for {len(canonical):,} strategy rows."
@@ -422,7 +422,7 @@ def _support_resistance_feature_set(
         progress,
         kind="stage",
         phase="support_resistance",
-        label=f"Preparing S/R {primary_label}",
+        label=f"Checking S/R {primary_label} cache",
         detail=(
             "Checking the strategy-independent S/R cache scope and building only "
             "when the S/R inputs themselves changed."
