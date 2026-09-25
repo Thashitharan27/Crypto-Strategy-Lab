@@ -391,6 +391,83 @@ def _independent_sr_research_features(
     return result
 
 
+def _support_resistance_feature_set(
+    store: MarketDataStore,
+    registry,
+    request: DataRequest,
+    canonical: pd.DataFrame,
+    feature_parameters: Mapping[str, Mapping[str, object]],
+    strategy: pd.DataFrame,
+    *,
+    strategy_minutes: int,
+) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Build primary and independent S/R frames from one stable S/R request."""
+    base_sr = dict(feature_parameters.get("support_resistance", {}))
+    if not base_sr:
+        raise ValueError("S/R feature parameters are required when S/R is enabled")
+
+    dependency_names = set(registry.dependency_order(["support_resistance"]))
+    parameters = {
+        name: dict(feature_parameters[name])
+        for name in dependency_names
+        if name in feature_parameters
+    }
+    parameters["support_resistance"] = base_sr
+    progress = getattr(store, "progress_callback", None)
+    primary_minutes = int(base_sr.get("sr_timeframe_minutes", 0) or strategy_minutes)
+    primary_label = {15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(
+        primary_minutes, f"{primary_minutes}m"
+    )
+    emit_progress(
+        progress,
+        kind="stage",
+        phase="support_resistance",
+        label=f"Preparing S/R {primary_label}",
+        detail=(
+            "Checking the strategy-independent S/R cache scope and building only "
+            "when the S/R inputs themselves changed."
+        ),
+    )
+    started = time.perf_counter()
+    primary = registry.execute(
+        ["support_resistance"],
+        request,
+        {DatasetKind.KLINES: canonical},
+        parameters=parameters,
+        cache=FeatureFrameCache(store.cache.root),
+        progress_callback=progress,
+    )["support_resistance"]
+    elapsed = time.perf_counter() - started
+    cache_state = (
+        "cache hit"
+        if bool(primary.attrs.get("feature_cache_hit", False))
+        else "cache built"
+    )
+    emit_progress(
+        progress,
+        kind="stage",
+        phase="support_resistance",
+        label=f"S/R {primary_label} ready",
+        detail=f"{cache_state}; {len(primary):,} S/R-scope rows in {elapsed:.1f}s.",
+    )
+
+    independent = _independent_sr_research_features(
+        store,
+        registry,
+        request,
+        canonical,
+        feature_parameters,
+        primary,
+        strategy_minutes=strategy_minutes,
+    )
+    aligned_primary = _align_research_frame_to_strategy(primary, strategy)
+    aligned_independent = {
+        name: _align_research_frame_to_strategy(frame, strategy)
+        for name, frame in independent.items()
+    }
+    return aligned_primary, aligned_independent
+
+
 _INDEPENDENT_ICHIMOKU_TIMEFRAMES = ((60, "1h"), (240, "4h"), (1440, "1d"))
 
 
