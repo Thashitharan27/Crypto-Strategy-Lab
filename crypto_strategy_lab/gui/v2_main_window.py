@@ -338,7 +338,10 @@ class DataclassForm(QWidget):
         "strategy_profile_run_mode": ("COMBINED_SHARED_CAPITAL", "ISOLATED_PROFILES", "BOTH"),
         "entry_mode": ("WAIT_UNTIL_CLOSED", "EVERY_N_CANDLES"),
         "entry_timing_mode": ("SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"),
-        "ema_920_trade_plan": ("PULLBACK_1R", "EMA_20_100_CROSS"),
+        "ema_920_trade_plan": (
+            "PULLBACK_1R", "EMA_20_100_CROSS",
+            "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH",
+        ),
         "sr_filter_mode": ("ANALYSIS_ONLY", "APPLY_ENTRY_RULES"),
         "sr_timeframe_minutes": (0, 60, 240, 1440),
         "daily_entry_missed_policy": ("SKIP_DAY", "NEXT_AVAILABLE_CANDLE"),
