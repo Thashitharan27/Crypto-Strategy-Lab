@@ -65,6 +65,21 @@ class EmaCrossTests(unittest.TestCase):
             entry_timing_mode="NEXT_CANDLE_OPEN",
             ema_920_trade_plan="EMA_20_100_CROSS")).validate()
 
+    def test_config_accepts_short_and_both_cross_modes(self):
+        config = ResearchRunConfig()
+        profiles = dict(config.strategy.profiles)
+        key = next(iter(profiles))
+        profiles[key] = replace(profiles[key], entry_rules=(
+            {"_strategy_direction_mode": EMA_920_MODE},
+        ))
+        config = replace(
+            config,
+            strategy=replace(config.strategy, profiles=profiles),
+            execution=replace(config.execution, entry_timing_mode="NEXT_CANDLE_OPEN"),
+        )
+        for plan in ("EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH"):
+            replace(config, execution=replace(config.execution, ema_920_trade_plan=plan)).validate()
+
     def test_config_rejects_active_flip_rules_but_ignores_muted_ones(self):
         config = ResearchRunConfig()
         profiles = dict(config.strategy.profiles)
