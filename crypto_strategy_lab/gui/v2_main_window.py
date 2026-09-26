@@ -120,7 +120,7 @@ EXECUTION_GROUPS = (
     ("Take Profit", (
         "sr_take_profit_mode", "sr_take_profit_timeframe_minutes",
         "sr_take_profit_maximum_r", "sr_take_profit_minimum_r",
-        "sr_take_profit_buffer_r", "sr_take_profit_no_level_policy",
+        "sr_take_profit_buffer_r", "fvg_target_buffer_atr", "sr_take_profit_no_level_policy",
     ), None),
     ("Fees", (
         "maker_fee", "taker_fee", "use_maker_entry", "use_maker_exit",
@@ -497,8 +497,7 @@ class DataclassForm(QWidget):
             else:
                 widget.setText("" if raw is None else str(raw))
         for controller, dependents in self._dependents.items():
-            if controller in self.widgets:
-                self._set_visible(dependents, self.widgets[controller].isChecked())
+            if controller in self.widgets:                self._set_visible(dependents, self.widgets[controller].isChecked())
 
     def value(self, base=None):
         base = base or self.cls()
@@ -997,8 +996,7 @@ class StrategyWorkspace(QWidget):
         legend = QLabel(
             "Role model: Analyze Only records evidence without changing trades. Required can reject "
             "an entry when a native condition fails. Veto / Avoid rejects otherwise valid entries. "
-            "Confirmation and Ranking are reserved until the native engine explicitly supports them."
-        )
+            "Confirmation and Ranking are reserved until the native engine explicitly supports them."        )
         legend.setWordWrap(True)
         legend.setStyleSheet("color:#52606d; padding:6px")
         entry.addWidget(legend)
@@ -1497,8 +1495,7 @@ class MainWindow(QMainWindow):
         box = QGroupBox("Data Status")
         layout = QVBoxLayout(box)
         self.resolution = QLabel("Requested/effective resolution: not run")
-        self.coverage = QTableWidget(0, 6)
-        self.coverage.setHorizontalHeaderLabels([
+        self.coverage = QTableWidget(0, 6)        self.coverage.setHorizontalHeaderLabels([
             "Dataset", "Interval", "First UTC", "Last UTC", "Partitions", "State"
         ])
         self.quality = QLabel("Data quality: not run")

@@ -60,15 +60,23 @@ def test_fvg_stop_is_beyond_box_and_next_open_gap_through_is_rejected():
         def _expected_entry_price(self, i, execution_i, direction):
             return self.entry
 
+        def _profile_context(self, i):
+            return None, None, None, self.profile
+
     class Probe(FairValueGapMixin, Base):
         pass
 
     class Config:
         strategy_timeframe_minutes = 15
+        fvg_target_buffer_atr = 0.05
+
+    class Profile:
+        reward_risk_ratio = 2.0
 
     probe = Probe()
     probe.config = Config()
     probe.signal_strategy_mode = "FAIR_VALUE_GAP"
+    probe.profile = Profile()
     probe.direction = "LONG"
     probe.entry = 11.5
     probe.atr_values = np.array([2.0])
@@ -78,7 +86,7 @@ def test_fvg_stop_is_beyond_box_and_next_open_gap_through_is_rejected():
     long_plan = probe._sr_stop_plan(0)
     assert np.isclose(long_plan["stop_price"], 9.9)
     assert np.isclose(long_plan["distance"], 1.6)
-    assert probe._fvg_target_plan(0)["target_r"] == 3.0
+    assert probe._fvg_target_plan(0)["target_r"] == 2.0
     assert probe._sr_stop_plan(0, 1)["reason"] == "FVG_ENTRY_GAPPED_THROUGH_STOP"
 
     probe.direction = "SHORT"
@@ -86,7 +94,52 @@ def test_fvg_stop_is_beyond_box_and_next_open_gap_through_is_rejected():
     short_plan = probe._sr_stop_plan(0)
     assert np.isclose(short_plan["stop_price"], 12.1)
     assert np.isclose(short_plan["distance"], 2.1)
-    assert probe._fvg_target_plan(0)["target_r"] == 3.0
+    assert probe._fvg_target_plan(0)["target_r"] == 2.0
 
     probe.fvg_target_boundaries["SHORT"][0] = 8.8
-    assert probe._fvg_target_plan(0)["reason"] == "FVG_TARGET_LESS_THAN_1R"
+    assert probe._fvg_target_plan(0)["reason"] == "FVG_TARGET_INSUFFICIENT_ROOM"
+
+
+def test_fvg_target_uses_selected_r_and_requires_buffered_room():
+    class Profile:
+        reward_risk_ratio = 1.0
+
+    class Base:
+        def _effective_trade_direction(self, i):
+            return "LONG"
+
+        def _expected_entry_price(self, i, execution_i, direction):
+            return 11.5
+
+        def _profile_context(self, i):
+            return None, None, None, self.profile
+
+    class Probe(FairValueGapMixin, Base):
+        pass
+
+    class Config:
+        strategy_timeframe_minutes = 15
+        fvg_target_buffer_atr = 0.05
+
+    probe = Probe()
+    probe.config = Config()
+    probe.profile = Profile()
+    probe.signal_strategy_mode = "FAIR_VALUE_GAP"
+    probe.atr_values = np.array([2.0])
+    probe.fvg_stop_boundaries = {"LONG": np.array([10.0]), "SHORT": np.array([12.0])}
+    probe.fvg_target_boundaries = {"LONG": np.array([16.4]), "SHORT": np.array([3.0])}
+    probe.open = np.array([11.5])
+
+    for selected_r in (1.0, 2.0, 3.0):
+        probe.profile.reward_risk_ratio = selected_r
+        plan = probe._fvg_target_plan(0)
+        assert plan["passed"]
+        assert plan["target_r"] == selected_r
+        assert np.isclose(plan["limit_price"], 16.3)
+
+    probe.config.fvg_target_buffer_atr = 0.20
+    assert np.isclose(probe._fvg_target_plan(0)["limit_price"], 16.0)
+
+    probe.config.fvg_target_buffer_atr = 0.05
+    probe.fvg_target_boundaries["LONG"][0] = 16.3
+    assert probe._fvg_target_plan(0)["reason"] == "FVG_TARGET_INSUFFICIENT_ROOM"

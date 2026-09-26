@@ -399,6 +399,7 @@ class ExecutionConfig:
     sr_take_profit_maximum_r: float = 3.0
     sr_take_profit_minimum_r: float = 1.5
     sr_take_profit_buffer_r: float = 0.20
+    fvg_target_buffer_atr: float = 0.05
     sr_take_profit_no_level_policy: str = "USE_FIXED_TP"
 
 
@@ -497,8 +498,7 @@ class ResearchRunConfig:
         if features.sr_timeframe_minutes:
             if features.sr_timeframe_minutes < data.strategy_timeframe_minutes:
                 raise ValueError("S/R timeframe cannot be lower than strategy timeframe")
-            if features.sr_timeframe_minutes % data.strategy_timeframe_minutes:
-                raise ValueError("S/R timeframe must be an integer multiple of strategy timeframe")
+            if features.sr_timeframe_minutes % data.strategy_timeframe_minutes:                raise ValueError("S/R timeframe must be an integer multiple of strategy timeframe")
         if set(strategy.profiles) != set(PROFILE_KEYS) or set(execution.profiles) != set(PROFILE_KEYS):
             raise ValueError("strategy and execution profile keys must match the current profile contract")
         if strategy.strategy_profile_run_mode not in {"ISOLATED_PROFILES", "COMBINED_SHARED_CAPITAL", "BOTH"}:
@@ -649,6 +649,8 @@ class ResearchRunConfig:
             raise ValueError("S/R minimum TP cannot exceed maximum TP")
         if execution.sr_take_profit_buffer_r < 0:
             raise ValueError("S/R take-profit buffer cannot be negative")
+        if execution.fvg_target_buffer_atr < 0:
+            raise ValueError("FVG target buffer cannot be negative")
         structural_stop = execution.risk_mode == "SR_STRUCTURE"
         sr_target = execution.sr_take_profit_mode in {"SR_CAPPED_R", "SR_LEVEL"}
         separate_sizing = any(

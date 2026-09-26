@@ -7,6 +7,7 @@ import numpy as np
 FVG_MODE = "FAIR_VALUE_GAP"
 FVG_RULE_INDICATORS = frozenset({"FVG_GAP_SIZE_ATR", "FVG_AGE_BARS", "FVG_REVISIT_DEPTH_PCT"})
 FVG_STOP_BUFFER_ATR = 0.05
+FVG_TARGET_BUFFER_ATR = 0.05
 
 
 def first_revisit_context(high, low, close, atr=None):
@@ -163,15 +164,35 @@ class FairValueGapMixin:
         if direction not in {"LONG", "SHORT"} or not stop_plan.get("applied"):
             return {"passed": False, "reason": "FVG_TARGET_UNAVAILABLE"}
         level = float(self.fvg_target_boundaries[direction][i])
+        atr = float(self.atr_values[i])
         entry = float(self._expected_entry_price(i, execution_i, direction))
         risk = float(stop_plan["distance"])
-        room = level - entry if direction == "LONG" else entry - level
+        target_buffer_atr = float(
+            getattr(self.config, "fvg_target_buffer_atr", FVG_TARGET_BUFFER_ATR)
+        )
+        target_limit = (
+            level - target_buffer_atr * atr
+            if direction == "LONG"
+            else level + target_buffer_atr * atr
+        )
+        room = target_limit - entry if direction == "LONG" else entry - target_limit
         available_r = room / risk if risk > 0 else np.nan
-        if not np.isfinite(available_r) or available_r < 1.0:
-            return {"passed": False, "reason": "FVG_TARGET_LESS_THAN_1R", "available_r": available_r}
-        target_r = float(min(3, int(np.floor(available_r + 1e-12))))
-        return {"passed": True, "reason": "FVG_EXTREME_R_TARGET", "target_r": target_r,
-                "available_r": available_r, "level_price": level}
+        profile = self._profile_context(i)[3]
+        target_r = float(profile.reward_risk_ratio)
+        if (
+            not np.isfinite(available_r) or not np.isfinite(target_r) or target_r <= 0
+            or available_r + 1e-12 < target_r
+        ):
+            return {
+                "passed": False, "reason": "FVG_TARGET_INSUFFICIENT_ROOM",
+                "target_r": target_r, "available_r": available_r,
+                "level_price": level, "limit_price": target_limit,
+            }
+        return {
+            "passed": True, "reason": "FVG_CONFIGURED_R_TARGET",
+            "target_r": target_r, "available_r": available_r,
+            "level_price": level, "limit_price": target_limit,
+        }
 
     def _entry_filter_result(self, i, execution_i=None):
         passed, reason = super()._entry_filter_result(i, execution_i)
@@ -198,6 +219,7 @@ class FairValueGapMixin:
                 pos.fvg_target_r = target_r
                 pos.fvg_target_available_r = float(target["available_r"])
                 pos.fvg_target_level_price = float(target["level_price"])
+                pos.fvg_target_limit_price = float(target["limit_price"])
         return result
 
     def _build_result_row(self, pair, row_kind, positions):
@@ -209,6 +231,7 @@ class FairValueGapMixin:
         row["fvg_target_r"] = getattr(pos, "fvg_target_r", np.nan)
         row["fvg_target_available_r"] = getattr(pos, "fvg_target_available_r", np.nan)
         row["fvg_target_level_price"] = getattr(pos, "fvg_target_level_price", np.nan)
+        row["fvg_target_limit_price"] = getattr(pos, "fvg_target_limit_price", np.nan)
         return row
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
