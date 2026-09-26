@@ -197,6 +197,23 @@ def test_research_native_config_preserves_strategy_rules_and_per_trade_execution
     assert research.enable_daily_entry_schedule is False
 
 
+def test_ema_cross_research_exit_uses_mature_strategy_scanner():
+    engine = object.__new__(StrategyResearchSamplingEngine)
+    engine.signal_strategy_mode = "EMA_9_20_PULLBACK"
+    engine._ema_920_cross_plan = lambda: True
+    pair = _research_pair(1, Side.LONG)
+
+    assert not engine._research_simple_exit_eligible(pair.position)
+
+
+def test_fixed_exit_research_position_remains_fast_exit_eligible():
+    engine = object.__new__(StrategyResearchSamplingEngine)
+    engine.signal_strategy_mode = "DI"
+    pair = _research_pair(1, Side.LONG)
+
+    assert engine._research_simple_exit_eligible(pair.position)
+
+
 def test_research_sampling_emits_bounded_scan_progress():
     engine = object.__new__(StrategyResearchSamplingEngine)
     engine.risk = np.ones(5000)
