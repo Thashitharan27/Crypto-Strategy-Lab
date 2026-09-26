@@ -42,13 +42,14 @@ def test_revisit_filters_use_formation_atr_and_first_touch():
     low = [9, 10, 11, 11.5, 12, 10.5, 10]
     close = [9.5, 11, 12, 12.2, 13, 11.5, 11]
     atr = [1, 1, 2, 2, 2, 10, 10]
-    _, features, boundaries = first_revisit_context(high, low, close, atr)
+    _, features, boundaries, targets = first_revisit_context(high, low, close, atr)
     bullish = features["LONG"]
     assert bullish["FVG_GAP_SIZE_ATR"][5] == 0.5
     assert bullish["FVG_AGE_BARS"][5] == 3
     assert bullish["FVG_REVISIT_DEPTH_PCT"][5] == 0.5
     assert np.isnan(bullish["FVG_AGE_BARS"][6])
     assert boundaries["LONG"][5] == 10
+    assert targets["LONG"][5] == 14
 
 
 def test_fvg_stop_is_beyond_box_and_next_open_gap_through_is_rejected():
@@ -72,10 +73,12 @@ def test_fvg_stop_is_beyond_box_and_next_open_gap_through_is_rejected():
     probe.entry = 11.5
     probe.atr_values = np.array([2.0])
     probe.fvg_stop_boundaries = {"LONG": np.array([10.0]), "SHORT": np.array([12.0])}
+    probe.fvg_target_boundaries = {"LONG": np.array([16.4]), "SHORT": np.array([3.0])}
     probe.open = np.array([11.5, 9.0])
     long_plan = probe._sr_stop_plan(0)
     assert np.isclose(long_plan["stop_price"], 9.9)
     assert np.isclose(long_plan["distance"], 1.6)
+    assert probe._fvg_target_plan(0)["target_r"] == 3.0
     assert probe._sr_stop_plan(0, 1)["reason"] == "FVG_ENTRY_GAPPED_THROUGH_STOP"
 
     probe.direction = "SHORT"
@@ -83,3 +86,7 @@ def test_fvg_stop_is_beyond_box_and_next_open_gap_through_is_rejected():
     short_plan = probe._sr_stop_plan(0)
     assert np.isclose(short_plan["stop_price"], 12.1)
     assert np.isclose(short_plan["distance"], 2.1)
+    assert probe._fvg_target_plan(0)["target_r"] == 3.0
+
+    probe.fvg_target_boundaries["SHORT"][0] = 8.8
+    assert probe._fvg_target_plan(0)["reason"] == "FVG_TARGET_LESS_THAN_1R"

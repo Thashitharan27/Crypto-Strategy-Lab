@@ -218,6 +218,11 @@ class RiskExecutionWorkspace(QWidget):
         self.ema_target_value = QLabel("1.00 R")
         self.target_card.add_field("ema_920_target_method", "Target Method", self.ema_target_method)
         self.target_card.add_field("ema_920_target_value", "Profit Target", self.ema_target_value)
+        self.fvg_target_method = QLabel("FVG Move High / Low — Automatic")
+        self.fvg_target_method.setStyleSheet("font-weight:600")
+        self.fvg_target_value = QLabel("Largest complete target: 1R, 2R, or 3R")
+        self.target_card.add_field("fvg_target_method", "Target Method", self.fvg_target_method)
+        self.target_card.add_field("fvg_target_value", "Profit Target", self.fvg_target_value)
         self.sr_dependency_note = QLabel(
             "Structural S/R stop/target policies automatically require causal Support / Resistance calculation; no separate enable step is needed."
         )
@@ -451,7 +456,7 @@ class RiskExecutionWorkspace(QWidget):
             and not structural_stop
             and self.trade["position_sizing_stop_override_enabled"].isChecked()
         )
-        if (ema_920 or structural_stop) and self.trade[
+        if (ema_920 or fvg or structural_stop) and self.trade[
             "position_sizing_stop_override_enabled"
         ].isChecked():
             self.trade["position_sizing_stop_override_enabled"].setChecked(False)
@@ -487,7 +492,9 @@ class RiskExecutionWorkspace(QWidget):
         sr_target = target_mode in ("SR_CAPPED_R", "SR_LEVEL")
         for name in ("ema_920_target_method", "ema_920_target_value"):
             self.target_card.set_row_visible(name, ema_920)
-        if ema_920:
+        self.target_card.set_row_visible("fvg_target_method", fvg)
+        self.target_card.set_row_visible("fvg_target_value", fvg)
+        if ema_920 or fvg:
             self.target_card.set_row_visible("sr_take_profit_mode", False)
             self.target_card.set_row_visible("reward_risk_ratio", False)
             for name in (
@@ -637,6 +644,8 @@ class RiskExecutionWorkspace(QWidget):
                 ),
             }.get(execution.ema_920_trade_plan)
             target = cross_target or "automatic fixed 1.00R target"
+        elif fvg:
+            target = "automatic 1R / 2R / 3R from the FVG move high or low; reject below 1R room"
         else:
             target_mode = str(execution.sr_take_profit_mode).upper()
             if target_mode == "SR_CAPPED_R":
