@@ -68,6 +68,7 @@ def test_fvg_stop_is_beyond_box_and_next_open_gap_through_is_rejected():
 
     class Config:
         strategy_timeframe_minutes = 15
+        fvg_target_buffer_atr = 0.05
 
     class Profile:
         reward_risk_ratio = 2.0
@@ -118,6 +119,7 @@ def test_fvg_target_uses_selected_r_and_requires_buffered_room():
 
     class Config:
         strategy_timeframe_minutes = 15
+        fvg_target_buffer_atr = 0.05
 
     probe = Probe()
     probe.config = Config()
@@ -135,5 +137,9 @@ def test_fvg_target_uses_selected_r_and_requires_buffered_room():
         assert plan["target_r"] == selected_r
         assert np.isclose(plan["limit_price"], 16.3)
 
+    probe.config.fvg_target_buffer_atr = 0.20
+    assert np.isclose(probe._fvg_target_plan(0)["limit_price"], 16.0)
+
+    probe.config.fvg_target_buffer_atr = 0.05
     probe.fvg_target_boundaries["LONG"][0] = 16.3
     assert probe._fvg_target_plan(0)["reason"] == "FVG_TARGET_INSUFFICIENT_ROOM"
