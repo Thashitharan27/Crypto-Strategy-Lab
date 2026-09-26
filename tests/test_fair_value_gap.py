@@ -1,6 +1,6 @@
 import numpy as np
 
-from crypto_strategy_lab.fair_value_gap import first_revisit_context, first_revisit_signals
+from crypto_strategy_lab.fair_value_gap import FairValueGapMixin, first_revisit_context, first_revisit_signals
 from crypto_strategy_lab.strategy_rule_model import (
     MARKET_PERMISSIONS,
     compile_profiles,
@@ -42,9 +42,44 @@ def test_revisit_filters_use_formation_atr_and_first_touch():
     low = [9, 10, 11, 11.5, 12, 10.5, 10]
     close = [9.5, 11, 12, 12.2, 13, 11.5, 11]
     atr = [1, 1, 2, 2, 2, 10, 10]
-    _, features = first_revisit_context(high, low, close, atr)
+    _, features, boundaries = first_revisit_context(high, low, close, atr)
     bullish = features["LONG"]
     assert bullish["FVG_GAP_SIZE_ATR"][5] == 0.5
     assert bullish["FVG_AGE_BARS"][5] == 3
     assert bullish["FVG_REVISIT_DEPTH_PCT"][5] == 0.5
     assert np.isnan(bullish["FVG_AGE_BARS"][6])
+    assert boundaries["LONG"][5] == 10
+
+
+def test_fvg_stop_is_beyond_box_and_next_open_gap_through_is_rejected():
+    class Base:
+        def _effective_trade_direction(self, i):
+            return self.direction
+
+        def _expected_entry_price(self, i, execution_i, direction):
+            return self.entry
+
+    class Probe(FairValueGapMixin, Base):
+        pass
+
+    class Config:
+        strategy_timeframe_minutes = 15
+
+    probe = Probe()
+    probe.config = Config()
+    probe.signal_strategy_mode = "FAIR_VALUE_GAP"
+    probe.direction = "LONG"
+    probe.entry = 11.5
+    probe.atr_values = np.array([2.0])
+    probe.fvg_stop_boundaries = {"LONG": np.array([10.0]), "SHORT": np.array([12.0])}
+    probe.open = np.array([11.5, 9.0])
+    long_plan = probe._sr_stop_plan(0)
+    assert np.isclose(long_plan["stop_price"], 9.9)
+    assert np.isclose(long_plan["distance"], 1.6)
+    assert probe._sr_stop_plan(0, 1)["reason"] == "FVG_ENTRY_GAPPED_THROUGH_STOP"
+
+    probe.direction = "SHORT"
+    probe.entry = 10.0
+    short_plan = probe._sr_stop_plan(0)
+    assert np.isclose(short_plan["stop_price"], 12.1)
+    assert np.isclose(short_plan["distance"], 2.1)

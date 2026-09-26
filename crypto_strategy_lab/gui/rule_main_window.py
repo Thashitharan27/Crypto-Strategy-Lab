@@ -99,7 +99,7 @@ class MainWindow(LegacyMainWindow):
         if timing is None or not hasattr(timing, "findData"):
             return
         strategy = self.rule_builder.direction_mode.currentData()
-        target = "NEXT_CANDLE_OPEN" if strategy == "EMA_9_20_PULLBACK" else "SIGNAL_CLOSE"
+        target = "NEXT_CANDLE_OPEN" if strategy in {"EMA_9_20_PULLBACK", "FAIR_VALUE_GAP"} else "SIGNAL_CLOSE"
         index = timing.findData(target)
         if index >= 0:
             timing.setCurrentIndex(index)
