@@ -260,6 +260,7 @@ class IntrabarExecutionData:
     open: np.ndarray
     high: np.ndarray
     low: np.ndarray
+    close: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         interval = pd.Timedelta(self.interval)
@@ -269,14 +270,18 @@ class IntrabarExecutionData:
         object.__setattr__(self, "timestamp", _readonly(self.timestamp, "datetime64[ns]", "intrabar timestamp"))
         for name in ("open", "high", "low"):
             object.__setattr__(self, name, _readonly(getattr(self, name), np.float64, f"intrabar {name}"))
+        if self.close is not None:
+            object.__setattr__(self, "close", _readonly(self.close, np.float64, "intrabar close"))
         length = len(self.timestamp)
-        if any(len(getattr(self, name)) != length for name in ("open", "high", "low")):
+        names = ("open", "high", "low") if self.close is None else ("open", "high", "low", "close")
+        if any(len(getattr(self, name)) != length for name in names):
             raise ValueError("intrabar arrays must have equal lengths")
         if np.isnat(self.timestamp).any():
             raise ValueError("intrabar timestamps cannot contain missing values")
         if length and (np.diff(self.timestamp) <= np.timedelta64(0, "ns")).any():
             raise ValueError("intrabar timestamps must be strictly increasing and unique")
-        if any(not np.isfinite(getattr(self, name)).all() for name in ("open", "high", "low")):
+        finite_names = ("open", "high", "low") if self.close is None else ("open", "high", "low", "close")
+        if any(not np.isfinite(getattr(self, name)).all() for name in finite_names):
             raise ValueError("intrabar OHLC contains missing or non-finite values")
 
     def validate_compatible(self, strategy: PreparedBacktestFrame) -> None:
@@ -460,7 +465,7 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
             bundle.intrabar["period_start"].to_numpy(),
             pd.Timedelta(bundle.request.intrabar_interval),
             bundle.intrabar["open"].to_numpy(), bundle.intrabar["high"].to_numpy(),
-            bundle.intrabar["low"].to_numpy(),
+            bundle.intrabar["low"].to_numpy(), bundle.intrabar["close"].to_numpy(),
         )
         intrabar.validate_compatible(prepared)
     return prepared, intrabar
@@ -474,5 +479,5 @@ def intrabar_from_data_lake_bundle(bundle) -> IntrabarExecutionData | None:
         bundle.intrabar["period_start"].to_numpy(),
         pd.Timedelta(bundle.request.intrabar_interval),
         bundle.intrabar["open"].to_numpy(), bundle.intrabar["high"].to_numpy(),
-        bundle.intrabar["low"].to_numpy(),
+        bundle.intrabar["low"].to_numpy(), bundle.intrabar["close"].to_numpy(),
     )
