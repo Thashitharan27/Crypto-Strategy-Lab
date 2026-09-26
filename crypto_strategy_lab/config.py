@@ -151,6 +151,8 @@ class BacktestConfig:
                 raise ValueError("FVG confirmation timeframe must be positive and smaller than strategy timeframe")
             if self.fvg_confirmation_minutes % self.intrabar_timeframe_minutes:
                 raise ValueError("FVG confirmation timeframe must be an exact multiple of intrabar timeframe")
+            if self.enable_daily_entry_schedule:
+                raise ValueError("FVG confirmation does not support scheduled daily entries")
         if not 0 < self.risk_per_leg < 1:
             raise ValueError("risk_per_leg must be between 0 and 1")
         if self.atr_period <= 0 or self.atr_multiplier <= 0:
