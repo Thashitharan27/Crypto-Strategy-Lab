@@ -308,7 +308,7 @@ class FairValueGapMixin:
             return {"passed": False, "reason": "FVG_TARGET_UNAVAILABLE"}
         level = float(self.fvg_target_boundaries[direction][i])
         atr = float(self.atr_values[i])
-        entry = float(self._expected_entry_price(i, execution_i, direction))
+        entry = self._fvg_expected_entry_price(i, execution_i, direction)
         risk = float(stop_plan["distance"])
         target_buffer_atr = float(
             getattr(self.config, "fvg_target_buffer_atr", FVG_TARGET_BUFFER_ATR)
