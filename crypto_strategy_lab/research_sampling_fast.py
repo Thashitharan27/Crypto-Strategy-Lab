@@ -59,9 +59,22 @@ class ResearchSamplingFastExitMixin:
             }
         )
 
-    @staticmethod
-    def _research_simple_exit_eligible(position) -> bool:
-        """Return True only when a position is a stateless fixed SL/TP trade."""
+    def _research_simple_exit_eligible(self, position) -> bool:
+        """Return True only when a position has no strategy-stateful exit path.
+
+        EMA 9/20 plans that exit on an EMA 20/100 cross must stay on the mature
+        strategy-interval scanner. Resolving those positions across their full
+        future intrabar horizon would bypass the strategy-open crossover exit and
+        can turn canonical source winners into synthetic losses.
+        """
+        ema_cross_plan = getattr(self, "_ema_920_cross_plan", None)
+        if (
+            str(getattr(self, "signal_strategy_mode", "")).upper()
+            == "EMA_9_20_PULLBACK"
+            and callable(ema_cross_plan)
+            and bool(ema_cross_plan())
+        ):
+            return False
         return bool(
             position.is_open
             and not position.partial_sl_enabled
