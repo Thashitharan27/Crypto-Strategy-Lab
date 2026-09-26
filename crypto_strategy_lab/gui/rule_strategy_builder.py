@@ -68,6 +68,9 @@ EVIDENCE_LABELS = {
     "EMA_9_DISTANCE_ATR": "Price − EMA 9 (ATR)",
     "EMA_20_DISTANCE_ATR": "Price − EMA 20 (ATR)",
     "EMA_9_20_SPREAD_ATR": "EMA 9 − EMA 20 (ATR)",
+    "FVG_GAP_SIZE_ATR": "FVG Size / Formation ATR",
+    "FVG_AGE_BARS": "FVG Bars Since Formation",
+    "FVG_REVISIT_DEPTH_PCT": "FVG First Revisit Depth (0–1)",
     "EMA_9_SLOPE_ATR": "EMA 9 Slope (ATR / bar)",
     "EMA_20_SLOPE_ATR": "EMA 20 Slope (ATR / bar)",
     "VOLUME_RATIO_20": "Volume / Prior 20-Bar Average",
@@ -245,6 +248,7 @@ EVIDENCE_GROUPS = (
         "Trend & Volatility",
         (
             "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
+            "FVG_GAP_SIZE_ATR", "FVG_AGE_BARS", "FVG_REVISIT_DEPTH_PCT",
             "EMA_9_DISTANCE_ATR", "EMA_20_DISTANCE_ATR", "EMA_9_20_SPREAD_ATR",
             "EMA_9_SLOPE_ATR", "EMA_20_SLOPE_ATR",
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
@@ -376,6 +380,7 @@ EVIDENCE_MENU_TREE = (
         "Trend & Volatility",
         (
             "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
+            "FVG_GAP_SIZE_ATR", "FVG_AGE_BARS", "FVG_REVISIT_DEPTH_PCT",
             "EMA_9_DISTANCE_ATR", "EMA_20_DISTANCE_ATR", "EMA_9_20_SPREAD_ATR",
             "EMA_9_SLOPE_ATR", "EMA_20_SLOPE_ATR",
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
@@ -509,6 +514,7 @@ DIRECTION_LABELS = {
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
+    "FAIR_VALUE_GAP": "Fair Value Gap — First Revisit",
     "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
 }
 SR_TIMEFRAME_OPTIONS = (

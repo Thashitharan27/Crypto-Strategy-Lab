@@ -36,7 +36,7 @@ from crypto_strategy_lab.mtf_sr_reaction import (
 # selection but adds a deliberately simple, non-optimized trend confirmation
 # baseline at compile time. LONG/SHORT eligibility still belongs to the market
 # permission grid below.
-SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", MTF_SR_REACTION_MODE)
+SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "FAIR_VALUE_GAP", MTF_SR_REACTION_MODE)
 # Backward-compatible internal name retained while the UI moves to "Signal Strategy".
 DIRECTION_MODES = SIGNAL_STRATEGIES
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
@@ -832,6 +832,17 @@ def _ema_9_20_pullback_native_rules() -> tuple[dict, ...]:
     )
 
 
+def _fair_value_gap_native_rules() -> tuple[dict, ...]:
+    """Store the signal selection in a no-op native rule for GUI round trips."""
+    return ({
+        "action": "REJECT", "indicator": "ATR_PCT", "condition": "OUTSIDE",
+        "minimum": LOW, "maximum": HIGH,
+        f"{_META_PREFIX}kind": "REQUIRED",
+        _DMI_TREND_MODE_MARKER: "FAIR_VALUE_GAP",
+        _DMI_TREND_RULE_MARKER: "FAIR_VALUE_GAP_SIGNAL",
+    },)
+
+
 def _mtf_sr_reaction_native_rules() -> tuple[dict, ...]:
     """Persist the MTF S/R signal choice without hiding its editable filters."""
     return (
@@ -969,6 +980,8 @@ def compile_profiles(
             native_rules = list(_macd_pullback_native_rules())
         elif mode == "EMA_9_20_PULLBACK":
             native_rules = list(_ema_9_20_pullback_native_rules())
+        elif mode == "FAIR_VALUE_GAP":
+            native_rules = list(_fair_value_gap_native_rules())
         elif mode == MTF_SR_REACTION_MODE:
             native_rules = list(_mtf_sr_reaction_native_rules())
         else:
