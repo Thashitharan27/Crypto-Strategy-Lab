@@ -67,6 +67,7 @@ SIGNAL_STRATEGIES = {
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
+    "FAIR_VALUE_GAP": "Fair Value Gap — First Revisit",
     "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
 }
 
@@ -83,6 +84,9 @@ EVIDENCE_LABELS = {
     "ADX": "ADX",
     "ADX_CHANGE": "ADX Change (1 bar)",
     "ATR_PCT": "ATR % (decimal)",
+    "FVG_GAP_SIZE_ATR": "FVG Size / Formation ATR",
+    "FVG_AGE_BARS": "FVG Bars Since Formation",
+    "FVG_REVISIT_DEPTH_PCT": "FVG First Revisit Depth (0–1)",
     "EMA_9_DISTANCE_ATR": "Price − EMA 9 (ATR)",
     "EMA_20_DISTANCE_ATR": "Price − EMA 20 (ATR)",
     "EMA_9_20_SPREAD_ATR": "EMA 9 − EMA 20 (ATR)",
