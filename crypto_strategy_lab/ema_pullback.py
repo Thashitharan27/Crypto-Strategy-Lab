@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_core.ema_strategy import ema_20_100_cross, ema_20_100_entry_direction
 from crypto_strategy_lab.engine import _signal_ema
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
 
@@ -163,11 +164,10 @@ class Ema920PullbackMixin:
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
             cross_mode = self._ema_920_cross_mode()
             if cross_mode is not None:
-                if cross_mode in {"LONG", "BOTH"} and self._ema_20_100_cross(i, upwards=True):
-                    return "LONG"
-                if cross_mode in {"SHORT", "BOTH"} and self._ema_20_100_cross(i, upwards=False):
-                    return "SHORT"
-                return None
+                return ema_20_100_entry_direction(
+                    i, self.ema_20_values, self.ema_100_values,
+                    self.config.ema_920_trade_plan,
+                )
             return self._ema_920_direction(i)
         return super()._selected_direction(i)
 
@@ -183,14 +183,8 @@ class Ema920PullbackMixin:
         return self._ema_920_cross_mode() is not None
 
     def _ema_20_100_cross(self, i, *, upwards):
-        if i < 100:
-            return False
-        current_20, previous_20 = float(self.ema_20_values[i]), float(self.ema_20_values[i - 1])
-        current_100, previous_100 = float(self.ema_100_values[i]), float(self.ema_100_values[i - 1])
-        if not all(np.isfinite(v) for v in (current_20, previous_20, current_100, previous_100)):
-            return False
-        return (previous_20 <= previous_100 and current_20 > current_100) if upwards else (
-            previous_20 >= previous_100 and current_20 < current_100
+        return ema_20_100_cross(
+            i, self.ema_20_values, self.ema_100_values, upwards=upwards,
         )
 
     def _scan_pair_exit(self, pair, i):
