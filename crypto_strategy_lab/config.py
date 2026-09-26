@@ -64,6 +64,8 @@ class BacktestConfig:
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
     entry_timing_mode: EntryTimingMode = EntryTimingMode.SIGNAL_CLOSE
     ema_920_trade_plan: str = "PULLBACK_1R"
+    fvg_confirmation_enabled: bool = False
+    fvg_confirmation_minutes: int = 15
     entry_interval: int = 1
     enable_di_direction_selection: bool = True
     enable_di_pressure_analysis: bool = True
@@ -142,6 +144,13 @@ class BacktestConfig:
             raise ValueError("timeframes must be positive")
         if self.use_intrabar_data and self.intrabar_timeframe_minutes >= self.strategy_timeframe_minutes:
             raise ValueError("intrabar timeframe must be less than strategy timeframe")
+        if self.fvg_confirmation_enabled:
+            if not self.use_intrabar_data:
+                raise ValueError("FVG confirmation requires intrabar data")
+            if self.fvg_confirmation_minutes <= 0 or self.fvg_confirmation_minutes >= self.strategy_timeframe_minutes:
+                raise ValueError("FVG confirmation timeframe must be positive and smaller than strategy timeframe")
+            if self.fvg_confirmation_minutes % self.intrabar_timeframe_minutes:
+                raise ValueError("FVG confirmation timeframe must be an exact multiple of intrabar timeframe")
         if not 0 < self.risk_per_leg < 1:
             raise ValueError("risk_per_leg must be between 0 and 1")
         if self.atr_period <= 0 or self.atr_multiplier <= 0:
