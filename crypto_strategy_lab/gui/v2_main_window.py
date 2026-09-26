@@ -1495,7 +1495,8 @@ class MainWindow(QMainWindow):
         box = QGroupBox("Data Status")
         layout = QVBoxLayout(box)
         self.resolution = QLabel("Requested/effective resolution: not run")
-        self.coverage = QTableWidget(0, 6)\n        self.coverage.setHorizontalHeaderLabels([
+        self.coverage = QTableWidget(0, 6)
+        self.coverage.setHorizontalHeaderLabels([
             "Dataset", "Interval", "First UTC", "Last UTC", "Partitions", "State"
         ])
         self.quality = QLabel("Data quality: not run")
