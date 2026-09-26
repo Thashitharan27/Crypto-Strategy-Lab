@@ -148,6 +148,12 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.add_field(
             "ema_920_trade_plan", "EMA 9/20 Trade Plan", self.account["ema_920_trade_plan"]
         )
+        self.entry_card.add_control(
+            "fvg_confirmation_enabled", self.account["fvg_confirmation_enabled"]
+        )
+        self.entry_card.add_field(
+            "fvg_confirmation_minutes", "FVG Confirmation Candle", self.account["fvg_confirmation_minutes"]
+        )
         layout.addWidget(self.entry_card)
 
         self.account_card = FormCard(
@@ -317,6 +323,7 @@ class RiskExecutionWorkspace(QWidget):
         self.account["sr_take_profit_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["entry_timing_mode"].currentIndexChanged.connect(self.refresh_summary_from_widgets)
         self.account["ema_920_trade_plan"].currentIndexChanged.connect(self.refresh_visibility)
+        self.account["fvg_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["di_ladder_enabled"].toggled.connect(self.refresh_visibility)
         builder = getattr(self.window, "rule_builder", None)
         if builder is not None:
@@ -346,6 +353,7 @@ class RiskExecutionWorkspace(QWidget):
             "use_maker_exit": "Assume maker exit",
             "zero_cost_comparison": "Also calculate zero-cost comparison",
             "di_ladder_enabled": "Enable DI ladder / reversal-filter execution",
+            "fvg_confirmation_enabled": "Require directional FVG confirmation before entry",
         }.items():
             widget = self.trade.get(name) or self.account.get(name)
             if isinstance(widget, QCheckBox):
@@ -361,6 +369,8 @@ class RiskExecutionWorkspace(QWidget):
             self.account["atr_multiplier"].setSuffix(" × ATR")
         if hasattr(self.account["fvg_target_buffer_atr"], "setSuffix"):
             self.account["fvg_target_buffer_atr"].setSuffix(" × signal ATR")
+        if hasattr(self.account["fvg_confirmation_minutes"], "setSuffix"):
+            self.account["fvg_confirmation_minutes"].setSuffix(" min")
         if hasattr(self.account["di_ladder_level_r"], "setSuffix"):
             self.account["di_ladder_level_r"].setSuffix(" R")
         if hasattr(self.account["di_ladder_layers"], "setMaximumHeight"):
@@ -385,6 +395,11 @@ class RiskExecutionWorkspace(QWidget):
         }.get(self.account["ema_920_trade_plan"].currentData())
         cross_plan = ema_920 and cross_mode is not None
         self.entry_card.set_row_visible("ema_920_trade_plan", ema_920)
+        self.entry_card.set_row_visible("fvg_confirmation_enabled", fvg)
+        self.entry_card.set_row_visible(
+            "fvg_confirmation_minutes",
+            fvg and self.account["fvg_confirmation_enabled"].isChecked(),
+        )
         self.ema_stop_method.setText(
             "EMA 100 at Signal Close — Automatic" if cross_plan else "EMA 9/20 Micro-Swing — Automatic"
         )
@@ -636,7 +651,9 @@ class RiskExecutionWorkspace(QWidget):
 
         timing = str(getattr(execution, "entry_timing_mode", "SIGNAL_CLOSE")).upper()
         entry_fill = (
-            "Next Candle Open — Causal"
+            f"{int(execution.fvg_confirmation_minutes)}m directional confirmation close"
+            if fvg and execution.fvg_confirmation_enabled
+            else "Next Candle Open — Causal"
             if timing == "NEXT_CANDLE_OPEN"
             else "Signal Candle Close — Legacy"
         )
