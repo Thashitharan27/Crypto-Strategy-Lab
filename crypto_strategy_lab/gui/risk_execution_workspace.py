@@ -139,7 +139,7 @@ class RiskExecutionWorkspace(QWidget):
             "1. Entry Execution",
             note=(
                 "Choose when a completed strategy signal becomes an executable fill. "
-                "Next Candle Open is the causal default for EMA 9/20 scalping."
+                "Next Candle Open is the causal default for EMA 9/20 and FVG entries."
             ),
         )
         self.entry_card.add_field(
@@ -196,6 +196,10 @@ class RiskExecutionWorkspace(QWidget):
         self.stop_card.add_field("ema_920_stop_lookback", "Swing Lookback", self.ema_stop_lookback)
         self.stop_card.add_field("ema_920_stop_buffer", "Stop Buffer", self.ema_stop_buffer)
         self.stop_card.add_field("ema_920_stop_maximum", "Maximum Stop", self.ema_stop_maximum)
+        self.fvg_stop_method = QLabel("FVG Box Boundary — Automatic")
+        self.fvg_stop_buffer = QLabel("0.05 × signal ATR beyond the far edge")
+        self.stop_card.add_field("fvg_stop_method", "Stop Method", self.fvg_stop_method)
+        self.stop_card.add_field("fvg_stop_buffer", "Stop Buffer", self.fvg_stop_buffer)
         layout.addWidget(self.stop_card)
 
         self.target_card = FormCard(
@@ -365,6 +369,7 @@ class RiskExecutionWorkspace(QWidget):
 
     def refresh_visibility(self, *_args) -> None:
         ema_920 = self._ema_920_selected()
+        fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
         cross_mode = {
             "EMA_20_100_CROSS": "LONG",
             "EMA_20_100_CROSS_SHORT": "SHORT",
@@ -403,9 +408,11 @@ class RiskExecutionWorkspace(QWidget):
         )
         for name in ema_stop_fields:
             self.stop_card.set_row_visible(name, ema_920)
+        self.stop_card.set_row_visible("fvg_stop_method", fvg)
+        self.stop_card.set_row_visible("fvg_stop_buffer", fvg)
         for name in ("ema_920_stop_confirmation", "ema_920_stop_lookback", "ema_920_stop_maximum"):
             self.stop_card.set_row_visible(name, ema_920 and not cross_plan)
-        if ema_920:
+        if ema_920 or fvg:
             for name in (
                 "risk_mode", "atr_multiplier", "percent_r", "fixed_r",
                 "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
@@ -440,7 +447,7 @@ class RiskExecutionWorkspace(QWidget):
             )
 
         sizing_override_active = bool(
-            not ema_920
+            not ema_920 and not fvg
             and not structural_stop
             and self.trade["position_sizing_stop_override_enabled"].isChecked()
         )
@@ -581,9 +588,10 @@ class RiskExecutionWorkspace(QWidget):
         risk_dollars = float(execution.initial_equity) * effective_risk
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
         ema_920 = self._ema_920_selected()
+        fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
         sizing_override = bool(
             base.position_sizing_stop_override_enabled
-            and not ema_920
+            and not ema_920 and not fvg
             and str(execution.risk_mode).upper() != "SR_STRUCTURE"
         )
         sizing_stop_mult = (
@@ -680,6 +688,11 @@ class RiskExecutionWorkspace(QWidget):
             stop_description = cross_stop or (
                 "Stop: EMA 9/20 confirmed micro-swing (2-left / 2-right, "
                 "20-bar lookback, 0.05× ATR buffer, maximum 1.50× ATR). "
+            )
+        elif fvg:
+            stop_description = (
+                "Stop: beyond the selected FVG box (below bullish / above bearish), "
+                "with a 0.05× signal ATR buffer; size from the full stop distance. "
             )
         elif str(execution.risk_mode).upper() == "SR_STRUCTURE":
             stop_description = f"Stop distance uses {self._distance_description(execution)}. "

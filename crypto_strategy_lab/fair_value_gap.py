@@ -6,6 +6,7 @@ import numpy as np
 
 FVG_MODE = "FAIR_VALUE_GAP"
 FVG_RULE_INDICATORS = frozenset({"FVG_GAP_SIZE_ATR", "FVG_AGE_BARS", "FVG_REVISIT_DEPTH_PCT"})
+FVG_STOP_BUFFER_ATR = 0.05
 
 
 def first_revisit_context(high, low, close, atr=None):
@@ -25,6 +26,7 @@ def first_revisit_context(high, low, close, atr=None):
     if atr.shape != close.shape:
         raise ValueError("FVG ATR array must match candle lengths")
     result = np.full(len(close), None, dtype=object)
+    stop_boundaries = {side: np.full(len(close), np.nan) for side in ("LONG", "SHORT")}
     features = {
         side: {key: np.full(len(close), np.nan) for key in FVG_RULE_INDICATORS}
         for side in ("LONG", "SHORT")
@@ -48,7 +50,9 @@ def first_revisit_context(high, low, close, atr=None):
                     )
                     if np.isfinite(atr[formed]) and atr[formed] > 0:
                         features["LONG"]["FVG_GAP_SIZE_ATR"][i] = (top - bottom) / atr[formed]
-                long_touch |= close[i] > top
+                if close[i] > top and not long_touch:
+                    stop_boundaries["LONG"][i] = bottom
+                    long_touch = True
             else:
                 next_bullish.append((bottom, top, formed))
         next_bearish = []
@@ -61,7 +65,9 @@ def first_revisit_context(high, low, close, atr=None):
                     )
                     if np.isfinite(atr[formed]) and atr[formed] > 0:
                         features["SHORT"]["FVG_GAP_SIZE_ATR"][i] = (top - bottom) / atr[formed]
-                short_touch |= close[i] < bottom
+                if close[i] < bottom and not short_touch:
+                    stop_boundaries["SHORT"][i] = top
+                    short_touch = True
             else:
                 next_bearish.append((bottom, top, formed))
         bullish, bearish = next_bullish, next_bearish
@@ -72,7 +78,7 @@ def first_revisit_context(high, low, close, atr=None):
                 bullish.append((high[i - 2], low[i], i))
             if high[i] < low[i - 2]:
                 bearish.append((high[i], low[i - 2], i))
-    return result, features
+    return result, features, stop_boundaries
 
 
 def first_revisit_signals(high, low, close):
@@ -89,7 +95,7 @@ class FairValueGapMixin:
             for profile in self.config.strategy_profiles.values()
             for rule in getattr(profile, "entry_rules", ())
         ):
-            self.fvg_first_revisit, self.fvg_rule_features = first_revisit_context(
+            self.fvg_first_revisit, self.fvg_rule_features, self.fvg_stop_boundaries = first_revisit_context(
                 self.high, self.low, self.close, self.atr_values
             )
 
@@ -110,6 +116,48 @@ class FairValueGapMixin:
             if self._selected_direction(i) is None:
                 return False
         return super()._should_enter(i)
+
+    def _sr_stop_plan(self, i, execution_i=None):
+        if getattr(self, "signal_strategy_mode", "DI") != FVG_MODE:
+            return super()._sr_stop_plan(i, execution_i)
+        direction = self._effective_trade_direction(i)
+        if direction not in {"LONG", "SHORT"}:
+            return {"passed": False, "applied": False, "reason": "FVG_NO_DIRECTION", "distance": None}
+        boundary = float(self.fvg_stop_boundaries[direction][i])
+        atr = float(self.atr_values[i])
+        if not np.isfinite(boundary) or not np.isfinite(atr) or atr <= 0:
+            return {"passed": False, "applied": False, "reason": "FVG_STOP_UNAVAILABLE", "distance": None}
+        stop = boundary - FVG_STOP_BUFFER_ATR * atr if direction == "LONG" else boundary + FVG_STOP_BUFFER_ATR * atr
+        if execution_i is not None and execution_i > i:
+            opening = float(self.open[execution_i])
+            gap_through = opening <= stop if direction == "LONG" else opening >= stop
+            if gap_through:
+                return {"passed": False, "applied": False, "reason": "FVG_ENTRY_GAPPED_THROUGH_STOP", "distance": None}
+        entry = float(self._expected_entry_price(i, execution_i, direction))
+        distance = entry - stop if direction == "LONG" else stop - entry
+        if not np.isfinite(distance) or distance <= 0:
+            return {"passed": False, "applied": False, "reason": "FVG_STOP_ON_WRONG_SIDE", "distance": None}
+        return {
+            "passed": True, "applied": True, "reason": "FVG_BOX_STOP",
+            "distance": distance, "distance_atr": distance / atr,
+            "level_price": boundary, "boundary_price": boundary, "stop_price": stop,
+            "timeframe_minutes": int(self.config.strategy_timeframe_minutes),
+        }
+
+    def _annotate_sr_stop(self, positions, plan):
+        super()._annotate_sr_stop(positions, plan)
+        for pos in positions:
+            pos.fvg_stop_applied = plan.get("reason") == "FVG_BOX_STOP"
+            pos.fvg_stop_boundary_price = plan.get("boundary_price", np.nan) if pos.fvg_stop_applied else np.nan
+            pos.fvg_stop_price = plan.get("stop_price", np.nan) if pos.fvg_stop_applied else np.nan
+
+    def _build_result_row(self, pair, row_kind, positions):
+        row = super()._build_result_row(pair, row_kind, positions)
+        pos = positions[0] if positions else None
+        row["fvg_stop_applied"] = bool(getattr(pos, "fvg_stop_applied", False))
+        row["fvg_stop_boundary_price"] = getattr(pos, "fvg_stop_boundary_price", np.nan)
+        row["fvg_stop_price"] = getattr(pos, "fvg_stop_price", np.nan)
+        return row
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
         if indicator in FVG_RULE_INDICATORS:

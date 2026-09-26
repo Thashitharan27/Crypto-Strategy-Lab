@@ -48,9 +48,9 @@ def _sync_target_sr_dependency(window) -> None:
             if builder is not None
             else "DI"
         )
-        ema_920_override = strategy_mode == "EMA_9_20_PULLBACK"
-        required_by_target = (not ema_920_override) and target_value in {"SR_CAPPED_R", "SR_LEVEL"}
-        required_by_stop = (not ema_920_override) and stop_value == "SR_STRUCTURE"
+        native_stop = strategy_mode in {"EMA_9_20_PULLBACK", "FAIR_VALUE_GAP"}
+        required_by_target = strategy_mode != "EMA_9_20_PULLBACK" and target_value in {"SR_CAPPED_R", "SR_LEVEL"}
+        required_by_stop = (not native_stop) and stop_value == "SR_STRUCTURE"
         required_by_execution = required_by_target or required_by_stop
         was_required = bool(getattr(window, "_sr_target_dependency_active", False))
         panel = getattr(window, "research_features_panel", None)
