@@ -31,6 +31,8 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "entry_mode": "WAIT_UNTIL_CLOSED",
     "entry_timing_mode": "SIGNAL_CLOSE",
     "ema_920_trade_plan": "PULLBACK_1R",
+    "fvg_confirmation_enabled": False,
+    "fvg_confirmation_minutes": 15,
     "entry_interval": 1,
     "max_active_pairs": 1,
     "tie_policy": "PESSIMISTIC",
@@ -224,6 +226,19 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         errors.append("Invalid entry mode.")
     if values["entry_timing_mode"] not in (EntryTimingMode.SIGNAL_CLOSE.value, EntryTimingMode.NEXT_CANDLE_OPEN.value):
         errors.append("Invalid entry timing mode.")
+    if values["fvg_confirmation_enabled"]:
+        try:
+            confirm = int(values["fvg_confirmation_minutes"])
+            strategy = int(values["strategy_timeframe_minutes"])
+            intrabar = int(values["intrabar_timeframe_minutes"])
+            if not values["use_intrabar_data"]:
+                errors.append("FVG confirmation requires intrabar data.")
+            if confirm <= 0 or confirm >= strategy:
+                errors.append("FVG confirmation timeframe must be positive and smaller than strategy timeframe.")
+            elif confirm % intrabar:
+                errors.append("FVG confirmation timeframe must be an exact multiple of intrabar timeframe.")
+        except (TypeError, ValueError):
+            errors.append("FVG confirmation timeframe must be a whole number.")
     if values["ema_920_trade_plan"] not in (
         "PULLBACK_1R", "EMA_20_100_CROSS", "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH"
     ):
@@ -295,6 +310,8 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         entry_mode=EntryMode(merged["entry_mode"]),
         entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]),
         ema_920_trade_plan=str(merged["ema_920_trade_plan"]),
+        fvg_confirmation_enabled=bool(merged["fvg_confirmation_enabled"]),
+        fvg_confirmation_minutes=int(merged["fvg_confirmation_minutes"]),
         entry_interval=int(merged["entry_interval"]),
         enable_di_direction_selection=bool(merged["enable_di_direction_selection"]),
         enable_di_pressure_analysis=bool(merged["enable_di_pressure_analysis"]),
