@@ -1045,16 +1045,48 @@ def load_backtest_bundle(
         store.refresh_catalog()
 
     canonical = store.load_klines(request, request.strategy_interval)
-    quality_reports = [
-        store.data_quality_report(
-            request,
-            DatasetKind.KLINES,
-            interval=request.strategy_interval,
-            required=True,
-            frame=canonical,
-        )
-    ]
-    DataQualityReport(tuple(quality_reports)).raise_for_errors()
+    quality_reports = []
+    selected_quality_request = request
+    selected_quality_frame = canonical
+    if research_start is not None:
+        selected_start = pd.Timestamp(research_start)
+        request_start = pd.Timestamp(request.start)
+        if selected_start.tzinfo is None:
+            selected_start = selected_start.tz_localize("UTC")
+        else:
+            selected_start = selected_start.tz_convert("UTC")
+        if request_start.tzinfo is None:
+            request_start = request_start.tz_localize("UTC")
+        else:
+            request_start = request_start.tz_convert("UTC")
+        if selected_start > request_start:
+            selected_quality_request = replace(
+                request,
+                start=selected_start.to_pydatetime(),
+            )
+            selected_quality_frame = _strategy_slice_for_request(
+                canonical,
+                selected_quality_request,
+            )
+            quality_reports.append(
+                store.data_quality_report(
+                    request,
+                    DatasetKind.KLINES,
+                    interval=request.strategy_interval,
+                    required=False,
+                    frame=canonical,
+                )
+            )
+
+    required_strategy_quality = store.data_quality_report(
+        selected_quality_request,
+        DatasetKind.KLINES,
+        interval=request.strategy_interval,
+        required=True,
+        frame=selected_quality_frame,
+    )
+    quality_reports.insert(0, required_strategy_quality)
+    DataQualityReport((required_strategy_quality,)).raise_for_errors()
     strategy = canonical
     strategy_minutes = int(
         interval_to_timedelta(request.strategy_interval).total_seconds() // 60
