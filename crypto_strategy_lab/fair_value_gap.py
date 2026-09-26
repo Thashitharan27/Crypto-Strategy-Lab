@@ -167,10 +167,13 @@ class FairValueGapMixin:
         atr = float(self.atr_values[i])
         entry = float(self._expected_entry_price(i, execution_i, direction))
         risk = float(stop_plan["distance"])
+        target_buffer_atr = float(
+            getattr(self.config, "fvg_target_buffer_atr", FVG_TARGET_BUFFER_ATR)
+        )
         target_limit = (
-            level - FVG_TARGET_BUFFER_ATR * atr
+            level - target_buffer_atr * atr
             if direction == "LONG"
-            else level + FVG_TARGET_BUFFER_ATR * atr
+            else level + target_buffer_atr * atr
         )
         room = target_limit - entry if direction == "LONG" else entry - target_limit
         available_r = room / risk if risk > 0 else np.nan
