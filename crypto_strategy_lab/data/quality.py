@@ -22,7 +22,7 @@ from .schemas import DatasetKind
 from .timing import interval_to_timedelta
 
 
-VALIDATION_CONTRACT_VERSION = "5"
+VALIDATION_CONTRACT_VERSION = "6"
 QUALITY_CACHE_FORMAT_VERSION = 1
 
 
@@ -993,6 +993,35 @@ def classify_archive_overlap(
         if column not in keys and column not in _PROVENANCE_COLUMNS
     ]
     contract = _overlap_contract(combined)
+    timestamp_column = (
+        contract.timestamp_column
+        if contract is not None and contract.timestamp_column in overlap.columns
+        else "period_start"
+        if "period_start" in overlap.columns
+        else "event_time"
+        if "event_time" in overlap.columns
+        else None
+    )
+    overlap_timestamps = (
+        pd.to_datetime(overlap[timestamp_column], utc=True, errors="coerce")
+        if timestamp_column is not None
+        else pd.Series(dtype="datetime64[ns, UTC]")
+    )
+    overlap_first = _iso(overlap_timestamps.min()) if len(overlap_timestamps) else None
+    overlap_last = _iso(overlap_timestamps.max()) if len(overlap_timestamps) else None
+    source_archives = []
+    if "source_archive" in overlap.columns:
+        source_archives = sorted(
+            {
+                str(value)
+                for value in overlap["source_archive"].dropna().tolist()
+                if str(value)
+            }
+        )
+    overlap_details = {
+        "source_archive_count": len(source_archives),
+        "source_archives": source_archives[:20],
+    }
     conflicts = 0
     repaired_overrides = 0
     grouped = overlap.groupby(keys, dropna=False, sort=False)
@@ -1013,6 +1042,9 @@ def classify_archive_overlap(
             DataQualityStatus.WARN,
             "Raw archives contain overlapping logical keys",
             key_count,
+            first_timestamp=overlap_first,
+            last_timestamp=overlap_last,
+            details=overlap_details,
         )
     ]
     if repaired_overrides:
@@ -1022,6 +1054,9 @@ def classify_archive_overlap(
                 DataQualityStatus.WARN,
                 "A later overlapping archive replaces an invalid source row with a valid row",
                 repaired_overrides,
+                first_timestamp=overlap_first,
+                last_timestamp=overlap_last,
+                details=overlap_details,
             )
         )
     if conflicts:
@@ -1031,6 +1066,9 @@ def classify_archive_overlap(
                 DataQualityStatus.ERROR,
                 "Overlapping archives disagree for a logical key",
                 conflicts,
+                first_timestamp=overlap_first,
+                last_timestamp=overlap_last,
+                details=overlap_details,
             )
         )
     elif not repaired_overrides:
@@ -1040,6 +1078,9 @@ def classify_archive_overlap(
                 DataQualityStatus.WARN,
                 "Overlapping source rows are identical",
                 key_count,
+                first_timestamp=overlap_first,
+                last_timestamp=overlap_last,
+                details=overlap_details,
             )
         )
     return tuple(result)
