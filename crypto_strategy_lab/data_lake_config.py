@@ -587,6 +587,8 @@ class ResearchRunConfig:
                 raise ValueError("FVG confirmation timeframe must be positive and smaller than strategy timeframe")
             if execution.fvg_confirmation_minutes % data.intrabar_timeframe_minutes:
                 raise ValueError("FVG confirmation timeframe must be an exact multiple of intrabar timeframe")
+            if strategy.enable_daily_entry_schedule:
+                raise ValueError("FVG confirmation does not support scheduled daily entries")
         ema_cross_plans = {
             "EMA_20_100_CROSS",
             "EMA_20_100_CROSS_SHORT",
@@ -696,6 +698,8 @@ class ResearchRunConfig:
                 raise ValueError("DI ladder execution does not support scheduled daily entries")
             if execution.entry_timing_mode != "SIGNAL_CLOSE":
                 raise ValueError("DI ladder execution currently requires SIGNAL_CLOSE entry timing")
+            if execution.fvg_confirmation_enabled:
+                raise ValueError("DI ladder execution does not support FVG intrabar confirmation")
             if execution.risk_mode == "SR_STRUCTURE" or execution.sr_take_profit_mode != "FIXED_R":
                 raise ValueError("DI ladder execution requires fixed-distance stop and FIXED_R target geometry")
             if reporting.research_sampling_mode == "WALK_FORWARD":
