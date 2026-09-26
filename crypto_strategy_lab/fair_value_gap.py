@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 
 FVG_MODE = "FAIR_VALUE_GAP"
@@ -93,6 +94,147 @@ def first_revisit_signals(high, low, close):
 
 
 class FairValueGapMixin:
+    def _fvg_confirmation_enabled(self):
+        return bool(
+            getattr(self.config, "fvg_confirmation_enabled", False)
+            and getattr(self, "signal_strategy_mode", "DI") == FVG_MODE
+        )
+
+    def _fvg_expected_entry_price(self, i, execution_i, direction):
+        raw = getattr(self, "_pending_fvg_confirmation_price", None)
+        if raw is None:
+            return float(self._expected_entry_price(i, execution_i, direction))
+        raw = float(raw)
+        return raw * (1.0 + self.config.slippage) if direction == "LONG" else raw * (1.0 - self.config.slippage)
+
+    def _fvg_confirmation_candle(self, execution_i):
+        data = getattr(self, "intrabar_data", None)
+        if data is None:
+            return None
+        minutes = int(getattr(self.config, "fvg_confirmation_minutes", 15))
+        intrabar_minutes = int(getattr(self.config, "intrabar_timeframe_minutes", 1))
+        if minutes <= 0 or intrabar_minutes <= 0 or minutes % intrabar_minutes:
+            return None
+        start = pd.Timestamp(self.times[execution_i])
+        if start.tzinfo is None:
+            start = start.tz_localize("UTC")
+        else:
+            start = start.tz_convert("UTC")
+        end = start + pd.Timedelta(minutes=minutes)
+        expected = minutes // intrabar_minutes
+
+        if hasattr(data, "timestamp") and not isinstance(data, pd.DataFrame):
+            timestamps = pd.DatetimeIndex(pd.to_datetime(data.timestamp, utc=True))
+            left = int(timestamps.searchsorted(start, side="left"))
+            right = int(timestamps.searchsorted(end, side="left"))
+            if right - left != expected or left >= len(timestamps):
+                return None
+            expected_times = pd.date_range(
+                start, periods=expected, freq=f"{intrabar_minutes}min", tz="UTC"
+            )
+            if not timestamps[left:right].equals(expected_times):
+                return None
+            closes = getattr(data, "close", None)
+            if closes is None:
+                return None
+            opening = float(data.open[left])
+            closing = float(closes[right - 1])
+        else:
+            frame = data
+            if "timestamp" not in frame or "close" not in frame:
+                return None
+            timestamps = pd.to_datetime(frame["timestamp"], utc=True)
+            mask = (timestamps >= start) & (timestamps < end)
+            window = frame.loc[mask]
+            if len(window) != expected:
+                return None
+            actual_times = pd.DatetimeIndex(pd.to_datetime(window["timestamp"], utc=True))
+            expected_times = pd.date_range(
+                start, periods=expected, freq=f"{intrabar_minutes}min", tz="UTC"
+            )
+            if not actual_times.equals(expected_times):
+                return None
+            opening = float(window.iloc[0]["open"])
+            closing = float(window.iloc[-1]["close"])
+        if not np.isfinite(opening) or not np.isfinite(closing):
+            return None
+        return {
+            "open": opening,
+            "close": closing,
+            "confirmed_at": end,
+            "minutes": minutes,
+        }
+
+    def _entry_decision(self, i, active_at_candle_start=False):
+        if (
+            self._fvg_confirmation_enabled()
+            and not self.config.enable_daily_entry_schedule
+        ):
+            if i + 1 >= len(self.times) or not self._should_enter(i):
+                return None
+            return {
+                "execution_index": i + 1,
+                "indicator_index": i,
+                "scheduled_timestamp": pd.Timestamp(self.times[i + 1]),
+                "actual_entry_timestamp": None,
+                "entry_schedule_status": "FVG_INTRABAR_CONFIRMATION_PENDING",
+                "fill_price_source": "FVG_INTRABAR_CONFIRMATION",
+                "defer_to_next_open": True,
+                "fvg_confirmation": True,
+            }
+        return super()._entry_decision(i, active_at_candle_start)
+
+    def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
+        decision = getattr(self, "pending_next_open_entry", None)
+        if not decision or not decision.get("fvg_confirmation"):
+            return super()._execute_pending_next_open_entry(i, active_at_candle_start)
+        if int(decision.get("execution_index", -1)) != i:
+            return
+        self.pending_next_open_entry = None
+        indicator_i = int(decision["indicator_index"])
+        if active_at_candle_start or len(self.active_pairs) >= self.config.max_active_pairs:
+            self._record_skipped_signal(indicator_i, "FVG_CONFIRMATION_ACTIVE_TRADE")
+            return
+
+        direction = self._selected_direction(indicator_i)
+        candle = self._fvg_confirmation_candle(i)
+        if candle is None:
+            self._record_skipped_signal(indicator_i, "FVG_CONFIRMATION_DATA_UNAVAILABLE")
+            return
+        confirmed = (
+            candle["close"] > candle["open"]
+            if direction == "LONG"
+            else candle["close"] < candle["open"]
+            if direction == "SHORT"
+            else False
+        )
+        if not confirmed:
+            self._record_skipped_signal(indicator_i, "FVG_CONFIRMATION_DIRECTION_MISMATCH")
+            return
+
+        decision.update(
+            actual_entry_timestamp=candle["confirmed_at"],
+            entry_schedule_status="FVG_INTRABAR_CONFIRMED",
+            fill_price=float(candle["close"]),
+            fvg_confirmation_open=float(candle["open"]),
+            fvg_confirmation_close=float(candle["close"]),
+            fvg_confirmation_minutes=int(candle["minutes"]),
+        )
+        self._pending_fvg_confirmation_price = float(candle["close"])
+        try:
+            passed, reason = self._entry_filter_result(indicator_i, i)
+            if not passed:
+                self._record_skipped_signal(indicator_i, reason)
+                return
+            before = len(self.active_pairs)
+            self._open_pair(i, passed, reason, decision)
+            if len(self.active_pairs) > before:
+                pair = self.active_pairs[-1]
+                if pair.position.is_open:
+                    self._scan_pair_exit(pair, i)
+        finally:
+            self._pending_fvg_confirmation_price = None
+
     def _configure_signal_features(self):
         super()._configure_signal_features()
         if any(
@@ -136,11 +278,12 @@ class FairValueGapMixin:
             return {"passed": False, "applied": False, "reason": "FVG_STOP_UNAVAILABLE", "distance": None}
         stop = boundary - FVG_STOP_BUFFER_ATR * atr if direction == "LONG" else boundary + FVG_STOP_BUFFER_ATR * atr
         if execution_i is not None and execution_i > i:
-            opening = float(self.open[execution_i])
+            confirmation_price = getattr(self, "_pending_fvg_confirmation_price", None)
+            opening = float(confirmation_price) if confirmation_price is not None else float(self.open[execution_i])
             gap_through = opening <= stop if direction == "LONG" else opening >= stop
             if gap_through:
                 return {"passed": False, "applied": False, "reason": "FVG_ENTRY_GAPPED_THROUGH_STOP", "distance": None}
-        entry = float(self._expected_entry_price(i, execution_i, direction))
+        entry = self._fvg_expected_entry_price(i, execution_i, direction)
         distance = entry - stop if direction == "LONG" else stop - entry
         if not np.isfinite(distance) or distance <= 0:
             return {"passed": False, "applied": False, "reason": "FVG_STOP_ON_WRONG_SIDE", "distance": None}
@@ -165,7 +308,7 @@ class FairValueGapMixin:
             return {"passed": False, "reason": "FVG_TARGET_UNAVAILABLE"}
         level = float(self.fvg_target_boundaries[direction][i])
         atr = float(self.atr_values[i])
-        entry = float(self._expected_entry_price(i, execution_i, direction))
+        entry = self._fvg_expected_entry_price(i, execution_i, direction)
         risk = float(stop_plan["distance"])
         target_buffer_atr = float(
             getattr(self.config, "fvg_target_buffer_atr", FVG_TARGET_BUFFER_ATR)
@@ -208,6 +351,12 @@ class FairValueGapMixin:
         target = self._fvg_target_plan(indicator_i, i) if getattr(self, "signal_strategy_mode", "DI") == FVG_MODE else None
         before = len(self.active_pairs)
         result = super()._open_pair(i, entry_filter_passed, entry_filter_reason, schedule)
+        if len(self.active_pairs) > before and schedule and schedule.get("fvg_confirmation"):
+            pair = self.active_pairs[-1]
+            pair.fvg_confirmation_open = schedule.get("fvg_confirmation_open", np.nan)
+            pair.fvg_confirmation_close = schedule.get("fvg_confirmation_close", np.nan)
+            pair.fvg_confirmation_minutes = schedule.get("fvg_confirmation_minutes", np.nan)
+            pair.fvg_confirmation_time = schedule.get("actual_entry_timestamp")
         if target and target.get("passed") and len(self.active_pairs) > before:
             for pos in self.active_pairs[-1].positions():
                 direction = "LONG" if str(getattr(pos.side, "value", pos.side)).upper() == "LONG" else "SHORT"
@@ -232,6 +381,10 @@ class FairValueGapMixin:
         row["fvg_target_available_r"] = getattr(pos, "fvg_target_available_r", np.nan)
         row["fvg_target_level_price"] = getattr(pos, "fvg_target_level_price", np.nan)
         row["fvg_target_limit_price"] = getattr(pos, "fvg_target_limit_price", np.nan)
+        row["fvg_confirmation_open"] = getattr(pair, "fvg_confirmation_open", np.nan)
+        row["fvg_confirmation_close"] = getattr(pair, "fvg_confirmation_close", np.nan)
+        row["fvg_confirmation_minutes"] = getattr(pair, "fvg_confirmation_minutes", np.nan)
+        row["fvg_confirmation_time"] = getattr(pair, "fvg_confirmation_time", None)
         return row
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
