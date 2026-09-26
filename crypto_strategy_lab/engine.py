@@ -955,8 +955,13 @@ class BacktestEngine(DILadderExecutionMixin):
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):
         ind_i = schedule["indicator_index"] if schedule else i
         fill_source = str((schedule or {}).get("fill_price_source", "")).upper()
+        custom_fill_price = (schedule or {}).get("fill_price")
         open_fill = self.config.enable_daily_entry_schedule or fill_source == "NEXT_CANDLE_OPEN"
-        raw = self.open[i] if open_fill else self.close[i]
+        raw = (
+            float(custom_fill_price)
+            if custom_fill_price is not None
+            else self.open[i] if open_fill else self.close[i]
+        )
         entry_timestamp = (schedule or {}).get("actual_entry_timestamp")
         if entry_timestamp is None:
             entry_timestamp = pd.Timestamp(self.times[i]) if open_fill else self._execution_time(i)
@@ -1153,7 +1158,8 @@ class BacktestEngine(DILadderExecutionMixin):
         pair.trade_direction = direction
         pair.signal_strategy_mode = getattr(self,"signal_strategy_mode","DI")
         pair.entry_timing_mode = (
-            "NEXT_CANDLE_OPEN" if fill_source == "NEXT_CANDLE_OPEN"
+            "FVG_INTRABAR_CONFIRMATION" if fill_source == "FVG_INTRABAR_CONFIRMATION"
+            else "NEXT_CANDLE_OPEN" if fill_source == "NEXT_CANDLE_OPEN"
             else "SCHEDULED_CANDLE_OPEN" if self.config.enable_daily_entry_schedule
             else "SIGNAL_CLOSE"
         )
