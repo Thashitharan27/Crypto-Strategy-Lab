@@ -92,6 +92,16 @@ def test_store_quality_report_surfaces_identical_archive_overlap(tmp_path):
     assert "ARCHIVE_OVERLAP" in codes
     assert "IDENTICAL_ARCHIVE_OVERLAP" in codes
     assert "CONFLICTING_ARCHIVE_OVERLAP" not in codes
+    overlap = next(issue for issue in report.issues if issue.code == "ARCHIVE_OVERLAP")
+    identical = next(
+        issue for issue in report.issues if issue.code == "IDENTICAL_ARCHIVE_OVERLAP"
+    )
+    assert overlap.first_timestamp == "2026-01-01T00:00:00+00:00"
+    assert overlap.last_timestamp == "2026-01-01T03:00:00+00:00"
+    assert identical.first_timestamp == overlap.first_timestamp
+    assert identical.last_timestamp == overlap.last_timestamp
+    assert overlap.details["source_archive_count"] == 2
+    assert len(overlap.details["source_archives"]) == 2
     assert report.status is DataQualityStatus.WARN
 
 
