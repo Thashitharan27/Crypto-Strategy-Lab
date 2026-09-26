@@ -220,9 +220,10 @@ class RiskExecutionWorkspace(QWidget):
         self.target_card.add_field("ema_920_target_value", "Profit Target", self.ema_target_value)
         self.fvg_target_method = QLabel("Configured R before FVG move high / low")
         self.fvg_target_method.setStyleSheet("font-weight:600")
-        self.fvg_target_value = QLabel("0.05 × signal ATR inside the extreme; reject if it does not fit")
         self.target_card.add_field("fvg_target_method", "Target Method", self.fvg_target_method)
-        self.target_card.add_field("fvg_target_value", "Profit Target", self.fvg_target_value)
+        self.target_card.add_field(
+            "fvg_target_buffer_atr", "Extreme Buffer", self.account["fvg_target_buffer_atr"]
+        )
         self.sr_dependency_note = QLabel(
             "Structural S/R stop/target policies automatically require causal Support / Resistance calculation; no separate enable step is needed."
         )
@@ -358,6 +359,8 @@ class RiskExecutionWorkspace(QWidget):
             self.trade["position_sizing_stop_multiple"].setSuffix(" ×")
         if hasattr(self.account["atr_multiplier"], "setSuffix"):
             self.account["atr_multiplier"].setSuffix(" × ATR")
+        if hasattr(self.account["fvg_target_buffer_atr"], "setSuffix"):
+            self.account["fvg_target_buffer_atr"].setSuffix(" × signal ATR")
         if hasattr(self.account["di_ladder_level_r"], "setSuffix"):
             self.account["di_ladder_level_r"].setSuffix(" R")
         if hasattr(self.account["di_ladder_layers"], "setMaximumHeight"):
@@ -493,12 +496,11 @@ class RiskExecutionWorkspace(QWidget):
         for name in ("ema_920_target_method", "ema_920_target_value"):
             self.target_card.set_row_visible(name, ema_920)
         self.target_card.set_row_visible("fvg_target_method", fvg)
-        self.target_card.set_row_visible("fvg_target_value", fvg)
+        self.target_card.set_row_visible("fvg_target_buffer_atr", fvg)
         if ema_920:
             self.target_card.set_row_visible("sr_take_profit_mode", False)
             self.target_card.set_row_visible("reward_risk_ratio", False)
-            for name in (
-                "sr_take_profit_timeframe_minutes", "sr_take_profit_minimum_r",
+            for name in (                "sr_take_profit_timeframe_minutes", "sr_take_profit_minimum_r",
                 "sr_take_profit_maximum_r", "sr_take_profit_buffer_r",
                 "sr_take_profit_no_level_policy",
             ):
@@ -658,8 +660,9 @@ class RiskExecutionWorkspace(QWidget):
             target = cross_target or "automatic fixed 1.00R target"
         elif fvg:
             target = (
-                f"configured {base.reward_risk_ratio:g}R target; it must fit 0.05× signal ATR "
-                "before the FVG move high for long or move low for short, otherwise reject"
+                f"configured {base.reward_risk_ratio:g}R target; it must fit "
+                f"{execution.fvg_target_buffer_atr:g}× signal ATR before the FVG move high "
+                "for long or move low for short, otherwise reject"
             )
         else:
             target_mode = str(execution.sr_take_profit_mode).upper()
