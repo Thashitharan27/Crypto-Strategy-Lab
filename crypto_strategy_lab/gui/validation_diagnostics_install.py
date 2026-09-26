@@ -29,6 +29,8 @@ QUALITY_HEADERS = (
     "Missing Candles",
     "First Gap UTC",
     "Last Gap UTC",
+    "First Overlap UTC",
+    "Last Overlap UTC",
     "Issues",
 )
 
@@ -44,6 +46,14 @@ _COVERAGE_GAP_CODES = frozenset(
         *_EXACT_CANDLE_GAP_CODES,
         "LEADING_SOURCE_COVERAGE_GAP",
         "TRAILING_SOURCE_COVERAGE_GAP",
+    }
+)
+_ARCHIVE_OVERLAP_CODES = frozenset(
+    {
+        "ARCHIVE_OVERLAP",
+        "IDENTICAL_ARCHIVE_OVERLAP",
+        "CONFLICTING_ARCHIVE_OVERLAP",
+        "INVALID_SOURCE_ROW_OVERRIDDEN",
     }
 )
 
@@ -149,6 +159,28 @@ def _gap_summary(dataset) -> tuple[str, str, str, str]:
     return missing_text, first_text, last_text, "\n".join(detail_lines)
 
 
+def _overlap_summary(dataset) -> tuple[str, str]:
+    issues = tuple(getattr(dataset, "issues", ()) or ())
+    overlap = [
+        issue
+        for issue in issues
+        if str(getattr(issue, "code", "")) in _ARCHIVE_OVERLAP_CODES
+    ]
+    first_values = [
+        str(getattr(issue, "first_timestamp"))
+        for issue in overlap
+        if getattr(issue, "first_timestamp", None)
+    ]
+    last_values = [
+        str(getattr(issue, "last_timestamp"))
+        for issue in overlap
+        if getattr(issue, "last_timestamp", None)
+    ]
+    first_text = _format_utc(min(first_values)) if first_values else "—"
+    last_text = _format_utc(max(last_values)) if last_values else "—"
+    return first_text, last_text
+
+
 def _issues_text(dataset) -> str:
     parts = []
     for issue in tuple(getattr(dataset, "issues", ()) or ()):
@@ -172,6 +204,17 @@ def _issues_tooltip(dataset, gap_detail: str) -> str:
         text = code
         if count:
             text += f" · {count:,}"
+        first = getattr(issue, "first_timestamp", None)
+        last = getattr(issue, "last_timestamp", None)
+        if first or last:
+            text += f" · {_format_utc(first)} → {_format_utc(last)}"
+        details = getattr(issue, "details", {}) or {}
+        archives = details.get("source_archives", ()) if hasattr(details, "get") else ()
+        archive_count = details.get("source_archive_count") if hasattr(details, "get") else None
+        if archives:
+            text += "\n    archives: " + ", ".join(str(value) for value in archives)
+            if archive_count and int(archive_count) > len(archives):
+                text += f" (+{int(archive_count) - len(archives)} more)"
         if message:
             text += f" · {message}"
         lines.append(text)
@@ -200,6 +243,7 @@ def _render_data_quality(self, report) -> None:
 
     for row, dataset in enumerate(datasets):
         missing, first_gap, last_gap, gap_detail = _gap_summary(dataset)
+        first_overlap, last_overlap = _overlap_summary(dataset)
         dataset_status = getattr(
             getattr(dataset, "status", None),
             "value",
@@ -216,12 +260,14 @@ def _render_data_quality(self, report) -> None:
             missing,
             first_gap,
             last_gap,
+            first_overlap,
+            last_overlap,
             _issues_text(dataset),
         )
         tooltip = _issues_tooltip(dataset, gap_detail)
         for column, value in enumerate(values):
             item = QTableWidgetItem(str(value))
-            if tooltip and column in (7, 8, 9, 10):
+            if tooltip and column in (7, 8, 9, 10, 11, 12):
                 item.setToolTip(tooltip)
             table.setItem(row, column, item)
 
