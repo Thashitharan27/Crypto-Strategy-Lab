@@ -110,7 +110,10 @@ FEATURE_GROUPS = (
 )
 
 EXECUTION_GROUPS = (
-    ("Entry Fill", ("entry_timing_mode", "ema_920_trade_plan"), None),
+    ("Entry Fill", (
+        "entry_timing_mode", "ema_920_trade_plan",
+        "fvg_confirmation_enabled", "fvg_confirmation_minutes",
+    ), None),
     ("Risk", (
         "initial_equity", "risk_mode", "fixed_r", "percent_r", "atr_multiplier",
         "sr_stop_timeframe_minutes", "sr_stop_buffer_atr", "sr_stop_maximum_atr",
