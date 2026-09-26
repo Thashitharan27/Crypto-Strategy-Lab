@@ -69,6 +69,29 @@ def test_gap_summary_exposes_exact_missing_count_and_bounds():
     assert last_gap == "2022-05-11 05:00:00 UTC"
     assert "3 missing" in detail
 
+def test_overlap_summary_exposes_archive_bounds():
+    from crypto_strategy_lab.gui.validation_diagnostics_install import _overlap_summary
+
+    issue = DataQualityIssue(
+        "ARCHIVE_OVERLAP",
+        DataQualityStatus.WARN,
+        "Raw archives contain overlapping logical keys",
+        count=138,
+        first_timestamp="2021-03-01T00:00:00+00:00",
+        last_timestamp="2021-03-23T20:00:00+00:00",
+        details={
+            "source_archive_count": 2,
+            "source_archives": ["monthly.zip", "daily.zip"],
+        },
+    )
+    first_overlap, last_overlap = _overlap_summary(
+        _dataset("4h", status=DataQualityStatus.WARN, issues=(issue,))
+    )
+
+    assert first_overlap == "2021-03-01 00:00:00 UTC"
+    assert last_overlap == "2021-03-23 20:00:00 UTC"
+
+
 
 def test_installed_renderer_labels_roles_and_distinguishes_benchmark():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -133,7 +156,7 @@ def test_installed_renderer_labels_roles_and_distinguishes_benchmark():
     assert window.quality_table.item(0, 7).text() == "117"
     assert window.quality_table.item(0, 8).text() == "2022-05-11 03:14:00 UTC"
     assert window.quality_table.item(0, 9).text() == "2022-05-11 05:10:00 UTC"
-    assert "MISSING_INTERNAL_INTERVAL (117)" == window.quality_table.item(0, 10).text()
+    assert "MISSING_INTERNAL_INTERVAL (117)" == window.quality_table.item(0, 12).text()
     assert window.quality_table.item(2, 7).text() == "—"
 
 
