@@ -197,6 +197,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   <div id="layers">
     <div class="layer-group">
       <strong style="font-size:11px;color:#94a3b8">Layers</strong>
+      <label><input type="checkbox" data-overlay="ema20" checked>EMA 20</label>
       <label><input type="checkbox" data-overlay="ema50" checked>EMA 50</label>
       <label><input type="checkbox" data-overlay="ema100" checked>EMA 100</label>
       <label><input type="checkbox" data-overlay="ema200" checked>EMA 200</label>

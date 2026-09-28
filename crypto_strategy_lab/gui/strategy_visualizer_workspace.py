@@ -127,6 +127,7 @@ class StrategyVisualizerWorkspace(QWidget):
 
         self.overlay_checks = {}
         overlay_specs = (
+            ("ema20", "EMA 20", True),
             ("ema50", "EMA 50", True),
             ("ema100", "EMA 100", True),
             ("ema200", "EMA 200", True),
