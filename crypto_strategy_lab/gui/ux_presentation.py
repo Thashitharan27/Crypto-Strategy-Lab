@@ -55,6 +55,12 @@ FIELDS = {
         unit=" ×",
         decimals=3,
     ),
+    "ema_cross_stop_multiplier": FieldPresentation(
+        "EMA Cross Actual Stop Distance",
+        "Multiplier applied to the normal entry-to-EMA100 protective-stop distance. Position size remains based on the original EMA100 stop distance.",
+        unit=" × base stop",
+        decimals=2,
+    ),
     "sr_stop_timeframe_minutes": FieldPresentation("S/R Stop Timeframe", "Independent S/R context used for structural stop placement."),
     "sr_stop_buffer_atr": FieldPresentation("Buffer Beyond S/R", "Extra distance beyond the outer edge of the S/R zone, measured in strategy ATR.", unit=" × ATR", decimals=2),
     "sr_stop_maximum_atr": FieldPresentation("Maximum Structural Stop", "Reject structural stops farther than this many strategy ATR from entry.", unit=" × ATR", decimals=2),
