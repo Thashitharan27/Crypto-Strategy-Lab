@@ -388,7 +388,12 @@ class Ema920PullbackMixin:
         }
 
     def _ema_100_cross_stop_plan(self, i: int, execution_i: int | None = None):
-        """Anchor the protective stop to the EMA 100 known at the signal close."""
+        """Anchor the base protective stop to signal-close EMA100, then optionally widen it.
+
+        The base entry-to-EMA100 stop distance is the sizing-R reference.  The
+        configurable multiplier changes only the actual protective stop distance,
+        so a 2x stop with a 1% sizing budget carries about 2% full-stop exposure.
+        """
         direction = self._effective_trade_direction(i)
         if direction not in {"LONG", "SHORT"}:
             return {"passed": False, "applied": False, "reason": "EMA100_NO_DIRECTION", "distance": None}
@@ -396,33 +401,33 @@ class Ema920PullbackMixin:
         atr = float(self.atr_values[i])
         if not np.isfinite(level) or not np.isfinite(atr) or atr <= 0:
             return {"passed": False, "applied": False, "reason": "EMA100_STOP_UNAVAILABLE", "distance": None}
+        context = self._profile_context(i)
+        profile = context[3] if context is not None else None
+        multiplier = float(getattr(profile, "ema_cross_stop_multiplier", 1.0))
+        if not np.isfinite(multiplier) or multiplier <= 0:
+            return {"passed": False, "applied": False, "reason": "EMA100_STOP_MULTIPLIER_INVALID", "distance": None}
         buffer_price = self.ema_100_stop_buffer_atr * atr
-        stop_price = level - buffer_price if direction == "LONG" else level + buffer_price
-        if execution_i is not None and execution_i > i:
-            raw_open = float(self.open[execution_i])
-            gap_through = raw_open <= stop_price if direction == "LONG" else raw_open >= stop_price
-            if gap_through:
-                return {
-                    "passed": False, "applied": False, "reason": "ENTRY_INVALIDATED_GAP_THROUGH_STOP",
-                    "distance": None, "level_price": level, "boundary_price": level,
-                    "stop_price": stop_price,
-                    "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
-                    "ema_100_stop": True,
-                }
+        base_stop_price = level - buffer_price if direction == "LONG" else level + buffer_price
         entry = float(self._expected_entry_price(i, execution_i, direction))
-        distance = entry - stop_price if direction == "LONG" else stop_price - entry
-        if not np.isfinite(distance) or distance <= 0:
+        base_distance = entry - base_stop_price if direction == "LONG" else base_stop_price - entry
+        if not np.isfinite(base_distance) or base_distance <= 0:
             return {
-                "passed": False, "applied": False, "reason": "EMA100_STOP_ON_WRONG_SIDE",
-                "distance": None, "level_price": level, "boundary_price": level,
-                "stop_price": stop_price,
+                "passed": False, "applied": False, "reason": "ENTRY_INVALIDATED_GAP_THROUGH_STOP",
+                "distance": None, "base_distance": None,
+                "level_price": level, "boundary_price": level,
+                "stop_price": base_stop_price, "base_stop_price": base_stop_price,
                 "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
                 "ema_100_stop": True,
             }
+        distance = base_distance * multiplier
+        stop_price = entry - distance if direction == "LONG" else entry + distance
         return {
             "passed": True, "applied": True, "reason": "EMA100_CROSS_STOP",
-            "distance": distance, "distance_atr": distance / atr,
-            "level_price": level, "boundary_price": level, "stop_price": stop_price,
+            "distance": distance, "base_distance": base_distance,
+            "distance_atr": distance / atr, "base_distance_atr": base_distance / atr,
+            "stop_multiplier": multiplier,
+            "level_price": level, "boundary_price": level,
+            "stop_price": stop_price, "base_stop_price": base_stop_price,
             "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
             "ema_100_stop": True,
         }
@@ -440,6 +445,9 @@ class Ema920PullbackMixin:
             for pos in positions:
                 pos.ema_100_stop_level = plan.get("level_price", np.nan)
                 pos.ema_100_stop_price = plan.get("stop_price", np.nan)
+                pos.ema_100_base_stop_price = plan.get("base_stop_price", np.nan)
+                pos.ema_100_base_stop_distance = plan.get("base_distance", np.nan)
+                pos.ema_100_stop_multiplier = plan.get("stop_multiplier", 1.0)
                 pos.ema_100_stop_distance_atr = plan.get("distance_atr", np.nan)
         if not plan.get("micro_swing"):
             return
@@ -460,20 +468,59 @@ class Ema920PullbackMixin:
         row["micro_swing_stop_distance_atr"] = getattr(pos, "micro_swing_stop_distance_atr", np.nan) if pos is not None else np.nan
         row["ema_100_stop_level"] = getattr(pos, "ema_100_stop_level", np.nan) if pos is not None else np.nan
         row["ema_100_stop_price"] = getattr(pos, "ema_100_stop_price", np.nan) if pos is not None else np.nan
+        row["ema_100_base_stop_price"] = getattr(pos, "ema_100_base_stop_price", np.nan) if pos is not None else np.nan
+        row["ema_100_base_stop_distance"] = getattr(pos, "ema_100_base_stop_distance", np.nan) if pos is not None else np.nan
+        row["ema_100_stop_multiplier"] = getattr(pos, "ema_100_stop_multiplier", np.nan) if pos is not None else np.nan
         row["ema_100_stop_distance_atr"] = getattr(pos, "ema_100_stop_distance_atr", np.nan) if pos is not None else np.nan
         return row
 
+    def _position_sizing_stop_distance(self, profile, risk_unit, actual_stop):
+        base_distance = getattr(self, "_ema_cross_sizing_distance", None)
+        if self._ema_920_cross_plan() and base_distance is not None:
+            base_distance = float(base_distance)
+            if np.isfinite(base_distance) and base_distance > 0:
+                actual = float(actual_stop)
+                ratio = actual / base_distance if np.isfinite(actual) else np.nan
+                return base_distance, ratio, abs(actual - base_distance) > 1e-12
+        return super()._position_sizing_stop_distance(profile, risk_unit, actual_stop)
+
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):
+        indicator_i = schedule["indicator_index"] if schedule else i
+        self._ema_cross_sizing_distance = None
+        if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE and self._ema_920_cross_plan():
+            plan = self._ema_100_cross_stop_plan(indicator_i, i)
+            if bool(plan.get("passed")):
+                self._ema_cross_sizing_distance = plan.get("base_distance")
+
         before = len(self.active_pairs)
-        result = super()._open_pair(i, entry_filter_passed, entry_filter_reason, schedule)
+        try:
+            result = super()._open_pair(i, entry_filter_passed, entry_filter_reason, schedule)
+        finally:
+            self._ema_cross_sizing_distance = None
         if getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE or len(self.active_pairs) <= before:
             return result
         pair = self.active_pairs[-1]
+        context = self._profile_context(indicator_i)
+        profile = context[3] if context is not None else None
         for pos in pair.positions():
             if self._ema_920_cross_plan():
-                # The crossover is the profit exit; retain the fixed EMA 100 stop.
+                # The opposite crossover is the runner exit.  An optional TP1
+                # closes only part of the position and is measured from the
+                # original EMA100 sizing-R, not from a widened protective stop.
                 pos.tp = np.nan
                 pos.ema_920_fixed_target_r = None
+                if getattr(pos, "partial_tp_enabled", False):
+                    base_distance = float(
+                        getattr(pos, "position_sizing_reference_distance", np.nan)
+                    )
+                    tp1_r = float(getattr(profile, "tp1_r", 1.0))
+                    side_sign = 1.0 if str(getattr(pos.side, "value", pos.side)).upper() == "LONG" else -1.0
+                    if np.isfinite(base_distance) and base_distance > 0:
+                        pos.tp1_price = float(pos.entry_price) + side_sign * tp1_r * base_distance
+                    # Disable the legacy fixed TP2. The remaining quantity is a
+                    # true runner until the opposite EMA20/100 cross or stop.
+                    pos.tp2_price = np.inf if side_sign > 0 else -np.inf
+                    pos.tp2_quantity = 0.0
                 continue
             side_sign = 1.0 if str(getattr(pos.side, "value", pos.side)).upper() == "LONG" else -1.0
             pos.tp = float(pos.entry_price) + side_sign * float(pos.risk)
