@@ -532,7 +532,11 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
     assert service.store.calls
     request, _dataset, interval = service.store.calls[-1]
     assert interval == "15m"
-    assert pd.Timestamp(request.start) > pd.Timestamp(manifest["request"]["start"])
+    expected_native_start = (
+        pd.Timestamp(model.seed.request.period_start)
+        - strategy_warmup_period(model.seed.config)
+    )
+    assert pd.Timestamp(request.start) <= expected_native_start
 
 
 
