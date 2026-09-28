@@ -212,12 +212,17 @@ class Ema920PullbackMixin:
                     opening = float(row.open)
                     high = float(row.high)
                     low = float(row.low)
+                    fill_time = pd.Timestamp(row.timestamp)
+                    if fill_time.tzinfo is None:
+                        fill_time = fill_time.tz_localize("UTC")
+                    else:
+                        fill_time = fill_time.tz_convert("UTC")
                     if direction == "LONG" and high >= trigger_price:
                         raw = max(float(trigger_price), opening)
-                        return raw, pd.Timestamp(row.timestamp)
+                        return raw, fill_time
                     if direction == "SHORT" and low <= trigger_price:
                         raw = min(float(trigger_price), opening)
-                        return raw, pd.Timestamp(row.timestamp)
+                        return raw, fill_time
                 return None
         opening = float(self.open[i])
         if direction == "LONG" and float(self.high[i]) >= trigger_price:
