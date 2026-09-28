@@ -31,6 +31,8 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "entry_mode": "WAIT_UNTIL_CLOSED",
     "entry_timing_mode": "SIGNAL_CLOSE",
     "ema_920_trade_plan": "PULLBACK_1R",
+    "ema_cross_entry_confirmation_enabled": False,
+    "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
     "fvg_confirmation_minutes": 15,
     "entry_interval": 1,
@@ -226,6 +228,12 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         errors.append("Invalid entry mode.")
     if values["entry_timing_mode"] not in (EntryTimingMode.SIGNAL_CLOSE.value, EntryTimingMode.NEXT_CANDLE_OPEN.value):
         errors.append("Invalid entry timing mode.")
+    if values["ema_cross_entry_confirmation_enabled"]:
+        try:
+            if float(values["ema_cross_entry_confirmation_r"]) <= 0:
+                errors.append("EMA cross entry confirmation R must be > 0.")
+        except (TypeError, ValueError, KeyError):
+            errors.append("EMA cross entry confirmation R must be numeric.")
     if values["fvg_confirmation_enabled"]:
         try:
             confirm = int(values["fvg_confirmation_minutes"])
