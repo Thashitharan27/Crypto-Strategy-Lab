@@ -88,15 +88,34 @@ def native_simulator_config(
         values["sr_pivot_right"] = int(resolved_sr["sr_pivot_right"])
         values["sr_lookback_bars"] = int(resolved_sr["sr_lookback_bars"])
 
+    ema_cross_plans = {
+        "EMA_20_100_CROSS",
+        "EMA_20_100_CROSS_SHORT",
+        "EMA_20_100_CROSS_BOTH",
+    }
+
+    def _native_profile_values(key):
+        values = {
+            **asdict(strategy_config.profiles[key]),
+            **asdict(execution_config.profiles[key]),
+        }
+        if (
+            execution_config.ema_920_trade_plan in ema_cross_plans
+            and values.get("partial_profit_enabled")
+        ):
+            # EMA-cross partial mode has no TP2: TP1 takes the configured partial
+            # and the remainder exits only on the opposite EMA20/100 crossover
+            # or the protective stop. The mature StrategyProfile schema still
+            # validates tp2_r > tp1_r, so provide an inert compatibility value
+            # that is never used by the EMA-cross runtime.
+            tp1 = float(values.get("tp1_r", 1.0))
+            tp2 = float(values.get("tp2_r", tp1 + 1.0))
+            if tp2 <= tp1:
+                values["tp2_r"] = tp1 + 1.0
+        return values
+
     values["strategy_profiles"] = {
-        key: asdict(
-            StrategyProfile(
-                **{
-                    **asdict(strategy_config.profiles[key]),
-                    **asdict(execution_config.profiles[key]),
-                }
-            )
-        )
+        key: asdict(StrategyProfile(**_native_profile_values(key)))
         for key in strategy_config.profiles
     }
     # Inert compatibility fields required by the mature config constructor.
