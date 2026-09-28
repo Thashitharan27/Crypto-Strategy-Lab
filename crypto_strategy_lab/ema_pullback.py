@@ -406,7 +406,10 @@ class Ema920PullbackMixin:
         multiplier = float(getattr(profile, "ema_cross_stop_multiplier", 1.0))
         if not np.isfinite(multiplier) or multiplier <= 0:
             return {"passed": False, "applied": False, "reason": "EMA100_STOP_MULTIPLIER_INVALID", "distance": None}
-        buffer_price = self.ema_100_stop_buffer_atr * atr
+        buffer_atr = float(getattr(profile, "ema_cross_stop_buffer_atr", self.ema_100_stop_buffer_atr))
+        if not np.isfinite(buffer_atr) or buffer_atr < 0:
+            return {"passed": False, "applied": False, "reason": "EMA100_STOP_BUFFER_INVALID", "distance": None}
+        buffer_price = buffer_atr * atr
         base_stop_price = level - buffer_price if direction == "LONG" else level + buffer_price
         entry = float(self._expected_entry_price(i, execution_i, direction))
         base_distance = entry - base_stop_price if direction == "LONG" else base_stop_price - entry
