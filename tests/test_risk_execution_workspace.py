@@ -312,6 +312,7 @@ def test_ema_920_execution_plan_is_explicit_and_generic_stop_target_controls_are
         plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS"))
         app.processEvents()
         assert workspace.ema_stop_method.text() == "EMA 100 at Signal Close — Automatic"
+        assert not window.base_execution_form.widgets["ema_cross_stop_buffer_atr"].isHidden()
         assert not window.base_execution_form.widgets["ema_cross_stop_multiplier"].isHidden()
         sizing_override = window.base_execution_form.widgets[
             "position_sizing_stop_override_enabled"
