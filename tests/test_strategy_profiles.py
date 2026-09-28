@@ -233,3 +233,26 @@ def test_removed_post_tp1_stop_field_is_rejected():
     raw["bull_long"]["after_tp1_stop_mode"] = "MOVE_TO_ENTRY"
     with pytest.raises(ValueError, match="unknown profile settings: after_tp1_stop_mode"):
         normalize_profiles(raw)
+
+
+def test_disabled_partial_levels_do_not_validate():
+    profile = StrategyProfile(
+        enabled=True,
+        partial_profit_enabled=False,
+        tp1_r=2.0,
+        tp2_r=2.0,
+        partial_stop_enabled=False,
+        sl1_r=2.0,
+        sl2_r=2.0,
+    )
+    profile.validate("bull_long")
+
+
+def test_enabled_partial_levels_still_validate():
+    with pytest.raises(ValueError, match="TP2 must be greater than TP1"):
+        StrategyProfile(
+            enabled=True,
+            partial_profit_enabled=True,
+            tp1_r=2.0,
+            tp2_r=2.0,
+        ).validate("bull_long")
