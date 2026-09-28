@@ -754,8 +754,7 @@ class StrategyVisualizerWorkspace(QWidget):
             self.rule_summary.setText(
                 f"{trace.get('timestamp', '')} · {trace.get('regime', '')} "
                 f"{trace.get('side', '')} · {trace.get('profile', '')} · "
-                f"{outcome}
-{trace.get('filterReason', '')}"
+                f"{outcome}\n{trace.get('filterReason', '')}"
             )
         else:
             self.rule_summary.setText(str(trace.get("message") or status))
