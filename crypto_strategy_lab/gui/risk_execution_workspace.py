@@ -149,6 +149,15 @@ class RiskExecutionWorkspace(QWidget):
             "ema_920_trade_plan", "EMA 9/20 Trade Plan", self.account["ema_920_trade_plan"]
         )
         self.entry_card.add_control(
+            "ema_cross_entry_confirmation_enabled",
+            self.account["ema_cross_entry_confirmation_enabled"],
+        )
+        self.entry_card.add_field(
+            "ema_cross_entry_confirmation_r",
+            "Confirmation Distance",
+            self.account["ema_cross_entry_confirmation_r"],
+        )
+        self.entry_card.add_control(
             "fvg_confirmation_enabled", self.account["fvg_confirmation_enabled"]
         )
         self.entry_card.add_field(
@@ -333,6 +342,7 @@ class RiskExecutionWorkspace(QWidget):
         self.account["sr_take_profit_mode"].currentIndexChanged.connect(self.refresh_visibility)
         self.account["entry_timing_mode"].currentIndexChanged.connect(self.refresh_summary_from_widgets)
         self.account["ema_920_trade_plan"].currentIndexChanged.connect(self.refresh_visibility)
+        self.account["ema_cross_entry_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["di_ladder_enabled"].toggled.connect(self.refresh_visibility)
         builder = getattr(self.window, "rule_builder", None)
@@ -364,6 +374,7 @@ class RiskExecutionWorkspace(QWidget):
             "zero_cost_comparison": "Also calculate zero-cost comparison",
             "di_ladder_enabled": "Enable DI ladder / reversal-filter execution",
             "fvg_confirmation_enabled": "Require directional FVG confirmation before entry",
+            "ema_cross_entry_confirmation_enabled": "Wait for confirmation distance before EMA-cross entry",
         }.items():
             widget = self.trade.get(name) or self.account.get(name)
             if isinstance(widget, QCheckBox):
@@ -383,6 +394,8 @@ class RiskExecutionWorkspace(QWidget):
             self.account["fvg_target_buffer_atr"].setSuffix(" × signal ATR")
         if hasattr(self.account["fvg_confirmation_minutes"], "setSuffix"):
             self.account["fvg_confirmation_minutes"].setSuffix(" min")
+        if hasattr(self.account["ema_cross_entry_confirmation_r"], "setSuffix"):
+            self.account["ema_cross_entry_confirmation_r"].setSuffix(" R")
         if hasattr(self.account["di_ladder_level_r"], "setSuffix"):
             self.account["di_ladder_level_r"].setSuffix(" R")
         if hasattr(self.account["di_ladder_layers"], "setMaximumHeight"):
@@ -407,6 +420,11 @@ class RiskExecutionWorkspace(QWidget):
         }.get(self.account["ema_920_trade_plan"].currentData())
         cross_plan = ema_920 and cross_mode is not None
         self.entry_card.set_row_visible("ema_920_trade_plan", ema_920)
+        self.entry_card.set_row_visible("ema_cross_entry_confirmation_enabled", cross_plan)
+        self.entry_card.set_row_visible(
+            "ema_cross_entry_confirmation_r",
+            cross_plan and self.account["ema_cross_entry_confirmation_enabled"].isChecked(),
+        )
         self.entry_card.set_row_visible("fvg_confirmation_enabled", fvg)
         self.entry_card.set_row_visible(
             "fvg_confirmation_minutes",
