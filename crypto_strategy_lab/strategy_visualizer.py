@@ -1599,7 +1599,7 @@ class CompletedRunVisualizer:
         visible_mask = market_times >= visible_start
         visible_times = market_times[visible_mask]
 
-        for period in (50, 100, 200):
+        for period in (20, 50, 100, 200):
             values = _ema(market["close"], period)
             data = _line_points(visible_times, values[visible_mask.to_numpy()])
             if data:
