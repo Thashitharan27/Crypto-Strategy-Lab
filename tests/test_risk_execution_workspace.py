@@ -312,6 +312,16 @@ def test_ema_920_execution_plan_is_explicit_and_generic_stop_target_controls_are
         plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS"))
         app.processEvents()
         assert workspace.ema_stop_method.text() == "EMA 100 at Signal Close — Automatic"
+        assert not window.base_execution_form.widgets["ema_cross_stop_multiplier"].isHidden()
+        partial = window.base_execution_form.widgets["partial_profit_enabled"]
+        partial.setChecked(True)
+        app.processEvents()
+        workspace.refresh_visibility()
+        assert partial.isEnabled()
+        assert not window.base_execution_form.widgets["tp1_r"].isHidden()
+        assert not window.base_execution_form.widgets["tp1_close_pct"].isHidden()
+        assert window.base_execution_form.widgets["tp2_r"].isHidden()
+        assert "runner exits on opposite cross" in workspace.ema_target_value.text().lower()
         assert workspace.ema_stop_confirmation.isHidden()
         assert workspace.ema_stop_lookback.isHidden()
         assert workspace.ema_stop_maximum.isHidden()
