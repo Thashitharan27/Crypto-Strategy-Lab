@@ -373,6 +373,8 @@ class ExecutionConfig:
     profiles: Mapping[str, ExecutionProfileConfig] = field(default_factory=_execution_profiles)
     entry_timing_mode: str = "SIGNAL_CLOSE"
     ema_920_trade_plan: str = "PULLBACK_1R"
+    ema_cross_entry_confirmation_enabled: bool = False
+    ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
     fvg_confirmation_minutes: int = 15
     initial_equity: float = 1000.0
@@ -600,6 +602,8 @@ class ResearchRunConfig:
                     )
         if execution.entry_timing_mode not in {"SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"}:
             raise ValueError("invalid entry timing mode")
+        if execution.ema_cross_entry_confirmation_enabled and execution.ema_cross_entry_confirmation_r <= 0:
+            raise ValueError("EMA cross entry confirmation R must be positive")
         if execution.fvg_confirmation_enabled:
             if not data.use_intrabar_data:
                 raise ValueError("FVG confirmation requires intrabar data")
