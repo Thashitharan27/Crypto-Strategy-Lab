@@ -260,6 +260,7 @@ class ExecutionProfileConfig:
     stop_loss_multiple: float = 2.0
     position_sizing_stop_override_enabled: bool = False
     position_sizing_stop_multiple: float = 1.0
+    ema_cross_stop_multiplier: float = 1.0
     partial_stop_enabled: bool = False
     sl1_r: float = 0.5
     sl1_close_pct: float = 50.0
@@ -619,14 +620,17 @@ class ResearchRunConfig:
                     raise ValueError(f"{key}: EMA 20/100 crossover uses native direction; disable direction FLIP rules")
             for key, profile in execution.profiles.items():
                 if strategy.profiles[key].enabled and any((
-                    profile.partial_profit_enabled,
                     profile.partial_stop_enabled,
                     profile.r_step_trailing_enabled,
                     profile.atr_checkpoint_tp_extension_enabled,
                 )):
                     raise ValueError(
-                        f"{key}: EMA 20/100 crossover requires full-position exits; "
-                        "disable partials and target extensions"
+                        f"{key}: EMA 20/100 crossover supports one partial take-profit runner, "
+                        "but staged stops and target extensions remain disabled"
+                    )
+                if strategy.profiles[key].enabled and profile.ema_cross_stop_multiplier <= 0:
+                    raise ValueError(
+                        f"{key}: EMA cross stop multiplier must be positive"
                     )
         if execution.initial_equity <= 0 or execution.fixed_r <= 0 or execution.percent_r <= 0:
             raise ValueError("execution equity/risk settings must be positive")
