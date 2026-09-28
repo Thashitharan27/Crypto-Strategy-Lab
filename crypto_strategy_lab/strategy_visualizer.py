@@ -20,6 +20,7 @@ from crypto_strategy_lab.data import DatasetKind
 from crypto_strategy_lab.data.timing import interval_to_timedelta
 from crypto_strategy_lab.data.source_identity import SourceSignature
 from crypto_strategy_lab.gui.completed_run_research import research_seed_from_manifest
+from crypto_strategy_lab.research_warmup import strategy_warmup_period
 from crypto_strategy_lab.research_warmup import expand_strategy_request
 from crypto_strategy_lab.strategy_rule_model import (
     CATEGORICAL_VALUE_CODES,
@@ -961,9 +962,23 @@ class CompletedRunVisualizer:
         after = visible - before
         visible_start = max(run_start, center - before * interval)
         visible_end = min(run_end, center + after * interval)
-        calculation_start = max(
-            run_start, visible_start - EMA_WARMUP_BARS * interval
-        )
+        strategy_timeframe = str(self.seed.request.strategy_timeframe)
+        selected_chart_timeframe = str(chart_timeframe or strategy_timeframe)
+        if selected_chart_timeframe == strategy_timeframe:
+            # Match the simulator's causal EMA seed exactly.  The native runner
+            # expands the user-selected research start by strategy_warmup_period()
+            # before calculating signal EMAs; starting a display EMA near the
+            # visible window gives a different recursive seed and can move
+            # crossover points.
+            native_start = run_start - strategy_warmup_period(self.seed.config)
+            calculation_start = min(
+                visible_start - EMA_WARMUP_BARS * interval,
+                native_start,
+            )
+        else:
+            # Alternate chart timeframes are reference-only and were not part of
+            # the strategy calculation, so a bounded display warm-up is enough.
+            calculation_start = visible_start - EMA_WARMUP_BARS * interval
         return calculation_start, visible_start, visible_end
 
     def _market_frame(
