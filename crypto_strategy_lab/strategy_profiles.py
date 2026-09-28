@@ -114,12 +114,16 @@ class StrategyProfile:
                     "simple fixed stop/target execution; disable "
                     + ", ".join(incompatible)
                 )
-        if self.sl1_r <= 0 or self.sl2_r <= self.sl1_r:
-            raise ValueError(f"{key}: SL2 must be greater than SL1")
-        if self.tp1_r <= 0 or self.tp2_r <= self.tp1_r:
-            raise ValueError(f"{key}: TP2 must be greater than TP1")
-        if not 0 < self.sl1_close_pct < 100 or not 0 < self.tp1_close_pct < 100:
-            raise ValueError(f"{key}: partial close percentages must be between 0 and 100")
+        if self.partial_stop_enabled:
+            if self.sl1_r <= 0 or self.sl2_r <= self.sl1_r:
+                raise ValueError(f"{key}: SL2 must be greater than SL1")
+            if not 0 < self.sl1_close_pct < 100:
+                raise ValueError(f"{key}: partial stop close percentage must be between 0 and 100")
+        if self.partial_profit_enabled:
+            if self.tp1_r <= 0 or self.tp2_r <= self.tp1_r:
+                raise ValueError(f"{key}: TP2 must be greater than TP1")
+            if not 0 < self.tp1_close_pct < 100:
+                raise ValueError(f"{key}: partial take-profit close percentage must be between 0 and 100")
         if self.flip_rule_match_mode not in ("ANY", "ALL") or self.reject_rule_match_mode not in ("ANY", "ALL"):
             raise ValueError(f"{key}: rule match modes must be ANY or ALL")
         for number, rule in enumerate(self.entry_rules, 1):
