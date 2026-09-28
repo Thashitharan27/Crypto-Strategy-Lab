@@ -313,6 +313,25 @@ def test_ema_920_execution_plan_is_explicit_and_generic_stop_target_controls_are
         app.processEvents()
         assert workspace.ema_stop_method.text() == "EMA 100 at Signal Close — Automatic"
         assert not window.base_execution_form.widgets["ema_cross_stop_multiplier"].isHidden()
+        sizing_override = window.base_execution_form.widgets[
+            "position_sizing_stop_override_enabled"
+        ]
+        sizing_multiple = window.base_execution_form.widgets[
+            "position_sizing_stop_multiple"
+        ]
+        risk = window.execution_form.widgets["risk_per_leg"]
+        actual_stop = window.base_execution_form.widgets["ema_cross_stop_multiplier"]
+        assert not sizing_override.isHidden()
+        sizing_override.setChecked(True)
+        sizing_multiple.setValue(2.0)
+        actual_stop.setValue(1.0)
+        risk.setValue(2.0)
+        app.processEvents()
+        workspace.refresh_visibility()
+        assert not sizing_multiple.isHidden()
+        assert "separate 2× base-stop reference" in workspace.summary_label.text()
+        assert "actual EMA100 stop = 0.50 sizing-R" in workspace.summary_label.text()
+        assert "Gross stop exposure is about 1.00%" in workspace.summary_label.text()
         partial = window.base_execution_form.widgets["partial_profit_enabled"]
         partial.setChecked(True)
         app.processEvents()

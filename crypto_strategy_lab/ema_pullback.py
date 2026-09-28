@@ -480,8 +480,24 @@ class Ema920PullbackMixin:
             base_distance = float(base_distance)
             if np.isfinite(base_distance) and base_distance > 0:
                 actual = float(actual_stop)
-                ratio = actual / base_distance if np.isfinite(actual) else np.nan
-                return base_distance, ratio, abs(actual - base_distance) > 1e-12
+                sizing_multiple = 1.0
+                if bool(getattr(profile, "position_sizing_stop_override_enabled", False)):
+                    sizing_multiple = float(
+                        getattr(profile, "position_sizing_stop_multiple", 1.0)
+                    )
+                    if not np.isfinite(sizing_multiple) or sizing_multiple <= 0:
+                        raise ValueError(
+                            "EMA-cross position-sizing stop multiple must be finite and positive"
+                        )
+                sizing_distance = base_distance * sizing_multiple
+                actual_as_sizing_r = (
+                    actual / sizing_distance if np.isfinite(actual) else np.nan
+                )
+                applied = (
+                    bool(getattr(profile, "position_sizing_stop_override_enabled", False))
+                    or abs(actual - sizing_distance) > 1e-12
+                )
+                return sizing_distance, sizing_multiple, applied
         return super()._position_sizing_stop_distance(profile, risk_unit, actual_stop)
 
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="Strategy profile passed", schedule=None):

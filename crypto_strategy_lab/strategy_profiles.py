@@ -100,7 +100,9 @@ class StrategyProfile:
                 name
                 for name, enabled in (
                     ("partial stop", self.partial_stop_enabled),
-                    ("partial take-profit", self.partial_profit_enabled),
+                    # Partial take-profit compatibility is validated by the composed
+                    # run config because EMA 20/100 cross plans deliberately allow
+                    # a partial runner measured from the separate sizing-R.
                     ("break-even", self.break_even_enabled),
                     ("trailing stop", self.trailing_enabled),
                     ("R-step trailing", self.r_step_trailing_enabled),

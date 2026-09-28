@@ -525,11 +525,29 @@ class ResearchRunConfig:
                     f"{key}: position-sizing stop multiple must be positive"
                 )
             if execution_profile.position_sizing_stop_override_enabled:
+                ema_cross_profile = (
+                    execution.ema_920_trade_plan
+                    in {
+                        "EMA_20_100_CROSS",
+                        "EMA_20_100_CROSS_SHORT",
+                        "EMA_20_100_CROSS_BOTH",
+                    }
+                    and any(
+                        isinstance(rule, dict)
+                        and str(rule.get("_strategy_direction_mode", "")).upper()
+                        == "EMA_9_20_PULLBACK"
+                        for rule in profile.entry_rules
+                    )
+                )
                 incompatible = [
                     name
                     for name, enabled in (
                         ("partial stop", execution_profile.partial_stop_enabled),
-                        ("partial take-profit", execution_profile.partial_profit_enabled),
+                        (
+                            "partial take-profit",
+                            execution_profile.partial_profit_enabled
+                            and not ema_cross_profile,
+                        ),
                         ("break-even", execution_profile.break_even_enabled),
                         ("trailing stop", execution_profile.trailing_enabled),
                         ("R-step trailing", execution_profile.r_step_trailing_enabled),

@@ -448,10 +448,16 @@ class RiskExecutionWorkspace(QWidget):
                 "risk_mode", "atr_multiplier", "percent_r", "fixed_r",
                 "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
                 "sr_stop_maximum_atr", "sr_stop_no_level_policy", "stop_loss_multiple",
-                "position_sizing_stop_override_enabled",
-                "position_sizing_stop_multiple",
             ):
                 self.stop_card.set_row_visible(name, False)
+            self.stop_card.set_row_visible(
+                "position_sizing_stop_override_enabled", cross_plan
+            )
+            self.stop_card.set_row_visible(
+                "position_sizing_stop_multiple",
+                cross_plan
+                and self.trade["position_sizing_stop_override_enabled"].isChecked(),
+            )
             self.stop_card.set_row_visible("ema_cross_stop_multiplier", cross_plan)
         else:
             self.stop_card.set_row_visible("risk_mode", True)
@@ -480,13 +486,16 @@ class RiskExecutionWorkspace(QWidget):
             self.stop_card.set_row_visible("ema_cross_stop_multiplier", False)
 
         sizing_override_active = bool(
-            not ema_920 and not fvg
-            and not structural_stop
-            and self.trade["position_sizing_stop_override_enabled"].isChecked()
+            self.trade["position_sizing_stop_override_enabled"].isChecked()
+            and (
+                cross_plan
+                or (not ema_920 and not fvg and not structural_stop)
+            )
         )
-        if (ema_920 or fvg or structural_stop) and self.trade[
-            "position_sizing_stop_override_enabled"
-        ].isChecked():
+        if (
+            ((ema_920 and not cross_plan) or fvg or structural_stop)
+            and self.trade["position_sizing_stop_override_enabled"].isChecked()
+        ):
             self.trade["position_sizing_stop_override_enabled"].setChecked(False)
             sizing_override_active = False
 
@@ -500,9 +509,10 @@ class RiskExecutionWorkspace(QWidget):
         )
         for name in incompatible_toggles:
             widget = self.trade[name]
-            if sizing_override_active and widget.isChecked():
+            cross_partial_compatible = cross_plan and name == "partial_profit_enabled"
+            if sizing_override_active and widget.isChecked() and not cross_partial_compatible:
                 widget.setChecked(False)
-            widget.setEnabled(not sizing_override_active)
+            widget.setEnabled(not sizing_override_active or cross_partial_compatible)
 
         if cross_plan:
             # EMA-cross supports one partial take-profit runner. Staged stops and
@@ -649,10 +659,24 @@ class RiskExecutionWorkspace(QWidget):
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
         ema_920 = self._ema_920_selected()
         fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
+        cross_plan = bool(
+            ema_920
+            and execution.ema_920_trade_plan
+            in {
+                "EMA_20_100_CROSS",
+                "EMA_20_100_CROSS_SHORT",
+                "EMA_20_100_CROSS_BOTH",
+            }
+        )
         sizing_override = bool(
             base.position_sizing_stop_override_enabled
-            and not ema_920 and not fvg
-            and str(execution.risk_mode).upper() != "SR_STRUCTURE"
+            and (
+                cross_plan
+                or (
+                    not ema_920 and not fvg
+                    and str(execution.risk_mode).upper() != "SR_STRUCTURE"
+                )
+            )
         )
         sizing_stop_mult = (
             float(base.position_sizing_stop_multiple)
@@ -747,17 +771,32 @@ class RiskExecutionWorkspace(QWidget):
                 "EMA_20_100_CROSS": (
                     f"Stop: base stop is signal-candle EMA 100 minus 0.05× signal ATR; "
                     f"actual stop distance = {base.ema_cross_stop_multiplier:g}× base distance, "
-                    "while quantity remains sized from the base stop. "
+                    + (
+                        f"while quantity is sized from a separate "
+                        f"{base.position_sizing_stop_multiple:g}× base-distance reference. "
+                        if sizing_override
+                        else "while quantity remains sized from the base stop. "
+                    )
                 ),
                 "EMA_20_100_CROSS_SHORT": (
                     f"Stop: base stop is signal-candle EMA 100 plus 0.05× signal ATR; "
                     f"actual stop distance = {base.ema_cross_stop_multiplier:g}× base distance, "
-                    "while quantity remains sized from the base stop. "
+                    + (
+                        f"while quantity is sized from a separate "
+                        f"{base.position_sizing_stop_multiple:g}× base-distance reference. "
+                        if sizing_override
+                        else "while quantity remains sized from the base stop. "
+                    )
                 ),
                 "EMA_20_100_CROSS_BOTH": (
                     f"Stop: base stop is signal-candle EMA 100 with a 0.05× signal ATR buffer; "
                     f"actual stop distance = {base.ema_cross_stop_multiplier:g}× base distance, "
-                    "while quantity remains sized from the base stop. "
+                    + (
+                        f"while quantity is sized from a separate "
+                        f"{base.position_sizing_stop_multiple:g}× base-distance reference. "
+                        if sizing_override
+                        else "while quantity remains sized from the base stop. "
+                    )
                 ),
             }.get(execution.ema_920_trade_plan)
             stop_description = cross_stop or (
@@ -778,13 +817,29 @@ class RiskExecutionWorkspace(QWidget):
             )
 
         sizing_description = ""
-        if ema_920 and {
-            "EMA_20_100_CROSS", "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH"
-        }.__contains__(execution.ema_920_trade_plan):
-            cross_exposure = effective_risk * float(base.ema_cross_stop_multiplier)
+        if cross_plan:
+            sizing_multiple = (
+                float(base.position_sizing_stop_multiple)
+                if sizing_override else 1.0
+            )
+            cross_exposure = (
+                effective_risk
+                * float(base.ema_cross_stop_multiplier)
+                / sizing_multiple
+            )
+            actual_as_sizing_r = (
+                float(base.ema_cross_stop_multiplier) / sizing_multiple
+            )
             sizing_description = (
-                f" Base EMA100 stop = 1.00 sizing-R; full widened stop exposure is about "
-                f"{cross_exposure * 100:.2f}% before fees/slippage."
+                (
+                    f" Position size uses a separate {sizing_multiple:g}× base-stop "
+                    f"reference; actual EMA100 stop = {actual_as_sizing_r:.2f} sizing-R. "
+                )
+                if sizing_override
+                else " Base EMA100 stop = 1.00 sizing-R. "
+            ) + (
+                f"Gross stop exposure is about {cross_exposure * 100:.2f}% "
+                "before fees/slippage."
             )
         elif sizing_override:
             gross_stop_dollars = float(execution.initial_equity) * gross_stop_exposure

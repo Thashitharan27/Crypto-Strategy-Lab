@@ -80,7 +80,9 @@ class EmaCrossTests(unittest.TestCase):
             partial_profit_enabled=True,
             tp1_r=0.5,
             tp1_close_pct=50.0,
-            ema_cross_stop_multiplier=2.0,
+            position_sizing_stop_override_enabled=True,
+            position_sizing_stop_multiple=2.0,
+            ema_cross_stop_multiplier=1.0,
         )
         replace(
             config,
@@ -311,6 +313,18 @@ class EmaCrossTests(unittest.TestCase):
         self.assertAlmostEqual(plan["base_distance"], entry - 95.0)
         self.assertAlmostEqual(plan["distance"], 2.0 * (entry - 95.0))
         self.assertAlmostEqual(plan["stop_price"], entry - plan["distance"])
+
+    def test_cross_separate_sizing_stop_can_be_wider_than_actual_ema_stop(self):
+        e = self.engine
+        e.profile.position_sizing_stop_override_enabled = True
+        e.profile.position_sizing_stop_multiple = 2.0
+        e._ema_cross_sizing_distance = 5.0
+        sizing_distance, sizing_multiple, applied = e._position_sizing_stop_distance(
+            e.profile, 2.0, 5.0
+        )
+        self.assertAlmostEqual(sizing_distance, 10.0)
+        self.assertAlmostEqual(sizing_multiple, 2.0)
+        self.assertTrue(applied)
 
     def test_cross_partial_tp_is_sizing_r_and_runner_has_no_tp2(self):
         e = self.engine
