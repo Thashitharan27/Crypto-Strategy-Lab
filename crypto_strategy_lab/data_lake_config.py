@@ -260,6 +260,7 @@ class ExecutionProfileConfig:
     stop_loss_multiple: float = 2.0
     position_sizing_stop_override_enabled: bool = False
     position_sizing_stop_multiple: float = 1.0
+    ema_cross_stop_buffer_atr: float = 0.05
     ema_cross_stop_multiplier: float = 1.0
     partial_stop_enabled: bool = False
     sl1_r: float = 0.5
@@ -645,6 +646,10 @@ class ResearchRunConfig:
                     raise ValueError(
                         f"{key}: EMA 20/100 crossover supports one partial take-profit runner, "
                         "but staged stops and target extensions remain disabled"
+                    )
+                if strategy.profiles[key].enabled and profile.ema_cross_stop_buffer_atr < 0:
+                    raise ValueError(
+                        f"{key}: EMA cross stop buffer cannot be negative"
                     )
                 if strategy.profiles[key].enabled and profile.ema_cross_stop_multiplier <= 0:
                     raise ValueError(
