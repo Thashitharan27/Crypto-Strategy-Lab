@@ -55,6 +55,12 @@ FIELDS = {
         unit=" ×",
         decimals=3,
     ),
+    "ema_cross_stop_buffer_atr": FieldPresentation(
+        "EMA Cross Stop Buffer",
+        "Extra distance beyond signal-candle EMA 100 used for the protective stop.",
+        unit=" × signal ATR",
+        decimals=2,
+    ),
     "ema_cross_stop_multiplier": FieldPresentation(
         "EMA Cross Actual Stop Distance",
         "Multiplier applied to the normal entry-to-EMA100 protective-stop distance. Position size remains based on the original EMA100 stop distance.",
