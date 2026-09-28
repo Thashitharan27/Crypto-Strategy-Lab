@@ -532,7 +532,11 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
     assert service.store.calls
     request, _dataset, interval = service.store.calls[-1]
     assert interval == "15m"
-    assert pd.Timestamp(request.start) > pd.Timestamp(manifest["request"]["start"])
+    expected_native_start = (
+        pd.Timestamp(model.seed.request.period_start)
+        - strategy_warmup_period(model.seed.config)
+    )
+    assert pd.Timestamp(request.start) <= expected_native_start
 
 
 
@@ -926,3 +930,19 @@ def test_active_app_composes_strategy_visualizer():
 
     source = inspect.getsource(app.main)
     assert "apply_strategy_visualizer_workspace(window)" in source
+
+
+def test_strategy_chart_ema_window_uses_native_research_warmup(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    calculation_start, visible_start, _visible_end = model._window_bounds(
+        0,
+        240,
+        chart_timeframe=model.seed.request.strategy_timeframe,
+    )
+    expected_native_start = (
+        pd.Timestamp(model.seed.request.period_start)
+        - strategy_warmup_period(model.seed.config)
+    )
+    assert calculation_start <= expected_native_start
+    assert calculation_start < visible_start
