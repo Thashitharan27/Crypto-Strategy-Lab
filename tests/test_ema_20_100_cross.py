@@ -65,6 +65,33 @@ class EmaCrossTests(unittest.TestCase):
             entry_timing_mode="NEXT_CANDLE_OPEN",
             ema_920_trade_plan="EMA_20_100_CROSS")).validate()
 
+    def test_config_allows_partial_profit_runner_for_cross_mode(self):
+        config = ResearchRunConfig()
+        strategy_profiles = dict(config.strategy.profiles)
+        execution_profiles = dict(config.execution.profiles)
+        key = next(iter(strategy_profiles))
+        strategy_profiles[key] = replace(
+            strategy_profiles[key],
+            entry_rules=({"_strategy_direction_mode": EMA_920_MODE},),
+        )
+        execution_profiles[key] = replace(
+            execution_profiles[key],
+            partial_profit_enabled=True,
+            tp1_r=0.5,
+            tp1_close_pct=50.0,
+            ema_cross_stop_multiplier=2.0,
+        )
+        replace(
+            config,
+            strategy=replace(config.strategy, profiles=strategy_profiles),
+            execution=replace(
+                config.execution,
+                profiles=execution_profiles,
+                entry_timing_mode="NEXT_CANDLE_OPEN",
+                ema_920_trade_plan="EMA_20_100_CROSS",
+            ),
+        ).validate()
+
     def test_config_accepts_short_and_both_cross_modes(self):
         config = ResearchRunConfig()
         profiles = dict(config.strategy.profiles)
@@ -112,7 +139,11 @@ class EmaCrossTests(unittest.TestCase):
         engine.fallback_scans = []
         engine.exits = []
         engine.active_pairs = []
-        engine.profile = SimpleNamespace(flip_direction=False, entry_rules=(), flip_rule_match_mode="ANY")
+        engine.profile = SimpleNamespace(
+            flip_direction=False, entry_rules=(), flip_rule_match_mode="ANY",
+            ema_cross_stop_multiplier=1.0, partial_profit_enabled=False,
+            tp1_r=1.0, tp1_close_pct=50.0,
+        )
         engine.flip_matches = False
         engine.direction = "LONG"
 
@@ -199,11 +230,45 @@ class EmaCrossTests(unittest.TestCase):
 
     def test_cross_plan_has_no_fixed_profit_target(self):
         e = self.engine
-        pos = SimpleNamespace(tp=101.0, entry_price=100.0, risk=1.0, side=Side.LONG)
+        pos = SimpleNamespace(
+            tp=101.0, entry_price=100.0, risk=1.0, side=Side.LONG,
+            partial_tp_enabled=False,
+        )
         e.pending_pair = SimpleNamespace(positions=lambda: [pos])
         e._open_pair(101)
         self.assertTrue(np.isnan(pos.tp))
         self.assertIsNone(pos.ema_920_fixed_target_r)
+
+    def test_cross_stop_multiplier_widens_actual_stop_from_entry(self):
+        e = self.engine
+        e.profile.ema_cross_stop_multiplier = 2.0
+        e.config.strategy_timeframe_minutes = 15
+        e.ema_100_values[101] = 95.1
+        e.atr_values[101] = 2.0
+        e.open[102] = 100.0
+        plan = e._sr_stop_plan(101, 102)
+        self.assertTrue(plan["passed"])
+        self.assertAlmostEqual(plan["base_stop_price"], 95.0)
+        entry = 100.0 * 1.001
+        self.assertAlmostEqual(plan["base_distance"], entry - 95.0)
+        self.assertAlmostEqual(plan["distance"], 2.0 * (entry - 95.0))
+        self.assertAlmostEqual(plan["stop_price"], entry - plan["distance"])
+
+    def test_cross_partial_tp_is_sizing_r_and_runner_has_no_tp2(self):
+        e = self.engine
+        e.profile.partial_profit_enabled = True
+        e.profile.tp1_r = 0.5
+        pos = SimpleNamespace(
+            tp=120.0, entry_price=100.0, risk=10.0, side=Side.LONG,
+            partial_tp_enabled=True, position_sizing_reference_distance=5.0,
+            tp1_price=105.0, tp2_price=110.0, tp2_quantity=1.0,
+        )
+        e.pending_pair = SimpleNamespace(positions=lambda: [pos])
+        e._open_pair(101)
+        self.assertAlmostEqual(pos.tp1_price, 102.5)
+        self.assertTrue(np.isinf(pos.tp2_price))
+        self.assertEqual(pos.tp2_quantity, 0.0)
+        self.assertTrue(np.isnan(pos.tp))
 
     def test_cross_stop_uses_signal_ema_100_not_micro_swing_or_1_5_atr_cap(self):
         e = self.engine
