@@ -127,7 +127,8 @@ class StrategyVisualizerWorkspace(QWidget):
 
         self.overlay_checks = {}
         overlay_specs = (
-            ("ema20", "EMA 20", True),\n            ("ema50", "EMA 50", True),
+            ("ema20", "EMA 20", True),
+            ("ema50", "EMA 50", True),
             ("ema100", "EMA 100", True),
             ("ema200", "EMA 200", True),
             ("vwap", "VWAP", True),
@@ -753,7 +754,8 @@ class StrategyVisualizerWorkspace(QWidget):
             self.rule_summary.setText(
                 f"{trace.get('timestamp', '')} · {trace.get('regime', '')} "
                 f"{trace.get('side', '')} · {trace.get('profile', '')} · "
-                f"{outcome}\n{trace.get('filterReason', '')}"
+                f"{outcome}
+{trace.get('filterReason', '')}"
             )
         else:
             self.rule_summary.setText(str(trace.get("message") or status))
