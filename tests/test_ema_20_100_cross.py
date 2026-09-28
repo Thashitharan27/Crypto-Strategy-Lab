@@ -8,6 +8,7 @@ import pandas as pd
 
 from crypto_strategy_lab.ema_pullback import Ema920PullbackMixin, EMA_920_MODE
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+from crypto_strategy_lab.research_adapters import native_simulator_config
 from crypto_strategy_lab.trade import ExitReason, ExitSource, Side
 
 
@@ -91,6 +92,37 @@ class EmaCrossTests(unittest.TestCase):
                 ema_920_trade_plan="EMA_20_100_CROSS",
             ),
         ).validate()
+
+    def test_native_adapter_ignores_hidden_tp2_for_cross_runner(self):
+        config = ResearchRunConfig()
+        strategy_profiles = dict(config.strategy.profiles)
+        execution_profiles = dict(config.execution.profiles)
+        key = next(iter(strategy_profiles))
+        strategy_profiles[key] = replace(
+            strategy_profiles[key],
+            entry_rules=({"_strategy_direction_mode": EMA_920_MODE},),
+        )
+        execution_profiles[key] = replace(
+            execution_profiles[key],
+            partial_profit_enabled=True,
+            tp1_r=2.0,
+            tp1_close_pct=50.0,
+            tp2_r=2.0,  # hidden / unused in EMA-cross runner mode
+        )
+        config = replace(
+            config,
+            strategy=replace(config.strategy, profiles=strategy_profiles),
+            execution=replace(
+                config.execution,
+                profiles=execution_profiles,
+                entry_timing_mode="NEXT_CANDLE_OPEN",
+                ema_920_trade_plan="EMA_20_100_CROSS",
+            ),
+        )
+        native = native_simulator_config(
+            config.data, config.features, config.strategy, config.execution
+        )
+        self.assertGreater(native.strategy_profiles[key].tp2_r, 2.0)
 
     def test_config_accepts_short_and_both_cross_modes(self):
         config = ResearchRunConfig()
