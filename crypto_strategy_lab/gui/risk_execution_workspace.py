@@ -191,6 +191,11 @@ class RiskExecutionWorkspace(QWidget):
             self.trade["position_sizing_stop_multiple"],
         )
         self.stop_card.add_field(
+            "ema_cross_stop_buffer_atr",
+            "Stop vs EMA 100",
+            self.trade["ema_cross_stop_buffer_atr"],
+        )
+        self.stop_card.add_field(
             "ema_cross_stop_multiplier",
             "EMA Cross Actual Stop Distance",
             self.trade["ema_cross_stop_multiplier"],
@@ -370,6 +375,8 @@ class RiskExecutionWorkspace(QWidget):
             self.trade["stop_loss_multiple"].setSuffix(" ×")
         if hasattr(self.trade["position_sizing_stop_multiple"], "setSuffix"):
             self.trade["position_sizing_stop_multiple"].setSuffix(" ×")
+        if hasattr(self.trade["ema_cross_stop_buffer_atr"], "setSuffix"):
+            self.trade["ema_cross_stop_buffer_atr"].setSuffix(" × signal ATR")
         if hasattr(self.account["atr_multiplier"], "setSuffix"):
             self.account["atr_multiplier"].setSuffix(" × ATR")
         if hasattr(self.account["fvg_target_buffer_atr"], "setSuffix"):
@@ -408,15 +415,8 @@ class RiskExecutionWorkspace(QWidget):
         self.ema_stop_method.setText(
             "EMA 100 at Signal Close — Automatic" if cross_plan else "EMA 9/20 Micro-Swing — Automatic"
         )
-        stop_buffer_text = {
-            "LONG": "0.05 × signal ATR below EMA 100",
-            "SHORT": "0.05 × signal ATR above EMA 100",
-            "BOTH": "0.05 × signal ATR beyond EMA 100 (below long / above short)",
-        }.get(cross_mode, "0.05 × ATR")
-        self.ema_stop_buffer.setText(stop_buffer_text)
-        self.stop_card.rows["ema_920_stop_buffer"][0].setText(
-            "Stop vs EMA 100" if cross_plan else "Stop Buffer"
-        )
+        self.ema_stop_buffer.setText("0.05 × ATR")
+        self.stop_card.rows["ema_920_stop_buffer"][0].setText("Stop Buffer")
         target_method = {
             "LONG": "EMA 20/100 Bearish Cross — Next Candle Open",
             "SHORT": "EMA 20/100 Bullish Cross — Next Candle Open",
@@ -438,7 +438,8 @@ class RiskExecutionWorkspace(QWidget):
             "ema_920_stop_lookback", "ema_920_stop_buffer", "ema_920_stop_maximum",
         )
         for name in ema_stop_fields:
-            self.stop_card.set_row_visible(name, ema_920)
+            self.stop_card.set_row_visible(name, ema_920 and not cross_plan)
+        self.stop_card.set_row_visible("ema_920_stop_method", ema_920)
         self.stop_card.set_row_visible("fvg_stop_method", fvg)
         self.stop_card.set_row_visible("fvg_stop_buffer", fvg)
         for name in ("ema_920_stop_confirmation", "ema_920_stop_lookback", "ema_920_stop_maximum"):
@@ -458,6 +459,7 @@ class RiskExecutionWorkspace(QWidget):
                 cross_plan
                 and self.trade["position_sizing_stop_override_enabled"].isChecked(),
             )
+            self.stop_card.set_row_visible("ema_cross_stop_buffer_atr", cross_plan)
             self.stop_card.set_row_visible("ema_cross_stop_multiplier", cross_plan)
         else:
             self.stop_card.set_row_visible("risk_mode", True)
@@ -483,6 +485,7 @@ class RiskExecutionWorkspace(QWidget):
                 sizing_override_available
                 and self.trade["position_sizing_stop_override_enabled"].isChecked(),
             )
+            self.stop_card.set_row_visible("ema_cross_stop_buffer_atr", False)
             self.stop_card.set_row_visible("ema_cross_stop_multiplier", False)
 
         sizing_override_active = bool(
@@ -769,7 +772,7 @@ class RiskExecutionWorkspace(QWidget):
         if ema_920:
             cross_stop = {
                 "EMA_20_100_CROSS": (
-                    f"Stop: base stop is signal-candle EMA 100 minus 0.05× signal ATR; "
+                    f"Stop: base stop is signal-candle EMA 100 minus {base.ema_cross_stop_buffer_atr:g}× signal ATR; "
                     f"actual stop distance = {base.ema_cross_stop_multiplier:g}× base distance, "
                     + (
                         f"while quantity is sized from a separate "
@@ -779,7 +782,7 @@ class RiskExecutionWorkspace(QWidget):
                     )
                 ),
                 "EMA_20_100_CROSS_SHORT": (
-                    f"Stop: base stop is signal-candle EMA 100 plus 0.05× signal ATR; "
+                    f"Stop: base stop is signal-candle EMA 100 plus {base.ema_cross_stop_buffer_atr:g}× signal ATR; "
                     f"actual stop distance = {base.ema_cross_stop_multiplier:g}× base distance, "
                     + (
                         f"while quantity is sized from a separate "
@@ -789,7 +792,7 @@ class RiskExecutionWorkspace(QWidget):
                     )
                 ),
                 "EMA_20_100_CROSS_BOTH": (
-                    f"Stop: base stop is signal-candle EMA 100 with a 0.05× signal ATR buffer; "
+                    f"Stop: base stop is signal-candle EMA 100 with a {base.ema_cross_stop_buffer_atr:g}× signal ATR buffer; "
                     f"actual stop distance = {base.ema_cross_stop_multiplier:g}× base distance, "
                     + (
                         f"while quantity is sized from a separate "

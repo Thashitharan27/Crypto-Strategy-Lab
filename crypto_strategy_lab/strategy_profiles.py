@@ -35,6 +35,7 @@ class StrategyProfile:
     stop_loss_multiple: float = 2.0
     position_sizing_stop_override_enabled: bool = False
     position_sizing_stop_multiple: float = 1.0
+    ema_cross_stop_buffer_atr: float = 0.05
     ema_cross_stop_multiplier: float = 1.0
     partial_stop_enabled: bool = False
     sl1_r: float = 0.5
@@ -93,6 +94,8 @@ class StrategyProfile:
             raise ValueError(f"{key}: stop-loss multiple must be positive")
         if self.position_sizing_stop_multiple <= 0:
             raise ValueError(f"{key}: position-sizing stop multiple must be positive")
+        if self.ema_cross_stop_buffer_atr < 0:
+            raise ValueError(f"{key}: EMA cross stop buffer cannot be negative")
         if self.ema_cross_stop_multiplier <= 0:
             raise ValueError(f"{key}: EMA cross stop multiplier must be positive")
         if self.position_sizing_stop_override_enabled:

@@ -146,7 +146,8 @@ STRATEGY_PROFILE_GROUPS = (
 EXECUTION_PROFILE_GROUPS = (
     ("Risk", (
         "risk_multiplier", "position_sizing_stop_override_enabled",
-        "position_sizing_stop_multiple", "ema_cross_stop_multiplier",
+        "position_sizing_stop_multiple", "ema_cross_stop_buffer_atr",
+        "ema_cross_stop_multiplier",
     ), None),
     ("Stop Loss", ("stop_loss_multiple",), None),
     ("Take Profit", ("reward_risk_ratio",), None),

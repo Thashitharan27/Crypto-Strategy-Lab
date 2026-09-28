@@ -201,7 +201,8 @@ class EmaCrossTests(unittest.TestCase):
         engine.active_pairs = []
         engine.profile = SimpleNamespace(
             flip_direction=False, entry_rules=(), flip_rule_match_mode="ANY",
-            ema_cross_stop_multiplier=1.0, partial_profit_enabled=False,
+            ema_cross_stop_buffer_atr=0.05, ema_cross_stop_multiplier=1.0,
+            partial_profit_enabled=False,
             tp1_r=1.0, tp1_close_pct=50.0,
         )
         engine.flip_matches = False
@@ -298,6 +299,17 @@ class EmaCrossTests(unittest.TestCase):
         e._open_pair(101)
         self.assertTrue(np.isnan(pos.tp))
         self.assertIsNone(pos.ema_920_fixed_target_r)
+
+    def test_cross_stop_buffer_is_profile_configurable(self):
+        e = self.engine
+        e.profile.ema_cross_stop_buffer_atr = 0.25
+        e.config.strategy_timeframe_minutes = 15
+        e.ema_100_values[101] = 95.0
+        e.atr_values[101] = 2.0
+        e.open[102] = 100.0
+        plan = e._sr_stop_plan(101, 102)
+        self.assertTrue(plan["passed"])
+        self.assertAlmostEqual(plan["base_stop_price"], 94.5)
 
     def test_cross_stop_multiplier_widens_actual_stop_from_entry(self):
         e = self.engine
