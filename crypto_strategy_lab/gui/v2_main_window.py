@@ -112,6 +112,7 @@ FEATURE_GROUPS = (
 EXECUTION_GROUPS = (
     ("Entry Fill", (
         "entry_timing_mode", "ema_920_trade_plan",
+        "ema_cross_entry_confirmation_enabled", "ema_cross_entry_confirmation_r",
         "fvg_confirmation_enabled", "fvg_confirmation_minutes",
     ), None),
     ("Risk", (
@@ -400,6 +401,7 @@ class DataclassForm(QWidget):
                 "sr_break_basis",
             ),
             "position_sizing_stop_override_enabled": ("position_sizing_stop_multiple",),
+            "ema_cross_entry_confirmation_enabled": ("ema_cross_entry_confirmation_r",),
             "break_even_enabled": ("break_even_activation_r", "break_even_offset_r"),
             "trailing_enabled": ("trailing_activation_r", "trailing_distance_r"),
             "partial_profit_enabled": ("tp1_r", "tp1_close_pct", "tp2_r"),
