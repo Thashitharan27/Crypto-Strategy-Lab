@@ -124,6 +124,32 @@ class EmaCrossTests(unittest.TestCase):
         )
         self.assertGreater(native.strategy_profiles[key].tp2_r, 2.0)
 
+    def test_cross_config_allows_stale_hidden_tp_values_when_partial_disabled(self):
+        config = ResearchRunConfig()
+        strategy_profiles = dict(config.strategy.profiles)
+        execution_profiles = dict(config.execution.profiles)
+        key = next(iter(strategy_profiles))
+        strategy_profiles[key] = replace(
+            strategy_profiles[key],
+            entry_rules=({"_strategy_direction_mode": EMA_920_MODE},),
+        )
+        execution_profiles[key] = replace(
+            execution_profiles[key],
+            partial_profit_enabled=False,
+            tp1_r=2.0,
+            tp2_r=2.0,
+        )
+        replace(
+            config,
+            strategy=replace(config.strategy, profiles=strategy_profiles),
+            execution=replace(
+                config.execution,
+                profiles=execution_profiles,
+                entry_timing_mode="NEXT_CANDLE_OPEN",
+                ema_920_trade_plan="EMA_20_100_CROSS",
+            ),
+        ).validate()
+
     def test_config_accepts_short_and_both_cross_modes(self):
         config = ResearchRunConfig()
         profiles = dict(config.strategy.profiles)
