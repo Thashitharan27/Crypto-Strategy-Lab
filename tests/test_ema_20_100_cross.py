@@ -187,7 +187,15 @@ class EmaCrossTests(unittest.TestCase):
         self.engine = Engine()
         engine = self.engine
         engine.signal_strategy_mode = EMA_920_MODE
-        engine.config = SimpleNamespace(ema_920_trade_plan="EMA_20_100_CROSS", slippage=0.001)
+        engine.config = SimpleNamespace(
+            ema_920_trade_plan="EMA_20_100_CROSS",
+            ema_cross_entry_confirmation_enabled=False,
+            ema_cross_entry_confirmation_r=1.0,
+            enable_daily_entry_schedule=False,
+            max_active_pairs=1,
+            use_intrabar_data=False,
+            slippage=0.001,
+        )
         engine.close = np.full(104, 100.0)
         engine.open = np.full(104, 100.0)
         engine.high = engine.close + 1
@@ -207,6 +215,62 @@ class EmaCrossTests(unittest.TestCase):
         )
         engine.flip_matches = False
         engine.direction = "LONG"
+
+    def test_config_accepts_positive_ema_cross_entry_confirmation_r(self):
+        config = ResearchRunConfig()
+        replace(
+            config,
+            execution=replace(
+                config.execution,
+                ema_cross_entry_confirmation_enabled=True,
+                ema_cross_entry_confirmation_r=1.0,
+            ),
+        ).validate()
+        with self.assertRaisesRegex(ValueError, "confirmation R must be positive"):
+            replace(
+                config,
+                execution=replace(
+                    config.execution,
+                    ema_cross_entry_confirmation_enabled=True,
+                    ema_cross_entry_confirmation_r=0.0,
+                ),
+            ).validate()
+
+    def test_confirmation_fill_waits_for_trigger(self):
+        e = self.engine
+        e.entry_delta = pd.Timedelta(minutes=15)
+        e.config.ema_cross_entry_confirmation_enabled = True
+        e.high[101] = 104.9
+        e.low[101] = 99.0
+        self.assertIsNone(e._ema_cross_confirmation_fill(101, 105.0, "LONG"))
+        e.high[101] = 105.1
+        raw, timestamp = e._ema_cross_confirmation_fill(101, 105.0, "LONG")
+        self.assertAlmostEqual(raw, 105.0)
+        self.assertEqual(timestamp, pd.Timestamp(e.times[101]))
+
+    def test_confirmation_distance_uses_original_cross_r(self):
+        e = self.engine
+        e.entry_delta = pd.Timedelta(minutes=15)
+        e.config.ema_cross_entry_confirmation_enabled = True
+        e.config.strategy_timeframe_minutes = 15
+        e.ema_20_values[99:102] = [99, 99, 101]
+        e.ema_100_values[99:102] = [100, 100, 100]
+        e.atr_values[101] = 2.0
+        e.open[102] = 101.0
+        e.risk = np.ones(104)
+        e.times = pd.date_range("2025-01-01", periods=104, freq="15min", tz="UTC")
+        e._should_enter = lambda i: True
+        e._entry_filter_result = lambda i, execution_i=None: (True, "passed")
+        decision = e._entry_decision(101)
+        self.assertTrue(decision["ema_cross_confirmation"])
+        original_entry = 101.0 * 1.001
+        base_stop = 100.0 - 0.05 * 2.0
+        expected_r = original_entry - base_stop
+        self.assertAlmostEqual(decision["ema_cross_confirmation_original_r"], expected_r)
+        self.assertAlmostEqual(
+            decision["ema_cross_confirmation_trigger_price"],
+            original_entry + expected_r,
+        )
 
     def test_completed_bullish_cross_is_a_long_entry_signal_only_once(self):
         e = self.engine

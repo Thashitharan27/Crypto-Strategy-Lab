@@ -78,6 +78,16 @@ FIELDS = {
         "Entry Fill Timing",
         "Signal Close preserves historical fills. Next Candle Open queues a completed signal and fills at the next strategy candle open before that candle is processed.",
     ),
+    "ema_cross_entry_confirmation_enabled": FieldPresentation(
+        "Wait for EMA Cross Confirmation Distance",
+        "After an EMA 20/100 cross, do not enter immediately. Arm the setup and enter only after price reaches the configured distance measured from the original hypothetical cross entry.",
+    ),
+    "ema_cross_entry_confirmation_r": FieldPresentation(
+        "EMA Cross Confirmation Distance",
+        "Distance price must move in the crossover direction before entry. R is the original hypothetical next-open entry-to-EMA100 protective-stop distance.",
+        unit=" R",
+        decimals=2,
+    ),
     "sr_timeframe_minutes": FieldPresentation(
         "Primary S/R Timeframe",
         "Backward-compatible primary S/R context. Individual S/R rules can independently choose Strategy TF, 1h, 4h or 1d.",
