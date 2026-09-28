@@ -511,7 +511,7 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
     assert position["open"] is False
 
     overlay_names = {item["name"] for item in payload["overlays"]}
-    assert {"EMA 50", "EMA 100", "EMA 200", "VWAP"} <= overlay_names
+    assert {"EMA 20", "EMA 50", "EMA 100", "EMA 200", "VWAP"} <= overlay_names
     assert not any(item.get("kind") == "sr" for item in payload["overlays"])
 
     zone_names = {item["name"] for item in payload["srZones"]}
@@ -561,7 +561,7 @@ def test_completed_run_visualizer_loads_alternate_cached_chart_timeframe(tmp_pat
     assert service.store.calls[-1][2] == "1h"
     assert payload["candles"]
     overlay_names = {item["name"] for item in payload["overlays"]}
-    assert {"EMA 50", "EMA 100"} <= overlay_names
+    assert {"EMA 20", "EMA 50", "EMA 100"} <= overlay_names
     assert "VWAP" not in overlay_names
     candle_times = {item["time"] for item in payload["candles"]}
     assert all(marker["time"] in candle_times for marker in payload["markers"])
