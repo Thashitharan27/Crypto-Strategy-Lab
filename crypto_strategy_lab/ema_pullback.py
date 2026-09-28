@@ -182,6 +182,97 @@ class Ema920PullbackMixin:
     def _ema_920_cross_plan(self):
         return self._ema_920_cross_mode() is not None
 
+    def _ema_cross_confirmation_enabled(self):
+        return bool(
+            getattr(self.config, "ema_cross_entry_confirmation_enabled", False)
+            and getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE
+            and self._ema_920_cross_plan()
+        )
+
+    def _ema_cross_confirmation_distance_r(self):
+        value = float(getattr(self.config, "ema_cross_entry_confirmation_r", 1.0))
+        if not np.isfinite(value) or value <= 0:
+            raise ValueError("EMA cross entry confirmation R must be finite and positive")
+        return value
+
+    def _ema_cross_confirmation_fill(self, i, trigger_price, direction):
+        """Return the first causal fill at/through the armed confirmation level."""
+        start = pd.Timestamp(self.times[i])
+        end = start + self.entry_delta
+        use_intrabar = bool(
+            getattr(self.config, "use_intrabar_data", False)
+            and getattr(self, "intrabar_data", None) is not None
+        )
+        if use_intrabar:
+            frame = self.intrabar_data
+            if isinstance(frame, pd.DataFrame) and "timestamp" in frame:
+                timestamps = pd.to_datetime(frame["timestamp"], utc=True)
+                window = frame.loc[(timestamps >= start) & (timestamps < end)]
+                for _, row in window.iterrows():
+                    opening = float(row.open)
+                    high = float(row.high)
+                    low = float(row.low)
+                    if direction == "LONG" and high >= trigger_price:
+                        raw = max(float(trigger_price), opening)
+                        return raw, pd.Timestamp(row.timestamp)
+                    if direction == "SHORT" and low <= trigger_price:
+                        raw = min(float(trigger_price), opening)
+                        return raw, pd.Timestamp(row.timestamp)
+                return None
+        opening = float(self.open[i])
+        if direction == "LONG" and float(self.high[i]) >= trigger_price:
+            return max(float(trigger_price), opening), start
+        if direction == "SHORT" and float(self.low[i]) <= trigger_price:
+            return min(float(trigger_price), opening), start
+        return None
+
+    def _entry_decision(self, i, active_at_candle_start=False):
+        if self._ema_cross_confirmation_enabled() and not self.config.enable_daily_entry_schedule:
+            if i + 1 >= len(self.times) or not self._should_enter(i):
+                return None
+            direction = self._selected_direction(i)
+            if direction not in {"LONG", "SHORT"}:
+                return None
+            plan = self._ema_100_cross_stop_plan(i, i + 1)
+            passed, reason = self._entry_filter_result(i, i + 1)
+            if not passed or not bool(plan.get("passed")):
+                return {
+                    "execution_index": i + 1,
+                    "indicator_index": i,
+                    "scheduled_timestamp": pd.Timestamp(self.times[i + 1]),
+                    "actual_entry_timestamp": None,
+                    "entry_schedule_status": "EMA_CROSS_CONFIRMATION_REJECTED",
+                    "fill_price_source": "EMA_CROSS_CONFIRMATION",
+                    "defer_to_next_open": True,
+                    "ema_cross_confirmation": True,
+                    "ema_cross_confirmation_rejected": True,
+                    "ema_cross_confirmation_reject_reason": (
+                        reason if not passed else str(plan.get("reason", "EMA_CROSS_CONFIRMATION_GEOMETRY_INVALID"))
+                    ),
+                }
+            original_entry = float(self._expected_entry_price(i, i + 1, direction))
+            original_r = float(plan["base_distance"])
+            confirmation_r = self._ema_cross_confirmation_distance_r()
+            sign = 1.0 if direction == "LONG" else -1.0
+            trigger = original_entry + sign * confirmation_r * original_r
+            return {
+                "execution_index": i + 1,
+                "indicator_index": i,
+                "scheduled_timestamp": pd.Timestamp(self.times[i + 1]),
+                "actual_entry_timestamp": None,
+                "entry_schedule_status": "EMA_CROSS_CONFIRMATION_PENDING",
+                "fill_price_source": "EMA_CROSS_CONFIRMATION",
+                "defer_to_next_open": True,
+                "ema_cross_confirmation": True,
+                "ema_cross_confirmation_direction": direction,
+                "ema_cross_confirmation_r": confirmation_r,
+                "ema_cross_confirmation_trigger_price": float(trigger),
+                "ema_cross_confirmation_original_entry_price": original_entry,
+                "ema_cross_confirmation_original_r": original_r,
+                "ema_cross_confirmation_filter_reason": reason,
+            }
+        return super()._entry_decision(i, active_at_candle_start)
+
     def _ema_20_100_cross(self, i, *, upwards):
         return ema_20_100_cross(
             i, self.ema_20_values, self.ema_100_values, upwards=upwards,
@@ -277,6 +368,75 @@ class Ema920PullbackMixin:
 
     def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
         decision = getattr(self, "pending_next_open_entry", None)
+        if (
+            decision
+            and decision.get("ema_cross_confirmation")
+            and int(decision.get("execution_index", -1)) == i
+        ):
+            self.pending_next_open_entry = None
+            indicator_i = int(decision["indicator_index"])
+            if decision.get("ema_cross_confirmation_rejected"):
+                self._record_skipped_signal(
+                    indicator_i,
+                    str(decision.get("ema_cross_confirmation_reject_reason", "EMA_CROSS_CONFIRMATION_REJECTED")),
+                )
+                return
+            if active_at_candle_start or len(self.active_pairs) >= self.config.max_active_pairs:
+                self._record_skipped_signal(indicator_i, "EMA_CROSS_CONFIRMATION_ACTIVE_TRADE")
+                return
+
+            direction = str(decision["ema_cross_confirmation_direction"]).upper()
+            # An opposite completed EMA cross invalidates an armed setup before
+            # the confirmation level is reached.
+            if i - 1 > indicator_i:
+                opposite = self._ema_20_100_cross(
+                    i - 1, upwards=(direction == "SHORT")
+                )
+                if opposite:
+                    self._record_skipped_signal(indicator_i, "EMA_CROSS_CONFIRMATION_INVALIDATED")
+                    return
+
+            trigger = float(decision["ema_cross_confirmation_trigger_price"])
+            fill = self._ema_cross_confirmation_fill(i, trigger, direction)
+            if fill is None:
+                if i + 1 < len(self.times):
+                    decision["execution_index"] = i + 1
+                    self.pending_next_open_entry = decision
+                else:
+                    self._record_skipped_signal(indicator_i, "EMA_CROSS_CONFIRMATION_NOT_REACHED")
+                return
+
+            raw_fill, fill_time = fill
+            decision.update(
+                fill_price=float(raw_fill),
+                actual_entry_timestamp=pd.Timestamp(fill_time),
+                entry_schedule_status="EMA_CROSS_CONFIRMATION_FILLED",
+            )
+            self._pending_ema_cross_confirmation_price = float(raw_fill)
+            try:
+                before = len(self.active_pairs)
+                self._open_pair(
+                    i,
+                    True,
+                    str(decision.get("ema_cross_confirmation_filter_reason", "Strategy profile passed")),
+                    decision,
+                )
+                if len(self.active_pairs) > before:
+                    pair = self.active_pairs[-1]
+                    pair.ema_cross_confirmation_enabled = True
+                    pair.ema_cross_confirmation_r = float(decision["ema_cross_confirmation_r"])
+                    pair.ema_cross_confirmation_trigger_price = trigger
+                    pair.ema_cross_confirmation_original_entry_price = float(
+                        decision["ema_cross_confirmation_original_entry_price"]
+                    )
+                    pair.ema_cross_confirmation_original_r = float(
+                        decision["ema_cross_confirmation_original_r"]
+                    )
+                    self._scan_pair_exit(pair, i)
+            finally:
+                self._pending_ema_cross_confirmation_price = None
+            return
+
         if (
             decision
             and int(decision.get("execution_index", -1)) == i
@@ -411,7 +571,12 @@ class Ema920PullbackMixin:
             return {"passed": False, "applied": False, "reason": "EMA100_STOP_BUFFER_INVALID", "distance": None}
         buffer_price = buffer_atr * atr
         base_stop_price = level - buffer_price if direction == "LONG" else level + buffer_price
-        entry = float(self._expected_entry_price(i, execution_i, direction))
+        confirmation_price = getattr(self, "_pending_ema_cross_confirmation_price", None)
+        if confirmation_price is not None:
+            slip = 1 + self.config.slippage if direction == "LONG" else 1 - self.config.slippage
+            entry = float(confirmation_price) * slip
+        else:
+            entry = float(self._expected_entry_price(i, execution_i, direction))
         base_distance = entry - base_stop_price if direction == "LONG" else base_stop_price - entry
         if not np.isfinite(base_distance) or base_distance <= 0:
             return {
@@ -475,6 +640,11 @@ class Ema920PullbackMixin:
         row["ema_100_base_stop_distance"] = getattr(pos, "ema_100_base_stop_distance", np.nan) if pos is not None else np.nan
         row["ema_100_stop_multiplier"] = getattr(pos, "ema_100_stop_multiplier", np.nan) if pos is not None else np.nan
         row["ema_100_stop_distance_atr"] = getattr(pos, "ema_100_stop_distance_atr", np.nan) if pos is not None else np.nan
+        row["ema_cross_confirmation_enabled"] = bool(getattr(p, "ema_cross_confirmation_enabled", False))
+        row["ema_cross_confirmation_r"] = getattr(p, "ema_cross_confirmation_r", np.nan)
+        row["ema_cross_confirmation_trigger_price"] = getattr(p, "ema_cross_confirmation_trigger_price", np.nan)
+        row["ema_cross_confirmation_original_entry_price"] = getattr(p, "ema_cross_confirmation_original_entry_price", np.nan)
+        row["ema_cross_confirmation_original_r"] = getattr(p, "ema_cross_confirmation_original_r", np.nan)
         return row
 
     def _position_sizing_stop_distance(self, profile, risk_unit, actual_stop):
