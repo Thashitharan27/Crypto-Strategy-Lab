@@ -150,6 +150,18 @@ def _first(row: pd.Series, *names: str):
     return None
 
 
+def _optional_bool(value, default: bool) -> bool:
+    """Safely interpret nullable research flags without coercing pandas.NA."""
+    if value is None or value is pd.NA:
+        return bool(default)
+    try:
+        if pd.isna(value):
+            return bool(default)
+    except (TypeError, ValueError):
+        pass
+    return bool(value)
+
+
 def _direction_relation(value, side: str) -> str:
     state = _category(value)
     if state in {"UNKNOWN", "NEUTRAL", "NONE", "NO_SIGNAL"}:
@@ -462,7 +474,7 @@ def _evidence_tokens(row: pd.Series, side: str) -> tuple[tuple[str, str, str], .
     # missing or stale snapshots never masquerade as genuine zero-valued evidence.
     trade_flow_allowed = (
         "trade_source_covered" not in row.index
-        or bool(row.get("trade_source_covered"))
+        or _optional_bool(row.get("trade_source_covered"), False)
     )
     if trade_flow_allowed:
         for label, names, edges in (
@@ -489,8 +501,8 @@ def _evidence_tokens(row: pd.Series, side: str) -> tuple[tuple[str, str, str], .
                 )
 
     ticker_allowed = not (
-        ("book_ticker_observed" in row.index and not bool(row.get("book_ticker_observed")))
-        or ("book_ticker_stale" in row.index and bool(row.get("book_ticker_stale")))
+        ("book_ticker_observed" in row.index and not _optional_bool(row.get("book_ticker_observed"), False))
+        or ("book_ticker_stale" in row.index and _optional_bool(row.get("book_ticker_stale"), True))
     )
     if ticker_allowed:
         for label, names, edges in (
@@ -503,8 +515,8 @@ def _evidence_tokens(row: pd.Series, side: str) -> tuple[tuple[str, str, str], .
                 _append(groups, "microstructure", label, _signed_bucket(value, edges))
 
     depth_allowed = not (
-        ("book_depth_observed" in row.index and not bool(row.get("book_depth_observed")))
-        or ("book_depth_stale" in row.index and bool(row.get("book_depth_stale")))
+        ("book_depth_observed" in row.index and not _optional_bool(row.get("book_depth_observed"), False))
+        or ("book_depth_stale" in row.index and _optional_bool(row.get("book_depth_stale"), True))
     )
     if depth_allowed:
         value = _first(row, "book_depth_imbalance_1pct")
