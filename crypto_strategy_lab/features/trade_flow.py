@@ -356,7 +356,9 @@ class TradeFlowContextFeatureProvider:
         )
 
         delta_1h = pd.to_numeric(
-            aligned.get("trade_delta_pct_1h", np.nan), errors="coerce"
+            aligned["trade_delta_pct_1h"], errors="coerce"
+        ) if "trade_delta_pct_1h" in aligned.columns else pd.Series(
+            np.nan, index=aligned.index, dtype=float
         )
         aligned["flow_response_state"] = np.select(
             [
