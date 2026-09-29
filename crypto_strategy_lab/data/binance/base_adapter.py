@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import BinaryIO, Iterator
 import zipfile
+import zlib
 
 import pandas as pd
 
@@ -41,13 +42,27 @@ def open_csv_stream(path: Path) -> Iterator[BinaryIO]:
 
     path = Path(path)
     if path.suffix.lower() == ".zip":
-        with zipfile.ZipFile(path) as archive:
-            members = [name for name in archive.namelist() if name.lower().endswith(".csv")]
-            if not members:
-                raise ValueError(f"No CSV member found in Binance archive: {path}")
-            member = max(members, key=lambda name: archive.getinfo(name).file_size)
-            with archive.open(member, "r") as stream:
-                yield stream
+        try:
+            with zipfile.ZipFile(path) as archive:
+                members = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+                if not members:
+                    raise ValueError(f"No CSV member found in Binance archive: {path}")
+                member = max(members, key=lambda name: archive.getinfo(name).file_size)
+                with archive.open(member, "r") as stream:
+                    try:
+                        yield stream
+                    except (zipfile.BadZipFile, zlib.error, OSError, RuntimeError) as exc:
+                        raise ValueError(
+                            "Corrupt Binance ZIP archive while reading CSV data: "
+                            f"{path}. Delete/re-download this archive, then refresh/validate "
+                            "the data catalog before rerunning."
+                        ) from exc
+        except zipfile.BadZipFile as exc:
+            raise ValueError(
+                "Corrupt Binance ZIP archive: "
+                f"{path}. Delete/re-download this archive, then refresh/validate "
+                "the data catalog before rerunning."
+            ) from exc
         return
     with path.open("rb") as stream:
         yield stream
