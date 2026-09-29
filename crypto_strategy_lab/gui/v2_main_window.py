@@ -114,6 +114,7 @@ EXECUTION_GROUPS = (
         "entry_timing_mode", "ema_920_trade_plan",
         "ema_cross_entry_confirmation_enabled", "ema_cross_entry_confirmation_r",
         "fvg_confirmation_enabled", "fvg_confirmation_minutes",
+        "fvg_context_enabled", "fvg_context_timeframe_minutes",
         "fvg_structure_swing_strength",
     ), None),
     ("Risk", (
