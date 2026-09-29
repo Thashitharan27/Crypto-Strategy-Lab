@@ -32,8 +32,10 @@ from crypto_strategy_lab.strategy_rule_model import (
     is_context_timeframe_evidence,
     is_support_resistance_evidence,
     normalize_rule,
+    uses_detailed_trade_flow_rules,
     uses_higher_timeframe_ichimoku_rules,
     uses_ichimoku_rules,
+    uses_order_book_rules,
     rule_value_options,
 )
 
@@ -963,18 +965,25 @@ class RuleWorkspace:
             rebuilt[key] = asdict(profile)
         result = deepcopy(self._base_config)
         result["strategy"]["profiles"] = rebuilt
-        if uses_ichimoku_rules(
+        active_groups = (
             self.rules["REQUIRED"],
             self.rules["VETO"],
             self.rules["FLIP"],
-        ):
+        )
+        if uses_ichimoku_rules(*active_groups):
             result["features"]["ichimoku_enabled"] = True
             strategy_minutes = int(result["data"]["strategy_timeframe_minutes"])
             if uses_higher_timeframe_ichimoku_rules(
                 strategy_minutes,
-                self.rules["REQUIRED"],
-                self.rules["VETO"],
-                self.rules["FLIP"],
+                *active_groups,
             ):
                 result["features"]["ichimoku_include_higher_timeframes"] = True
+        if uses_detailed_trade_flow_rules(*active_groups):
+            result["features"]["trade_flow_enabled"] = True
+            current = tuple(result["features"].get("trade_flow_windows", ()))
+            result["features"]["trade_flow_windows"] = list(
+                dict.fromkeys((*current, "1m", "5m", "15m", "1h"))
+            )
+        if uses_order_book_rules(*active_groups):
+            result["features"]["order_book_enabled"] = True
         return result
