@@ -6,12 +6,134 @@ import pandas as pd
 
 
 FVG_MODE = "FAIR_VALUE_GAP"
-FVG_RULE_INDICATORS = frozenset({"FVG_GAP_SIZE_ATR", "FVG_AGE_BARS", "FVG_REVISIT_DEPTH_PCT"})
+FVG_RULE_INDICATORS = frozenset({
+    "FVG_GAP_SIZE_ATR",
+    "FVG_AGE_BARS",
+    "FVG_REVISIT_DEPTH_PCT",
+    "FVG_CHOCH_ALIGNED",
+    "FVG_BOS_ALIGNED",
+    "FVG_LIQUIDITY_SWEEP_ALIGNED",
+    "FVG_BARS_SINCE_CHOCH",
+    "FVG_BARS_SINCE_BOS",
+    "FVG_BARS_SINCE_SWEEP",
+    "FVG_DISPLACEMENT_BODY_ATR",
+    "FVG_DISPLACEMENT_BODY_RATIO",
+    "FVG_DISPLACEMENT_CLOSE_LOCATION",
+    "FVG_LOCATION_ALIGNED",
+})
 FVG_STOP_BUFFER_ATR = 0.05
 FVG_TARGET_BUFFER_ATR = 0.05
 
 
-def first_revisit_context(high, low, close, atr=None):
+def _fvg_market_structure_features(high, low, open_, close, atr, swing_strength=2):
+    """Build causal structure evidence available at each candle close.
+
+    Swing pivots are confirmed only after the configured number of right-side
+    bars. CHoCH is the first break opposite the previous break direction;
+    repeated breaks in the same direction are BOS. Liquidity sweeps require a
+    wick through the latest confirmed swing with a close back inside.
+    """
+    n = len(close)
+    keys = (
+        "choch_long", "choch_short", "bos_long", "bos_short",
+        "sweep_long", "sweep_short",
+        "bars_since_choch_long", "bars_since_choch_short",
+        "bars_since_bos_long", "bars_since_bos_short",
+        "bars_since_sweep_long", "bars_since_sweep_short",
+        "displacement_body_atr", "displacement_body_ratio",
+        "displacement_close_location", "location_long", "location_short",
+    )
+    out = {key: np.full(n, np.nan) for key in keys}
+    for key in ("choch_long", "choch_short", "bos_long", "bos_short",
+                "sweep_long", "sweep_short"):
+        out[key][:] = 0.0
+
+    strength = max(1, int(swing_strength))
+    last_swing_high = np.nan
+    last_swing_low = np.nan
+    last_break_direction = None
+    last_choch = {"LONG": None, "SHORT": None}
+    last_bos = {"LONG": None, "SHORT": None}
+    last_sweep = {"LONG": None, "SHORT": None}
+
+    for i in range(n):
+        pivot_i = i - strength
+        if pivot_i >= strength:
+            left = pivot_i - strength
+            right = pivot_i + strength + 1
+            ph = high[pivot_i]
+            pl = low[pivot_i]
+            if np.isfinite(ph):
+                peers = np.concatenate((high[left:pivot_i], high[pivot_i + 1:right]))
+                if len(peers) and np.all(np.isfinite(peers)) and ph > np.max(peers):
+                    last_swing_high = float(ph)
+            if np.isfinite(pl):
+                peers = np.concatenate((low[left:pivot_i], low[pivot_i + 1:right]))
+                if len(peers) and np.all(np.isfinite(peers)) and pl < np.min(peers):
+                    last_swing_low = float(pl)
+
+        if np.isfinite(last_swing_low) and np.isfinite(low[i]) and np.isfinite(close[i]):
+            if low[i] < last_swing_low and close[i] >= last_swing_low:
+                out["sweep_long"][i] = 1.0
+                last_sweep["LONG"] = i
+        if np.isfinite(last_swing_high) and np.isfinite(high[i]) and np.isfinite(close[i]):
+            if high[i] > last_swing_high and close[i] <= last_swing_high:
+                out["sweep_short"][i] = 1.0
+                last_sweep["SHORT"] = i
+
+        break_direction = None
+        previous_close = close[i - 1] if i > 0 else np.nan
+        if (
+            np.isfinite(last_swing_high)
+            and np.isfinite(close[i])
+            and close[i] > last_swing_high
+            and (not np.isfinite(previous_close) or previous_close <= last_swing_high)
+        ):
+            break_direction = "LONG"
+        elif (
+            np.isfinite(last_swing_low)
+            and np.isfinite(close[i])
+            and close[i] < last_swing_low
+            and (not np.isfinite(previous_close) or previous_close >= last_swing_low)
+        ):
+            break_direction = "SHORT"
+        if break_direction is not None:
+            opposite = "SHORT" if break_direction == "LONG" else "LONG"
+            if last_break_direction is not None and break_direction != last_break_direction:
+                out["choch_long" if break_direction == "LONG" else "choch_short"][i] = 1.0
+                last_choch[break_direction] = i
+                last_choch[opposite] = None
+                last_bos[opposite] = None
+                last_bos[break_direction] = None
+            else:
+                out["bos_long" if break_direction == "LONG" else "bos_short"][i] = 1.0
+                last_bos[break_direction] = i
+            last_break_direction = break_direction
+
+        for direction, suffix in (("LONG", "long"), ("SHORT", "short")):
+            if last_choch[direction] is not None:
+                out[f"bars_since_choch_{suffix}"][i] = i - last_choch[direction]
+            if last_bos[direction] is not None:
+                out[f"bars_since_bos_{suffix}"][i] = i - last_bos[direction]
+            if last_sweep[direction] is not None:
+                out[f"bars_since_sweep_{suffix}"][i] = i - last_sweep[direction]
+
+        rng = high[i] - low[i] if np.isfinite(high[i]) and np.isfinite(low[i]) else np.nan
+        body = abs(close[i] - open_[i]) if np.isfinite(close[i]) and np.isfinite(open_[i]) else np.nan
+        if np.isfinite(body) and np.isfinite(atr[i]) and atr[i] > 0:
+            out["displacement_body_atr"][i] = body / atr[i]
+        if np.isfinite(body) and np.isfinite(rng) and rng > 0:
+            out["displacement_body_ratio"][i] = body / rng
+            out["displacement_close_location"][i] = (close[i] - low[i]) / rng
+
+        if np.isfinite(last_swing_high) and np.isfinite(last_swing_low) and last_swing_high > last_swing_low:
+            equilibrium = 0.5 * (last_swing_high + last_swing_low)
+            out["location_long"][i] = float(close[i] <= equilibrium)
+            out["location_short"][i] = float(close[i] >= equilibrium)
+    return out
+
+
+def first_revisit_context(high, low, close, atr=None, open_=None, swing_strength=2):
     """Signal on the first completed candle touching a previously formed gap.
 
     A bullish gap is (high[i-2], low[i]); a bearish gap is
@@ -27,6 +149,12 @@ def first_revisit_context(high, low, close, atr=None):
     atr = np.full(len(close), np.nan) if atr is None else np.asarray(atr, dtype=float)
     if atr.shape != close.shape:
         raise ValueError("FVG ATR array must match candle lengths")
+    open_ = np.full(len(close), np.nan) if open_ is None else np.asarray(open_, dtype=float)
+    if open_.shape != close.shape:
+        raise ValueError("FVG open array must match candle lengths")
+    structure = _fvg_market_structure_features(
+        high, low, open_, close, atr, swing_strength=swing_strength
+    )
     result = np.full(len(close), None, dtype=object)
     stop_boundaries = {side: np.full(len(close), np.nan) for side in ("LONG", "SHORT")}
     target_boundaries = {side: np.full(len(close), np.nan) for side in ("LONG", "SHORT")}
@@ -44,7 +172,7 @@ def first_revisit_context(high, low, close, atr=None):
         long_touch = False
         short_touch = False
         next_bullish = []
-        for bottom, top, formed, extreme in bullish:
+        for bottom, top, formed, extreme, formation_features in bullish:
             extreme = max(extreme, high[i])
             if low[i] <= top and high[i] >= bottom:
                 if np.isnan(features["LONG"]["FVG_AGE_BARS"][i]):
@@ -54,14 +182,16 @@ def first_revisit_context(high, low, close, atr=None):
                     )
                     if np.isfinite(atr[formed]) and atr[formed] > 0:
                         features["LONG"]["FVG_GAP_SIZE_ATR"][i] = (top - bottom) / atr[formed]
+                    for key, value in formation_features.items():
+                        features["LONG"][key][i] = value
                 if close[i] > top and not long_touch:
                     stop_boundaries["LONG"][i] = bottom
                     target_boundaries["LONG"][i] = extreme
                     long_touch = True
             else:
-                next_bullish.append((bottom, top, formed, extreme))
+                next_bullish.append((bottom, top, formed, extreme, formation_features))
         next_bearish = []
-        for bottom, top, formed, extreme in bearish:
+        for bottom, top, formed, extreme, formation_features in bearish:
             extreme = min(extreme, low[i])
             if high[i] >= bottom and low[i] <= top:
                 if np.isnan(features["SHORT"]["FVG_AGE_BARS"][i]):
@@ -71,20 +201,45 @@ def first_revisit_context(high, low, close, atr=None):
                     )
                     if np.isfinite(atr[formed]) and atr[formed] > 0:
                         features["SHORT"]["FVG_GAP_SIZE_ATR"][i] = (top - bottom) / atr[formed]
+                    for key, value in formation_features.items():
+                        features["SHORT"][key][i] = value
                 if close[i] < bottom and not short_touch:
                     stop_boundaries["SHORT"][i] = top
                     target_boundaries["SHORT"][i] = extreme
                     short_touch = True
             else:
-                next_bearish.append((bottom, top, formed, extreme))
+                next_bearish.append((bottom, top, formed, extreme, formation_features))
         bullish, bearish = next_bullish, next_bearish
         if long_touch != short_touch:
             result[i] = "LONG" if long_touch else "SHORT"
         if i >= 2 and np.isfinite(high[i - 2]) and np.isfinite(low[i - 2]):
             if low[i] > high[i - 2]:
-                bullish.append((high[i - 2], low[i], i, high[i]))
+                bullish.append((high[i - 2], low[i], i, high[i], {
+                    "FVG_CHOCH_ALIGNED": structure["choch_long"][i],
+                    "FVG_BOS_ALIGNED": structure["bos_long"][i],
+                    "FVG_LIQUIDITY_SWEEP_ALIGNED": structure["sweep_long"][i],
+                    "FVG_BARS_SINCE_CHOCH": structure["bars_since_choch_long"][i],
+                    "FVG_BARS_SINCE_BOS": structure["bars_since_bos_long"][i],
+                    "FVG_BARS_SINCE_SWEEP": structure["bars_since_sweep_long"][i],
+                    "FVG_DISPLACEMENT_BODY_ATR": structure["displacement_body_atr"][i],
+                    "FVG_DISPLACEMENT_BODY_RATIO": structure["displacement_body_ratio"][i],
+                    "FVG_DISPLACEMENT_CLOSE_LOCATION": structure["displacement_close_location"][i],
+                    "FVG_LOCATION_ALIGNED": structure["location_long"][i],
+                }))
             if high[i] < low[i - 2]:
-                bearish.append((high[i], low[i - 2], i, low[i]))
+                bearish.append((high[i], low[i - 2], i, low[i], {
+                    "FVG_CHOCH_ALIGNED": structure["choch_short"][i],
+                    "FVG_BOS_ALIGNED": structure["bos_short"][i],
+                    "FVG_LIQUIDITY_SWEEP_ALIGNED": structure["sweep_short"][i],
+                    "FVG_BARS_SINCE_CHOCH": structure["bars_since_choch_short"][i],
+                    "FVG_BARS_SINCE_BOS": structure["bars_since_bos_short"][i],
+                    "FVG_BARS_SINCE_SWEEP": structure["bars_since_sweep_short"][i],
+                    "FVG_DISPLACEMENT_BODY_ATR": structure["displacement_body_atr"][i],
+                    "FVG_DISPLACEMENT_BODY_RATIO": structure["displacement_body_ratio"][i],
+                    "FVG_DISPLACEMENT_CLOSE_LOCATION": 1.0 - structure["displacement_close_location"][i]
+                        if np.isfinite(structure["displacement_close_location"][i]) else np.nan,
+                    "FVG_LOCATION_ALIGNED": structure["location_short"][i],
+                }))
     return result, features, stop_boundaries, target_boundaries
 
 
@@ -245,7 +400,12 @@ class FairValueGapMixin:
         ):
             (self.fvg_first_revisit, self.fvg_rule_features,
              self.fvg_stop_boundaries, self.fvg_target_boundaries) = first_revisit_context(
-                self.high, self.low, self.close, self.atr_values
+                self.high,
+                self.low,
+                self.close,
+                self.atr_values,
+                open_=self.open,
+                swing_strength=int(getattr(self.config, "fvg_structure_swing_strength", 2)),
             )
 
     def _infer_signal_strategy_mode(self):

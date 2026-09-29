@@ -163,6 +163,11 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.add_field(
             "fvg_confirmation_minutes", "FVG Confirmation Candle", self.account["fvg_confirmation_minutes"]
         )
+        self.entry_card.add_field(
+            "fvg_structure_swing_strength",
+            "FVG Structure Swing Strength",
+            self.account["fvg_structure_swing_strength"],
+        )
         layout.addWidget(self.entry_card)
 
         self.account_card = FormCard(
@@ -426,6 +431,7 @@ class RiskExecutionWorkspace(QWidget):
             cross_plan and self.account["ema_cross_entry_confirmation_enabled"].isChecked(),
         )
         self.entry_card.set_row_visible("fvg_confirmation_enabled", fvg)
+        self.entry_card.set_row_visible("fvg_structure_swing_strength", fvg)
         self.entry_card.set_row_visible(
             "fvg_confirmation_minutes",
             fvg and self.account["fvg_confirmation_enabled"].isChecked(),
