@@ -9,6 +9,7 @@ FVG_MODE = "FAIR_VALUE_GAP"
 FVG_RULE_INDICATORS = frozenset({
     "FVG_GAP_SIZE_ATR",
     "FVG_STOP_BOUNDARY_DISTANCE_ATR",
+    "FVG_HTF_CONTEXT_ALIGNED",
     "FVG_AGE_BARS",
     "FVG_REVISIT_DEPTH_PCT",
     "FVG_CHOCH_ALIGNED",
@@ -132,6 +133,105 @@ def _fvg_market_structure_features(high, low, open_, close, atr, swing_strength=
             out["location_long"][i] = float(close[i] <= equilibrium)
             out["location_short"][i] = float(close[i] >= equilibrium)
     return out
+
+
+def higher_timeframe_fvg_context_alignment(
+    times,
+    high,
+    low,
+    close,
+    strategy_minutes,
+    context_minutes,
+):
+    """Project completed higher-timeframe FVG zones onto strategy bars causally.
+
+    The strategy timeframe is the execution/setup timeframe. A context gap
+    becomes visible only after its formation candle has fully closed. Bullish
+    zones stay active until a strategy candle closes below the zone; bearish
+    zones stay active until a strategy candle closes above it. Alignment is
+    true only when the current strategy candle overlaps an active zone.
+    """
+    strategy_minutes = int(strategy_minutes)
+    context_minutes = int(context_minutes)
+    if strategy_minutes <= 0 or context_minutes <= strategy_minutes:
+        raise ValueError("FVG context timeframe must be larger than strategy timeframe")
+    if context_minutes % strategy_minutes:
+        raise ValueError("FVG context timeframe must be an exact multiple of strategy timeframe")
+
+    high = np.asarray(high, dtype=float)
+    low = np.asarray(low, dtype=float)
+    close = np.asarray(close, dtype=float)
+    if high.shape != low.shape or high.shape != close.shape:
+        raise ValueError("FVG context candle arrays must have equal lengths")
+    ts = pd.DatetimeIndex(pd.to_datetime(times, utc=True))
+    if len(ts) != len(close):
+        raise ValueError("FVG context timestamps must align with candle arrays")
+
+    n = len(close)
+    long_aligned = np.zeros(n, dtype=float)
+    short_aligned = np.zeros(n, dtype=float)
+    if n == 0:
+        return {"LONG": long_aligned, "SHORT": short_aligned}
+
+    period = f"{context_minutes}min"
+    frame = pd.DataFrame(
+        {"timestamp": ts, "high": high, "low": low, "close": close}
+    )
+    frame["bucket"] = frame["timestamp"].dt.floor(period)
+    expected = context_minutes // strategy_minutes
+
+    completed = []
+    for bucket, group in frame.groupby("bucket", sort=True):
+        if len(group) != expected:
+            continue
+        expected_times = pd.date_range(
+            bucket, periods=expected, freq=f"{strategy_minutes}min", tz="UTC"
+        )
+        actual_times = pd.DatetimeIndex(group["timestamp"])
+        if not actual_times.equals(expected_times):
+            continue
+        completed.append(
+            {
+                "start": bucket,
+                "end": bucket + pd.Timedelta(minutes=context_minutes),
+                "high": float(group["high"].max()),
+                "low": float(group["low"].min()),
+                "close": float(group["close"].iloc[-1]),
+            }
+        )
+
+    active_long = []
+    active_short = []
+    htf_history = []
+    next_completed = 0
+
+    for i, now in enumerate(ts):
+        while next_completed < len(completed) and completed[next_completed]["end"] <= now:
+            bar = completed[next_completed]
+            htf_history.append(bar)
+            if len(htf_history) >= 3:
+                first = htf_history[-3]
+                current = htf_history[-1]
+                if current["low"] > first["high"]:
+                    active_long.append((first["high"], current["low"]))
+                if current["high"] < first["low"]:
+                    active_short.append((current["high"], first["low"]))
+            next_completed += 1
+
+        current_close = close[i]
+        if np.isfinite(current_close):
+            active_long = [zone for zone in active_long if current_close >= zone[0]]
+            active_short = [zone for zone in active_short if current_close <= zone[1]]
+
+        if np.isfinite(high[i]) and np.isfinite(low[i]):
+            long_aligned[i] = float(
+                any(low[i] <= top and high[i] >= bottom for bottom, top in active_long)
+            )
+            short_aligned[i] = float(
+                any(low[i] <= top and high[i] >= bottom for bottom, top in active_short)
+            )
+
+    return {"LONG": long_aligned, "SHORT": short_aligned}
 
 
 def first_revisit_context(high, low, close, atr=None, open_=None, swing_strength=2):
@@ -408,6 +508,20 @@ class FairValueGapMixin:
                 open_=self.open,
                 swing_strength=int(getattr(self.config, "fvg_structure_swing_strength", 2)),
             )
+            if bool(getattr(self.config, "fvg_context_enabled", False)):
+                self.fvg_htf_context = higher_timeframe_fvg_context_alignment(
+                    self.times,
+                    self.high,
+                    self.low,
+                    self.close,
+                    int(self.config.strategy_timeframe_minutes),
+                    int(getattr(self.config, "fvg_context_timeframe_minutes", 240)),
+                )
+            else:
+                self.fvg_htf_context = {
+                    "LONG": np.ones(len(self.close), dtype=float),
+                    "SHORT": np.ones(len(self.close), dtype=float),
+                }
 
     def _infer_signal_strategy_mode(self):
         for profile in self.config.strategy_profiles.values():
@@ -418,7 +532,14 @@ class FairValueGapMixin:
 
     def _selected_direction(self, i):
         if getattr(self, "signal_strategy_mode", "DI") == FVG_MODE:
-            return self.fvg_first_revisit[i]
+            direction = self.fvg_first_revisit[i]
+            if direction in {"LONG", "SHORT"} and bool(
+                getattr(self.config, "fvg_context_enabled", False)
+            ):
+                context = getattr(self, "fvg_htf_context", None)
+                if context is None or not bool(context[direction][i]):
+                    return None
+            return direction
         return super()._selected_direction(i)
 
     def _should_enter(self, i):
@@ -553,6 +674,13 @@ class FairValueGapMixin:
         return row
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
+        if indicator == "FVG_HTF_CONTEXT_ALIGNED":
+            if direction not in {"LONG", "SHORT"}:
+                return np.nan
+            context = getattr(self, "fvg_htf_context", None)
+            if context is None:
+                return 0.0
+            return float(context[direction][i])
         if indicator == "FVG_STOP_BOUNDARY_DISTANCE_ATR":
             if direction not in {"LONG", "SHORT"}:
                 return np.nan
