@@ -8,6 +8,7 @@ import pandas as pd
 FVG_MODE = "FAIR_VALUE_GAP"
 FVG_RULE_INDICATORS = frozenset({
     "FVG_GAP_SIZE_ATR",
+    "FVG_STOP_BOUNDARY_DISTANCE_ATR",
     "FVG_AGE_BARS",
     "FVG_REVISIT_DEPTH_PCT",
     "FVG_CHOCH_ALIGNED",
@@ -498,7 +499,11 @@ class FairValueGapMixin:
         }
 
     def _entry_filter_result(self, i, execution_i=None):
-        passed, reason = super()._entry_filter_result(i, execution_i)
+        self._fvg_rule_execution_i = execution_i
+        try:
+            passed, reason = super()._entry_filter_result(i, execution_i)
+        finally:
+            self._fvg_rule_execution_i = None
         if not passed or getattr(self, "signal_strategy_mode", "DI") != FVG_MODE:
             return passed, reason
         target = self._fvg_target_plan(i, execution_i)
@@ -548,6 +553,21 @@ class FairValueGapMixin:
         return row
 
     def _strategy_profile_rule_value(self, i, direction, profile, indicator):
+        if indicator == "FVG_STOP_BOUNDARY_DISTANCE_ATR":
+            if direction not in {"LONG", "SHORT"}:
+                return np.nan
+            if not hasattr(self, "fvg_stop_boundaries"):
+                return np.nan
+            boundary = float(self.fvg_stop_boundaries[direction][i])
+            atr = float(self.atr_values[i])
+            if not np.isfinite(boundary) or not np.isfinite(atr) or atr <= 0:
+                return np.nan
+            execution_i = getattr(self, "_fvg_rule_execution_i", None)
+            entry = self._fvg_expected_entry_price(i, execution_i, direction)
+            distance = entry - boundary if direction == "LONG" else boundary - entry
+            if not np.isfinite(distance) or distance < 0:
+                return np.nan
+            return distance / atr
         if indicator in FVG_RULE_INDICATORS:
             if direction not in {"LONG", "SHORT"}:
                 return np.nan
