@@ -150,6 +150,36 @@ _RESEARCH_NUMERIC_FIELDS = {
         "flow_persistence",
         1.0,
     ),
+    "AGG_TRADE_DELTA_PCT_1M": ("trade_flow_context", "trade_delta_pct_1m", 1.0),
+    "AGG_TRADE_DELTA_PCT_5M": ("trade_flow_context", "trade_delta_pct_5m", 1.0),
+    "AGG_TRADE_DELTA_PCT_15M": ("trade_flow_context", "trade_delta_pct_15m", 1.0),
+    "AGG_TRADE_DELTA_PCT_1H": ("trade_flow_context", "trade_delta_pct_1h", 1.0),
+    "AGG_CVD_1H": ("trade_flow_context", "cvd_1h", 1.0),
+    "AGG_CVD_CHANGE_1BAR": ("trade_flow_context", "cvd_change_1bar", 1.0),
+    "AGG_TRADE_INTENSITY_CHANGE": ("trade_flow_context", "trade_intensity_change", 1.0),
+    "AGG_TRADE_INTENSITY_1M": ("trade_flow_context", "trade_intensity_1m", 1.0),
+    "AGG_TRADE_INTENSITY_5M": ("trade_flow_context", "trade_intensity_5m", 1.0),
+    "AGG_TRADE_INTENSITY_15M": ("trade_flow_context", "trade_intensity_15m", 1.0),
+    "AGG_TRADE_INTENSITY_1H": ("trade_flow_context", "trade_intensity_1h", 1.0),
+    "AGG_LARGE_BUY_SHARE_15M": ("trade_flow_context", "large_buy_share_15m", 1.0),
+    "AGG_LARGE_SELL_SHARE_15M": ("trade_flow_context", "large_sell_share_15m", 1.0),
+    "AGG_TRADE_VWAP_DISTANCE_PCT_15M": (
+        "trade_flow_context", "trade_vwap_distance_pct_15m", 1.0
+    ),
+    "AGG_TRADE_VWAP_DISTANCE_PCT_1H": (
+        "trade_flow_context", "trade_vwap_distance_pct_1h", 1.0
+    ),
+    "BOOK_SPREAD_BPS": ("order_book_context", "book_spread_bps", 1.0),
+    "BOOK_IMBALANCE_L1": ("order_book_context", "book_imbalance_l1", 1.0),
+    "BOOK_MICROPRICE_OFFSET_BPS": (
+        "order_book_context", "book_microprice_offset_bps", 1.0
+    ),
+    "BOOK_IMBALANCE_CHANGE": (
+        "order_book_context", "book_imbalance_l1_change", 1.0
+    ),
+    "BOOK_MICROPRICE_OFFSET_CHANGE_BPS": (
+        "order_book_context", "book_microprice_offset_change_bps", 1.0
+    ),
     "ICH_TK_SPREAD_ATR": ("ichimoku_context", "tk_spread_atr", 1.0),
     "ICH_TENKAN_DISTANCE_ATR": ("ichimoku_context", "tenkan_distance_atr", 1.0),
     "ICH_KIJUN_DISTANCE_ATR": ("ichimoku_context", "kijun_distance_atr", 1.0),
@@ -166,6 +196,9 @@ _RESEARCH_CATEGORICAL_FIELDS = {
     "FUNDING_EXTREME_POSITIVE": ("funding_context", "funding_extreme_positive"),
     "FUNDING_EXTREME_NEGATIVE": ("funding_context", "funding_extreme_negative"),
     "MARK_INDEX_BASIS_STATE": ("basis_context", "mark_index_basis_state"),
+    "AGG_CVD_PRICE_STATE": ("trade_flow_context", "cvd_price_state"),
+    "AGG_FLOW_RESPONSE_STATE": ("trade_flow_context", "flow_response_state"),
+    "BOOK_PRESSURE_STATE": ("order_book_context", "book_pressure_state"),
     "ICH_PRICE_VS_CLOUD": ("ichimoku_context", "price_vs_cloud"),
     "ICH_TK_STATE": ("ichimoku_context", "tk_state"),
     "ICH_TK_CROSS": ("ichimoku_context", "tk_cross"),
