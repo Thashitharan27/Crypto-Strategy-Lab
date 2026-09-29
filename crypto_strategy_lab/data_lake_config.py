@@ -377,6 +377,8 @@ class ExecutionConfig:
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
     fvg_confirmation_minutes: int = 15
+    fvg_context_enabled: bool = False
+    fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
     initial_equity: float = 1000.0
     risk_mode: str = "ATR"
@@ -607,6 +609,11 @@ class ResearchRunConfig:
             raise ValueError("EMA cross entry confirmation R must be positive")
         if execution.fvg_structure_swing_strength < 1 or execution.fvg_structure_swing_strength > 50:
             raise ValueError("FVG structure swing strength must be between 1 and 50")
+        if execution.fvg_context_enabled:
+            if execution.fvg_context_timeframe_minutes <= data.strategy_timeframe_minutes:
+                raise ValueError("FVG context timeframe must be larger than strategy timeframe")
+            if execution.fvg_context_timeframe_minutes % data.strategy_timeframe_minutes:
+                raise ValueError("FVG context timeframe must be an exact multiple of strategy timeframe")
         if execution.fvg_confirmation_enabled:
             if not data.use_intrabar_data:
                 raise ValueError("FVG confirmation requires intrabar data")

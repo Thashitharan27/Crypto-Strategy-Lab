@@ -1,7 +1,13 @@
 import numpy as np
+import pandas as pd
 
 from crypto_strategy_core.rules import RULE_INDICATORS
-from crypto_strategy_lab.fair_value_gap import FairValueGapMixin, first_revisit_context, first_revisit_signals
+from crypto_strategy_lab.fair_value_gap import (
+    FairValueGapMixin,
+    first_revisit_context,
+    first_revisit_signals,
+    higher_timeframe_fvg_context_alignment,
+)
 from crypto_strategy_lab.gui.rule_strategy_builder import EVIDENCE_LABELS
 from crypto_strategy_lab.strategy_rule_model import (
     MARKET_PERMISSIONS,
@@ -174,3 +180,63 @@ def test_fvg_stop_boundary_distance_rule_is_execution_aware_and_exposed():
 
     probe._fvg_rule_execution_i = None
     assert probe._strategy_profile_rule_value(0, "LONG", None, indicator) == 0.5
+
+
+
+def test_higher_timeframe_fvg_context_is_causal_and_overlap_gated():
+    times = np.array(
+        pd.date_range("2026-01-01T00:00:00Z", periods=14, freq="15min")
+        .tz_localize(None)
+        .to_numpy()
+    )
+    # Three complete 1h candles are formed by the first 12 strategy bars.
+    # Hour 3 has a bullish FVG over hour 1: low(3)=102 > high(1)=100.
+    high = np.array(
+        [100, 99, 98, 97, 106, 108, 109, 110, 106, 107, 108, 109, 101.8, 100.2],
+        dtype=float,
+    )
+    low = np.array(
+        [95, 96, 96, 95, 103, 104, 105, 105, 102, 103, 104, 103, 100.5, 98.5],
+        dtype=float,
+    )
+    close = np.array(
+        [98, 98, 97, 96, 105, 107, 108, 109, 104, 105, 106, 107, 101.2, 99.0],
+        dtype=float,
+    )
+
+    context = higher_timeframe_fvg_context_alignment(
+        times, high, low, close, strategy_minutes=15, context_minutes=60
+    )
+
+    # The 1h FVG is unavailable until the third 1h formation candle closes.
+    assert np.all(context["LONG"][:12] == 0.0)
+    # First strategy bar after the completed HTF candle overlaps 100-102.
+    assert context["LONG"][12] == 1.0
+    # A close below the bullish context invalidates it on the next bar.
+    assert context["LONG"][13] == 0.0
+    assert np.all(context["SHORT"] == 0.0)
+
+
+def test_fvg_direction_can_require_higher_timeframe_context():
+    class Base:
+        def _selected_direction(self, i):
+            return "BASE"
+
+    class Probe(FairValueGapMixin, Base):
+        pass
+
+    p = Probe()
+    p.signal_strategy_mode = "FAIR_VALUE_GAP"
+    p.config = type("Cfg", (), {"fvg_context_enabled": True})()
+    p.fvg_first_revisit = np.array(["LONG", "LONG"], dtype=object)
+    p.fvg_htf_context = {
+        "LONG": np.array([0.0, 1.0]),
+        "SHORT": np.array([0.0, 0.0]),
+    }
+    assert p._selected_direction(0) is None
+    assert p._selected_direction(1) == "LONG"
+
+
+def test_higher_timeframe_context_rule_is_exposed():
+    assert "FVG_HTF_CONTEXT_ALIGNED" in RULE_INDICATORS
+    assert EVIDENCE_LABELS["FVG_HTF_CONTEXT_ALIGNED"] == "Higher-TF FVG Context Aligned (0/1)"

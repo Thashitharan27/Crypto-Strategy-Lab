@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from crypto_strategy_lab.data_lake_config import (
     ResearchRunConfig,
     build_data_lake_backtest_config,
@@ -103,3 +105,40 @@ def test_data_lake_gui_v2_migrates_exact_legacy_sr_geometry_only() -> None:
     assert custom["sr_zone_padding_atr"] == 0.20
     assert custom["sr_zone_max_cluster_span_atr"] == 1.00
 
+
+
+
+def test_fvg_context_timeframe_must_be_higher_and_aligned() -> None:
+    base = ResearchRunConfig()
+    valid = replace(
+        base,
+        data=replace(base.data, strategy_timeframe_minutes=15),
+        execution=replace(
+            base.execution,
+            fvg_context_enabled=True,
+            fvg_context_timeframe_minutes=240,
+        ),
+    )
+    valid.validate()
+
+    too_small = replace(
+        valid,
+        execution=replace(valid.execution, fvg_context_timeframe_minutes=15),
+    )
+    try:
+        too_small.validate()
+    except ValueError as exc:
+        assert "larger than strategy timeframe" in str(exc)
+    else:
+        raise AssertionError("accepted same-timeframe FVG context")
+
+    misaligned = replace(
+        valid,
+        execution=replace(valid.execution, fvg_context_timeframe_minutes=50),
+    )
+    try:
+        misaligned.validate()
+    except ValueError as exc:
+        assert "exact multiple" in str(exc)
+    else:
+        raise AssertionError("accepted misaligned FVG context timeframe")

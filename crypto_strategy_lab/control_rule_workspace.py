@@ -86,6 +86,7 @@ EVIDENCE_LABELS = {
     "ATR_PCT": "ATR % (decimal)",
     "FVG_GAP_SIZE_ATR": "FVG Size / Formation ATR",
     "FVG_STOP_BOUNDARY_DISTANCE_ATR": "FVG Stop-Boundary Distance / ATR",
+    "FVG_HTF_CONTEXT_ALIGNED": "Higher-TF FVG Context Aligned (0/1)",
     "FVG_AGE_BARS": "FVG Bars Since Formation",
     "FVG_REVISIT_DEPTH_PCT": "FVG First Revisit Depth (0–1)",
     "FVG_CHOCH_ALIGNED": "FVG Formation Has Aligned CHoCH (0/1)",
