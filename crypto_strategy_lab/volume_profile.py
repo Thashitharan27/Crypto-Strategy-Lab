@@ -416,7 +416,12 @@ def _profile_snapshot(engine, i: int, direction: str, timeframe_minutes: int):
 
 
 class VolumeProfileMixin:
-    """Expose exact aggTrade VP when available, otherwise causal OHLCV fallback."""
+    """Expose only exact aggTrade-backed Volume Profile to trading rules.
+
+    OHLCV approximation is retained for non-trading research/visualization only.
+    Entry/Veto/Flip rules must never silently downgrade to candle-distributed
+    volume because that changes decision quality without an explicit failure.
+    """
 
     def _exact_volume_profile_rule_value(
         self, i, direction, indicator, timeframe_minutes=0
@@ -473,31 +478,33 @@ class VolumeProfileMixin:
     ):
         if indicator not in VOLUME_PROFILE_RULE_INDICATORS:
             raise KeyError(indicator)
-        if indicator not in {"VP_BUY_ABSORPTION", "VP_SELL_ABSORPTION"}:
-            exact = self._exact_volume_profile_rule_value(
-                i, direction, indicator, timeframe_minutes
-            )
-            if np.isfinite(exact) or np.isinf(exact):
-                return exact
-        snapshot = _profile_snapshot(
-            self, int(i), str(direction).upper(), int(timeframe_minutes or 0)
-        )
-        if snapshot is None:
-            return np.nan
-        raw = snapshot.get(indicator)
-        if indicator in {"VP_POSITION", "VP_VALUE_MIGRATION"}:
-            from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_VALUE_CODES
-            return CATEGORICAL_VALUE_CODES[indicator].get(str(raw).upper(), np.nan)
-        if indicator in {"VP_NEAR_HVN"}:
-            return 1.0 if bool(raw) else 0.0
+        # Absorption rules are deliberately sourced from the aggTrade-derived
+        # flow-response state, not from the lower-resolution OHLCV profile.
         if indicator in {"VP_BUY_ABSORPTION", "VP_SELL_ABSORPTION"}:
-            try:
-                value = float(raw)
-            except (TypeError, ValueError):
-                return np.nan
-            return value if np.isfinite(value) else np.nan
-        try:
-            value = float(raw)
-        except (TypeError, ValueError):
-            return np.nan
-        return value if np.isfinite(value) or np.isinf(value) else np.nan
+            reader = getattr(self, "_prepared_research_raw_value", None)
+            if not callable(reader):
+                raise RuntimeError(
+                    "Volume Profile rule requires aggTrade research, but no prepared "
+                    "trade_flow_context is available. OHLCV fallback is disabled for "
+                    "Entry/Veto/Flip decisions."
+                )
+            raw = reader(int(i), "trade_flow_context", "flow_response_state")
+            wanted = "BUY_ABSORPTION" if indicator == "VP_BUY_ABSORPTION" else "SELL_ABSORPTION"
+            if raw is None or raw is pd.NA or str(raw).upper() == "UNKNOWN":
+                raise RuntimeError(
+                    "Volume Profile absorption rule reached a decision without usable "
+                    "aggTrade coverage. OHLCV fallback is disabled; complete the "
+                    "aggTrades archive for this period before running the strategy."
+                )
+            return 1.0 if str(raw).upper() == wanted else 0.0
+
+        exact = self._exact_volume_profile_rule_value(
+            i, direction, indicator, timeframe_minutes
+        )
+        if np.isfinite(exact) or np.isinf(exact):
+            return exact
+        raise RuntimeError(
+            "Volume Profile rule reached a decision without exact aggTrade-backed "
+            "volume-at-price evidence. OHLCV fallback is disabled for trading "
+            "decisions; complete/validate aggTrades coverage for this period."
+        )
