@@ -31,6 +31,10 @@ from crypto_strategy_lab.strategy_rule_model import (
     CATEGORICAL_VALUE_CODES,
     ICHIMOKU_RULE_EVIDENCE,
 )
+from crypto_strategy_lab.volume_profile import (
+    VOLUME_PROFILE_RULE_INDICATORS,
+    VolumeProfileMixin,
+)
 
 
 DI_PRESSURE_STATE_CODES = CATEGORICAL_VALUE_CODES["DI_PRESSURE_STATE"]
@@ -191,7 +195,7 @@ _MR_RULE_INDICATORS = frozenset(
 )
 
 
-class RuleAwareDataLakeProductionBacktestEngine(FairValueGapMixin, MtfSrReactionMixin, Ema920PullbackMixin, DataLakeProductionBacktestEngine):
+class RuleAwareDataLakeProductionBacktestEngine(VolumeProfileMixin, FairValueGapMixin, MtfSrReactionMixin, Ema920PullbackMixin, DataLakeProductionBacktestEngine):
     """Current native runtime with prepared research evidence available to rules."""
 
     @classmethod
@@ -638,6 +642,8 @@ class RuleAwareDataLakeProductionBacktestEngine(FairValueGapMixin, MtfSrReaction
             return self._prepared_pressure_value(i, direction, indicator)
         if indicator in _MR_RULE_INDICATORS:
             return self._prepared_mean_reversion_value(i, direction, indicator)
+        if indicator in VOLUME_PROFILE_RULE_INDICATORS:
+            return self._volume_profile_rule_value(i, direction, indicator, 0)
         if indicator in MTF_SR_REACTION_RULE_INDICATORS:
             return self._prepared_mtf_sr_reaction_value(i, direction, indicator, 0)
         if indicator in SR_TRADE_RULE_INDICATORS:
@@ -662,6 +668,10 @@ class RuleAwareDataLakeProductionBacktestEngine(FairValueGapMixin, MtfSrReaction
         if indicator in ICHIMOKU_RULE_EVIDENCE and sr_timeframe is not None:
             value = self._prepared_ichimoku_value_for_timeframe(
                 i, indicator, sr_timeframe
+            )
+        elif indicator in VOLUME_PROFILE_RULE_INDICATORS and sr_timeframe is not None:
+            value = self._volume_profile_rule_value(
+                i, direction, indicator, sr_timeframe
             )
         elif indicator in MTF_SR_REACTION_RULE_INDICATORS and sr_timeframe is not None:
             value = self._prepared_mtf_sr_reaction_value(
