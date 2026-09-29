@@ -1,6 +1,8 @@
 import numpy as np
 
+from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.fair_value_gap import FairValueGapMixin, first_revisit_context, first_revisit_signals
+from crypto_strategy_lab.gui.rule_strategy_builder import EVIDENCE_LABELS
 from crypto_strategy_lab.strategy_rule_model import (
     MARKET_PERMISSIONS,
     compile_profiles,
@@ -143,3 +145,32 @@ def test_fvg_target_uses_selected_r_and_requires_buffered_room():
     probe.config.fvg_target_buffer_atr = 0.05
     probe.fvg_target_boundaries["LONG"][0] = 16.3
     assert probe._fvg_target_plan(0)["reason"] == "FVG_TARGET_INSUFFICIENT_ROOM"
+
+
+def test_fvg_stop_boundary_distance_rule_is_execution_aware_and_exposed():
+    indicator = "FVG_STOP_BOUNDARY_DISTANCE_ATR"
+    assert indicator in RULE_INDICATORS
+    assert EVIDENCE_LABELS[indicator] == "FVG Stop-Boundary Distance / ATR"
+
+    class Base:
+        def _expected_entry_price(self, i, execution_i, direction):
+            index = i if execution_i is None else execution_i
+            return float(self.open[index])
+
+    class Probe(FairValueGapMixin, Base):
+        pass
+
+    probe = Probe()
+    probe.open = np.array([11.0, 12.0])
+    probe.atr_values = np.array([2.0, 2.0])
+    probe.fvg_stop_boundaries = {
+        "LONG": np.array([10.0, np.nan]),
+        "SHORT": np.array([14.0, np.nan]),
+    }
+    probe._fvg_rule_execution_i = 1
+
+    assert probe._strategy_profile_rule_value(0, "LONG", None, indicator) == 1.0
+    assert probe._strategy_profile_rule_value(0, "SHORT", None, indicator) == 1.0
+
+    probe._fvg_rule_execution_i = None
+    assert probe._strategy_profile_rule_value(0, "LONG", None, indicator) == 0.5
