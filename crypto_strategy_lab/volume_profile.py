@@ -1,10 +1,9 @@
 """Causal rolling Volume Profile evidence for strategy rules.
 
-The profile is built only from completed candles available before the decision
-timestamp.  With OHLCV input, each candle's volume is distributed uniformly
-across the price bins crossed by that candle.  This is an approximation of
-volume-at-price (not tick-exact market profile); when raw trade data is absent it
-preserves causality and keeps the feature usable across the existing Data Lake.
+When aggTrades are available, the native rule path prefers the high-resolution
+profile derived from actual aggTrade price x quantity, compacted causally into
+completed 1-minute volume-at-price rows. OHLCV distribution remains a fallback
+for ranges without aggTrade coverage.
 
 Higher-timeframe profiles are reconstructed only from complete, contiguous
 strategy-candle buckets and become visible after the higher-timeframe bar closes.
@@ -417,13 +416,69 @@ def _profile_snapshot(engine, i: int, direction: str, timeframe_minutes: int):
 
 
 class VolumeProfileMixin:
-    """Expose rolling Volume Profile evidence to the native rule engine."""
+    """Expose exact aggTrade VP when available, otherwise causal OHLCV fallback."""
+
+    def _exact_volume_profile_rule_value(
+        self, i, direction, indicator, timeframe_minutes=0
+    ):
+        config = getattr(self, "config", None)
+        strategy_minutes = int(getattr(config, "strategy_timeframe_minutes", 0) or 0)
+        requested = int(timeframe_minutes or 0)
+        requested = strategy_minutes if requested in {0, strategy_minutes} else requested
+        prefix = (
+            "strategy" if requested == strategy_minutes
+            else {60: "1h", 240: "4h", 1440: "1d"}.get(requested)
+        )
+        if prefix is None:
+            return np.nan
+        mapping = {
+            "VP_POSITION": "position",
+            "VP_POC_DISTANCE_ATR": "poc_distance_atr",
+            "VP_VAH_DISTANCE_ATR": "vah_distance_atr",
+            "VP_VAL_DISTANCE_ATR": "val_distance_atr",
+            "VP_NEAR_HVN": "near_hvn",
+            "VP_HVN_DISTANCE_ATR": "hvn_distance_atr",
+            "VP_HVN_STRENGTH": "hvn_strength",
+            "VP_ROOM_TO_OPPOSING_HVN_ATR": (
+                "room_long_atr" if str(direction).upper() == "LONG" else "room_short_atr"
+            ),
+            "VP_LOW_VOLUME_PATH_SCORE": (
+                "low_volume_path_long" if str(direction).upper() == "LONG"
+                else "low_volume_path_short"
+            ),
+            "VP_VALUE_MIGRATION": "value_migration",
+            "VP_ACCUMULATION_SCORE": "accumulation_score",
+            "VP_DISTRIBUTION_SCORE": "distribution_score",
+        }
+        suffix = mapping.get(indicator)
+        if suffix is None:
+            return np.nan
+        reader = getattr(self, "_prepared_research_raw_value", None)
+        if not callable(reader):
+            return np.nan
+        raw = reader(int(i), "trade_flow_context", f"vp_exact_{prefix}_{suffix}")
+        if raw is None or raw is pd.NA:
+            return np.nan
+        if indicator in {"VP_POSITION", "VP_VALUE_MIGRATION"}:
+            from crypto_strategy_lab.strategy_rule_model import CATEGORICAL_VALUE_CODES
+            return CATEGORICAL_VALUE_CODES[indicator].get(str(raw).upper(), np.nan)
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return np.nan
+        return value if np.isfinite(value) or np.isinf(value) else np.nan
 
     def _volume_profile_rule_value(
         self, i, direction, indicator, timeframe_minutes=0
     ):
         if indicator not in VOLUME_PROFILE_RULE_INDICATORS:
             raise KeyError(indicator)
+        if indicator not in {"VP_BUY_ABSORPTION", "VP_SELL_ABSORPTION"}:
+            exact = self._exact_volume_profile_rule_value(
+                i, direction, indicator, timeframe_minutes
+            )
+            if np.isfinite(exact) or np.isinf(exact):
+                return exact
         snapshot = _profile_snapshot(
             self, int(i), str(direction).upper(), int(timeframe_minutes or 0)
         )
