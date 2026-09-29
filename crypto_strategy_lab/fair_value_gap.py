@@ -170,8 +170,13 @@ def higher_timeframe_fvg_context_alignment(
     n = len(close)
     long_aligned = np.zeros(n, dtype=float)
     short_aligned = np.zeros(n, dtype=float)
+    long_zone_id = np.full(n, -1, dtype=int)
+    short_zone_id = np.full(n, -1, dtype=int)
     if n == 0:
-        return {"LONG": long_aligned, "SHORT": short_aligned}
+        return {
+            "LONG": long_aligned, "SHORT": short_aligned,
+            "LONG_ZONE_ID": long_zone_id, "SHORT_ZONE_ID": short_zone_id,
+        }
 
     period = f"{context_minutes}min"
     frame = pd.DataFrame(
@@ -185,7 +190,7 @@ def higher_timeframe_fvg_context_alignment(
         if len(group) != expected:
             continue
         expected_times = pd.date_range(
-            bucket, periods=expected, freq=f"{strategy_minutes}min", tz="UTC"
+            bucket, periods=expected, freq=f"{strategy_minutes}min"
         )
         actual_times = pd.DatetimeIndex(group["timestamp"])
         if not actual_times.equals(expected_times):
@@ -204,6 +209,7 @@ def higher_timeframe_fvg_context_alignment(
     active_short = []
     htf_history = []
     next_completed = 0
+    next_zone_id = 1
 
     for i, now in enumerate(ts):
         while next_completed < len(completed) and completed[next_completed]["end"] <= now:
@@ -213,25 +219,44 @@ def higher_timeframe_fvg_context_alignment(
                 first = htf_history[-3]
                 current = htf_history[-1]
                 if current["low"] > first["high"]:
-                    active_long.append((first["high"], current["low"]))
+                    active_long.append((next_zone_id, first["high"], current["low"]))
+                    next_zone_id += 1
                 if current["high"] < first["low"]:
-                    active_short.append((current["high"], first["low"]))
+                    active_short.append((next_zone_id, current["high"], first["low"]))
+                    next_zone_id += 1
             next_completed += 1
 
         current_close = close[i]
         if np.isfinite(current_close):
-            active_long = [zone for zone in active_long if current_close >= zone[0]]
-            active_short = [zone for zone in active_short if current_close <= zone[1]]
+            active_long = [
+                zone for zone in active_long if current_close >= zone[1]
+            ]
+            active_short = [
+                zone for zone in active_short if current_close <= zone[2]
+            ]
 
         if np.isfinite(high[i]) and np.isfinite(low[i]):
-            long_aligned[i] = float(
-                any(low[i] <= top and high[i] >= bottom for bottom, top in active_long)
-            )
-            short_aligned[i] = float(
-                any(low[i] <= top and high[i] >= bottom for bottom, top in active_short)
-            )
+            long_matches = [
+                zone_id for zone_id, bottom, top in active_long
+                if low[i] <= top and high[i] >= bottom
+            ]
+            short_matches = [
+                zone_id for zone_id, bottom, top in active_short
+                if low[i] <= top and high[i] >= bottom
+            ]
+            if long_matches:
+                long_aligned[i] = 1.0
+                long_zone_id[i] = max(long_matches)
+            if short_matches:
+                short_aligned[i] = 1.0
+                short_zone_id[i] = max(short_matches)
 
-    return {"LONG": long_aligned, "SHORT": short_aligned}
+    return {
+        "LONG": long_aligned,
+        "SHORT": short_aligned,
+        "LONG_ZONE_ID": long_zone_id,
+        "SHORT_ZONE_ID": short_zone_id,
+    }
 
 
 def first_revisit_context(high, low, close, atr=None, open_=None, swing_strength=2):
@@ -517,10 +542,22 @@ class FairValueGapMixin:
                     int(self.config.strategy_timeframe_minutes),
                     int(getattr(self.config, "fvg_context_timeframe_minutes", 240)),
                 )
+                seen_context_zones = set()
+                for signal_i, direction in enumerate(self.fvg_first_revisit):
+                    if direction not in {"LONG", "SHORT"}:
+                        continue
+                    zone_id = int(self.fvg_htf_context[f"{direction}_ZONE_ID"][signal_i])
+                    key = (direction, zone_id)
+                    if zone_id < 0 or key in seen_context_zones:
+                        self.fvg_first_revisit[signal_i] = None
+                    else:
+                        seen_context_zones.add(key)
             else:
                 self.fvg_htf_context = {
                     "LONG": np.ones(len(self.close), dtype=float),
                     "SHORT": np.ones(len(self.close), dtype=float),
+                    "LONG_ZONE_ID": np.full(len(self.close), -1, dtype=int),
+                    "SHORT_ZONE_ID": np.full(len(self.close), -1, dtype=int),
                 }
 
     def _infer_signal_strategy_mode(self):
