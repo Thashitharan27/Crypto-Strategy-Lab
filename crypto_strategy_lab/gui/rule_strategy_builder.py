@@ -228,6 +228,29 @@ EVIDENCE_LABELS = {
     "TAKER_DELTA_PCT_15M": "Taker Delta 15m (decimal)",
     "TAKER_DELTA_PCT_1H": "Taker Delta 1h (decimal)",
     "TAKER_FLOW_PERSISTENCE": "Taker Flow Persistence (0–1)",
+    "AGG_TRADE_DELTA_PCT_1M": "AggTrades — Delta 1m (decimal)",
+    "AGG_TRADE_DELTA_PCT_5M": "AggTrades — Delta 5m (decimal)",
+    "AGG_TRADE_DELTA_PCT_15M": "AggTrades — Delta 15m (decimal)",
+    "AGG_TRADE_DELTA_PCT_1H": "AggTrades — Delta 1h (decimal)",
+    "AGG_CVD_1H": "AggTrades — CVD 1h",
+    "AGG_CVD_CHANGE_1BAR": "AggTrades — CVD Change vs Prior Strategy Bar",
+    "AGG_TRADE_INTENSITY_CHANGE": "AggTrades — Trade Intensity Change",
+    "AGG_TRADE_INTENSITY_1M": "AggTrades — Trade Intensity 1m",
+    "AGG_TRADE_INTENSITY_5M": "AggTrades — Trade Intensity 5m",
+    "AGG_TRADE_INTENSITY_15M": "AggTrades — Trade Intensity 15m",
+    "AGG_TRADE_INTENSITY_1H": "AggTrades — Trade Intensity 1h",
+    "AGG_LARGE_BUY_SHARE_15M": "AggTrades — Large Buy Share 15m",
+    "AGG_LARGE_SELL_SHARE_15M": "AggTrades — Large Sell Share 15m",
+    "AGG_TRADE_VWAP_DISTANCE_PCT_15M": "AggTrades — Price vs Trade VWAP 15m (%)",
+    "AGG_TRADE_VWAP_DISTANCE_PCT_1H": "AggTrades — Price vs Trade VWAP 1h (%)",
+    "AGG_CVD_PRICE_STATE": "AggTrades — CVD / Price State",
+    "AGG_FLOW_RESPONSE_STATE": "AggTrades — Flow Response / Absorption State",
+    "BOOK_SPREAD_BPS": "Book Ticker — Spread (bps)",
+    "BOOK_IMBALANCE_L1": "Book Ticker — L1 Bid/Ask Imbalance",
+    "BOOK_MICROPRICE_OFFSET_BPS": "Book Ticker — Microprice Offset (bps)",
+    "BOOK_IMBALANCE_CHANGE": "Book Ticker — L1 Imbalance Change",
+    "BOOK_MICROPRICE_OFFSET_CHANGE_BPS": "Book Ticker — Microprice Offset Change (bps)",
+    "BOOK_PRESSURE_STATE": "Book Ticker — Pressure State",
 }
 LEGACY_SR_AUTHORING_EVIDENCE = frozenset(
     {
@@ -370,6 +393,28 @@ EVIDENCE_GROUPS = (
         ),
     ),
     (
+        "Detailed Trade Flow — AggTrades",
+        (
+            "AGG_TRADE_DELTA_PCT_1M", "AGG_TRADE_DELTA_PCT_5M",
+            "AGG_TRADE_DELTA_PCT_15M", "AGG_TRADE_DELTA_PCT_1H",
+            "AGG_CVD_1H", "AGG_CVD_CHANGE_1BAR",
+            "AGG_TRADE_INTENSITY_CHANGE", "AGG_TRADE_INTENSITY_1M",
+            "AGG_TRADE_INTENSITY_5M", "AGG_TRADE_INTENSITY_15M",
+            "AGG_TRADE_INTENSITY_1H", "AGG_LARGE_BUY_SHARE_15M",
+            "AGG_LARGE_SELL_SHARE_15M", "AGG_TRADE_VWAP_DISTANCE_PCT_15M",
+            "AGG_TRADE_VWAP_DISTANCE_PCT_1H", "AGG_CVD_PRICE_STATE",
+            "AGG_FLOW_RESPONSE_STATE",
+        ),
+    ),
+    (
+        "Order Book — Book Ticker",
+        (
+            "BOOK_SPREAD_BPS", "BOOK_IMBALANCE_L1",
+            "BOOK_MICROPRICE_OFFSET_BPS", "BOOK_IMBALANCE_CHANGE",
+            "BOOK_MICROPRICE_OFFSET_CHANGE_BPS", "BOOK_PRESSURE_STATE",
+        ),
+    ),
+    (
         "Support & Resistance — Trade Context",
         (
             "SR_ENTRY_RELATION",
@@ -503,6 +548,27 @@ EVIDENCE_MENU_TREE = (
                 "TAKER_BUY_SELL_RATIO", "TAKER_DELTA_PCT",
                 "TAKER_DELTA_PCT_15M", "TAKER_DELTA_PCT_1H",
                 "TAKER_FLOW_PERSISTENCE",
+            )),
+        ),
+    ),
+    (
+        "Microstructure",
+        (
+            ("AggTrades / Detailed Flow", (
+                "AGG_TRADE_DELTA_PCT_1M", "AGG_TRADE_DELTA_PCT_5M",
+                "AGG_TRADE_DELTA_PCT_15M", "AGG_TRADE_DELTA_PCT_1H",
+                "AGG_CVD_1H", "AGG_CVD_CHANGE_1BAR",
+                "AGG_TRADE_INTENSITY_CHANGE", "AGG_TRADE_INTENSITY_1M",
+                "AGG_TRADE_INTENSITY_5M", "AGG_TRADE_INTENSITY_15M",
+                "AGG_TRADE_INTENSITY_1H", "AGG_LARGE_BUY_SHARE_15M",
+                "AGG_LARGE_SELL_SHARE_15M", "AGG_TRADE_VWAP_DISTANCE_PCT_15M",
+                "AGG_TRADE_VWAP_DISTANCE_PCT_1H", "AGG_CVD_PRICE_STATE",
+                "AGG_FLOW_RESPONSE_STATE",
+            )),
+            ("Book Ticker", (
+                "BOOK_SPREAD_BPS", "BOOK_IMBALANCE_L1",
+                "BOOK_MICROPRICE_OFFSET_BPS", "BOOK_IMBALANCE_CHANGE",
+                "BOOK_MICROPRICE_OFFSET_CHANGE_BPS", "BOOK_PRESSURE_STATE",
             )),
         ),
     ),
@@ -1662,7 +1728,7 @@ class RuleStrategyBuilder(QWidget):
         self.enable_mr.setChecked(True)
         research_layout.addWidget(self.enable_mr)
         self.research_status = QLabel(
-            "S/R · Multi-TF Price Action · OI · Funding · Positioning/Basis · Taker Flow are rule-ready. Detailed Trade Flow · Order Book remain Analyze Only until dedicated rule dependencies are added."
+            "S/R · Multi-TF Price Action · OI · Funding · Positioning/Basis · Taker Flow · Detailed AggTrade Flow · Book Ticker are rule-ready. Optional Book Depth remains research-only."
         )
         self.research_status.setWordWrap(True)
         self.research_status.setStyleSheet("color:#52606d")
@@ -1972,12 +2038,12 @@ class RuleStrategyBuilder(QWidget):
             "Taker Flow",
         ]
         items.append(
-            "Trade Flow ON" if features.trade_flow_enabled else "Trade Flow Off"
+            "AggTrade Flow ON" if features.trade_flow_enabled else "AggTrade Flow Off"
         )
         items.append(
-            "Order Book ON" if features.order_book_enabled else "Order Book Off"
+            "Book Ticker/Order Book ON" if features.order_book_enabled else "Book Ticker/Order Book Off"
         )
         self.research_status.setText(
             " · ".join(items)
-            + " — S/R and lightweight futures context are rule-ready; detailed Trade Flow and Order Book remain research-only."
+            + " — S/R, detailed AggTrade flow and Book Ticker context are rule-ready; Book Depth remains research-only."
         )
