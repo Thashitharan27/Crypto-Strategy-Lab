@@ -325,7 +325,7 @@ class TradeFlowContextFeatureProvider:
         strategy_minutes = int(
             interval_to_timedelta(request.strategy_interval).total_seconds() // 60
         )
-        if strategy_minutes > 0 and "volume_at_price_json" in agg.columns:
+        if strategy_minutes > 0:
             exact = exact_profile_frame(
                 agg,
                 klines.reset_index(drop=True),
