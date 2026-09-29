@@ -68,6 +68,7 @@ class BacktestConfig:
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
     fvg_confirmation_minutes: int = 15
+    fvg_structure_swing_strength: int = 2
     entry_interval: int = 1
     enable_di_direction_selection: bool = True
     enable_di_pressure_analysis: bool = True
@@ -148,6 +149,8 @@ class BacktestConfig:
             raise ValueError("intrabar timeframe must be less than strategy timeframe")
         if self.ema_cross_entry_confirmation_enabled and self.ema_cross_entry_confirmation_r <= 0:
             raise ValueError("EMA cross entry confirmation R must be positive")
+        if self.fvg_structure_swing_strength < 1 or self.fvg_structure_swing_strength > 50:
+            raise ValueError("FVG structure swing strength must be between 1 and 50")
         if self.fvg_confirmation_enabled:
             if not self.use_intrabar_data:
                 raise ValueError("FVG confirmation requires intrabar data")
