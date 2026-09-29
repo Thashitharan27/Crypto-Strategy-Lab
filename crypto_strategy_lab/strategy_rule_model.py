@@ -466,6 +466,15 @@ def is_volume_profile_evidence(evidence: str) -> bool:
     return str(evidence).upper() in VOLUME_PROFILE_RULE_INDICATORS
 
 
+def uses_volume_profile_rules(*rule_groups) -> bool:
+    return any(
+        _rule_group_enabled(rule)
+        and is_volume_profile_evidence(rule.get("evidence", ""))
+        for group in rule_groups
+        for rule in (group or ())
+    )
+
+
 def is_context_timeframe_evidence(evidence: str) -> bool:
     return (
         is_support_resistance_evidence(evidence)
