@@ -391,8 +391,7 @@ class TradeAggregateStore:
                         for row in rows.itertuples(index=False)
                     ],
                     separators=(",", ":"),
-                ),
-                include_groups=False,
+                )
             )
             grouped["volume_at_price_json"] = vap_json
 
