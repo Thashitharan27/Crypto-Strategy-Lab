@@ -287,3 +287,20 @@ def test_empty_frame_gets_stable_bayesian_schema():
     assert "bayes_take_60_min20" in scored
     assert "bayes_actual_evidence_families" in scored
     assert "bayes_actual_microstructure_log_odds_lift" in scored
+
+
+def test_nullable_microstructure_coverage_flags_do_not_crash_bayesian_enrichment():
+    rows = []
+    for day in range(1, 4):
+        row = _rich_trade(good=True, pnl=1.0, day=day)
+        row["trade_source_covered"] = pd.NA
+        row["book_ticker_observed"] = pd.NA
+        row["book_ticker_stale"] = pd.NA
+        row["book_depth_observed"] = pd.NA
+        row["book_depth_stale"] = pd.NA
+        rows.append(row)
+
+    scored = enrich_bayesian_trade_probabilities(pd.DataFrame(rows))
+
+    assert len(scored) == 3
+    assert scored["bayes_long_probability"].notna().all()
