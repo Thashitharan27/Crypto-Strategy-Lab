@@ -215,13 +215,15 @@ def exact_profile_frame(
         window_minutes = int(lookback_bars) * int(minutes)
         active: dict[int, float] = defaultdict(float)
         left = right = 0
-        prior_poc = None
-        snapshot_cache = {}
+        previous_context_poc = None
+        current_anchor = None
+        current_anchor_poc = None
         for i, when in enumerate(decision):
             anchor = when.floor(f"{minutes}min")
-            cache_key = int(anchor.value)
-            snap = snapshot_cache.get(cache_key)
-            if snap is None and cache_key not in snapshot_cache:
+            if current_anchor is None or anchor != current_anchor:
+                if current_anchor_poc is not None and np.isfinite(current_anchor_poc):
+                    previous_context_poc = current_anchor_poc
+                current_anchor = anchor
                 window_start = anchor - pd.Timedelta(minutes=window_minutes)
                 while right < len(minute_end) and minute_end[right] <= anchor:
                     bins = decoded_cache.get(right)
@@ -243,17 +245,19 @@ def exact_profile_frame(
                         else:
                             active[key] = updated
                     left += 1
-                snap = _snapshot(
-                    active, price=close[i], atr=atr[i], log_step=log_step,
-                    previous_poc=prior_poc, value_fraction=value_fraction,
-                    hvn_multiplier=hvn_multiplier, near_hvn_atr=near_hvn_atr,
-                    path_r=path_r,
-                )
-                snapshot_cache[cache_key] = snap
-                if snap is not None:
-                    prior_poc = snap["poc"]
+
+            # The accepted-volume structure is fixed until the next completed
+            # context bucket, but distance/location remains relative to the
+            # current strategy decision price and ATR.
+            snap = _snapshot(
+                active, price=close[i], atr=atr[i], log_step=log_step,
+                previous_poc=previous_context_poc, value_fraction=value_fraction,
+                hvn_multiplier=hvn_multiplier, near_hvn_atr=near_hvn_atr,
+                path_r=path_r,
+            )
             if snap is None:
                 continue
+            current_anchor_poc = snap["poc"]
             for field in PROFILE_FIELDS:
                 result.loc[i, f"vp_exact_{prefix}_{field}"] = snap[field]
     return result
