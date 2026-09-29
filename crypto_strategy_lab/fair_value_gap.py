@@ -45,7 +45,7 @@ def _fvg_market_structure_features(high, low, open_, close, atr, swing_strength=
     )
     out = {key: np.full(n, np.nan) for key in keys}
     for key in ("choch_long", "choch_short", "bos_long", "bos_short",
-                "sweep_long", "sweep_short", "location_long", "location_short"):
+                "sweep_long", "sweep_short"):
         out[key][:] = 0.0
 
     strength = max(1, int(swing_strength))
@@ -82,14 +82,29 @@ def _fvg_market_structure_features(high, low, open_, close, atr, swing_strength=
                 last_sweep["SHORT"] = i
 
         break_direction = None
-        if np.isfinite(last_swing_high) and np.isfinite(close[i]) and close[i] > last_swing_high:
+        previous_close = close[i - 1] if i > 0 else np.nan
+        if (
+            np.isfinite(last_swing_high)
+            and np.isfinite(close[i])
+            and close[i] > last_swing_high
+            and (not np.isfinite(previous_close) or previous_close <= last_swing_high)
+        ):
             break_direction = "LONG"
-        elif np.isfinite(last_swing_low) and np.isfinite(close[i]) and close[i] < last_swing_low:
+        elif (
+            np.isfinite(last_swing_low)
+            and np.isfinite(close[i])
+            and close[i] < last_swing_low
+            and (not np.isfinite(previous_close) or previous_close >= last_swing_low)
+        ):
             break_direction = "SHORT"
         if break_direction is not None:
+            opposite = "SHORT" if break_direction == "LONG" else "LONG"
             if last_break_direction is not None and break_direction != last_break_direction:
                 out["choch_long" if break_direction == "LONG" else "choch_short"][i] = 1.0
                 last_choch[break_direction] = i
+                last_choch[opposite] = None
+                last_bos[opposite] = None
+                last_bos[break_direction] = None
             else:
                 out["bos_long" if break_direction == "LONG" else "bos_short"][i] = 1.0
                 last_bos[break_direction] = i
