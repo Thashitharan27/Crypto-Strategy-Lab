@@ -186,6 +186,15 @@ def exact_profile_frame(
 ) -> pd.DataFrame:
     """Return exact-price-source VP evidence aligned to strategy decisions."""
     result = pd.DataFrame(index=np.arange(len(strategy)))
+    for prefix in ("strategy", "1h", "4h", "1d"):
+        for field in PROFILE_FIELDS:
+            column = f"vp_exact_{prefix}_{field}"
+            if field in {"position", "value_migration"}:
+                result[column] = pd.Series(
+                    [None] * len(strategy), index=result.index, dtype=object
+                )
+            else:
+                result[column] = np.nan
     if "volume_at_price_json" not in aggregate.columns:
         return result
     minute_end = pd.DatetimeIndex(pd.to_datetime(aggregate["available_at"], utc=True))
