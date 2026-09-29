@@ -322,8 +322,18 @@ EVIDENCE_GROUPS = (
         ),
     ),
     (
-        "Ichimoku",
+        "Volume Profile",
         (
+            "VP_POSITION", "VP_POC_DISTANCE_ATR", "VP_VAH_DISTANCE_ATR",
+            "VP_VAL_DISTANCE_ATR", "VP_NEAR_HVN", "VP_HVN_DISTANCE_ATR",
+            "VP_HVN_STRENGTH", "VP_ROOM_TO_OPPOSING_HVN_ATR",
+            "VP_LOW_VOLUME_PATH_SCORE", "VP_VALUE_MIGRATION",
+            "VP_ACCUMULATION_SCORE", "VP_DISTRIBUTION_SCORE",
+            "VP_BUY_ABSORPTION", "VP_SELL_ABSORPTION",
+        ),
+    ),
+    (
+        "Ichimoku",
             "ICH_PRICE_VS_CLOUD", "ICH_TK_STATE", "ICH_TK_CROSS",
             "ICH_TK_SPREAD_ATR", "ICH_TENKAN_DISTANCE_ATR",
             "ICH_KIJUN_DISTANCE_ATR", "ICH_KIJUN_SLOPE_ATR",
