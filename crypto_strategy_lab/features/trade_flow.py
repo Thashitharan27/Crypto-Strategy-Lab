@@ -141,7 +141,8 @@ class TradeFlowContextFeatureProvider:
         parameters: Mapping[str, object],
         feature_frames=None,
     ) -> pd.DataFrame:
-        del request, feature_frames
+        del feature_frames
+        parameters = self.definition.normalize_parameters(parameters)
         source = DatasetKind[str(parameters["trade_flow_source"]).upper()]
         resource = trade_flow_resource(source)
         if resource not in datasets:
