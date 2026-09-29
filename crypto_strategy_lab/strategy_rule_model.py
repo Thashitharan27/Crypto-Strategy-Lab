@@ -30,6 +30,7 @@ from crypto_strategy_lab.mtf_sr_reaction import (
     PRICE_ACTION_RULE_INDICATORS,
     mtf_sr_reaction_timeframe_plan,
 )
+from crypto_strategy_lab.volume_profile import VOLUME_PROFILE_RULE_INDICATORS
 
 # Direction selection and trade permission are intentionally separate concepts.
 # DI remains the raw directional control. DMI_TREND keeps the same +DI/-DI side
@@ -137,6 +138,11 @@ CATEGORICAL_RULE_VALUES = {
     "FUNDING_EXTREME_POSITIVE": _BOOL_VALUES,
     "FUNDING_EXTREME_NEGATIVE": _BOOL_VALUES,
     "MARK_INDEX_BASIS_STATE": ("NEGATIVE", "NEUTRAL", "POSITIVE"),
+    "VP_POSITION": ("ABOVE_VAH", "INSIDE_VALUE", "BELOW_VAL"),
+    "VP_NEAR_HVN": _BOOL_VALUES,
+    "VP_VALUE_MIGRATION": ("UP", "DOWN", "FLAT"),
+    "VP_BUY_ABSORPTION": _BOOL_VALUES,
+    "VP_SELL_ABSORPTION": _BOOL_VALUES,
 }
 CATEGORICAL_VALUE_CODES = {
     "DI_PRESSURE_STATE": {"EXPANDING": 1.0, "CONTRACTING": 2.0, "MIXED": 3.0},
@@ -247,6 +253,11 @@ CATEGORICAL_VALUE_CODES = {
     "FUNDING_EXTREME_POSITIVE": {"TRUE": 1.0, "FALSE": 0.0},
     "FUNDING_EXTREME_NEGATIVE": {"TRUE": 1.0, "FALSE": 0.0},
     "MARK_INDEX_BASIS_STATE": {"NEGATIVE": 1.0, "NEUTRAL": 2.0, "POSITIVE": 3.0},
+    "VP_POSITION": {"ABOVE_VAH": 1.0, "INSIDE_VALUE": 2.0, "BELOW_VAL": 3.0},
+    "VP_NEAR_HVN": {"TRUE": 1.0, "FALSE": 0.0},
+    "VP_VALUE_MIGRATION": {"UP": 1.0, "DOWN": 2.0, "FLAT": 3.0},
+    "VP_BUY_ABSORPTION": {"TRUE": 1.0, "FALSE": 0.0},
+    "VP_SELL_ABSORPTION": {"TRUE": 1.0, "FALSE": 0.0},
 }
 # Rule-authoring presets are aliases over raw categorical states. They never
 # replace the underlying research classification, so saved exact-state rules
@@ -388,11 +399,16 @@ def is_price_action_evidence(evidence: str) -> bool:
     return str(evidence).upper() in PRICE_ACTION_RULE_EVIDENCE
 
 
+def is_volume_profile_evidence(evidence: str) -> bool:
+    return str(evidence).upper() in VOLUME_PROFILE_RULE_INDICATORS
+
+
 def is_context_timeframe_evidence(evidence: str) -> bool:
     return (
         is_support_resistance_evidence(evidence)
         or is_price_action_evidence(evidence)
         or is_ichimoku_evidence(evidence)
+        or is_volume_profile_evidence(evidence)
     )
 
 
