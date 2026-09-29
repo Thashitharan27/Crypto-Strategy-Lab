@@ -318,6 +318,12 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         entry_mode=EntryMode(merged["entry_mode"]),
         entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]),
         ema_920_trade_plan=str(merged["ema_920_trade_plan"]),
+        ema_cross_entry_confirmation_enabled=bool(
+            merged["ema_cross_entry_confirmation_enabled"]
+        ),
+        ema_cross_entry_confirmation_r=float(
+            merged["ema_cross_entry_confirmation_r"]
+        ),
         fvg_confirmation_enabled=bool(merged["fvg_confirmation_enabled"]),
         fvg_confirmation_minutes=int(merged["fvg_confirmation_minutes"]),
         entry_interval=int(merged["entry_interval"]),
