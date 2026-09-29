@@ -216,6 +216,25 @@ class EmaCrossTests(unittest.TestCase):
         engine.flip_matches = False
         engine.direction = "LONG"
 
+    def test_composed_config_preserves_ema_cross_confirmation_into_native_simulator(self):
+        from dataclasses import replace
+        from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+        from crypto_strategy_lab.research_adapters import native_simulator_config
+
+        config = ResearchRunConfig()
+        execution = replace(
+            config.execution,
+            entry_timing_mode="NEXT_CANDLE_OPEN",
+            ema_920_trade_plan="EMA_20_100_CROSS",
+            ema_cross_entry_confirmation_enabled=True,
+            ema_cross_entry_confirmation_r=2.0,
+        )
+        native = native_simulator_config(
+            config.data, config.features, config.strategy, execution
+        )
+        self.assertTrue(native.ema_cross_entry_confirmation_enabled)
+        self.assertEqual(native.ema_cross_entry_confirmation_r, 2.0)
+
     def test_config_accepts_positive_ema_cross_entry_confirmation_r(self):
         config = ResearchRunConfig()
         replace(
