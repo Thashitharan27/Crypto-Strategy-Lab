@@ -26,7 +26,7 @@ from .schemas import ArchiveRecord, DatasetKind
 from .store import DataNotAvailableError, MarketDataStore
 
 
-TRADE_AGGREGATE_SCHEMA_VERSION = 1
+TRADE_AGGREGATE_SCHEMA_VERSION = 2
 TRADE_AGGREGATE_CACHE_FORMAT_VERSION = 1
 TRADE_AGGREGATE_INTERVAL = "1m"
 
@@ -58,6 +58,7 @@ _REQUIRED_COLUMNS = (
     *_LARGE_COLUMNS,
     "median_source_event_size",
     "last_event_at",
+    "volume_at_price_json",
 )
 
 
@@ -363,6 +364,38 @@ class TradeAggregateStore:
             aggregation["last_event_at"] = ("last_event_at", "max")
             grouped = work.groupby("bucket", sort=True).agg(**aggregation)
 
+            # Preserve exact event price x quantity information in a compact
+            # per-minute sparse representation. Equal aggTrade prices are
+            # collapsed; raw IDs/events never leave this bounded partition.
+            vap = pd.DataFrame({
+                "bucket": bucket,
+                "price": price,
+                "volume": quantity,
+                "buy_volume": np.where(~maker, quantity, 0.0),
+                "sell_volume": np.where(maker, quantity, 0.0),
+            })
+            vap = vap.groupby(["bucket", "price"], sort=True, as_index=False).agg(
+                volume=("volume", "sum"),
+                buy_volume=("buy_volume", "sum"),
+                sell_volume=("sell_volume", "sum"),
+            )
+            vap_json = vap.groupby("bucket", sort=True).apply(
+                lambda rows: json.dumps(
+                    [
+                        [
+                            float(row.price),
+                            float(row.volume),
+                            float(row.buy_volume),
+                            float(row.sell_volume),
+                        ]
+                        for row in rows.itertuples(index=False)
+                    ],
+                    separators=(",", ":"),
+                ),
+                include_groups=False,
+            )
+            grouped["volume_at_price_json"] = vap_json
+
         grouped = grouped.reindex(grid)
         if large_trade_quote_threshold is None:
             fill_columns = tuple(column for column in _ADDITIVE_COLUMNS if not column.startswith("trade_delta"))
@@ -382,6 +415,9 @@ class TradeAggregateStore:
             grouped["median_source_event_size"] = np.nan
         if "last_event_at" not in grouped:
             grouped["last_event_at"] = pd.NaT
+        if "volume_at_price_json" not in grouped:
+            grouped["volume_at_price_json"] = "[]"
+        grouped["volume_at_price_json"] = grouped["volume_at_price_json"].fillna("[]")
 
         grouped["trade_delta_base"] = (
             grouped["aggressive_buy_base_volume"] - grouped["aggressive_sell_base_volume"]
