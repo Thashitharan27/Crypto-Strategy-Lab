@@ -163,6 +163,12 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.add_field(
             "fvg_confirmation_minutes", "FVG Confirmation Candle", self.account["fvg_confirmation_minutes"]
         )
+        self.entry_card.add_control(
+            "fvg_context_enabled", self.account["fvg_context_enabled"]
+        )
+        self.entry_card.add_field(
+            "fvg_context_timeframe_minutes", "FVG Context Timeframe", self.account["fvg_context_timeframe_minutes"]
+        )
         self.entry_card.add_field(
             "fvg_structure_swing_strength",
             "FVG Structure Swing Strength",
@@ -379,6 +385,7 @@ class RiskExecutionWorkspace(QWidget):
             "zero_cost_comparison": "Also calculate zero-cost comparison",
             "di_ladder_enabled": "Enable DI ladder / reversal-filter execution",
             "fvg_confirmation_enabled": "Require directional FVG confirmation before entry",
+            "fvg_context_enabled": "Require the execution-timeframe FVG to overlap an active higher-timeframe FVG",
             "ema_cross_entry_confirmation_enabled": "Wait for confirmation distance before EMA-cross entry",
         }.items():
             widget = self.trade.get(name) or self.account.get(name)
