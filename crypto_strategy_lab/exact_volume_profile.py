@@ -195,7 +195,8 @@ def exact_profile_frame(
                 )
             else:
                 result[column] = np.nan
-    if "volume_at_price_json" not in aggregate.columns:
+    required_strategy = {"available_at", "open", "high", "low", "close"}
+    if "volume_at_price_json" not in aggregate.columns or not required_strategy.issubset(strategy.columns):
         return result
     minute_end = pd.DatetimeIndex(pd.to_datetime(aggregate["available_at"], utc=True))
     payloads = aggregate["volume_at_price_json"].tolist()
