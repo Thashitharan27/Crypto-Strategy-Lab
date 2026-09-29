@@ -323,6 +323,7 @@ EVIDENCE_GROUPS = (
     ),
     (
         "Ichimoku",
+        (
             "ICH_PRICE_VS_CLOUD", "ICH_TK_STATE", "ICH_TK_CROSS",
             "ICH_TK_SPREAD_ATR", "ICH_TENKAN_DISTANCE_ATR",
             "ICH_KIJUN_DISTANCE_ATR", "ICH_KIJUN_SLOPE_ATR",
