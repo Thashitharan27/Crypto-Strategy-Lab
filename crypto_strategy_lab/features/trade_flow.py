@@ -10,10 +10,11 @@ import pandas as pd
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
 from .base import FeatureDataResource, FeatureDefinition, OutputField, ParameterDefinition
+from crypto_strategy_lab.exact_volume_profile import PROFILE_FIELDS, exact_profile_frame
 
 
 TRADE_FLOW_FEATURE_NAME = "trade_flow_context"
-TRADE_FLOW_FEATURE_VERSION = "3"
+TRADE_FLOW_FEATURE_VERSION = "4"
 
 
 def trade_flow_resource(source: DatasetKind, interval: str = "1m") -> FeatureDataResource:
@@ -77,6 +78,10 @@ def _schema(params):
         "last_trade_event_at": OutputField("datetime"),
         "trade_event_age_seconds": OutputField("numeric"),
     }
+    for prefix in ("strategy", "1h", "4h", "1d"):
+        for name in PROFILE_FIELDS:
+            kind = "string" if name in {"position", "value_migration"} else "numeric"
+            schema[f"vp_exact_{prefix}_{name}"] = OutputField(kind)
     for minutes in _windows(params["trade_flow_windows"]):
         suffix = "1h" if minutes == 60 else f"{minutes}m"
         for name in (
@@ -120,6 +125,9 @@ class TradeFlowContextFeatureProvider:
                 else tuple(str(x).split(",")),
                 ("1m", "5m", "15m", "1h"),
             ),
+            "volume_profile_atr_period": ParameterDefinition(int, 14),
+            "volume_profile_lookback_bars": ParameterDefinition(int, 120),
+            "volume_profile_bin_bps": ParameterDefinition(float, 5.0),
         },
         output_schema_factory=_schema,
         availability_rule="completed_1m_trade_aggregates_available_at_bucket_close",
@@ -312,6 +320,24 @@ class TradeFlowContextFeatureProvider:
             on="available_at",
             direction="backward",
         )
+        strategy_minutes = int(
+            pd.Timedelta(request.strategy_interval).total_seconds() // 60
+        ) if str(request.strategy_interval).endswith("min") else {
+            "1h": 60, "2h": 120, "4h": 240, "6h": 360, "8h": 480,
+            "12h": 720, "1d": 1440,
+        }.get(str(request.strategy_interval).lower(), 0)
+        if strategy_minutes > 0 and "volume_at_price_json" in agg.columns:
+            exact = exact_profile_frame(
+                agg,
+                klines.reset_index(drop=True),
+                strategy_minutes=strategy_minutes,
+                atr_period=int(parameters["volume_profile_atr_period"]),
+                lookback_bars=int(parameters["volume_profile_lookback_bars"]),
+                bin_bps=float(parameters["volume_profile_bin_bps"]),
+            )
+            for column in exact.columns:
+                aligned[column] = exact[column].to_numpy()
+
         aligned["trade_flow_source"] = aligned["trade_flow_source"].fillna(source.value)
         aligned["trade_source_covered"] = (
             aligned["trade_source_covered"].fillna(False).astype(bool)
