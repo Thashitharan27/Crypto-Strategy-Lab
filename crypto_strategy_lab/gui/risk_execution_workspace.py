@@ -680,15 +680,12 @@ class RiskExecutionWorkspace(QWidget):
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
         ema_920 = self._ema_920_selected()
         fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
-        cross_plan = bool(
-            ema_920
-            and execution.ema_920_trade_plan
-            in {
-                "EMA_20_100_CROSS",
-                "EMA_20_100_CROSS_SHORT",
-                "EMA_20_100_CROSS_BOTH",
-            }
-        )
+        cross_mode = {
+            "EMA_20_100_CROSS": "LONG",
+            "EMA_20_100_CROSS_SHORT": "SHORT",
+            "EMA_20_100_CROSS_BOTH": "BOTH",
+        }.get(execution.ema_920_trade_plan)
+        cross_plan = bool(ema_920 and cross_mode is not None)
         sizing_override = bool(
             base.position_sizing_stop_override_enabled
             and (
