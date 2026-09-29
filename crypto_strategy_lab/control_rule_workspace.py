@@ -36,6 +36,7 @@ from crypto_strategy_lab.strategy_rule_model import (
     uses_higher_timeframe_ichimoku_rules,
     uses_ichimoku_rules,
     uses_order_book_rules,
+    uses_volume_profile_rules,
     rule_value_options,
 )
 
@@ -978,7 +979,7 @@ class RuleWorkspace:
                 *active_groups,
             ):
                 result["features"]["ichimoku_include_higher_timeframes"] = True
-        if uses_detailed_trade_flow_rules(*active_groups):
+        if uses_detailed_trade_flow_rules(*active_groups) or uses_volume_profile_rules(*active_groups):
             result["features"]["trade_flow_enabled"] = True
             current = tuple(result["features"].get("trade_flow_windows", ()))
             result["features"]["trade_flow_windows"] = list(
