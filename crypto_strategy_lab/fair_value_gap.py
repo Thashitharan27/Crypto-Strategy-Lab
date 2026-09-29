@@ -214,6 +214,12 @@ def higher_timeframe_fvg_context_alignment(
     for i, now in enumerate(ts):
         while next_completed < len(completed) and completed[next_completed]["end"] <= now:
             bar = completed[next_completed]
+            if htf_history:
+                expected_start = htf_history[-1]["start"] + pd.Timedelta(minutes=context_minutes)
+                if bar["start"] != expected_start:
+                    htf_history.clear()
+                    active_long.clear()
+                    active_short.clear()
             htf_history.append(bar)
             if len(htf_history) >= 3:
                 first = htf_history[-3]
