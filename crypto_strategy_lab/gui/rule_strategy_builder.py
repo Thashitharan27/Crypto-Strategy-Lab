@@ -553,9 +553,7 @@ EVIDENCE_MENU_TREE = (
                 "TAKER_BUY_SELL_RATIO", "TAKER_DELTA_PCT",
                 "TAKER_DELTA_PCT_15M", "TAKER_DELTA_PCT_1H",
                 "TAKER_FLOW_PERSISTENCE",
-            )),
-            ("Microstructure", (
-                ("AggTrades / Detailed Flow", (
+                ("Detailed AggTrades", (
                     "AGG_TRADE_DELTA_PCT_1M", "AGG_TRADE_DELTA_PCT_5M",
                     "AGG_TRADE_DELTA_PCT_15M", "AGG_TRADE_DELTA_PCT_1H",
                     "AGG_CVD_1H", "AGG_CVD_CHANGE_1BAR",
