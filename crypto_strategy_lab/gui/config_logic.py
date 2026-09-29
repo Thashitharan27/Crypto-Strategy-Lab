@@ -35,6 +35,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
     "fvg_confirmation_minutes": 15,
+    "fvg_structure_swing_strength": 2,
     "entry_interval": 1,
     "max_active_pairs": 1,
     "tie_policy": "PESSIMISTIC",
@@ -234,6 +235,12 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
                 errors.append("EMA cross entry confirmation R must be > 0.")
         except (TypeError, ValueError, KeyError):
             errors.append("EMA cross entry confirmation R must be numeric.")
+    try:
+        swing_strength = int(values["fvg_structure_swing_strength"])
+        if swing_strength < 1 or swing_strength > 50:
+            errors.append("FVG structure swing strength must be between 1 and 50.")
+    except (TypeError, ValueError):
+        errors.append("FVG structure swing strength must be an integer.")
     if values["fvg_confirmation_enabled"]:
         try:
             confirm = int(values["fvg_confirmation_minutes"])
