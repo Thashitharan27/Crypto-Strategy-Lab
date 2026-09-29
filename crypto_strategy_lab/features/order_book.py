@@ -12,7 +12,7 @@ from crypto_strategy_lab.data.schemas import DatasetKind
 from .base import FeatureDataResource, FeatureDefinition, OutputField, ParameterDefinition
 
 ORDER_BOOK_FEATURE_NAME = "order_book_context"
-ORDER_BOOK_FEATURE_VERSION = "2"
+ORDER_BOOK_FEATURE_VERSION = "3"
 
 
 def book_ticker_resource(interval="1m"):
@@ -44,6 +44,9 @@ def _schema(_params):
     result = {name: OutputField("numeric") for name in _TOP_VALUES}
     result.update(
         {
+            "book_imbalance_l1_change": OutputField("numeric"),
+            "book_microprice_offset_change_bps": OutputField("numeric"),
+            "book_pressure_state": OutputField("string"),
             "book_ticker_event_at": OutputField("datetime"),
             "book_ticker_age_seconds": OutputField("numeric"),
             "book_ticker_covered": OutputField("bool", False),
@@ -119,6 +122,24 @@ class OrderBookContextFeatureProvider:
         self._reject_raw_events(ticker, DatasetKind.BOOK_TICKER)
         self._reject_raw_events(depth, DatasetKind.BOOK_DEPTH)
         result = self._ticker(result, ticker, ticker_max_age)
+        result["book_imbalance_l1_change"] = pd.to_numeric(
+            result["book_imbalance_l1"], errors="coerce"
+        ).diff()
+        result["book_microprice_offset_change_bps"] = pd.to_numeric(
+            result["book_microprice_offset_bps"], errors="coerce"
+        ).diff()
+        imbalance = pd.to_numeric(result["book_imbalance_l1"], errors="coerce")
+        micro = pd.to_numeric(result["book_microprice_offset_bps"], errors="coerce")
+        result["book_pressure_state"] = np.select(
+            [
+                (imbalance > 0) & (micro > 0),
+                (imbalance < 0) & (micro < 0),
+            ],
+            ["BULLISH", "BEARISH"],
+            default="MIXED",
+        )
+        result.loc[imbalance.isna() | micro.isna(), "book_pressure_state"] = "UNKNOWN"
+
         result = self._depth(result, depth, depth_max_age)
         return result.loc[:, ["timestamp", "available_at", *_schema(parameters).keys()]]
 
