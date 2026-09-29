@@ -69,6 +69,7 @@ EVIDENCE_LABELS = {
     "EMA_20_DISTANCE_ATR": "Price − EMA 20 (ATR)",
     "EMA_9_20_SPREAD_ATR": "EMA 9 − EMA 20 (ATR)",
     "FVG_GAP_SIZE_ATR": "FVG Size / Formation ATR",
+    "FVG_STOP_BOUNDARY_DISTANCE_ATR": "FVG Stop-Boundary Distance / ATR",
     "FVG_AGE_BARS": "FVG Bars Since Formation",
     "FVG_REVISIT_DEPTH_PCT": "FVG First Revisit Depth (0–1)",
     "FVG_CHOCH_ALIGNED": "FVG Formation Has Aligned CHoCH (0/1)",
@@ -258,7 +259,8 @@ EVIDENCE_GROUPS = (
         "Trend & Volatility",
         (
             "ADX", "ADX_CHANGE", "ATR_PCT", "BB_WIDTH",
-            "FVG_GAP_SIZE_ATR", "FVG_AGE_BARS", "FVG_REVISIT_DEPTH_PCT",
+            "FVG_GAP_SIZE_ATR", "FVG_STOP_BOUNDARY_DISTANCE_ATR",
+            "FVG_AGE_BARS", "FVG_REVISIT_DEPTH_PCT",
             "FVG_CHOCH_ALIGNED", "FVG_BOS_ALIGNED", "FVG_LIQUIDITY_SWEEP_ALIGNED",
             "FVG_BARS_SINCE_CHOCH", "FVG_BARS_SINCE_BOS", "FVG_BARS_SINCE_SWEEP",
             "FVG_DISPLACEMENT_BODY_ATR", "FVG_DISPLACEMENT_BODY_RATIO",
