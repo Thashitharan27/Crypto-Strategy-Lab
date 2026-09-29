@@ -87,6 +87,20 @@ EVIDENCE_LABELS = {
     "EMA_20_SLOPE_ATR": "EMA 20 Slope (ATR / bar)",
     "VOLUME_RATIO_20": "Volume / Prior 20-Bar Average",
     "VOLUME_CHANGE_PCT": "Volume Change (1 bar, decimal)",
+    "VP_POSITION": "Volume Profile — Price vs Value Area",
+    "VP_POC_DISTANCE_ATR": "Volume Profile — Price − POC (ATR)",
+    "VP_VAH_DISTANCE_ATR": "Volume Profile — Price − VAH (ATR)",
+    "VP_VAL_DISTANCE_ATR": "Volume Profile — Price − VAL (ATR)",
+    "VP_NEAR_HVN": "Volume Profile — Near High-Volume Node",
+    "VP_HVN_DISTANCE_ATR": "Volume Profile — Nearest HVN Distance (ATR)",
+    "VP_HVN_STRENGTH": "Volume Profile — Nearest HVN Strength (0–1)",
+    "VP_ROOM_TO_OPPOSING_HVN_ATR": "Volume Profile — Room to Opposing HVN (ATR)",
+    "VP_LOW_VOLUME_PATH_SCORE": "Volume Profile — Low-Volume Path Score (0–1)",
+    "VP_VALUE_MIGRATION": "Volume Profile — POC / Value Migration",
+    "VP_ACCUMULATION_SCORE": "Volume Profile — Accumulation Score (0–100)",
+    "VP_DISTRIBUTION_SCORE": "Volume Profile — Distribution Score (0–100)",
+    "VP_BUY_ABSORPTION": "Volume Profile — Buy Absorption",
+    "VP_SELL_ABSORPTION": "Volume Profile — Sell Absorption",
     "EMA_50_DISTANCE_ATR": "Price − EMA 50 (ATR)",
     "EMA_100_DISTANCE_ATR": "Price − EMA 100 (ATR)",
     "EMA_200_DISTANCE_ATR": "Price − EMA 200 (ATR)",
@@ -214,6 +228,29 @@ EVIDENCE_LABELS = {
     "TAKER_DELTA_PCT_15M": "Taker Delta 15m (decimal)",
     "TAKER_DELTA_PCT_1H": "Taker Delta 1h (decimal)",
     "TAKER_FLOW_PERSISTENCE": "Taker Flow Persistence (0–1)",
+    "AGG_TRADE_DELTA_PCT_1M": "AggTrades — Delta 1m (decimal)",
+    "AGG_TRADE_DELTA_PCT_5M": "AggTrades — Delta 5m (decimal)",
+    "AGG_TRADE_DELTA_PCT_15M": "AggTrades — Delta 15m (decimal)",
+    "AGG_TRADE_DELTA_PCT_1H": "AggTrades — Delta 1h (decimal)",
+    "AGG_CVD_1H": "AggTrades — CVD 1h",
+    "AGG_CVD_CHANGE_1BAR": "AggTrades — CVD Change vs Prior Strategy Bar",
+    "AGG_TRADE_INTENSITY_CHANGE": "AggTrades — Trade Intensity Change",
+    "AGG_TRADE_INTENSITY_1M": "AggTrades — Trade Intensity 1m",
+    "AGG_TRADE_INTENSITY_5M": "AggTrades — Trade Intensity 5m",
+    "AGG_TRADE_INTENSITY_15M": "AggTrades — Trade Intensity 15m",
+    "AGG_TRADE_INTENSITY_1H": "AggTrades — Trade Intensity 1h",
+    "AGG_LARGE_BUY_SHARE_15M": "AggTrades — Large Buy Share 15m",
+    "AGG_LARGE_SELL_SHARE_15M": "AggTrades — Large Sell Share 15m",
+    "AGG_TRADE_VWAP_DISTANCE_PCT_15M": "AggTrades — Price vs Trade VWAP 15m (%)",
+    "AGG_TRADE_VWAP_DISTANCE_PCT_1H": "AggTrades — Price vs Trade VWAP 1h (%)",
+    "AGG_CVD_PRICE_STATE": "AggTrades — CVD / Price State",
+    "AGG_FLOW_RESPONSE_STATE": "AggTrades — Flow Response / Absorption State",
+    "BOOK_SPREAD_BPS": "Book Ticker — Spread (bps)",
+    "BOOK_IMBALANCE_L1": "Book Ticker — L1 Bid/Ask Imbalance",
+    "BOOK_MICROPRICE_OFFSET_BPS": "Book Ticker — Microprice Offset (bps)",
+    "BOOK_IMBALANCE_CHANGE": "Book Ticker — L1 Imbalance Change",
+    "BOOK_MICROPRICE_OFFSET_CHANGE_BPS": "Book Ticker — Microprice Offset Change (bps)",
+    "BOOK_PRESSURE_STATE": "Book Ticker — Pressure State",
 }
 LEGACY_SR_AUTHORING_EVIDENCE = frozenset(
     {
@@ -271,6 +308,14 @@ EVIDENCE_GROUPS = (
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
             "EMA_STACK_STATE", "PRICE_VS_EMA_STACK",
+            ("Volume Profile", (
+                "VP_POSITION", "VP_POC_DISTANCE_ATR", "VP_VAH_DISTANCE_ATR",
+                "VP_VAL_DISTANCE_ATR", "VP_NEAR_HVN", "VP_HVN_DISTANCE_ATR",
+                "VP_HVN_STRENGTH", "VP_ROOM_TO_OPPOSING_HVN_ATR",
+                "VP_LOW_VOLUME_PATH_SCORE", "VP_VALUE_MIGRATION",
+                "VP_ACCUMULATION_SCORE", "VP_DISTRIBUTION_SCORE",
+                "VP_BUY_ABSORPTION", "VP_SELL_ABSORPTION",
+            )),
         ),
     ),
     (
@@ -345,6 +390,28 @@ EVIDENCE_GROUPS = (
         ),
     ),
     (
+        "Detailed Trade Flow — AggTrades",
+        (
+            "AGG_TRADE_DELTA_PCT_1M", "AGG_TRADE_DELTA_PCT_5M",
+            "AGG_TRADE_DELTA_PCT_15M", "AGG_TRADE_DELTA_PCT_1H",
+            "AGG_CVD_1H", "AGG_CVD_CHANGE_1BAR",
+            "AGG_TRADE_INTENSITY_CHANGE", "AGG_TRADE_INTENSITY_1M",
+            "AGG_TRADE_INTENSITY_5M", "AGG_TRADE_INTENSITY_15M",
+            "AGG_TRADE_INTENSITY_1H", "AGG_LARGE_BUY_SHARE_15M",
+            "AGG_LARGE_SELL_SHARE_15M", "AGG_TRADE_VWAP_DISTANCE_PCT_15M",
+            "AGG_TRADE_VWAP_DISTANCE_PCT_1H", "AGG_CVD_PRICE_STATE",
+            "AGG_FLOW_RESPONSE_STATE",
+        ),
+    ),
+    (
+        "Order Book — Book Ticker",
+        (
+            "BOOK_SPREAD_BPS", "BOOK_IMBALANCE_L1",
+            "BOOK_MICROPRICE_OFFSET_BPS", "BOOK_IMBALANCE_CHANGE",
+            "BOOK_MICROPRICE_OFFSET_CHANGE_BPS", "BOOK_PRESSURE_STATE",
+        ),
+    ),
+    (
         "Support & Resistance — Trade Context",
         (
             "SR_ENTRY_RELATION",
@@ -408,6 +475,14 @@ EVIDENCE_MENU_TREE = (
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
             "EMA_STACK_STATE", "PRICE_VS_EMA_STACK",
+            ("Volume Profile", (
+                "VP_POSITION", "VP_POC_DISTANCE_ATR", "VP_VAH_DISTANCE_ATR",
+                "VP_VAL_DISTANCE_ATR", "VP_NEAR_HVN", "VP_HVN_DISTANCE_ATR",
+                "VP_HVN_STRENGTH", "VP_ROOM_TO_OPPOSING_HVN_ATR",
+                "VP_LOW_VOLUME_PATH_SCORE", "VP_VALUE_MIGRATION",
+                "VP_ACCUMULATION_SCORE", "VP_DISTRIBUTION_SCORE",
+                "VP_BUY_ABSORPTION", "VP_SELL_ABSORPTION",
+            )),
         ),
     ),
     (
@@ -478,6 +553,22 @@ EVIDENCE_MENU_TREE = (
                 "TAKER_BUY_SELL_RATIO", "TAKER_DELTA_PCT",
                 "TAKER_DELTA_PCT_15M", "TAKER_DELTA_PCT_1H",
                 "TAKER_FLOW_PERSISTENCE",
+                ("Detailed AggTrades", (
+                    "AGG_TRADE_DELTA_PCT_1M", "AGG_TRADE_DELTA_PCT_5M",
+                    "AGG_TRADE_DELTA_PCT_15M", "AGG_TRADE_DELTA_PCT_1H",
+                    "AGG_CVD_1H", "AGG_CVD_CHANGE_1BAR",
+                    "AGG_TRADE_INTENSITY_CHANGE", "AGG_TRADE_INTENSITY_1M",
+                    "AGG_TRADE_INTENSITY_5M", "AGG_TRADE_INTENSITY_15M",
+                    "AGG_TRADE_INTENSITY_1H", "AGG_LARGE_BUY_SHARE_15M",
+                    "AGG_LARGE_SELL_SHARE_15M", "AGG_TRADE_VWAP_DISTANCE_PCT_15M",
+                    "AGG_TRADE_VWAP_DISTANCE_PCT_1H", "AGG_CVD_PRICE_STATE",
+                    "AGG_FLOW_RESPONSE_STATE",
+                )),
+                ("Book Ticker", (
+                    "BOOK_SPREAD_BPS", "BOOK_IMBALANCE_L1",
+                    "BOOK_MICROPRICE_OFFSET_BPS", "BOOK_IMBALANCE_CHANGE",
+                    "BOOK_MICROPRICE_OFFSET_CHANGE_BPS", "BOOK_PRESSURE_STATE",
+                )),
             )),
         ),
     ),
@@ -1637,7 +1728,7 @@ class RuleStrategyBuilder(QWidget):
         self.enable_mr.setChecked(True)
         research_layout.addWidget(self.enable_mr)
         self.research_status = QLabel(
-            "S/R · Multi-TF Price Action · OI · Funding · Positioning/Basis · Taker Flow are rule-ready. Detailed Trade Flow · Order Book remain Analyze Only until dedicated rule dependencies are added."
+            "S/R · Multi-TF Price Action · OI · Funding · Positioning/Basis · Taker Flow · Detailed AggTrade Flow · Book Ticker are rule-ready. Optional Book Depth remains research-only."
         )
         self.research_status.setWordWrap(True)
         self.research_status.setStyleSheet("color:#52606d")
@@ -1947,12 +2038,12 @@ class RuleStrategyBuilder(QWidget):
             "Taker Flow",
         ]
         items.append(
-            "Trade Flow ON" if features.trade_flow_enabled else "Trade Flow Off"
+            "AggTrade Flow ON" if features.trade_flow_enabled else "AggTrade Flow Off"
         )
         items.append(
-            "Order Book ON" if features.order_book_enabled else "Order Book Off"
+            "Book Ticker/Order Book ON" if features.order_book_enabled else "Book Ticker/Order Book Off"
         )
         self.research_status.setText(
             " · ".join(items)
-            + " — S/R and lightweight futures context are rule-ready; detailed Trade Flow and Order Book remain research-only."
+            + " — S/R, detailed AggTrade flow and Book Ticker context are rule-ready; Book Depth remains research-only."
         )

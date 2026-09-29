@@ -32,8 +32,11 @@ from crypto_strategy_lab.strategy_rule_model import (
     is_context_timeframe_evidence,
     is_support_resistance_evidence,
     normalize_rule,
+    uses_detailed_trade_flow_rules,
     uses_higher_timeframe_ichimoku_rules,
     uses_ichimoku_rules,
+    uses_order_book_rules,
+    uses_volume_profile_rules,
     rule_value_options,
 )
 
@@ -106,6 +109,20 @@ EVIDENCE_LABELS = {
     "EMA_20_SLOPE_ATR": "EMA 20 Slope (ATR / bar)",
     "VOLUME_RATIO_20": "Volume / Prior 20-Bar Average",
     "VOLUME_CHANGE_PCT": "Volume Change (1 bar, decimal)",
+    "VP_POSITION": "Volume Profile — Price vs Value Area",
+    "VP_POC_DISTANCE_ATR": "Volume Profile — Price − POC (ATR)",
+    "VP_VAH_DISTANCE_ATR": "Volume Profile — Price − VAH (ATR)",
+    "VP_VAL_DISTANCE_ATR": "Volume Profile — Price − VAL (ATR)",
+    "VP_NEAR_HVN": "Volume Profile — Near High-Volume Node",
+    "VP_HVN_DISTANCE_ATR": "Volume Profile — Nearest HVN Distance (ATR)",
+    "VP_HVN_STRENGTH": "Volume Profile — Nearest HVN Strength (0–1)",
+    "VP_ROOM_TO_OPPOSING_HVN_ATR": "Volume Profile — Room to Opposing HVN (ATR)",
+    "VP_LOW_VOLUME_PATH_SCORE": "Volume Profile — Low-Volume Path Score (0–1)",
+    "VP_VALUE_MIGRATION": "Volume Profile — POC / Value Migration",
+    "VP_ACCUMULATION_SCORE": "Volume Profile — Accumulation Score (0–100)",
+    "VP_DISTRIBUTION_SCORE": "Volume Profile — Distribution Score (0–100)",
+    "VP_BUY_ABSORPTION": "Volume Profile — Buy Absorption",
+    "VP_SELL_ABSORPTION": "Volume Profile — Sell Absorption",
     "EMA_50_DISTANCE_ATR": "Price − EMA 50 (ATR)",
     "EMA_100_DISTANCE_ATR": "Price − EMA 100 (ATR)",
     "EMA_200_DISTANCE_ATR": "Price − EMA 200 (ATR)",
@@ -233,6 +250,29 @@ EVIDENCE_LABELS = {
     "TAKER_DELTA_PCT_15M": "Taker Delta 15m (decimal)",
     "TAKER_DELTA_PCT_1H": "Taker Delta 1h (decimal)",
     "TAKER_FLOW_PERSISTENCE": "Taker Flow Persistence (0–1)",
+    "AGG_TRADE_DELTA_PCT_1M": "AggTrades — Delta 1m (decimal)",
+    "AGG_TRADE_DELTA_PCT_5M": "AggTrades — Delta 5m (decimal)",
+    "AGG_TRADE_DELTA_PCT_15M": "AggTrades — Delta 15m (decimal)",
+    "AGG_TRADE_DELTA_PCT_1H": "AggTrades — Delta 1h (decimal)",
+    "AGG_CVD_1H": "AggTrades — CVD 1h",
+    "AGG_CVD_CHANGE_1BAR": "AggTrades — CVD Change vs Prior Strategy Bar",
+    "AGG_TRADE_INTENSITY_CHANGE": "AggTrades — Trade Intensity Change",
+    "AGG_TRADE_INTENSITY_1M": "AggTrades — Trade Intensity 1m",
+    "AGG_TRADE_INTENSITY_5M": "AggTrades — Trade Intensity 5m",
+    "AGG_TRADE_INTENSITY_15M": "AggTrades — Trade Intensity 15m",
+    "AGG_TRADE_INTENSITY_1H": "AggTrades — Trade Intensity 1h",
+    "AGG_LARGE_BUY_SHARE_15M": "AggTrades — Large Buy Share 15m",
+    "AGG_LARGE_SELL_SHARE_15M": "AggTrades — Large Sell Share 15m",
+    "AGG_TRADE_VWAP_DISTANCE_PCT_15M": "AggTrades — Price vs Trade VWAP 15m (%)",
+    "AGG_TRADE_VWAP_DISTANCE_PCT_1H": "AggTrades — Price vs Trade VWAP 1h (%)",
+    "AGG_CVD_PRICE_STATE": "AggTrades — CVD / Price State",
+    "AGG_FLOW_RESPONSE_STATE": "AggTrades — Flow Response / Absorption State",
+    "BOOK_SPREAD_BPS": "Book Ticker — Spread (bps)",
+    "BOOK_IMBALANCE_L1": "Book Ticker — L1 Bid/Ask Imbalance",
+    "BOOK_MICROPRICE_OFFSET_BPS": "Book Ticker — Microprice Offset (bps)",
+    "BOOK_IMBALANCE_CHANGE": "Book Ticker — L1 Imbalance Change",
+    "BOOK_MICROPRICE_OFFSET_CHANGE_BPS": "Book Ticker — Microprice Offset Change (bps)",
+    "BOOK_PRESSURE_STATE": "Book Ticker — Pressure State",
 }
 
 LEGACY_SR_AUTHORING_EVIDENCE = frozenset(
@@ -926,18 +966,25 @@ class RuleWorkspace:
             rebuilt[key] = asdict(profile)
         result = deepcopy(self._base_config)
         result["strategy"]["profiles"] = rebuilt
-        if uses_ichimoku_rules(
+        active_groups = (
             self.rules["REQUIRED"],
             self.rules["VETO"],
             self.rules["FLIP"],
-        ):
+        )
+        if uses_ichimoku_rules(*active_groups):
             result["features"]["ichimoku_enabled"] = True
             strategy_minutes = int(result["data"]["strategy_timeframe_minutes"])
             if uses_higher_timeframe_ichimoku_rules(
                 strategy_minutes,
-                self.rules["REQUIRED"],
-                self.rules["VETO"],
-                self.rules["FLIP"],
+                *active_groups,
             ):
                 result["features"]["ichimoku_include_higher_timeframes"] = True
+        if uses_detailed_trade_flow_rules(*active_groups) or uses_volume_profile_rules(*active_groups):
+            result["features"]["trade_flow_enabled"] = True
+            current = tuple(result["features"].get("trade_flow_windows", ()))
+            result["features"]["trade_flow_windows"] = list(
+                dict.fromkeys((*current, "1m", "5m", "15m", "1h"))
+            )
+        if uses_order_book_rules(*active_groups):
+            result["features"]["order_book_enabled"] = True
         return result

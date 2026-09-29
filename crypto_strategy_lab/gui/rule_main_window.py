@@ -28,10 +28,13 @@ from crypto_strategy_lab.strategy_rule_model import (
     SUPPORT_RESISTANCE_RULE_EVIDENCE,
     common_execution_profile,
     compile_profiles,
+    uses_detailed_trade_flow_rules,
     uses_higher_timeframe_ichimoku_rules,
     uses_ichimoku_rules,
     uses_mean_reversion_rules,
+    uses_order_book_rules,
     uses_support_resistance_rules,
+    uses_volume_profile_rules,
 )
 from .rule_strategy_builder import DIRECTION_LABELS, RuleStrategyBuilder
 from .v2_main_window import (
@@ -727,6 +730,18 @@ class MainWindow(LegacyMainWindow):
             or uses_support_resistance_rules(required_rules, veto_rules, flip_rules)
         ):
             features = replace(features, enable_support_resistance_analysis=True)
+        if (
+            uses_detailed_trade_flow_rules(required_rules, veto_rules, flip_rules)
+            or uses_volume_profile_rules(required_rules, veto_rules, flip_rules)
+        ):
+            windows = tuple(dict.fromkeys((*features.trade_flow_windows, "1m", "5m", "15m", "1h")))
+            features = replace(
+                features,
+                trade_flow_enabled=True,
+                trade_flow_windows=windows,
+            )
+        if uses_order_book_rules(required_rules, veto_rules, flip_rules):
+            features = replace(features, order_book_enabled=True)
 
         base_execution = self.base_execution_form.value(
             common_execution_profile(self.config.execution.profiles)

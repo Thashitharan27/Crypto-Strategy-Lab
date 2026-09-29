@@ -30,6 +30,7 @@ from crypto_strategy_lab.mtf_sr_reaction import (
     PRICE_ACTION_RULE_INDICATORS,
     mtf_sr_reaction_timeframe_plan,
 )
+from crypto_strategy_lab.volume_profile import VOLUME_PROFILE_RULE_INDICATORS
 
 # Direction selection and trade permission are intentionally separate concepts.
 # DI remains the raw directional control. DMI_TREND keeps the same +DI/-DI side
@@ -137,6 +138,28 @@ CATEGORICAL_RULE_VALUES = {
     "FUNDING_EXTREME_POSITIVE": _BOOL_VALUES,
     "FUNDING_EXTREME_NEGATIVE": _BOOL_VALUES,
     "MARK_INDEX_BASIS_STATE": ("NEGATIVE", "NEUTRAL", "POSITIVE"),
+    "VP_POSITION": ("ABOVE_VAH", "INSIDE_VALUE", "BELOW_VAL"),
+    "VP_NEAR_HVN": _BOOL_VALUES,
+    "VP_VALUE_MIGRATION": ("UP", "DOWN", "FLAT"),
+    "VP_BUY_ABSORPTION": _BOOL_VALUES,
+    "VP_SELL_ABSORPTION": _BOOL_VALUES,
+    "AGG_CVD_PRICE_STATE": (
+        "BULLISH_DIVERGENCE",
+        "BEARISH_DIVERGENCE",
+        "ALIGNED_UP",
+        "ALIGNED_DOWN",
+        "FLAT_OR_MIXED",
+        "UNKNOWN",
+    ),
+    "AGG_FLOW_RESPONSE_STATE": (
+        "BUY_ABSORPTION",
+        "SELL_ABSORPTION",
+        "BUY_CONTROL",
+        "SELL_CONTROL",
+        "MIXED",
+        "UNKNOWN",
+    ),
+    "BOOK_PRESSURE_STATE": ("BULLISH", "BEARISH", "MIXED", "UNKNOWN"),
 }
 CATEGORICAL_VALUE_CODES = {
     "DI_PRESSURE_STATE": {"EXPANDING": 1.0, "CONTRACTING": 2.0, "MIXED": 3.0},
@@ -247,6 +270,33 @@ CATEGORICAL_VALUE_CODES = {
     "FUNDING_EXTREME_POSITIVE": {"TRUE": 1.0, "FALSE": 0.0},
     "FUNDING_EXTREME_NEGATIVE": {"TRUE": 1.0, "FALSE": 0.0},
     "MARK_INDEX_BASIS_STATE": {"NEGATIVE": 1.0, "NEUTRAL": 2.0, "POSITIVE": 3.0},
+    "VP_POSITION": {"ABOVE_VAH": 1.0, "INSIDE_VALUE": 2.0, "BELOW_VAL": 3.0},
+    "VP_NEAR_HVN": {"TRUE": 1.0, "FALSE": 0.0},
+    "VP_VALUE_MIGRATION": {"UP": 1.0, "DOWN": 2.0, "FLAT": 3.0},
+    "VP_BUY_ABSORPTION": {"TRUE": 1.0, "FALSE": 0.0},
+    "VP_SELL_ABSORPTION": {"TRUE": 1.0, "FALSE": 0.0},
+    "AGG_CVD_PRICE_STATE": {
+        "BULLISH_DIVERGENCE": 1.0,
+        "BEARISH_DIVERGENCE": 2.0,
+        "ALIGNED_UP": 3.0,
+        "ALIGNED_DOWN": 4.0,
+        "FLAT_OR_MIXED": 5.0,
+        "UNKNOWN": 6.0,
+    },
+    "AGG_FLOW_RESPONSE_STATE": {
+        "BUY_ABSORPTION": 1.0,
+        "SELL_ABSORPTION": 2.0,
+        "BUY_CONTROL": 3.0,
+        "SELL_CONTROL": 4.0,
+        "MIXED": 5.0,
+        "UNKNOWN": 6.0,
+    },
+    "BOOK_PRESSURE_STATE": {
+        "BULLISH": 1.0,
+        "BEARISH": 2.0,
+        "MIXED": 3.0,
+        "UNKNOWN": 4.0,
+    },
 }
 # Rule-authoring presets are aliases over raw categorical states. They never
 # replace the underlying research classification, so saved exact-state rules
@@ -308,6 +358,12 @@ ICHIMOKU_RULE_EVIDENCE = frozenset(
 SUPPORT_RESISTANCE_RULE_EVIDENCE = frozenset(
     indicator for indicator in RULE_INDICATORS if indicator.startswith("SR_")
 )
+DETAILED_TRADE_FLOW_RULE_EVIDENCE = frozenset(
+    indicator for indicator in RULE_INDICATORS if indicator.startswith("AGG_")
+)
+ORDER_BOOK_RULE_EVIDENCE = frozenset(
+    indicator for indicator in RULE_INDICATORS if indicator.startswith("BOOK_")
+)
 PRICE_ACTION_RULE_EVIDENCE = frozenset(PRICE_ACTION_RULE_INDICATORS)
 # Researcher-authored S/R and price-action rules can select one causal context without
 # changing the canonical indicator ID. 0 means the strategy timeframe; None is
@@ -333,6 +389,24 @@ def _rule_group_enabled(rule: dict) -> bool:
     Historical rules predate group muting and therefore default to active.
     """
     return bool(rule.get("group_enabled", True))
+
+
+def uses_detailed_trade_flow_rules(*rule_groups) -> bool:
+    return any(
+        _rule_group_enabled(rule)
+        and str(rule.get("evidence", "")).upper() in DETAILED_TRADE_FLOW_RULE_EVIDENCE
+        for group in rule_groups
+        for rule in (group or ())
+    )
+
+
+def uses_order_book_rules(*rule_groups) -> bool:
+    return any(
+        _rule_group_enabled(rule)
+        and str(rule.get("evidence", "")).upper() in ORDER_BOOK_RULE_EVIDENCE
+        for group in rule_groups
+        for rule in (group or ())
+    )
 
 
 def uses_mean_reversion_rules(*rule_groups) -> bool:
@@ -388,11 +462,25 @@ def is_price_action_evidence(evidence: str) -> bool:
     return str(evidence).upper() in PRICE_ACTION_RULE_EVIDENCE
 
 
+def is_volume_profile_evidence(evidence: str) -> bool:
+    return str(evidence).upper() in VOLUME_PROFILE_RULE_INDICATORS
+
+
+def uses_volume_profile_rules(*rule_groups) -> bool:
+    return any(
+        _rule_group_enabled(rule)
+        and is_volume_profile_evidence(rule.get("evidence", ""))
+        for group in rule_groups
+        for rule in (group or ())
+    )
+
+
 def is_context_timeframe_evidence(evidence: str) -> bool:
     return (
         is_support_resistance_evidence(evidence)
         or is_price_action_evidence(evidence)
         or is_ichimoku_evidence(evidence)
+        or is_volume_profile_evidence(evidence)
     )
 
 

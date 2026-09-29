@@ -9,11 +9,13 @@ import pandas as pd
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data.timing import interval_to_timedelta
 from .base import FeatureDataResource, FeatureDefinition, OutputField, ParameterDefinition
+from crypto_strategy_lab.exact_volume_profile import PROFILE_FIELDS, exact_profile_frame
 
 
 TRADE_FLOW_FEATURE_NAME = "trade_flow_context"
-TRADE_FLOW_FEATURE_VERSION = "2"
+TRADE_FLOW_FEATURE_VERSION = "4"
 
 
 def trade_flow_resource(source: DatasetKind, interval: str = "1m") -> FeatureDataResource:
@@ -70,9 +72,17 @@ def _schema(params):
         "cvd_utc_day": OutputField("numeric"),
         "cvd_1h": OutputField("numeric"),
         "trade_intensity_change": OutputField("numeric"),
+        "trade_price_change_pct_1bar": OutputField("numeric"),
+        "cvd_change_1bar": OutputField("numeric"),
+        "cvd_price_state": OutputField("string"),
+        "flow_response_state": OutputField("string"),
         "last_trade_event_at": OutputField("datetime"),
         "trade_event_age_seconds": OutputField("numeric"),
     }
+    for prefix in ("strategy", "1h", "4h", "1d"):
+        for name in PROFILE_FIELDS:
+            kind = "string" if name in {"position", "value_migration"} else "numeric"
+            schema[f"vp_exact_{prefix}_{name}"] = OutputField(kind)
     for minutes in _windows(params["trade_flow_windows"]):
         suffix = "1h" if minutes == 60 else f"{minutes}m"
         for name in (
@@ -89,6 +99,7 @@ def _schema(params):
             "average_trade_size",
             "average_source_event_size",
             "trade_vwap",
+            "trade_vwap_distance_pct",
             "large_source_event_volume_share",
             "large_buy_share",
             "large_sell_share",
@@ -115,6 +126,9 @@ class TradeFlowContextFeatureProvider:
                 else tuple(str(x).split(",")),
                 ("1m", "5m", "15m", "1h"),
             ),
+            "volume_profile_atr_period": ParameterDefinition(int, 14),
+            "volume_profile_lookback_bars": ParameterDefinition(int, 120),
+            "volume_profile_bin_bps": ParameterDefinition(float, 5.0),
         },
         output_schema_factory=_schema,
         availability_rule="completed_1m_trade_aggregates_available_at_bucket_close",
@@ -127,7 +141,8 @@ class TradeFlowContextFeatureProvider:
         parameters: Mapping[str, object],
         feature_frames=None,
     ) -> pd.DataFrame:
-        del request, feature_frames
+        del feature_frames
+        parameters = self.definition.normalize_parameters(parameters)
         source = DatasetKind[str(parameters["trade_flow_source"]).upper()]
         resource = trade_flow_resource(source)
         if resource not in datasets:
@@ -307,8 +322,87 @@ class TradeFlowContextFeatureProvider:
             on="available_at",
             direction="backward",
         )
+        strategy_minutes = int(
+            interval_to_timedelta(request.strategy_interval).total_seconds() // 60
+        )
+        if strategy_minutes > 0:
+            exact = exact_profile_frame(
+                agg,
+                klines.reset_index(drop=True),
+                strategy_minutes=strategy_minutes,
+                atr_period=int(parameters["volume_profile_atr_period"]),
+                lookback_bars=int(parameters["volume_profile_lookback_bars"]),
+                bin_bps=float(parameters["volume_profile_bin_bps"]),
+            )
+            for column in exact.columns:
+                aligned[column] = exact[column].to_numpy()
+
         aligned["trade_flow_source"] = aligned["trade_flow_source"].fillna(source.value)
         aligned["trade_source_covered"] = (
             aligned["trade_source_covered"].fillna(False).astype(bool)
         )
+
+        close = (
+            pd.to_numeric(klines["close"], errors="coerce").reset_index(drop=True)
+            if "close" in klines.columns
+            else pd.Series(np.nan, index=aligned.index, dtype=float)
+        )
+        aligned["trade_price_change_pct_1bar"] = close.pct_change()
+        aligned["cvd_change_1bar"] = pd.to_numeric(
+            aligned["cvd_1h"], errors="coerce"
+        ).diff()
+
+        for minutes in windows:
+            suffix = "1h" if minutes == 60 else f"{minutes}m"
+            vwap_col = f"trade_vwap_{suffix}"
+            distance_col = f"trade_vwap_distance_pct_{suffix}"
+            if vwap_col in aligned.columns:
+                vwap = pd.to_numeric(aligned[vwap_col], errors="coerce")
+                aligned[distance_col] = close / vwap.replace(0, np.nan) - 1.0
+
+        price_change = pd.to_numeric(
+            aligned["trade_price_change_pct_1bar"], errors="coerce"
+        )
+        cvd_change = pd.to_numeric(aligned["cvd_change_1bar"], errors="coerce")
+        aligned["cvd_price_state"] = np.select(
+            [
+                (price_change < 0) & (cvd_change > 0),
+                (price_change > 0) & (cvd_change < 0),
+                (price_change > 0) & (cvd_change > 0),
+                (price_change < 0) & (cvd_change < 0),
+            ],
+            [
+                "BULLISH_DIVERGENCE",
+                "BEARISH_DIVERGENCE",
+                "ALIGNED_UP",
+                "ALIGNED_DOWN",
+            ],
+            default="FLAT_OR_MIXED",
+        )
+
+        delta_1h = pd.to_numeric(
+            aligned["trade_delta_pct_1h"], errors="coerce"
+        ) if "trade_delta_pct_1h" in aligned.columns else pd.Series(
+            np.nan, index=aligned.index, dtype=float
+        )
+        aligned["flow_response_state"] = np.select(
+            [
+                (delta_1h < 0) & (price_change >= 0),
+                (delta_1h > 0) & (price_change <= 0),
+                (delta_1h > 0) & (price_change > 0),
+                (delta_1h < 0) & (price_change < 0),
+            ],
+            [
+                "BUY_ABSORPTION",
+                "SELL_ABSORPTION",
+                "BUY_CONTROL",
+                "SELL_CONTROL",
+            ],
+            default="MIXED",
+        )
+        missing_state = price_change.isna() | delta_1h.isna()
+        aligned.loc[missing_state, "flow_response_state"] = "UNKNOWN"
+        missing_cvd = price_change.isna() | cvd_change.isna()
+        aligned.loc[missing_cvd, "cvd_price_state"] = "UNKNOWN"
+
         return aligned.reset_index(drop=True)
