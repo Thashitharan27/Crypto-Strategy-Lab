@@ -35,6 +35,8 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
     "fvg_confirmation_minutes": 15,
+    "fvg_context_enabled": False,
+    "fvg_context_timeframe_minutes": 240,
     "fvg_structure_swing_strength": 2,
     "entry_interval": 1,
     "max_active_pairs": 1,
@@ -241,6 +243,16 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
             errors.append("FVG structure swing strength must be between 1 and 50.")
     except (TypeError, ValueError):
         errors.append("FVG structure swing strength must be an integer.")
+    if values.get("fvg_context_enabled", False):
+        try:
+            context = int(values["fvg_context_timeframe_minutes"])
+            strategy = int(values["strategy_timeframe_minutes"])
+            if context <= strategy:
+                errors.append("FVG context timeframe must be larger than strategy timeframe.")
+            elif context % strategy:
+                errors.append("FVG context timeframe must be an exact multiple of strategy timeframe.")
+        except (TypeError, ValueError, KeyError):
+            errors.append("FVG context timeframe must be a whole number.")
     if values["fvg_confirmation_enabled"]:
         try:
             confirm = int(values["fvg_confirmation_minutes"])
