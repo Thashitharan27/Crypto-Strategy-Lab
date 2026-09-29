@@ -9,6 +9,7 @@ import pandas as pd
 
 from crypto_strategy_lab.data.query import DataRequest
 from crypto_strategy_lab.data.schemas import DatasetKind
+from crypto_strategy_lab.data.timing import interval_to_timedelta
 from .base import FeatureDataResource, FeatureDefinition, OutputField, ParameterDefinition
 from crypto_strategy_lab.exact_volume_profile import PROFILE_FIELDS, exact_profile_frame
 
@@ -321,11 +322,8 @@ class TradeFlowContextFeatureProvider:
             direction="backward",
         )
         strategy_minutes = int(
-            pd.Timedelta(request.strategy_interval).total_seconds() // 60
-        ) if str(request.strategy_interval).endswith("min") else {
-            "1h": 60, "2h": 120, "4h": 240, "6h": 360, "8h": 480,
-            "12h": 720, "1d": 1440,
-        }.get(str(request.strategy_interval).lower(), 0)
+            interval_to_timedelta(request.strategy_interval).total_seconds() // 60
+        )
         if strategy_minutes > 0 and "volume_at_price_json" in agg.columns:
             exact = exact_profile_frame(
                 agg,
