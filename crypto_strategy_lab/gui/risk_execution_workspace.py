@@ -719,8 +719,18 @@ class RiskExecutionWorkspace(QWidget):
         )
 
         timing = str(getattr(execution, "entry_timing_mode", "SIGNAL_CLOSE")).upper()
+        ema_cross_confirmation = bool(
+            cross_plan
+            and getattr(execution, "ema_cross_entry_confirmation_enabled", False)
+        )
         entry_fill = (
-            f"{int(execution.fvg_confirmation_minutes)}m directional confirmation close"
+            (
+                f"EMA cross arms setup; wait for "
+                f"{float(execution.ema_cross_entry_confirmation_r):g}R confirmation "
+                "from the original hypothetical next-open entry"
+            )
+            if ema_cross_confirmation
+            else f"{int(execution.fvg_confirmation_minutes)}m directional confirmation close"
             if fvg and execution.fvg_confirmation_enabled
             else "Next Candle Open — Causal"
             if timing == "NEXT_CANDLE_OPEN"
@@ -744,6 +754,14 @@ class RiskExecutionWorkspace(QWidget):
                 ),
             }.get(execution.ema_920_trade_plan)
             target = cross_target or "automatic fixed 1.00R target"
+            if cross_target and ema_cross_confirmation:
+                confirm_r = float(execution.ema_cross_entry_confirmation_r)
+                target = (
+                    f"EMA 20/100 crossover arms the {cross_mode.lower()} setup; "
+                    f"enter only after price travels {confirm_r:g}R in the crossover direction "
+                    "from the original hypothetical next-open entry; "
+                    + target
+                )
             if cross_target and base.partial_profit_enabled:
                 target += (
                     f"; take {base.tp1_close_pct:g}% at {base.tp1_r:g} sizing-R, "

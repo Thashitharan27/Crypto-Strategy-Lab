@@ -384,6 +384,35 @@ def test_ema_920_execution_plan_is_explicit_and_generic_stop_target_controls_are
         app.processEvents()
 
 
+def test_ema_cross_confirmation_is_visible_in_effective_plan_summary():
+    app, window = _window()
+    try:
+        workspace = window.risk_execution_workspace
+        selector = window.rule_builder.direction_mode
+        ema_index = selector.findData("EMA_9_20_PULLBACK")
+        selector.setCurrentIndex(ema_index)
+        selector.activated.emit(ema_index)
+        app.processEvents()
+
+        plan = window.execution_form.widgets["ema_920_trade_plan"]
+        plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS"))
+        confirm = window.execution_form.widgets["ema_cross_entry_confirmation_enabled"]
+        distance = window.execution_form.widgets["ema_cross_entry_confirmation_r"]
+        confirm.setChecked(True)
+        distance.setValue(1.0)
+        app.processEvents()
+        workspace.refresh_visibility()
+
+        summary = workspace.summary_label.text()
+        assert "EMA cross arms setup" in summary
+        assert "wait for 1R confirmation" in summary
+        assert "enter only after price travels 1R" in summary
+        assert not distance.isHidden()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_ema_920_hidden_generic_sr_policy_does_not_force_sr_dependency():
     app, window = _window()
     try:
