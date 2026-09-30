@@ -234,6 +234,8 @@ def test_aggregate_cache_is_partition_local_and_never_calls_multi_year_load_data
     second = aggregates.load(req, DatasetKind.TRADES)
     assert second.cache_hit and second.partitions_built == 0 and second.partitions_reused == 2
     assert first.source_identity == second.source_identity
+    assert "volume_at_price_json" not in second.frame.columns
+    assert len(second.frame.attrs["volume_at_price_parquet_paths"]) == 2
 
     # Change only the second immutable source identity. Day 1 must remain reusable.
     rec2_changed = record(day2, start=datetime(2026, 1, 2, tzinfo=UTC),
