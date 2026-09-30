@@ -896,7 +896,7 @@ class TradeAggregateStore:
             result["trade_flow_source_covered"] = True
             result["last_event_at"] = pd.to_datetime(
                 result["last_event_at"], utc=True, errors="coerce"
-            )
+            ).astype("datetime64[ns, UTC]")
             return result.loc[:, list(_REQUIRED_COLUMNS)].reset_index(drop=True)
         finally:
             for suffix in ("", ".wal"):
