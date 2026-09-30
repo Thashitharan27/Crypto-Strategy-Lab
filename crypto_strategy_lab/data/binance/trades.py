@@ -140,13 +140,16 @@ class AggTradesArchiveAdapter(BinanceArchiveAdapter):
                 yield self._normalize_raw(record, raw)
 
     def read(self, record: ArchiveRecord) -> pd.DataFrame:
-        chunks = list(self.iter_read(record))
-        if not chunks:
-            return pd.DataFrame()
-        frame = pd.concat(chunks, ignore_index=True)
+        if record.dataset != self.dataset:
+            raise ValueError(f"AggTradesArchiveAdapter cannot read {record.dataset.value}")
+        with open_csv_stream(record.path) as stream:
+            raw = pd.read_csv(stream, header=None, low_memory=False)
+        frame = self._normalize_raw(record, raw)
+        if frame.empty:
+            return frame
         if bool(frame["agg_trade_id"].duplicated().any()):
             raise ValueError(f"Duplicate Binance aggregate trade IDs found in {record.path}")
-        return frame.sort_values(["event_time", "agg_trade_id"], kind="stable").reset_index(drop=True)
+        return frame
 
 
 class TradesArchiveAdapter(BinanceArchiveAdapter):
