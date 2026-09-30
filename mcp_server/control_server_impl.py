@@ -18,6 +18,9 @@ from crypto_strategy_lab.walk_forward_candidate_engine import (
     get_next_walk_forward_candidate as _get_next_walk_forward_candidate,
     teacher_loss_flip_policy,
 )
+from crypto_strategy_lab.walk_forward_edge_lifecycle import (
+    summarize_walk_forward_edge_lifecycle as _summarize_walk_forward_edge_lifecycle,
+)
 from crypto_strategy_lab.walk_forward_materialization import (
     create_run_from_walk_forward_experiment as _create_run_from_walk_forward_experiment,
     materialize_walk_forward_strategy as _materialize_walk_forward_strategy,
@@ -95,6 +98,7 @@ CAUSAL_EXPERIMENT_TOOLS = (
     "summarize_walk_forward_monthly",
     "summarize_walk_forward_rule_performance",
     "summarize_walk_forward_periodic_review",
+    "summarize_walk_forward_edge_lifecycle",
     "list_walk_forward_experiments",
     "append_walk_forward_experiment_event",
     "get_next_walk_forward_candidate",
@@ -529,6 +533,20 @@ def create_control_server(
                 )
         except Exception as exc:
             return _connection_safe_error("advance_walk_forward", exc)
+
+    @instrumented_tool()
+    def summarize_walk_forward_edge_lifecycle(
+        experiment_id: str,
+    ) -> dict[str, Any]:
+        """Replay one strategy causal LIVE/SHADOW capital gate without mutating the WF chain."""
+        try:
+            return _summarize_walk_forward_edge_lifecycle(
+                control,
+                reports,
+                experiment_id=experiment_id,
+            )
+        except Exception as exc:
+            return _connection_safe_error("summarize_walk_forward_edge_lifecycle", exc)
 
     @instrumented_tool()
     def continue_walk_forward_autonomous(
