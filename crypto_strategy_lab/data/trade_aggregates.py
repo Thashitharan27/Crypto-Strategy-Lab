@@ -148,8 +148,13 @@ class TradeAggregateStore:
         return result
 
     @classmethod
-    def _validate_aggregate_frame(cls, frame: pd.DataFrame) -> None:
-        missing = sorted(set(_REQUIRED_COLUMNS) - set(frame.columns))
+    def _validate_aggregate_frame(
+        cls, frame: pd.DataFrame, *, require_volume_profile: bool = True
+    ) -> None:
+        required = set(_REQUIRED_COLUMNS)
+        if not require_volume_profile:
+            required.discard("volume_at_price_json")
+        missing = sorted(required - set(frame.columns))
         if missing:
             raise ValueError(f"Trade aggregate cache missing columns: {missing}")
         if frame.empty:
@@ -287,11 +292,69 @@ class TradeAggregateStore:
             con.execute(
                 f"COPY trade_aggregate TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
             )
-        # Read the temporary artifact before publishing it; corrupt/partial writes
-        # are never allowed to become cache hits.
+        # Validate the temporary artifact in DuckDB before publishing it.
+        # Re-reading a large partition into pandas here creates an avoidable
+        # second full partition allocation during first-time cache builds.
+        escaped_temporary = str(temporary).replace("'", "''")
         with duckdb.connect() as con:
-            verified = self._normalize_loaded(con.read_parquet(str(temporary)).df())
-        self._validate_aggregate_frame(verified)
+            relation = con.read_parquet(str(temporary))
+            missing = sorted(set(_REQUIRED_COLUMNS) - set(relation.columns))
+            if missing:
+                raise ValueError(f"Trade aggregate cache missing columns: {missing}")
+            verification = con.execute(
+                f"""
+                WITH cached AS (
+                    SELECT
+                        *,
+                        lag(period_start) OVER () AS previous_period_start
+                    FROM read_parquet('{escaped_temporary}')
+                )
+                SELECT
+                    count(*) AS row_count,
+                    count(DISTINCT period_start) AS unique_period_starts,
+                    sum(
+                        CASE
+                            WHEN period_start IS NULL
+                              OR period_end IS NULL
+                              OR available_at IS NULL
+                              OR period_end <> period_start + INTERVAL 1 MINUTE
+                              OR available_at <> period_end
+                              OR (
+                                  previous_period_start IS NOT NULL
+                                  AND period_start <= previous_period_start
+                              )
+                            THEN 1 ELSE 0
+                        END
+                    ) AS timeline_errors,
+                    sum(
+                        CASE
+                            WHEN trade_flow_source_covered
+                             AND (
+                                  source_event_count IS NULL
+                                  OR underlying_trade_count IS NULL
+                                  OR base_volume IS NULL
+                                  OR quote_volume IS NULL
+                                  OR source_event_count < 0
+                                  OR underlying_trade_count < 0
+                                  OR base_volume < 0
+                                  OR quote_volume < 0
+                             )
+                            THEN 1 ELSE 0
+                        END
+                    ) AS value_errors
+                FROM cached
+                """
+            ).fetchone()
+        if verification is None:
+            raise ValueError("Trade aggregate cache verification returned no result")
+        verified_rows, unique_starts, timeline_errors, value_errors = verification
+        if (
+            int(verified_rows) != len(frame)
+            or int(unique_starts) != int(verified_rows)
+            or int(timeline_errors or 0) != 0
+            or int(value_errors or 0) != 0
+        ):
+            raise ValueError("Trade aggregate cache verification failed")
         metadata = {
             "cache_format_version": TRADE_AGGREGATE_CACHE_FORMAT_VERSION,
             "aggregate_schema_version": TRADE_AGGREGATE_SCHEMA_VERSION,
@@ -325,7 +388,10 @@ class TradeAggregateStore:
         if dataset not in {DatasetKind.AGG_TRADES, DatasetKind.TRADES}:
             raise ValueError("Unsupported trade aggregate source")
 
-        frame = events.copy()
+        # This source partition is transient and owned by this aggregation call.
+        # A shallow copy avoids duplicating a potentially large raw aggTrade
+        # frame; all mutations below replace columns or create derived frames.
+        frame = events.copy(deep=False)
         required = {"event_time", "price", "quantity", "is_buyer_maker"}
         missing = sorted(required - set(frame.columns))
         if missing:
@@ -624,10 +690,18 @@ class TradeAggregateStore:
             # DuckDB scans the compact Parquet partitions directly and
             # materializes only the single combined frame required downstream.
             # This avoids holding N partition DataFrames plus a pd.concat copy.
+            # The exact volume-at-price payload is by far the largest
+            # object/string column. Keep it in the partition Parquet files and
+            # stream it later inside exact-volume-profile research instead of
+            # materializing six years of JSON into the main pandas frame.
+            frame_columns = [
+                column for column in _REQUIRED_COLUMNS
+                if column != "volume_at_price_json"
+            ]
             with duckdb.connect() as con:
                 combined = con.read_parquet(
                     [str(path) for path in partition_paths]
-                ).df()
+                ).project(", ".join(frame_columns)).df()
         if combined.empty:
             raise DataNotAvailableError(
                 f"No aggregate rows were produced for {request.symbol} {dataset.value}"
@@ -668,8 +742,18 @@ class TradeAggregateStore:
         combined.loc[~covered, "last_event_at"] = pd.NaT
         combined = combined.reset_index(names="period_start")
         combined["last_event_at"] = pd.to_datetime(combined["last_event_at"], utc=True, errors="coerce")
-        combined = combined.loc[:, list(_REQUIRED_COLUMNS)].reset_index(drop=True)
-        self._validate_aggregate_frame(combined)
+        output_columns = [
+            column for column in _REQUIRED_COLUMNS
+            if column != "volume_at_price_json"
+        ]
+        combined = combined.loc[:, output_columns].reset_index(drop=True)
+        self._validate_aggregate_frame(combined, require_volume_profile=False)
+        # Preserve a lazy handle to exact volume-at-price evidence. Consumers
+        # that need VP can stream these compact Parquet columns without forcing
+        # the full multi-year JSON payload into RAM.
+        combined.attrs["volume_at_price_parquet_paths"] = tuple(
+            str(path) for path in partition_paths
+        )
 
         return TradeAggregateResult(
             frame=combined,

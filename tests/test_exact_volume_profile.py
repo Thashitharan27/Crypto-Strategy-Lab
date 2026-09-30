@@ -1,5 +1,6 @@
 import json
 
+import duckdb
 import numpy as np
 import pandas as pd
 
@@ -88,3 +89,89 @@ def test_future_volume_at_price_cannot_change_past_profile():
         before.loc[: cutoff - 1, columns],
         after.loc[: cutoff - 1, columns],
     )
+
+
+def test_parquet_backed_profile_matches_inline_without_materializing_json(tmp_path):
+    aggregate = _aggregate(minutes=180)
+    strategy = _strategy(minutes=180)
+    inline = exact_profile_frame(
+        aggregate,
+        strategy,
+        strategy_minutes=1,
+        atr_period=5,
+        lookback_bars=20,
+        bin_bps=5.0,
+    )
+
+    parquet = tmp_path / "trade_aggregate.parquet"
+    with duckdb.connect() as con:
+        con.register("aggregate_frame", aggregate)
+        escaped = str(parquet).replace("'", "''")
+        con.execute(
+            f"COPY aggregate_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+        )
+
+    lazy = aggregate.drop(columns=["volume_at_price_json"]).copy()
+    lazy.attrs["volume_at_price_parquet_paths"] = (str(parquet),)
+    streamed = exact_profile_frame(
+        lazy,
+        strategy,
+        strategy_minutes=1,
+        atr_period=5,
+        lookback_bars=20,
+        bin_bps=5.0,
+    )
+
+    pd.testing.assert_frame_equal(inline, streamed)
+
+
+def test_streamed_profile_uses_last_partition_for_overlap(tmp_path):
+    base = _aggregate(minutes=80)
+    strategy = _strategy(minutes=80)
+
+    first = base.copy()
+    second = base.copy()
+    # Same minute timeline, but a conflicting exact-price payload in the later
+    # partition. The aggregate loader resolves overlaps with keep="last", so the
+    # streamed profile must use the second partition deterministically too.
+    second.loc[20, "volume_at_price_json"] = json.dumps(
+        [[250.0, 5000.0, 5000.0, 0.0]], separators=(",", ":")
+    )
+
+    paths = []
+    for idx, frame in enumerate((first, second)):
+        parquet = tmp_path / f"part-{idx}.parquet"
+        with duckdb.connect() as con:
+            con.register("aggregate_frame", frame)
+            escaped = str(parquet).replace("'", "''")
+            con.execute(
+                f"COPY aggregate_frame TO '{escaped}' "
+                "(FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
+        paths.append(str(parquet))
+
+    expected = base.copy()
+    expected.loc[20, "volume_at_price_json"] = second.loc[
+        20, "volume_at_price_json"
+    ]
+    expected_profile = exact_profile_frame(
+        expected,
+        strategy,
+        strategy_minutes=1,
+        atr_period=5,
+        lookback_bars=20,
+        bin_bps=5.0,
+    )
+
+    lazy = base.drop(columns=["volume_at_price_json"]).copy()
+    lazy.attrs["volume_at_price_parquet_paths"] = tuple(paths)
+    streamed = exact_profile_frame(
+        lazy,
+        strategy,
+        strategy_minutes=1,
+        atr_period=5,
+        lookback_bars=20,
+        bin_bps=5.0,
+    )
+
+    pd.testing.assert_frame_equal(expected_profile, streamed)
