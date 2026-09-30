@@ -449,6 +449,11 @@ class OrderBookSnapshotStore:
             combined = con.read_parquet(
                 [str(path) for path in partition_paths]
             ).df()
+        # DuckDB may materialize Parquet timestamps at microsecond resolution.
+        # Preserve the public snapshot-frame contract used by direct consumers.
+        for column in ("period_start", "period_end", "available_at", "source_event_at"):
+            if column in combined:
+                combined[column] = self._utc_ns(combined[column])
         combined = combined.sort_values("period_start", kind="stable")
         combined = combined.drop_duplicates("period_start", keep="last")
         grid = pd.date_range(
