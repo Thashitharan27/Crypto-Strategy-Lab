@@ -5,6 +5,7 @@ from collections import defaultdict
 import json
 import math
 
+import duckdb
 import numpy as np
 import pandas as pd
 
@@ -60,6 +61,46 @@ def _decode_bins(payload: object, log_step: float) -> dict[int, float]:
         key = int(math.floor(math.log(price) / log_step))
         result[key] += volume
     return dict(result)
+
+
+def _parquet_payload_rows(
+    paths: tuple[str, ...],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+):
+    """Stream minute volume-at-price payloads from compact Parquet caches.
+
+    The full JSON column is intentionally never materialized into pandas.
+    Separate forward iterators can be used for window entry/eviction so exact
+    profiles remain bounded by the active price-bin map rather than history size.
+    """
+    if not paths:
+        return
+    escaped_paths = ", ".join(
+        "'" + str(path).replace("'", "''") + "'" for path in paths
+    )
+    connection = duckdb.connect()
+    try:
+        cursor = connection.execute(
+            f"""
+            SELECT
+                available_at,
+                any_value(volume_at_price_json) AS volume_at_price_json
+            FROM read_parquet([{escaped_paths}])
+            WHERE available_at >= ? AND available_at <= ?
+            GROUP BY available_at
+            ORDER BY available_at
+            """,
+            [start.to_pydatetime(), end.to_pydatetime()],
+        )
+        while True:
+            rows = cursor.fetchmany(4096)
+            if not rows:
+                break
+            for available_at, payload in rows:
+                yield pd.Timestamp(available_at, tz="UTC") if getattr(available_at, "tzinfo", None) is None else pd.Timestamp(available_at).tz_convert("UTC"), payload
+    finally:
+        connection.close()
 
 
 def _snapshot(
@@ -196,10 +237,22 @@ def exact_profile_frame(
             else:
                 result[column] = np.nan
     required_strategy = {"available_at", "open", "high", "low", "close"}
-    if "volume_at_price_json" not in aggregate.columns or not required_strategy.issubset(strategy.columns):
+    parquet_paths = tuple(
+        str(path)
+        for path in aggregate.attrs.get("volume_at_price_parquet_paths", ())
+    )
+    inline_payloads = "volume_at_price_json" in aggregate.columns
+    if (
+        not required_strategy.issubset(strategy.columns)
+        or (not inline_payloads and not parquet_paths)
+    ):
         return result
     minute_end = pd.DatetimeIndex(pd.to_datetime(aggregate["available_at"], utc=True))
-    payloads = aggregate["volume_at_price_json"].reset_index(drop=True)
+    payloads = (
+        aggregate["volume_at_price_json"].reset_index(drop=True)
+        if inline_payloads
+        else None
+    )
     decision = pd.DatetimeIndex(pd.to_datetime(strategy["available_at"], utc=True))
     close = pd.to_numeric(strategy["close"], errors="coerce").to_numpy(float)
     atr = _atr(strategy, atr_period).to_numpy(float)
@@ -214,6 +267,15 @@ def exact_profile_frame(
         window_minutes = int(lookback_bars) * int(minutes)
         active: dict[int, float] = defaultdict(float)
         left = right = 0
+        add_rows = remove_rows = None
+        next_add = next_remove = None
+        if parquet_paths and len(minute_end):
+            range_start = pd.Timestamp(minute_end[0])
+            range_end = pd.Timestamp(minute_end[-1])
+            add_rows = _parquet_payload_rows(parquet_paths, range_start, range_end)
+            remove_rows = _parquet_payload_rows(parquet_paths, range_start, range_end)
+            next_add = next(add_rows, None)
+            next_remove = next(remove_rows, None)
         previous_context_poc = None
         current_anchor = None
         current_anchor_poc = None
@@ -224,27 +286,36 @@ def exact_profile_frame(
                     previous_context_poc = current_anchor_poc
                 current_anchor = anchor
                 window_start = anchor - pd.Timedelta(minutes=window_minutes)
-                while right < len(minute_end) and minute_end[right] <= anchor:
-                    # Decode only while applying a minute to the rolling profile.
-                    # Do not retain years of per-minute Python dictionaries: the
-                    # aggregate already keeps the compact JSON payload on disk/in
-                    # memory, and the decoded form is substantially larger.
-                    bins = _decode_bins(payloads.iat[right], log_step)
-                    for key, value in bins.items():
-                        active[key] += value
-                    right += 1
-                while left < right and minute_end[left] <= window_start:
-                    # Re-decode on eviction. This deliberately trades a small
-                    # amount of CPU for bounded memory instead of caching every
-                    # historical minute's expanded volume-at-price dictionary.
-                    bins = _decode_bins(payloads.iat[left], log_step)
-                    for key, value in bins.items():
-                        updated = active.get(key, 0.0) - value
-                        if updated <= 1e-12:
-                            active.pop(key, None)
-                        else:
-                            active[key] = updated
-                    left += 1
+                if parquet_paths:
+                    while next_add is not None and next_add[0] <= anchor:
+                        bins = _decode_bins(next_add[1], log_step)
+                        for key, value in bins.items():
+                            active[key] += value
+                        next_add = next(add_rows, None)
+                    while next_remove is not None and next_remove[0] <= window_start:
+                        bins = _decode_bins(next_remove[1], log_step)
+                        for key, value in bins.items():
+                            updated = active.get(key, 0.0) - value
+                            if updated <= 1e-12:
+                                active.pop(key, None)
+                            else:
+                                active[key] = updated
+                        next_remove = next(remove_rows, None)
+                else:
+                    while right < len(minute_end) and minute_end[right] <= anchor:
+                        bins = _decode_bins(payloads.iat[right], log_step)
+                        for key, value in bins.items():
+                            active[key] += value
+                        right += 1
+                    while left < right and minute_end[left] <= window_start:
+                        bins = _decode_bins(payloads.iat[left], log_step)
+                        for key, value in bins.items():
+                            updated = active.get(key, 0.0) - value
+                            if updated <= 1e-12:
+                                active.pop(key, None)
+                            else:
+                                active[key] = updated
+                        left += 1
 
             # The accepted-volume structure is fixed until the next completed
             # context bucket, but distance/location remains relative to the
