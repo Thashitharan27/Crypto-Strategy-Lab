@@ -199,7 +199,7 @@ def exact_profile_frame(
     if "volume_at_price_json" not in aggregate.columns or not required_strategy.issubset(strategy.columns):
         return result
     minute_end = pd.DatetimeIndex(pd.to_datetime(aggregate["available_at"], utc=True))
-    payloads = aggregate["volume_at_price_json"].tolist()
+    payloads = aggregate["volume_at_price_json"].reset_index(drop=True)
     decision = pd.DatetimeIndex(pd.to_datetime(strategy["available_at"], utc=True))
     close = pd.to_numeric(strategy["close"], errors="coerce").to_numpy(float)
     atr = _atr(strategy, atr_period).to_numpy(float)
@@ -209,8 +209,6 @@ def exact_profile_frame(
 
     contexts = [strategy_minutes, *[m for m in PROFILE_CONTEXTS if m >= strategy_minutes and m % strategy_minutes == 0]]
     contexts = list(dict.fromkeys(contexts))
-    decoded_cache: dict[int, dict[int, float]] = {}
-
     for minutes in contexts:
         prefix = "strategy" if minutes == strategy_minutes else {60:"1h",240:"4h",1440:"1d"}[minutes]
         window_minutes = int(lookback_bars) * int(minutes)
@@ -227,18 +225,19 @@ def exact_profile_frame(
                 current_anchor = anchor
                 window_start = anchor - pd.Timedelta(minutes=window_minutes)
                 while right < len(minute_end) and minute_end[right] <= anchor:
-                    bins = decoded_cache.get(right)
-                    if bins is None:
-                        bins = _decode_bins(payloads[right], log_step)
-                        decoded_cache[right] = bins
+                    # Decode only while applying a minute to the rolling profile.
+                    # Do not retain years of per-minute Python dictionaries: the
+                    # aggregate already keeps the compact JSON payload on disk/in
+                    # memory, and the decoded form is substantially larger.
+                    bins = _decode_bins(payloads.iat[right], log_step)
                     for key, value in bins.items():
                         active[key] += value
                     right += 1
                 while left < right and minute_end[left] <= window_start:
-                    bins = decoded_cache.get(left)
-                    if bins is None:
-                        bins = _decode_bins(payloads[left], log_step)
-                        decoded_cache[left] = bins
+                    # Re-decode on eviction. This deliberately trades a small
+                    # amount of CPU for bounded memory instead of caching every
+                    # historical minute's expanded volume-at-price dictionary.
+                    bins = _decode_bins(payloads.iat[left], log_step)
                     for key, value in bins.items():
                         updated = active.get(key, 0.0) - value
                         if updated <= 1e-12:
