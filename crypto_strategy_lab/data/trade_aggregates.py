@@ -61,6 +61,17 @@ _REQUIRED_COLUMNS = (
     "volume_at_price_json",
 )
 
+_VALIDATION_SCAN_COLUMNS = (
+    "period_start",
+    "period_end",
+    "available_at",
+    "trade_flow_source_covered",
+    "source_event_count",
+    "underlying_trade_count",
+    "base_volume",
+    "quote_volume",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class TradeAggregateResult:
@@ -184,11 +195,11 @@ class TradeAggregateStore:
     ) -> Path | None:
         """Validate a cached partition without materializing it into pandas.
 
-        Warm multi-year aggTrade runs previously loaded every cached Parquet
-        partition into a DataFrame merely to validate it. Large object columns
-        such as volume_at_price_json could therefore push a 16 GB machine to
-        the memory ceiling once per partition. DuckDB validates the cache
-        contract column-wise and returns only scalar statistics.
+        Warm multi-year aggTrade runs must not scan large payload columns merely
+        to validate cache integrity. In particular, volume_at_price_json can be
+        many gigabytes across historical partitions. DuckDB checks schema
+        metadata separately, then scans only the small timestamp/count/volume
+        columns required for scalar integrity checks.
         """
         parquet, manifest = self._partition_paths(dataset, record.symbol, identity)
         if not parquet.is_file() or not manifest.is_file():
@@ -206,6 +217,9 @@ class TradeAggregateStore:
                 return None
 
             escaped = str(parquet).replace("'", "''")
+            validation_columns = ",\n                            ".join(
+                _VALIDATION_SCAN_COLUMNS
+            )
             with duckdb.connect() as con:
                 relation = con.read_parquet(str(parquet))
                 missing = sorted(set(_REQUIRED_COLUMNS) - set(relation.columns))
@@ -215,7 +229,7 @@ class TradeAggregateStore:
                     f"""
                     WITH cached AS (
                         SELECT
-                            *,
+                            {validation_columns},
                             lag(period_start) OVER () AS previous_period_start
                         FROM read_parquet('{escaped}')
                     )
@@ -296,6 +310,9 @@ class TradeAggregateStore:
         # Re-reading a large partition into pandas here creates an avoidable
         # second full partition allocation during first-time cache builds.
         escaped_temporary = str(temporary).replace("'", "''")
+        validation_columns = ",\n                        ".join(
+            _VALIDATION_SCAN_COLUMNS
+        )
         with duckdb.connect() as con:
             relation = con.read_parquet(str(temporary))
             missing = sorted(set(_REQUIRED_COLUMNS) - set(relation.columns))
@@ -305,7 +322,7 @@ class TradeAggregateStore:
                 f"""
                 WITH cached AS (
                     SELECT
-                        *,
+                        {validation_columns},
                         lag(period_start) OVER () AS previous_period_start
                     FROM read_parquet('{escaped_temporary}')
                 )

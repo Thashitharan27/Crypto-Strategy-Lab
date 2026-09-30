@@ -8,7 +8,10 @@ import pytest
 from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketKind, MarketDataStore
 from crypto_strategy_lab.data.binance.trades import AggTradesArchiveAdapter, TradesArchiveAdapter
 from crypto_strategy_lab.data.schemas import ArchiveRecord
-from crypto_strategy_lab.data.trade_aggregates import TradeAggregateStore
+from crypto_strategy_lab.data.trade_aggregates import (
+    TradeAggregateStore,
+    _VALIDATION_SCAN_COLUMNS,
+)
 from crypto_strategy_lab.features.trade_flow import (
     TradeFlowContextFeatureProvider,
     trade_flow_resource,
@@ -247,6 +250,20 @@ def test_aggregate_cache_is_partition_local_and_never_calls_multi_year_load_data
     assert third.source_identity != second.source_identity
 
 
+
+
+def test_cached_partition_validation_prunes_large_volume_profile_payload():
+    assert "volume_at_price_json" not in _VALIDATION_SCAN_COLUMNS
+    assert set(_VALIDATION_SCAN_COLUMNS) == {
+        "period_start",
+        "period_end",
+        "available_at",
+        "trade_flow_source_covered",
+        "source_event_count",
+        "underlying_trade_count",
+        "base_volume",
+        "quote_volume",
+    }
 
 
 def test_cached_partition_validation_does_not_materialize_pandas_frame(
