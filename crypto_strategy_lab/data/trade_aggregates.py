@@ -176,7 +176,15 @@ class TradeAggregateStore:
         dataset: DatasetKind,
         identity: str,
         large_trade_quote_threshold: float | None,
-    ) -> pd.DataFrame | None:
+    ) -> Path | None:
+        """Validate a cached partition without materializing it into pandas.
+
+        Warm multi-year aggTrade runs previously loaded every cached Parquet
+        partition into a DataFrame merely to validate it. Large object columns
+        such as volume_at_price_json could therefore push a 16 GB machine to
+        the memory ceiling once per partition. DuckDB validates the cache
+        contract column-wise and returns only scalar statistics.
+        """
         parquet, manifest = self._partition_paths(dataset, record.symbol, identity)
         if not parquet.is_file() or not manifest.is_file():
             return None
@@ -191,13 +199,69 @@ class TradeAggregateStore:
                 or metadata.get("large_trade_quote_threshold") != large_trade_quote_threshold
             ):
                 return None
+
+            escaped = str(parquet).replace("'", "''")
             with duckdb.connect() as con:
-                frame = con.read_parquet(str(parquet)).df()
-            frame = self._normalize_loaded(frame)
-            self._validate_aggregate_frame(frame)
-            if int(metadata.get("row_count", -1)) != len(frame):
+                relation = con.read_parquet(str(parquet))
+                missing = sorted(set(_REQUIRED_COLUMNS) - set(relation.columns))
+                if missing:
+                    return None
+                row = con.execute(
+                    f"""
+                    WITH cached AS (
+                        SELECT
+                            *,
+                            lag(period_start) OVER () AS previous_period_start
+                        FROM read_parquet('{escaped}')
+                    )
+                    SELECT
+                        count(*) AS row_count,
+                        count(DISTINCT period_start) AS unique_period_starts,
+                        sum(
+                            CASE
+                                WHEN period_start IS NULL
+                                  OR period_end IS NULL
+                                  OR available_at IS NULL
+                                  OR period_end <> period_start + INTERVAL 1 MINUTE
+                                  OR available_at <> period_end
+                                  OR (
+                                      previous_period_start IS NOT NULL
+                                      AND period_start <= previous_period_start
+                                  )
+                                THEN 1 ELSE 0
+                            END
+                        ) AS timeline_errors,
+                        sum(
+                            CASE
+                                WHEN trade_flow_source_covered
+                                 AND (
+                                      source_event_count IS NULL
+                                      OR underlying_trade_count IS NULL
+                                      OR base_volume IS NULL
+                                      OR quote_volume IS NULL
+                                      OR source_event_count < 0
+                                      OR underlying_trade_count < 0
+                                      OR base_volume < 0
+                                      OR quote_volume < 0
+                                 )
+                                THEN 1 ELSE 0
+                            END
+                        ) AS value_errors
+                    FROM cached
+                    """
+                ).fetchone()
+            if row is None:
                 return None
-            return frame
+            row_count, unique_starts, timeline_errors, value_errors = row
+            expected_rows = int(metadata.get("row_count", -1))
+            if (
+                int(row_count) != expected_rows
+                or int(unique_starts) != int(row_count)
+                or int(timeline_errors or 0) != 0
+                or int(value_errors or 0) != 0
+            ):
+                return None
+            return parquet
         except Exception:
             return None
 
@@ -512,10 +576,10 @@ class TradeAggregateStore:
         for index, record in enumerate(records, 1):
             identity = self._partition_identity(record, dataset, large_trade_quote_threshold)
             partition_identities.append(identity)
-            aggregate = self._read_cached_partition(
+            cached_parquet = self._read_cached_partition(
                 record, dataset, identity, large_trade_quote_threshold
             )
-            if aggregate is None:
+            if cached_parquet is None:
                 # Important memory boundary: one raw archive is normalized,
                 # aggregated, released, and cached before the next is opened.
                 events = adapter.read(record)
@@ -528,18 +592,19 @@ class TradeAggregateStore:
                     aggregate,
                     large_trade_quote_threshold,
                 )
+                del aggregate
                 built += 1
                 action = "Built missing partition"
+                parquet, _manifest = self._partition_paths(
+                    dataset, record.symbol, identity
+                )
             else:
                 reused += 1
                 action = "Reused cached partition"
-            parquet, _manifest = self._partition_paths(dataset, record.symbol, identity)
+                parquet = cached_parquet
             if not parquet.is_file():
                 raise ValueError("Trade aggregate partition was not persisted")
             partition_paths.append(parquet)
-            # The final union is disk-backed below; do not retain one DataFrame
-            # per source archive while the remaining partitions are checked.
-            del aggregate
             emit_progress(
                 progress,
                 kind="cache",
