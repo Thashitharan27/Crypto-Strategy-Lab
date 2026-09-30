@@ -76,22 +76,37 @@ def _parquet_payload_rows(
     """
     if not paths:
         return
-    escaped_paths = ", ".join(
-        "'" + str(path).replace("'", "''") + "'" for path in paths
-    )
+    # Preserve the aggregate loader's "last partition wins" precedence
+    # explicitly. read_parquet(...)+any_value() is not deterministic when daily
+    # and monthly archives overlap, and separate add/remove scans must make the
+    # same choice for exact profile arithmetic.
+    scans = []
+    for partition_order, path in enumerate(paths):
+        escaped = str(path).replace("'", "''")
+        scans.append(
+            "SELECT available_at, volume_at_price_json, "
+            f"{partition_order} AS partition_order "
+            f"FROM read_parquet('{escaped}') "
+            "WHERE available_at >= ? AND available_at <= ?"
+        )
+    union_sql = " UNION ALL ".join(scans)
+    parameters = []
+    for _ in paths:
+        parameters.extend([start.to_pydatetime(), end.to_pydatetime()])
+
     connection = duckdb.connect()
     try:
         cursor = connection.execute(
             f"""
-            SELECT
-                available_at,
-                any_value(volume_at_price_json) AS volume_at_price_json
-            FROM read_parquet([{escaped_paths}])
-            WHERE available_at >= ? AND available_at <= ?
-            GROUP BY available_at
+            SELECT available_at, volume_at_price_json
+            FROM ({union_sql})
+            QUALIFY row_number() OVER (
+                PARTITION BY available_at
+                ORDER BY partition_order DESC
+            ) = 1
             ORDER BY available_at
             """,
-            [start.to_pydatetime(), end.to_pydatetime()],
+            parameters,
         )
         while True:
             rows = cursor.fetchmany(4096)
