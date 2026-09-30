@@ -175,7 +175,8 @@ def _window_stats(rows: list[dict[str, Any]], lookback: int) -> dict[str, Any]:
 
 
 def _risk_model(definition: dict[str, Any]) -> tuple[float, float]:
-    risk = definition.get("risk_model") or {}
+    raw_risk = definition.get("risk_model")
+    risk = raw_risk if isinstance(raw_risk, dict) else {}
     initial = risk.get("initial_equity", definition.get("initial_equity", 1000.0))
     initial_equity = float(initial)
     if initial_equity <= 0:
