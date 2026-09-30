@@ -187,6 +187,46 @@ def test_exact_aggregate_boundary_and_large_event_semantics(tmp_path):
     assert second.large_source_event_count == 0
 
 
+def test_chunked_aggtrade_cache_build_matches_in_memory_aggregate(tmp_path):
+    raw = tmp_path / "raw"
+    path = raw / "agg.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker\n"
+        "1,100,1,10,10,1767225605000,false\n"
+        "2,100,2,11,12,1767225615000,true\n"
+        "3,101,3,13,15,1767225665000,false\n"
+        "4,102,4,16,19,1767225675000,true\n"
+        "5,102,5,20,24,1767225676000,false\n",
+        encoding="utf-8",
+    )
+    rec = record(
+        path,
+        DatasetKind.AGG_TRADES,
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 2, tzinfo=UTC),
+        fingerprint="agg-day",
+        raw_root=raw,
+    )
+    adapter = AggTradesArchiveAdapter()
+    events = adapter.read(rec)
+    expected = TradeAggregateStore._aggregate(rec, events, 250.0)
+
+    store = MarketDataStore(raw, tmp_path / "cache")
+    actual = TradeAggregateStore(store)._aggregate_aggtrades_chunked(
+        rec,
+        adapter,
+        250.0,
+        chunksize=2,
+    )
+
+    pd.testing.assert_frame_equal(
+        expected.reset_index(drop=True),
+        actual.reset_index(drop=True),
+        check_dtype=False,
+    )
+
+
 def test_agg_trade_source_event_and_underlying_counts_differ(tmp_path):
     path = tmp_path / "agg.csv"
     path.write_text("x", encoding="utf-8")
