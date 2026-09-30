@@ -12,6 +12,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import shutil
 import time
 from typing import Any
 from uuid import uuid4
@@ -578,6 +579,331 @@ class TradeAggregateStore:
         result["last_event_at"] = pd.to_datetime(result["last_event_at"], utc=True, errors="coerce")
         return result.loc[:, list(_REQUIRED_COLUMNS)].reset_index(drop=True)
 
+    def _aggregate_aggtrades_chunked(
+        self,
+        record: ArchiveRecord,
+        adapter: Any,
+        large_trade_quote_threshold: float | None,
+        *,
+        chunksize: int = 250_000,
+        progress: Any = None,
+        progress_label: str | None = None,
+        progress_completed: int = 0,
+        progress_total: int = 0,
+        progress_built: int = 0,
+        progress_reused: int = 0,
+        progress_started: float | None = None,
+        partition_index: int | None = None,
+    ) -> pd.DataFrame:
+        """Build one aggTrade cache partition with bounded RAM.
+
+        Raw monthly archives are normalized in chunks and staged into a
+        disk-backed DuckDB database. Exact minute medians and volume-at-price
+        evidence are then computed from that staging table without ever holding
+        the full raw archive in pandas.
+        """
+        if record.dataset is not DatasetKind.AGG_TRADES:
+            raise ValueError("chunked aggregation is only valid for agg_trades")
+        if large_trade_quote_threshold is not None and large_trade_quote_threshold <= 0:
+            raise ValueError("large_trade_quote_threshold must be positive or null")
+
+        build_root = self.root / "_build"
+        build_root.mkdir(parents=True, exist_ok=True)
+        token = f"{os.getpid()}.{uuid4().hex}"
+        database = build_root / f"{record.symbol}.{token}.duckdb"
+        spill = build_root / f"{record.symbol}.{token}.tmp"
+        spill.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with duckdb.connect(str(database)) as con:
+                con.execute("SET memory_limit='1GB'")
+                escaped_spill = str(spill).replace("'", "''")
+                con.execute(f"SET temp_directory='{escaped_spill}'")
+                con.execute(
+                    """
+                    CREATE TABLE raw_events (
+                        event_time TIMESTAMPTZ,
+                        agg_trade_id BIGINT,
+                        price DOUBLE,
+                        quantity DOUBLE,
+                        quote_quantity DOUBLE,
+                        first_trade_id BIGINT,
+                        last_trade_id BIGINT,
+                        is_buyer_maker BOOLEAN
+                    )
+                    """
+                )
+
+                chunk_count = 0
+                source_rows = 0
+                for chunk in adapter.iter_read(record, chunksize=chunksize):
+                    if chunk.empty:
+                        continue
+                    chunk_count += 1
+                    source_rows += len(chunk)
+                    minimal = chunk.loc[
+                        :,
+                        [
+                            "event_time",
+                            "agg_trade_id",
+                            "price",
+                            "quantity",
+                            "quote_quantity",
+                            "first_trade_id",
+                            "last_trade_id",
+                            "is_buyer_maker",
+                        ],
+                    ].copy(deep=False)
+                    con.register("aggtrade_chunk", minimal)
+                    con.execute(
+                        """
+                        INSERT INTO raw_events
+                        SELECT
+                            event_time,
+                            agg_trade_id,
+                            price,
+                            quantity,
+                            quote_quantity,
+                            first_trade_id,
+                            last_trade_id,
+                            is_buyer_maker
+                        FROM aggtrade_chunk
+                        """
+                    )
+                    con.unregister("aggtrade_chunk")
+                    del minimal, chunk
+
+                    if progress is not None and progress_label is not None:
+                        elapsed = (
+                            time.perf_counter() - progress_started
+                            if progress_started is not None
+                            else 0.0
+                        )
+                        suffix = (
+                            f" {partition_index}/{progress_total}"
+                            if partition_index is not None and progress_total
+                            else ""
+                        )
+                        emit_progress(
+                            progress,
+                            kind="cache",
+                            phase="trade_flow_cache",
+                            label=progress_label,
+                            completed=progress_completed,
+                            total=progress_total,
+                            built=progress_built,
+                            reused=progress_reused,
+                            elapsed_seconds=elapsed,
+                            current=(
+                                f"Building missing partition{suffix} in bounded chunks "
+                                f"· chunk {chunk_count}"
+                            ),
+                        )
+
+                if source_rows == 0:
+                    return self._aggregate(record, pd.DataFrame(), large_trade_quote_threshold)
+
+                duplicate = con.execute(
+                    """
+                    SELECT agg_trade_id
+                    FROM raw_events
+                    GROUP BY agg_trade_id
+                    HAVING count(*) > 1
+                    LIMIT 1
+                    """
+                ).fetchone()
+                if duplicate is not None:
+                    raise ValueError(
+                        f"Duplicate Binance aggregate trade IDs found in {record.path}"
+                    )
+
+                if record.period_start is not None and record.period_end is not None:
+                    grid_start = pd.Timestamp(record.period_start).floor("min")
+                    grid_end = pd.Timestamp(record.period_end).ceil("min")
+                else:
+                    bounds = con.execute(
+                        "SELECT min(event_time), max(event_time) FROM raw_events"
+                    ).fetchone()
+                    if bounds is None or bounds[0] is None or bounds[1] is None:
+                        return pd.DataFrame(columns=_REQUIRED_COLUMNS)
+                    grid_start = pd.Timestamp(bounds[0]).floor("min")
+                    grid_end = pd.Timestamp(bounds[1]).floor("min") + pd.Timedelta(minutes=1)
+
+                threshold = (
+                    "NULL"
+                    if large_trade_quote_threshold is None
+                    else repr(float(large_trade_quote_threshold))
+                )
+                grouped = con.execute(
+                    f"""
+                    SELECT
+                        date_trunc('minute', event_time) AS bucket,
+                        count(*)::DOUBLE AS source_event_count,
+                        sum(last_trade_id - first_trade_id + 1)::DOUBLE
+                            AS underlying_trade_count,
+                        sum(quantity) AS base_volume,
+                        sum(quote_quantity) AS quote_volume,
+                        sum(CASE WHEN NOT is_buyer_maker THEN quantity ELSE 0 END)
+                            AS aggressive_buy_base_volume,
+                        sum(CASE WHEN is_buyer_maker THEN quantity ELSE 0 END)
+                            AS aggressive_sell_base_volume,
+                        sum(CASE WHEN NOT is_buyer_maker THEN quote_quantity ELSE 0 END)
+                            AS aggressive_buy_quote_volume,
+                        sum(CASE WHEN is_buyer_maker THEN quote_quantity ELSE 0 END)
+                            AS aggressive_sell_quote_volume,
+                        sum(price * quantity) AS weighted_price_sum,
+                        CASE
+                            WHEN {threshold} IS NULL THEN NULL
+                            ELSE sum(CASE WHEN quote_quantity >= {threshold} THEN 1 ELSE 0 END)
+                        END AS large_source_event_count,
+                        CASE
+                            WHEN {threshold} IS NULL THEN NULL
+                            ELSE sum(
+                                CASE WHEN quote_quantity >= {threshold}
+                                THEN quote_quantity ELSE 0 END
+                            )
+                        END AS large_source_event_quote_volume,
+                        CASE
+                            WHEN {threshold} IS NULL THEN NULL
+                            ELSE sum(
+                                CASE
+                                    WHEN quote_quantity >= {threshold}
+                                     AND NOT is_buyer_maker
+                                    THEN quote_quantity ELSE 0
+                                END
+                            )
+                        END AS large_buy_quote_volume,
+                        CASE
+                            WHEN {threshold} IS NULL THEN NULL
+                            ELSE sum(
+                                CASE
+                                    WHEN quote_quantity >= {threshold}
+                                     AND is_buyer_maker
+                                    THEN quote_quantity ELSE 0
+                                END
+                            )
+                        END AS large_sell_quote_volume,
+                        median(quantity) AS median_source_event_size,
+                        max(event_time) AS last_event_at
+                    FROM raw_events
+                    WHERE event_time >= ? AND event_time < ?
+                    GROUP BY 1
+                    ORDER BY 1
+                    """,
+                    [grid_start.to_pydatetime(), grid_end.to_pydatetime()],
+                ).df()
+
+                vap_by_bucket: dict[pd.Timestamp, str] = {}
+                cursor = con.execute(
+                    """
+                    SELECT
+                        bucket,
+                        price,
+                        sum(quantity) AS volume,
+                        sum(CASE WHEN NOT is_buyer_maker THEN quantity ELSE 0 END)
+                            AS buy_volume,
+                        sum(CASE WHEN is_buyer_maker THEN quantity ELSE 0 END)
+                            AS sell_volume
+                    FROM (
+                        SELECT
+                            date_trunc('minute', event_time) AS bucket,
+                            price,
+                            quantity,
+                            is_buyer_maker
+                        FROM raw_events
+                        WHERE event_time >= ? AND event_time < ?
+                    )
+                    GROUP BY bucket, price
+                    ORDER BY bucket, price
+                    """,
+                    [grid_start.to_pydatetime(), grid_end.to_pydatetime()],
+                )
+                current_bucket: pd.Timestamp | None = None
+                current_rows: list[list[float]] = []
+                while True:
+                    rows = cursor.fetchmany(8192)
+                    if not rows:
+                        break
+                    for bucket, price, volume, buy_volume, sell_volume in rows:
+                        bucket_ts = pd.Timestamp(bucket)
+                        if bucket_ts.tzinfo is None:
+                            bucket_ts = bucket_ts.tz_localize("UTC")
+                        else:
+                            bucket_ts = bucket_ts.tz_convert("UTC")
+                        if current_bucket is not None and bucket_ts != current_bucket:
+                            vap_by_bucket[current_bucket] = json.dumps(
+                                current_rows, separators=(",", ":")
+                            )
+                            current_rows = []
+                        current_bucket = bucket_ts
+                        current_rows.append(
+                            [
+                                float(price),
+                                float(volume),
+                                float(buy_volume),
+                                float(sell_volume),
+                            ]
+                        )
+                if current_bucket is not None:
+                    vap_by_bucket[current_bucket] = json.dumps(
+                        current_rows, separators=(",", ":")
+                    )
+
+            grid = pd.date_range(grid_start, grid_end, freq="1min", inclusive="left")
+            if grouped.empty:
+                result = pd.DataFrame(index=grid)
+            else:
+                grouped["bucket"] = pd.to_datetime(
+                    grouped["bucket"], utc=True, errors="raise"
+                )
+                result = grouped.set_index("bucket").reindex(grid)
+
+            fill_columns = tuple(
+                column
+                for column in _ADDITIVE_COLUMNS
+                if not column.startswith("trade_delta")
+            )
+            if large_trade_quote_threshold is not None:
+                fill_columns = (*fill_columns, *_LARGE_COLUMNS)
+            for column in fill_columns:
+                if column not in result:
+                    result[column] = 0.0
+                result[column] = pd.to_numeric(
+                    result[column], errors="coerce"
+                ).fillna(0.0)
+            if large_trade_quote_threshold is None:
+                for column in _LARGE_COLUMNS:
+                    result[column] = np.nan
+            if "median_source_event_size" not in result:
+                result["median_source_event_size"] = np.nan
+            if "last_event_at" not in result:
+                result["last_event_at"] = pd.NaT
+
+            result["volume_at_price_json"] = [
+                vap_by_bucket.get(pd.Timestamp(ts), "[]") for ts in grid
+            ]
+            result["trade_delta_base"] = (
+                result["aggressive_buy_base_volume"]
+                - result["aggressive_sell_base_volume"]
+            )
+            result["trade_delta_quote"] = (
+                result["aggressive_buy_quote_volume"]
+                - result["aggressive_sell_quote_volume"]
+            )
+            result = result.reset_index(names="period_start")
+            result["period_end"] = result["period_start"] + pd.Timedelta(minutes=1)
+            result["available_at"] = result["period_end"]
+            result["trade_flow_source_covered"] = True
+            result["last_event_at"] = pd.to_datetime(
+                result["last_event_at"], utc=True, errors="coerce"
+            ).astype("datetime64[ns, UTC]")
+            return result.loc[:, list(_REQUIRED_COLUMNS)].reset_index(drop=True)
+        finally:
+            for suffix in ("", ".wal"):
+                Path(str(database) + suffix).unlink(missing_ok=True)
+            shutil.rmtree(spill, ignore_errors=True)
+
+
     @staticmethod
     def _combined_identity(dataset: DatasetKind, partition_identities: list[str]) -> str:
         encoded = json.dumps(
@@ -663,11 +989,42 @@ class TradeAggregateStore:
                 record, dataset, identity, large_trade_quote_threshold
             )
             if cached_parquet is None:
-                # Important memory boundary: one raw archive is normalized,
-                # aggregated, released, and cached before the next is opened.
-                events = adapter.read(record)
-                aggregate = self._aggregate(record, events, large_trade_quote_threshold)
-                del events
+                # Surface the cache miss before expensive raw work begins. The
+                # previous UI left the last "Reused" status visible while a large
+                # monthly archive was actually rebuilding.
+                emit_progress(
+                    progress,
+                    kind="cache",
+                    phase="trade_flow_cache",
+                    label=label,
+                    completed=index - 1,
+                    total=total,
+                    built=built,
+                    reused=reused,
+                    elapsed_seconds=time.perf_counter() - progress_started,
+                    current=f"Building missing partition {index}/{total}",
+                )
+                if dataset is DatasetKind.AGG_TRADES and hasattr(adapter, "iter_read"):
+                    aggregate = self._aggregate_aggtrades_chunked(
+                        record,
+                        adapter,
+                        large_trade_quote_threshold,
+                        progress=progress,
+                        progress_label=label,
+                        progress_completed=index - 1,
+                        progress_total=total,
+                        progress_built=built,
+                        progress_reused=reused,
+                        progress_started=progress_started,
+                        partition_index=index,
+                    )
+                else:
+                    # Individual trades keep the established one-archive path.
+                    events = adapter.read(record)
+                    aggregate = self._aggregate(
+                        record, events, large_trade_quote_threshold
+                    )
+                    del events
                 self._write_partition(
                     record,
                     dataset,

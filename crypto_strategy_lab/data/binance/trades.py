@@ -50,17 +50,15 @@ class AggTradesArchiveAdapter(BinanceArchiveAdapter):
 
     dataset = DatasetKind.AGG_TRADES
 
-    def read(self, record: ArchiveRecord) -> pd.DataFrame:
-        if record.dataset != self.dataset:
-            raise ValueError(f"AggTradesArchiveAdapter cannot read {record.dataset.value}")
-        with open_csv_stream(record.path) as stream:
-            raw = pd.read_csv(stream, header=None, low_memory=False)
+    @staticmethod
+    def _normalize_raw(record: ArchiveRecord, raw: pd.DataFrame) -> pd.DataFrame:
         if raw.empty:
             return pd.DataFrame()
 
-        first = _key(raw.iloc[0, 0])
-        if first in {"aggtradeid", "aggregatetradeid", "id"}:
+        if _key(raw.iloc[0, 0]) in {"aggtradeid", "aggregatetradeid", "id"}:
             raw = raw.iloc[1:].reset_index(drop=True)
+        if raw.empty:
+            return pd.DataFrame()
         if raw.shape[1] < len(_AGG_TRADE_COLUMNS):
             raise ValueError(
                 f"Unexpected Binance aggTrades schema in {record.path}: {raw.shape[1]} columns"
@@ -90,7 +88,6 @@ class AggTradesArchiveAdapter(BinanceArchiveAdapter):
                 "first_trade_id": pd.to_numeric(raw["first_trade_id"], errors="raise").astype("int64"),
                 "last_trade_id": pd.to_numeric(raw["last_trade_id"], errors="raise").astype("int64"),
                 "is_buyer_maker": buyer_maker,
-                # Buyer maker means the aggressive side was the seller.
                 "taker_side": np.where(buyer_maker.to_numpy(bool), "SELL", "BUY"),
                 "source_archive": str(record.path),
                 "source_fingerprint": record.fingerprint,
@@ -108,6 +105,51 @@ class AggTradesArchiveAdapter(BinanceArchiveAdapter):
         if bool(frame["agg_trade_id"].duplicated().any()):
             raise ValueError(f"Duplicate Binance aggregate trade IDs found in {record.path}")
         return frame.sort_values(["event_time", "agg_trade_id"], kind="stable").reset_index(drop=True)
+
+    def iter_read(
+        self, record: ArchiveRecord, *, chunksize: int = 250_000
+    ):
+        """Yield bounded canonical aggTrade chunks from one archive.
+
+        This path is intended for large research-cache builds where materializing
+        an entire monthly archive at once can exceed workstation memory.
+        """
+        if record.dataset != self.dataset:
+            raise ValueError(f"AggTradesArchiveAdapter cannot read {record.dataset.value}")
+        if int(chunksize) <= 0:
+            raise ValueError("chunksize must be positive")
+
+        with open_csv_stream(record.path) as stream:
+            reader = pd.read_csv(
+                stream,
+                header=None,
+                low_memory=False,
+                chunksize=int(chunksize),
+            )
+            first_chunk = True
+            for raw in reader:
+                if first_chunk and not raw.empty and _key(raw.iloc[0, 0]) in {
+                    "aggtradeid",
+                    "aggregatetradeid",
+                    "id",
+                }:
+                    raw = raw.iloc[1:].reset_index(drop=True)
+                first_chunk = False
+                if raw.empty:
+                    continue
+                yield self._normalize_raw(record, raw)
+
+    def read(self, record: ArchiveRecord) -> pd.DataFrame:
+        if record.dataset != self.dataset:
+            raise ValueError(f"AggTradesArchiveAdapter cannot read {record.dataset.value}")
+        with open_csv_stream(record.path) as stream:
+            raw = pd.read_csv(stream, header=None, low_memory=False)
+        frame = self._normalize_raw(record, raw)
+        if frame.empty:
+            return frame
+        if bool(frame["agg_trade_id"].duplicated().any()):
+            raise ValueError(f"Duplicate Binance aggregate trade IDs found in {record.path}")
+        return frame
 
 
 class TradesArchiveAdapter(BinanceArchiveAdapter):
