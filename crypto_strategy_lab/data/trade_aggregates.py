@@ -217,6 +217,9 @@ class TradeAggregateStore:
                 return None
 
             escaped = str(parquet).replace("'", "''")
+            validation_columns = ",\n                            ".join(
+                _VALIDATION_SCAN_COLUMNS
+            )
             with duckdb.connect() as con:
                 relation = con.read_parquet(str(parquet))
                 missing = sorted(set(_REQUIRED_COLUMNS) - set(relation.columns))
@@ -226,14 +229,7 @@ class TradeAggregateStore:
                     f"""
                     WITH cached AS (
                         SELECT
-                            period_start,
-                            period_end,
-                            available_at,
-                            trade_flow_source_covered,
-                            source_event_count,
-                            underlying_trade_count,
-                            base_volume,
-                            quote_volume,
+                            {validation_columns},
                             lag(period_start) OVER () AS previous_period_start
                         FROM read_parquet('{escaped}')
                     )
@@ -314,6 +310,9 @@ class TradeAggregateStore:
         # Re-reading a large partition into pandas here creates an avoidable
         # second full partition allocation during first-time cache builds.
         escaped_temporary = str(temporary).replace("'", "''")
+        validation_columns = ",\n                        ".join(
+            _VALIDATION_SCAN_COLUMNS
+        )
         with duckdb.connect() as con:
             relation = con.read_parquet(str(temporary))
             missing = sorted(set(_REQUIRED_COLUMNS) - set(relation.columns))
@@ -323,14 +322,7 @@ class TradeAggregateStore:
                 f"""
                 WITH cached AS (
                     SELECT
-                        period_start,
-                        period_end,
-                        available_at,
-                        trade_flow_source_covered,
-                        source_event_count,
-                        underlying_trade_count,
-                        base_volume,
-                        quote_volume,
+                        {validation_columns},
                         lag(period_start) OVER () AS previous_period_start
                     FROM read_parquet('{escaped_temporary}')
                 )
