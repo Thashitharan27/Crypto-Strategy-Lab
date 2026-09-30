@@ -149,7 +149,11 @@ class TradeFlowContextFeatureProvider:
             raise ValueError(
                 "trade_flow_context requires a compact trade_flow_aggregate resource"
             )
-        agg = datasets[resource].copy()
+        # The aggregate can span years and includes large JSON payload strings.
+        # A deep DataFrame copy duplicates all numeric blocks before any research
+        # work begins. We only replace/derive columns below, so a shallow view is
+        # sufficient and preserves the input frame.
+        agg = datasets[resource].copy(deep=False)
         forbidden = {
             "agg_trade_id",
             "trade_id",
@@ -303,7 +307,14 @@ class TradeFlowContextFeatureProvider:
         ).dt.total_seconds()
         facts["trade_flow_source"] = source.value
 
-        klines = datasets[DatasetKind.KLINES].copy()
+        # Rolling intermediates can be sizeable on multi-year 1m histories and
+        # are no longer needed once facts have been materialized. Release their
+        # references before exact volume-profile processing starts.
+        del numeric, covered, segment, last_event, current5, prior60
+
+        # Avoid another unnecessary deep copy; timestamp normalization replaces
+        # columns on this shallow frame rather than mutating the source object.
+        klines = datasets[DatasetKind.KLINES].copy(deep=False)
         required_kline = {"period_start", "available_at"}
         missing_kline = sorted(required_kline - set(klines))
         if missing_kline:
