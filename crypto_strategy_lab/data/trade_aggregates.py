@@ -501,7 +501,10 @@ class TradeAggregateStore:
             current="Checking compact 1-minute partitions",
         )
 
-        partition_frames: list[pd.DataFrame] = []
+        # Keep only cache paths while scanning partitions. Retaining every compact
+        # monthly/daily DataFrame here defeats the one-partition-at-a-time memory
+        # boundary and can exhaust RAM on multi-year aggTrade histories.
+        partition_paths: list[Path] = []
         partition_identities: list[str] = []
         built = 0
         reused = 0
@@ -530,7 +533,13 @@ class TradeAggregateStore:
             else:
                 reused += 1
                 action = "Reused cached partition"
-            partition_frames.append(aggregate)
+            parquet, _manifest = self._partition_paths(dataset, record.symbol, identity)
+            if not parquet.is_file():
+                raise ValueError("Trade aggregate partition was not persisted")
+            partition_paths.append(parquet)
+            # The final union is disk-backed below; do not retain one DataFrame
+            # per source archive while the remaining partitions are checked.
+            del aggregate
             emit_progress(
                 progress,
                 kind="cache",
@@ -544,7 +553,16 @@ class TradeAggregateStore:
                 current=action,
             )
 
-        combined = pd.concat(partition_frames, ignore_index=True) if partition_frames else pd.DataFrame()
+        if not partition_paths:
+            combined = pd.DataFrame()
+        else:
+            # DuckDB scans the compact Parquet partitions directly and
+            # materializes only the single combined frame required downstream.
+            # This avoids holding N partition DataFrames plus a pd.concat copy.
+            with duckdb.connect() as con:
+                combined = con.read_parquet(
+                    [str(path) for path in partition_paths]
+                ).df()
         if combined.empty:
             raise DataNotAvailableError(
                 f"No aggregate rows were produced for {request.symbol} {dataset.value}"
