@@ -385,7 +385,10 @@ class OrderBookSnapshotStore:
             current="Checking compact 1-minute partitions",
         )
 
-        frames: list[pd.DataFrame] = []
+        # Retain cache paths rather than every compact partition DataFrame.
+        # Long BookTicker histories can otherwise keep gigabytes resident before
+        # the final concat, leaving no headroom for subsequent research features.
+        partition_paths: list[Path] = []
         identities: list[str] = []
         built = reused = event_count = 0
         for index, record in enumerate(records, 1):
@@ -417,7 +420,13 @@ class OrderBookSnapshotStore:
                 reused += 1
                 action = "Reused cached partition"
             if not compact.empty:
-                frames.append(compact)
+                parquet, _manifest = self._paths(record, interval, identity)
+                if not parquet.is_file():
+                    raise ValueError("order-book snapshot partition was not persisted")
+                partition_paths.append(parquet)
+            # The final union is disk-backed below; release each compact frame
+            # before the next source partition is inspected.
+            del compact
             emit_progress(
                 progress,
                 kind="cache",
@@ -430,12 +439,17 @@ class OrderBookSnapshotStore:
                 elapsed_seconds=time.perf_counter() - progress_started,
                 current=action,
             )
-        if not frames:
+        if not partition_paths:
             raise DataNotAvailableError(f"No valid {dataset.value} observations")
 
-        combined = pd.concat(frames, ignore_index=True).sort_values(
-            "period_start", kind="stable"
-        )
+        # Scan cached compact partitions directly from Parquet. This keeps peak
+        # memory close to one final combined frame instead of N partition frames
+        # plus an additional pd.concat allocation.
+        with duckdb.connect() as con:
+            combined = con.read_parquet(
+                [str(path) for path in partition_paths]
+            ).df()
+        combined = combined.sort_values("period_start", kind="stable")
         combined = combined.drop_duplicates("period_start", keep="last")
         grid = pd.date_range(
             pd.Timestamp(expanded.start).floor("min"),
