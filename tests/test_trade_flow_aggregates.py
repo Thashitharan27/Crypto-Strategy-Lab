@@ -245,6 +245,35 @@ def test_aggregate_cache_is_partition_local_and_never_calls_multi_year_load_data
     assert third.source_identity != second.source_identity
 
 
+
+
+def test_cached_partition_validation_does_not_materialize_pandas_frame(
+    tmp_path, monkeypatch
+):
+    raw = tmp_path / "raw"
+    path = raw / "day.csv"
+    write_trades(path, ["1,100,1,100,1767225600000,false"])
+    rec = record(path, fingerprint="day", raw_root=raw)
+    store = MarketDataStore(raw, tmp_path / "cache")
+    store.catalog.sync_root(raw, [rec])
+    aggregates = TradeAggregateStore(store)
+    req = request(
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 1, 2, tzinfo=UTC),
+    )
+    aggregates.load(req, DatasetKind.TRADES)
+    identity = aggregates._partition_identity(rec, DatasetKind.TRADES, None)
+
+    def forbidden_normalize(*args, **kwargs):
+        raise AssertionError("warm cache validation must not materialize pandas")
+
+    monkeypatch.setattr(aggregates, "_normalize_loaded", forbidden_normalize)
+    cached = aggregates._read_cached_partition(
+        rec, DatasetKind.TRADES, identity, None
+    )
+    assert cached is not None
+    assert cached.is_file()
+
 def test_large_threshold_changes_aggregate_identity(tmp_path):
     raw = tmp_path / "raw"
     path = raw / "day.csv"
