@@ -331,4 +331,8 @@ def exact_profile_frame(
             current_anchor_poc = snap["poc"]
             for field in PROFILE_FIELDS:
                 result.loc[i, f"vp_exact_{prefix}_{field}"] = snap[field]
+        if add_rows is not None:
+            add_rows.close()
+        if remove_rows is not None:
+            remove_rows.close()
     return result
