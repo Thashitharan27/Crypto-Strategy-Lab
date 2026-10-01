@@ -4,6 +4,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Mapping, Sequence
 
 import duckdb
@@ -21,6 +22,35 @@ class FeatureFrameCache:
     def __init__(self, cache_root: Path) -> None:
         self.root = Path(cache_root) / "features"
         self.format_version = 2
+
+    def _bounded_connection(
+        self,
+        *,
+        memory_limit: str,
+        threads: int = 1,
+    ):
+        """Return a DuckDB connection with bounded RAM and disk spill enabled.
+
+        Feature cache frames can be very large (notably multi-timeframe S/R
+        research). DuckDB's defaults may otherwise consume most available RAM
+        while reading or writing Parquet. Keep the query engine bounded and let
+        it spill temporary state to the cache drive instead.
+        """
+        spill_root = self.root / "_duckdb_spill"
+        spill_root.mkdir(parents=True, exist_ok=True)
+        temporary = TemporaryDirectory(prefix="feature-cache-", dir=spill_root)
+        con = duckdb.connect()
+        spill = str(Path(temporary.name)).replace("'", "''")
+        try:
+            con.execute(f"SET memory_limit='{memory_limit}'")
+            con.execute(f"SET threads={int(threads)}")
+            con.execute("SET preserve_insertion_order=false")
+            con.execute(f"SET temp_directory='{spill}'")
+        except Exception:
+            con.close()
+            temporary.cleanup()
+            raise
+        return con, temporary
 
     @staticmethod
     def _source_signature(canonical_source: pd.DataFrame) -> str:
@@ -118,8 +148,15 @@ class FeatureFrameCache:
                 or metadata.get("feature_cache_key") != key
             ):
                 return None
-            with duckdb.connect() as con:
+            con, temporary = self._bounded_connection(
+                memory_limit="512MB",
+                threads=1,
+            )
+            try:
                 frame = con.read_parquet(str(parquet_path)).df()
+            finally:
+                con.close()
+                temporary.cleanup()
         except Exception:
             # Cache is disposable. A broken/incomplete entry simply becomes a miss.
             return None
@@ -145,12 +182,20 @@ class FeatureFrameCache:
         for path in (temporary_parquet, temporary_metadata):
             path.unlink(missing_ok=True)
 
-        with duckdb.connect() as con:
+        con, temporary = self._bounded_connection(
+            memory_limit="1GB",
+            threads=1,
+        )
+        try:
             con.register("feature_frame", frame)
             escaped = str(temporary_parquet).replace("'", "''")
             con.execute(
                 f"COPY feature_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
             )
+            con.unregister("feature_frame")
+        finally:
+            con.close()
+            temporary.cleanup()
         metadata = {
             "cache_format_version": self.format_version,
             "feature_name": definition.name,

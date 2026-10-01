@@ -185,3 +185,27 @@ def test_positioning_cache_hit_does_not_materialize_metrics_but_miss_does(tmp_pa
     assert hit.attrs["feature_cache_hit"] is True
     assert store.loads == 1
     pdt.assert_frame_equal(hit, missed, check_dtype=False)
+
+
+def test_feature_cache_duckdb_connection_is_memory_bounded_and_spillable(tmp_path: Path) -> None:
+    cache = FeatureFrameCache(tmp_path)
+    con, temporary = cache._bounded_connection(memory_limit="512MB", threads=1)
+    try:
+        memory_limit = str(con.execute("SELECT current_setting('memory_limit')").fetchone()[0])
+        threads = int(con.execute("SELECT current_setting('threads')").fetchone()[0])
+        preserve = bool(
+            con.execute("SELECT current_setting('preserve_insertion_order')").fetchone()[0]
+        )
+        temp_directory = str(
+            con.execute("SELECT current_setting('temp_directory')").fetchone()[0]
+        )
+        assert "MiB" in memory_limit or "MB" in memory_limit
+        assert threads == 1
+        assert preserve is False
+        assert Path(temp_directory).is_dir()
+        assert str(tmp_path / "features" / "_duckdb_spill") in temp_directory
+    finally:
+        spill_path = Path(temporary.name)
+        con.close()
+        temporary.cleanup()
+    assert not spill_path.exists()
