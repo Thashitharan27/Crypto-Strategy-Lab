@@ -70,16 +70,17 @@ def _parquet_payload_rows(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ):
-    """Stream minute volume-at-price payloads from compact Parquet caches.
+    """Stream exact volume-at-price payloads with bounded memory.
 
-    Process the historical range in small chronological chunks so DuckDB never
-    needs to sort/group a multi-year JSON payload stream at once. Later
-    partitions retain precedence for overlapping minutes.
+    Each small time chunk is read one Parquet partition at a time. Later
+    partitions overwrite duplicate minutes in a Python dict, preserving the
+    existing "later partition wins" contract without asking DuckDB to group or
+    sort all historical JSON payloads together.
     """
     if not paths:
         return
 
-    chunk_span = pd.Timedelta(days=7)
+    chunk_span = pd.Timedelta(days=2)
     exclusive_end = pd.Timestamp(end) + pd.Timedelta(minutes=1)
     chunk_start = pd.Timestamp(start)
 
@@ -88,56 +89,49 @@ def _parquet_payload_rows(
 
     while chunk_start < exclusive_end:
         chunk_end = min(chunk_start + chunk_span, exclusive_end)
-        scans = []
-        parameters = []
-        for partition_order, path in enumerate(paths):
-            escaped = str(path).replace("'", "''")
-            scans.append(
-                "SELECT available_at, volume_at_price_json, "
-                f"{partition_order} AS partition_order "
-                f"FROM read_parquet('{escaped}') "
-                "WHERE available_at >= ? AND available_at < ?"
-            )
-            parameters.extend(
-                [chunk_start.to_pydatetime(), chunk_end.to_pydatetime()]
-            )
-        union_sql = " UNION ALL ".join(scans)
+        by_minute: dict[pd.Timestamp, object] = {}
 
-        temporary = TemporaryDirectory(prefix="exact-profile-", dir=spill_root)
-        connection = duckdb.connect()
-        spill = str(Path(temporary.name)).replace("'", "''")
-        try:
-            connection.execute("SET memory_limit='512MB'")
-            connection.execute("SET threads=1")
-            connection.execute("SET preserve_insertion_order=false")
-            connection.execute(f"SET temp_directory='{spill}'")
-            cursor = connection.execute(
-                f"""
-                SELECT
-                    available_at,
-                    arg_max(volume_at_price_json, partition_order)
-                        AS volume_at_price_json
-                FROM ({union_sql})
-                GROUP BY available_at
-                ORDER BY available_at
-                """,
-                parameters,
-            )
-            while True:
-                rows = cursor.fetchmany(512)
-                if not rows:
-                    break
-                for available_at, payload in rows:
-                    timestamp = (
-                        pd.Timestamp(available_at, tz="UTC")
-                        if getattr(available_at, "tzinfo", None) is None
-                        else pd.Timestamp(available_at).tz_convert("UTC")
-                    )
-                    yield timestamp, payload
-        finally:
-            connection.close()
-            temporary.cleanup()
+        for path in paths:
+            temporary = TemporaryDirectory(prefix="exact-profile-", dir=spill_root)
+            connection = duckdb.connect()
+            spill = str(Path(temporary.name)).replace("'", "''")
+            try:
+                connection.execute("SET memory_limit='256MB'")
+                connection.execute("SET threads=1")
+                connection.execute("SET preserve_insertion_order=false")
+                connection.execute(f"SET temp_directory='{spill}'")
+                cursor = connection.execute(
+                    """
+                    SELECT available_at, volume_at_price_json
+                    FROM read_parquet(?)
+                    WHERE available_at >= ? AND available_at < ?
+                    ORDER BY available_at
+                    """,
+                    [
+                        str(path),
+                        chunk_start.to_pydatetime(),
+                        chunk_end.to_pydatetime(),
+                    ],
+                )
+                while True:
+                    rows = cursor.fetchmany(256)
+                    if not rows:
+                        break
+                    for available_at, payload in rows:
+                        timestamp = (
+                            pd.Timestamp(available_at, tz="UTC")
+                            if getattr(available_at, "tzinfo", None) is None
+                            else pd.Timestamp(available_at).tz_convert("UTC")
+                        )
+                        by_minute[timestamp] = payload
+            finally:
+                connection.close()
+                temporary.cleanup()
 
+        for timestamp in sorted(by_minute):
+            yield timestamp, by_minute[timestamp]
+
+        by_minute.clear()
         chunk_start = chunk_end
 
 def _snapshot(
