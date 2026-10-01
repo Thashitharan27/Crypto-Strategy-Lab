@@ -261,3 +261,52 @@ def test_parquet_payload_stream_chunks_multiweek_history_without_duplicates(tmp_
     assert rows[0][0] == starts[0]
     assert rows[-1][0] == starts[-1]
     assert all(left[0] < right[0] for left, right in zip(rows, rows[1:]))
+
+
+def test_streamed_profile_reads_partitions_sequentially_and_preserves_later_wins(tmp_path):
+    starts = pd.date_range(
+        "2026-01-01",
+        periods=3 * 24 * 60,
+        freq="1min",
+        tz="UTC",
+    )
+    base = pd.DataFrame(
+        {
+            "available_at": starts,
+            "volume_at_price_json": [
+                json.dumps([[100.0 + i * 0.001, 1.0]], separators=(",", ":"))
+                for i in range(len(starts))
+            ],
+        }
+    )
+    later = base.iloc[24 * 60 :].copy()
+    conflict_time = starts[30 * 60]
+    later.loc[
+        later["available_at"].eq(conflict_time),
+        "volume_at_price_json",
+    ] = json.dumps([[777.0, 9.0]], separators=(",", ":"))
+
+    paths = []
+    for idx, frame in enumerate((base, later)):
+        parquet = tmp_path / f"sequential-{idx}.parquet"
+        with duckdb.connect() as con:
+            con.register("payloads", frame)
+            escaped = str(parquet).replace("'", "''")
+            con.execute(
+                f"COPY payloads TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
+        paths.append(str(parquet))
+
+    rows = list(
+        _parquet_payload_rows(
+            tuple(paths),
+            starts[0],
+            starts[-1],
+        )
+    )
+    assert len(rows) == len(base)
+    assert all(left[0] < right[0] for left, right in zip(rows, rows[1:]))
+    payload_by_time = dict(rows)
+    assert payload_by_time[conflict_time] == json.dumps(
+        [[777.0, 9.0]], separators=(",", ":")
+    )
