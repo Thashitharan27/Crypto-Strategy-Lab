@@ -80,7 +80,7 @@ def _parquet_payload_rows(
     if not paths:
         return
 
-    chunk_span = pd.Timedelta(days=2)
+    chunk_span = pd.Timedelta(days=1)
     exclusive_end = pd.Timestamp(end) + pd.Timedelta(minutes=1)
     chunk_start = pd.Timestamp(start)
 
@@ -105,7 +105,6 @@ def _parquet_payload_rows(
                     SELECT available_at, volume_at_price_json
                     FROM read_parquet(?)
                     WHERE available_at >= ? AND available_at < ?
-                    ORDER BY available_at
                     """,
                     [
                         str(path),
@@ -114,7 +113,7 @@ def _parquet_payload_rows(
                     ],
                 )
                 while True:
-                    rows = cursor.fetchmany(256)
+                    rows = cursor.fetchmany(64)
                     if not rows:
                         break
                     for available_at, payload in rows:

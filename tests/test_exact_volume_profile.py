@@ -310,3 +310,37 @@ def test_streamed_profile_reads_partitions_sequentially_and_preserves_later_wins
     assert payload_by_time[conflict_time] == json.dumps(
         [[777.0, 9.0]], separators=(",", ":")
     )
+
+
+def test_partition_scan_order_does_not_matter_because_chunk_is_sorted_in_python(tmp_path):
+    starts = pd.date_range(
+        "2026-01-01",
+        periods=180,
+        freq="1min",
+        tz="UTC",
+    )
+    shuffled = pd.DataFrame(
+        {
+            "available_at": starts[::-1],
+            "volume_at_price_json": [
+                json.dumps([[100.0 + i * 0.01, 1.0]], separators=(",", ":"))
+                for i in range(len(starts))
+            ],
+        }
+    )
+    parquet = tmp_path / "unsorted.parquet"
+    with duckdb.connect() as con:
+        con.register("payloads", shuffled)
+        escaped = str(parquet).replace("'", "''")
+        con.execute(
+            f"COPY payloads TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+        )
+
+    rows = list(
+        _parquet_payload_rows(
+            (str(parquet),),
+            starts[0],
+            starts[-1],
+        )
+    )
+    assert [row[0] for row in rows] == list(starts)
