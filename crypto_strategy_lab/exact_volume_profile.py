@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from hashlib import sha256
 import json
 import math
 from pathlib import Path
@@ -31,6 +32,199 @@ PROFILE_FIELDS = (
     "accumulation_score",
     "distribution_score",
 )
+
+
+EXACT_PROFILE_CACHE_FORMAT_VERSION = 1
+EXACT_PROFILE_ALGORITHM_VERSION = 1
+
+
+def _exact_profile_cache_descriptor(
+    aggregate: pd.DataFrame,
+    strategy: pd.DataFrame,
+    *,
+    strategy_minutes: int,
+    atr_period: int,
+    lookback_bars: int,
+    bin_bps: float,
+    value_fraction: float,
+    hvn_multiplier: float,
+    near_hvn_atr: float,
+    path_r: float,
+):
+    """Return a stable shared-cache descriptor, or None when provenance is incomplete.
+
+    The cache intentionally excludes Entry/Veto/Flip rules and the rest of the
+    strategy configuration. Exact VP depends only on immutable aggTrade
+    volume-at-price evidence, strategy OHLCV, timeframe, and VP construction
+    parameters. This lets many filter experiments reuse one expensive profile.
+    """
+    root = aggregate.attrs.get("exact_volume_profile_cache_root")
+    scope = aggregate.attrs.get("exact_volume_profile_cache_scope")
+    strategy_source = aggregate.attrs.get(
+        "exact_volume_profile_strategy_source_identity"
+    )
+    parquet_paths = tuple(
+        str(path)
+        for path in aggregate.attrs.get("volume_at_price_parquet_paths", ())
+    )
+    if not root or not isinstance(scope, dict) or not strategy_source or not parquet_paths:
+        return None
+
+    source_partitions = []
+    for order, path_text in enumerate(parquet_paths):
+        path = Path(path_text)
+        manifest = path.with_suffix(".json")
+        try:
+            metadata = json.loads(manifest.read_text(encoding="utf-8"))
+            fingerprint = metadata["source_fingerprint"]
+            schema_version = metadata["aggregate_schema_version"]
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            # Never reuse a shared cache when immutable source provenance cannot
+            # be established. The exact profile can still be calculated normally.
+            return None
+        source_partitions.append(
+            {
+                "order": order,
+                "source_fingerprint": str(fingerprint),
+                "aggregate_schema_version": int(schema_version),
+                "source_period_start": metadata.get("source_period_start"),
+                "source_period_end": metadata.get("source_period_end"),
+            }
+        )
+
+    decisions = pd.to_datetime(strategy["available_at"], utc=True, errors="coerce")
+    if decisions.isna().any() or not len(decisions):
+        return None
+
+    params = {
+        "strategy_minutes": int(strategy_minutes),
+        "atr_period": int(atr_period),
+        "lookback_bars": int(lookback_bars),
+        "bin_bps": float(bin_bps),
+        "value_fraction": float(value_fraction),
+        "hvn_multiplier": float(hvn_multiplier),
+        "near_hvn_atr": float(near_hvn_atr),
+        "path_r": float(path_r),
+    }
+    payload = {
+        "cache_format_version": EXACT_PROFILE_CACHE_FORMAT_VERSION,
+        "algorithm_version": EXACT_PROFILE_ALGORITHM_VERSION,
+        "scope": {
+            "exchange": str(scope.get("exchange", "")),
+            "market": str(scope.get("market", "")),
+            "symbol": str(scope.get("symbol", "")),
+            "strategy_interval": str(scope.get("strategy_interval", "")),
+        },
+        "strategy_source_identity": str(strategy_source),
+        "decision_start": pd.Timestamp(decisions.iloc[0]).isoformat(),
+        "decision_end": pd.Timestamp(decisions.iloc[-1]).isoformat(),
+        "row_count": int(len(strategy)),
+        "parameters": params,
+        "source_partitions": source_partitions,
+    }
+    key = sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    directory = (
+        Path(root)
+        / "exact_volume_profile"
+        / f"v{EXACT_PROFILE_CACHE_FORMAT_VERSION}"
+        / payload["scope"]["market"]
+        / payload["scope"]["symbol"]
+        / payload["scope"]["strategy_interval"]
+    )
+    return key, directory / f"{key}.parquet", directory / f"{key}.json", payload
+
+
+def _load_exact_profile_cache(descriptor):
+    if descriptor is None:
+        return None
+    key, parquet, manifest, payload = descriptor
+    if not parquet.is_file() or not manifest.is_file():
+        return None
+    try:
+        metadata = json.loads(manifest.read_text(encoding="utf-8"))
+        if (
+            metadata.get("cache_format_version") != EXACT_PROFILE_CACHE_FORMAT_VERSION
+            or metadata.get("algorithm_version") != EXACT_PROFILE_ALGORITHM_VERSION
+            or metadata.get("cache_key") != key
+            or metadata.get("identity") != payload
+        ):
+            return None
+        spill_root = parquet.parent / "_duckdb_spill"
+        spill_root.mkdir(parents=True, exist_ok=True)
+        temporary = TemporaryDirectory(prefix="exact-vp-cache-", dir=spill_root)
+        con = duckdb.connect()
+        spill = str(Path(temporary.name)).replace("'", "''")
+        try:
+            con.execute("SET memory_limit='512MB'")
+            con.execute("SET threads=1")
+            con.execute("SET preserve_insertion_order=false")
+            con.execute(f"SET temp_directory='{spill}'")
+            frame = con.read_parquet(str(parquet)).df()
+        finally:
+            con.close()
+            temporary.cleanup()
+        expected_columns = {
+            f"vp_exact_{prefix}_{field}"
+            for prefix in ("strategy", "1h", "4h", "1d")
+            for field in PROFILE_FIELDS
+        }
+        if len(frame) != int(payload["row_count"]) or set(frame.columns) != expected_columns:
+            return None
+        frame.attrs["exact_volume_profile_cache_hit"] = True
+        frame.attrs["exact_volume_profile_cache_key"] = key
+        return frame
+    except Exception:
+        # Shared VP cache is disposable. Corrupt/incomplete entries are misses.
+        return None
+
+
+def _store_exact_profile_cache(descriptor, frame: pd.DataFrame) -> None:
+    if descriptor is None:
+        return
+    key, parquet, manifest, payload = descriptor
+    parquet.parent.mkdir(parents=True, exist_ok=True)
+    temp_parquet = parquet.with_suffix(".tmp.parquet")
+    temp_manifest = manifest.with_suffix(".tmp.json")
+    temp_parquet.unlink(missing_ok=True)
+    temp_manifest.unlink(missing_ok=True)
+
+    spill_root = parquet.parent / "_duckdb_spill"
+    spill_root.mkdir(parents=True, exist_ok=True)
+    temporary = TemporaryDirectory(prefix="exact-vp-cache-", dir=spill_root)
+    con = duckdb.connect()
+    spill = str(Path(temporary.name)).replace("'", "''")
+    try:
+        con.execute("SET memory_limit='1GB'")
+        con.execute("SET threads=1")
+        con.execute("SET preserve_insertion_order=false")
+        con.execute(f"SET temp_directory='{spill}'")
+        con.register("exact_profile_frame", frame)
+        escaped = str(temp_parquet).replace("'", "''")
+        con.execute(
+            f"COPY exact_profile_frame TO '{escaped}' "
+            "(FORMAT PARQUET, COMPRESSION ZSTD)"
+        )
+        con.unregister("exact_profile_frame")
+    finally:
+        con.close()
+        temporary.cleanup()
+
+    metadata = {
+        "cache_format_version": EXACT_PROFILE_CACHE_FORMAT_VERSION,
+        "algorithm_version": EXACT_PROFILE_ALGORITHM_VERSION,
+        "cache_key": key,
+        "identity": payload,
+    }
+    temp_manifest.write_text(
+        json.dumps(metadata, sort_keys=True, indent=2, default=str) + "\n",
+        encoding="utf-8",
+    )
+    temp_parquet.replace(parquet)
+    temp_manifest.replace(manifest)
 
 
 def _atr(frame: pd.DataFrame, period: int) -> pd.Series:
@@ -359,6 +553,34 @@ def exact_profile_frame(
     if log_step <= 0:
         raise ValueError("volume profile bin_bps must be positive")
 
+    cache_descriptor = _exact_profile_cache_descriptor(
+        aggregate,
+        strategy,
+        strategy_minutes=strategy_minutes,
+        atr_period=atr_period,
+        lookback_bars=lookback_bars,
+        bin_bps=bin_bps,
+        value_fraction=value_fraction,
+        hvn_multiplier=hvn_multiplier,
+        near_hvn_atr=near_hvn_atr,
+        path_r=path_r,
+    )
+    cached = _load_exact_profile_cache(cache_descriptor)
+    if cached is not None:
+        emit_progress(
+            aggregate.attrs.get("progress_callback"),
+            kind="cache",
+            phase="exact_volume_profile",
+            label="Exact Volume Profile",
+            completed=1,
+            total=1,
+            built=0,
+            reused=1,
+            current="Shared Exact Volume Profile cache reused",
+            detail="Entry/Veto/Flip filters do not rebuild this cached profile.",
+        )
+        return cached
+
     contexts = [strategy_minutes, *[m for m in PROFILE_CONTEXTS if m >= strategy_minutes and m % strategy_minutes == 0]]
     contexts = list(dict.fromkeys(contexts))
     for minutes in contexts:
@@ -434,4 +656,21 @@ def exact_profile_frame(
             add_rows.close()
         if remove_rows is not None:
             remove_rows.close()
+
+    _store_exact_profile_cache(cache_descriptor, result)
+    if cache_descriptor is not None:
+        result.attrs["exact_volume_profile_cache_hit"] = False
+        result.attrs["exact_volume_profile_cache_key"] = cache_descriptor[0]
+        emit_progress(
+            aggregate.attrs.get("progress_callback"),
+            kind="cache",
+            phase="exact_volume_profile",
+            label="Exact Volume Profile",
+            completed=1,
+            total=1,
+            built=1,
+            reused=0,
+            current="Shared Exact Volume Profile cache saved",
+            detail="Future runs with the same symbol/timeframe/VP inputs can reuse it.",
+        )
     return result
