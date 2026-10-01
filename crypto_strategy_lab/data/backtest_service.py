@@ -719,6 +719,14 @@ def _optional_futures_research_features(
     result: dict[str, pd.DataFrame] = {}
 
     if order_book_enabled:
+        progress = getattr(store, "progress_callback", None)
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="order_book",
+            label="Preparing historical Order Book research",
+            detail="Loading bounded BookTicker/BookDepth snapshot caches.",
+        )
         provider = OrderBookContextFeatureProvider()
         parameters = _research_parameters(feature_parameters, provider.definition.name)
         snapshots = OrderBookSnapshotStore(store)
@@ -743,6 +751,13 @@ def _optional_futures_research_features(
         result[provider.definition.name] = _cached_feature_by_identities(
             store, request, provider, parameters, source_ids, lambda: datasets,
             registry=registry)
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="order_book",
+            label="Historical Order Book research ready",
+            detail="Bounded order-book snapshots and derived context are ready.",
+        )
 
     if allowed is None or DatasetKind.FUTURES_METRICS in allowed:
         try:
