@@ -717,9 +717,9 @@ def _optional_futures_research_features(
 
     allowed = usable_datasets
     result: dict[str, pd.DataFrame] = {}
+    progress = getattr(store, "progress_callback", None)
 
     if order_book_enabled:
-        progress = getattr(store, "progress_callback", None)
         emit_progress(
             progress,
             kind="stage",
@@ -760,6 +760,13 @@ def _optional_futures_research_features(
         )
 
     if allowed is None or DatasetKind.FUTURES_METRICS in allowed:
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="futures_positioning",
+            label="Preparing futures positioning research",
+            detail="Loading bounded futures metrics and positioning inputs.",
+        )
         try:
             provider = FuturesPositioningFeatureProvider()
             parameters = _research_parameters(
@@ -830,6 +837,13 @@ def _optional_futures_research_features(
             pass
 
     if allowed is None or DatasetKind.FUNDING_RATE in allowed:
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="funding",
+            label="Preparing funding research",
+            detail="Loading bounded funding-rate research inputs.",
+        )
         try:
             provider = FundingContextFeatureProvider()
             parameters = _research_parameters(
@@ -863,6 +877,13 @@ def _optional_futures_research_features(
             pass
 
     if taker_flow_usable:
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="taker_flow",
+            label="Preparing taker-flow research",
+            detail="Loading bounded taker-flow source candles.",
+        )
         try:
             provider = TakerFlowContextFeatureProvider()
             parameters = _research_parameters(
@@ -914,6 +935,13 @@ def _optional_futures_research_features(
         except DataNotAvailableError:
             pass
 
+    emit_progress(
+        progress,
+        kind="stage",
+        phase="basis",
+        label="Preparing basis research",
+        detail="Loading bounded mark/index/premium reference data.",
+    )
     basis_provider = BasisContextFeatureProvider()
     basis_parameters = _research_parameters(
         feature_parameters, basis_provider.definition.name
@@ -972,6 +1000,13 @@ def _optional_futures_research_features(
         )
 
     if trade_flow_enabled:
+        emit_progress(
+            progress,
+            kind="stage",
+            phase="trade_flow",
+            label="Preparing detailed Trade Flow research",
+            detail="Loading bounded cached trade aggregates and exact volume-profile inputs.",
+        )
         if allowed is not None and trade_flow_source not in allowed:
             raise DataNotAvailableError(
                 f"trade_flow_context requested but {trade_flow_source.value} is unavailable"
