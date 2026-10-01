@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import json
 
 import duckdb
@@ -60,6 +61,29 @@ class MarketDataStore:
             DatasetKind.BOOK_TICKER: BookTickerArchiveAdapter(),
             DatasetKind.BOOK_DEPTH: BookDepthArchiveAdapter(),
         }
+
+    def _bounded_connection(
+        self,
+        *,
+        memory_limit: str,
+        threads: int = 1,
+    ):
+        """Return a spillable DuckDB connection with bounded process pressure."""
+        spill_root = Path(self.cache.root) / "_duckdb_spill"
+        spill_root.mkdir(parents=True, exist_ok=True)
+        temporary = TemporaryDirectory(prefix="market-data-", dir=spill_root)
+        con = duckdb.connect()
+        spill = str(Path(temporary.name)).replace("'", "''")
+        try:
+            con.execute(f"SET memory_limit='{memory_limit}'")
+            con.execute(f"SET threads={int(threads)}")
+            con.execute("SET preserve_insertion_order=false")
+            con.execute(f"SET temp_directory='{spill}'")
+        except Exception:
+            con.close()
+            temporary.cleanup()
+            raise
+        return con, temporary
 
     @staticmethod
     def _path_is_within(path_text: str, directory_text: str) -> bool:
@@ -234,8 +258,18 @@ class MarketDataStore:
                     and metadata.get("raw_source_fingerprint") == record.fingerprint
                     and metadata.get("contract") == contract
                 ):
-                    with duckdb.connect() as con:
-                        con.execute("SELECT * FROM read_parquet(?) LIMIT 0", [str(target)])
+                    con, temporary = self._bounded_connection(
+                        memory_limit="128MB",
+                        threads=1,
+                    )
+                    try:
+                        con.execute(
+                            "SELECT * FROM read_parquet(?) LIMIT 0",
+                            [str(target)],
+                        )
+                    finally:
+                        con.close()
+                        temporary.cleanup()
                     self.canonical_cache_events["hit"] += 1
                     return target
             except Exception:
@@ -249,12 +283,20 @@ class MarketDataStore:
         temporary_manifest = manifest.with_suffix(".tmp.json")
         for path in (temporary, temporary_manifest):
             path.unlink(missing_ok=True)
-        with duckdb.connect() as con:
+        con, duckdb_temporary = self._bounded_connection(
+            memory_limit="512MB",
+            threads=1,
+        )
+        try:
             con.register("canonical_frame", frame)
             escaped = str(temporary).replace("'", "''")
             con.execute(
                 f"COPY canonical_frame TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
             )
+            con.unregister("canonical_frame")
+        finally:
+            con.close()
+            duckdb_temporary.cleanup()
         temporary_manifest.write_text(
             json.dumps(
                 {
@@ -306,8 +348,17 @@ class MarketDataStore:
                 f"interval={interval!r} from {request.start.isoformat()} to {request.end.isoformat()}"
             )
         parquet_paths = [self._ensure_canonical(record) for record in records]
-        with duckdb.connect() as con:
-            frame = con.read_parquet([str(path) for path in parquet_paths]).df()
+        con, temporary = self._bounded_connection(
+            memory_limit="768MB",
+            threads=1,
+        )
+        try:
+            frame = con.read_parquet(
+                [str(path) for path in parquet_paths]
+            ).df()
+        finally:
+            con.close()
+            temporary.cleanup()
         if frame.empty:
             return frame
         starts = pd.to_datetime(frame["period_start"], utc=True)
@@ -408,8 +459,15 @@ class MarketDataStore:
         frames: list[pd.DataFrame] = []
         for index in sorted(participants):
             path = self._ensure_canonical(records[index])
-            with duckdb.connect() as con:
+            con, temporary = self._bounded_connection(
+                memory_limit="256MB",
+                threads=1,
+            )
+            try:
                 frame = con.read_parquet(str(path)).df()
+            finally:
+                con.close()
+                temporary.cleanup()
             if frame.empty or "period_start" not in frame:
                 continue
             starts = pd.to_datetime(frame["period_start"], utc=True, errors="coerce")
@@ -554,7 +612,11 @@ class MarketDataStore:
         precedence_rows = [
             (path, rank) for rank, path in enumerate(parquet_paths)
         ]
-        with duckdb.connect() as con:
+        con, temporary = self._bounded_connection(
+            memory_limit="768MB",
+            threads=1,
+        )
+        try:
             con.execute(
                 "CREATE TEMP TABLE execution_source_precedence "
                 "(path VARCHAR PRIMARY KEY, source_rank INTEGER NOT NULL)"
@@ -589,6 +651,9 @@ class MarketDataStore:
                 """,
                 [parquet_paths, request.start, request.end],
             ).df()
+        finally:
+            con.close()
+            temporary.cleanup()
         if frame.empty:
             return frame
 
