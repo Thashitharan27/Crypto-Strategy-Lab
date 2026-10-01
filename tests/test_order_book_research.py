@@ -417,3 +417,69 @@ def test_order_book_feature_identity_ignores_unrelated_auxiliary_resources():
     changed_book = dict(base)
     changed_book[ticker_resource] = "book-B"
     assert registry.identity(resolved, req, changed_book, {}) != identity
+
+
+def test_order_book_duckdb_connection_is_memory_bounded_and_spillable(tmp_path):
+    raw = tmp_path / "raw"
+    store = MarketDataStore(raw, tmp_path / "cache")
+    snapshots = OrderBookSnapshotStore(store)
+    con, temporary = snapshots._bounded_connection(
+        memory_limit="128MB",
+        threads=1,
+    )
+    try:
+        memory_limit = str(con.execute("SELECT current_setting('memory_limit')").fetchone()[0])
+        threads = int(con.execute("SELECT current_setting('threads')").fetchone()[0])
+        preserve = bool(
+            con.execute("SELECT current_setting('preserve_insertion_order')").fetchone()[0]
+        )
+        temp_directory = str(
+            con.execute("SELECT current_setting('temp_directory')").fetchone()[0]
+        )
+        assert "MiB" in memory_limit or "MB" in memory_limit
+        assert threads == 1
+        assert preserve is False
+        assert Path(temp_directory).is_dir()
+        assert str(tmp_path / "cache" / "order_book" / "_duckdb_spill") in temp_directory
+    finally:
+        spill_path = Path(temporary.name)
+        con.close()
+        temporary.cleanup()
+    assert not spill_path.exists()
+
+
+def test_warm_snapshot_cache_does_not_materialize_partition_frames(tmp_path, monkeypatch):
+    raw = tmp_path / "raw"
+    path = raw / "bookTicker" / "BTCUSDT" / "daily" / "BTCUSDT-bookTicker-2026-01-01.csv"
+    _write_ticker(
+        path,
+        [
+            "1,100,4,101,5,1767225600000,1767225600000",
+            "2,100,4,101,5,1767225660000,1767225660000",
+        ],
+    )
+    rec = _record(
+        DatasetKind.BOOK_TICKER,
+        path=path,
+        raw_root=raw,
+        fingerprint="ticker-day",
+    )
+    store = MarketDataStore(raw, tmp_path / "cache")
+    store.catalog.sync_root(raw, [rec])
+    snapshots = OrderBookSnapshotStore(store)
+    req = _request()
+
+    cold = snapshots.load(req, DatasetKind.BOOK_TICKER)
+    assert cold.partitions_built == 1
+
+    monkeypatch.setattr(
+        snapshots,
+        "_read",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("warm cache must not materialize partition DataFrames")
+        ),
+    )
+    warm = snapshots.load(req, DatasetKind.BOOK_TICKER)
+    assert warm.cache_hit
+    assert warm.partitions_reused == 1
+    assert warm.source_event_count == cold.source_event_count
