@@ -11,6 +11,8 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from .progress import emit_progress
+
 
 PROFILE_CONTEXTS = (60, 240, 1440)
 PROFILE_FIELDS = (
@@ -120,6 +122,12 @@ def _parquet_payload_rows(
     exclusive_end = pd.Timestamp(end) + pd.Timedelta(minutes=1)
     chunk_start = pd.Timestamp(start)
     partition_ranges = _partition_time_ranges(paths)
+    total_chunks = max(
+        1,
+        int(math.ceil((exclusive_end - chunk_start) / chunk_span)),
+    )
+    completed_chunks = 0
+    progress = getattr(_parquet_payload_rows, "_progress_callback", None)
 
     spill_root = Path(paths[0]).parent / "_duckdb_spill"
     spill_root.mkdir(parents=True, exist_ok=True)
@@ -174,6 +182,20 @@ def _parquet_payload_rows(
         for timestamp in sorted(by_minute):
             yield timestamp, by_minute[timestamp]
 
+        completed_chunks += 1
+        emit_progress(
+            progress,
+            kind="cache",
+            phase="exact_volume_profile",
+            label="Exact Volume Profile",
+            completed=completed_chunks,
+            total=total_chunks,
+            current=f"{chunk_start.date()} -> {chunk_end.date()}",
+            detail=(
+                f"Processed {completed_chunks}/{total_chunks} day-chunks; "
+                f"scanned {len(relevant)} relevant aggregate partition(s)."
+            ),
+        )
         by_minute.clear()
         chunk_start = chunk_end
 
@@ -314,6 +336,9 @@ def exact_profile_frame(
     parquet_paths = tuple(
         str(path)
         for path in aggregate.attrs.get("volume_at_price_parquet_paths", ())
+    )
+    _parquet_payload_rows._progress_callback = aggregate.attrs.get(
+        "progress_callback"
     )
     inline_payloads = "volume_at_price_json" in aggregate.columns
     if (
