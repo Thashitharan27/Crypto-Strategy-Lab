@@ -12,6 +12,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import shutil
 import time
 from typing import Any
@@ -93,6 +94,29 @@ class TradeAggregateStore:
         self.store = store
         self.root = Path(store.cache.root) / "trade_aggregates"
 
+    def _bounded_connection(
+        self,
+        *,
+        memory_limit: str,
+        threads: int = 1,
+    ):
+        """Return a spillable DuckDB connection with bounded RAM usage."""
+        spill_root = self.root / "_duckdb_spill"
+        spill_root.mkdir(parents=True, exist_ok=True)
+        temporary = TemporaryDirectory(prefix="trade-aggregate-", dir=spill_root)
+        con = duckdb.connect()
+        spill = str(Path(temporary.name)).replace("'", "''")
+        try:
+            con.execute(f"SET memory_limit='{memory_limit}'")
+            con.execute(f"SET threads={int(threads)}")
+            con.execute("SET preserve_insertion_order=false")
+            con.execute(f"SET temp_directory='{spill}'")
+        except Exception:
+            con.close()
+            temporary.cleanup()
+            raise
+        return con, temporary
+
     @staticmethod
     def _validate_source(dataset: DatasetKind) -> None:
         if dataset not in {DatasetKind.AGG_TRADES, DatasetKind.TRADES}:
@@ -145,8 +169,8 @@ class TradeAggregateStore:
             self.store.raw_root, request, dataset, None
         )
 
-    @staticmethod
     def _conflicting_source_archives(
+        self,
         partition_paths: list[Path],
         minute: pd.Timestamp,
     ) -> list[str]:
@@ -156,12 +180,19 @@ class TradeAggregateStore:
         for path in partition_paths:
             escaped = str(path).replace("'", "''")
             try:
-                with duckdb.connect() as con:
+                con, temporary = self._bounded_connection(
+                    memory_limit="128MB",
+                    threads=1,
+                )
+                try:
                     present = con.execute(
                         f"SELECT 1 FROM read_parquet('{escaped}') "
                         "WHERE period_start = ? LIMIT 1",
                         [probe],
                     ).fetchone()
+                finally:
+                    con.close()
+                    temporary.cleanup()
                 if present is None:
                     continue
                 manifest = path.with_suffix(".json")
@@ -278,7 +309,11 @@ class TradeAggregateStore:
             validation_columns = ",\n                            ".join(
                 _VALIDATION_SCAN_COLUMNS
             )
-            with duckdb.connect() as con:
+            con, temporary = self._bounded_connection(
+                memory_limit="256MB",
+                threads=1,
+            )
+            try:
                 relation = con.read_parquet(str(parquet))
                 missing = sorted(set(_REQUIRED_COLUMNS) - set(relation.columns))
                 if missing:
@@ -327,6 +362,9 @@ class TradeAggregateStore:
                     FROM cached
                     """
                 ).fetchone()
+            finally:
+                con.close()
+                temporary.cleanup()
             if row is None:
                 return None
             row_count, unique_starts, timeline_errors, value_errors = row
@@ -358,12 +396,20 @@ class TradeAggregateStore:
         temporary_manifest = manifest.with_suffix(f".{token}.tmp.json")
         for path in (temporary, temporary_manifest):
             path.unlink(missing_ok=True)
-        with duckdb.connect() as con:
+        con, duckdb_temporary = self._bounded_connection(
+            memory_limit="512MB",
+            threads=1,
+        )
+        try:
             con.register("trade_aggregate", frame)
             escaped = str(temporary).replace("'", "''")
             con.execute(
                 f"COPY trade_aggregate TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
             )
+            con.unregister("trade_aggregate")
+        finally:
+            con.close()
+            duckdb_temporary.cleanup()
         # Validate the temporary artifact in DuckDB before publishing it.
         # Re-reading a large partition into pandas here creates an avoidable
         # second full partition allocation during first-time cache builds.
@@ -371,7 +417,11 @@ class TradeAggregateStore:
         validation_columns = ",\n                        ".join(
             _VALIDATION_SCAN_COLUMNS
         )
-        with duckdb.connect() as con:
+        con, duckdb_verification = self._bounded_connection(
+            memory_limit="256MB",
+            threads=1,
+        )
+        try:
             relation = con.read_parquet(str(temporary))
             missing = sorted(set(_REQUIRED_COLUMNS) - set(relation.columns))
             if missing:
@@ -420,6 +470,9 @@ class TradeAggregateStore:
                 FROM cached
                 """
             ).fetchone()
+        finally:
+            con.close()
+            duckdb_verification.cleanup()
         if verification is None:
             raise ValueError("Trade aggregate cache verification returned no result")
         verified_rows, unique_starts, timeline_errors, value_errors = verification
@@ -1172,11 +1225,15 @@ class TradeAggregateStore:
             # The heavy combine connection is closed before pandas allocates
             # the final frame. Re-open only the single compact result through
             # DuckDB so CSL does not require optional pyarrow/fastparquet.
-            with duckdb.connect() as reader:
-                reader.execute("SET memory_limit='512MB'")
-                reader.execute("SET threads=1")
-                reader.execute("SET preserve_insertion_order=false")
+            reader, reader_temporary = self._bounded_connection(
+                memory_limit="512MB",
+                threads=1,
+            )
+            try:
                 combined = reader.read_parquet(str(output)).df()
+            finally:
+                reader.close()
+                reader_temporary.cleanup()
             return self._normalize_loaded(combined, copy=False)
         finally:
             output.unlink(missing_ok=True)
