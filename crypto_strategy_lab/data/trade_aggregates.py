@@ -116,6 +116,63 @@ class TradeAggregateStore:
             datasets=(dataset,),
         )
 
+    def _records_for_current_sources(
+        self,
+        request: DataRequest,
+        dataset: DatasetKind,
+    ) -> list[ArchiveRecord]:
+        """Return catalog records after reconciling any deleted raw sources.
+
+        Repair workflows can replace an invalid monthly archive with daily
+        fallbacks. A stale catalog row for the removed monthly file must never
+        keep its already-built compact cache eligible for reuse alongside the
+        replacement daily sources.
+        """
+        selected_before = len(self.store.catalog.selected_records)
+        records = self.store.catalog.records_for(
+            self.store.raw_root, request, dataset, None
+        )
+        stale = [record for record in records if not Path(record.path).is_file()]
+        if not stale:
+            return records
+
+        # records_for() also records provenance. Discard the stale selection
+        # before rebuilding the catalog so deleted sources cannot leak into the
+        # run's selected-catalog provenance.
+        del self.store.catalog.selected_records[selected_before:]
+        self.store.refresh_catalog(force_full=True)
+        return self.store.catalog.records_for(
+            self.store.raw_root, request, dataset, None
+        )
+
+    @staticmethod
+    def _conflicting_source_archives(
+        partition_paths: list[Path],
+        minute: pd.Timestamp,
+    ) -> list[str]:
+        """Identify source archives contributing a conflicting cached minute."""
+        sources: list[str] = []
+        probe = pd.Timestamp(minute).to_pydatetime()
+        for path in partition_paths:
+            escaped = str(path).replace("'", "''")
+            try:
+                with duckdb.connect() as con:
+                    present = con.execute(
+                        f"SELECT 1 FROM read_parquet('{escaped}') "
+                        "WHERE period_start = ? LIMIT 1",
+                        [probe],
+                    ).fetchone()
+                if present is None:
+                    continue
+                manifest = path.with_suffix(".json")
+                metadata = json.loads(manifest.read_text(encoding="utf-8"))
+                source = str(metadata.get("source_archive") or path)
+            except Exception:
+                source = str(path)
+            if source not in sources:
+                sources.append(source)
+        return sources
+
     def _partition_identity(
         self,
         record: ArchiveRecord,
@@ -928,7 +985,7 @@ class TradeAggregateStore:
         """Return aggregate-resource identity using catalog metadata only."""
         self._validate_source(dataset)
         expanded = self._expanded_request(request, dataset)
-        records = self.store.catalog.records_for(self.store.raw_root, expanded, dataset, None)
+        records = self._records_for_current_sources(expanded, dataset)
         if not records:
             raise DataNotAvailableError(
                 f"No catalog coverage for {request.symbol} {dataset.value} trade-flow research"
@@ -951,7 +1008,7 @@ class TradeAggregateStore:
         if large_trade_quote_threshold is not None and large_trade_quote_threshold <= 0:
             raise ValueError("large_trade_quote_threshold must be positive or null")
         expanded = self._expanded_request(request, dataset)
-        records = self.store.catalog.records_for(self.store.raw_root, expanded, dataset, None)
+        records = self._records_for_current_sources(expanded, dataset)
         if not records:
             raise DataNotAvailableError(
                 f"No catalog coverage for {request.symbol} {dataset.value} trade-flow research"
@@ -1094,7 +1151,19 @@ class TradeAggregateStore:
             ]
             for _, group in overlap.groupby("period_start", sort=False):
                 if any(group[column].nunique(dropna=False) > 1 for column in compare_columns):
-                    raise ValueError("Conflicting overlapping trade aggregate source partitions")
+                    minute = pd.Timestamp(group["period_start"].iloc[0])
+                    sources = self._conflicting_source_archives(
+                        partition_paths, minute
+                    )
+                    detail = (
+                        " Sources: " + " | ".join(sources)
+                        if sources
+                        else ""
+                    )
+                    raise ValueError(
+                        "Conflicting overlapping trade aggregate source partitions "
+                        f"at {minute.isoformat()}.{detail}"
+                    )
         combined = combined.sort_values("period_start", kind="stable").drop_duplicates(
             "period_start", keep="last"
         )
