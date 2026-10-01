@@ -1,6 +1,7 @@
 """Immutable feature-research artifacts and artifact-only DuckDB queries."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 import hashlib
@@ -57,6 +58,25 @@ def _bounded_duckdb_connection(
         temporary.cleanup()
         raise
     return connection, temporary
+
+
+@contextmanager
+def _bounded_duckdb_context(
+    base_dir: Path,
+    *,
+    memory_limit: str = "512MB",
+    threads: int = 1,
+):
+    connection, temporary = _bounded_duckdb_connection(
+        base_dir,
+        memory_limit=memory_limit,
+        threads=threads,
+    )
+    try:
+        yield connection
+    finally:
+        connection.close()
+        temporary.cleanup()
 
 
 SR_ZONE_ARTIFACT_COLUMNS = (
