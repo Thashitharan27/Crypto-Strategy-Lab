@@ -175,3 +175,49 @@ def test_streamed_profile_uses_last_partition_for_overlap(tmp_path):
     )
 
     pd.testing.assert_frame_equal(expected_profile, streamed)
+
+
+def test_streamed_profile_duplicate_resolution_uses_later_partition_with_arg_max(tmp_path):
+    base = _aggregate(minutes=20)
+    strategy = _strategy(minutes=20)
+
+    first = base.copy()
+    second = base.copy()
+    second.loc[5, "volume_at_price_json"] = json.dumps(
+        [[333.0, 1234.0, 1234.0, 0.0]], separators=(",", ":")
+    )
+
+    paths = []
+    for idx, frame in enumerate((first, second)):
+        parquet = tmp_path / f"argmax-{idx}.parquet"
+        with duckdb.connect() as con:
+            con.register("aggregate_frame", frame)
+            escaped = str(parquet).replace("'", "''")
+            con.execute(
+                f"COPY aggregate_frame TO '{escaped}' "
+                "(FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
+        paths.append(str(parquet))
+
+    expected = base.copy()
+    expected.loc[5, "volume_at_price_json"] = second.loc[5, "volume_at_price_json"]
+    expected_profile = exact_profile_frame(
+        expected,
+        strategy,
+        strategy_minutes=1,
+        atr_period=5,
+        lookback_bars=10,
+        bin_bps=5.0,
+    )
+
+    lazy = base.drop(columns=["volume_at_price_json"]).copy()
+    lazy.attrs["volume_at_price_parquet_paths"] = tuple(paths)
+    streamed = exact_profile_frame(
+        lazy,
+        strategy,
+        strategy_minutes=1,
+        atr_period=5,
+        lookback_bars=10,
+        bin_bps=5.0,
+    )
+    pd.testing.assert_frame_equal(expected_profile, streamed)
