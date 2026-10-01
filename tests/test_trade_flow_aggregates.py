@@ -292,6 +292,96 @@ def test_aggregate_cache_is_partition_local_and_never_calls_multi_year_load_data
 
 
 
+def test_deleted_trade_source_forces_full_catalog_reconciliation_before_cache_reuse(
+    tmp_path, monkeypatch
+):
+    raw = tmp_path / "raw"
+    stale_path = raw / "stale.csv"
+    current_path = raw / "current.csv"
+    write_trades(stale_path, ["1,100,1,100,1767225600000,false"])
+    write_trades(current_path, ["2,110,1,110,1767225600000,false"])
+
+    stale = record(
+        stale_path,
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 2, tzinfo=UTC),
+        fingerprint="stale-monthly",
+        raw_root=raw,
+    )
+    current = record(
+        current_path,
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 2, tzinfo=UTC),
+        fingerprint="daily-replacement",
+        raw_root=raw,
+    )
+    store = MarketDataStore(raw, tmp_path / "cache")
+    store.catalog.sync_root(raw, [stale, current])
+    stale_path.unlink()
+
+    calls = []
+
+    def reconcile(*, force_full=False):
+        calls.append(force_full)
+        assert force_full is True
+        store.catalog.sync_root(raw, [current])
+        return 1
+
+    monkeypatch.setattr(store, "refresh_catalog", reconcile)
+
+    result = TradeAggregateStore(store).load(
+        request(
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2026, 1, 2, tzinfo=UTC),
+        ),
+        DatasetKind.TRADES,
+    )
+
+    assert calls == [True]
+    assert result.partitions_built == 1
+    assert result.partitions_reused == 0
+    assert all(selected.path != stale_path for selected in store.catalog.selected_records)
+
+
+def test_conflicting_overlap_error_reports_minute_and_source_archives(tmp_path):
+    raw = tmp_path / "raw"
+    first_path = raw / "first.csv"
+    second_path = raw / "second.csv"
+    write_trades(first_path, ["1,100,1,100,1767225600000,false"])
+    write_trades(second_path, ["2,200,1,200,1767225600000,false"])
+    first = record(
+        first_path,
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 2, tzinfo=UTC),
+        fingerprint="first",
+        raw_root=raw,
+    )
+    second = record(
+        second_path,
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 1, 2, tzinfo=UTC),
+        fingerprint="second",
+        raw_root=raw,
+    )
+    store = MarketDataStore(raw, tmp_path / "cache")
+    store.catalog.sync_root(raw, [first, second])
+
+    with pytest.raises(ValueError) as excinfo:
+        TradeAggregateStore(store).load(
+            request(
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 2, tzinfo=UTC),
+            ),
+            DatasetKind.TRADES,
+        )
+
+    message = str(excinfo.value)
+    assert "Conflicting overlapping trade aggregate source partitions at" in message
+    assert "2026-01-01T00:00:00+00:00" in message
+    assert str(first_path) in message
+    assert str(second_path) in message
+
+
 def test_cached_partition_validation_prunes_large_volume_profile_payload():
     assert "volume_at_price_json" not in _VALIDATION_SCAN_COLUMNS
     assert set(_VALIDATION_SCAN_COLUMNS) == {
