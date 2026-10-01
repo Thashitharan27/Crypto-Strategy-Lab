@@ -1169,9 +1169,14 @@ class TradeAggregateStore:
                     [start.to_pydatetime(), end.to_pydatetime()],
                 )
 
-            # DuckDB is closed before pandas allocates the final frame, avoiding
-            # simultaneous query-engine and DataFrame peaks.
-            combined = pd.read_parquet(output)
+            # The heavy combine connection is closed before pandas allocates
+            # the final frame. Re-open only the single compact result through
+            # DuckDB so CSL does not require optional pyarrow/fastparquet.
+            with duckdb.connect() as reader:
+                reader.execute("SET memory_limit='512MB'")
+                reader.execute("SET threads=1")
+                reader.execute("SET preserve_insertion_order=false")
+                combined = reader.read_parquet(str(output)).df()
             return self._normalize_loaded(combined, copy=False)
         finally:
             output.unlink(missing_ok=True)
