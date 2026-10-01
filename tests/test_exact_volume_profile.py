@@ -6,6 +6,7 @@ import pandas as pd
 
 from crypto_strategy_lab.exact_volume_profile import (
     _parquet_payload_rows,
+    _partition_time_ranges,
     exact_profile_frame,
 )
 
@@ -344,3 +345,72 @@ def test_partition_scan_order_does_not_matter_because_chunk_is_sorted_in_python(
         )
     )
     assert [row[0] for row in rows] == list(starts)
+
+
+def test_partition_time_ranges_read_trade_aggregate_manifests(tmp_path):
+    parquet = tmp_path / "part.parquet"
+    parquet.write_bytes(b"placeholder")
+    parquet.with_suffix(".json").write_text(
+        json.dumps(
+            {
+                "source_period_start": "2026-01-01T00:00:00+00:00",
+                "source_period_end": "2026-02-01T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    ranges = _partition_time_ranges((str(parquet),))
+    assert len(ranges) == 1
+    _, path, start, end = ranges[0]
+    assert path == parquet
+    assert start == pd.Timestamp("2026-01-01T00:00:00Z")
+    assert end == pd.Timestamp("2026-02-01T00:00:00Z")
+
+
+def test_payload_stream_skips_nonoverlapping_partitions(tmp_path, monkeypatch):
+    jan_starts = pd.date_range("2026-01-01", periods=10, freq="1min", tz="UTC")
+    feb_starts = pd.date_range("2026-02-01", periods=10, freq="1min", tz="UTC")
+    paths = []
+    for idx, (starts, begin, finish) in enumerate(
+        (
+            (jan_starts, "2026-01-01T00:00:00+00:00", "2026-02-01T00:00:00+00:00"),
+            (feb_starts, "2026-02-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00"),
+        )
+    ):
+        frame = pd.DataFrame(
+            {
+                "available_at": starts,
+                "volume_at_price_json": [
+                    json.dumps([[100.0 + i, 1.0]], separators=(",", ":"))
+                    for i in range(len(starts))
+                ],
+            }
+        )
+        parquet = tmp_path / f"part-{idx}.parquet"
+        with duckdb.connect() as con:
+            con.register("payloads", frame)
+            escaped = str(parquet).replace("'", "''")
+            con.execute(
+                f"COPY payloads TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+            )
+        parquet.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "source_period_start": begin,
+                    "source_period_end": finish,
+                }
+            ),
+            encoding="utf-8",
+        )
+        paths.append(str(parquet))
+
+    rows = list(
+        _parquet_payload_rows(
+            tuple(paths),
+            jan_starts[0],
+            jan_starts[-1],
+        )
+    )
+    assert len(rows) == len(jan_starts)
+    assert rows[0][0] == jan_starts[0]
+    assert rows[-1][0] == jan_starts[-1]
