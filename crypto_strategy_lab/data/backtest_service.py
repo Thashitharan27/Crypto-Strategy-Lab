@@ -1013,14 +1013,42 @@ def _optional_futures_research_features(
             )
         try:
             aggregate = TradeAggregateStore(store).load(
-                _dataset_request(request, trade_flow_source), trade_flow_source,
-                large_trade_quote_threshold=large_trade_quote_threshold)
+                _dataset_request(request, trade_flow_source),
+                trade_flow_source,
+                large_trade_quote_threshold=large_trade_quote_threshold,
+            )
             aggregate.frame.attrs["progress_callback"] = progress
             provider = TradeFlowContextFeatureProvider()
             resource = trade_flow_resource(trade_flow_source)
-            parameters = _research_parameters(feature_parameters, provider.definition.name)
-            source_ids = {DatasetKind.KLINES: store.source_signature(_dataset_request(request, DatasetKind.KLINES), DatasetKind.KLINES, interval=request.strategy_interval).cache_identity(),
-                          resource: aggregate.source_identity}
+            parameters = _research_parameters(
+                feature_parameters, provider.definition.name
+            )
+            strategy_source_identity = store.source_signature(
+                _dataset_request(request, DatasetKind.KLINES),
+                DatasetKind.KLINES,
+                interval=request.strategy_interval,
+            ).cache_identity()
+            source_ids = {
+                DatasetKind.KLINES: strategy_source_identity,
+                resource: aggregate.source_identity,
+            }
+
+            # Exact VP is expensive but independent of Entry/Veto/Flip filters
+            # and of non-VP trade-flow settings. Give the provider a stable,
+            # provenance-bound shared-cache scope so one completed build can be
+            # reused by later filter experiments on the same market/timeframe.
+            aggregate.frame.attrs["exact_volume_profile_cache_root"] = str(
+                store.cache.root
+            )
+            aggregate.frame.attrs["exact_volume_profile_cache_scope"] = {
+                "exchange": request.exchange,
+                "market": request.market.value,
+                "symbol": request.symbol,
+                "strategy_interval": request.strategy_interval,
+            }
+            aggregate.frame.attrs[
+                "exact_volume_profile_strategy_source_identity"
+            ] = strategy_source_identity
             result[provider.definition.name] = _cached_feature_by_identities(
                 store, request, provider, parameters, source_ids,
                 lambda: {DatasetKind.KLINES: canonical, resource: aggregate.frame}, registry=registry)
