@@ -102,7 +102,7 @@ def _parquet_payload_rows(
     connection = duckdb.connect()
     spill = str(Path(temporary.name)).replace("'", "''")
     try:
-        connection.execute("SET memory_limit='512MB'")
+        connection.execute("SET memory_limit='2GB'")
         connection.execute("SET threads=1")
         connection.execute("SET preserve_insertion_order=false")
         connection.execute(f"SET temp_directory='{spill}'")
@@ -119,7 +119,7 @@ def _parquet_payload_rows(
             parameters,
         )
         while True:
-            rows = cursor.fetchmany(4096)
+            rows = cursor.fetchmany(512)
             if not rows:
                 break
             for available_at, payload in rows:
