@@ -11,6 +11,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import time
 from uuid import uuid4
 
@@ -47,6 +48,29 @@ class OrderBookSnapshotStore:
         self.root = Path(store.cache.root) / "order_book"
         if not hasattr(store, "order_book_snapshot_cache_events"):
             store.order_book_snapshot_cache_events = {}
+
+    def _bounded_connection(
+        self,
+        *,
+        memory_limit: str,
+        threads: int = 1,
+    ):
+        """Return a spillable DuckDB connection with bounded RAM usage."""
+        spill_root = self.root / "_duckdb_spill"
+        spill_root.mkdir(parents=True, exist_ok=True)
+        temporary = TemporaryDirectory(prefix="order-book-", dir=spill_root)
+        con = duckdb.connect()
+        spill = str(Path(temporary.name)).replace("'", "''")
+        try:
+            con.execute(f"SET memory_limit='{memory_limit}'")
+            con.execute(f"SET threads={int(threads)}")
+            con.execute("SET preserve_insertion_order=false")
+            con.execute(f"SET temp_directory='{spill}'")
+        except Exception:
+            con.close()
+            temporary.cleanup()
+            raise
+        return con, temporary
 
     @staticmethod
     def _validate(dataset: DatasetKind, interval: str) -> None:
@@ -218,6 +242,7 @@ class OrderBookSnapshotStore:
     def _read(
         self, record: ArchiveRecord, interval: str, identity: str
     ) -> tuple[pd.DataFrame, int] | None:
+        """Read one compact partition with bounded DuckDB memory."""
         parquet, manifest = self._paths(record, interval, identity)
         try:
             meta = json.loads(manifest.read_text(encoding="utf-8"))
@@ -229,8 +254,15 @@ class OrderBookSnapshotStore:
                 or meta.get("source_fingerprint") != record.fingerprint
             ):
                 return None
-            with duckdb.connect() as con:
+            con, temporary = self._bounded_connection(
+                memory_limit="256MB",
+                threads=1,
+            )
+            try:
                 frame = con.read_parquet(str(parquet)).df()
+            finally:
+                con.close()
+                temporary.cleanup()
             if int(meta.get("row_count", -1)) != len(frame):
                 return None
             for column in (
@@ -242,6 +274,45 @@ class OrderBookSnapshotStore:
                 if column in frame:
                     frame[column] = self._utc_ns(frame[column])
             return frame, int(meta.get("source_event_count", 0))
+        except Exception:
+            return None
+
+    def _cached_partition_info(
+        self, record: ArchiveRecord, interval: str, identity: str
+    ) -> tuple[int, int] | None:
+        """Validate a warm partition without materializing its DataFrame."""
+        parquet, manifest = self._paths(record, interval, identity)
+        try:
+            meta = json.loads(manifest.read_text(encoding="utf-8"))
+            if (
+                meta.get("identity") != identity
+                or meta.get("schema_version") != BOOK_SNAPSHOT_SCHEMA_VERSION
+                or meta.get("cache_format_version")
+                != BOOK_SNAPSHOT_CACHE_FORMAT_VERSION
+                or meta.get("source_fingerprint") != record.fingerprint
+            ):
+                return None
+            con, temporary = self._bounded_connection(
+                memory_limit="128MB",
+                threads=1,
+            )
+            try:
+                relation = con.read_parquet(str(parquet))
+                columns = set(relation.columns)
+                row_count = int(
+                    con.execute(
+                        "SELECT count(*) FROM read_parquet(?)",
+                        [str(parquet)],
+                    ).fetchone()[0]
+                )
+            finally:
+                con.close()
+                temporary.cleanup()
+            missing = self._required_snapshot_columns(record.dataset) - columns
+            expected_rows = int(meta.get("row_count", -1))
+            if missing or row_count != expected_rows:
+                return None
+            return row_count, int(meta.get("source_event_count", 0))
         except Exception:
             return None
 
@@ -284,18 +355,33 @@ class OrderBookSnapshotStore:
         tmp = parquet.with_suffix(f".{token}.tmp.parquet")
         tmp_manifest = manifest.with_suffix(f".{token}.tmp.json")
         try:
-            with duckdb.connect() as con:
+            con, temporary = self._bounded_connection(
+                memory_limit="512MB",
+                threads=1,
+            )
+            try:
                 con.register("snapshot", frame)
                 escaped = str(tmp).replace("'", "''")
                 con.execute(
                     f"COPY snapshot TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
                 )
-                check = con.read_parquet(str(tmp)).df()
-            missing = self._required_snapshot_columns(record.dataset) - set(check.columns)
-            if missing or len(check) != len(frame):
+                con.unregister("snapshot")
+                relation = con.read_parquet(str(tmp))
+                check_columns = set(relation.columns)
+                check_rows = int(
+                    con.execute(
+                        "SELECT count(*) FROM read_parquet(?)",
+                        [str(tmp)],
+                    ).fetchone()[0]
+                )
+            finally:
+                con.close()
+                temporary.cleanup()
+            missing = self._required_snapshot_columns(record.dataset) - check_columns
+            if missing or check_rows != len(frame):
                 raise ValueError(
                     "order-book snapshot cache validation failed: "
-                    f"missing={sorted(missing)} rows={len(check)}/{len(frame)}"
+                    f"missing={sorted(missing)} rows={check_rows}/{len(frame)}"
                 )
             metadata = {
                 "identity": identity,
@@ -394,7 +480,7 @@ class OrderBookSnapshotStore:
         for index, record in enumerate(records, 1):
             identity = self._identity(record, interval)
             identities.append(identity)
-            cached = self._read(record, interval, identity)
+            cached = self._cached_partition_info(record, interval, identity)
             if cached is None:
                 events = self.store._adapter_for(dataset).read(record)
                 source_events = len(events)
@@ -404,7 +490,8 @@ class OrderBookSnapshotStore:
                     if dataset is DatasetKind.BOOK_TICKER
                     else self._compact_depth(record, events)
                 )
-                if not compact.empty:
+                row_count = len(compact)
+                if row_count:
                     self._write(
                         record,
                         interval,
@@ -414,19 +501,18 @@ class OrderBookSnapshotStore:
                     )
                 built += 1
                 action = "Built missing partition"
+                del compact
+                del events
             else:
-                compact, source_events = cached
+                row_count, source_events = cached
                 event_count += source_events
                 reused += 1
                 action = "Reused cached partition"
-            if not compact.empty:
+            if row_count:
                 parquet, _manifest = self._paths(record, interval, identity)
                 if not parquet.is_file():
                     raise ValueError("order-book snapshot partition was not persisted")
                 partition_paths.append(parquet)
-            # The final union is disk-backed below; release each compact frame
-            # before the next source partition is inspected.
-            del compact
             emit_progress(
                 progress,
                 kind="cache",
@@ -442,13 +528,19 @@ class OrderBookSnapshotStore:
         if not partition_paths:
             raise DataNotAvailableError(f"No valid {dataset.value} observations")
 
-        # Scan cached compact partitions directly from Parquet. This keeps peak
-        # memory close to one final combined frame instead of N partition frames
-        # plus an additional pd.concat allocation.
-        with duckdb.connect() as con:
-            combined = con.read_parquet(
-                [str(path) for path in partition_paths]
-            ).df()
+        # Scan cached compact partitions directly from Parquet using a bounded
+        # DuckDB connection. Large multi-year histories may spill sort/dedup
+        # state to disk instead of consuming the rest of the process RAM.
+        con, temporary = self._bounded_connection(
+            memory_limit="768MB",
+            threads=1,
+        )
+        try:
+            relation = con.read_parquet([str(path) for path in partition_paths])
+            combined = relation.df()
+        finally:
+            con.close()
+            temporary.cleanup()
         # DuckDB may materialize Parquet timestamps at microsecond resolution.
         # Preserve the public snapshot-frame contract used by direct consumers.
         for column in ("period_start", "period_end", "available_at", "source_event_at"):
