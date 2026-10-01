@@ -1108,11 +1108,13 @@ class TradeAggregateStore:
                     if column in frame_columns
                 ]
                 value_projection = ",\n                        ".join(
-                    f"""CASE
-                            WHEN coalesce(d.trade_flow_source_covered, false)
-                            THEN d."{column}"
-                            ELSE NULL
-                        END AS "{column}""""
+                    (
+                        'CASE '
+                        'WHEN coalesce(d.trade_flow_source_covered, false) '
+                        f'THEN d."{column}" '
+                        'ELSE NULL '
+                        f'END AS "{column}"'
+                    )
                     for column in value_columns
                 )
                 projection_parts = [
