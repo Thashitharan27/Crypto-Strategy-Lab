@@ -1,6 +1,7 @@
 """Immutable feature-research artifacts and artifact-only DuckDB queries."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 import hashlib
@@ -34,6 +35,50 @@ REQUIRED_CONTEXT_COLUMNS = {
     "strategy_candle_open_time",
     "decision_available_at",
 }
+
+def _bounded_duckdb_connection(
+    base_dir: Path,
+    *,
+    memory_limit: str = "512MB",
+    threads: int = 1,
+):
+    """Return a spillable DuckDB connection for run/report artifact work."""
+    spill_root = Path(base_dir) / "_duckdb_spill"
+    spill_root.mkdir(parents=True, exist_ok=True)
+    temporary = tempfile.TemporaryDirectory(prefix="research-", dir=spill_root)
+    connection = duckdb.connect()
+    spill = str(Path(temporary.name)).replace("'", "''")
+    try:
+        connection.execute(f"SET memory_limit='{memory_limit}'")
+        connection.execute(f"SET threads={int(threads)}")
+        connection.execute("SET preserve_insertion_order=false")
+        connection.execute(f"SET temp_directory='{spill}'")
+    except Exception:
+        connection.close()
+        temporary.cleanup()
+        raise
+    return connection, temporary
+
+
+@contextmanager
+def _bounded_duckdb_context(
+    base_dir: Path,
+    *,
+    memory_limit: str = "512MB",
+    threads: int = 1,
+):
+    connection, temporary = _bounded_duckdb_connection(
+        base_dir,
+        memory_limit=memory_limit,
+        threads=threads,
+    )
+    try:
+        yield connection
+    finally:
+        connection.close()
+        temporary.cleanup()
+
+
 SR_ZONE_ARTIFACT_COLUMNS = (
     "strategy_index",
     "strategy_candle_open_time",
@@ -543,7 +588,11 @@ def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
     os.close(fd)
     escaped = name.replace("'", "''")
     try:
-        connection = duckdb.connect()
+        connection, temporary = _bounded_duckdb_connection(
+            path.parent,
+            memory_limit="512MB",
+            threads=1,
+        )
         try:
             connection.register("artifact_frame", frame)
             connection.execute(
@@ -554,6 +603,7 @@ def _write_parquet_atomic(frame: pd.DataFrame, path: Path) -> None:
             ).fetchone()[0]
         finally:
             connection.close()
+            temporary.cleanup()
         if int(actual) != len(frame):
             raise ResearchArtifactError(
                 "temporary parquet row count validation failed"
@@ -817,7 +867,11 @@ class ResearchQueryService:
             except Exception as legacy_exc:
                 raise ResearchArtifactError("research manifest is corrupt") from legacy_exc
 
-        self.connection = duckdb.connect()
+        self.connection, self._duckdb_temporary = _bounded_duckdb_connection(
+            self.run_dir,
+            memory_limit="512MB",
+            threads=1,
+        )
         self.last_query_seconds: float | None = None
         try:
             self._trades = trades_path
@@ -841,6 +895,10 @@ class ResearchQueryService:
 
     def close(self) -> None:
         self.connection.close()
+        temporary = getattr(self, "_duckdb_temporary", None)
+        if temporary is not None:
+            temporary.cleanup()
+            self._duckdb_temporary = None
 
     def __enter__(self):
         return self

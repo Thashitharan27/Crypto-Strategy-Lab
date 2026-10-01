@@ -14,6 +14,7 @@ import pandas as pd
 from .feature_research import (
     FEATURE_RESEARCH_ARTIFACT_CONTRACT,
     FEATURE_RESEARCH_ARTIFACT_VERSION,
+    _bounded_duckdb_context,
     _trade_fingerprint,
     _write_parquet_atomic,
     write_research_artifacts,
@@ -72,7 +73,7 @@ def _validate_research_artifacts(
         or research.get("artifact_version") != FEATURE_RESEARCH_ARTIFACT_VERSION
     ):
         raise ValueError("incompatible feature research artifact contract")
-    with duckdb.connect() as con:
+    with _bounded_duckdb_context(trades_path.parent) as con:
         trade_columns = [
             row[0]
             for row in con.execute(
@@ -182,7 +183,7 @@ def _validate_sr_zone_artifact(
     expected_rows: int,
 ) -> None:
     """Verify S/R inventory storage is causal, complete, and lossless."""
-    with duckdb.connect() as con:
+    with _bounded_duckdb_context(zones_path.parent) as con:
         con.execute("SET TimeZone='UTC'")
         columns = {
             row[0]
@@ -490,7 +491,7 @@ def _validate_signal_artifact(
         "decision",
         "reason_code",
     }
-    with duckdb.connect() as con:
+    with _bounded_duckdb_context(signals_path.parent) as con:
         columns = {
             row[0]
             for row in con.execute(
@@ -550,7 +551,7 @@ def _validate_rule_trace_artifact(
         "filter_passed",
         "filter_reason",
     }
-    with duckdb.connect() as con:
+    with _bounded_duckdb_context(trace_path.parent) as con:
         columns = {
             row[0]
             for row in con.execute(
@@ -860,7 +861,7 @@ class CsvManifestReporter:
         finish_phase("workbook", phase_started)
 
         phase_started = time.perf_counter()
-        with duckdb.connect() as con:
+        with _bounded_duckdb_context(run_dir) as con:
             parquet_count = con.execute(
                 "SELECT count(*) FROM read_parquet(?)", [str(trades_path)]
             ).fetchone()[0]
