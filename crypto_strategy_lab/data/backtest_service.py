@@ -1015,6 +1015,7 @@ def _optional_futures_research_features(
             aggregate = TradeAggregateStore(store).load(
                 _dataset_request(request, trade_flow_source), trade_flow_source,
                 large_trade_quote_threshold=large_trade_quote_threshold)
+            aggregate.frame.attrs["progress_callback"] = progress
             provider = TradeFlowContextFeatureProvider()
             resource = trade_flow_resource(trade_flow_source)
             parameters = _research_parameters(feature_parameters, provider.definition.name)

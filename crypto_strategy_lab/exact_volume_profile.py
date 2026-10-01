@@ -11,6 +11,8 @@ import duckdb
 import numpy as np
 import pandas as pd
 
+from .progress import emit_progress
+
 
 PROFILE_CONTEXTS = (60, 240, 1440)
 PROFILE_FIELDS = (
@@ -65,6 +67,42 @@ def _decode_bins(payload: object, log_step: float) -> dict[int, float]:
     return dict(result)
 
 
+def _partition_time_ranges(paths: tuple[str, ...]):
+    """Return cached source coverage for each aggregate partition.
+
+    Trade-aggregate manifests already record immutable source period bounds, so
+    Exact Volume Profile can skip every partition that cannot overlap the
+    current chunk instead of opening all historical Parquets repeatedly.
+    """
+    ranges = []
+    for order, path_text in enumerate(paths):
+        path = Path(path_text)
+        manifest = path.with_suffix(".json")
+        start = end = None
+        try:
+            metadata = json.loads(manifest.read_text(encoding="utf-8"))
+            raw_start = metadata.get("source_period_start")
+            raw_end = metadata.get("source_period_end")
+            if raw_start:
+                start = pd.Timestamp(raw_start)
+                if start.tzinfo is None:
+                    start = start.tz_localize("UTC")
+                else:
+                    start = start.tz_convert("UTC")
+            if raw_end:
+                end = pd.Timestamp(raw_end)
+                if end.tzinfo is None:
+                    end = end.tz_localize("UTC")
+                else:
+                    end = end.tz_convert("UTC")
+        except Exception:
+            # Old/corrupt manifests remain usable; they are treated as
+            # potentially overlapping every chunk rather than silently skipped.
+            start = end = None
+        ranges.append((order, path, start, end))
+    return ranges
+
+
 def _parquet_payload_rows(
     paths: tuple[str, ...],
     start: pd.Timestamp,
@@ -72,10 +110,10 @@ def _parquet_payload_rows(
 ):
     """Stream exact volume-at-price payloads with bounded memory.
 
-    Each small time chunk is read one Parquet partition at a time. Later
-    partitions overwrite duplicate minutes in a Python dict, preserving the
-    existing "later partition wins" contract without asking DuckDB to group or
-    sort all historical JSON payloads together.
+    The historical range is processed one day at a time, but only Parquet
+    partitions whose cached source period overlaps that day are opened. Later
+    partitions overwrite duplicate minutes, preserving the existing precedence
+    contract without re-scanning the full partition catalog for every day.
     """
     if not paths:
         return
@@ -83,6 +121,13 @@ def _parquet_payload_rows(
     chunk_span = pd.Timedelta(days=1)
     exclusive_end = pd.Timestamp(end) + pd.Timedelta(minutes=1)
     chunk_start = pd.Timestamp(start)
+    partition_ranges = _partition_time_ranges(paths)
+    total_chunks = max(
+        1,
+        int(math.ceil((exclusive_end - chunk_start) / chunk_span)),
+    )
+    completed_chunks = 0
+    progress = getattr(_parquet_payload_rows, "_progress_callback", None)
 
     spill_root = Path(paths[0]).parent / "_duckdb_spill"
     spill_root.mkdir(parents=True, exist_ok=True)
@@ -91,7 +136,14 @@ def _parquet_payload_rows(
         chunk_end = min(chunk_start + chunk_span, exclusive_end)
         by_minute: dict[pd.Timestamp, object] = {}
 
-        for path in paths:
+        relevant = []
+        for order, path, period_start, period_end in partition_ranges:
+            if period_start is not None and period_end is not None:
+                if period_end <= chunk_start or period_start >= chunk_end:
+                    continue
+            relevant.append((order, path))
+
+        for _order, path in relevant:
             temporary = TemporaryDirectory(prefix="exact-profile-", dir=spill_root)
             connection = duckdb.connect()
             spill = str(Path(temporary.name)).replace("'", "''")
@@ -130,6 +182,20 @@ def _parquet_payload_rows(
         for timestamp in sorted(by_minute):
             yield timestamp, by_minute[timestamp]
 
+        completed_chunks += 1
+        emit_progress(
+            progress,
+            kind="cache",
+            phase="exact_volume_profile",
+            label="Exact Volume Profile",
+            completed=completed_chunks,
+            total=total_chunks,
+            current=f"{chunk_start.date()} -> {chunk_end.date()}",
+            detail=(
+                f"Processed {completed_chunks}/{total_chunks} day-chunks; "
+                f"scanned {len(relevant)} relevant aggregate partition(s)."
+            ),
+        )
         by_minute.clear()
         chunk_start = chunk_end
 
@@ -270,6 +336,9 @@ def exact_profile_frame(
     parquet_paths = tuple(
         str(path)
         for path in aggregate.attrs.get("volume_at_price_parquet_paths", ())
+    )
+    _parquet_payload_rows._progress_callback = aggregate.attrs.get(
+        "progress_callback"
     )
     inline_payloads = "volume_at_price_json" in aggregate.columns
     if (
