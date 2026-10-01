@@ -319,3 +319,27 @@ def test_bundle_feature_timestamps_must_exactly_match_strategy(block):
 
     with pytest.raises(ValueError, match=expected):
         from_data_lake_bundle(bundle)
+
+
+def test_prepared_run_cache_duckdb_connection_is_memory_bounded_and_spillable(tmp_path):
+    cache = PreparedRunCache(tmp_path)
+    con, temporary = cache._bounded_connection(memory_limit="512MB", threads=1)
+    try:
+        memory_limit = str(con.execute("SELECT current_setting('memory_limit')").fetchone()[0])
+        threads = int(con.execute("SELECT current_setting('threads')").fetchone()[0])
+        preserve = bool(
+            con.execute("SELECT current_setting('preserve_insertion_order')").fetchone()[0]
+        )
+        temp_directory = str(
+            con.execute("SELECT current_setting('temp_directory')").fetchone()[0]
+        )
+        assert "MiB" in memory_limit or "MB" in memory_limit
+        assert threads == 1
+        assert preserve is False
+        assert Path(temp_directory).is_dir()
+        assert str(tmp_path / "prepared" / "_duckdb_spill") in temp_directory
+    finally:
+        spill_path = Path(temporary.name)
+        con.close()
+        temporary.cleanup()
+    assert not spill_path.exists()

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Callable, Mapping
 
 import duckdb
@@ -70,6 +71,29 @@ class PreparedRunCache:
         self.root = Path(cache_root) / "prepared"
         self.contract_version = int(contract_version)
 
+    def _bounded_connection(
+        self,
+        *,
+        memory_limit: str,
+        threads: int = 1,
+    ):
+        """Return a spillable DuckDB connection with a hard RAM budget."""
+        spill_root = self.root / "_duckdb_spill"
+        spill_root.mkdir(parents=True, exist_ok=True)
+        temporary = TemporaryDirectory(prefix="prepared-cache-", dir=spill_root)
+        con = duckdb.connect()
+        spill = str(Path(temporary.name)).replace("'", "''")
+        try:
+            con.execute(f"SET memory_limit='{memory_limit}'")
+            con.execute(f"SET threads={int(threads)}")
+            con.execute("SET preserve_insertion_order=false")
+            con.execute(f"SET temp_directory='{spill}'")
+        except Exception:
+            con.close()
+            temporary.cleanup()
+            raise
+        return con, temporary
+
     def identity(
         self,
         *,
@@ -125,15 +149,25 @@ class PreparedRunCache:
                 columns[column] = value
                 item["values"].append([name, column])
             layout["research"].append(item)
-        table = pd.DataFrame(columns)
+        # Reuse the prepared arrays where pandas can instead of eagerly copying
+        # every column before DuckDB writes the L3 artifact.
+        table = pd.DataFrame(columns, copy=False)
         for path in (temp_parquet, temp_manifest):
             path.unlink(missing_ok=True)
-        with duckdb.connect() as con:
+        con, temporary = self._bounded_connection(
+            memory_limit="1GB",
+            threads=1,
+        )
+        try:
             con.register("prepared_frame", table)
             con.execute(
                 "COPY prepared_frame TO ? (FORMAT PARQUET, COMPRESSION ZSTD)",
                 [str(temp_parquet)],
             )
+            con.unregister("prepared_frame")
+        finally:
+            con.close()
+            temporary.cleanup()
         metadata = {
             "cache_format_version": PREPARED_CACHE_FORMAT_VERSION,
             "prepared_contract_version": self.contract_version,
@@ -164,8 +198,15 @@ class PreparedRunCache:
                 or metadata["prepared_contract_version"] != self.contract_version
             ):
                 return None
-            with duckdb.connect() as con:
+            con, temporary = self._bounded_connection(
+                memory_limit="512MB",
+                threads=1,
+            )
+            try:
                 table = con.read_parquet(str(parquet)).df()
+            finally:
+                con.close()
+                temporary.cleanup()
             if len(table) != metadata["row_count"]:
                 return None
             layout = metadata["layout"]
