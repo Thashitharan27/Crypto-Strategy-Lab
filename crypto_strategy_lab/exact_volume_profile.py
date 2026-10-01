@@ -94,8 +94,16 @@ def _parquet_payload_rows(
     for _ in paths:
         parameters.extend([start.to_pydatetime(), end.to_pydatetime()])
 
+    spill_root = Path(paths[0]).parent / "_duckdb_spill"
+    spill_root.mkdir(parents=True, exist_ok=True)
+    temporary = TemporaryDirectory(prefix="exact-profile-", dir=spill_root)
     connection = duckdb.connect()
+    spill = str(Path(temporary.name)).replace("'", "''")
     try:
+        connection.execute("SET memory_limit='512MB'")
+        connection.execute("SET threads=1")
+        connection.execute("SET preserve_insertion_order=false")
+        connection.execute(f"SET temp_directory='{spill}'")
         cursor = connection.execute(
             f"""
             SELECT available_at, volume_at_price_json
@@ -116,6 +124,7 @@ def _parquet_payload_rows(
                 yield pd.Timestamp(available_at, tz="UTC") if getattr(available_at, "tzinfo", None) is None else pd.Timestamp(available_at).tz_convert("UTC"), payload
     finally:
         connection.close()
+        temporary.cleanup()
 
 
 def _snapshot(
