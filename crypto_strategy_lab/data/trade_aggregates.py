@@ -207,8 +207,8 @@ class TradeAggregateStore:
         return parquet, parquet.with_suffix(".json")
 
     @staticmethod
-    def _normalize_loaded(frame: pd.DataFrame) -> pd.DataFrame:
-        result = frame.copy()
+    def _normalize_loaded(frame: pd.DataFrame, *, copy: bool = True) -> pd.DataFrame:
+        result = frame.copy() if copy else frame
         for column in ("period_start", "period_end", "available_at", "last_event_at"):
             if column in result:
                 result[column] = pd.to_datetime(result[column], utc=True, errors="coerce")
@@ -996,6 +996,186 @@ class TradeAggregateStore:
         ]
         return self._combined_identity(dataset, identities)
 
+    def _combine_partitions_bounded(
+        self,
+        partition_paths: list[Path],
+        expanded: DataRequest,
+    ) -> pd.DataFrame:
+        """Combine many compact partitions with bounded DuckDB RAM and disk spill.
+
+        The old path materialized every partition into one DuckDB-backed pandas
+        conversion and then performed sort/dedup/reindex copies in pandas. On
+        multi-year 1-minute histories that temporarily required nearly all system
+        RAM. This path performs overlap validation, de-duplication and the complete
+        minute-grid join inside a spillable DuckDB query, writes one temporary
+        Parquet artifact, closes DuckDB, and only then materializes the final frame.
+        """
+        if not partition_paths:
+            return pd.DataFrame()
+
+        combine_root = self.root / "_combine"
+        combine_root.mkdir(parents=True, exist_ok=True)
+        token = f"{os.getpid()}.{uuid4().hex}"
+        spill = combine_root / f"{token}.tmp"
+        output = combine_root / f"{token}.parquet"
+        spill.mkdir(parents=True, exist_ok=True)
+
+        frame_columns = [
+            column for column in _REQUIRED_COLUMNS
+            if column != "volume_at_price_json"
+        ]
+        compare_columns = [
+            column
+            for column in (
+                *_ADDITIVE_COLUMNS,
+                *_LARGE_COLUMNS,
+                "median_source_event_size",
+                "last_event_at",
+            )
+            if column in frame_columns
+        ]
+        paths_sql = ", ".join(
+            "'" + str(path).replace("'", "''") + "'" for path in partition_paths
+        )
+        selected_sql = ", ".join(frame_columns)
+        conflict_terms = []
+        for column in compare_columns:
+            quoted = f'"{column}"'
+            conflict_terms.append(
+                "("
+                f"count(DISTINCT {quoted}) > 1 OR "
+                f"(count(*) <> count({quoted}) AND count({quoted}) > 0)"
+                ")"
+            )
+        conflict_sql = " OR ".join(conflict_terms) or "FALSE"
+
+        start = pd.Timestamp(expanded.start).floor("min")
+        end = pd.Timestamp(expanded.end).ceil("min")
+        if end <= start:
+            return pd.DataFrame(columns=frame_columns)
+
+        escaped_output = str(output).replace("'", "''")
+        escaped_spill = str(spill).replace("'", "''")
+        try:
+            with duckdb.connect() as con:
+                # Keep substantial headroom for the GUI/backtest process. DuckDB
+                # may spill sort/hash state to disk instead of competing for all
+                # physical RAM during a multi-year final combine.
+                con.execute("SET memory_limit='2GB'")
+                con.execute("SET threads=2")
+                con.execute("SET preserve_insertion_order=false")
+                con.execute(f"SET temp_directory='{escaped_spill}'")
+                con.execute(
+                    f"""
+                    CREATE TEMP VIEW trade_partition_source AS
+                    SELECT {selected_sql}
+                    FROM read_parquet([{paths_sql}])
+                    """
+                )
+
+                conflict = con.execute(
+                    f"""
+                    SELECT period_start
+                    FROM trade_partition_source
+                    GROUP BY period_start
+                    HAVING count(*) > 1 AND ({conflict_sql})
+                    ORDER BY period_start
+                    LIMIT 1
+                    """
+                ).fetchone()
+                if conflict is not None:
+                    minute = pd.Timestamp(conflict[0])
+                    sources = self._conflicting_source_archives(
+                        partition_paths, minute
+                    )
+                    detail = (
+                        " Sources: " + " | ".join(sources)
+                        if sources
+                        else ""
+                    )
+                    raise ValueError(
+                        "Conflicting overlapping trade aggregate source partitions "
+                        f"at {minute.isoformat()}.{detail}"
+                    )
+
+                value_columns = [
+                    column
+                    for column in (
+                        *_ADDITIVE_COLUMNS,
+                        *_LARGE_COLUMNS,
+                        "median_source_event_size",
+                    )
+                    if column in frame_columns
+                ]
+                value_projection = ",\n                        ".join(
+                    f"""CASE
+                            WHEN coalesce(d.trade_flow_source_covered, false)
+                            THEN d."{column}"
+                            ELSE NULL
+                        END AS "{column}""""
+                    for column in value_columns
+                )
+                projection_parts = [
+                    "g.period_start",
+                    "g.period_start + INTERVAL 1 MINUTE AS period_end",
+                    "g.period_start + INTERVAL 1 MINUTE AS available_at",
+                    "coalesce(d.trade_flow_source_covered, false) AS trade_flow_source_covered",
+                ]
+                if value_projection:
+                    projection_parts.append(value_projection)
+                projection_parts.append(
+                    """CASE
+                        WHEN coalesce(d.trade_flow_source_covered, false)
+                        THEN d.last_event_at
+                        ELSE NULL
+                    END AS last_event_at"""
+                )
+                final_projection = ",\n                        ".join(projection_parts)
+
+                con.execute(
+                    f"""
+                    COPY (
+                        WITH ranked AS (
+                            SELECT *,
+                                   row_number() OVER (
+                                       PARTITION BY period_start
+                                       ORDER BY period_start
+                                   ) AS source_rank
+                            FROM trade_partition_source
+                        ),
+                        deduped AS (
+                            SELECT {selected_sql}
+                            FROM ranked
+                            WHERE source_rank = 1
+                        ),
+                        grid AS (
+                            SELECT *
+                            FROM generate_series(
+                                ?::TIMESTAMPTZ,
+                                (?::TIMESTAMPTZ) - INTERVAL 1 MINUTE,
+                                INTERVAL 1 MINUTE
+                            ) AS t(period_start)
+                        )
+                        SELECT
+                            {final_projection}
+                        FROM grid g
+                        LEFT JOIN deduped d USING (period_start)
+                        ORDER BY g.period_start
+                    ) TO '{escaped_output}'
+                    (FORMAT PARQUET, COMPRESSION ZSTD)
+                    """,
+                    [start.to_pydatetime(), end.to_pydatetime()],
+                )
+
+            # DuckDB is closed before pandas allocates the final frame, avoiding
+            # simultaneous query-engine and DataFrame peaks.
+            combined = pd.read_parquet(output)
+            return self._normalize_loaded(combined, copy=False)
+        finally:
+            output.unlink(missing_ok=True)
+            shutil.rmtree(spill, ignore_errors=True)
+
+
     def load(
         self,
         request: DataRequest,
@@ -1115,76 +1295,13 @@ class TradeAggregateStore:
                 current=action,
             )
 
-        if not partition_paths:
-            combined = pd.DataFrame()
-        else:
-            # DuckDB scans the compact Parquet partitions directly and
-            # materializes only the single combined frame required downstream.
-            # This avoids holding N partition DataFrames plus a pd.concat copy.
-            # The exact volume-at-price payload is by far the largest
-            # object/string column. Keep it in the partition Parquet files and
-            # stream it later inside exact-volume-profile research instead of
-            # materializing six years of JSON into the main pandas frame.
-            frame_columns = [
-                column for column in _REQUIRED_COLUMNS
-                if column != "volume_at_price_json"
-            ]
-            with duckdb.connect() as con:
-                combined = con.read_parquet(
-                    [str(path) for path in partition_paths]
-                ).project(", ".join(frame_columns)).df()
+        combined = self._combine_partitions_bounded(
+            partition_paths, expanded
+        )
         if combined.empty:
             raise DataNotAvailableError(
                 f"No aggregate rows were produced for {request.symbol} {dataset.value}"
             )
-        combined = self._normalize_loaded(combined)
-
-        # Resolve normal daily/monthly archive overlap at the compact minute
-        # boundary.  Conflicting covered minute aggregates are a source-integrity
-        # error rather than something to sum twice or silently average.
-        duplicate = combined["period_start"].duplicated(keep=False)
-        if duplicate.any():
-            overlap = combined.loc[duplicate]
-            compare_columns = [
-                column for column in (*_ADDITIVE_COLUMNS, *_LARGE_COLUMNS, "median_source_event_size", "last_event_at")
-                if column in overlap
-            ]
-            for _, group in overlap.groupby("period_start", sort=False):
-                if any(group[column].nunique(dropna=False) > 1 for column in compare_columns):
-                    minute = pd.Timestamp(group["period_start"].iloc[0])
-                    sources = self._conflicting_source_archives(
-                        partition_paths, minute
-                    )
-                    detail = (
-                        " Sources: " + " | ".join(sources)
-                        if sources
-                        else ""
-                    )
-                    raise ValueError(
-                        "Conflicting overlapping trade aggregate source partitions "
-                        f"at {minute.isoformat()}.{detail}"
-                    )
-        combined = combined.sort_values("period_start", kind="stable").drop_duplicates(
-            "period_start", keep="last"
-        )
-
-        start = pd.Timestamp(expanded.start).floor("min")
-        end = pd.Timestamp(expanded.end).ceil("min")
-        grid = pd.date_range(start, end, freq="1min", inclusive="left")
-        combined = combined.set_index("period_start").reindex(grid)
-        covered = combined["trade_flow_source_covered"].fillna(False).astype(bool)
-        combined["trade_flow_source_covered"] = covered
-        combined["period_end"] = grid + pd.Timedelta(minutes=1)
-        combined["available_at"] = combined["period_end"]
-        for column in (*_ADDITIVE_COLUMNS, *_LARGE_COLUMNS, "median_source_event_size"):
-            if column not in combined:
-                combined[column] = np.nan
-            combined.loc[~covered, column] = np.nan
-        if "last_event_at" not in combined:
-            combined["last_event_at"] = pd.NaT
-        combined.loc[~covered, "last_event_at"] = pd.NaT
-        combined = combined.reset_index(names="period_start")
-        combined["last_event_at"] = pd.to_datetime(combined["last_event_at"], utc=True, errors="coerce")
         output_columns = [
             column for column in _REQUIRED_COLUMNS
             if column != "volume_at_price_json"
