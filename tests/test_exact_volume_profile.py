@@ -4,7 +4,10 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from crypto_strategy_lab.exact_volume_profile import exact_profile_frame
+from crypto_strategy_lab.exact_volume_profile import (
+    _parquet_payload_rows,
+    exact_profile_frame,
+)
 
 
 def _aggregate(minutes=80):
@@ -221,3 +224,40 @@ def test_streamed_profile_duplicate_resolution_uses_later_partition_with_arg_max
         bin_bps=5.0,
     )
     pd.testing.assert_frame_equal(expected_profile, streamed)
+
+
+def test_parquet_payload_stream_chunks_multiweek_history_without_duplicates(tmp_path):
+    starts = pd.date_range(
+        "2026-01-01",
+        periods=8 * 24 * 60,
+        freq="1min",
+        tz="UTC",
+    )
+    frame = pd.DataFrame(
+        {
+            "available_at": starts,
+            "volume_at_price_json": [
+                json.dumps([[100.0 + i * 0.001, 1.0]], separators=(",", ":"))
+                for i in range(len(starts))
+            ],
+        }
+    )
+    parquet = tmp_path / "multiweek.parquet"
+    with duckdb.connect() as con:
+        con.register("payloads", frame)
+        escaped = str(parquet).replace("'", "''")
+        con.execute(
+            f"COPY payloads TO '{escaped}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+        )
+
+    rows = list(
+        _parquet_payload_rows(
+            (str(parquet),),
+            starts[0],
+            starts[-1],
+        )
+    )
+    assert len(rows) == len(frame)
+    assert rows[0][0] == starts[0]
+    assert rows[-1][0] == starts[-1]
+    assert all(left[0] < right[0] for left, right in zip(rows, rows[1:]))
