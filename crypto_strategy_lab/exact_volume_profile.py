@@ -72,62 +72,73 @@ def _parquet_payload_rows(
 ):
     """Stream minute volume-at-price payloads from compact Parquet caches.
 
-    The full JSON column is intentionally never materialized into pandas.
-    Separate forward iterators can be used for window entry/eviction so exact
-    profiles remain bounded by the active price-bin map rather than history size.
+    Process the historical range in small chronological chunks so DuckDB never
+    needs to sort/group a multi-year JSON payload stream at once. Later
+    partitions retain precedence for overlapping minutes.
     """
     if not paths:
         return
-    # Preserve the aggregate loader's "last partition wins" precedence
-    # explicitly. read_parquet(...)+any_value() is not deterministic when daily
-    # and monthly archives overlap, and separate add/remove scans must make the
-    # same choice for exact profile arithmetic.
-    scans = []
-    for partition_order, path in enumerate(paths):
-        escaped = str(path).replace("'", "''")
-        scans.append(
-            "SELECT available_at, volume_at_price_json, "
-            f"{partition_order} AS partition_order "
-            f"FROM read_parquet('{escaped}') "
-            "WHERE available_at >= ? AND available_at <= ?"
-        )
-    union_sql = " UNION ALL ".join(scans)
-    parameters = []
-    for _ in paths:
-        parameters.extend([start.to_pydatetime(), end.to_pydatetime()])
+
+    chunk_span = pd.Timedelta(days=7)
+    exclusive_end = pd.Timestamp(end) + pd.Timedelta(minutes=1)
+    chunk_start = pd.Timestamp(start)
 
     spill_root = Path(paths[0]).parent / "_duckdb_spill"
     spill_root.mkdir(parents=True, exist_ok=True)
-    temporary = TemporaryDirectory(prefix="exact-profile-", dir=spill_root)
-    connection = duckdb.connect()
-    spill = str(Path(temporary.name)).replace("'", "''")
-    try:
-        connection.execute("SET memory_limit='2GB'")
-        connection.execute("SET threads=1")
-        connection.execute("SET preserve_insertion_order=false")
-        connection.execute(f"SET temp_directory='{spill}'")
-        cursor = connection.execute(
-            f"""
-            SELECT available_at, volume_at_price_json
-            FROM ({union_sql})
-            QUALIFY row_number() OVER (
-                PARTITION BY available_at
-                ORDER BY partition_order DESC
-            ) = 1
-            ORDER BY available_at
-            """,
-            parameters,
-        )
-        while True:
-            rows = cursor.fetchmany(512)
-            if not rows:
-                break
-            for available_at, payload in rows:
-                yield pd.Timestamp(available_at, tz="UTC") if getattr(available_at, "tzinfo", None) is None else pd.Timestamp(available_at).tz_convert("UTC"), payload
-    finally:
-        connection.close()
-        temporary.cleanup()
 
+    while chunk_start < exclusive_end:
+        chunk_end = min(chunk_start + chunk_span, exclusive_end)
+        scans = []
+        parameters = []
+        for partition_order, path in enumerate(paths):
+            escaped = str(path).replace("'", "''")
+            scans.append(
+                "SELECT available_at, volume_at_price_json, "
+                f"{partition_order} AS partition_order "
+                f"FROM read_parquet('{escaped}') "
+                "WHERE available_at >= ? AND available_at < ?"
+            )
+            parameters.extend(
+                [chunk_start.to_pydatetime(), chunk_end.to_pydatetime()]
+            )
+        union_sql = " UNION ALL ".join(scans)
+
+        temporary = TemporaryDirectory(prefix="exact-profile-", dir=spill_root)
+        connection = duckdb.connect()
+        spill = str(Path(temporary.name)).replace("'", "''")
+        try:
+            connection.execute("SET memory_limit='512MB'")
+            connection.execute("SET threads=1")
+            connection.execute("SET preserve_insertion_order=false")
+            connection.execute(f"SET temp_directory='{spill}'")
+            cursor = connection.execute(
+                f"""
+                SELECT
+                    available_at,
+                    arg_max(volume_at_price_json, partition_order)
+                        AS volume_at_price_json
+                FROM ({union_sql})
+                GROUP BY available_at
+                ORDER BY available_at
+                """,
+                parameters,
+            )
+            while True:
+                rows = cursor.fetchmany(512)
+                if not rows:
+                    break
+                for available_at, payload in rows:
+                    timestamp = (
+                        pd.Timestamp(available_at, tz="UTC")
+                        if getattr(available_at, "tzinfo", None) is None
+                        else pd.Timestamp(available_at).tz_convert("UTC")
+                    )
+                    yield timestamp, payload
+        finally:
+            connection.close()
+            temporary.cleanup()
+
+        chunk_start = chunk_end
 
 def _snapshot(
     bins: dict[int, float],
