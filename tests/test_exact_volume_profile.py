@@ -484,3 +484,67 @@ def test_shared_exact_profile_cache_reuses_completed_build_without_source_rescan
         second.reset_index(drop=True),
         check_dtype=False,
     )
+
+
+def test_shared_exact_profile_cache_preserves_all_null_string_fields(tmp_path):
+    aggregate = _aggregate(minutes=180)
+    strategy = _strategy(minutes=180)
+    parquet = tmp_path / "trade-aggregate-4h.parquet"
+    with duckdb.connect() as con:
+        con.register("aggregate_frame", aggregate)
+        escaped = str(parquet).replace("'", "''")
+        con.execute(
+            f"COPY aggregate_frame TO '{escaped}' "
+            "(FORMAT PARQUET, COMPRESSION ZSTD)"
+        )
+    parquet.with_suffix(".json").write_text(
+        json.dumps(
+            {
+                "aggregate_schema_version": 1,
+                "source_fingerprint": "immutable-aggtrade-source-4h",
+                "source_period_start": "2026-01-01T00:00:00+00:00",
+                "source_period_end": "2026-01-02T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def lazy_source():
+        frame = aggregate.drop(columns=["volume_at_price_json"]).copy()
+        frame.attrs["volume_at_price_parquet_paths"] = (str(parquet),)
+        frame.attrs["exact_volume_profile_cache_root"] = str(tmp_path / "cache")
+        frame.attrs["exact_volume_profile_cache_scope"] = {
+            "exchange": "binance",
+            "market": "futures_um",
+            "symbol": "BTCUSDT",
+            "strategy_interval": "4h",
+        }
+        frame.attrs[
+            "exact_volume_profile_strategy_source_identity"
+        ] = "immutable-kline-source-4h"
+        return frame
+
+    first = exact_profile_frame(
+        lazy_source(),
+        strategy,
+        strategy_minutes=240,
+        atr_period=5,
+        lookback_bars=20,
+        bin_bps=5.0,
+    )
+    assert first["vp_exact_1h_position"].isna().all()
+    assert pd.api.types.is_string_dtype(first["vp_exact_1h_position"].dtype)
+    assert pd.api.types.is_string_dtype(first["vp_exact_1h_value_migration"].dtype)
+
+    second = exact_profile_frame(
+        lazy_source(),
+        strategy,
+        strategy_minutes=240,
+        atr_period=5,
+        lookback_bars=20,
+        bin_bps=5.0,
+    )
+    assert second.attrs["exact_volume_profile_cache_hit"] is True
+    assert second["vp_exact_1h_position"].isna().all()
+    assert pd.api.types.is_string_dtype(second["vp_exact_1h_position"].dtype)
+    assert pd.api.types.is_string_dtype(second["vp_exact_1h_value_migration"].dtype)
