@@ -73,6 +73,9 @@ def fibonacci_retracement_arrays(
     impulse_bars = np.full(n, np.nan, dtype=float)
     impulse_direction = np.full(n, "UNKNOWN", dtype=object)
     signal_direction = np.full(n, None, dtype=object)
+    impulse_start_price = np.full(n, np.nan, dtype=float)
+    impulse_end_price = np.full(n, np.nan, dtype=float)
+    active_level_price = np.full(n, np.nan, dtype=float)
 
     confirmed_highs: list[int] = []
     confirmed_lows: list[int] = []
@@ -129,6 +132,8 @@ def fibonacci_retracement_arrays(
         impulse_atr[i] = leg_atr
         impulse_bars[i] = float(leg_bars)
         impulse_direction[i] = direction
+        impulse_start_price[i] = start_price
+        impulse_end_price[i] = end_price
 
         if i <= end_i:
             reaction_state[i] = "APPROACHING"
@@ -145,6 +150,7 @@ def fibonacci_retracement_arrays(
         nearest = min(FIB_LEVELS, key=lambda level: abs(float(close_prices[i]) - levels_price[level]))
         nearest_level[i] = nearest
         level_price = levels_price[nearest]
+        active_level_price[i] = level_price
         distance_atr[i] = abs(float(close_prices[i]) - level_price) / atr_now
 
         if retracement < FIB_LEVELS[0]:
@@ -198,6 +204,9 @@ def fibonacci_retracement_arrays(
         "FIB_IMPULSE_BARS": impulse_bars,
         "FIB_IMPULSE_DIRECTION": impulse_direction,
         "_FIB_SIGNAL_DIRECTION": signal_direction,
+        "_FIB_IMPULSE_START_PRICE": impulse_start_price,
+        "_FIB_IMPULSE_END_PRICE": impulse_end_price,
+        "_FIB_ACTIVE_LEVEL_PRICE": active_level_price,
     }
 
 
@@ -249,6 +258,191 @@ class FibonacciRetracementMixin:
             value = values[i]
             return value if value in {"LONG", "SHORT"} else None
         return super()._selected_direction(i)
+
+
+    fib_stop_buffer_atr = 0.05
+    fib_target_buffer_atr = 0.05
+
+    def _fib_native_plan_values(self, i: int, direction: str):
+        values = getattr(self, "fib_retracement", {})
+        try:
+            nearest = float(values["FIB_NEAREST_LEVEL"][i])
+            start = float(values["_FIB_IMPULSE_START_PRICE"][i])
+            end = float(values["_FIB_IMPULSE_END_PRICE"][i])
+        except (KeyError, IndexError, TypeError, ValueError):
+            return None
+        if (
+            direction not in {"LONG", "SHORT"}
+            or not np.isfinite(nearest)
+            or not np.isfinite(start)
+            or not np.isfinite(end)
+        ):
+            return None
+        span = abs(end - start)
+        if span <= 0:
+            return None
+        deeper = {
+            0.382: 0.500,
+            0.500: 0.618,
+            0.618: 0.786,
+        }.get(round(nearest, 3))
+        if deeper is None:
+            return None
+        stop_boundary = (
+            end - deeper * span
+            if direction == "LONG"
+            else end + deeper * span
+        )
+        return {
+            "nearest_level": nearest,
+            "stop_level": deeper,
+            "stop_boundary": stop_boundary,
+            "target_boundary": end,
+            "impulse_start": start,
+            "impulse_end": end,
+            "impulse_span": span,
+        }
+
+    def _sr_stop_plan(self, i: int, execution_i: int | None = None):
+        if getattr(self, "signal_strategy_mode", "DI") != FIB_RETRACEMENT_MODE:
+            return super()._sr_stop_plan(i, execution_i)
+        direction = self._effective_trade_direction(i)
+        plan = self._fib_native_plan_values(i, direction)
+        atr = float(self.atr_values[i]) if 0 <= i < len(self.atr_values) else np.nan
+        if plan is None or not np.isfinite(atr) or atr <= 0:
+            return {
+                "passed": False,
+                "applied": False,
+                "reason": "FIB_STOP_UNAVAILABLE",
+                "distance": None,
+            }
+        buffer_price = float(self.fib_stop_buffer_atr) * atr
+        boundary = float(plan["stop_boundary"])
+        stop = boundary - buffer_price if direction == "LONG" else boundary + buffer_price
+        if execution_i is not None and execution_i > i:
+            opening = float(self.open[execution_i])
+            gap_through = opening <= stop if direction == "LONG" else opening >= stop
+            if gap_through:
+                return {
+                    "passed": False,
+                    "applied": False,
+                    "reason": "FIB_ENTRY_GAPPED_THROUGH_STOP",
+                    "distance": None,
+                }
+        entry = float(self._expected_entry_price(i, execution_i, direction))
+        distance = entry - stop if direction == "LONG" else stop - entry
+        if not np.isfinite(distance) or distance <= 0:
+            return {
+                "passed": False,
+                "applied": False,
+                "reason": "FIB_STOP_ON_WRONG_SIDE",
+                "distance": None,
+            }
+        return {
+            "passed": True,
+            "applied": True,
+            "reason": "FIB_NEXT_LEVEL_STOP",
+            "distance": distance,
+            "distance_atr": distance / atr,
+            "level_price": boundary,
+            "boundary_price": boundary,
+            "stop_price": stop,
+            "fib_entry_level": float(plan["nearest_level"]),
+            "fib_stop_level": float(plan["stop_level"]),
+            "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
+        }
+
+    def _fib_target_plan(self, i: int, execution_i: int | None = None):
+        direction = self._effective_trade_direction(i)
+        plan = self._fib_native_plan_values(i, direction)
+        stop_plan = self._sr_stop_plan(i, execution_i)
+        atr = float(self.atr_values[i]) if 0 <= i < len(self.atr_values) else np.nan
+        if (
+            plan is None
+            or direction not in {"LONG", "SHORT"}
+            or not stop_plan.get("applied")
+            or not np.isfinite(atr)
+            or atr <= 0
+        ):
+            return {"passed": False, "reason": "FIB_TARGET_UNAVAILABLE"}
+        buffer_price = float(self.fib_target_buffer_atr) * atr
+        boundary = float(plan["target_boundary"])
+        target = boundary - buffer_price if direction == "LONG" else boundary + buffer_price
+        entry = float(self._expected_entry_price(i, execution_i, direction))
+        room = target - entry if direction == "LONG" else entry - target
+        risk = float(stop_plan["distance"])
+        available_r = room / risk if risk > 0 else np.nan
+        if not np.isfinite(room) or room <= 0:
+            return {
+                "passed": False,
+                "reason": "FIB_TARGET_ON_WRONG_SIDE",
+                "level_price": boundary,
+                "limit_price": target,
+                "available_r": available_r,
+            }
+        return {
+            "passed": True,
+            "reason": "FIB_IMPULSE_EXTREME_TARGET",
+            "level_price": boundary,
+            "limit_price": target,
+            "available_r": available_r,
+        }
+
+    def _entry_filter_result(self, i, execution_i=None):
+        passed, reason = super()._entry_filter_result(i, execution_i)
+        if not passed or getattr(self, "signal_strategy_mode", "DI") != FIB_RETRACEMENT_MODE:
+            return passed, reason
+        target = self._fib_target_plan(i, execution_i)
+        if not target["passed"]:
+            return False, str(target["reason"])
+        return True, reason
+
+    def _open_pair(
+        self,
+        i,
+        entry_filter_passed=True,
+        entry_filter_reason="Strategy profile passed",
+        schedule=None,
+    ):
+        indicator_i = schedule["indicator_index"] if schedule else i
+        target = (
+            self._fib_target_plan(indicator_i, i)
+            if getattr(self, "signal_strategy_mode", "DI") == FIB_RETRACEMENT_MODE
+            else None
+        )
+        stop = (
+            self._sr_stop_plan(indicator_i, i)
+            if getattr(self, "signal_strategy_mode", "DI") == FIB_RETRACEMENT_MODE
+            else None
+        )
+        before = len(self.active_pairs)
+        result = super()._open_pair(i, entry_filter_passed, entry_filter_reason, schedule)
+        if target and target.get("passed") and len(self.active_pairs) > before:
+            for pos in self.active_pairs[-1].positions():
+                pos.tp = float(target["limit_price"])
+                if getattr(pos, "partial_tp_enabled", False):
+                    pos.tp2_price = pos.tp
+                pos.fib_target_level_price = float(target["level_price"])
+                pos.fib_target_price = float(target["limit_price"])
+                pos.fib_target_available_r = float(target["available_r"])
+                if stop and stop.get("applied"):
+                    pos.fib_stop_boundary_price = float(stop["boundary_price"])
+                    pos.fib_stop_price = float(stop["stop_price"])
+                    pos.fib_entry_level = float(stop["fib_entry_level"])
+                    pos.fib_stop_level = float(stop["fib_stop_level"])
+        return result
+
+    def _build_result_row(self, pair, row_kind, positions):
+        row = super()._build_result_row(pair, row_kind, positions)
+        pos = positions[0] if positions else None
+        row["fib_entry_level"] = getattr(pos, "fib_entry_level", np.nan)
+        row["fib_stop_level"] = getattr(pos, "fib_stop_level", np.nan)
+        row["fib_stop_boundary_price"] = getattr(pos, "fib_stop_boundary_price", np.nan)
+        row["fib_stop_price"] = getattr(pos, "fib_stop_price", np.nan)
+        row["fib_target_level_price"] = getattr(pos, "fib_target_level_price", np.nan)
+        row["fib_target_price"] = getattr(pos, "fib_target_price", np.nan)
+        row["fib_target_available_r"] = getattr(pos, "fib_target_available_r", np.nan)
+        return row
 
     def _fib_rule_value(self, i: int, direction: str, indicator: str):
         values = getattr(self, "fib_retracement", {}).get(indicator)

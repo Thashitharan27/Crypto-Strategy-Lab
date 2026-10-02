@@ -440,3 +440,39 @@ def test_ema_920_hidden_generic_sr_policy_does_not_force_sr_dependency():
     finally:
         window.close()
         app.processEvents()
+
+def test_fib_execution_plan_hides_generic_atr_fixed_r_and_shows_native_levels():
+    app, window = _window()
+    try:
+        workspace = window.risk_execution_workspace
+        selector = window.rule_builder.direction_mode
+        fib_index = selector.findData("FIB_RETRACEMENT")
+        assert fib_index >= 0
+        selector.setCurrentIndex(fib_index)
+        selector.activated.emit(fib_index)
+        app.processEvents()
+        workspace.refresh_visibility()
+
+        timing = window.execution_form.widgets["entry_timing_mode"]
+        risk_mode = window.execution_form.widgets["risk_mode"]
+        target_mode = window.execution_form.widgets["sr_take_profit_mode"]
+        base_target = window.base_execution_form.widgets["reward_risk_ratio"]
+
+        assert timing.currentData() == "NEXT_CANDLE_OPEN"
+        assert risk_mode.isHidden()
+        assert target_mode.isHidden()
+        assert base_target.isHidden()
+        assert not workspace.fib_stop_method.isHidden()
+        assert not workspace.fib_stop_buffer.isHidden()
+        assert not workspace.fib_target_method.isHidden()
+        assert not workspace.fib_target_buffer.isHidden()
+        assert "Next Deeper Fib Level" in workspace.fib_stop_method.text()
+        assert "Prior Impulse Extreme" in workspace.fib_target_method.text()
+
+        summary = workspace.summary_label.text()
+        assert "next deeper Fib level" in summary
+        assert "prior impulse extreme" in summary
+        assert "Next Candle Open — Causal" in summary
+    finally:
+        window.close()
+        app.processEvents()
