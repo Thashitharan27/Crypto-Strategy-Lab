@@ -120,13 +120,14 @@ EXECUTION_GROUPS = (
     ("Risk", (
         "initial_equity", "risk_mode", "fixed_r", "percent_r", "atr_multiplier",
         "sr_stop_timeframe_minutes", "sr_stop_buffer_atr", "sr_stop_maximum_atr",
-        "sr_stop_no_level_policy", "risk_per_leg", "max_effective_leverage_per_leg",
-        "max_combined_effective_leverage", "max_active_pairs",
+        "sr_stop_no_level_policy", "fib_stop_buffer_atr", "risk_per_leg",
+        "max_effective_leverage_per_leg", "max_combined_effective_leverage", "max_active_pairs",
     ), None),
     ("Take Profit", (
         "sr_take_profit_mode", "sr_take_profit_timeframe_minutes",
         "sr_take_profit_maximum_r", "sr_take_profit_minimum_r",
-        "sr_take_profit_buffer_r", "fvg_target_buffer_atr", "sr_take_profit_no_level_policy",
+        "sr_take_profit_buffer_r", "fvg_target_buffer_atr", "fib_target_buffer_atr",
+        "fib_minimum_target_r", "sr_take_profit_no_level_policy",
     ), None),
     ("Fees", (
         "maker_fee", "taker_fee", "use_maker_entry", "use_maker_exit",
