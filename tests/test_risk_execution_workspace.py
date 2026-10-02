@@ -462,17 +462,33 @@ def test_fib_execution_plan_hides_generic_atr_fixed_r_and_shows_native_levels():
         assert risk_mode.isHidden()
         assert target_mode.isHidden()
         assert base_target.isHidden()
+        fib_stop_buffer = window.execution_form.widgets["fib_stop_buffer_atr"]
+        fib_target_buffer = window.execution_form.widgets["fib_target_buffer_atr"]
+        fib_minimum_r = window.execution_form.widgets["fib_minimum_target_r"]
         assert not workspace.fib_stop_method.isHidden()
-        assert not workspace.fib_stop_buffer.isHidden()
+        assert not fib_stop_buffer.isHidden()
         assert not workspace.fib_target_method.isHidden()
-        assert not workspace.fib_target_buffer.isHidden()
+        assert not fib_target_buffer.isHidden()
+        assert not fib_minimum_r.isHidden()
         assert "Next Deeper Fib Level" in workspace.fib_stop_method.text()
         assert "Prior Impulse Extreme" in workspace.fib_target_method.text()
+        assert fib_stop_buffer.value() == pytest.approx(0.05)
+        assert fib_target_buffer.value() == pytest.approx(0.05)
+        assert fib_minimum_r.value() == pytest.approx(2.0)
+
+        fib_stop_buffer.setValue(0.10)
+        fib_target_buffer.setValue(0.15)
+        fib_minimum_r.setValue(2.5)
+        app.processEvents()
+        workspace.refresh_visibility()
 
         summary = workspace.summary_label.text()
         assert "next deeper Fib level" in summary
         assert "prior impulse extreme" in summary
         assert "Next Candle Open — Causal" in summary
+        assert "0.1× signal ATR buffer" in summary
+        assert "0.15× signal ATR buffer" in summary
+        assert "at least 2.5R available target room" in summary
     finally:
         window.close()
         app.processEvents()

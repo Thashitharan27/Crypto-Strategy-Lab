@@ -142,3 +142,32 @@ def test_fvg_context_timeframe_must_be_higher_and_aligned() -> None:
         assert "exact multiple" in str(exc)
     else:
         raise AssertionError("accepted misaligned FVG context timeframe")
+
+def test_fib_execution_settings_validate_and_round_trip() -> None:
+    base = ResearchRunConfig()
+    configured = replace(
+        base,
+        execution=replace(
+            base.execution,
+            fib_stop_buffer_atr=0.10,
+            fib_target_buffer_atr=0.15,
+            fib_minimum_target_r=2.5,
+        ),
+    )
+    configured.validate()
+    assert configured.execution.fib_stop_buffer_atr == 0.10
+    assert configured.execution.fib_target_buffer_atr == 0.15
+    assert configured.execution.fib_minimum_target_r == 2.5
+
+    for bad_execution in (
+        replace(base.execution, fib_stop_buffer_atr=-0.01),
+        replace(base.execution, fib_target_buffer_atr=-0.01),
+        replace(base.execution, fib_minimum_target_r=0.0),
+    ):
+        bad = replace(base, execution=bad_execution)
+        try:
+            bad.validate()
+        except ValueError as exc:
+            assert "Fib" in str(exc)
+        else:
+            raise AssertionError("accepted invalid Fib execution settings")

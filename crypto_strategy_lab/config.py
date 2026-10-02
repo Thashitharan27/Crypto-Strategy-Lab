@@ -71,6 +71,9 @@ class BacktestConfig:
     fvg_context_enabled: bool = False
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
+    fib_stop_buffer_atr: float = 0.05
+    fib_target_buffer_atr: float = 0.05
+    fib_minimum_target_r: float = 2.0
     entry_interval: int = 1
     enable_di_direction_selection: bool = True
     enable_di_pressure_analysis: bool = True
@@ -153,6 +156,10 @@ class BacktestConfig:
             raise ValueError("EMA cross entry confirmation R must be positive")
         if self.fvg_structure_swing_strength < 1 or self.fvg_structure_swing_strength > 50:
             raise ValueError("FVG structure swing strength must be between 1 and 50")
+        if self.fib_stop_buffer_atr < 0 or self.fib_target_buffer_atr < 0:
+            raise ValueError("Fib ATR buffers cannot be negative")
+        if self.fib_minimum_target_r <= 0:
+            raise ValueError("Fib minimum target room must be positive")
         if self.fvg_context_enabled:
             if self.fvg_context_timeframe_minutes <= self.strategy_timeframe_minutes:
                 raise ValueError("FVG context timeframe must be larger than strategy timeframe")
