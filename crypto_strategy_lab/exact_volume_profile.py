@@ -174,6 +174,13 @@ def _load_exact_profile_cache(descriptor):
         }
         if len(frame) != int(payload["row_count"]) or set(frame.columns) != expected_columns:
             return None
+        # DuckDB/Pandas can materialize an all-null Parquet column as float64.
+        # Restore the feature contract explicitly for VP categorical outputs so
+        # cached and freshly built profiles have identical logical dtypes.
+        for prefix in ("strategy", "1h", "4h", "1d"):
+            for field in ("position", "value_migration"):
+                column = f"vp_exact_{prefix}_{field}"
+                frame[column] = frame[column].astype("string")
         frame.attrs["exact_volume_profile_cache_hit"] = True
         frame.attrs["exact_volume_profile_cache_key"] = key
         return frame
@@ -521,8 +528,12 @@ def exact_profile_frame(
         for field in PROFILE_FIELDS:
             column = f"vp_exact_{prefix}_{field}"
             if field in {"position", "value_migration"}:
+                # Use pandas' nullable string dtype so an all-missing context
+                # (for example 1h fields on a 4h strategy) remains logically
+                # string through DuckDB/Parquet round-trips instead of being
+                # inferred as float64.
                 result[column] = pd.Series(
-                    [None] * len(strategy), index=result.index, dtype=object
+                    [pd.NA] * len(strategy), index=result.index, dtype="string"
                 )
             else:
                 result[column] = np.nan
