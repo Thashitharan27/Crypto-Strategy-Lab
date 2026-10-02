@@ -380,6 +380,9 @@ class ExecutionConfig:
     fvg_context_enabled: bool = False
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
+    fib_stop_buffer_atr: float = 0.05
+    fib_target_buffer_atr: float = 0.05
+    fib_minimum_target_r: float = 2.0
     initial_equity: float = 1000.0
     risk_mode: str = "ATR"
     fixed_r: float = 100.0
@@ -609,6 +612,10 @@ class ResearchRunConfig:
             raise ValueError("EMA cross entry confirmation R must be positive")
         if execution.fvg_structure_swing_strength < 1 or execution.fvg_structure_swing_strength > 50:
             raise ValueError("FVG structure swing strength must be between 1 and 50")
+        if execution.fib_stop_buffer_atr < 0 or execution.fib_target_buffer_atr < 0:
+            raise ValueError("Fib ATR buffers cannot be negative")
+        if execution.fib_minimum_target_r <= 0:
+            raise ValueError("Fib minimum target room must be positive")
         if execution.fvg_context_enabled:
             if execution.fvg_context_timeframe_minutes <= data.strategy_timeframe_minutes:
                 raise ValueError("FVG context timeframe must be larger than strategy timeframe")
