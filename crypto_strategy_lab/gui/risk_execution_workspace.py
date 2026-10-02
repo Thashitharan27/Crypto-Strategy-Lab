@@ -139,7 +139,7 @@ class RiskExecutionWorkspace(QWidget):
             "1. Entry Execution",
             note=(
                 "Choose when a completed strategy signal becomes an executable fill. "
-                "Next Candle Open is the causal default for EMA 9/20 and FVG entries."
+                "Next Candle Open is the causal default for EMA 9/20, FVG and Fib reaction entries."
             ),
         )
         self.entry_card.add_field(
@@ -236,6 +236,11 @@ class RiskExecutionWorkspace(QWidget):
         self.fvg_stop_buffer = QLabel("0.05 × signal ATR beyond the far edge")
         self.stop_card.add_field("fvg_stop_method", "Stop Method", self.fvg_stop_method)
         self.stop_card.add_field("fvg_stop_buffer", "Stop Buffer", self.fvg_stop_buffer)
+        self.fib_stop_method = QLabel("Next Deeper Fib Level — Automatic")
+        self.fib_stop_method.setStyleSheet("font-weight:600")
+        self.fib_stop_buffer = QLabel("0.05 × signal ATR beyond the deeper Fib")
+        self.stop_card.add_field("fib_stop_method", "Stop Method", self.fib_stop_method)
+        self.stop_card.add_field("fib_stop_buffer", "Stop Buffer", self.fib_stop_buffer)
         layout.addWidget(self.stop_card)
 
         self.target_card = FormCard(
@@ -260,6 +265,11 @@ class RiskExecutionWorkspace(QWidget):
         self.target_card.add_field(
             "fvg_target_buffer_atr", "Extreme Buffer", self.account["fvg_target_buffer_atr"]
         )
+        self.fib_target_method = QLabel("Prior Impulse Extreme (0.0 Fib) — Automatic")
+        self.fib_target_method.setStyleSheet("font-weight:600")
+        self.fib_target_buffer = QLabel("0.05 × signal ATR before the prior high / low")
+        self.target_card.add_field("fib_target_method", "Target Method", self.fib_target_method)
+        self.target_card.add_field("fib_target_buffer", "Target Buffer", self.fib_target_buffer)
         self.sr_dependency_note = QLabel(
             "Structural S/R stop/target policies automatically require causal Support / Resistance calculation; no separate enable step is needed."
         )
@@ -425,6 +435,7 @@ class RiskExecutionWorkspace(QWidget):
     def refresh_visibility(self, *_args) -> None:
         ema_920 = self._ema_920_selected()
         fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
+        fib = self._signal_strategy_mode() == "FIB_RETRACEMENT"
         cross_mode = {
             "EMA_20_100_CROSS": "LONG",
             "EMA_20_100_CROSS_SHORT": "SHORT",
@@ -473,9 +484,11 @@ class RiskExecutionWorkspace(QWidget):
         self.stop_card.set_row_visible("ema_920_stop_method", ema_920)
         self.stop_card.set_row_visible("fvg_stop_method", fvg)
         self.stop_card.set_row_visible("fvg_stop_buffer", fvg)
+        self.stop_card.set_row_visible("fib_stop_method", fib)
+        self.stop_card.set_row_visible("fib_stop_buffer", fib)
         for name in ("ema_920_stop_confirmation", "ema_920_stop_lookback", "ema_920_stop_maximum"):
             self.stop_card.set_row_visible(name, ema_920 and not cross_plan)
-        if ema_920 or fvg:
+        if ema_920 or fvg or fib:
             for name in (
                 "risk_mode", "atr_multiplier", "percent_r", "fixed_r",
                 "sr_stop_timeframe_minutes", "sr_stop_buffer_atr",
@@ -523,11 +536,11 @@ class RiskExecutionWorkspace(QWidget):
             self.trade["position_sizing_stop_override_enabled"].isChecked()
             and (
                 cross_plan
-                or (not ema_920 and not fvg and not structural_stop)
+                or (not ema_920 and not fvg and not fib and not structural_stop)
             )
         )
         if (
-            ((ema_920 and not cross_plan) or fvg or structural_stop)
+            ((ema_920 and not cross_plan) or fvg or fib or structural_stop)
             and self.trade["position_sizing_stop_override_enabled"].isChecked()
         ):
             self.trade["position_sizing_stop_override_enabled"].setChecked(False)
@@ -576,6 +589,8 @@ class RiskExecutionWorkspace(QWidget):
             self.target_card.set_row_visible(name, ema_920)
         self.target_card.set_row_visible("fvg_target_method", fvg)
         self.target_card.set_row_visible("fvg_target_buffer_atr", fvg)
+        self.target_card.set_row_visible("fib_target_method", fib)
+        self.target_card.set_row_visible("fib_target_buffer", fib)
         if ema_920:
             self.target_card.set_row_visible("sr_take_profit_mode", False)
             self.target_card.set_row_visible("reward_risk_ratio", False)
@@ -590,6 +605,16 @@ class RiskExecutionWorkspace(QWidget):
             self.target_card.set_row_visible("reward_risk_ratio", True)
             if target_label is not None:
                 target_label.setText("FVG Profit Target")
+            for name in (
+                "sr_take_profit_timeframe_minutes", "sr_take_profit_minimum_r",
+                "sr_take_profit_maximum_r", "sr_take_profit_buffer_r",
+                "sr_take_profit_no_level_policy",
+            ):
+                self.target_card.set_row_visible(name, False)
+            self.sr_dependency_note.setVisible(False)
+        elif fib:
+            self.target_card.set_row_visible("sr_take_profit_mode", False)
+            self.target_card.set_row_visible("reward_risk_ratio", False)
             for name in (
                 "sr_take_profit_timeframe_minutes", "sr_take_profit_minimum_r",
                 "sr_take_profit_maximum_r", "sr_take_profit_buffer_r",
@@ -693,6 +718,7 @@ class RiskExecutionWorkspace(QWidget):
         stop_mult = float(base.sl2_r if base.partial_stop_enabled else base.stop_loss_multiple)
         ema_920 = self._ema_920_selected()
         fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
+        fib = self._signal_strategy_mode() == "FIB_RETRACEMENT"
         cross_mode = {
             "EMA_20_100_CROSS": "LONG",
             "EMA_20_100_CROSS_SHORT": "SHORT",
@@ -704,7 +730,7 @@ class RiskExecutionWorkspace(QWidget):
             and (
                 cross_plan
                 or (
-                    not ema_920 and not fvg
+                    not ema_920 and not fvg and not fib
                     and str(execution.risk_mode).upper() != "SR_STRUCTURE"
                 )
             )
@@ -783,6 +809,11 @@ class RiskExecutionWorkspace(QWidget):
                 f"{execution.fvg_target_buffer_atr:g}× signal ATR before the FVG move high "
                 "for long or move low for short, otherwise reject"
             )
+        elif fib:
+            target = (
+                "automatic prior impulse extreme (0.0 Fib): previous swing high for long "
+                "or previous swing low for short, with a 0.05× signal ATR buffer"
+            )
         else:
             target_mode = str(execution.sr_take_profit_mode).upper()
             if target_mode == "SR_CAPPED_R":
@@ -856,6 +887,11 @@ class RiskExecutionWorkspace(QWidget):
             stop_description = (
                 "Stop: beyond the selected FVG box (below bullish / above bearish), "
                 "with a 0.05× signal ATR buffer; size from the full stop distance. "
+            )
+        elif fib:
+            stop_description = (
+                "Stop: beyond the next deeper Fib level (0.382→0.500, 0.500→0.618, "
+                "0.618→0.786) with a 0.05× signal ATR buffer; size from the full stop distance. "
             )
         elif str(execution.risk_mode).upper() == "SR_STRUCTURE":
             stop_description = f"Stop distance uses {self._distance_description(execution)}. "
