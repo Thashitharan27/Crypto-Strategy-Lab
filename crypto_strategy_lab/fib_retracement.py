@@ -271,9 +271,6 @@ class FibonacciRetracementMixin:
         return super()._selected_direction(i)
 
 
-    fib_stop_buffer_atr = 0.05
-    fib_target_buffer_atr = 0.05
-
     def _fib_native_plan_values(self, i: int, direction: str):
         values = getattr(self, "fib_retracement", {})
         try:
@@ -327,7 +324,7 @@ class FibonacciRetracementMixin:
                 "reason": "FIB_STOP_UNAVAILABLE",
                 "distance": None,
             }
-        buffer_price = float(self.fib_stop_buffer_atr) * atr
+        buffer_price = float(getattr(self.config, "fib_stop_buffer_atr", 0.05)) * atr
         boundary = float(plan["stop_boundary"])
         stop = boundary - buffer_price if direction == "LONG" else boundary + buffer_price
         if execution_i is not None and execution_i > i:
@@ -376,7 +373,7 @@ class FibonacciRetracementMixin:
             or atr <= 0
         ):
             return {"passed": False, "reason": "FIB_TARGET_UNAVAILABLE"}
-        buffer_price = float(self.fib_target_buffer_atr) * atr
+        buffer_price = float(getattr(self.config, "fib_target_buffer_atr", 0.05)) * atr
         boundary = float(plan["target_boundary"])
         target = boundary - buffer_price if direction == "LONG" else boundary + buffer_price
         entry = float(self._expected_entry_price(i, execution_i, direction))
@@ -391,12 +388,23 @@ class FibonacciRetracementMixin:
                 "limit_price": target,
                 "available_r": available_r,
             }
+        minimum_r = float(getattr(self.config, "fib_minimum_target_r", 2.0))
+        if not np.isfinite(available_r) or available_r + 1e-12 < minimum_r:
+            return {
+                "passed": False,
+                "reason": "FIB_TARGET_INSUFFICIENT_ROOM",
+                "level_price": boundary,
+                "limit_price": target,
+                "available_r": available_r,
+                "minimum_r": minimum_r,
+            }
         return {
             "passed": True,
             "reason": "FIB_IMPULSE_EXTREME_TARGET",
             "level_price": boundary,
             "limit_price": target,
             "available_r": available_r,
+            "minimum_r": minimum_r,
         }
 
     def _entry_filter_result(self, i, execution_i=None):
