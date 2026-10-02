@@ -65,3 +65,47 @@ def test_fib_mixin_emits_first_reaction_only_once_per_impulse():
     p.signal_strategy_mode = FIB_RETRACEMENT_MODE
     signals = [p._selected_direction(i) for i in range(len(p.close))]
     assert signals.count("LONG") <= 1
+
+def test_fib_native_stop_uses_next_deeper_level_and_target_uses_impulse_extreme():
+    class Base:
+        def _sr_stop_plan(self, i, execution_i=None):
+            return {"passed": True, "applied": False, "reason": "BASE", "distance": 1.0}
+        def _effective_trade_direction(self, _i):
+            return "LONG"
+        def _expected_entry_price(self, i, execution_i, direction):
+            return 11.0
+        def _entry_filter_result(self, i, execution_i=None):
+            return True, "OK"
+        def _open_pair(self, *args, **kwargs):
+            return None
+        def _build_result_row(self, *args, **kwargs):
+            return {}
+
+    class Probe(FibonacciRetracementMixin, Base):
+        pass
+
+    p = Probe.__new__(Probe)
+    p.signal_strategy_mode = FIB_RETRACEMENT_MODE
+    p.config = SimpleNamespace(strategy_timeframe_minutes=240)
+    p.open = np.array([11.0, 11.0])
+    p.atr_values = np.array([1.0, 1.0])
+    p.fib_retracement = {
+        "FIB_NEAREST_LEVEL": np.array([0.500, 0.500]),
+        "_FIB_IMPULSE_START_PRICE": np.array([8.0, 8.0]),
+        "_FIB_IMPULSE_END_PRICE": np.array([12.0, 12.0]),
+    }
+
+    stop = p._sr_stop_plan(0, 1)
+    # 0.618 of a 4-point bullish impulse is 9.528; stop adds a 0.05 ATR buffer below.
+    assert stop["passed"] is True
+    assert stop["fib_entry_level"] == 0.5
+    assert stop["fib_stop_level"] == 0.618
+    assert np.isclose(stop["boundary_price"], 9.528)
+    assert np.isclose(stop["stop_price"], 9.478)
+    assert np.isclose(stop["distance"], 1.522)
+
+    target = p._fib_target_plan(0, 1)
+    assert target["passed"] is True
+    assert np.isclose(target["level_price"], 12.0)
+    assert np.isclose(target["limit_price"], 11.95)
+    assert target["available_r"] > 0
