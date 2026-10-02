@@ -83,6 +83,16 @@ EVIDENCE_LABELS = {
     "FVG_DISPLACEMENT_BODY_RATIO": "FVG Formation Candle Body / Range",
     "FVG_DISPLACEMENT_CLOSE_LOCATION": "FVG Formation Close Strength (0–1)",
     "FVG_LOCATION_ALIGNED": "FVG Premium / Discount Location Aligned (0/1)",
+    "FIB_RETRACEMENT_DEPTH": "Fib — Retracement Depth (0–1)",
+    "FIB_NEAREST_LEVEL": "Fib — Nearest Level",
+    "FIB_LEVEL_DISTANCE_ATR": "Fib — Distance to Nearest Level (ATR)",
+    "FIB_REACTION_STATE": "Fib — Reaction State",
+    "FIB_REJECTION_ATR": "Fib — Rejection (ATR)",
+    "FIB_BARS_SINCE_TEST": "Fib — Bars Since Test",
+    "FIB_TEST_COUNT": "Fib — Test Count",
+    "FIB_IMPULSE_ATR": "Fib — Impulse Size (ATR)",
+    "FIB_IMPULSE_BARS": "Fib — Impulse Length (bars)",
+    "FIB_IMPULSE_DIRECTION": "Fib — Impulse Direction",
     "EMA_9_SLOPE_ATR": "EMA 9 Slope (ATR / bar)",
     "EMA_20_SLOPE_ATR": "EMA 20 Slope (ATR / bar)",
     "VOLUME_RATIO_20": "Volume / Prior 20-Bar Average",
@@ -308,6 +318,13 @@ EVIDENCE_GROUPS = (
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
             "EMA_STACK_STATE", "PRICE_VS_EMA_STACK",
+            ("Fibonacci Retracement", (
+                "FIB_RETRACEMENT_DEPTH", "FIB_NEAREST_LEVEL",
+                "FIB_LEVEL_DISTANCE_ATR", "FIB_REACTION_STATE",
+                "FIB_REJECTION_ATR", "FIB_BARS_SINCE_TEST",
+                "FIB_TEST_COUNT", "FIB_IMPULSE_ATR",
+                "FIB_IMPULSE_BARS", "FIB_IMPULSE_DIRECTION",
+            )),
             ("Volume Profile", (
                 "VP_POSITION", "VP_POC_DISTANCE_ATR", "VP_VAH_DISTANCE_ATR",
                 "VP_VAL_DISTANCE_ATR", "VP_NEAR_HVN", "VP_HVN_DISTANCE_ATR",
@@ -475,6 +492,13 @@ EVIDENCE_MENU_TREE = (
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
             "EMA_STACK_STATE", "PRICE_VS_EMA_STACK",
+            ("Fibonacci Retracement", (
+                "FIB_RETRACEMENT_DEPTH", "FIB_NEAREST_LEVEL",
+                "FIB_LEVEL_DISTANCE_ATR", "FIB_REACTION_STATE",
+                "FIB_REJECTION_ATR", "FIB_BARS_SINCE_TEST",
+                "FIB_TEST_COUNT", "FIB_IMPULSE_ATR",
+                "FIB_IMPULSE_BARS", "FIB_IMPULSE_DIRECTION",
+            )),
             ("Volume Profile", (
                 "VP_POSITION", "VP_POC_DISTANCE_ATR", "VP_VAH_DISTANCE_ATR",
                 "VP_VAL_DISTANCE_ATR", "VP_NEAR_HVN", "VP_HVN_DISTANCE_ATR",
@@ -628,6 +652,7 @@ DIRECTION_LABELS = {
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
     "FAIR_VALUE_GAP": "Fair Value Gap — First Revisit",
+    "FIB_RETRACEMENT": "Fib Retracement — Reaction",
     "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",
 }
 SR_TIMEFRAME_OPTIONS = (

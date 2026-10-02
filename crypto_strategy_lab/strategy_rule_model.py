@@ -24,6 +24,7 @@ from crypto_strategy_lab.sr_trade_context import (
     TARGET_PATH_VALUES,
 )
 
+from crypto_strategy_lab.fib_retracement import FIB_RETRACEMENT_MODE
 from crypto_strategy_lab.mtf_sr_reaction import (
     MTF_SR_REACTION_MODE,
     MTF_SR_REACTION_RULE_INDICATORS,
@@ -37,7 +38,7 @@ from crypto_strategy_lab.volume_profile import VOLUME_PROFILE_RULE_INDICATORS
 # selection but adds a deliberately simple, non-optimized trend confirmation
 # baseline at compile time. LONG/SHORT eligibility still belongs to the market
 # permission grid below.
-SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "FAIR_VALUE_GAP", MTF_SR_REACTION_MODE)
+SIGNAL_STRATEGIES = ("DI", "DMI_TREND", "MACD_PULLBACK", "EMA_9_20_PULLBACK", "FAIR_VALUE_GAP", FIB_RETRACEMENT_MODE, MTF_SR_REACTION_MODE)
 # Backward-compatible internal name retained while the UI moves to "Signal Strategy".
 DIRECTION_MODES = SIGNAL_STRATEGIES
 REGIMES = ("BULL", "BEAR", "SIDEWAYS")
@@ -160,6 +161,8 @@ CATEGORICAL_RULE_VALUES = {
         "UNKNOWN",
     ),
     "BOOK_PRESSURE_STATE": ("BULLISH", "BEARISH", "MIXED", "UNKNOWN"),
+    "FIB_REACTION_STATE": ("UNKNOWN", "APPROACHING", "TESTING", "HELD", "BETWEEN_LEVELS", "BROKEN"),
+    "FIB_IMPULSE_DIRECTION": ("LONG", "SHORT"),
 }
 CATEGORICAL_VALUE_CODES = {
     "DI_PRESSURE_STATE": {"EXPANDING": 1.0, "CONTRACTING": 2.0, "MIXED": 3.0},
@@ -208,6 +211,8 @@ CATEGORICAL_VALUE_CODES = {
         "STRONGLY_BELOW_MEAN": 1.0, "BELOW_MEAN": 2.0, "NEAR_MEAN": 3.0,
         "ABOVE_MEAN": 4.0, "STRONGLY_ABOVE_MEAN": 5.0,
     },
+    "FIB_REACTION_STATE": {"UNKNOWN": 0.0, "APPROACHING": 1.0, "TESTING": 2.0, "HELD": 3.0, "BETWEEN_LEVELS": 4.0, "BROKEN": 5.0},
+    "FIB_IMPULSE_DIRECTION": {"LONG": 1.0, "SHORT": 2.0},
     "SR_NEAR_SUPPORT": {"TRUE": 1.0, "FALSE": 0.0},
     "SR_NEAR_RESISTANCE": {"TRUE": 1.0, "FALSE": 0.0},
     "SR_INSIDE_SUPPORT_ZONE": {"TRUE": 1.0, "FALSE": 0.0},
@@ -931,6 +936,17 @@ def _fair_value_gap_native_rules() -> tuple[dict, ...]:
     },)
 
 
+def _fib_retracement_native_rules() -> tuple[dict, ...]:
+    """Persist the Fib reaction signal choice without adding a hidden filter."""
+    return ({
+        "action": "REJECT", "indicator": "FIB_RETRACEMENT_DEPTH", "condition": "OUTSIDE",
+        "minimum": LOW, "maximum": HIGH,
+        f"{_META_PREFIX}kind": "REQUIRED",
+        _DMI_TREND_MODE_MARKER: FIB_RETRACEMENT_MODE,
+        _DMI_TREND_RULE_MARKER: "FIB_RETRACEMENT_SIGNAL",
+    },)
+
+
 def _mtf_sr_reaction_native_rules() -> tuple[dict, ...]:
     """Persist the MTF S/R signal choice without hiding its editable filters."""
     return (
@@ -1070,6 +1086,8 @@ def compile_profiles(
             native_rules = list(_ema_9_20_pullback_native_rules())
         elif mode == "FAIR_VALUE_GAP":
             native_rules = list(_fair_value_gap_native_rules())
+        elif mode == FIB_RETRACEMENT_MODE:
+            native_rules = list(_fib_retracement_native_rules())
         elif mode == MTF_SR_REACTION_MODE:
             native_rules = list(_mtf_sr_reaction_native_rules())
         else:

@@ -16,6 +16,10 @@ from crypto_strategy_lab.data_lake_production_engine import (
 )
 from crypto_strategy_lab.ema_pullback import Ema920PullbackMixin
 from crypto_strategy_lab.fair_value_gap import FairValueGapMixin
+from crypto_strategy_lab.fib_retracement import (
+    FIB_RULE_INDICATORS,
+    FibonacciRetracementMixin,
+)
 from crypto_strategy_lab.mtf_sr_reaction import (
     MTF_SR_REACTION_RULE_INDICATORS,
     MtfSrReactionMixin,
@@ -228,7 +232,7 @@ _MR_RULE_INDICATORS = frozenset(
 )
 
 
-class RuleAwareDataLakeProductionBacktestEngine(VolumeProfileMixin, FairValueGapMixin, MtfSrReactionMixin, Ema920PullbackMixin, DataLakeProductionBacktestEngine):
+class RuleAwareDataLakeProductionBacktestEngine(VolumeProfileMixin, FairValueGapMixin, FibonacciRetracementMixin, MtfSrReactionMixin, Ema920PullbackMixin, DataLakeProductionBacktestEngine):
     """Current native runtime with prepared research evidence available to rules."""
 
     @classmethod
@@ -677,6 +681,8 @@ class RuleAwareDataLakeProductionBacktestEngine(VolumeProfileMixin, FairValueGap
             return self._prepared_mean_reversion_value(i, direction, indicator)
         if indicator in VOLUME_PROFILE_RULE_INDICATORS:
             return self._volume_profile_rule_value(i, direction, indicator, 0)
+        if indicator in FIB_RULE_INDICATORS:
+            return self._fib_rule_value(i, direction, indicator)
         if indicator in MTF_SR_REACTION_RULE_INDICATORS:
             return self._prepared_mtf_sr_reaction_value(i, direction, indicator, 0)
         if indicator in SR_TRADE_RULE_INDICATORS:
