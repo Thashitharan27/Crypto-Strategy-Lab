@@ -12,7 +12,7 @@ from crypto_strategy_lab.data.backtest_service import (
     _support_resistance_cache_request,
 )
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
-from crypto_strategy_lab.research_adapters import native_simulator_config
+from crypto_strategy_lab.research_adapters import native_simulator_config, prepared_policy_config
 from crypto_strategy_lab.research_warmup import (
     expand_strategy_request,
     strategy_warmup_period,
@@ -263,3 +263,29 @@ def test_native_simulator_window_preserves_end_exclusive_request() -> None:
     native_end = pd.Timestamp(native.trading_end_date)
     assert native_start == pd.Timestamp(start).tz_localize(None)
     assert native_end + pd.Timedelta(nanoseconds=1) == pd.Timestamp(end).tz_localize(None)
+
+def test_prepared_policy_marks_fib_signal_and_rule_evidence_for_persistence() -> None:
+    base = ResearchRunConfig()
+    profiles = dict(base.strategy.profiles)
+    first_key = next(iter(profiles))
+    profiles[first_key] = replace(
+        profiles[first_key],
+        entry_rules=(
+            {
+                "action": "REJECT",
+                "indicator": "FIB_RETRACEMENT_DEPTH",
+                "condition": "OUTSIDE",
+                "minimum": -1e12,
+                "maximum": 1e12,
+                "_strategy_direction_mode": "FIB_RETRACEMENT",
+            },
+        ),
+    )
+    config = replace(base, strategy=replace(base.strategy, profiles=profiles))
+
+    policy = prepared_policy_config(config)
+
+    assert policy.fib_features_required is True
+    assert policy.fib_research_context_version >= 1
+    assert policy.fib_pivot_strength == 2
+
