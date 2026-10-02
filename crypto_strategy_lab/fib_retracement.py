@@ -12,6 +12,11 @@ import numpy as np
 
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
+FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
+FIB_RESEARCH_CONTEXT_VERSION = 1
+FIB_PIVOT_STRENGTH = 2
+FIB_MINIMUM_IMPULSE_ATR = 2.0
+FIB_LEVEL_TOLERANCE_ATR = 0.25
 FIB_LEVELS = (0.236, 0.382, 0.500, 0.618, 0.786)
 FIB_SIGNAL_LEVELS = frozenset({0.382, 0.500, 0.618})
 FIB_RULE_INDICATORS = frozenset({
@@ -26,6 +31,18 @@ FIB_RULE_INDICATORS = frozenset({
     "FIB_IMPULSE_BARS",
     "FIB_IMPULSE_DIRECTION",
 })
+
+
+
+def fib_features_needed(profiles) -> bool:
+    """Return whether any strategy profile needs Fib signal or rule evidence."""
+    for profile in profiles.values():
+        for rule in getattr(profile, "entry_rules", ()):
+            if str(rule.get("_strategy_direction_mode", "")).upper() == FIB_RETRACEMENT_MODE:
+                return True
+            if str(rule.get("indicator", "")).upper() in FIB_RULE_INDICATORS:
+                return True
+    return False
 
 
 def _confirmed_pivot(high, low, j: int, strength: int) -> tuple[bool, bool]:
@@ -213,18 +230,12 @@ def fibonacci_retracement_arrays(
 class FibonacciRetracementMixin:
     """Add causal Fib reaction direction selection and generic rule evidence."""
 
-    fib_pivot_strength = 2
-    fib_minimum_impulse_atr = 2.0
-    fib_level_tolerance_atr = 0.25
+    fib_pivot_strength = FIB_PIVOT_STRENGTH
+    fib_minimum_impulse_atr = FIB_MINIMUM_IMPULSE_ATR
+    fib_level_tolerance_atr = FIB_LEVEL_TOLERANCE_ATR
 
     def _fib_features_needed(self) -> bool:
-        for profile in self.config.strategy_profiles.values():
-            for rule in getattr(profile, "entry_rules", ()):
-                if str(rule.get("_strategy_direction_mode", "")).upper() == FIB_RETRACEMENT_MODE:
-                    return True
-                if str(rule.get("indicator", "")).upper() in FIB_RULE_INDICATORS:
-                    return True
-        return False
+        return fib_features_needed(self.config.strategy_profiles)
 
     def _configure_signal_features(self):
         super()._configure_signal_features()
