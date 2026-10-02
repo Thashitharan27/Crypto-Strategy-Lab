@@ -318,6 +318,13 @@ EVIDENCE_GROUPS = (
             "VOLUME_RATIO_20", "VOLUME_CHANGE_PCT",
             "EMA_50_DISTANCE_ATR", "EMA_100_DISTANCE_ATR", "EMA_200_DISTANCE_ATR",
             "EMA_STACK_STATE", "PRICE_VS_EMA_STACK",
+            ("Fibonacci Retracement", (
+                "FIB_RETRACEMENT_DEPTH", "FIB_NEAREST_LEVEL",
+                "FIB_LEVEL_DISTANCE_ATR", "FIB_REACTION_STATE",
+                "FIB_REJECTION_ATR", "FIB_BARS_SINCE_TEST",
+                "FIB_TEST_COUNT", "FIB_IMPULSE_ATR",
+                "FIB_IMPULSE_BARS", "FIB_IMPULSE_DIRECTION",
+            )),
             ("Volume Profile", (
                 "VP_POSITION", "VP_POC_DISTANCE_ATR", "VP_VAH_DISTANCE_ATR",
                 "VP_VAL_DISTANCE_ATR", "VP_NEAR_HVN", "VP_HVN_DISTANCE_ATR",
