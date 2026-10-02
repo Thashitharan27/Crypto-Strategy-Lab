@@ -238,9 +238,10 @@ class RiskExecutionWorkspace(QWidget):
         self.stop_card.add_field("fvg_stop_buffer", "Stop Buffer", self.fvg_stop_buffer)
         self.fib_stop_method = QLabel("Next Deeper Fib Level — Automatic")
         self.fib_stop_method.setStyleSheet("font-weight:600")
-        self.fib_stop_buffer = QLabel("0.05 × signal ATR beyond the deeper Fib")
         self.stop_card.add_field("fib_stop_method", "Stop Method", self.fib_stop_method)
-        self.stop_card.add_field("fib_stop_buffer", "Stop Buffer", self.fib_stop_buffer)
+        self.stop_card.add_field(
+            "fib_stop_buffer_atr", "Stop Buffer", self.account["fib_stop_buffer_atr"]
+        )
         layout.addWidget(self.stop_card)
 
         self.target_card = FormCard(
@@ -267,9 +268,13 @@ class RiskExecutionWorkspace(QWidget):
         )
         self.fib_target_method = QLabel("Prior Impulse Extreme (0.0 Fib) — Automatic")
         self.fib_target_method.setStyleSheet("font-weight:600")
-        self.fib_target_buffer = QLabel("0.05 × signal ATR before the prior high / low")
         self.target_card.add_field("fib_target_method", "Target Method", self.fib_target_method)
-        self.target_card.add_field("fib_target_buffer", "Target Buffer", self.fib_target_buffer)
+        self.target_card.add_field(
+            "fib_target_buffer_atr", "Target Buffer", self.account["fib_target_buffer_atr"]
+        )
+        self.target_card.add_field(
+            "fib_minimum_target_r", "Minimum Target Room", self.account["fib_minimum_target_r"]
+        )
         self.sr_dependency_note = QLabel(
             "Structural S/R stop/target policies automatically require causal Support / Resistance calculation; no separate enable step is needed."
         )
@@ -485,7 +490,7 @@ class RiskExecutionWorkspace(QWidget):
         self.stop_card.set_row_visible("fvg_stop_method", fvg)
         self.stop_card.set_row_visible("fvg_stop_buffer", fvg)
         self.stop_card.set_row_visible("fib_stop_method", fib)
-        self.stop_card.set_row_visible("fib_stop_buffer", fib)
+        self.stop_card.set_row_visible("fib_stop_buffer_atr", fib)
         for name in ("ema_920_stop_confirmation", "ema_920_stop_lookback", "ema_920_stop_maximum"):
             self.stop_card.set_row_visible(name, ema_920 and not cross_plan)
         if ema_920 or fvg or fib:
@@ -590,7 +595,8 @@ class RiskExecutionWorkspace(QWidget):
         self.target_card.set_row_visible("fvg_target_method", fvg)
         self.target_card.set_row_visible("fvg_target_buffer_atr", fvg)
         self.target_card.set_row_visible("fib_target_method", fib)
-        self.target_card.set_row_visible("fib_target_buffer", fib)
+        self.target_card.set_row_visible("fib_target_buffer_atr", fib)
+        self.target_card.set_row_visible("fib_minimum_target_r", fib)
         if ema_920:
             self.target_card.set_row_visible("sr_take_profit_mode", False)
             self.target_card.set_row_visible("reward_risk_ratio", False)
@@ -812,7 +818,9 @@ class RiskExecutionWorkspace(QWidget):
         elif fib:
             target = (
                 "automatic prior impulse extreme (0.0 Fib): previous swing high for long "
-                "or previous swing low for short, with a 0.05× signal ATR buffer"
+                "or previous swing low for short, with a "
+                f"{execution.fib_target_buffer_atr:g}× signal ATR buffer; "
+                f"entry requires at least {execution.fib_minimum_target_r:g}R available target room"
             )
         else:
             target_mode = str(execution.sr_take_profit_mode).upper()
@@ -891,7 +899,8 @@ class RiskExecutionWorkspace(QWidget):
         elif fib:
             stop_description = (
                 "Stop: beyond the next deeper Fib level (0.382→0.500, 0.500→0.618, "
-                "0.618→0.786) with a 0.05× signal ATR buffer; size from the full stop distance. "
+                f"0.618→0.786) with a {execution.fib_stop_buffer_atr:g}× signal ATR buffer; "
+                "size from the full stop distance. "
             )
         elif str(execution.risk_mode).upper() == "SR_STRUCTURE":
             stop_description = f"Stop distance uses {self._distance_description(execution)}. "
