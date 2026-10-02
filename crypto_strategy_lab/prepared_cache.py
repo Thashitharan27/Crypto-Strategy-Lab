@@ -61,6 +61,21 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
                 for profile in config.strategy_profiles.values()
             }
         ),
+        "fib_features_required": bool(
+            getattr(config, "fib_features_required", False)
+        ),
+        "fib_research_context_version": int(
+            getattr(config, "fib_research_context_version", 0)
+        ),
+        "fib_pivot_strength": int(
+            getattr(config, "fib_pivot_strength", 2)
+        ),
+        "fib_minimum_impulse_atr": float(
+            getattr(config, "fib_minimum_impulse_atr", 2.0)
+        ),
+        "fib_level_tolerance_atr": float(
+            getattr(config, "fib_level_tolerance_atr", 0.25)
+        ),
     }
 
 

@@ -436,6 +436,39 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
                 },
             )
         )
+
+    if bool(getattr(config, "fib_features_required", False)):
+        from crypto_strategy_lab.fib_retracement import (
+            FIB_RESEARCH_CONTEXT_NAME,
+            FIB_RULE_INDICATORS,
+            fibonacci_retracement_arrays,
+        )
+
+        fib_values = fibonacci_retracement_arrays(
+            strategy["open"].to_numpy(float),
+            strategy["high"].to_numpy(float),
+            strategy["low"].to_numpy(float),
+            strategy["close"].to_numpy(float),
+            technical["atr"].to_numpy(float),
+            pivot_strength=int(getattr(config, "fib_pivot_strength", 2)),
+            minimum_impulse_atr=float(
+                getattr(config, "fib_minimum_impulse_atr", 2.0)
+            ),
+            level_tolerance_atr=float(
+                getattr(config, "fib_level_tolerance_atr", 0.25)
+            ),
+        )
+        research_blocks.append(
+            ResearchContext(
+                FIB_RESEARCH_CONTEXT_NAME,
+                available,
+                {
+                    name: fib_values[name]
+                    for name in sorted(FIB_RULE_INDICATORS)
+                },
+            )
+        )
+
     research = tuple(research_blocks)
 
     bull_return = np.full(len(strategy), np.nan)

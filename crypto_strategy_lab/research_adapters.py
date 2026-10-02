@@ -11,6 +11,13 @@ from .bayesian_research import enrich_bayesian_trade_probabilities
 from .funding_execution import FundingAwareRuleBacktestEngine as RuleAwareDataLakeProductionBacktestEngine
 from .gui.enhanced_config import enhanced_default_gui_config, build_enhanced_backtest_config
 from .strategy_profiles import StrategyProfile
+from .fib_retracement import (
+    FIB_LEVEL_TOLERANCE_ATR,
+    FIB_MINIMUM_IMPULSE_ATR,
+    FIB_PIVOT_STRENGTH,
+    FIB_RESEARCH_CONTEXT_VERSION,
+    fib_features_needed,
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +38,11 @@ class PreparedPolicyConfig:
     structural_regime_sma_days: int
     structural_regime_slope_lookback_days: int
     strategy_profiles: dict[str, object]
+    fib_features_required: bool = False
+    fib_research_context_version: int = FIB_RESEARCH_CONTEXT_VERSION
+    fib_pivot_strength: int = FIB_PIVOT_STRENGTH
+    fib_minimum_impulse_atr: float = FIB_MINIMUM_IMPULSE_ATR
+    fib_level_tolerance_atr: float = FIB_LEVEL_TOLERANCE_ATR
     market_symbol: str = "POLICY"
 
 
@@ -54,6 +66,7 @@ def prepared_policy_config(run_config) -> PreparedPolicyConfig:
             run_config.features.structural_regime_slope_lookback_days
         ),
         strategy_profiles=profiles,
+        fib_features_required=fib_features_needed(run_config.strategy.profiles),
     )
 
 

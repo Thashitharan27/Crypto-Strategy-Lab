@@ -12,6 +12,9 @@ from crypto_strategy_lab.prepared_backtest import (
 from crypto_strategy_lab.config import BacktestConfig
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
 from crypto_strategy_lab.prepared_cache import PreparedRunCache
+from crypto_strategy_lab.feature_research import feature_context_frame
+from crypto_strategy_lab.fib_retracement import FIB_RULE_INDICATORS
+from crypto_strategy_lab.research_adapters import PreparedPolicyConfig
 
 
 def valid_kwargs(n=3):
@@ -343,3 +346,52 @@ def test_prepared_run_cache_duckdb_connection_is_memory_bounded_and_spillable(tm
         con.close()
         temporary.cleanup()
     assert not spill_path.exists()
+
+def test_fib_evidence_is_persisted_in_feature_context_when_required():
+    bundle = data_lake_bundle()
+    bundle.intrabar = None
+    profiles = {
+        "bull_long": SimpleNamespace(rsi_period=14, momentum_lookback_hours=24),
+    }
+    policy = PreparedPolicyConfig(
+        strategy_timeframe_minutes=240,
+        market_regime_method="ASSET_RETURN",
+        bull_regime_lookback_days=90,
+        bull_regime_return_threshold=0.20,
+        structural_regime_sma_days=200,
+        structural_regime_slope_lookback_days=30,
+        strategy_profiles=profiles,
+        fib_features_required=True,
+    )
+
+    prepared, _ = from_data_lake_bundle(bundle, policy)
+    fib = next(block for block in prepared.research if block.name == "fibonacci_retracement")
+    assert set(fib.values) == set(FIB_RULE_INDICATORS)
+    assert np.array_equal(fib.available_at, prepared.decision_available_at)
+
+    context = feature_context_frame(prepared)
+    assert set(FIB_RULE_INDICATORS) <= set(context.columns)
+    assert "fibonacci_retracement_feature_available_at" in context.columns
+    assert context["FIB_REACTION_STATE"].notna().all()
+
+
+def test_fib_evidence_is_not_materialized_for_unrelated_prepared_policy():
+    bundle = data_lake_bundle()
+    bundle.intrabar = None
+    profiles = {
+        "bull_long": SimpleNamespace(rsi_period=14, momentum_lookback_hours=24),
+    }
+    policy = PreparedPolicyConfig(
+        strategy_timeframe_minutes=240,
+        market_regime_method="ASSET_RETURN",
+        bull_regime_lookback_days=90,
+        bull_regime_return_threshold=0.20,
+        structural_regime_sma_days=200,
+        structural_regime_slope_lookback_days=30,
+        strategy_profiles=profiles,
+        fib_features_required=False,
+    )
+
+    prepared, _ = from_data_lake_bundle(bundle, policy)
+    assert all(block.name != "fibonacci_retracement" for block in prepared.research)
+
