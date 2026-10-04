@@ -133,6 +133,7 @@ class DILadderExecutionMixin:
         self._di_ladder_episode_history[episode_id] = episode
 
         pair.ladder_episode_id = episode_id
+        pair.ladder_mode = mode
         pair.ladder_layer = "INITIAL"
         pair.ladder_is_initial = True
         pair.ladder_is_child = False
