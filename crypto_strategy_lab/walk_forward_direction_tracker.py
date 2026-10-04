@@ -9,7 +9,7 @@ for that candidate have been frozen.
 """
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import defaultdict
 from typing import Any, Callable
 
 import numpy as np
@@ -275,6 +275,33 @@ def _utc_timestamp(value: Any, name: str) -> pd.Timestamp:
     return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
 
 
+def _validate_entry_time_context(
+    context: pd.Series,
+    candidate_entry_time: pd.Timestamp,
+) -> None:
+    """Reject any published feature context that was not available by entry."""
+
+    availability_columns = {
+        "research_signal_available_at",
+        "signal_available_at",
+    }
+    availability_columns.update(
+        str(name)
+        for name in context.index
+        if str(name).endswith("_feature_available_at")
+    )
+    for name in sorted(availability_columns):
+        if name not in context.index or _is_missing(context.get(name)):
+            continue
+        available_at = _utc_timestamp(context.get(name), name)
+        if available_at > candidate_entry_time:
+            raise ValueError(
+                f"candidate feature context leaks future data: {name}="
+                f"{available_at.isoformat()} > entry_time="
+                f"{candidate_entry_time.isoformat()}"
+            )
+
+
 def _pair_table(
     samples: pd.DataFrame,
 ) -> list[tuple[pd.Series, str, float, float, pd.Timestamp, pd.Timestamp]]:
@@ -370,6 +397,7 @@ def build_walk_forward_direction_tracker(
         candidate_entry_time,
         pair_available_time,
     ) in enumerate(_pair_table(samples), start=1):
+        _validate_entry_time_context(context, candidate_entry_time)
         winner = LONG if long_r > short_r else SHORT if short_r > long_r else TIE
         feature_votes_100: dict[str, list[str]] = defaultdict(list)
         feature_votes_20: dict[str, list[str]] = defaultdict(list)
@@ -512,6 +540,7 @@ def build_walk_forward_direction_tracker(
         "history_requires_fully_closed_pair_before_candidate": True,
         "pair_available_time": "MAX_LONG_SHORT_EXIT_TIME",
         "history_availability_rule": "pair_available_time < candidate_entry_time",
+        "entry_time_feature_availability_guard": True,
         "context_orientation": "CANONICAL_LONG_ROW",
         "feature_families": sorted({family for family, _, _ in FEATURES}),
     }
