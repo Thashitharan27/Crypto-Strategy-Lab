@@ -347,6 +347,7 @@ class DataclassForm(QWidget):
         "strategy_profile_run_mode": ("COMBINED_SHARED_CAPITAL", "ISOLATED_PROFILES", "BOTH"),
         "entry_mode": ("WAIT_UNTIL_CLOSED", "EVERY_N_CANDLES"),
         "entry_timing_mode": ("SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"),
+        "di_ladder_mode": ("PRICE_LEVELS", "DI_REVERSAL"),
         "ema_920_trade_plan": (
             "PULLBACK_1R", "EMA_20_100_CROSS",
             "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH",
