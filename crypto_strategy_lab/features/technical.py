@@ -25,7 +25,7 @@ from .base import FeatureDefinition, ParameterDefinition
 
 
 CORE_DIRECTIONAL_FEATURE_NAME = "core_directional"
-CORE_DIRECTIONAL_FEATURE_VERSION = "1"
+CORE_DIRECTIONAL_FEATURE_VERSION = "2"
 
 
 def _pressure_state(directional_change: np.ndarray, opposing_change: np.ndarray) -> np.ndarray:
@@ -53,6 +53,9 @@ class CoreDirectionalFeatureProvider:
         output_columns=(
             "atr",
             "atr_pct",
+            "atr_ratio_50",
+            "atr_change_pct_5",
+            "atr_volatility_state",
             "adx",
             "plus_di",
             "minus_di",
@@ -128,6 +131,33 @@ class CoreDirectionalFeatureProvider:
             out=np.full(len(close), np.nan, dtype=float),
             where=np.isfinite(atr_values) & (close != 0),
         )
+        # Compare current ATR with the prior 50 completed ATR observations so the
+        # volatility baseline is causal and portable across symbols/price levels.
+        atr_baseline_50 = (
+            pd.Series(atr_values)
+            .shift(1)
+            .rolling(window=50, min_periods=50)
+            .mean()
+            .to_numpy(float)
+        )
+        atr_ratio_50 = np.divide(
+            atr_values,
+            atr_baseline_50,
+            out=np.full(len(atr_values), np.nan, dtype=float),
+            where=np.isfinite(atr_values) & np.isfinite(atr_baseline_50) & (atr_baseline_50 != 0),
+        )
+        atr_5 = lag(atr_values, 5)
+        atr_change_pct_5 = np.divide(
+            atr_values - atr_5,
+            atr_5,
+            out=np.full(len(atr_values), np.nan, dtype=float),
+            where=np.isfinite(atr_values) & np.isfinite(atr_5) & (atr_5 != 0),
+        )
+        atr_volatility_state = np.full(len(atr_values), "UNKNOWN", dtype=object)
+        finite_atr_change = np.isfinite(atr_change_pct_5)
+        atr_volatility_state[finite_atr_change] = "FLAT"
+        atr_volatility_state[finite_atr_change & (atr_change_pct_5 > 0.05)] = "EXPANDING"
+        atr_volatility_state[finite_atr_change & (atr_change_pct_5 < -0.05)] = "CONTRACTING"
 
         pressure = directional_pressure_features(
             plus_di,
@@ -164,6 +194,9 @@ class CoreDirectionalFeatureProvider:
                 "available_at": pd.to_datetime(source["available_at"], utc=True),
                 "atr": atr_values,
                 "atr_pct": atr_pct,
+                "atr_ratio_50": atr_ratio_50,
+                "atr_change_pct_5": atr_change_pct_5,
+                "atr_volatility_state": atr_volatility_state,
                 "adx": adx_values,
                 "plus_di": plus_di,
                 "minus_di": minus_di,
@@ -199,7 +232,7 @@ class CoreDirectionalFeatureProvider:
                 "adx_period": adx_period,
                 "di_pressure_lookback": pressure_lookback,
                 "effective_warmup_bars": max(
-                    atr_period,
+                    atr_period + 50,
                     adx_period * 2,
                     pressure_lookback + 1,
                     6,
