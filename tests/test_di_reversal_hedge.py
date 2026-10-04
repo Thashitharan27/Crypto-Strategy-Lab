@@ -219,3 +219,9 @@ def test_di_reversal_initializes_from_prepared_intrabar_execution_data():
     assert engine._di_reversal_minus is not None
     assert len(engine._di_reversal_plus) == len(raw)
     assert len(engine._di_reversal_minus) == len(raw)
+
+
+def test_di_reversal_parent_close_path_has_exit_reason_symbol_available():
+    import crypto_strategy_lab.di_ladder as module
+
+    assert module.ExitReason.PARENT_CLOSED.value == "PARENT_CLOSED"
