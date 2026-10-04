@@ -14,7 +14,7 @@ import pandas as pd
 from crypto_strategy_lab.adx import adx
 from crypto_strategy_lab.config import IntrabarMissingPolicy, TiePolicy
 from crypto_strategy_lab.strategy_profiles import profile_key
-from crypto_strategy_lab.trade import ExitSource, Position, Side, TradePair
+from crypto_strategy_lab.trade import ExitReason, ExitSource, Position, Side, TradePair
 
 
 class DILadderExecutionMixin:
