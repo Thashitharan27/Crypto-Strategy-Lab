@@ -74,6 +74,7 @@ def apply_ladder_rule_workspace(window) -> None:
         )
         risk_workspace.ladder_card.layout().addWidget(open_button)
         window.ladder_rule_open_button = open_button
+        risk_workspace.refresh_visibility()
 
     # Loading/resetting a config may update the hidden tuple editor with signals
     # blocked. Refresh the visible workspace after every successful apply.
