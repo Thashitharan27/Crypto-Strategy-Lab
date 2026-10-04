@@ -11,6 +11,7 @@ from copy import deepcopy
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_lab.adx import adx
 from crypto_strategy_lab.config import IntrabarMissingPolicy, TiePolicy
 from crypto_strategy_lab.strategy_profiles import profile_key
 from crypto_strategy_lab.trade import ExitSource, Position, Side, TradePair
@@ -32,6 +33,25 @@ class DILadderExecutionMixin:
         self._di_ladder_episode = None
         self._di_ladder_episode_history = {}
         self.ladder_event_rows = []
+        self._di_reversal_plus = None
+        self._di_reversal_minus = None
+        if (
+            bool(getattr(self.config, "di_ladder_enabled", False))
+            and str(getattr(self.config, "di_ladder_mode", "PRICE_LEVELS")).upper() == "DI_REVERSAL"
+            and self.intrabar_data is not None
+        ):
+            frame = self.intrabar_data
+            required = {"high", "low", "close"}
+            if not required.issubset(set(getattr(frame, "columns", ()))):
+                raise ValueError("DI reversal hedge requires materialized 15m OHLC intrabar data")
+            _adx, plus, minus = adx(
+                frame.high.to_numpy(float),
+                frame.low.to_numpy(float),
+                frame.close.to_numpy(float),
+                int(self.config.adx_period),
+            )
+            self._di_reversal_plus = plus
+            self._di_reversal_minus = minus
 
     def _di_ladder_enabled(self) -> bool:
         return bool(getattr(self.config, "di_ladder_enabled", False))
@@ -63,6 +83,7 @@ class DILadderExecutionMixin:
         )
         if not np.isfinite(sizing_reference) or sizing_reference <= 0:
             raise ValueError("DI ladder requires a finite positive sizing reference distance")
+        mode = str(getattr(self.config, "di_ladder_mode", "PRICE_LEVELS")).upper()
         level_r = float(getattr(self.config, "di_ladder_level_r", 0.20))
         level_distance = sizing_reference * level_r
         if not np.isfinite(level_distance) or level_distance <= 0:
@@ -70,9 +91,11 @@ class DILadderExecutionMixin:
 
         initial_direction = position.side.value
         direction_sign = 1.0 if position.side == Side.LONG else -1.0
-        layers = self._di_ladder_layers()
+        layers = self._di_ladder_layers() if mode == "PRICE_LEVELS" else ()
         episode_id = int(pair.pair_id)
         episode = {
+            "mode": mode,
+            "reversal_target_r": float(getattr(self.config, "di_reversal_target_r", 0.20)),
             "episode_id": episode_id,
             "initial_pair": pair,
             "initial_pair_id": int(pair.pair_id),
@@ -192,8 +215,8 @@ class DILadderExecutionMixin:
             return min(float(trigger_price), float(raw_open))
         return max(float(trigger_price), float(raw_open))
 
-    def _ladder_capacity_reason(self, episode, entry_price: float):
-        qty = float(episode["quantity"])
+    def _ladder_capacity_reason(self, episode, entry_price: float, quantity: float | None = None):
+        qty = float(episode["quantity"] if quantity is None else quantity)
         equity = float(episode["equity_before_trade"])
         if equity <= 0:
             return "LADDER_INVALID_EQUITY"
@@ -432,6 +455,171 @@ class DILadderExecutionMixin:
         })
         return pair
 
+    def _di_reversal_direction(self, intrabar_i: int):
+        if self._di_reversal_plus is None or self._di_reversal_minus is None:
+            return None
+        if intrabar_i < 0 or intrabar_i >= len(self._di_reversal_plus):
+            return None
+        plus = float(self._di_reversal_plus[intrabar_i])
+        minus = float(self._di_reversal_minus[intrabar_i])
+        if not np.isfinite(plus) or not np.isfinite(minus) or plus == minus:
+            return None
+        return "LONG" if plus > minus else "SHORT"
+
+    def _open_di_reversal_leg(
+        self, episode, execution_i: int, decision_i: int, intrabar_i: int,
+        timestamp, raw_open: float
+    ):
+        child_direction = str(episode["child_direction"])
+        side = Side.LONG if child_direction == "LONG" else Side.SHORT
+        entry = float(raw_open) * (
+            1 + self.config.slippage if side == Side.LONG else 1 - self.config.slippage
+        )
+        parent = episode["initial_pair"].position
+        stop_price = float(parent.tp)
+        risk_distance = abs(stop_price - entry)
+        if risk_distance <= 0:
+            return None
+        risk_amount = float(episode["risk_amount"])
+        qty = risk_amount / risk_distance
+        capacity_reason = self._ladder_capacity_reason(episode, entry, qty)
+        if capacity_reason is not None:
+            self.ladder_event_rows.append({
+                "ladder_episode_id": int(episode["episode_id"]),
+                "ladder_layer": "DI_REVERSAL",
+                "ladder_decision": "SKIP",
+                "strategy_entry_time": self._ladder_utc_timestamp(timestamp),
+                "strategy_entry_price": float(raw_open),
+                "entry_filter_reason": capacity_reason,
+            })
+            return None
+        target_r = float(episode["reversal_target_r"])
+        target_price = (
+            entry + target_r * risk_distance
+            if side == Side.LONG else
+            entry - target_r * risk_distance
+        )
+        entry_fee_rate = self.config.maker_fee if self.config.use_maker_entry else self.config.taker_fee
+        entry_fee = entry * qty * entry_fee_rate
+        atr_value = float(self.atr_values[decision_i]) if np.isfinite(self.atr_values[decision_i]) else np.nan
+        pos = Position(
+            side=side,
+            entry_time=pd.Timestamp(timestamp),
+            entry_index=int(intrabar_i),
+            entry_price=entry,
+            risk=risk_distance,
+            sl=stop_price,
+            tp=target_price,
+            quantity=qty,
+            risk_amount=risk_amount,
+            entry_notional=entry * qty,
+            atr_at_entry=atr_value,
+            uncapped_quantity=qty,
+            effective_leverage=(entry * qty / float(episode["equity_before_trade"])),
+            distance_unit=risk_distance,
+            position_sizing_stop_override_enabled=True,
+            position_sizing_stop_override_applied=True,
+            position_sizing_stop_multiple=1.0,
+            position_sizing_reference_distance=risk_distance,
+            entry_fee=entry_fee,
+            fees=entry_fee,
+            original_sl=stop_price,
+        )
+        pair = TradePair(
+            self.next_pair_id,
+            pos if side == Side.LONG else None,
+            pos if side == Side.SHORT else None,
+            self.current_equity,
+            pd.Timestamp(self.times[decision_i]),
+            self._ladder_utc_timestamp(timestamp),
+            float(raw_open),
+            False,
+        )
+        pair.trade_direction = child_direction
+        pair.signal_strategy_mode = "DI_REVERSAL_HEDGE"
+        pair.entry_timing_mode = "NEXT_15M_OPEN"
+        pair.signal_candle_time = self._ladder_utc_timestamp(
+            pd.Timestamp(timestamp) - pd.Timedelta(minutes=15)
+        )
+        pair.signal_available_at = self._ladder_utc_timestamp(timestamp)
+        pair.actual_entry_timestamp = self._ladder_utc_timestamp(timestamp)
+        pair.strategy_profile_key = None
+        pair.applied_stop_loss_multiple = 1.0
+        pair.applied_partial_sl_enabled = False
+        pair.applied_partial_tp_enabled = False
+        pair.profile_timeout_enabled = False
+        pair.ladder_episode_id = int(episode["episode_id"])
+        pair.ladder_layer = "DI_REVERSAL"
+        pair.ladder_is_initial = False
+        pair.ladder_is_child = True
+        pair.ladder_initial_direction = str(episode["initial_direction"])
+        pair.ladder_filter_decision = "ENTER"
+        pair.ladder_filter_reason = "Fresh opposite 15m DI cross"
+        pair.ladder_level_r = target_r
+        pair.ladder_level_distance_price = risk_distance
+        pair.ladder_anchor_price = float(parent.entry_price)
+        pair.ladder_frozen_quantity = qty
+        pair.ladder_sizing_budget_dollars = risk_amount
+        pair.ladder_decision_strategy_index = int(decision_i)
+        pair.ladder_trigger_timestamp = self._ladder_utc_timestamp(timestamp)
+        pair.ladder_mode = "DI_REVERSAL"
+        pair.ladder_parent_progress_r = (
+            ((entry - float(parent.entry_price)) if parent.side == Side.LONG else (float(parent.entry_price) - entry))
+            / float(parent.risk)
+            if float(parent.risk) > 0 else np.nan
+        )
+        signal_i = intrabar_i - 1
+        pair.ladder_signal_plus_di = (
+            float(self._di_reversal_plus[signal_i])
+            if signal_i >= 0 and np.isfinite(self._di_reversal_plus[signal_i]) else np.nan
+        )
+        pair.ladder_signal_minus_di = (
+            float(self._di_reversal_minus[signal_i])
+            if signal_i >= 0 and np.isfinite(self._di_reversal_minus[signal_i]) else np.nan
+        )
+        self.active_pairs.append(pair)
+        attach = getattr(self, "_attach_research_features_to_pair", None)
+        if callable(attach):
+            attach(pair, decision_i)
+        self._record_pair_telemetry(pair, execution_i)
+        self.next_pair_id += 1
+        self.ladder_event_rows.append({
+            "ladder_episode_id": int(episode["episode_id"]),
+            "ladder_layer": "DI_REVERSAL",
+            "ladder_decision": "ENTER",
+            "strategy_entry_time": self._ladder_utc_timestamp(timestamp),
+            "strategy_entry_price": float(raw_open),
+            "parent_progress_r": pair.ladder_parent_progress_r,
+            "plus_di_15m": pair.ladder_signal_plus_di,
+            "minus_di_15m": pair.ladder_signal_minus_di,
+        })
+        return pair
+
+    def _maybe_trigger_di_reversal(
+        self, episode, execution_i: int, intrabar_i: int, timestamp, raw_open: float
+    ) -> None:
+        if not episode.get("allow_new_layers", False):
+            return
+        if any(
+            getattr(pair, "ladder_episode_id", None) == episode["episode_id"]
+            and getattr(pair, "ladder_is_child", False)
+            and pair.position.is_open
+            for pair in self.active_pairs
+        ):
+            return
+        signal_i = int(intrabar_i) - 1
+        previous_i = signal_i - 1
+        if previous_i < 0:
+            return
+        previous = self._di_reversal_direction(previous_i)
+        current = self._di_reversal_direction(signal_i)
+        if previous != episode["initial_direction"] or current != episode["child_direction"]:
+            return
+        decision_i = max(0, int(execution_i) - 1)
+        self._open_di_reversal_leg(
+            episode, execution_i, decision_i, intrabar_i, timestamp, raw_open
+        )
+
     def _trigger_ladder_layers(
         self, episode, execution_i: int, timestamp, raw_open: float,
         high: float, low: float
@@ -525,10 +713,15 @@ class DILadderExecutionMixin:
                 episode["allow_new_layers"] = False
                 return
 
-        self._trigger_ladder_layers(
-            episode, execution_i, timestamp, raw_open, high, low
-        )
-        self._update_skipped_ladder_outcomes(episode, high, low)
+        if str(episode.get("mode", "PRICE_LEVELS")).upper() == "DI_REVERSAL":
+            self._maybe_trigger_di_reversal(
+                episode, execution_i, int(j), timestamp, raw_open
+            )
+        else:
+            self._trigger_ladder_layers(
+                episode, execution_i, timestamp, raw_open, high, low
+            )
+            self._update_skipped_ladder_outcomes(episode, high, low)
 
         for pair in list(self.active_pairs):
             if getattr(pair, "ladder_episode_id", None) != episode["episode_id"]:
@@ -541,6 +734,18 @@ class DILadderExecutionMixin:
 
         if not initial.is_open:
             episode["allow_new_layers"] = False
+            if str(episode.get("mode", "PRICE_LEVELS")).upper() == "DI_REVERSAL":
+                for pair in list(self.active_pairs):
+                    if (
+                        getattr(pair, "ladder_episode_id", None) == episode["episode_id"]
+                        and getattr(pair, "ladder_is_child", False)
+                        and pair.position.is_open
+                    ):
+                        exit_price = float(initial.exit_price)
+                        self._close_position(
+                            pair.position, j, exit_price, ExitReason.PARENT_CLOSED,
+                            ExitSource.INTRABAR, timestamp
+                        )
 
     def _ladder_intrabar_rows(self, start, end):
         expected = pd.Timedelta(minutes=self.config.intrabar_timeframe_minutes)
@@ -670,6 +875,10 @@ class DILadderExecutionMixin:
             "ladder_sizing_budget_dollars": getattr(pair, "ladder_sizing_budget_dollars", np.nan),
             "ladder_decision_strategy_index": getattr(pair, "ladder_decision_strategy_index", np.nan),
             "ladder_trigger_timestamp": getattr(pair, "ladder_trigger_timestamp", None),
+            "ladder_mode": getattr(pair, "ladder_mode", "PRICE_LEVELS"),
+            "ladder_parent_progress_r": getattr(pair, "ladder_parent_progress_r", np.nan),
+            "ladder_signal_plus_di": getattr(pair, "ladder_signal_plus_di", np.nan),
+            "ladder_signal_minus_di": getattr(pair, "ladder_signal_minus_di", np.nan),
         })
         if bool(getattr(pair, "ladder_is_child", False)):
             sizing_reference = float(
