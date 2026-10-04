@@ -561,11 +561,20 @@ class LadderRuleWorkspace(QWidget):
         global_box = QGroupBox("DI Ladder")
         global_form = QFormLayout(global_box)
         self.enabled = QCheckBox("Enable DI ladder / reversal-filter execution")
+        self.mode = QComboBox()
+        self.mode.addItem("Price Levels (S1/S2/S3/S4)", "PRICE_LEVELS")
+        self.mode.addItem("15m DI Reversal Hedge", "DI_REVERSAL")
         self.level_size = QDoubleSpinBox()
         self.level_size.setRange(0.000001, 1_000_000.0)
         self.level_size.setDecimals(6)
         self.level_size.setSuffix(" R")
+        self.reversal_target = QDoubleSpinBox()
+        self.reversal_target.setRange(0.000001, 1_000_000.0)
+        self.reversal_target.setDecimals(6)
+        self.reversal_target.setSuffix(" R")
         global_form.addRow(self.enabled)
+        global_form.addRow("Execution Mode", self.mode)
+        global_form.addRow("DI Reversal Target", self.reversal_target)
         global_form.addRow("Ladder Level Size", self.level_size)
         outer.addWidget(global_box)
 
@@ -580,9 +589,17 @@ class LadderRuleWorkspace(QWidget):
         outer.addWidget(self.tabs, 1)
 
         self.enabled.toggled.connect(self._global_enabled_changed)
+        self.mode.currentIndexChanged.connect(self._global_mode_changed)
+        self.reversal_target.valueChanged.connect(self._global_reversal_target_changed)
         self.level_size.valueChanged.connect(self._global_level_changed)
         self.account["di_ladder_enabled"].toggled.connect(
             self._authoritative_enabled_changed
+        )
+        self.account["di_ladder_mode"].currentIndexChanged.connect(
+            self._authoritative_mode_changed
+        )
+        self.account["di_reversal_target_r"].valueChanged.connect(
+            self._authoritative_reversal_target_changed
         )
         self.account["di_ladder_level_r"].valueChanged.connect(
             self._authoritative_level_changed
@@ -598,6 +615,24 @@ class LadderRuleWorkspace(QWidget):
         self.enabled.blockSignals(True)
         self.enabled.setChecked(bool(checked))
         self.enabled.blockSignals(False)
+        self._refresh_summary()
+
+    def _authoritative_mode_changed(self, _index):
+        if self._syncing:
+            return
+        value = str(self.account["di_ladder_mode"].currentData() or "PRICE_LEVELS")
+        self.mode.blockSignals(True)
+        self.mode.setCurrentIndex(max(0, self.mode.findData(value)))
+        self.mode.blockSignals(False)
+        self._refresh_mode_visibility()
+        self._refresh_summary()
+
+    def _authoritative_reversal_target_changed(self, value):
+        if self._syncing:
+            return
+        self.reversal_target.blockSignals(True)
+        self.reversal_target.setValue(float(value))
+        self.reversal_target.blockSignals(False)
         self._refresh_summary()
 
     def _authoritative_level_changed(self, value):
@@ -618,6 +653,31 @@ class LadderRuleWorkspace(QWidget):
         self._syncing = True
         try:
             self.account["di_ladder_enabled"].setChecked(bool(checked))
+        finally:
+            self._syncing = False
+        self._refresh_summary()
+        self.changed.emit()
+
+    def _global_mode_changed(self, _index):
+        if self._syncing:
+            return
+        self._syncing = True
+        try:
+            authoritative = self.account["di_ladder_mode"]
+            index = authoritative.findData(str(self.mode.currentData()))
+            authoritative.setCurrentIndex(max(index, 0))
+        finally:
+            self._syncing = False
+        self._refresh_mode_visibility()
+        self._refresh_summary()
+        self.changed.emit()
+
+    def _global_reversal_target_changed(self, value):
+        if self._syncing:
+            return
+        self._syncing = True
+        try:
+            self.account["di_reversal_target_r"].setValue(float(value))
         finally:
             self._syncing = False
         self._refresh_summary()
@@ -648,6 +708,11 @@ class LadderRuleWorkspace(QWidget):
             self.enabled.setChecked(
                 bool(self.account["di_ladder_enabled"].isChecked())
             )
+            mode = str(self.account["di_ladder_mode"].currentData() or "PRICE_LEVELS")
+            self.mode.setCurrentIndex(max(0, self.mode.findData(mode)))
+            self.reversal_target.setValue(
+                float(self.account["di_reversal_target_r"].value())
+            )
             self.level_size.setValue(
                 float(self.account["di_ladder_level_r"].value())
             )
@@ -669,7 +734,23 @@ class LadderRuleWorkspace(QWidget):
                 )
         finally:
             self._syncing = False
+        self._refresh_mode_visibility()
         self._refresh_summary()
+
+    def _refresh_mode_visibility(self):
+        reversal = str(self.mode.currentData()) == "DI_REVERSAL"
+        self.reversal_target.setVisible(reversal)
+        reversal_label = global_label = self.reversal_target.parentWidget()
+        form = global_label.layout() if global_label is not None else None
+        if isinstance(form, QFormLayout):
+            label = form.labelForField(self.reversal_target)
+            if label is not None:
+                label.setVisible(reversal)
+            level_label = form.labelForField(self.level_size)
+            if level_label is not None:
+                level_label.setVisible(not reversal)
+        self.level_size.setVisible(not reversal)
+        self.tabs.setVisible(not reversal)
 
     def _layers_changed(self):
         if self._syncing:
@@ -689,9 +770,16 @@ class LadderRuleWorkspace(QWidget):
         self.changed.emit()
 
     def _refresh_summary(self):
+        state = "Enabled" if self.enabled.isChecked() else "Disabled"
+        if str(self.mode.currentData()) == "DI_REVERSAL":
+            self.summary.setText(
+                f"{state} · 15m DI reversal hedge · "
+                f"target {self.reversal_target.value():g} R · "
+                "child stop anchored to parent TP"
+            )
+            return
         active = sum(panel.enabled.isChecked() for panel in self.panels)
         rules = sum(len(panel.conditions) for panel in self.panels)
-        state = "Enabled" if self.enabled.isChecked() else "Disabled"
         self.summary.setText(
             f"{state} · {active}/{len(self.panels)} layers active · "
             f"{rules} ladder entry condition(s) · level size {self.level_size.value():g} R"
@@ -701,6 +789,8 @@ class LadderRuleWorkspace(QWidget):
 def apply_ladder_rule_dependencies(config):
     """Turn on causal feature blocks needed by enabled ladder rules."""
     if not config.execution.di_ladder_enabled:
+        return config
+    if str(config.execution.di_ladder_mode).upper() != "PRICE_LEVELS":
         return config
 
     rules = [
