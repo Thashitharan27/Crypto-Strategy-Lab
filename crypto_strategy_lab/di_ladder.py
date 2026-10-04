@@ -41,13 +41,26 @@ class DILadderExecutionMixin:
             and self.intrabar_data is not None
         ):
             frame = self.intrabar_data
-            required = {"high", "low", "close"}
-            if not required.issubset(set(getattr(frame, "columns", ()))):
-                raise ValueError("DI reversal hedge requires materialized 15m OHLC intrabar data")
+            if hasattr(frame, "columns"):
+                required = {"high", "low", "close"}
+                if not required.issubset(set(frame.columns)):
+                    raise ValueError("DI reversal hedge requires materialized 15m OHLC intrabar data")
+                high = frame.high.to_numpy(float)
+                low = frame.low.to_numpy(float)
+                close = frame.close.to_numpy(float)
+            else:
+                high = getattr(frame, "high", None)
+                low = getattr(frame, "low", None)
+                close = getattr(frame, "close", None)
+                if high is None or low is None or close is None:
+                    raise ValueError("DI reversal hedge requires materialized 15m OHLC intrabar data")
+                high = np.asarray(high, dtype=float)
+                low = np.asarray(low, dtype=float)
+                close = np.asarray(close, dtype=float)
             _adx, plus, minus = adx(
-                frame.high.to_numpy(float),
-                frame.low.to_numpy(float),
-                frame.close.to_numpy(float),
+                high,
+                low,
+                close,
                 int(self.config.adx_period),
             )
             self._di_reversal_plus = plus
