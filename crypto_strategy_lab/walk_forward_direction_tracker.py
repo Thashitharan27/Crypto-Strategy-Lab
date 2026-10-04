@@ -263,12 +263,12 @@ def _directional_accuracy(
     lookback: int = ADAPTIVE_DIRECTION_WINDOW,
 ) -> tuple[int, float | None]:
     eligible = [
-        (signal_index, correct)
+        (available_time, signal_index, correct)
         for available_time, signal_index, correct in history
         if available_time < candidate_entry_time
     ]
-    eligible.sort(key=lambda item: item[0])
-    observations = [correct for _, correct in eligible[-lookback:]]
+    eligible.sort(key=lambda item: (item[0], item[1]))
+    observations = [correct for _, _, correct in eligible[-lookback:]]
     if not observations:
         return 0, None
     return len(observations), sum(observations) / len(observations)
