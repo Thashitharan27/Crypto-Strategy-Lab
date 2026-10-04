@@ -40,7 +40,9 @@ SR_HTF_DEFAULTS: dict[str, Any] = {
 
 DI_LADDER_DEFAULTS: dict[str, Any] = {
     "di_ladder_enabled": False,
+    "di_ladder_mode": "PRICE_LEVELS",
     "di_ladder_level_r": 0.20,
+    "di_reversal_target_r": 0.20,
     "di_ladder_layers": (
         {
             "name": "S1", "enabled": True, "entry_level": -1.0,
@@ -107,7 +109,9 @@ class EnhancedBacktestConfig(BacktestConfig):
     mean_reversion_track_motion: bool = True
     sr_timeframe_minutes: int = 0
     di_ladder_enabled: bool = False
+    di_ladder_mode: str = "PRICE_LEVELS"
     di_ladder_level_r: float = 0.20
+    di_reversal_target_r: float = 0.20
     di_ladder_layers: tuple = DI_LADDER_DEFAULTS["di_ladder_layers"]
     sr_stop_timeframe_minutes: int = 0
     sr_stop_buffer_atr: float = 0.25
@@ -142,12 +146,27 @@ class EnhancedBacktestConfig(BacktestConfig):
         if not 0 <= oversold < overbought <= 100:
             raise ValueError("RSI thresholds must satisfy 0 <= oversold < overbought <= 100")
 
+        ladder_mode = str(self.di_ladder_mode).upper()
+        object.__setattr__(self, "di_ladder_mode", ladder_mode)
+        if ladder_mode not in ("PRICE_LEVELS", "DI_REVERSAL"):
+            raise ValueError("di_ladder_mode must be PRICE_LEVELS or DI_REVERSAL")
         if self.di_ladder_level_r <= 0:
             raise ValueError("di_ladder_level_r must be positive")
+        if self.di_reversal_target_r <= 0:
+            raise ValueError("di_reversal_target_r must be positive")
         if isinstance(self.di_ladder_layers, list):
             object.__setattr__(self, "di_ladder_layers", tuple(self.di_ladder_layers))
-        if self.di_ladder_enabled and not self.di_ladder_layers:
-            raise ValueError("DI ladder execution requires at least one configured layer")
+        if self.di_ladder_enabled and self.di_ladder_mode == "PRICE_LEVELS" and not self.di_ladder_layers:
+            raise ValueError("DI price-level ladder execution requires at least one configured layer")
+        if self.di_ladder_enabled and self.di_ladder_mode == "DI_REVERSAL":
+            if not self.use_intrabar_data or self.intrabar_timeframe_minutes != 15:
+                raise ValueError("DI reversal hedge requires 15-minute intrabar data")
+            if self.strategy_timeframe_minutes <= 15:
+                raise ValueError("DI reversal hedge requires a parent timeframe larger than 15 minutes")
+            if self.entry_mode.value != "WAIT_UNTIL_CLOSED":
+                raise ValueError("DI reversal hedge requires WAIT_UNTIL_CLOSED entry mode")
+            if self.entry_timing_mode.value != "SIGNAL_CLOSE":
+                raise ValueError("DI reversal hedge requires SIGNAL_CLOSE parent entry timing")
 
         sr_tf = int(self.sr_timeframe_minutes)
         object.__setattr__(self, "sr_timeframe_minutes", sr_tf)

@@ -135,9 +135,10 @@ EXECUTION_GROUPS = (
     ), None),
     ("Slippage", ("slippage",), None),
     ("Tie / Same-bar Policy", ("tie_policy",), None),
-    ("DI Ladder", (
-        "di_ladder_enabled", "di_ladder_level_r", "di_ladder_layers",
-    ), "Optional opposite-side ladder. Layer rules are positive ENTER conditions; failed conditions SKIP that layer."),
+    ("DI Ladder / Reversal Hedge", (
+        "di_ladder_enabled", "di_ladder_mode", "di_ladder_level_r",
+        "di_reversal_target_r", "di_ladder_layers",
+    ), "PRICE_LEVELS uses the existing ladder. DI_REVERSAL uses fresh opposite 15m DI crosses; its child stop is the parent TP and its target is expressed in child risk-R."),
 )
 
 STRATEGY_PROFILE_GROUPS = (

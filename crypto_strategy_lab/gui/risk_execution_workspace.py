@@ -295,6 +295,12 @@ class RiskExecutionWorkspace(QWidget):
             "di_ladder_enabled", self.account["di_ladder_enabled"]
         )
         self.ladder_card.add_field(
+            "di_ladder_mode", "Execution Mode", self.account["di_ladder_mode"]
+        )
+        self.ladder_card.add_field(
+            "di_reversal_target_r", "DI Reversal Target R", self.account["di_reversal_target_r"]
+        )
+        self.ladder_card.add_field(
             "di_ladder_level_r", "Ladder Level Size", self.account["di_ladder_level_r"]
         )
         self.ladder_card.add_field(
@@ -970,8 +976,14 @@ class RiskExecutionWorkspace(QWidget):
             f"{sizing_description}"
             f" Profit policy: {target}. Maximum active trades: {execution.max_active_pairs}. "
             + (
-                f"DI ladder enabled at {execution.di_ladder_level_r:g} sizing-R per level with "
-                f"{sum(1 for layer in execution.di_ladder_layers if layer.get('enabled', True))} enabled layers. "
+                (
+                    f"DI reversal hedge enabled: fresh opposite 15m DI crosses, "
+                    f"{execution.di_reversal_target_r:g}R child target, parent TP as child stop. "
+                    if execution.di_ladder_mode == "DI_REVERSAL"
+                    else
+                    f"DI ladder enabled at {execution.di_ladder_level_r:g} sizing-R per level with "
+                    f"{sum(1 for layer in execution.di_ladder_layers if layer.get('enabled', True))} enabled layers. "
+                )
                 if execution.di_ladder_enabled else
                 "DI ladder disabled. "
             )
