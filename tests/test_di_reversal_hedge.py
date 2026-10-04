@@ -192,3 +192,30 @@ def test_di_reversal_requires_a_fresh_cross_and_does_not_repeat_same_di_state():
         raw_open=99.0,
     )
     assert sum(bool(getattr(pair, "ladder_is_child", False)) for pair in engine.active_pairs) == 1
+
+
+def test_di_reversal_initializes_from_prepared_intrabar_execution_data():
+    from crypto_strategy_lab.prepared_backtest import IntrabarExecutionData
+
+    strategy = _strategy()
+    raw = _intrabar()
+    prepared_intrabar = IntrabarExecutionData(
+        raw["timestamp"].to_numpy(),
+        pd.Timedelta(minutes=15),
+        raw["open"].to_numpy(float),
+        raw["high"].to_numpy(float),
+        raw["low"].to_numpy(float),
+        raw["close"].to_numpy(float),
+    )
+
+    engine = BacktestEngine.__new__(BacktestEngine)
+    engine.config = _config()
+    engine.intrabar_data = prepared_intrabar
+
+    # Must accept the array-backed production intrabar contract used by Data Lake.
+    engine._initialize_di_ladder_state()
+
+    assert engine._di_reversal_plus is not None
+    assert engine._di_reversal_minus is not None
+    assert len(engine._di_reversal_plus) == len(raw)
+    assert len(engine._di_reversal_minus) == len(raw)
