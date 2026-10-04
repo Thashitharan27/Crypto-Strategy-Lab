@@ -96,7 +96,11 @@ def data_lake_bundle():
     })
     technical = pd.DataFrame({
         "timestamp": times, "available_at": times + pd.Timedelta(hours=4),
-        "atr": 1.0, "atr_pct": .1, "adx": 20.0, "plus_di": 15.0, "minus_di": 10.0,
+        "atr": 1.0, "atr_pct": .1,
+        "atr_ratio_50": [0.8, 1.0, 1.4],
+        "atr_change_pct_5": [-0.1, 0.0, 0.1],
+        "atr_volatility_state": ["CONTRACTING", "FLAT", "EXPANDING"],
+        "adx": 20.0, "plus_di": 15.0, "minus_di": 10.0,
         **{name: 1.0 for name in (
             "di_spread", "di_spread_1", "di_spread_3", "di_spread_5",
             "di_spread_change", "di_ratio", "plus_di_change", "minus_di_change",
@@ -395,3 +399,16 @@ def test_fib_evidence_is_not_materialized_for_unrelated_prepared_policy():
     prepared, _ = from_data_lake_bundle(bundle, policy)
     assert all(block.name != "fibonacci_retracement" for block in prepared.research)
 
+
+
+def test_atr_volatility_is_persisted_in_feature_context():
+    bundle = data_lake_bundle()
+    prepared, _ = from_data_lake_bundle(bundle)
+    block = next(item for item in prepared.research if item.name == "atr_volatility")
+    assert set(block.values) == {"atr_ratio_50", "atr_change_pct_5", "atr_volatility_state"}
+
+    context = feature_context_frame(prepared)
+    assert context["atr_ratio_50"].tolist() == [0.8, 1.0, 1.4]
+    assert context["atr_change_pct_5"].tolist() == [-0.1, 0.0, 0.1]
+    assert context["atr_volatility_state"].tolist() == ["CONTRACTING", "FLAT", "EXPANDING"]
+    assert "atr_volatility_feature_available_at" in context.columns

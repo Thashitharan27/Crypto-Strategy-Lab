@@ -95,7 +95,12 @@ def test_provider_matches_existing_atr_adx_dmi_math() -> None:
     np.testing.assert_allclose(features.plus_di, expected_plus, equal_nan=True)
     np.testing.assert_allclose(features.minus_di, expected_minus, equal_nan=True)
     assert features.attrs["feature_name"] == "core_directional"
-    assert features.attrs["feature_version"] == "1"
+    assert features.attrs["feature_version"] == "2"
+    assert {"atr_ratio_50", "atr_change_pct_5", "atr_volatility_state"} <= set(features.columns)
+    assert features["atr_ratio_50"].notna().any()
+    assert set(features["atr_volatility_state"]) <= {
+        "UNKNOWN", "FLAT", "EXPANDING", "CONTRACTING"
+    }
 
 
 def test_future_source_mutation_cannot_change_past_features() -> None:
@@ -109,6 +114,9 @@ def test_future_source_mutation_cannot_change_past_features() -> None:
 
     columns = [
         "atr",
+        "atr_ratio_50",
+        "atr_change_pct_5",
+        "atr_volatility_state",
         "adx",
         "plus_di",
         "minus_di",
@@ -135,7 +143,7 @@ def test_data_lake_engine_reuses_prepared_features_and_preserves_di_pressure() -
     legacy = BacktestEngine(data, config)
     lake = DataLakeBacktestEngine(data, config, technical_features=features)
 
-    assert lake.technical_feature_source == "core_directional@1"
+    assert lake.technical_feature_source == "core_directional@2"
     np.testing.assert_allclose(lake.atr_values, legacy.atr_values, equal_nan=True)
     np.testing.assert_allclose(lake.adx_values, legacy.adx_values, equal_nan=True)
     np.testing.assert_allclose(lake.plus_di_values, legacy.plus_di_values, equal_nan=True)
@@ -170,4 +178,4 @@ def test_prepared_path_does_not_execute_legacy_atr_or_adx(monkeypatch) -> None:
     monkeypatch.setattr(engine_module, "atr", forbidden)
     monkeypatch.setattr(engine_module, "adx", forbidden)
     engine = DataLakeBacktestEngine(data, config, technical_features=features)
-    assert engine.technical_feature_source == "core_directional@1"
+    assert engine.technical_feature_source == "core_directional@2"

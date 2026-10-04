@@ -416,6 +416,23 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
     )}
 
     research_blocks: list[ResearchContext] = []
+    atr_volatility_columns = (
+        "atr_ratio_50",
+        "atr_change_pct_5",
+        "atr_volatility_state",
+    )
+    if set(atr_volatility_columns) <= set(technical.columns):
+        research_blocks.append(
+            ResearchContext(
+                "atr_volatility",
+                technical_available,
+                {
+                    name: technical[name].to_numpy()
+                    for name in atr_volatility_columns
+                },
+            )
+        )
+
     frames = dict(bundle.research_features)
     support_resistance = getattr(bundle, "support_resistance_features", None)
     if support_resistance is not None:
