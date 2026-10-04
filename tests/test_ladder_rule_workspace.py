@@ -127,3 +127,42 @@ def test_ladder_context_rule_round_trips_timeframe_and_auto_enables_dependency()
     finally:
         window.close()
         app.processEvents()
+
+
+def test_di_reversal_mode_is_dropdown_and_hides_price_level_controls():
+    app, window = _window()
+    try:
+        account = window.execution_form.widgets
+        risk = window.risk_execution_workspace
+        workspace = window.ladder_rule_workspace
+
+        # The authoritative editor must be a choice control, not free text.
+        assert account["di_ladder_mode"].findData("PRICE_LEVELS") >= 0
+        assert account["di_ladder_mode"].findData("DI_REVERSAL") >= 0
+
+        account["di_ladder_enabled"].setChecked(True)
+        account["di_ladder_mode"].setCurrentIndex(
+            account["di_ladder_mode"].findData("DI_REVERSAL")
+        )
+        app.processEvents()
+
+        assert account["di_ladder_mode"].currentData() == "DI_REVERSAL"
+        assert workspace.mode.currentData() == "DI_REVERSAL"
+        assert workspace.tabs.isHidden()
+        assert workspace.level_size.isHidden()
+        assert not workspace.reversal_target.isHidden()
+        assert risk.account["di_ladder_level_r"].isHidden()
+        assert not risk.account["di_reversal_target_r"].isHidden()
+        assert window.ladder_rule_open_button.isHidden()
+        assert "15m di reversal hedge" in workspace.summary.text().lower()
+
+        workspace.mode.setCurrentIndex(workspace.mode.findData("PRICE_LEVELS"))
+        app.processEvents()
+        assert account["di_ladder_mode"].currentData() == "PRICE_LEVELS"
+        assert not workspace.tabs.isHidden()
+        assert not workspace.level_size.isHidden()
+        assert workspace.reversal_target.isHidden()
+        assert not window.ladder_rule_open_button.isHidden()
+    finally:
+        window.close()
+        app.processEvents()
