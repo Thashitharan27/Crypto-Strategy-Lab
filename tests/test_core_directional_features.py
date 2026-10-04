@@ -143,7 +143,7 @@ def test_data_lake_engine_reuses_prepared_features_and_preserves_di_pressure() -
     legacy = BacktestEngine(data, config)
     lake = DataLakeBacktestEngine(data, config, technical_features=features)
 
-    assert lake.technical_feature_source == "core_directional@1"
+    assert lake.technical_feature_source == "core_directional@2"
     np.testing.assert_allclose(lake.atr_values, legacy.atr_values, equal_nan=True)
     np.testing.assert_allclose(lake.adx_values, legacy.adx_values, equal_nan=True)
     np.testing.assert_allclose(lake.plus_di_values, legacy.plus_di_values, equal_nan=True)
@@ -178,4 +178,4 @@ def test_prepared_path_does_not_execute_legacy_atr_or_adx(monkeypatch) -> None:
     monkeypatch.setattr(engine_module, "atr", forbidden)
     monkeypatch.setattr(engine_module, "adx", forbidden)
     engine = DataLakeBacktestEngine(data, config, technical_features=features)
-    assert engine.technical_feature_source == "core_directional@1"
+    assert engine.technical_feature_source == "core_directional@2"
