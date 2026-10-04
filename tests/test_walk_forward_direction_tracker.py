@@ -10,16 +10,27 @@ from crypto_strategy_lab.walk_forward_direction_tracker import (
 )
 
 
-def _samples(outcomes: list[str], *, regime: str = "BULL") -> pd.DataFrame:
+def _samples(
+    outcomes: list[str],
+    *,
+    regime: str = "BULL",
+    close_hours: list[int] | None = None,
+) -> pd.DataFrame:
     rows: list[dict] = []
-    for index, winner in enumerate(outcomes, start=1):
+    close_hours = close_hours or [1] * len(outcomes)
+    for index, (winner, close_hour) in enumerate(zip(outcomes, close_hours), start=1):
         long_r = 1.0 if winner == LONG else -1.0 if winner == SHORT else 0.0
         short_r = 1.0 if winner == SHORT else -1.0 if winner == LONG else 0.0
         candidate_id = f"wf-{index}"
+        entry_time = pd.Timestamp("2026-01-01T00:00:00Z") + pd.Timedelta(days=index - 1)
+        exit_time = entry_time + pd.Timedelta(hours=close_hour)
         common = {
             "walk_forward_candidate_id": candidate_id,
             "research_signal_index": index,
             "market_regime": regime,
+            "entry_time": entry_time,
+            "exit_time": exit_time,
+            "research_signal_available_at": entry_time,
         }
         rows.append({**common, "side": LONG, "pair_net_r": long_r})
         rows.append({**common, "side": SHORT, "pair_net_r": short_r})
@@ -83,3 +94,58 @@ def test_pair_validation_requires_one_long_and_one_short() -> None:
         assert "exactly one LONG and one SHORT" in str(exc)
     else:
         raise AssertionError("expected malformed pair to be rejected")
+
+
+def test_still_open_earlier_candidate_is_not_available_to_later_candidate() -> None:
+    samples = _samples(
+        [LONG, SHORT, LONG],
+        close_hours=[72, 1, 1],
+    )
+    details, scores, summary = build_walk_forward_direction_tracker(samples)
+    market = details.loc[details["feature"] == "market_regime"].reset_index(drop=True)
+
+    # Candidate 1 opened first but does not fully close until candidate 3's
+    # entry timestamp.  Strictly-before availability means candidate 2 cannot
+    # see it, and candidate 3 still cannot see it at the same timestamp.
+    assert market.loc[1, "last100_directional_count"] == 0
+    assert market.loc[1, "last100_vote"] == NEUTRAL
+    assert market.loc[2, "last100_directional_count"] == 1
+    assert market.loc[2, "last100_short_count"] == 1
+    assert market.loc[2, "last100_vote"] == SHORT
+
+    assert summary["history_requires_fully_closed_pair_before_candidate"] is True
+    assert summary["history_availability_rule"] == (
+        "pair_available_time < candidate_entry_time"
+    )
+
+
+def test_pair_becomes_eligible_only_after_both_sides_close() -> None:
+    samples = _samples([LONG, SHORT, LONG], close_hours=[25, 1, 1])
+    # Make candidate 1's SHORT side close later than its LONG side.
+    mask = (
+        samples["walk_forward_candidate_id"].eq("wf-1")
+        & samples["side"].eq(SHORT)
+    )
+    samples.loc[mask, "exit_time"] = pd.Timestamp("2026-01-03T12:00:00Z")
+
+    details, _, _ = build_walk_forward_direction_tracker(samples)
+    market = details.loc[details["feature"] == "market_regime"].reset_index(drop=True)
+
+    # Candidate 2 is before candidate 1's later side closes, so candidate 1 is
+    # unavailable. Candidate 3 is also before 2026-01-03 12:00, so still unavailable.
+    assert market.loc[1, "last100_directional_count"] == 0
+    assert market.loc[2, "last100_directional_count"] == 1  # candidate 2 only
+
+
+def test_future_feature_availability_is_rejected() -> None:
+    samples = _samples([LONG])
+    samples["funding_context_feature_available_at"] = pd.Timestamp(
+        "2026-01-01T00:01:00Z"
+    )
+    try:
+        build_walk_forward_direction_tracker(samples)
+    except ValueError as exc:
+        assert "leaks future data" in str(exc)
+        assert "funding_context_feature_available_at" in str(exc)
+    else:
+        raise AssertionError("expected future feature availability to be rejected")

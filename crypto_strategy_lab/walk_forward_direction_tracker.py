@@ -2,12 +2,14 @@
 
 The tracker is deliberately research-only. It consumes immutable paired
 `WALK_FORWARD` observations and scores each candidate strictly from earlier
-resolved candidates. No current-candidate outcome is added to history until all
-feature and family votes for that candidate have been frozen.
+resolved candidates. A prior pair is eligible only when both LONG and SHORT
+outcomes were already closed before the current candidate entry time. No
+current-candidate outcome is added to history until all feature and family votes
+for that candidate have been frozen.
 """
 from __future__ import annotations
 
-from collections import defaultdict, deque
+from collections import defaultdict
 from typing import Any, Callable
 
 import numpy as np
@@ -219,8 +221,22 @@ FEATURES: tuple[tuple[str, str, FeatureExtractor], ...] = (
 )
 
 
-def _history_vote(history: deque[str], lookback: int) -> tuple[int, int, int, float | None, str]:
-    observations = list(history)[-lookback:]
+def _history_vote(
+    history: list[tuple[pd.Timestamp, int, str]],
+    lookback: int,
+    *,
+    candidate_entry_time: pd.Timestamp,
+) -> tuple[int, int, int, float | None, str]:
+    # Only outcomes already fully resolved before the candidate becomes
+    # decision-available may contribute.  Keep occurrence order by the original
+    # research signal index after filtering on the causal availability watermark.
+    eligible = [
+        (signal_index, winner)
+        for available_time, signal_index, winner in history
+        if available_time < candidate_entry_time
+    ]
+    eligible.sort(key=lambda item: item[0])
+    observations = [winner for _, winner in eligible[-lookback:]]
     long_count = sum(value == LONG for value in observations)
     short_count = sum(value == SHORT for value in observations)
     directional = long_count + short_count
@@ -252,11 +268,49 @@ def _aggregate_votes(votes: list[str]) -> tuple[int, int, float | None, str]:
     return long_count, short_count, long_share, decision
 
 
-def _pair_table(samples: pd.DataFrame) -> list[tuple[pd.Series, str, float, float]]:
+def _utc_timestamp(value: Any, name: str) -> pd.Timestamp:
+    stamp = pd.Timestamp(value)
+    if pd.isna(stamp):
+        raise ValueError(f"{name} is missing")
+    return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+
+
+def _validate_entry_time_context(
+    context: pd.Series,
+    candidate_entry_time: pd.Timestamp,
+) -> None:
+    """Reject any published feature context that was not available by entry."""
+
+    availability_columns = {
+        "research_signal_available_at",
+        "signal_available_at",
+    }
+    availability_columns.update(
+        str(name)
+        for name in context.index
+        if str(name).endswith("_feature_available_at")
+    )
+    for name in sorted(availability_columns):
+        if name not in context.index or _is_missing(context.get(name)):
+            continue
+        available_at = _utc_timestamp(context.get(name), name)
+        if available_at > candidate_entry_time:
+            raise ValueError(
+                f"candidate feature context leaks future data: {name}="
+                f"{available_at.isoformat()} > entry_time="
+                f"{candidate_entry_time.isoformat()}"
+            )
+
+
+def _pair_table(
+    samples: pd.DataFrame,
+) -> list[tuple[pd.Series, str, float, float, pd.Timestamp, pd.Timestamp]]:
     required = {
         "walk_forward_candidate_id",
         "research_signal_index",
         "side",
+        "entry_time",
+        "exit_time",
         "pair_net_r",
     }
     missing = sorted(required - set(samples.columns))
@@ -266,7 +320,9 @@ def _pair_table(samples: pd.DataFrame) -> list[tuple[pd.Series, str, float, floa
             + ", ".join(missing)
         )
 
-    rows: list[tuple[pd.Series, str, float, float]] = []
+    rows: list[
+        tuple[pd.Series, str, float, float, pd.Timestamp, pd.Timestamp]
+    ] = []
     grouped = samples.groupby("walk_forward_candidate_id", sort=False)
     for candidate_id, group in grouped:
         sides = group["side"].astype(str).str.upper()
@@ -280,10 +336,32 @@ def _pair_table(samples: pd.DataFrame) -> list[tuple[pd.Series, str, float, floa
         short_r = _number(short_row.get("pair_net_r"))
         if long_r is None or short_r is None:
             raise ValueError(f"candidate {candidate_id!r} is missing pair_net_r")
-        rows.append((long_row, str(candidate_id), long_r, short_r))
+
+        long_entry = _utc_timestamp(long_row.get("entry_time"), "LONG entry_time")
+        short_entry = _utc_timestamp(short_row.get("entry_time"), "SHORT entry_time")
+        if long_entry != short_entry:
+            raise ValueError(
+                f"candidate {candidate_id!r} LONG/SHORT rows disagree on entry_time"
+            )
+        long_exit = _utc_timestamp(long_row.get("exit_time"), "LONG exit_time")
+        short_exit = _utc_timestamp(short_row.get("exit_time"), "SHORT exit_time")
+        if long_exit < long_entry or short_exit < short_entry:
+            raise ValueError(f"candidate {candidate_id!r} contains exit-before-entry")
+        pair_available_time = max(long_exit, short_exit)
+        rows.append(
+            (
+                long_row,
+                str(candidate_id),
+                long_r,
+                short_r,
+                long_entry,
+                pair_available_time,
+            )
+        )
 
     rows.sort(
         key=lambda item: (
+            item[4],
             int(item[0]["research_signal_index"]),
             item[1],
         )
@@ -302,15 +380,24 @@ def build_walk_forward_direction_tracker(
     SHORT pair_net_r values.
     """
 
-    histories: dict[tuple[str, str], deque[str]] = defaultdict(
-        lambda: deque(maxlen=100)
-    )
+    # Keep all observed state outcomes with their pair-resolution watermark.
+    # Eligibility for candidate N is decided at read time from entry_time, not
+    # merely from signal order, so overlapping still-open candidates cannot leak.
+    histories: dict[
+        tuple[str, str], list[tuple[pd.Timestamp, int, str]]
+    ] = defaultdict(list)
     detail_rows: list[dict[str, Any]] = []
     score_rows: list[dict[str, Any]] = []
 
-    for sequence, (context, candidate_id, long_r, short_r) in enumerate(
-        _pair_table(samples), start=1
-    ):
+    for sequence, (
+        context,
+        candidate_id,
+        long_r,
+        short_r,
+        candidate_entry_time,
+        pair_available_time,
+    ) in enumerate(_pair_table(samples), start=1):
+        _validate_entry_time_context(context, candidate_entry_time)
         winner = LONG if long_r > short_r else SHORT if short_r > long_r else TIE
         feature_votes_100: dict[str, list[str]] = defaultdict(list)
         feature_votes_20: dict[str, list[str]] = defaultdict(list)
@@ -324,8 +411,16 @@ def build_walk_forward_direction_tracker(
             key = (feature, state)
             current_states.append(key)
             history = histories[key]
-            l100, s100, n100, share100, vote100 = _history_vote(history, 100)
-            l20, s20, n20, share20, vote20 = _history_vote(history, 20)
+            l100, s100, n100, share100, vote100 = _history_vote(
+                history,
+                100,
+                candidate_entry_time=candidate_entry_time,
+            )
+            l20, s20, n20, share20, vote20 = _history_vote(
+                history,
+                20,
+                candidate_entry_time=candidate_entry_time,
+            )
             feature_votes_100[family].append(vote100)
             feature_votes_20[family].append(vote20)
             detail_rows.append(
@@ -334,6 +429,8 @@ def build_walk_forward_direction_tracker(
                     "sequence": sequence,
                     "walk_forward_candidate_id": candidate_id,
                     "research_signal_index": int(context["research_signal_index"]),
+                    "candidate_entry_time": candidate_entry_time,
+                    "pair_available_time": pair_available_time,
                     "family": family,
                     "feature": feature,
                     "state": state,
@@ -381,6 +478,8 @@ def build_walk_forward_direction_tracker(
             "sequence": sequence,
             "walk_forward_candidate_id": candidate_id,
             "research_signal_index": int(context["research_signal_index"]),
+            "candidate_entry_time": candidate_entry_time,
+            "pair_available_time": pair_available_time,
             "winner": winner,
             "long_r": long_r,
             "short_r": short_r,
@@ -401,9 +500,12 @@ def build_walk_forward_direction_tracker(
             score[f"{safe}_last20_vote"] = family_result_20[family]
         score_rows.append(score)
 
-        # Current outcome enters rolling history only after every score is frozen.
+        # Store the outcome only after every score is frozen.  Future candidates
+        # still cannot consume it until BOTH paired sides have closed strictly
+        # before that future candidate's entry_time.
+        signal_index = int(context["research_signal_index"])
         for key in current_states:
-            histories[key].append(winner)
+            histories[key].append((pair_available_time, signal_index, winner))
 
     details = pd.DataFrame(detail_rows)
     scores = pd.DataFrame(score_rows)
@@ -435,6 +537,10 @@ def build_walk_forward_direction_tracker(
         ),
         "causal": True,
         "current_candidate_excluded_from_own_history": True,
+        "history_requires_fully_closed_pair_before_candidate": True,
+        "pair_available_time": "MAX_LONG_SHORT_EXIT_TIME",
+        "history_availability_rule": "pair_available_time < candidate_entry_time",
+        "entry_time_feature_availability_guard": True,
         "context_orientation": "CANONICAL_LONG_ROW",
         "feature_families": sorted({family for family, _, _ in FEATURES}),
     }
