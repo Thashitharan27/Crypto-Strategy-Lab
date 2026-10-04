@@ -95,7 +95,12 @@ def test_provider_matches_existing_atr_adx_dmi_math() -> None:
     np.testing.assert_allclose(features.plus_di, expected_plus, equal_nan=True)
     np.testing.assert_allclose(features.minus_di, expected_minus, equal_nan=True)
     assert features.attrs["feature_name"] == "core_directional"
-    assert features.attrs["feature_version"] == "1"
+    assert features.attrs["feature_version"] == "2"
+    assert {"atr_ratio_50", "atr_change_pct_5", "atr_volatility_state"} <= set(features.columns)
+    assert features["atr_ratio_50"].notna().any()
+    assert set(features["atr_volatility_state"]) <= {
+        "UNKNOWN", "FLAT", "EXPANDING", "CONTRACTING"
+    }
 
 
 def test_future_source_mutation_cannot_change_past_features() -> None:
@@ -109,6 +114,9 @@ def test_future_source_mutation_cannot_change_past_features() -> None:
 
     columns = [
         "atr",
+        "atr_ratio_50",
+        "atr_change_pct_5",
+        "atr_volatility_state",
         "adx",
         "plus_di",
         "minus_di",
