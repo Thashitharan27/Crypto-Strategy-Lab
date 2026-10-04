@@ -377,6 +377,7 @@ class RiskExecutionWorkspace(QWidget):
         self.account["ema_cross_entry_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["fvg_confirmation_enabled"].toggled.connect(self.refresh_visibility)
         self.account["di_ladder_enabled"].toggled.connect(self.refresh_visibility)
+        self.account["di_ladder_mode"].currentIndexChanged.connect(self.refresh_visibility)
         builder = getattr(self.window, "rule_builder", None)
         if builder is not None:
             builder.direction_mode.currentIndexChanged.connect(self.refresh_visibility)
@@ -431,6 +432,8 @@ class RiskExecutionWorkspace(QWidget):
             self.account["ema_cross_entry_confirmation_r"].setSuffix(" R")
         if hasattr(self.account["di_ladder_level_r"], "setSuffix"):
             self.account["di_ladder_level_r"].setSuffix(" R")
+        if hasattr(self.account["di_reversal_target_r"], "setSuffix"):
+            self.account["di_reversal_target_r"].setSuffix(" R")
         if hasattr(self.account["di_ladder_layers"], "setMaximumHeight"):
             self.account["di_ladder_layers"].setMaximumHeight(260)
 
@@ -483,8 +486,22 @@ class RiskExecutionWorkspace(QWidget):
         mode = str(self.account["risk_mode"].currentData() or "ATR")
         structural_stop = mode == "SR_STRUCTURE"
         ladder_enabled = bool(self.account["di_ladder_enabled"].isChecked())
-        self.ladder_card.set_row_visible("di_ladder_level_r", ladder_enabled)
-        self.ladder_card.set_row_visible("di_ladder_layers", ladder_enabled)
+        ladder_mode = str(self.account["di_ladder_mode"].currentData() or "PRICE_LEVELS")
+        reversal_mode = ladder_mode == "DI_REVERSAL"
+        price_level_mode = ladder_mode == "PRICE_LEVELS"
+        self.ladder_card.set_row_visible("di_ladder_mode", ladder_enabled)
+        self.ladder_card.set_row_visible(
+            "di_reversal_target_r", ladder_enabled and reversal_mode
+        )
+        self.ladder_card.set_row_visible(
+            "di_ladder_level_r", ladder_enabled and price_level_mode
+        )
+        self.ladder_card.set_row_visible(
+            "di_ladder_layers", ladder_enabled and price_level_mode
+        )
+        ladder_button = getattr(self.window, "ladder_rule_open_button", None)
+        if ladder_button is not None:
+            ladder_button.setVisible(ladder_enabled and price_level_mode)
 
         ema_stop_fields = (
             "ema_920_stop_method", "ema_920_stop_confirmation",
