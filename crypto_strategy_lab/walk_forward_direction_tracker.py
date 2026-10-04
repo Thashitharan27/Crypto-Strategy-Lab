@@ -21,9 +21,13 @@ SHORT = "SHORT"
 NEUTRAL = "NEUTRAL"
 TIE = "TIE"
 
-DIRECTION_TRACKER_VERSION = "WALK_FORWARD_DIRECTION_TRACKER_V1"
+DIRECTION_TRACKER_VERSION = "WALK_FORWARD_DIRECTION_TRACKER_V2"
 LONG_THRESHOLD = 0.60
 SHORT_THRESHOLD = 0.40
+ADAPTIVE_DIRECTION_WINDOW = 30
+ADAPTIVE_DIRECTION_MIN_CALLS = 20
+ADAPTIVE_KEEP_THRESHOLD = 0.60
+ADAPTIVE_FLIP_THRESHOLD = 0.40
 
 FeatureExtractor = Callable[[pd.Series], Any]
 
@@ -252,6 +256,41 @@ def _history_vote(
     return long_count, short_count, directional, long_share, vote
 
 
+def _directional_accuracy(
+    history: list[tuple[pd.Timestamp, int, bool]],
+    *,
+    candidate_entry_time: pd.Timestamp,
+    lookback: int = ADAPTIVE_DIRECTION_WINDOW,
+) -> tuple[int, float | None]:
+    eligible = [
+        (available_time, signal_index, correct)
+        for available_time, signal_index, correct in history
+        if available_time < candidate_entry_time
+    ]
+    eligible.sort(key=lambda item: (item[0], item[1]))
+    observations = [correct for _, _, correct in eligible[-lookback:]]
+    if not observations:
+        return 0, None
+    return len(observations), sum(observations) / len(observations)
+
+
+def _adapt_direction_vote(
+    raw_vote: str,
+    *,
+    sample_n: int,
+    accuracy: float | None,
+) -> str:
+    if raw_vote not in {LONG, SHORT}:
+        return NEUTRAL
+    if sample_n < ADAPTIVE_DIRECTION_MIN_CALLS or accuracy is None:
+        return NEUTRAL
+    if accuracy > ADAPTIVE_KEEP_THRESHOLD:
+        return raw_vote
+    if accuracy < ADAPTIVE_FLIP_THRESHOLD:
+        return SHORT if raw_vote == LONG else LONG
+    return NEUTRAL
+
+
 def _aggregate_votes(votes: list[str]) -> tuple[int, int, float | None, str]:
     long_count = sum(value == LONG for value in votes)
     short_count = sum(value == SHORT for value in votes)
@@ -386,6 +425,9 @@ def build_walk_forward_direction_tracker(
     histories: dict[
         tuple[str, str], list[tuple[pd.Timestamp, int, str]]
     ] = defaultdict(list)
+    directional_accuracy_histories: dict[
+        tuple[str, str, str], list[tuple[pd.Timestamp, int, bool]]
+    ] = defaultdict(list)
     detail_rows: list[dict[str, Any]] = []
     score_rows: list[dict[str, Any]] = []
 
@@ -401,7 +443,9 @@ def build_walk_forward_direction_tracker(
         winner = LONG if long_r > short_r else SHORT if short_r > long_r else TIE
         feature_votes_100: dict[str, list[str]] = defaultdict(list)
         feature_votes_20: dict[str, list[str]] = defaultdict(list)
+        feature_votes_adaptive: dict[str, list[str]] = defaultdict(list)
         current_states: list[tuple[str, str]] = []
+        current_direction_calls: list[tuple[str, str, str]] = []
 
         for family, feature, extractor in FEATURES:
             state = extractor(context)
@@ -423,6 +467,28 @@ def build_walk_forward_direction_tracker(
             )
             feature_votes_100[family].append(vote100)
             feature_votes_20[family].append(vote20)
+
+            raw_agreed_vote = (
+                vote100
+                if vote100 == vote20 and vote100 in {LONG, SHORT}
+                else NEUTRAL
+            )
+            accuracy_key = (family, feature, raw_agreed_vote)
+            if raw_agreed_vote in {LONG, SHORT}:
+                accuracy_n, directional_accuracy = _directional_accuracy(
+                    directional_accuracy_histories[accuracy_key],
+                    candidate_entry_time=candidate_entry_time,
+                )
+                current_direction_calls.append(accuracy_key)
+            else:
+                accuracy_n, directional_accuracy = 0, None
+            adaptive_vote = _adapt_direction_vote(
+                raw_agreed_vote,
+                sample_n=accuracy_n,
+                accuracy=directional_accuracy,
+            )
+            feature_votes_adaptive[family].append(adaptive_vote)
+
             detail_rows.append(
                 {
                     "tracker_version": DIRECTION_TRACKER_VERSION,
@@ -447,18 +513,28 @@ def build_walk_forward_direction_tracker(
                     "last20_directional_count": n20,
                     "last20_long_share": share20,
                     "last20_vote": vote20,
+                    "raw_agreed_vote": raw_agreed_vote,
+                    "adaptive_direction_window": ADAPTIVE_DIRECTION_WINDOW,
+                    "adaptive_direction_min_calls": ADAPTIVE_DIRECTION_MIN_CALLS,
+                    "adaptive_direction_sample_n": accuracy_n,
+                    "adaptive_direction_accuracy": directional_accuracy,
+                    "adaptive_vote": adaptive_vote,
                 }
             )
 
         families = sorted(set(feature_votes_100) | set(feature_votes_20))
         family_result_100: dict[str, str] = {}
         family_result_20: dict[str, str] = {}
+        family_result_adaptive: dict[str, str] = {}
         for family in families:
             _, _, _, family_result_100[family] = _aggregate_votes(
                 feature_votes_100.get(family, [])
             )
             _, _, _, family_result_20[family] = _aggregate_votes(
                 feature_votes_20.get(family, [])
+            )
+            _, _, _, family_result_adaptive[family] = _aggregate_votes(
+                feature_votes_adaptive.get(family, [])
             )
 
         long100, short100, share100, decision100 = _aggregate_votes(
@@ -471,6 +547,9 @@ def build_walk_forward_direction_tracker(
             decision100
             if decision100 == decision20 and decision100 in {LONG, SHORT}
             else NEUTRAL
+        )
+        adaptive_long, adaptive_short, adaptive_share, adaptive_decision = (
+            _aggregate_votes(list(family_result_adaptive.values()))
         )
 
         score: dict[str, Any] = {
@@ -493,11 +572,19 @@ def build_walk_forward_direction_tracker(
             "last20_decision": decision20,
             "agreed_decision": agreed,
             "agreement_correct": agreed == winner if agreed != NEUTRAL else False,
+            "adaptive_long_family_votes": adaptive_long,
+            "adaptive_short_family_votes": adaptive_short,
+            "adaptive_long_share": adaptive_share,
+            "adaptive_decision": adaptive_decision,
+            "adaptive_correct": (
+                adaptive_decision == winner if adaptive_decision != NEUTRAL else False
+            ),
         }
         for family in families:
             safe = family.lower()
             score[f"{safe}_last100_vote"] = family_result_100[family]
             score[f"{safe}_last20_vote"] = family_result_20[family]
+            score[f"{safe}_adaptive_vote"] = family_result_adaptive[family]
         score_rows.append(score)
 
         # Store the outcome only after every score is frozen.  Future candidates
@@ -506,6 +593,11 @@ def build_walk_forward_direction_tracker(
         signal_index = int(context["research_signal_index"])
         for key in current_states:
             histories[key].append((pair_available_time, signal_index, winner))
+        for accuracy_key in current_direction_calls:
+            raw_vote = accuracy_key[2]
+            directional_accuracy_histories[accuracy_key].append(
+                (pair_available_time, signal_index, raw_vote == winner)
+            )
 
     details = pd.DataFrame(detail_rows)
     scores = pd.DataFrame(score_rows)
@@ -513,6 +605,17 @@ def build_walk_forward_direction_tracker(
     agreed_mask = scores["agreed_decision"].isin([LONG, SHORT]) if total else pd.Series(dtype=bool)
     agreement_count = int(agreed_mask.sum()) if total else 0
     correct = int(scores.loc[agreed_mask, "agreement_correct"].sum()) if agreement_count else 0
+    adaptive_mask = (
+        scores["adaptive_decision"].isin([LONG, SHORT])
+        if total
+        else pd.Series(dtype=bool)
+    )
+    adaptive_count = int(adaptive_mask.sum()) if total else 0
+    adaptive_correct = (
+        int(scores.loc[adaptive_mask, "adaptive_correct"].sum())
+        if adaptive_count
+        else 0
+    )
     summary = {
         "tracker_version": DIRECTION_TRACKER_VERSION,
         "thresholds": {
@@ -534,6 +637,35 @@ def build_walk_forward_direction_tracker(
         ),
         "short_agreements": (
             int((scores["agreed_decision"] == SHORT).sum()) if total else 0
+        ),
+        "adaptive_direction_policy": {
+            "enabled": True,
+            "source_vote": "LAST100_AND_LAST20_FEATURE_AGREEMENT",
+            "rolling_directional_calls": ADAPTIVE_DIRECTION_WINDOW,
+            "minimum_prior_directional_calls": ADAPTIVE_DIRECTION_MIN_CALLS,
+            "keep_when_accuracy": f">{ADAPTIVE_KEEP_THRESHOLD:.2f}",
+            "ignore_when_accuracy": (
+                f"{ADAPTIVE_FLIP_THRESHOLD:.2f}.."
+                f"{ADAPTIVE_KEEP_THRESHOLD:.2f} inclusive"
+            ),
+            "flip_when_accuracy": f"<{ADAPTIVE_FLIP_THRESHOLD:.2f}",
+            "aggregation": "ADAPTED_FEATURES_TO_FAMILY_TO_OVERALL_60_40",
+        },
+        "adaptive_directional_candidates": adaptive_count,
+        "adaptive_coverage_pct": (
+            100.0 * adaptive_count / total if total else None
+        ),
+        "adaptive_correct": adaptive_correct,
+        "adaptive_accuracy_pct": (
+            100.0 * adaptive_correct / adaptive_count
+            if adaptive_count
+            else None
+        ),
+        "adaptive_long_calls": (
+            int((scores["adaptive_decision"] == LONG).sum()) if total else 0
+        ),
+        "adaptive_short_calls": (
+            int((scores["adaptive_decision"] == SHORT).sum()) if total else 0
         ),
         "causal": True,
         "current_candidate_excluded_from_own_history": True,

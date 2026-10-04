@@ -7,6 +7,7 @@ from crypto_strategy_lab.walk_forward_direction_tracker import (
     NEUTRAL,
     SHORT,
     build_walk_forward_direction_tracker,
+    _adapt_direction_vote,
 )
 
 
@@ -149,3 +150,68 @@ def test_future_feature_availability_is_rejected() -> None:
         assert "funding_context_feature_available_at" in str(exc)
     else:
         raise AssertionError("expected future feature availability to be rejected")
+
+
+
+def test_adaptive_direction_waits_for_twenty_prior_calls() -> None:
+    outcomes = [LONG] * 25
+    details, scores, summary = build_walk_forward_direction_tracker(_samples(outcomes))
+    market = details.loc[details["feature"] == "market_regime"].reset_index(drop=True)
+
+    # Candidate 21 has only 19 prior directional market-regime calls because
+    # candidate 1 had no prior history and therefore no raw agreed direction.
+    assert market.loc[20, "adaptive_direction_sample_n"] == 19
+    assert market.loc[20, "adaptive_vote"] == NEUTRAL
+
+    # Candidate 22 now has 20 prior fully closed directional calls, all correct.
+    assert market.loc[21, "adaptive_direction_sample_n"] == 20
+    assert market.loc[21, "adaptive_direction_accuracy"] == 1.0
+    assert market.loc[21, "raw_agreed_vote"] == LONG
+    assert market.loc[21, "adaptive_vote"] == LONG
+
+    assert scores.loc[21, "adaptive_decision"] == LONG
+    assert summary["adaptive_direction_policy"]["rolling_directional_calls"] == 30
+    assert summary["adaptive_direction_policy"]["minimum_prior_directional_calls"] == 20
+
+
+def test_adaptive_direction_flips_when_prior_accuracy_is_below_forty_percent() -> None:
+    # Build enough stable LONG calls, then make those LONG calls repeatedly wrong.
+    # The adaptive history tracks correctness of the raw direction, independently
+    # from the current candidate's eventual outcome.
+    outcomes = [LONG] * 21 + [SHORT] * 30
+    details, _, _ = build_walk_forward_direction_tracker(_samples(outcomes))
+    market = details.loc[details["feature"] == "market_regime"].reset_index(drop=True)
+
+    flipped = market.loc[
+        (market["raw_agreed_vote"] == LONG)
+        & (market["adaptive_direction_sample_n"] >= 20)
+        & (market["adaptive_direction_accuracy"] < 0.40)
+    ]
+    if not flipped.empty:
+        assert set(flipped["adaptive_vote"]) == {SHORT}
+
+
+def test_adaptive_history_obeys_pair_close_availability() -> None:
+    outcomes = [LONG] * 25
+    samples = _samples(outcomes)
+    # Delay candidate 2 until well after candidate 22's entry. Its raw call must
+    # not be counted in candidate 22's adaptive performance sample.
+    mask = samples["walk_forward_candidate_id"].eq("wf-2")
+    samples.loc[mask, "exit_time"] = pd.Timestamp("2026-02-15T00:00:00Z")
+
+    details, _, _ = build_walk_forward_direction_tracker(samples)
+    market = details.loc[details["feature"] == "market_regime"].reset_index(drop=True)
+
+    assert market.loc[21, "adaptive_direction_sample_n"] == 19
+    assert market.loc[21, "adaptive_vote"] == NEUTRAL
+
+
+
+def test_adaptive_direction_thresholds_keep_ignore_and_flip() -> None:
+    assert _adapt_direction_vote(LONG, sample_n=20, accuracy=0.61) == LONG
+    assert _adapt_direction_vote(SHORT, sample_n=20, accuracy=0.61) == SHORT
+    assert _adapt_direction_vote(LONG, sample_n=20, accuracy=0.60) == NEUTRAL
+    assert _adapt_direction_vote(SHORT, sample_n=20, accuracy=0.40) == NEUTRAL
+    assert _adapt_direction_vote(LONG, sample_n=20, accuracy=0.39) == SHORT
+    assert _adapt_direction_vote(SHORT, sample_n=20, accuracy=0.39) == LONG
+    assert _adapt_direction_vote(LONG, sample_n=19, accuracy=1.0) == NEUTRAL
