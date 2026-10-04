@@ -21,6 +21,9 @@ from crypto_strategy_lab.research_sampling import (
     generate_strategy_research_samples,
 )
 from crypto_strategy_lab.run_manifest import atomic_json
+from crypto_strategy_lab.walk_forward_direction_tracker import (
+    build_walk_forward_direction_tracker,
+)
 
 
 def research_sampling_enabled(reporting_config) -> bool:
@@ -289,6 +292,20 @@ def append_research_sampling_artifacts(result, context) -> None:
     metadata["research_summary_seconds"] = summary_seconds
     summary["research_summary_seconds"] = summary_seconds
     summary.update(episode_reporting)
+
+    direction_details = pd.DataFrame()
+    direction_scores = pd.DataFrame()
+    direction_summary = None
+    direction_started = time.perf_counter()
+    if mode == WALK_FORWARD_SAMPLING_MODE:
+        (
+            direction_details,
+            direction_scores,
+            direction_summary,
+        ) = build_walk_forward_direction_tracker(samples)
+        metadata["walk_forward_direction_tracker_seconds"] = (
+            time.perf_counter() - direction_started
+        )
     elapsed = time.perf_counter() - started
 
     run_dir = Path(result.output_dir)
@@ -297,12 +314,22 @@ def append_research_sampling_artifacts(result, context) -> None:
     episodes_path = artifacts_dir / "research_sampling_episodes.parquet"
     context_path = run_dir / "research_sampling_context.csv"
     summary_path = run_dir / "research_sampling_summary.json"
+    direction_details_path = artifacts_dir / "walk_forward_direction_features.parquet"
+    direction_scores_path = artifacts_dir / "walk_forward_direction_scores.parquet"
+    direction_summary_path = run_dir / "walk_forward_direction_summary.json"
 
     artifact_started = time.perf_counter()
     _write_parquet_atomic(samples, samples_path)
     _write_parquet_atomic(episodes, episodes_path)
     context_breakdown.to_csv(context_path, index=False)
     summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    if direction_summary is not None:
+        _write_parquet_atomic(direction_details, direction_details_path)
+        _write_parquet_atomic(direction_scores, direction_scores_path)
+        direction_summary_path.write_text(
+            json.dumps(direction_summary, indent=2, default=str),
+            encoding="utf-8",
+        )
     artifact_write_seconds = time.perf_counter() - artifact_started
     metadata["research_artifact_write_seconds"] = artifact_write_seconds
 
@@ -345,6 +372,31 @@ def append_research_sampling_artifacts(result, context) -> None:
         collection_status="COLLECTED",
         research_population="STRATEGY_RESILIENCE_SUMMARY",
     )
+    if direction_summary is not None:
+        manifest["artifacts"]["walk_forward_direction_features"] = _catalog_entry(
+            direction_details_path,
+            run_dir,
+            "parquet",
+            len(direction_details),
+            collection_status="COLLECTED",
+            research_population="WALK_FORWARD_CAUSAL_DIRECTION_FEATURES",
+        )
+        manifest["artifacts"]["walk_forward_direction_scores"] = _catalog_entry(
+            direction_scores_path,
+            run_dir,
+            "parquet",
+            len(direction_scores),
+            collection_status="COLLECTED",
+            research_population="WALK_FORWARD_CAUSAL_DIRECTION_SCORES",
+        )
+        manifest["artifacts"]["walk_forward_direction_summary"] = _catalog_entry(
+            direction_summary_path,
+            run_dir,
+            "json",
+            1,
+            collection_status="COLLECTED",
+            research_population="WALK_FORWARD_CAUSAL_DIRECTION_SUMMARY",
+        )
     execution = manifest.setdefault("execution_result", {})
     execution["research_sampling_rows"] = len(samples)
     execution["research_sampling_episode_rows"] = len(episodes)
@@ -366,5 +418,12 @@ def append_research_sampling_artifacts(result, context) -> None:
             "bayesian_effective_cluster_units"
         ],
     }
+    if direction_summary is not None:
+        manifest["research"]["walk_forward_direction_tracker"] = {
+            **direction_summary,
+            "feature_artifact": "artifacts/walk_forward_direction_features.parquet",
+            "score_artifact": "artifacts/walk_forward_direction_scores.parquet",
+            "summary": "walk_forward_direction_summary.json",
+        }
     manifest["run_completed_at"] = datetime.now(timezone.utc).isoformat()
     atomic_json(manifest_path, manifest)
