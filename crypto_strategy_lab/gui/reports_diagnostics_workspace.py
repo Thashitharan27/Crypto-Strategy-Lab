@@ -125,8 +125,11 @@ class ReportsDiagnosticsWorkspace(QWidget):
             "and slippage. The opposite row bypasses entry-selection rules only; it still uses the "
             "matching regime/direction execution profile. Only complete two-sided pairs are kept, "
             "so 1:3 and other asymmetric outcomes never infer the opposite result from the source "
-            "trade. Equity curve, drawdown, exposure and compounded return are invalid for these "
-            "independent research observations."
+            "trade. Walk Forward also builds a causal direction tracker from prior same-state "
+            "occurrences: Last-100 and Last-20 feature/family votes are kept separately, and the "
+            "final research direction is active only when both windows agree. Equity curve, "
+            "drawdown, exposure and compounded return are invalid for these independent research "
+            "observations."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
@@ -247,6 +250,9 @@ class ReportsDiagnosticsWorkspace(QWidget):
             "• artifacts/research_sampling_episodes.parquet — correlation-cluster/episode outcomes\n"
             "• research_sampling_context.csv — DI/ADX/regime/MR/funding/OI sample breakdowns\n"
             "• research_sampling_summary.json — entry-level + episode-level resilience metrics\n"
+            "• artifacts/walk_forward_direction_features.parquet — causal Last-100/Last-20 state scores for Walk Forward\n"
+            "• artifacts/walk_forward_direction_scores.parquet — one-vote-per-family and agreement decision per candidate\n"
+            "• walk_forward_direction_summary.json — coverage/accuracy summary when both windows agree\n"
             "• artifacts/bayes_research_samples.parquet — optional direction-neutral market grid\n"
             "• provenance/source_archives.parquet — exact selected Binance archive provenance\n"
             "• run_manifest.json — hashes, config, provenance, artifact catalog and completion marker"
