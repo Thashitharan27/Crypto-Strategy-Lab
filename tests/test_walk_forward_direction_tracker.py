@@ -7,6 +7,7 @@ from crypto_strategy_lab.walk_forward_direction_tracker import (
     NEUTRAL,
     SHORT,
     build_walk_forward_direction_tracker,
+    _adapt_direction_vote,
 )
 
 
@@ -203,3 +204,14 @@ def test_adaptive_history_obeys_pair_close_availability() -> None:
 
     assert market.loc[21, "adaptive_direction_sample_n"] == 19
     assert market.loc[21, "adaptive_vote"] == NEUTRAL
+
+
+
+def test_adaptive_direction_thresholds_keep_ignore_and_flip() -> None:
+    assert _adapt_direction_vote(LONG, sample_n=20, accuracy=0.61) == LONG
+    assert _adapt_direction_vote(SHORT, sample_n=20, accuracy=0.61) == SHORT
+    assert _adapt_direction_vote(LONG, sample_n=20, accuracy=0.60) == NEUTRAL
+    assert _adapt_direction_vote(SHORT, sample_n=20, accuracy=0.40) == NEUTRAL
+    assert _adapt_direction_vote(LONG, sample_n=20, accuracy=0.39) == SHORT
+    assert _adapt_direction_vote(SHORT, sample_n=20, accuracy=0.39) == LONG
+    assert _adapt_direction_vote(LONG, sample_n=19, accuracy=1.0) == NEUTRAL
