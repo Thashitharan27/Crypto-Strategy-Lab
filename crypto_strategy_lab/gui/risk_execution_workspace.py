@@ -295,6 +295,12 @@ class RiskExecutionWorkspace(QWidget):
             "di_ladder_enabled", self.account["di_ladder_enabled"]
         )
         self.ladder_card.add_field(
+            "di_ladder_mode", "Execution Mode", self.account["di_ladder_mode"]
+        )
+        self.ladder_card.add_field(
+            "di_reversal_target_r", "DI Reversal Target R", self.account["di_reversal_target_r"]
+        )
+        self.ladder_card.add_field(
             "di_ladder_level_r", "Ladder Level Size", self.account["di_ladder_level_r"]
         )
         self.ladder_card.add_field(
