@@ -404,7 +404,9 @@ class ExecutionConfig:
     max_active_pairs: int = 1
     zero_cost_comparison: bool = False
     di_ladder_enabled: bool = False
+    di_ladder_mode: str = "PRICE_LEVELS"
     di_ladder_level_r: float = 0.20
+    di_reversal_target_r: float = 0.20
     di_ladder_layers: tuple = field(default_factory=_default_di_ladder_layers)
     sr_take_profit_timeframe_minutes: int = -1
     sr_take_profit_mode: str = "FIXED_R"
@@ -735,11 +737,21 @@ class ResearchRunConfig:
             raise ValueError("max active pairs must be positive")
         if min(execution.maker_fee, execution.taker_fee, execution.slippage) < 0:
             raise ValueError("fees/slippage must be non-negative")
+        if execution.di_ladder_mode not in {"PRICE_LEVELS", "DI_REVERSAL"}:
+            raise ValueError("DI ladder mode must be PRICE_LEVELS or DI_REVERSAL")
         if execution.di_ladder_level_r <= 0:
             raise ValueError("DI ladder level size must be positive")
+        if execution.di_reversal_target_r <= 0:
+            raise ValueError("DI reversal target R must be positive")
         if execution.di_ladder_enabled:
-            if not data.use_intrabar_data or data.intrabar_timeframe_minutes != 1:
-                raise ValueError("DI ladder execution requires 1-minute intrabar data")
+            required_intrabar = 15 if execution.di_ladder_mode == "DI_REVERSAL" else 1
+            if not data.use_intrabar_data or data.intrabar_timeframe_minutes != required_intrabar:
+                raise ValueError(
+                    f"DI {execution.di_ladder_mode.lower()} execution requires "
+                    f"{required_intrabar}-minute intrabar data"
+                )
+            if execution.di_ladder_mode == "DI_REVERSAL" and data.strategy_timeframe_minutes <= 15:
+                raise ValueError("DI reversal hedge requires a parent timeframe larger than 15 minutes")
             if strategy.entry_mode != "WAIT_UNTIL_CLOSED":
                 raise ValueError("DI ladder execution currently requires WAIT_UNTIL_CLOSED")
             if strategy.enable_daily_entry_schedule:
@@ -755,7 +767,11 @@ class ResearchRunConfig:
             enabled_layers = []
             seen_names = set()
             seen_entries = set()
+            if execution.di_ladder_mode == "DI_REVERSAL":
+                enabled_layers = [(0.0, "DI_REVERSAL")]
             for number, layer in enumerate(execution.di_ladder_layers, start=1):
+                if execution.di_ladder_mode == "DI_REVERSAL":
+                    break
                 if not isinstance(layer, Mapping):
                     raise ValueError(f"DI ladder layer {number} must be an object")
                 name = str(layer.get("name") or f"S{number}").strip()
