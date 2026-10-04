@@ -158,6 +158,15 @@ class EnhancedBacktestConfig(BacktestConfig):
             object.__setattr__(self, "di_ladder_layers", tuple(self.di_ladder_layers))
         if self.di_ladder_enabled and self.di_ladder_mode == "PRICE_LEVELS" and not self.di_ladder_layers:
             raise ValueError("DI price-level ladder execution requires at least one configured layer")
+        if self.di_ladder_enabled and self.di_ladder_mode == "DI_REVERSAL":
+            if not self.use_intrabar_data or self.intrabar_timeframe_minutes != 15:
+                raise ValueError("DI reversal hedge requires 15-minute intrabar data")
+            if self.strategy_timeframe_minutes <= 15:
+                raise ValueError("DI reversal hedge requires a parent timeframe larger than 15 minutes")
+            if self.entry_mode.value != "WAIT_UNTIL_CLOSED":
+                raise ValueError("DI reversal hedge requires WAIT_UNTIL_CLOSED entry mode")
+            if self.entry_timing_mode.value != "SIGNAL_CLOSE":
+                raise ValueError("DI reversal hedge requires SIGNAL_CLOSE parent entry timing")
 
         sr_tf = int(self.sr_timeframe_minutes)
         object.__setattr__(self, "sr_timeframe_minutes", sr_tf)
