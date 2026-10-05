@@ -100,6 +100,24 @@ The **Portfolio** tab accepts a dynamic list of assets. Each enabled asset uses 
 - Entries that would exceed that limit are blocked and reported.
 - Portfolio output includes accepted trades, blocked candidates, realized equity, mark-to-market equity, monthly/yearly results, and component contribution.
 
+### Binance perpetual funding carry replay
+
+The **Portfolio Replay** workspace also includes **BTC Funding Carry Test** for a
+delta-neutral cash-and-carry experiment. It uses Binance funding-settlement
+archives already supported by the Data Lake and models equal-notional BTC spot
+long plus BTCUSDT USD-M perpetual short exposure.
+
+The tester records positive and negative funding, entry/exit fees, equity,
+annualized return, and event-level drawdown. Controls include starting capital,
+minimum funding required to enter, fee assumptions per leg, and an optional
+close-on-negative-funding policy. Results are written under
+`funding_carry_replays/` as `summary.json` and `ledger.csv`.
+
+This first version intentionally does **not** claim a quarterly-futures basis
+backtest: the current Data Lake has perpetual funding history but not a canonical
+dated-quarterly contract history. It also does not model basis mark-to-market,
+liquidation, borrowing, collateral yield, slippage, tax, or exchange failure.
+
 ### BTC spot + short futures replay
 
 In **Portfolio Replay**, select exactly one finalized BTCUSDT run with **Every Viable Entry** research sampling, then use **BTC Spot + Shorts Test**. Set starting BTC and USDT cash, fixed USDT futures risk per short (for example $50), and the spot trading fee. The test accepts nonoverlapping SHORT outcomes in time order. Each net futures win purchases BTC at that trade's exit price; each loss sells enough BTC to fund it. If BTC is exhausted, the remaining loss reduces cash. The source run's net R includes its futures execution costs; this replay scales that R by the chosen fixed risk and does not recompute futures fees or position size.
