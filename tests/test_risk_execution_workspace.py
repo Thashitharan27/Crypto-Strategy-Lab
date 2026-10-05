@@ -463,19 +463,26 @@ def test_fib_execution_plan_hides_generic_atr_fixed_r_and_shows_native_levels():
         assert target_mode.isHidden()
         assert base_target.isHidden()
         fib_stop_buffer = window.execution_form.widgets["fib_stop_buffer_atr"]
+        fib_target_mode = window.execution_form.widgets["fib_target_mode"]
+        fib_fixed_target = window.execution_form.widgets["fib_fixed_target_r"]
         fib_target_buffer = window.execution_form.widgets["fib_target_buffer_atr"]
         fib_minimum_r = window.execution_form.widgets["fib_minimum_target_r"]
         assert not workspace.fib_stop_method.isHidden()
         assert not fib_stop_buffer.isHidden()
         assert not workspace.fib_target_method.isHidden()
+        assert fib_target_mode.currentData() == "IMPULSE_EXTREME"
+        assert fib_fixed_target.isHidden()
         assert not fib_target_buffer.isHidden()
         assert not fib_minimum_r.isHidden()
         assert "Next Deeper Fib Level" in workspace.fib_stop_method.text()
-        assert "Prior Impulse Extreme" in workspace.fib_target_method.text()
         assert fib_stop_buffer.value() == pytest.approx(0.05)
         assert fib_target_buffer.value() == pytest.approx(0.05)
         assert fib_minimum_r.value() == pytest.approx(2.0)
 
+        fixed_index = fib_target_mode.findData("FIXED_R")
+        assert fixed_index >= 0
+        fib_target_mode.setCurrentIndex(fixed_index)
+        fib_fixed_target.setValue(4.0)
         fib_stop_buffer.setValue(0.10)
         fib_target_buffer.setValue(0.15)
         fib_minimum_r.setValue(2.5)
@@ -484,11 +491,13 @@ def test_fib_execution_plan_hides_generic_atr_fixed_r_and_shows_native_levels():
 
         summary = workspace.summary_label.text()
         assert "next deeper Fib level" in summary
-        assert "prior impulse extreme" in summary
+        assert "fixed 4R actual take-profit" in summary
+        assert "prior impulse extreme room" in summary
         assert "Next Candle Open — Causal" in summary
         assert "0.1× signal ATR buffer" in summary
         assert "0.15× signal ATR buffer" in summary
-        assert "at least 2.5R available target room" in summary
+        assert "at least 2.5R" in summary
+        assert not fib_fixed_target.isHidden()
     finally:
         window.close()
         app.processEvents()
