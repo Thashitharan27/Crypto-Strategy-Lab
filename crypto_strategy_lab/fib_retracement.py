@@ -375,9 +375,9 @@ class FibonacciRetracementMixin:
             return {"passed": False, "reason": "FIB_TARGET_UNAVAILABLE"}
         buffer_price = float(getattr(self.config, "fib_target_buffer_atr", 0.05)) * atr
         boundary = float(plan["target_boundary"])
-        target = boundary - buffer_price if direction == "LONG" else boundary + buffer_price
+        room_target = boundary - buffer_price if direction == "LONG" else boundary + buffer_price
         entry = float(self._expected_entry_price(i, execution_i, direction))
-        room = target - entry if direction == "LONG" else entry - target
+        room = room_target - entry if direction == "LONG" else entry - room_target
         risk = float(stop_plan["distance"])
         available_r = room / risk if risk > 0 else np.nan
         if not np.isfinite(room) or room <= 0:
@@ -385,7 +385,7 @@ class FibonacciRetracementMixin:
                 "passed": False,
                 "reason": "FIB_TARGET_ON_WRONG_SIDE",
                 "level_price": boundary,
-                "limit_price": target,
+                "limit_price": room_target,
                 "available_r": available_r,
             }
         minimum_r = float(getattr(self.config, "fib_minimum_target_r", 2.0))
@@ -394,15 +394,28 @@ class FibonacciRetracementMixin:
                 "passed": False,
                 "reason": "FIB_TARGET_INSUFFICIENT_ROOM",
                 "level_price": boundary,
-                "limit_price": target,
+                "limit_price": room_target,
                 "available_r": available_r,
                 "minimum_r": minimum_r,
             }
+
+        target_mode = str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
+        if target_mode == "FIXED_R":
+            target_r = float(getattr(self.config, "fib_fixed_target_r", 2.0))
+            target = entry + target_r * risk if direction == "LONG" else entry - target_r * risk
+            reason = "FIB_FIXED_R_TARGET"
+        else:
+            target_r = available_r
+            target = room_target
+            reason = "FIB_IMPULSE_EXTREME_TARGET"
         return {
             "passed": True,
-            "reason": "FIB_IMPULSE_EXTREME_TARGET",
+            "reason": reason,
+            "target_mode": target_mode,
+            "target_r": target_r,
             "level_price": boundary,
             "limit_price": target,
+            "room_limit_price": room_target,
             "available_r": available_r,
             "minimum_r": minimum_r,
         }
@@ -441,6 +454,8 @@ class FibonacciRetracementMixin:
                 pos.tp = float(target["limit_price"])
                 if getattr(pos, "partial_tp_enabled", False):
                     pos.tp2_price = pos.tp
+                pos.fib_target_mode = str(target.get("target_mode", "IMPULSE_EXTREME"))
+                pos.fib_target_r = float(target.get("target_r", target["available_r"]))
                 pos.fib_target_level_price = float(target["level_price"])
                 pos.fib_target_price = float(target["limit_price"])
                 pos.fib_target_available_r = float(target["available_r"])
@@ -458,6 +473,8 @@ class FibonacciRetracementMixin:
         row["fib_stop_level"] = getattr(pos, "fib_stop_level", np.nan)
         row["fib_stop_boundary_price"] = getattr(pos, "fib_stop_boundary_price", np.nan)
         row["fib_stop_price"] = getattr(pos, "fib_stop_price", np.nan)
+        row["fib_target_mode"] = getattr(pos, "fib_target_mode", None)
+        row["fib_target_r"] = getattr(pos, "fib_target_r", np.nan)
         row["fib_target_level_price"] = getattr(pos, "fib_target_level_price", np.nan)
         row["fib_target_price"] = getattr(pos, "fib_target_price", np.nan)
         row["fib_target_available_r"] = getattr(pos, "fib_target_available_r", np.nan)
