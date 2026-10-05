@@ -117,6 +117,8 @@ def fibonacci_retracement_arrays(
     signal_direction = np.full(n, None, dtype=object)
     impulse_start_price = np.full(n, np.nan, dtype=float)
     impulse_end_price = np.full(n, np.nan, dtype=float)
+    impulse_start_index = np.full(n, np.nan, dtype=float)
+    impulse_end_index = np.full(n, np.nan, dtype=float)
     active_level_price = np.full(n, np.nan, dtype=float)
 
     confirmed_highs: list[int] = []
@@ -176,6 +178,8 @@ def fibonacci_retracement_arrays(
         impulse_direction[i] = direction
         impulse_start_price[i] = start_price
         impulse_end_price[i] = end_price
+        impulse_start_index[i] = float(start_i)
+        impulse_end_index[i] = float(end_i)
 
         if i <= end_i:
             reaction_state[i] = "APPROACHING"
@@ -259,6 +263,8 @@ def fibonacci_retracement_arrays(
         "_FIB_SIGNAL_DIRECTION": signal_direction,
         "_FIB_IMPULSE_START_PRICE": impulse_start_price,
         "_FIB_IMPULSE_END_PRICE": impulse_end_price,
+        "_FIB_IMPULSE_START_INDEX": impulse_start_index,
+        "_FIB_IMPULSE_END_INDEX": impulse_end_index,
         "_FIB_ACTIVE_LEVEL_PRICE": active_level_price,
     }
 
@@ -396,6 +402,9 @@ class FibonacciRetracementMixin:
             "stop_price": stop,
             "fib_entry_level": float(plan["nearest_level"]),
             "fib_stop_level": float(plan["stop_level"]),
+            "fib_impulse_start_price": float(plan["impulse_start"]),
+            "fib_impulse_end_price": float(plan["impulse_end"]),
+            "fib_impulse_span": float(plan["impulse_span"]),
             "timeframe_minutes": int(getattr(self.config, "strategy_timeframe_minutes", 0)),
         }
 
@@ -503,6 +512,15 @@ class FibonacciRetracementMixin:
                     pos.fib_stop_price = float(stop["stop_price"])
                     pos.fib_entry_level = float(stop["fib_entry_level"])
                     pos.fib_stop_level = float(stop["fib_stop_level"])
+                    pos.fib_impulse_start_price = float(stop["fib_impulse_start_price"])
+                    pos.fib_impulse_end_price = float(stop["fib_impulse_end_price"])
+                    pos.fib_impulse_span = float(stop["fib_impulse_span"])
+                    values = getattr(self, "fib_retracement", {})
+                    try:
+                        pos.fib_impulse_start_index = int(values["_FIB_IMPULSE_START_INDEX"][indicator_i])
+                        pos.fib_impulse_end_index = int(values["_FIB_IMPULSE_END_INDEX"][indicator_i])
+                    except (KeyError, IndexError, TypeError, ValueError, OverflowError):
+                        pass
         return result
 
     def _build_result_row(self, pair, row_kind, positions):
@@ -512,6 +530,11 @@ class FibonacciRetracementMixin:
         row["fib_stop_level"] = getattr(pos, "fib_stop_level", np.nan)
         row["fib_stop_boundary_price"] = getattr(pos, "fib_stop_boundary_price", np.nan)
         row["fib_stop_price"] = getattr(pos, "fib_stop_price", np.nan)
+        row["fib_impulse_start_price"] = getattr(pos, "fib_impulse_start_price", np.nan)
+        row["fib_impulse_end_price"] = getattr(pos, "fib_impulse_end_price", np.nan)
+        row["fib_impulse_span"] = getattr(pos, "fib_impulse_span", np.nan)
+        row["fib_impulse_start_index"] = getattr(pos, "fib_impulse_start_index", np.nan)
+        row["fib_impulse_end_index"] = getattr(pos, "fib_impulse_end_index", np.nan)
         row["fib_target_mode"] = getattr(pos, "fib_target_mode", None)
         row["fib_target_r"] = getattr(pos, "fib_target_r", np.nan)
         row["fib_target_level_price"] = getattr(pos, "fib_target_level_price", np.nan)
