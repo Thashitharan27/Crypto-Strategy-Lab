@@ -266,11 +266,13 @@ class RiskExecutionWorkspace(QWidget):
         self.target_card.add_field(
             "fvg_target_buffer_atr", "Extreme Buffer", self.account["fvg_target_buffer_atr"]
         )
-        self.fib_target_method = QLabel("Prior Impulse Extreme (0.0 Fib) — Automatic")
-        self.fib_target_method.setStyleSheet("font-weight:600")
+        self.fib_target_method = self.account["fib_target_mode"]
         self.target_card.add_field("fib_target_method", "Target Method", self.fib_target_method)
         self.target_card.add_field(
-            "fib_target_buffer_atr", "Target Buffer", self.account["fib_target_buffer_atr"]
+            "fib_fixed_target_r", "Fixed Profit Target", self.account["fib_fixed_target_r"]
+        )
+        self.target_card.add_field(
+            "fib_target_buffer_atr", "Impulse-Extreme Room Buffer", self.account["fib_target_buffer_atr"]
         )
         self.target_card.add_field(
             "fib_minimum_target_r", "Minimum Target Room", self.account["fib_minimum_target_r"]
@@ -617,7 +619,9 @@ class RiskExecutionWorkspace(QWidget):
             self.target_card.set_row_visible(name, ema_920)
         self.target_card.set_row_visible("fvg_target_method", fvg)
         self.target_card.set_row_visible("fvg_target_buffer_atr", fvg)
+        fib_target_mode = str(self.account["fib_target_mode"].currentData() or "IMPULSE_EXTREME")
         self.target_card.set_row_visible("fib_target_method", fib)
+        self.target_card.set_row_visible("fib_fixed_target_r", fib and fib_target_mode == "FIXED_R")
         self.target_card.set_row_visible("fib_target_buffer_atr", fib)
         self.target_card.set_row_visible("fib_minimum_target_r", fib)
         if ema_920:
@@ -839,12 +843,21 @@ class RiskExecutionWorkspace(QWidget):
                 "for long or move low for short, otherwise reject"
             )
         elif fib:
-            target = (
-                "automatic prior impulse extreme (0.0 Fib): previous swing high for long "
-                "or previous swing low for short, with a "
-                f"{execution.fib_target_buffer_atr:g}× signal ATR buffer; "
-                f"entry requires at least {execution.fib_minimum_target_r:g}R available target room"
+            fib_target_mode = str(execution.fib_target_mode).upper()
+            room_gate = (
+                f"prior impulse extreme room is measured with a {execution.fib_target_buffer_atr:g}× "
+                f"signal ATR buffer and must provide at least {execution.fib_minimum_target_r:g}R"
             )
+            if fib_target_mode == "FIXED_R":
+                target = (
+                    f"fixed {execution.fib_fixed_target_r:g}R actual take-profit from the actual Fib stop; "
+                    f"{room_gate}"
+                )
+            else:
+                target = (
+                    "prior impulse extreme (0.0 Fib): previous swing high for long or previous swing low "
+                    f"for short; {room_gate}"
+                )
         else:
             target_mode = str(execution.sr_take_profit_mode).upper()
             if target_mode == "SR_CAPPED_R":
