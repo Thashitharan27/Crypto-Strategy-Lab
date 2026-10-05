@@ -1926,6 +1926,25 @@ class CompletedRunVisualizer:
             row,
             ("exit_time", "actual_exit_timestamp", "strategy_exit_time"),
         )
+        exit_price = _finite(
+            _first_value(
+                row,
+                (
+                    f"{side.lower()}_exit_price",
+                    "exit_price",
+                    "actual_exit_price",
+                    "strategy_exit_price",
+                ),
+            )
+        )
+        exit_reason = _first_value(
+            row,
+            (
+                f"{side.lower()}_final_exit_reason",
+                f"{side.lower()}_exit_reason",
+                "exit_reason",
+            ),
+        )
         exit_time = _utc(exit_time_raw) if exit_time_raw is not None else None
         entry_chart_time = self._snap_to_candle(entry_time, market)
         exit_chart_time = (
@@ -1944,6 +1963,8 @@ class CompletedRunVisualizer:
             "entryChartTime": entry_chart_time,
             "exitTime": _unix_seconds(exit_time) if exit_time is not None else None,
             "exitChartTime": exit_chart_time,
+            "exitPrice": exit_price,
+            "exitReason": _json_value(exit_reason),
             "open": exit_time is None,
             "visibleEnd": _unix_seconds(visible_end),
         }
