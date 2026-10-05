@@ -36,6 +36,52 @@ def test_fib_arrays_do_not_use_unconfirmed_future_pivot():
     assert values["FIB_IMPULSE_DIRECTION"][7] == "LONG"
 
 
+def test_fib_ema_confluence_measures_level_to_ema_not_price_to_ema():
+    n = 220
+    open_ = np.linspace(90.0, 110.0, n)
+    high = open_ + 1.0
+    low = open_ - 1.0
+    close = open_ + 0.2
+    atr = np.full(n, 2.0)
+
+    # Build one confirmed bullish impulse then a retracement near its 0.500 level.
+    open_[195:202] = [100, 99, 98, 100, 104, 108, 106]
+    high[195:202] = [101, 100, 99, 101, 105, 110, 107]
+    low[195:202] = [99, 98, 96, 99, 103, 107, 105]
+    close[195:202] = [100, 99, 97, 100, 104, 109, 106]
+    open_[202:206] = [105, 104, 103, 103]
+    high[202:206] = [106, 105, 104, 104]
+    low[202:206] = [104, 103, 102, 102]
+    close[202:206] = [105, 104, 103, 103]
+
+    ema50 = np.full(n, np.nan)
+    ema100 = np.full(n, np.nan)
+    ema200 = np.full(n, np.nan)
+    # We only care that the distance is measured from the active Fib level,
+    # not from the current close. Use deliberately different locations.
+    ema50[205] = 102.0
+    ema100[205] = 103.0
+    ema200[205] = 104.0
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=2,
+        ema_50_values=ema50,
+        ema_100_values=ema100,
+        ema_200_values=ema200,
+    )
+    level = values["_FIB_ACTIVE_LEVEL_PRICE"][205]
+    assert np.isfinite(level)
+    assert np.isclose(
+        values["FIB_EMA_100_DISTANCE_ATR"][205],
+        abs(level - 103.0) / 2.0,
+    )
+    assert not np.isclose(
+        values["FIB_EMA_100_DISTANCE_ATR"][205],
+        abs(close[205] - 103.0) / 2.0,
+    )
+
+
 def test_fib_mixin_emits_first_reaction_only_once_per_impulse():
     class Base:
         def _configure_signal_features(self):
