@@ -1680,6 +1680,45 @@ class CompletedRunVisualizer:
         index = max(0, min(index, len(times) - 1))
         return _unix_seconds(times[index])
 
+    def _all_trade_markers(self, market: pd.DataFrame) -> list[dict[str, Any]]:
+        """Return lightweight entry/exit markers for every completed trade in view."""
+        markers: list[dict[str, Any]] = []
+        if not self.trade_count:
+            return markers
+        for index in range(self.trade_count):
+            row = self._trade_row(index)
+            side = _trade_side(row)
+            entry_raw = _first_value(
+                row, ("entry_time", "strategy_entry_time", "actual_entry_timestamp")
+            )
+            entry = self._snap_to_candle(entry_raw, market) if entry_raw is not None else None
+            if entry is not None:
+                markers.append(
+                    {
+                        "time": entry,
+                        "position": "belowBar" if side == "LONG" else "aboveBar",
+                        "shape": "arrowUp" if side == "LONG" else "arrowDown",
+                        "text": f"#{index + 1} {side}",
+                        "kind": "all-trade-entry",
+                    }
+                )
+            exit_raw = _first_value(
+                row, ("exit_time", "actual_exit_timestamp", "strategy_exit_time")
+            )
+            exit_time = self._snap_to_candle(exit_raw, market) if exit_raw is not None and not pd.isna(exit_raw) else None
+            if exit_time is not None:
+                markers.append(
+                    {
+                        "time": exit_time,
+                        "position": "aboveBar" if side == "LONG" else "belowBar",
+                        "shape": "square",
+                        "text": f"#{index + 1} EXIT",
+                        "kind": "all-trade-exit",
+                    }
+                )
+        markers.sort(key=lambda item: (int(item["time"]), str(item["kind"])))
+        return markers
+
     def _markers(
         self,
         signals: pd.DataFrame,
@@ -2162,6 +2201,7 @@ class CompletedRunVisualizer:
             "srZones": sr_zones,
             "srEvents": sr_events,
             "markers": self._markers(signals, trade_index, show_rejections, visible),
+            "allTradeMarkers": self._all_trade_markers(visible),
             "priceLines": self._price_lines(trade_index),
             "positionBox": self._position_box(
                 trade_index,
