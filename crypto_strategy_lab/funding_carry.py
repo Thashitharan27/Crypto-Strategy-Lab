@@ -1,16 +1,7 @@
 """Delta-neutral Binance perpetual funding carry backtest.
 
-This module models a spot-long + USD-M perpetual-short hedge using funding
-settlement events already stored in Crypto Strategy Lab's Binance Data Lake.
-It is deliberately independent from the directional strategy engine.
-
-Assumptions:
-- spot and perpetual notional are matched 1:1 at entry;
-- BTC price risk is therefore approximately hedged while the pair remains open;
-- positive funding is received by the short, negative funding is paid;
-- entry/exit trading fees are charged on both legs;
-- no leverage, liquidation, borrowing, tax, or exchange-failure modeling;
-- funding is applied only at recorded Binance settlement events.
+Models a spot-long + USD-M perpetual-short hedge using funding settlements and
+causal futures price proxies already stored in Crypto Strategy Lab's Data Lake.
 """
 from __future__ import annotations
 
@@ -55,6 +46,38 @@ def _timestamp(value) -> pd.Timestamp:
     return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
 
 
+def _event_prices(store, symbol: str, start_ts: pd.Timestamp, end_ts: pd.Timestamp, funding: pd.DataFrame) -> pd.Series:
+    """Return a causal 4h futures-open price proxy for each funding settlement."""
+    price_request = DataRequest(
+        symbol=symbol,
+        start=start_ts.to_pydatetime(),
+        end=end_ts.to_pydatetime(),
+        strategy_interval="4h",
+        datasets=(DatasetKind.KLINES,),
+        market=MarketKind.FUTURES_UM,
+    )
+    prices = store.load_dataset(price_request, DatasetKind.KLINES)
+    if prices.empty:
+        raise ValueError(f"No futures klines for {symbol}; funding carry needs prices to revalue notional")
+    prices = prices.sort_values("event_time", kind="stable").copy()
+    prices["event_time"] = pd.to_datetime(prices["event_time"], utc=True)
+    prices["open"] = pd.to_numeric(prices["open"], errors="raise")
+    if (prices["open"] <= 0).any() or not prices["open"].map(math.isfinite).all():
+        raise ValueError("Futures kline data contains invalid prices")
+
+    events = funding[["event_time"]].copy()
+    events["event_time"] = pd.to_datetime(events["event_time"], utc=True)
+    matched = pd.merge_asof(
+        events.sort_values("event_time"),
+        prices[["event_time", "open"]].sort_values("event_time"),
+        on="event_time",
+        direction="backward",
+    )
+    if matched["open"].isna().any():
+        raise ValueError("No causal futures price is available for one or more funding settlements")
+    return matched["open"].astype(float).reset_index(drop=True)
+
+
 def backtest_funding_carry(
     store: MarketDataStore,
     *,
@@ -79,16 +102,18 @@ def backtest_funding_carry(
     funding = store.load_dataset(request, DatasetKind.FUNDING_RATE)
     if funding.empty:
         raise ValueError(f"No funding-rate events for {symbol} in selected period")
-    funding = funding.sort_values("event_time", kind="stable").copy()
+    funding = funding.sort_values("event_time", kind="stable").reset_index(drop=True).copy()
+    funding["event_time"] = pd.to_datetime(funding["event_time"], utc=True)
     funding["funding_rate"] = pd.to_numeric(funding["funding_rate"], errors="raise")
     if not funding["funding_rate"].map(math.isfinite).all():
         raise ValueError("Funding-rate data contains non-finite values")
+    funding["price_proxy"] = _event_prices(store, symbol, start_ts, end_ts, funding)
 
     capital = float(config.initial_capital_usdt)
     fee_entry = config.entry_fee_percent_per_leg / 100.0
     fee_exit = config.exit_fee_percent_per_leg / 100.0
     in_position = False
-    notional = 0.0
+    quantity = 0.0
     cumulative_funding = 0.0
     cumulative_fees = 0.0
     entries = exits = 0
@@ -97,52 +122,58 @@ def backtest_funding_carry(
     for event in funding.itertuples(index=False):
         rate = float(event.funding_rate)
         timestamp = pd.Timestamp(event.event_time)
+        price = float(event.price_proxy)
+        funding_pnl = 0.0
+
+        # A hedge already open before this timestamp participates in this settlement.
+        # A signal learned from this completed settlement may only enter afterwards.
+        if in_position:
+            current_notional = quantity * price
+            funding_pnl = current_notional * rate  # positive funding pays the short
+            capital += funding_pnl
+            cumulative_funding += funding_pnl
+
+            if config.close_on_negative_funding and rate < 0.0:
+                exit_cost = current_notional * fee_exit * 2.0
+                capital -= exit_cost
+                cumulative_fees += exit_cost
+                exits += 1
+                in_position = False
+                quantity = 0.0
 
         if not in_position and rate >= config.minimum_funding_rate:
-            # One unit of total capital supports equal spot and short legs.
-            # Each leg uses half the capital notional, keeping gross exposure at 1x.
-            notional = capital / 2.0
-            entry_cost = notional * fee_entry * 2.0
+            leg_notional = capital / 2.0
+            quantity = leg_notional / price
+            entry_cost = leg_notional * fee_entry * 2.0
             capital -= entry_cost
             cumulative_fees += entry_cost
             entries += 1
             in_position = True
 
-        funding_pnl = 0.0
-        if in_position:
-            # Binance positive funding means longs pay shorts.
-            funding_pnl = notional * rate
-            capital += funding_pnl
-            cumulative_funding += funding_pnl
-
-            should_close = config.close_on_negative_funding and rate < 0.0
-            if should_close:
-                exit_cost = notional * fee_exit * 2.0
-                capital -= exit_cost
-                cumulative_fees += exit_cost
-                exits += 1
-                in_position = False
-                notional = 0.0
-
-        rows.append(
-            {
-                "event_time": timestamp,
-                "funding_rate": rate,
-                "position_open": in_position,
-                "hedged_leg_notional_usdt": notional,
-                "funding_pnl_usdt": funding_pnl,
-                "cumulative_funding_usdt": cumulative_funding,
-                "cumulative_fees_usdt": cumulative_fees,
-                "equity_usdt": capital,
-            }
-        )
+        current_notional = quantity * price if in_position else 0.0
+        rows.append({
+            "event_time": timestamp,
+            "funding_rate": rate,
+            "price_proxy_usdt": price,
+            "position_open": in_position,
+            "hedged_quantity_btc": quantity,
+            "hedged_leg_notional_usdt": current_notional,
+            "funding_pnl_usdt": funding_pnl,
+            "cumulative_funding_usdt": cumulative_funding,
+            "cumulative_fees_usdt": cumulative_fees,
+            "equity_usdt": capital,
+        })
 
     if in_position:
-        exit_cost = notional * fee_exit * 2.0
+        final_price = float(funding.iloc[-1]["price_proxy"])
+        final_notional = quantity * final_price
+        exit_cost = final_notional * fee_exit * 2.0
         capital -= exit_cost
         cumulative_fees += exit_cost
         exits += 1
         rows[-1]["position_open"] = False
+        rows[-1]["hedged_quantity_btc"] = 0.0
+        rows[-1]["hedged_leg_notional_usdt"] = 0.0
         rows[-1]["cumulative_fees_usdt"] = cumulative_fees
         rows[-1]["equity_usdt"] = capital
 
@@ -150,8 +181,12 @@ def backtest_funding_carry(
     days = max((end_ts - start_ts).total_seconds() / 86400.0, 1e-9)
     total_return = capital / config.initial_capital_usdt - 1.0
     annualized = (1.0 + total_return) ** (365.25 / days) - 1.0 if total_return > -1 else -1.0
-    peak = ledger["equity_usdt"].cummax()
-    drawdown = ledger["equity_usdt"] / peak - 1.0
+    equity_with_initial = pd.concat(
+        [pd.Series([float(config.initial_capital_usdt)]), ledger["equity_usdt"].astype(float)],
+        ignore_index=True,
+    )
+    peak = equity_with_initial.cummax()
+    drawdown = equity_with_initial / peak - 1.0
 
     summary = {
         "mode": "BINANCE_PERPETUAL_FUNDING_CARRY_V1",
@@ -174,10 +209,12 @@ def backtest_funding_carry(
         "close_on_negative_funding": config.close_on_negative_funding,
         "entry_fee_percent_per_leg": config.entry_fee_percent_per_leg,
         "exit_fee_percent_per_leg": config.exit_fee_percent_per_leg,
+        "price_proxy": "4h USD-M futures open at-or-before settlement",
         "limitations": (
-            "Delta-neutral funding carry only. Does not model spot/perpetual basis "
-            "mark-to-market, futures liquidation, borrowing, collateral yield, "
-            "slippage, tax, exchange insolvency, or dated-quarterly futures basis."
+            "Delta-neutral funding carry only. Funding and fees use fixed hedge quantity "
+            "revalued with a causal 4h futures-open proxy, not exact mark price. Does not "
+            "model spot/perpetual basis mark-to-market, liquidation, borrowing, collateral "
+            "yield, slippage, tax, exchange insolvency, or dated-quarterly futures basis."
         ),
     }
 
