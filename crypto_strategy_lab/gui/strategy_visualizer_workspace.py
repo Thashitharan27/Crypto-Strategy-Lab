@@ -133,6 +133,7 @@ class StrategyVisualizerWorkspace(QWidget):
             ("ema200", "EMA 200", True),
             ("vwap", "VWAP", True),
             ("bb", "Bollinger Bands", False),
+            ("fib", "Fib Derivation", True),
             ("sr-strategy", "S/R Strategy TF", False),
             ("sr-1h", "S/R 1H", False),
             ("sr-4h", "S/R 4H", True),
@@ -223,6 +224,24 @@ class StrategyVisualizerWorkspace(QWidget):
         self.trade_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         trade_layout.addWidget(self.trade_table)
         self.inspector_tabs.addTab(trade_tab, "Trade")
+
+        fib_tab = QWidget()
+        fib_layout = QVBoxLayout(fib_tab)
+        fib_layout.setContentsMargins(0, 0, 0, 0)
+        self.fib_summary = QLabel(
+            "Select a completed Fib trade to inspect the exact persisted impulse and retracement geometry."
+        )
+        self.fib_summary.setWordWrap(True)
+        self.fib_summary.setStyleSheet("color:#52606d")
+        fib_layout.addWidget(self.fib_summary)
+        self.fib_table = QTableWidget(0, 2)
+        self.fib_table.setHorizontalHeaderLabels(("Fib Field", "Value"))
+        self.fib_table.verticalHeader().setVisible(False)
+        self.fib_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.fib_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.fib_table.horizontalHeader().setStretchLastSection(True)
+        fib_layout.addWidget(self.fib_table)
+        self.inspector_tabs.addTab(fib_tab, "Fib Inspector")
 
         rules_tab = QWidget()
         rules_layout = QVBoxLayout(rules_tab)
@@ -388,9 +407,14 @@ class StrategyVisualizerWorkspace(QWidget):
             )
             self._populate_trade_selector()
             request = self.model.seed.request
+            provenance_suffix = (
+                " · ⚠ reference candles differ from run provenance"
+                if self.model.source_verified is False
+                else ""
+            )
             self.run_label.setText(
                 f"{request.symbol} · {request.strategy_timeframe} · "
-                f"{self.model.trade_count:,} completed trades"
+                f"{self.model.trade_count:,} completed trades{provenance_suffix}"
             )
             self._set_navigation_enabled(self.model.trade_count > 0)
             self.visible_candles.setEnabled(True)
@@ -653,6 +677,7 @@ class StrategyVisualizerWorkspace(QWidget):
             self._populate_trade_inspector(
                 self._base_payload.get("selectedTrade") or {}
             )
+            self._populate_fib_inspector(self._base_payload.get("fibDerivation") or {})
             self._show_selected_trade_rule_trace()
             self._show_selected_trade_sr()
             self._render_chart()
@@ -663,7 +688,10 @@ class StrategyVisualizerWorkspace(QWidget):
                 if verified is True
                 else "Legacy run: candle source provenance could not be independently verified. "
                 if verified is None
-                else ""
+                else (
+                    "WARNING: current canonical candles differ from this completed run's recorded source; "
+                    "candles are reference-only while persisted trade/Fib evidence remains authoritative. "
+                )
             )
             inventory_available = bool(
                 (self._base_payload.get("run") or {}).get(
@@ -794,6 +822,18 @@ class StrategyVisualizerWorkspace(QWidget):
                     for overlay in payload.get("overlays", ())
                     if self._overlay_enabled(overlay)
                 ]
+                if self.overlay_checks["fib"].isChecked():
+                    fib = payload.get("fibDerivation") or {}
+                    for item in fib.get("levels") or ():
+                        level = item.get("level")
+                        price = item.get("price")
+                        if price is None:
+                            continue
+                        tag = "ENTRY" if item.get("selected") else "STOP BOUNDARY" if item.get("stopBoundary") else ""
+                        title = f"Fib {float(level):.3f}" + (f" · {tag}" if tag else "")
+                        payload.setdefault("priceLines", []).append(
+                            {"title": title, "price": float(price), "kind": "fib"}
+                        )
 
             payload["srZones"] = [
                 zone
@@ -831,6 +871,45 @@ class StrategyVisualizerWorkspace(QWidget):
             )
         except Exception as exc:
             self.status.setText(f"Chart unavailable: {exc}")
+
+    def _populate_fib_inspector(self, fib):
+        fib = fib or {}
+        status = str(fib.get("status") or "NOT_AVAILABLE")
+        if status != "AVAILABLE":
+            self.fib_summary.setText(str(fib.get("message") or status))
+            self.fib_table.setRowCount(0)
+            return
+        rows = [
+            ("Direction", fib.get("direction")),
+            ("Impulse start price", fib.get("impulseStartPrice")),
+            ("Impulse end price", fib.get("impulseEndPrice")),
+            ("Impulse span", fib.get("impulseSpan")),
+            ("Impulse start index", fib.get("impulseStartIndex")),
+            ("Impulse end index", fib.get("impulseEndIndex")),
+            ("Entry Fib level", fib.get("entryLevel")),
+            ("Stop Fib level", fib.get("stopLevel")),
+            ("Stop boundary price", fib.get("stopBoundaryPrice")),
+            ("Actual stop price", fib.get("actualStopPrice")),
+            ("Target mode", fib.get("targetMode")),
+            ("Target R", fib.get("targetR")),
+            ("Target price", fib.get("targetPrice")),
+            ("Available impulse-extreme room R", fib.get("availableRoomR")),
+        ]
+        for level in fib.get("levels") or ():
+            suffix = " · ENTRY" if level.get("selected") else " · STOP BOUNDARY" if level.get("stopBoundary") else ""
+            rows.append((f"Fib {float(level.get('level')):.3f}{suffix}", level.get("price")))
+        self.fib_table.setRowCount(len(rows))
+        for row_number, (field, value) in enumerate(rows):
+            if isinstance(value, float):
+                value = f"{value:,.8g}"
+            self.fib_table.setItem(row_number, 0, QTableWidgetItem(str(field)))
+            self.fib_table.setItem(row_number, 1, QTableWidgetItem("—" if value is None else str(value)))
+        self.fib_table.resizeColumnsToContents()
+        self.fib_table.horizontalHeader().setStretchLastSection(True)
+        self.fib_summary.setText(
+            "Persisted native Fib geometry from the completed trade. "
+            "Purple chart lines are derived only from these recorded impulse anchors."
+        )
 
     def _populate_trade_inspector(self, summary):
         items = list(summary.items())
