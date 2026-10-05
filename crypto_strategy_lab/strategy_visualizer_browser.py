@@ -621,7 +621,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
 
   function drawPositionBox() {
     positionBoxLayer.replaceChildren();
-    if (!showPositionBox.checked || !payload || !chart || !candle) return;
+    if (tradeMode.value !== 'selected' || !showPositionBox.checked || !payload || !chart || !candle) return;
     const box = payload.positionBox;
     if (!box || !box.enabled) return;
 
@@ -741,7 +741,18 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   }
 
   function seriesMarkerSource() {
-    const result = [...(payload?.markers || [])];
+    const base = payload?.markers || [];
+    const result = [];
+    if (tradeMode.value === 'selected') {
+      result.push(...base.filter(item =>
+        ['selected-open','exit','reject'].includes(String(item.kind || ''))
+      ));
+    } else if (tradeMode.value === 'all') {
+      result.push(...(payload?.allTradeMarkers || []));
+      result.push(...base.filter(item => String(item.kind || '') === 'reject'));
+    } else {
+      result.push(...base.filter(item => String(item.kind || '') === 'reject'));
+    }
     if (viewMode.value === 'audit' && ['lifecycle','all'].includes(srDetails.value)) {
       const tfs = selectedTimeframes();
       result.push(...(payload.srEvents || []).filter(event => tfs.has(String(event.timeframe))));
@@ -828,7 +839,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       LC.createSeriesMarkers(candle,markers);
     }
 
-    if (viewMode.value !== 'audit' && showFib.checked) {
+    if (viewMode.value !== 'audit' && tradeMode.value === 'selected' && showFib.checked) {
       const fib = payload.fibDerivation || {};
       if (fib.status === 'AVAILABLE') {
         const candles = payload.candles || [];
@@ -857,6 +868,25 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
             {time:fibStartTime,value:Number(fib.impulseStartPrice)},
             {time:fibEndTime,value:Number(fib.impulseEndPrice)},
           ]);
+          if (LC.createSeriesMarkers) {
+            const longSide = String(fib.direction || '').toUpperCase() === 'LONG';
+            LC.createSeriesMarkers(swing,[
+              {
+                time:fibStartTime,
+                position:longSide ? 'belowBar' : 'aboveBar',
+                shape:'circle',
+                color:'#ffd166',
+                text:longSide ? 'SWING LOW' : 'SWING HIGH',
+              },
+              {
+                time:fibEndTime,
+                position:longSide ? 'aboveBar' : 'belowBar',
+                shape:'circle',
+                color:'#ffd166',
+                text:longSide ? 'SWING HIGH' : 'SWING LOW',
+              },
+            ]);
+          }
         }
         const levelEnd = Number.isFinite(entryTime) ? entryTime : fibEndTime;
         for (const item of fib.levels || []) {
@@ -878,7 +908,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       }
     }
 
-    if (viewMode.value !== 'audit') {
+    if (viewMode.value !== 'audit' && tradeMode.value === 'selected') {
       for (const line of payload.priceLines || []) {
         const color = line.kind==='entry' ? '#7db7ff' : line.kind==='stop' ? '#f08a8a' : '#79d39d';
         candle.createPriceLine({
