@@ -150,16 +150,22 @@ def test_fib_execution_settings_validate_and_round_trip() -> None:
         execution=replace(
             base.execution,
             fib_stop_buffer_atr=0.10,
+            fib_target_mode="FIXED_R",
+            fib_fixed_target_r=4.0,
             fib_target_buffer_atr=0.15,
             fib_minimum_target_r=2.5,
         ),
     )
     configured.validate()
     assert configured.execution.fib_stop_buffer_atr == 0.10
+    assert configured.execution.fib_target_mode == "FIXED_R"
+    assert configured.execution.fib_fixed_target_r == 4.0
     assert configured.execution.fib_target_buffer_atr == 0.15
     assert configured.execution.fib_minimum_target_r == 2.5
 
     for bad_execution in (
+        replace(base.execution, fib_target_mode="UNKNOWN"),
+        replace(base.execution, fib_fixed_target_r=0.0),
         replace(base.execution, fib_stop_buffer_atr=-0.01),
         replace(base.execution, fib_target_buffer_atr=-0.01),
         replace(base.execution, fib_minimum_target_r=0.0),

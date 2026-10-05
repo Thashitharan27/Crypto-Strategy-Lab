@@ -39,6 +39,8 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "fvg_context_timeframe_minutes": 240,
     "fvg_structure_swing_strength": 2,
     "fib_stop_buffer_atr": 0.05,
+    "fib_target_mode": "IMPULSE_EXTREME",
+    "fib_fixed_target_r": 2.0,
     "fib_target_buffer_atr": 0.05,
     "fib_minimum_target_r": 2.0,
     "entry_interval": 1,
@@ -273,6 +275,13 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         "PULLBACK_1R", "EMA_20_100_CROSS", "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH"
     ):
         errors.append("Invalid EMA 9/20 trade plan.")
+    if str(values.get("fib_target_mode", "")).upper() not in ("IMPULSE_EXTREME", "FIXED_R"):
+        errors.append("Invalid Fib target mode.")
+    try:
+        if float(values["fib_fixed_target_r"]) <= 0:
+            errors.append("Fib fixed target R must be > 0.")
+    except (TypeError, ValueError, KeyError):
+        errors.append("Fib fixed target R must be numeric.")
     if values["risk_mode"] not in [e.value for e in RiskMode]:
         errors.append("Invalid risk mode.")
     if values["tie_policy"] not in (TiePolicy.PESSIMISTIC.value, TiePolicy.OPTIMISTIC.value):
@@ -351,6 +360,11 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         fvg_context_enabled=bool(merged["fvg_context_enabled"]),
         fvg_context_timeframe_minutes=int(merged["fvg_context_timeframe_minutes"]),
         fvg_structure_swing_strength=int(merged["fvg_structure_swing_strength"]),
+        fib_stop_buffer_atr=float(merged["fib_stop_buffer_atr"]),
+        fib_target_mode=str(merged["fib_target_mode"]).upper(),
+        fib_fixed_target_r=float(merged["fib_fixed_target_r"]),
+        fib_target_buffer_atr=float(merged["fib_target_buffer_atr"]),
+        fib_minimum_target_r=float(merged["fib_minimum_target_r"]),
         entry_interval=int(merged["entry_interval"]),
         enable_di_direction_selection=bool(merged["enable_di_direction_selection"]),
         enable_di_pressure_analysis=bool(merged["enable_di_pressure_analysis"]),
