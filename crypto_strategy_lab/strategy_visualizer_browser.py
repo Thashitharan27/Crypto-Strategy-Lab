@@ -23,7 +23,7 @@ from crypto_strategy_lab.strategy_visualizer import (
 )
 
 
-BROWSER_DEFAULT_VISIBLE_CANDLES = min(240, MAX_VISIBLE_CANDLES)
+BROWSER_DEFAULT_VISIBLE_CANDLES = min(120, MAX_VISIBLE_CANDLES)
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -1008,11 +1008,16 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     );
     let index = candles.findIndex(item => Number(item.time) >= target);
     if (index < 0) index = candles.length - 1;
-    const radius = 70;
-    const from = Number(candles[Math.max(0,index-radius)]?.time);
-    const to = Number(candles[Math.min(candles.length-1,index+radius)]?.time);
-    if (Number.isFinite(from) && Number.isFinite(to) && from < to)
-      chart.timeScale().setVisibleRange({from,to});
+
+    // Use logical bars rather than a timestamp span. This keeps the selected
+    // trade genuinely centered even during fast rallies/crashes, and lets the
+    // chart's normal autoscale focus the price axis on the local trade geometry.
+    const leftBars = 32;
+    const rightBars = 32;
+    chart.timeScale().setVisibleLogicalRange({
+      from: Math.max(-0.5, index - leftBars),
+      to: Math.min(candles.length - 0.5, index + rightBars),
+    });
   }
   $('center-trade').addEventListener('click',() => {
     if (payload?.fullRun) centerSelectedTrade();
