@@ -518,6 +518,8 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
     assert position["entry"] == payload["selectedTrade"]["Entry"]
     assert position["stop"] == payload["selectedTrade"]["Stop"]
     assert position["target"] == payload["selectedTrade"]["Target"]
+    assert position["exitPrice"] == payload["selectedTrade"]["Exit"]
+    assert position["exitReason"] == payload["selectedTrade"]["Exit Reason"]
     assert position["stop"] < position["entry"] < position["target"]
     assert position["entryChartTime"] is not None
     assert position["exitChartTime"] is not None
