@@ -72,6 +72,8 @@ class BacktestConfig:
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
     fib_stop_buffer_atr: float = 0.05
+    fib_target_mode: str = "IMPULSE_EXTREME"
+    fib_fixed_target_r: float = 2.0
     fib_target_buffer_atr: float = 0.05
     fib_minimum_target_r: float = 2.0
     entry_interval: int = 1
@@ -156,6 +158,12 @@ class BacktestConfig:
             raise ValueError("EMA cross entry confirmation R must be positive")
         if self.fvg_structure_swing_strength < 1 or self.fvg_structure_swing_strength > 50:
             raise ValueError("FVG structure swing strength must be between 1 and 50")
+        fib_target_mode = str(self.fib_target_mode).upper()
+        object.__setattr__(self, "fib_target_mode", fib_target_mode)
+        if fib_target_mode not in {"IMPULSE_EXTREME", "FIXED_R"}:
+            raise ValueError("Fib target mode must be IMPULSE_EXTREME or FIXED_R")
+        if self.fib_fixed_target_r <= 0:
+            raise ValueError("Fib fixed target R must be positive")
         if self.fib_stop_buffer_atr < 0 or self.fib_target_buffer_atr < 0:
             raise ValueError("Fib ATR buffers cannot be negative")
         if self.fib_minimum_target_r <= 0:
