@@ -126,8 +126,9 @@ EXECUTION_GROUPS = (
     ("Take Profit", (
         "sr_take_profit_mode", "sr_take_profit_timeframe_minutes",
         "sr_take_profit_maximum_r", "sr_take_profit_minimum_r",
-        "sr_take_profit_buffer_r", "fvg_target_buffer_atr", "fib_target_buffer_atr",
-        "fib_minimum_target_r", "sr_take_profit_no_level_policy",
+        "sr_take_profit_buffer_r", "fvg_target_buffer_atr", "fib_target_mode",
+        "fib_fixed_target_r", "fib_target_buffer_atr", "fib_minimum_target_r",
+        "sr_take_profit_no_level_policy",
     ), None),
     ("Fees", (
         "maker_fee", "taker_fee", "use_maker_entry", "use_maker_exit",
@@ -365,6 +366,7 @@ class DataclassForm(QWidget):
         "tie_policy": ("PESSIMISTIC", "OPTIMISTIC", "INTRABAR"),
         "sr_take_profit_timeframe_minutes": (-1, 0, 60, 240, 1440),
         "sr_take_profit_mode": ("FIXED_R", "SR_CAPPED_R", "SR_LEVEL"),
+        "fib_target_mode": ("IMPULSE_EXTREME", "FIXED_R"),
         "sr_take_profit_no_level_policy": ("USE_FIXED_TP", "REJECT_TRADE"),
         "flip_rule_match_mode": ("ANY", "ALL"),
         "reject_rule_match_mode": ("ANY", "ALL"),
