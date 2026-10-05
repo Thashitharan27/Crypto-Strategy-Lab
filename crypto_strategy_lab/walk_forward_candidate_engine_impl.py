@@ -67,7 +67,7 @@ _SAFE_TRADE_ENTRY_COLUMNS = (
     "opposing_di_change", "di_spread_change", "di_pressure_state",
     "plus_di_change", "minus_di_change", "bb_width", "bb_width_pct",
     "bb_width_change", "bb_width_change_pct", "bb_width_entry_5bar_change",
-    "bb_width_entry_5bar_change_pct", "rsi", "entry_rsi", "momentum",
+    "bb_width_entry_5bar_change_pct", "rsi", "entry_rsi", "rsi_divergence", "momentum",
     "directional_momentum_return_at_entry", "ema_50", "ema_100", "ema_200",
     "ema_50_distance_atr", "ema_100_distance_atr", "ema_200_distance_atr",
     "macd_line", "macd_signal", "macd_histogram", "macd_histogram_change",
@@ -162,6 +162,7 @@ _DIRECT_NUMERIC = {
 _DIRECT_CATEGORICAL = {
     "MACD_CROSS_STATE": ("macd_cross_state",),
     "MACD_ZERO_STATE": ("macd_zero_state",),
+    "RSI_DIVERGENCE": ("rsi_divergence",),
     "MR_MOTION": ("mean_reversion_motion",),
     "MR_BB_LOCATION": ("mean_reversion_bb_location",),
     "MR_SIGNAL": ("mean_reversion_signal", "mr_signal"),

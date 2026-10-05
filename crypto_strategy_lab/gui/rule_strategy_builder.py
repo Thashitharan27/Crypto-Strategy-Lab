@@ -138,6 +138,7 @@ EVIDENCE_LABELS = {
     "MACD_CROSS_STATE": "MACD Cross State",
     "MACD_ZERO_STATE": "MACD Zero State",
     "RSI": "RSI",
+    "RSI_DIVERGENCE": "RSI Divergence",
     "BB_WIDTH": "BB Width (decimal)",
     "CLOSE_LOCATION": "Close Location",
     "CANDLE_BODY_ATR": "Candle Body (ATR)",
@@ -350,7 +351,7 @@ EVIDENCE_GROUPS = (
     (
         "Momentum & Price",
         (
-            "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
+            "RSI", "RSI_DIVERGENCE", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
             "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
             "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
             "CANDLE_BODY_ATR", "CANDLE_RANGE_ATR", "BODY_TO_RANGE_RATIO",
@@ -524,7 +525,7 @@ EVIDENCE_MENU_TREE = (
     (
         "Momentum & Price",
         (
-            "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
+            "RSI", "RSI_DIVERGENCE", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
             ("MACD", (
                 "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
                 "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
