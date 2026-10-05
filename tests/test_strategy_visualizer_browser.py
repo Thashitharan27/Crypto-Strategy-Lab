@@ -179,6 +179,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "Fib swing" in html
     assert "Fib derivation" in html
     assert "centerSelectedTrade()" in html
+    assert "setVisibleLogicalRange" in html
+    assert "const leftBars = 32" in html
+    assert BROWSER_DEFAULT_VISIBLE_CANDLES == 120
 
 
 def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():
