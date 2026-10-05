@@ -159,3 +159,54 @@ def test_fib_target_room_gate_uses_actual_stop_and_entry_geometry():
     allowed = p._fib_target_plan(0, 1)
     assert allowed["passed"] is True
     assert allowed["available_r"] >= 0.5
+
+
+def test_fib_fixed_r_target_uses_actual_stop_r_while_room_gate_stays_independent():
+    class Base:
+        def _sr_stop_plan(self, i, execution_i=None):
+            return {"passed": True, "applied": False, "reason": "BASE", "distance": 1.0}
+        def _effective_trade_direction(self, _i):
+            return "LONG"
+        def _expected_entry_price(self, i, execution_i, direction):
+            return 11.0
+        def _entry_filter_result(self, i, execution_i=None):
+            return True, "OK"
+
+    class Probe(FibonacciRetracementMixin, Base):
+        pass
+
+    p = Probe.__new__(Probe)
+    p.signal_strategy_mode = FIB_RETRACEMENT_MODE
+    p.config = SimpleNamespace(
+        strategy_timeframe_minutes=240,
+        fib_stop_buffer_atr=0.05,
+        fib_target_mode="FIXED_R",
+        fib_fixed_target_r=4.0,
+        fib_target_buffer_atr=0.05,
+        fib_minimum_target_r=0.5,
+    )
+    p.open = np.array([11.0, 11.0])
+    p.atr_values = np.array([1.0, 1.0])
+    p.fib_retracement = {
+        "FIB_NEAREST_LEVEL": np.array([0.500, 0.500]),
+        "_FIB_IMPULSE_START_PRICE": np.array([8.0, 8.0]),
+        "_FIB_IMPULSE_END_PRICE": np.array([12.0, 12.0]),
+    }
+
+    stop = p._sr_stop_plan(0, 1)
+    target = p._fib_target_plan(0, 1)
+
+    assert target["passed"] is True
+    assert target["reason"] == "FIB_FIXED_R_TARGET"
+    assert target["target_mode"] == "FIXED_R"
+    assert target["target_r"] == 4.0
+    assert np.isclose(target["limit_price"], 11.0 + 4.0 * stop["distance"])
+    assert np.isclose(target["room_limit_price"], 11.95)
+    assert target["available_r"] < 1.0
+
+    # Raising only the room gate rejects the same 4R target setup; the two
+    # controls deliberately have separate meanings.
+    p.config.fib_minimum_target_r = 4.0
+    rejected = p._fib_target_plan(0, 1)
+    assert rejected["passed"] is False
+    assert rejected["reason"] == "FIB_TARGET_INSUFFICIENT_ROOM"
