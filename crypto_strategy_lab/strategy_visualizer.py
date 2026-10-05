@@ -1719,6 +1719,24 @@ class CompletedRunVisualizer:
         if trade_index is not None and self.trade_count:
             row = self._trade_row(trade_index)
             side = _trade_side(row)
+            entry_raw = _first_value(
+                row, ("entry_time", "strategy_entry_time", "actual_entry_timestamp")
+            )
+            entry_price = _finite(
+                _first_value(row, ("entry_price", "actual_entry_price", "strategy_entry_price"))
+            )
+            if entry_raw is not None and entry_price is not None:
+                snapped = self._snap_to_candle(entry_raw, market)
+                if snapped is not None:
+                    markers.append(
+                        {
+                            "time": snapped,
+                            "position": "belowBar" if side == "LONG" else "aboveBar",
+                            "shape": "arrowUp" if side == "LONG" else "arrowDown",
+                            "text": f"OPEN · {entry_price:,.2f}",
+                            "kind": "selected-open",
+                        }
+                    )
             exit_time = row.get("exit_time")
             if exit_time is not None and not pd.isna(exit_time):
                 reason = _first_value(
@@ -1773,6 +1791,23 @@ class CompletedRunVisualizer:
         )
         return result
 
+    def _strategy_time_for_index(self, value: Any) -> pd.Timestamp | None:
+        """Resolve a persisted strategy index back to its completed-run candle time."""
+        index = _finite(value)
+        if index is None or self.context_path is None:
+            return None
+        escaped = str(self.context_path).replace("'", "''")
+        with duckdb.connect(":memory:") as connection:
+            connection.execute("SET TimeZone='UTC'")
+            rows = connection.execute(
+                f"SELECT strategy_candle_open_time FROM read_parquet('{escaped}') "
+                "WHERE strategy_index=? LIMIT 1",
+                [int(index)],
+            ).fetchall()
+        if not rows:
+            return None
+        return _utc(rows[0][0])
+
     def fib_derivation(self, trade_index: int | None) -> dict[str, Any]:
         """Return persisted native Fib geometry for the selected completed trade."""
         if trade_index is None or not self.trade_count:
@@ -1797,6 +1832,14 @@ class CompletedRunVisualizer:
             return {"status": "INVALID", "message": "Persisted Fib impulse span is invalid.", "levels": []}
         entry_level = _finite(row.get("fib_entry_level"))
         stop_level = _finite(row.get("fib_stop_level"))
+        start_index = _finite(row.get("fib_impulse_start_index"))
+        end_index = _finite(row.get("fib_impulse_end_index"))
+        start_time = self._strategy_time_for_index(start_index)
+        end_time = self._strategy_time_for_index(end_index)
+        entry_time_raw = _first_value(
+            row, ("entry_time", "strategy_entry_time", "actual_entry_timestamp")
+        )
+        entry_time = _utc(entry_time_raw) if entry_time_raw is not None else None
         levels = []
         for level in (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0):
             price = end - level * span if side == "LONG" else end + level * span
@@ -1817,6 +1860,9 @@ class CompletedRunVisualizer:
             "impulseSpan": span,
             "impulseStartIndex": _json_value(row.get("fib_impulse_start_index")),
             "impulseEndIndex": _json_value(row.get("fib_impulse_end_index")),
+            "impulseStartTime": _unix_seconds(start_time) if start_time is not None else None,
+            "impulseEndTime": _unix_seconds(end_time) if end_time is not None else None,
+            "entryTime": _unix_seconds(entry_time) if entry_time is not None else None,
             "entryLevel": entry_level,
             "stopLevel": stop_level,
             "stopBoundaryPrice": _finite(row.get("fib_stop_boundary_price")),
@@ -1880,6 +1926,25 @@ class CompletedRunVisualizer:
             row,
             ("exit_time", "actual_exit_timestamp", "strategy_exit_time"),
         )
+        exit_price = _finite(
+            _first_value(
+                row,
+                (
+                    f"{side.lower()}_exit_price",
+                    "exit_price",
+                    "actual_exit_price",
+                    "strategy_exit_price",
+                ),
+            )
+        )
+        exit_reason = _first_value(
+            row,
+            (
+                f"{side.lower()}_final_exit_reason",
+                f"{side.lower()}_exit_reason",
+                "exit_reason",
+            ),
+        )
         exit_time = _utc(exit_time_raw) if exit_time_raw is not None else None
         entry_chart_time = self._snap_to_candle(entry_time, market)
         exit_chart_time = (
@@ -1898,6 +1963,8 @@ class CompletedRunVisualizer:
             "entryChartTime": entry_chart_time,
             "exitTime": _unix_seconds(exit_time) if exit_time is not None else None,
             "exitChartTime": exit_chart_time,
+            "exitPrice": exit_price,
+            "exitReason": _json_value(exit_reason),
             "open": exit_time is None,
             "visibleEnd": _unix_seconds(visible_end),
         }
@@ -2295,7 +2362,8 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
     markerSource.sort((a,b) => Number(a.time)-Number(b.time));
     const markers=markerSource.map(m => ({{
       time:m.time, position:m.position, shape:m.shape, text:m.text,
-      color: m.kind==='entry' ? '#6fd3a4'
+      color: m.kind==='selected-open' ? '#00e5ff'
+        : m.kind==='entry' ? '#6fd3a4'
         : m.kind==='exit' ? '#ffd166'
         : m.kind==='sr-snapshot' ? '#9ec5ff'
         : m.kind==='sr-event' && m.event==='break' ? '#ff8e8e'
@@ -2304,6 +2372,34 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
         : '#9aa5b1',
     }}));
     LC.createSeriesMarkers(candle, markers);
+  }}
+
+  const fib = payload.fibDerivation || {{}};
+  if (fib.status === 'AVAILABLE' && fib.impulseStartTime && fib.impulseEndTime) {{
+    const swing = chart.addSeries(LC.LineSeries, {{
+      color:'#ffd166', lineWidth:3, priceLineVisible:false, lastValueVisible:false,
+      crosshairMarkerVisible:true, title:'Fib swing',
+    }});
+    swing.setData([
+      {{time:fib.impulseStartTime, value:Number(fib.impulseStartPrice)}},
+      {{time:fib.impulseEndTime, value:Number(fib.impulseEndPrice)}},
+    ]);
+    const levelEnd = fib.entryTime || payload.selectedTradeCandleTime || fib.impulseEndTime;
+    for (const item of fib.levels || []) {{
+      const level = Number(item.level);
+      const important = item.selected || item.stopBoundary || Math.abs(level-.5)<1e-9 || Math.abs(level-.618)<1e-9;
+      const levelSeries = chart.addSeries(LC.LineSeries, {{
+        color: item.selected ? '#00e5ff' : item.stopBoundary ? '#ff7b7b' : important ? '#c7a6ff' : '#6f7782',
+        lineWidth: important ? 2 : 1,
+        lineStyle: important ? 0 : 2,
+        priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false,
+        title: 'Fib ' + level.toFixed(3) + (item.selected ? ' ENTRY' : item.stopBoundary ? ' STOP LEVEL' : ''),
+      }});
+      levelSeries.setData([
+        {{time:fib.impulseStartTime, value:Number(item.price)}},
+        {{time:levelEnd, value:Number(item.price)}},
+      ]);
+    }}
   }}
 
   for (const line of payload.priceLines || []) {{

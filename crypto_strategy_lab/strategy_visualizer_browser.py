@@ -602,6 +602,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const entryY = candle.priceToCoordinate(Number(box.entry));
     const stopY = box.stop == null ? null : candle.priceToCoordinate(Number(box.stop));
     const targetY = box.target == null ? null : candle.priceToCoordinate(Number(box.target));
+    const closeY = box.exitPrice == null ? null : candle.priceToCoordinate(Number(box.exitPrice));
     if ([x1,x2,entryY].some(v => v == null || !Number.isFinite(Number(v)))) return;
 
     const left = Math.min(Number(x1),Number(x2));
@@ -627,12 +628,17 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       addRect('reward',entryY,targetY);
     }
 
-    const labelLeft = right + 6;
-    addPositionLabel(labelLeft,entryY,'entry','Entry ' + fmt(box.entry,6));
+    const openLeft = left + 6;
+    const closeLeft = Math.max(left + 6, right - 112);
+    addPositionLabel(openLeft,entryY,'entry','OPEN ' + fmt(box.entry,6));
+    if (closeY != null && Number.isFinite(Number(closeY))) {
+      const reason = box.exitReason ? ' · ' + String(box.exitReason) : '';
+      addPositionLabel(closeLeft,closeY,'target','CLOSE ' + fmt(box.exitPrice,6) + reason);
+    }
     if (stopY != null && Number.isFinite(Number(stopY)))
-      addPositionLabel(labelLeft,stopY,'stop','Stop ' + fmt(box.stop,6));
+      addPositionLabel(right + 6,stopY,'stop','SL ' + fmt(box.stop,6));
     if (targetY != null && Number.isFinite(Number(targetY)))
-      addPositionLabel(labelLeft,targetY,'target','Target ' + fmt(box.target,6));
+      addPositionLabel(right + 6,targetY,'target','TP ' + fmt(box.target,6));
   }
 
   function drawZones() {
