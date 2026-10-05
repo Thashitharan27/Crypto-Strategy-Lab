@@ -537,6 +537,9 @@ def test_completed_run_visualizer_builds_bounded_causal_payload(tmp_path):
     assert sum(zone["nearestAtEntry"] for zone in payload["srZones"]) == 2
     assert payload["selectedTradeCandleTime"] is not None
     assert payload["srEvents"]
+    assert payload["allTradeMarkers"]
+    assert any(item["kind"] == "all-trade-entry" for item in payload["allTradeMarkers"])
+    assert any(item["kind"] == "all-trade-exit" for item in payload["allTradeMarkers"])
 
     assert any(marker["kind"] == "enter" for marker in payload["markers"])
     assert not any(marker["kind"] == "reject" for marker in payload["markers"])
