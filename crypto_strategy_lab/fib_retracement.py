@@ -9,11 +9,12 @@ remain available as generic Entry/Veto evidence.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 1
+FIB_RESEARCH_CONTEXT_VERSION = 2
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -23,6 +24,9 @@ FIB_RULE_INDICATORS = frozenset({
     "FIB_RETRACEMENT_DEPTH",
     "FIB_NEAREST_LEVEL",
     "FIB_LEVEL_DISTANCE_ATR",
+    "FIB_EMA_50_DISTANCE_ATR",
+    "FIB_EMA_100_DISTANCE_ATR",
+    "FIB_EMA_200_DISTANCE_ATR",
     "FIB_REACTION_STATE",
     "FIB_REJECTION_ATR",
     "FIB_BARS_SINCE_TEST",
@@ -43,6 +47,16 @@ def fib_features_needed(profiles) -> bool:
             if str(rule.get("indicator", "")).upper() in FIB_RULE_INDICATORS:
                 return True
     return False
+
+
+def _causal_ema(values, period: int) -> np.ndarray:
+    """Match the engine's causal EMA convention for Fib/EMA confluence."""
+    return (
+        pd.Series(np.asarray(values, dtype=float))
+        .ewm(span=period, adjust=False, min_periods=period)
+        .mean()
+        .to_numpy(float)
+    )
 
 
 def _confirmed_pivot(high, low, j: int, strength: int) -> tuple[bool, bool]:
@@ -70,6 +84,9 @@ def fibonacci_retracement_arrays(
     pivot_strength: int = 2,
     minimum_impulse_atr: float = 2.0,
     level_tolerance_atr: float = 0.25,
+    ema_50_values=None,
+    ema_100_values=None,
+    ema_200_values=None,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -77,11 +94,19 @@ def fibonacci_retracement_arrays(
     low_prices = np.asarray(low_prices, dtype=float)
     close_prices = np.asarray(close_prices, dtype=float)
     atr_values = np.asarray(atr_values, dtype=float)
+    ema_50_values = _causal_ema(close_prices, 50) if ema_50_values is None else np.asarray(ema_50_values, dtype=float)
+    ema_100_values = _causal_ema(close_prices, 100) if ema_100_values is None else np.asarray(ema_100_values, dtype=float)
+    ema_200_values = _causal_ema(close_prices, 200) if ema_200_values is None else np.asarray(ema_200_values, dtype=float)
     n = len(close_prices)
+    if any(len(values) != n for values in (ema_50_values, ema_100_values, ema_200_values)):
+        raise ValueError("Fib EMA arrays must match price length")
 
     depth = np.full(n, np.nan, dtype=float)
     nearest_level = np.full(n, np.nan, dtype=float)
     distance_atr = np.full(n, np.nan, dtype=float)
+    fib_ema_50_distance_atr = np.full(n, np.nan, dtype=float)
+    fib_ema_100_distance_atr = np.full(n, np.nan, dtype=float)
+    fib_ema_200_distance_atr = np.full(n, np.nan, dtype=float)
     reaction_state = np.full(n, "UNKNOWN", dtype=object)
     rejection_atr = np.full(n, np.nan, dtype=float)
     bars_since_test = np.full(n, np.nan, dtype=float)
@@ -169,6 +194,14 @@ def fibonacci_retracement_arrays(
         level_price = levels_price[nearest]
         active_level_price[i] = level_price
         distance_atr[i] = abs(float(close_prices[i]) - level_price) / atr_now
+        for ema_values, output in (
+            (ema_50_values, fib_ema_50_distance_atr),
+            (ema_100_values, fib_ema_100_distance_atr),
+            (ema_200_values, fib_ema_200_distance_atr),
+        ):
+            ema_value = float(ema_values[i])
+            if np.isfinite(ema_value):
+                output[i] = abs(level_price - ema_value) / atr_now
 
         if retracement < FIB_LEVELS[0]:
             state = "APPROACHING"
@@ -213,6 +246,9 @@ def fibonacci_retracement_arrays(
         "FIB_RETRACEMENT_DEPTH": depth,
         "FIB_NEAREST_LEVEL": nearest_level,
         "FIB_LEVEL_DISTANCE_ATR": distance_atr,
+        "FIB_EMA_50_DISTANCE_ATR": fib_ema_50_distance_atr,
+        "FIB_EMA_100_DISTANCE_ATR": fib_ema_100_distance_atr,
+        "FIB_EMA_200_DISTANCE_ATR": fib_ema_200_distance_atr,
         "FIB_REACTION_STATE": reaction_state,
         "FIB_REJECTION_ATR": rejection_atr,
         "FIB_BARS_SINCE_TEST": bars_since_test,
@@ -251,6 +287,9 @@ class FibonacciRetracementMixin:
             pivot_strength=int(self.fib_pivot_strength),
             minimum_impulse_atr=float(self.fib_minimum_impulse_atr),
             level_tolerance_atr=float(self.fib_level_tolerance_atr),
+            ema_50_values=getattr(self, "ema_50_values", None),
+            ema_100_values=getattr(self, "ema_100_values", None),
+            ema_200_values=getattr(self, "ema_200_values", None),
         )
 
     def _infer_signal_strategy_mode(self):
