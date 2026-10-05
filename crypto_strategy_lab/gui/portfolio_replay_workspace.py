@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
+import pandas as pd
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -408,6 +410,11 @@ class PortfolioReplayWorkspace(QWidget):
         if not start_text or not end_text:
             QMessageBox.warning(self, "Funding Carry", "Set a Backtest Setup start and end date first.")
             return
+        # DataRequest uses an exclusive end. Match the main GUI's date-only
+        # convention by including the full displayed end date.
+        normalized_end = end_text
+        if re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", end_text):
+            normalized_end = (pd.Timestamp(end_text) + pd.Timedelta(days=1)).isoformat()
 
         self.funding_run_button.setEnabled(False)
         try:
@@ -423,7 +430,7 @@ class PortfolioReplayWorkspace(QWidget):
                 store,
                 symbol="BTCUSDT",
                 start=start_text,
-                end=end_text,
+                end=normalized_end,
                 config=config,
                 output_root=self._output_root(),
             )
