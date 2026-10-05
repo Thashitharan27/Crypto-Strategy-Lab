@@ -179,6 +179,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
 <div id="app">
   <div id="toolbar">
     <span class="run-badge" id="run-badge"></span>
+    <label>Trades
+      <select id="trade-mode">
+        <option value="none" selected>No trades</option>
+        <option value="selected">Selected trade</option>
+        <option value="all">All trades</option>
+      </select>
+    </label>
     <button id="prev-trade" title="Previous trade">◀</button>
     <select id="trade-select" title="Completed trade"></select>
     <button id="next-trade" title="Next trade">▶</button>
@@ -284,6 +291,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const errorBox = $('error');
   const readout = $('readout');
   const tradeSelect = $('trade-select');
+  const tradeMode = $('trade-mode');
   const chartTf = $('chart-tf');
   const windowSize = $('window-size');
   const viewMode = $('view-mode');
@@ -351,6 +359,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const fullRunOption = document.createElement('option');
   fullRunOption.value = 'full';
   fullRunOption.textContent = 'Full run';
+  fullRunOption.selected = true;
   windowSize.appendChild(fullRunOption);
 
   function api(path, params={}) {
@@ -937,7 +946,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       renderTrade(payload.selectedTrade || {});
       updateRunBadge();
       renderChart(true);
-      if (!fullRun) centerSelectedTrade();
       const referenceNote = payload.chartTimeframe !== payload.run.strategyTimeframe
         ? 'Reference candles: ' + String(payload.chartTimeframe).toUpperCase() +
           ' from current canonical cache; strategy evidence remains ' +
@@ -960,8 +968,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   }
 
   function updateTradeButtons() {
-    $('prev-trade').disabled = currentTrade <= 0 || !boot.trades.length;
-    $('next-trade').disabled = currentTrade >= boot.trades.length - 1 || !boot.trades.length;
+    const selectedMode = tradeMode.value === 'selected';
+    $('prev-trade').disabled = !selectedMode || currentTrade <= 0 || !boot.trades.length;
+    $('next-trade').disabled = !selectedMode || currentTrade >= boot.trades.length - 1 || !boot.trades.length;
+    tradeSelect.disabled = !selectedMode;
+    $('center-trade').disabled = !selectedMode;
+    showPositionBox.disabled = !selectedMode;
+    showFib.disabled = !selectedMode;
     tradeSelect.value = String(currentTrade);
   }
   function setTrade(index) {
@@ -989,6 +1002,10 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   $('prev-trade').addEventListener('click',() => setTrade(currentTrade-1));
   $('next-trade').addEventListener('click',() => setTrade(currentTrade+1));
   tradeSelect.addEventListener('change',() => setTrade(Number(tradeSelect.value)));
+  tradeMode.addEventListener('change',() => {
+    updateTradeButtons();
+    renderChart(false);
+  });
   chartTf.addEventListener('change',() => {
     focusedZone = null;
     inspectedTime = null;
