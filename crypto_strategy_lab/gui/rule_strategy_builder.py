@@ -525,7 +525,7 @@ EVIDENCE_MENU_TREE = (
     (
         "Momentum & Price",
         (
-            "RSI", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
+            "RSI", "RSI_DIVERGENCE", "MOMENTUM", "CLOSE_LOCATION", "VWAP_DISTANCE",
             ("MACD", (
                 "MACD_LINE", "MACD_SIGNAL", "MACD_HISTOGRAM",
                 "MACD_HISTOGRAM_CHANGE", "MACD_CROSS_STATE", "MACD_ZERO_STATE",
