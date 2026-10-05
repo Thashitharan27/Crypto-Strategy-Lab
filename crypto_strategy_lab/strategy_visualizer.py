@@ -367,10 +367,11 @@ class CompletedRunVisualizer:
             source_request, DatasetKind.KLINES, interval=interval
         ).cache_identity()
         if current != expected:
-            raise ValueError(
-                "current canonical candle source does not match the completed run provenance; "
-                "the underlying archive set was changed or repaired after this run"
-            )
+            # Do not block completed-run audit merely because the local canonical
+            # archive was repaired after the run. Persisted trades / feature
+            # evidence remain authoritative; chart candles are reference-only in
+            # this degraded mode and the UI labels that distinction explicitly.
+            return False
         return True
 
     @staticmethod
@@ -1772,6 +1773,61 @@ class CompletedRunVisualizer:
         )
         return result
 
+    def fib_derivation(self, trade_index: int | None) -> dict[str, Any]:
+        """Return persisted native Fib geometry for the selected completed trade."""
+        if trade_index is None or not self.trade_count:
+            return {"status": "NOT_AVAILABLE", "message": "No completed trade selected.", "levels": []}
+        row = self._trade_row(trade_index)
+        start = _finite(row.get("fib_impulse_start_price"))
+        end = _finite(row.get("fib_impulse_end_price"))
+        span = _finite(row.get("fib_impulse_span"))
+        if start is None or end is None:
+            return {
+                "status": "LEGACY_UNAVAILABLE",
+                "message": (
+                    "This completed run predates persisted Fib impulse anchors. "
+                    "Re-run the same configuration to audit exact Fib derivation."
+                ),
+                "levels": [],
+            }
+        side = _trade_side(row)
+        if span is None:
+            span = abs(end - start)
+        if span <= 0:
+            return {"status": "INVALID", "message": "Persisted Fib impulse span is invalid.", "levels": []}
+        entry_level = _finite(row.get("fib_entry_level"))
+        stop_level = _finite(row.get("fib_stop_level"))
+        levels = []
+        for level in (0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0):
+            price = end - level * span if side == "LONG" else end + level * span
+            levels.append(
+                {
+                    "level": level,
+                    "price": float(price),
+                    "selected": entry_level is not None and abs(level - entry_level) < 1e-9,
+                    "stopBoundary": stop_level is not None and abs(level - stop_level) < 1e-9,
+                }
+            )
+        return {
+            "status": "AVAILABLE",
+            "message": "",
+            "direction": side,
+            "impulseStartPrice": start,
+            "impulseEndPrice": end,
+            "impulseSpan": span,
+            "impulseStartIndex": _json_value(row.get("fib_impulse_start_index")),
+            "impulseEndIndex": _json_value(row.get("fib_impulse_end_index")),
+            "entryLevel": entry_level,
+            "stopLevel": stop_level,
+            "stopBoundaryPrice": _finite(row.get("fib_stop_boundary_price")),
+            "actualStopPrice": _finite(row.get("fib_stop_price")),
+            "targetMode": _json_value(row.get("fib_target_mode")),
+            "targetR": _finite(row.get("fib_target_r")),
+            "targetPrice": _finite(row.get("fib_target_price")),
+            "availableRoomR": _finite(row.get("fib_target_available_r")),
+            "levels": levels,
+        }
+
     def _price_lines(self, trade_index: int | None) -> list[dict[str, Any]]:
         if trade_index is None or not self.trade_count:
             return []
@@ -1981,11 +2037,18 @@ class CompletedRunVisualizer:
                 "start": _utc(request.period_start).isoformat(),
                 "end": _utc(request.period_end).isoformat(),
                 "sourceVerified": self.source_verified,
+                "sourceWarning": (
+                    "Current canonical candle archives differ from this completed run's recorded source provenance. "
+                    "Candles are reference-only; persisted trade and Fib values remain the completed-run record."
+                    if self.source_verified is False
+                    else None
+                ),
                 "ruleTraceAvailable": self.rule_trace_path is not None,
                 "srZoneInventoryAvailable": self.sr_zones_path is not None,
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": self.selected_trade_summary(trade_index),
+            "fibDerivation": self.fib_derivation(trade_index),
             "selectedTradeCandleTime": (
                 _unix_seconds(entry_snapshot) if entry_snapshot is not None else None
             ),
@@ -2244,9 +2307,12 @@ html,body{{height:100%;margin:0;background:#0f1720;color:#e6edf3;font-family:Seg
   }}
 
   for (const line of payload.priceLines || []) {{
-    const color=line.kind==='entry' ? '#7db7ff' : line.kind==='stop' ? '#f08a8a' : '#79d39d';
+    const color=line.kind==='entry' ? '#7db7ff'
+      : line.kind==='stop' ? '#f08a8a'
+      : line.kind==='fib' ? '#c7a6ff'
+      : '#79d39d';
     candle.createPriceLine({{
-      price:line.price, color, lineWidth:2, lineStyle:2,
+      price:line.price, color, lineWidth:line.kind==='fib' ? 1 : 2, lineStyle:2,
       axisLabelVisible:true, title:line.title,
     }});
   }}

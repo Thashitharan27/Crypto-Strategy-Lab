@@ -78,6 +78,19 @@ def _fixture(tmp_path: Path):
                 "long_exit_reason": "TP",
                 "pair_net_r": 1.9,
                 "pair_net_pnl": 19.0,
+                "fib_entry_level": 0.5,
+                "fib_stop_level": 0.618,
+                "fib_stop_boundary_price": float(close[300] - 1.5),
+                "fib_stop_price": float(close[300] - 2.0),
+                "fib_impulse_start_price": 108.0,
+                "fib_impulse_end_price": 120.0,
+                "fib_impulse_span": 12.0,
+                "fib_impulse_start_index": 260,
+                "fib_impulse_end_index": 290,
+                "fib_target_mode": "FIXED_R",
+                "fib_target_r": 2.0,
+                "fib_target_price": float(close[300] + 4.0),
+                "fib_target_available_r": 2.5,
                 "strategy_profile_key": "bull_long",
                 "signal_strategy": "MTF_SR_REACTION",
                 "entry_filter_reason": "Strategy profile passed",
@@ -849,6 +862,22 @@ def test_legacy_run_does_not_reverse_engineer_missing_rule_trace(tmp_path):
     assert trace["status"] == "LEGACY_UNAVAILABLE"
     assert "Re-run" in trace["message"]
     assert trace["rows"] == []
+
+
+def test_fib_derivation_uses_persisted_impulse_anchors(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    fib = model.fib_derivation(0)
+
+    assert fib["status"] == "AVAILABLE"
+    assert fib["direction"] == "LONG"
+    assert fib["impulseStartPrice"] == 108.0
+    assert fib["impulseEndPrice"] == 120.0
+    prices = {round(item["level"], 3): item["price"] for item in fib["levels"]}
+    assert prices[0.5] == 114.0
+    assert np.isclose(prices[0.618], 112.584)
+    assert any(item["selected"] for item in fib["levels"] if np.isclose(item["level"], 0.5))
+    assert any(item["stopBoundary"] for item in fib["levels"] if np.isclose(item["level"], 0.618))
 
 
 def test_rejected_signal_markers_are_explicit_opt_in(tmp_path):

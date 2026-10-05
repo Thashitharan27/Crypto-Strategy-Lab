@@ -59,7 +59,9 @@ def test_strategy_visualizer_exposes_dedicated_sr_review_controls_and_inspector(
             workspace.inspector_tabs.tabText(index)
             for index in range(workspace.inspector_tabs.count())
         ]
-        assert labels == ["Trade", "Strategy Inspector", "S/R Inspector"]
+        assert labels == ["Trade", "Fib Inspector", "Strategy Inspector", "S/R Inspector"]
+        assert "fib" in workspace.overlay_checks
+        assert workspace.overlay_checks["fib"].isChecked()
     finally:
         workspace.close()
 
