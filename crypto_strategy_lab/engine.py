@@ -635,6 +635,46 @@ class BacktestEngine(DILadderExecutionMixin):
         if indicator=="MACD_CROSS_STATE": return {"BULLISH":1.0,"BEARISH":2.0,"NONE":3.0}.get(str(self.macd_cross_state[i]),np.nan)
         if indicator=="MACD_ZERO_STATE": return {"ABOVE_ZERO":1.0,"BELOW_ZERO":2.0,"AT_ZERO":3.0}.get(str(self.macd_zero_state[i]),np.nan)
         if indicator=="RSI": return float(self.profile_rsi_values[profile.rsi_period][i])
+        if indicator=="RSI_DIVERGENCE":
+            # Causal regular divergence: the current completed candle must make a
+            # fresh price extreme versus the preceding RSI-period window while RSI
+            # moves the opposite way by at least two points. Only current/past bars
+            # are inspected, so this filter has no pivot-confirmation look-ahead.
+            lookback=max(5,int(profile.rsi_period))
+            start=max(0,int(i)-lookback)
+            if int(i)-start < 5:
+                return np.nan
+            rsi_values=self.profile_rsi_values[profile.rsi_period]
+            current_rsi=float(rsi_values[i])
+            if not np.isfinite(current_rsi):
+                return np.nan
+            prior_lows=np.asarray(self.low[start:i],dtype=float)
+            prior_highs=np.asarray(self.high[start:i],dtype=float)
+            prior_rsi=np.asarray(rsi_values[start:i],dtype=float)
+            valid_low=np.isfinite(prior_lows) & np.isfinite(prior_rsi)
+            valid_high=np.isfinite(prior_highs) & np.isfinite(prior_rsi)
+            if not valid_low.any() or not valid_high.any():
+                return np.nan
+            low_candidates=np.where(valid_low,prior_lows,np.inf)
+            high_candidates=np.where(valid_high,prior_highs,-np.inf)
+            low_offset=int(np.argmin(low_candidates))
+            high_offset=int(np.argmax(high_candidates))
+            current_low=float(self.low[i]); current_high=float(self.high[i])
+            bullish=(
+                np.isfinite(current_low)
+                and current_low < float(prior_lows[low_offset])
+                and current_rsi >= float(prior_rsi[low_offset]) + 2.0
+            )
+            bearish=(
+                np.isfinite(current_high)
+                and current_high > float(prior_highs[high_offset])
+                and current_rsi <= float(prior_rsi[high_offset]) - 2.0
+            )
+            if bullish and not bearish:
+                return 1.0
+            if bearish and not bullish:
+                return 2.0
+            return 3.0
         if indicator=="BB_WIDTH": return float(self.bb_width[i])
         if indicator=="CLOSE_LOCATION": return float(self.close_location_values[i])
         if indicator=="MOMENTUM": return float(self.profile_momentum_values[profile.momentum_lookback_hours][i])
