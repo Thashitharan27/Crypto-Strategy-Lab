@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
+import pandas as pd
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -28,6 +30,7 @@ from crypto_strategy_lab.portfolio_replay import (
     run_portfolio_replay,
 )
 from crypto_strategy_lab.spot_short_replay import replay_spot_short
+from crypto_strategy_lab.funding_carry import FundingCarryConfig, backtest_funding_carry
 
 
 class PortfolioReplayWorkspace(QWidget):
@@ -198,11 +201,54 @@ class PortfolioReplayWorkspace(QWidget):
         spot_form.addRow(self.spot_summary)
         layout.addWidget(spot_box)
 
+        funding_box = QGroupBox("Binance perpetual funding carry test")
+        funding_form = QFormLayout(funding_box)
+        funding_hint = QLabel(
+            "Backtest a delta-neutral BTC spot-long + BTCUSDT perpetual-short hedge "
+            "using Binance funding settlements already stored in the Data Lake."
+        )
+        funding_hint.setWordWrap(True)
+        self.funding_capital = QDoubleSpinBox()
+        self.funding_capital.setRange(1.0, 1_000_000_000.0)
+        self.funding_capital.setPrefix("$")
+        self.funding_capital.setValue(10000.0)
+        self.funding_min_rate = QDoubleSpinBox()
+        self.funding_min_rate.setRange(-10.0, 10.0)
+        self.funding_min_rate.setDecimals(4)
+        self.funding_min_rate.setSuffix("% per settlement")
+        self.funding_min_rate.setValue(0.0)
+        self.funding_entry_fee = QDoubleSpinBox()
+        self.funding_entry_fee.setRange(0.0, 10.0)
+        self.funding_entry_fee.setDecimals(4)
+        self.funding_entry_fee.setSuffix("% per leg")
+        self.funding_entry_fee.setValue(0.05)
+        self.funding_exit_fee = QDoubleSpinBox()
+        self.funding_exit_fee.setRange(0.0, 10.0)
+        self.funding_exit_fee.setDecimals(4)
+        self.funding_exit_fee.setSuffix("% per leg")
+        self.funding_exit_fee.setValue(0.05)
+        self.funding_close_negative = QCheckBox("Close hedge when funding turns negative")
+        self.funding_close_negative.setChecked(False)
+        self.funding_run_button = QPushButton("Run BTC Funding Carry Test")
+        self.funding_summary = QPlainTextEdit()
+        self.funding_summary.setReadOnly(True)
+        self.funding_summary.setMinimumHeight(130)
+        funding_form.addRow(funding_hint)
+        funding_form.addRow("Starting capital", self.funding_capital)
+        funding_form.addRow("Minimum funding to enter", self.funding_min_rate)
+        funding_form.addRow("Entry fee", self.funding_entry_fee)
+        funding_form.addRow("Exit fee", self.funding_exit_fee)
+        funding_form.addRow("Negative funding policy", self.funding_close_negative)
+        funding_form.addRow(self.funding_run_button)
+        funding_form.addRow(self.funding_summary)
+        layout.addWidget(funding_box)
+
         self.refresh_button.clicked.connect(self.refresh_runs)
         self.latest_button.clicked.connect(self.select_latest_per_symbol)
         self.clear_button.clicked.connect(self.clear_selection)
         self.run_button.clicked.connect(self.run_replay)
         self.spot_run_button.clicked.connect(self.run_spot_replay)
+        self.funding_run_button.clicked.connect(self.run_funding_carry)
         self.open_folder_button.clicked.connect(self.open_last_output)
 
         self.refresh_runs()
@@ -348,6 +394,78 @@ class PortfolioReplayWorkspace(QWidget):
         if self._last_run_dir is None:
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._last_run_dir)))
+
+    def run_funding_carry(self):
+        window = self.host_window
+        store = getattr(window, "_data_lake_store", None)
+        if store is None and hasattr(window, "_store"):
+            store = window._store()
+        if store is None:
+            QMessageBox.warning(self, "Funding Carry", "Binance Data Lake is not available.")
+            return
+        start_widget = getattr(window, "trading_start", None)
+        end_widget = getattr(window, "trading_end", None)
+        start_text = start_widget.text().strip() if start_widget is not None else ""
+        end_text = end_widget.text().strip() if end_widget is not None else ""
+        if not start_text or not end_text:
+            QMessageBox.warning(self, "Funding Carry", "Set a Backtest Setup start and end date first.")
+            return
+        # DataRequest uses an exclusive end. Match the main GUI's date-only
+        # convention by including the full displayed end date.
+        normalized_end = end_text
+        if re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", end_text):
+            normalized_end = (pd.Timestamp(end_text) + pd.Timedelta(days=1)).isoformat()
+
+        self.funding_run_button.setEnabled(False)
+        try:
+            store.refresh_catalog()
+            config = FundingCarryConfig(
+                initial_capital_usdt=self.funding_capital.value(),
+                minimum_funding_rate=self.funding_min_rate.value() / 100.0,
+                entry_fee_percent_per_leg=self.funding_entry_fee.value(),
+                exit_fee_percent_per_leg=self.funding_exit_fee.value(),
+                close_on_negative_funding=self.funding_close_negative.isChecked(),
+            )
+            summary, _ledger, output = backtest_funding_carry(
+                store,
+                symbol="BTCUSDT",
+                start=start_text,
+                end=normalized_end,
+                config=config,
+                output_root=self._output_root(),
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Funding Carry Failed", str(exc))
+            self.funding_summary.setPlainText(str(exc))
+            return
+        finally:
+            self.funding_run_button.setEnabled(True)
+
+        self._last_run_dir = output
+        self.open_folder_button.setEnabled(True)
+        self.funding_summary.setPlainText(
+            "Funding events: {:,} (positive {:,}, negative {:,})\n"
+            "Equity: ${:,.2f} -> ${:,.2f}\n"
+            "Total return: {:.2f}%; annualized: {:.2f}%\n"
+            "Funding P/L: ${:,.2f}; fees: ${:,.2f}\n"
+            "Entries/exits: {}/{}; max drawdown: {:.2f}%\n"
+            "Saved: {}\n{}".format(
+                summary["funding_events"],
+                summary["positive_funding_events"],
+                summary["negative_funding_events"],
+                summary["initial_capital_usdt"],
+                summary["ending_equity_usdt"],
+                summary["total_return_percent"],
+                summary["annualized_return_percent"],
+                summary["funding_received_net_usdt"],
+                summary["trading_fees_usdt"],
+                summary["entries"],
+                summary["exits"],
+                summary["maximum_drawdown_percent"],
+                output,
+                summary["limitations"],
+            )
+        )
 
     def run_spot_replay(self):
         selected = self.selected_run_dirs()
