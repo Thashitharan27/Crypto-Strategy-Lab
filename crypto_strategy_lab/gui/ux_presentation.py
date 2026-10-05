@@ -73,6 +73,16 @@ FIELDS = {
         unit=" × signal ATR",
         decimals=2,
     ),
+    "fib_target_mode": FieldPresentation(
+        "Fib Target Method",
+        "Choose the actual take-profit: prior impulse extreme or a fixed multiple of the actual Fib stop risk.",
+    ),
+    "fib_fixed_target_r": FieldPresentation(
+        "Fixed Fib Profit Target",
+        "Actual take-profit distance from entry when Fixed R is selected. R uses the actual entry-to-Fib-stop distance.",
+        unit=" R",
+        decimals=2,
+    ),
     "fib_target_buffer_atr": FieldPresentation(
         "Fib Target Buffer",
         "Distance kept before the prior impulse extreme used as the Fib profit target.",
@@ -176,6 +186,7 @@ ENUM_LABELS = {
     "reject_rule_match_mode": {"ANY": "Any Rule (OR)", "ALL": "All Rules (AND)"},
     "sr_stop_no_level_policy": {"USE_ATR_STOP": "Use ATR Stop When No Valid S/R Exists", "REJECT_TRADE": "Reject Trade When No Valid S/R Exists"},
     "sr_take_profit_mode": {"FIXED_R": "Fixed R Target", "SR_CAPPED_R": "Cap Fixed-R Target at Support/Resistance", "SR_LEVEL": "Structural S/R Target"},
+    "fib_target_mode": {"IMPULSE_EXTREME": "Prior Impulse Extreme (0.0 Fib)", "FIXED_R": "Fixed R Target"},
     "sr_take_profit_no_level_policy": {"USE_FIXED_TP": "Use Fixed Target When No Level Exists", "REJECT_TRADE": "Reject Trade When No Valid Level Exists"},
 }
 
