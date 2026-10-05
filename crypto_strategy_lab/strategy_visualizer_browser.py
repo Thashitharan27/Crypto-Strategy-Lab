@@ -23,7 +23,7 @@ from crypto_strategy_lab.strategy_visualizer import (
 )
 
 
-BROWSER_DEFAULT_VISIBLE_CANDLES = min(1000, MAX_VISIBLE_CANDLES)
+BROWSER_DEFAULT_VISIBLE_CANDLES = min(240, MAX_VISIBLE_CANDLES)
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -204,7 +204,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       <label><input type="checkbox" data-overlay="vwap" checked>VWAP</label>
       <label><input type="checkbox" data-overlay="bb">BB</label>
       <label><input type="checkbox" id="show-rejections">Rejected</label>
-      <label><input type="checkbox" id="show-position-box" checked>Position box</label>
+      <label><input type="checkbox" id="show-position-box" checked>Trade box</label>
+      <label><input type="checkbox" id="show-fib" checked>Fib</label>
     </div>
     <div class="layer-group">
       <label>View
@@ -292,6 +293,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const nearestOnly = $('nearest-only');
   const showRejections = $('show-rejections');
   const showPositionBox = $('show-position-box');
+  const showFib = $('show-fib');
   let payload = null;
   let chart = null;
   let candle = null;
@@ -424,6 +426,26 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     });
   }
 
+  function renderFibSummary(fib) {
+    if (!fib || fib.status !== 'AVAILABLE') return '';
+    const mode = fib.reconstructedLegacy
+      ? '<div class="note status-warn">Fib price ladder reconstructed from persisted execution geometry. Older run did not save swing candle timestamps.</div>'
+      : '<div class="note status-pass">Exact persisted Fib swing geometry.</div>';
+    const rows = [
+      ['Direction', fib.direction],
+      ['Impulse start', fib.impulseStartPrice],
+      ['Impulse end', fib.impulseEndPrice],
+      ['Entry Fib', fib.entryLevel],
+      ['Stop Fib', fib.stopLevel],
+      ['Stop boundary', fib.stopBoundaryPrice],
+      ['Actual SL', fib.actualStopPrice],
+      ['Target R', fib.targetR],
+      ['Target price', fib.targetPrice],
+      ['Available room R', fib.availableRoomR],
+    ].map(([k,v]) => '<tr><th>' + esc(k) + '</th><td>' + esc(typeof v === 'number' ? fmt(v,6) : v) + '</td></tr>').join('');
+    return mode + '<div class="section-title">Fib derivation</div><table class="kv">' + rows + '</table>';
+  }
+
   function renderTrade(summary) {
     const rows = Object.entries(summary || {}).map(([key,value]) =>
       '<tr><th>' + esc(key) + '</th><td>' + esc(
@@ -432,7 +454,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     ).join('');
     $('panel-trade').innerHTML =
       '<div class="note">Exact selected completed-trade values.</div>' +
-      '<table class="kv">' + rows + '</table>';
+      '<table class="kv">' + rows + '</table>' +
+      renderFibSummary(payload?.fibDerivation || null);
   }
 
   function statusClass(text) {
@@ -796,6 +819,56 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       LC.createSeriesMarkers(candle,markers);
     }
 
+    if (viewMode.value !== 'audit' && showFib.checked) {
+      const fib = payload.fibDerivation || {};
+      if (fib.status === 'AVAILABLE') {
+        const candles = payload.candles || [];
+        const entryTime = Number(
+          fib.entryTime || payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
+        );
+        let fibStartTime = Number(fib.impulseStartTime);
+        let fibEndTime = Number(fib.impulseEndTime);
+        if (!Number.isFinite(fibStartTime) || !Number.isFinite(fibEndTime)) {
+          let index = candles.findIndex(item => Number(item.time) >= entryTime);
+          if (index < 0) index = Math.max(0,candles.length-1);
+          fibStartTime = Number(candles[Math.max(0,index-80)]?.time || entryTime);
+          fibEndTime = Number(candles[Math.max(0,index-1)]?.time || entryTime);
+        }
+        if (
+          Number.isFinite(fib.impulseStartPrice) &&
+          Number.isFinite(fib.impulseEndPrice) &&
+          Number.isFinite(fibStartTime) &&
+          Number.isFinite(fibEndTime)
+        ) {
+          const swing = chart.addSeries(LC.LineSeries,{
+            color:'#ffd166',lineWidth:3,priceLineVisible:false,lastValueVisible:false,
+            crosshairMarkerVisible:true,title:fib.reconstructedLegacy ? 'Fib swing · timing reconstructed' : 'Fib swing',
+          });
+          swing.setData([
+            {time:fibStartTime,value:Number(fib.impulseStartPrice)},
+            {time:fibEndTime,value:Number(fib.impulseEndPrice)},
+          ]);
+        }
+        const levelEnd = Number.isFinite(entryTime) ? entryTime : fibEndTime;
+        for (const item of fib.levels || []) {
+          const level = Number(item.level), price = Number(item.price);
+          if (!Number.isFinite(level) || !Number.isFinite(price) ||
+              !Number.isFinite(fibStartTime) || !Number.isFinite(levelEnd)) continue;
+          const important = item.selected || item.stopBoundary ||
+            Math.abs(level-.5)<1e-9 || Math.abs(level-.618)<1e-9;
+          const line = chart.addSeries(LC.LineSeries,{
+            color:item.selected ? '#00e5ff' : item.stopBoundary ? '#ff7b7b'
+              : important ? '#c7a6ff' : '#66717e',
+            lineWidth:important ? 2 : 1,lineStyle:important ? 0 : 2,
+            priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
+            title:'Fib ' + level.toFixed(3) +
+              (item.selected ? ' ENTRY' : item.stopBoundary ? ' STOP LEVEL' : ''),
+          });
+          line.setData([{time:fibStartTime,value:price},{time:levelEnd,value:price}]);
+        }
+      }
+    }
+
     if (viewMode.value !== 'audit') {
       for (const line of payload.priceLines || []) {
         const color = line.kind==='entry' ? '#7db7ff' : line.kind==='stop' ? '#f08a8a' : '#79d39d';
@@ -864,6 +937,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       renderTrade(payload.selectedTrade || {});
       updateRunBadge();
       renderChart(true);
+      if (!fullRun) centerSelectedTrade();
       const referenceNote = payload.chartTimeframe !== payload.run.strategyTimeframe
         ? 'Reference candles: ' + String(payload.chartTimeframe).toUpperCase() +
           ' from current canonical cache; strategy evidence remains ' +
@@ -924,6 +998,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   windowSize.addEventListener('change',loadPayload);
   showRejections.addEventListener('change',loadPayload);
   showPositionBox.addEventListener('change',drawPositionBox);
+  showFib.addEventListener('change',() => renderChart(false));
   function centerSelectedTrade() {
     if (!chart || !payload?.selectedTradeCandleTime) return;
     const candles = payload.candles || [];
@@ -933,7 +1008,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     );
     let index = candles.findIndex(item => Number(item.time) >= target);
     if (index < 0) index = candles.length - 1;
-    const radius = 120;
+    const radius = 70;
     const from = Number(candles[Math.max(0,index-radius)]?.time);
     const to = Number(candles[Math.min(candles.length-1,index+radius)]?.time);
     if (Number.isFinite(from) && Number.isFinite(to) && from < to)

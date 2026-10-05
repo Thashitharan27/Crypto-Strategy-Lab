@@ -1816,16 +1816,42 @@ class CompletedRunVisualizer:
         start = _finite(row.get("fib_impulse_start_price"))
         end = _finite(row.get("fib_impulse_end_price"))
         span = _finite(row.get("fib_impulse_span"))
-        if start is None or end is None:
-            return {
-                "status": "LEGACY_UNAVAILABLE",
-                "message": (
-                    "This completed run predates persisted Fib impulse anchors. "
-                    "Re-run the same configuration to audit exact Fib derivation."
-                ),
-                "levels": [],
-            }
         side = _trade_side(row)
+        reconstructed = False
+        if start is None or end is None:
+            # Older Fib runs persisted enough native execution geometry to
+            # reconstruct the exact price ladder even though they did not retain
+            # the pivot candle indices/timestamps. The prior impulse extreme is
+            # fib_target_level_price and the next-deeper stop boundary is
+            # fib_stop_boundary_price.
+            stop_level = _finite(row.get("fib_stop_level"))
+            boundary = _finite(row.get("fib_stop_boundary_price"))
+            target_extreme = _finite(row.get("fib_target_level_price"))
+            if (
+                side in {"LONG", "SHORT"}
+                and stop_level is not None
+                and stop_level > 0
+                and boundary is not None
+                and target_extreme is not None
+            ):
+                end = target_extreme
+                span = (
+                    (end - boundary) / stop_level
+                    if side == "LONG"
+                    else (boundary - end) / stop_level
+                )
+                if span is not None and span > 0:
+                    start = end - span if side == "LONG" else end + span
+                    reconstructed = True
+            if start is None or end is None:
+                return {
+                    "status": "LEGACY_UNAVAILABLE",
+                    "message": (
+                        "This completed run predates persisted Fib impulse anchors "
+                        "and does not contain enough execution geometry to reconstruct them."
+                    ),
+                    "levels": [],
+                }
         if span is None:
             span = abs(end - start)
         if span <= 0:
@@ -1853,7 +1879,13 @@ class CompletedRunVisualizer:
             )
         return {
             "status": "AVAILABLE",
-            "message": "",
+            "message": (
+                "Fib price ladder reconstructed exactly from persisted execution geometry; "
+                "the older run did not persist swing candle timestamps."
+                if reconstructed
+                else ""
+            ),
+            "reconstructedLegacy": reconstructed,
             "direction": side,
             "impulseStartPrice": start,
             "impulseEndPrice": end,

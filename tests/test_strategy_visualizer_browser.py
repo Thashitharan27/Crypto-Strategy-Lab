@@ -72,6 +72,28 @@ class _FakeVisualizer:
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": {"Side": "LONG"},
+            "fibDerivation": {
+                "status": "AVAILABLE",
+                "message": "",
+                "reconstructedLegacy": False,
+                "direction": "LONG",
+                "impulseStartPrice": 90.0,
+                "impulseEndPrice": 110.0,
+                "impulseStartTime": 1_699_990_000,
+                "impulseEndTime": 1_699_998_000,
+                "entryTime": 1_700_000_000,
+                "entryLevel": 0.5,
+                "stopLevel": 0.618,
+                "stopBoundaryPrice": 97.64,
+                "actualStopPrice": 95.0,
+                "targetR": 2.0,
+                "targetPrice": 110.0,
+                "availableRoomR": 2.5,
+                "levels": [
+                    {"level": 0.5, "price": 100.0, "selected": True, "stopBoundary": False},
+                    {"level": 0.618, "price": 97.64, "selected": False, "stopBoundary": True},
+                ],
+            },
             "selectedTradeCandleTime": 1_700_000_000,
             "selectedTradeChartCandleTime": 1_700_000_000,
             "candles": [],
@@ -133,6 +155,7 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert 'id="sr-snapshot"' in html
     assert 'id="nearest-only"' in html
     assert 'id="show-position-box"' in html
+    assert 'id="show-fib"' in html
     assert 'id="position-box-layer"' in html
     assert "Pan/zoom freely" in html
     assert "Click a zone below to isolate it on the chart" in html
@@ -153,6 +176,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "OPEN " in html
     assert "CLOSE " in html
     assert "box.exitPrice" in html
+    assert "Fib swing" in html
+    assert "Fib derivation" in html
+    assert "centerSelectedTrade()" in html
 
 
 def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():

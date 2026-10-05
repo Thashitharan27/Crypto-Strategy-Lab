@@ -882,6 +882,31 @@ def test_fib_derivation_uses_persisted_impulse_anchors(tmp_path):
     assert any(item["stopBoundary"] for item in fib["levels"] if np.isclose(item["level"], 0.618))
 
 
+def test_fib_derivation_reconstructs_legacy_price_ladder(tmp_path):
+    service, run_dir, manifest, _market = _fixture(tmp_path)
+    model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    model.trades.loc[0, "fib_impulse_start_price"] = np.nan
+    model.trades.loc[0, "fib_impulse_end_price"] = np.nan
+    model.trades.loc[0, "fib_impulse_span"] = np.nan
+    model.trades.loc[0, "fib_impulse_start_index"] = np.nan
+    model.trades.loc[0, "fib_impulse_end_index"] = np.nan
+    model.trades.loc[0, "fib_target_level_price"] = 120.0
+    model.trades.loc[0, "fib_stop_level"] = 0.618
+    model.trades.loc[0, "fib_stop_boundary_price"] = 112.584
+
+    fib = model.fib_derivation(0)
+
+    assert fib["status"] == "AVAILABLE"
+    assert fib["reconstructedLegacy"] is True
+    assert np.isclose(fib["impulseEndPrice"], 120.0)
+    assert np.isclose(fib["impulseStartPrice"], 108.0)
+    prices = {round(item["level"], 3): item["price"] for item in fib["levels"]}
+    assert np.isclose(prices[0.5], 114.0)
+    assert np.isclose(prices[0.618], 112.584)
+    assert fib["impulseStartTime"] is None
+    assert fib["impulseEndTime"] is None
+
+
 def test_rejected_signal_markers_are_explicit_opt_in(tmp_path):
     service, run_dir, manifest, _market = _fixture(tmp_path)
     model = CompletedRunVisualizer.load(service, run_dir, manifest)
