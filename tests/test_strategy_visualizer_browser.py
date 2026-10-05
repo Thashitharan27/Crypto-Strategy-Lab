@@ -90,6 +90,8 @@ class _FakeVisualizer:
                 "entryChartTime": 1_700_000_000,
                 "exitTime": 1_700_003_600,
                 "exitChartTime": 1_700_003_600,
+                "exitPrice": 108.0,
+                "exitReason": "TP",
                 "open": False,
                 "visibleEnd": 1_701_000_000,
             },
@@ -148,6 +150,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert ".position-box.risk" in html
     assert "addRect('reward'" in html
     assert "addRect('risk'" in html
+    assert "OPEN " in html
+    assert "CLOSE " in html
+    assert "box.exitPrice" in html
 
 
 def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():
