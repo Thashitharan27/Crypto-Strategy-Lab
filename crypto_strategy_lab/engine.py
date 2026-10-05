@@ -1262,6 +1262,8 @@ class BacktestEngine(DILadderExecutionMixin):
         profile_rsi = float(self.profile_rsi_values[active_profile.rsi_period][ind_i])
         profile_momentum = float(self.profile_momentum_values[active_profile.momentum_lookback_hours][ind_i])
         pair.entry_rsi = profile_rsi if np.isfinite(profile_rsi) else np.nan
+        divergence_code = self._strategy_profile_rule_value(ind_i, direction, active_profile, "RSI_DIVERGENCE")
+        pair.rsi_divergence = {1.0: "BULLISH", 2.0: "BEARISH", 3.0: "NONE"}.get(divergence_code, "UNKNOWN")
         pair.directional_momentum_return = profile_momentum if np.isfinite(profile_momentum) else np.nan
         pair.long_momentum_return = pair.directional_momentum_return
         pair.market_regime = self._regime_at(ind_i)
@@ -2131,6 +2133,7 @@ class BacktestEngine(DILadderExecutionMixin):
             "bull_regime": getattr(p, "bull_regime", False),
             "entry_atr_pct": getattr(p, "entry_atr_pct", np.nan),
             "entry_rsi": getattr(p, "entry_rsi", np.nan),
+            "rsi_divergence": getattr(p, "rsi_divergence", "UNKNOWN"),
             "entry_close_location": getattr(p, "entry_close_location", np.nan),
             "directional_momentum_return_at_entry": getattr(p, "directional_momentum_return", np.nan),
         }
