@@ -14,10 +14,13 @@ import pandas as pd
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 2
+FIB_RESEARCH_CONTEXT_VERSION = 3
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
+FIB_DOMINANT_LOOKBACK_BARS = 160
+FIB_DOMINANT_RECENCY_PENALTY = 0.35
+FIB_DOMINANT_REPLACEMENT_RATIO = 1.10
 FIB_LEVELS = (0.236, 0.382, 0.500, 0.618, 0.786)
 FIB_SIGNAL_LEVELS = frozenset({0.382, 0.500, 0.618})
 FIB_RULE_INDICATORS = frozenset({
@@ -87,6 +90,9 @@ def fibonacci_retracement_arrays(
     ema_50_values=None,
     ema_100_values=None,
     ema_200_values=None,
+    dominant_lookback_bars: int = FIB_DOMINANT_LOOKBACK_BARS,
+    dominant_recency_penalty: float = FIB_DOMINANT_RECENCY_PENALTY,
+    dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -123,10 +129,26 @@ def fibonacci_retracement_arrays(
 
     confirmed_highs: list[int] = []
     confirmed_lows: list[int] = []
+    # Candidate tuple: (direction, start_index, end_index, structural_strength_atr).
+    # Candidates are created only when the ending pivot is confirmed, so the
+    # selector remains causal.  The active leg is sticky: a newer local wiggle
+    # cannot replace a meaningful swing unless it is materially stronger, the
+    # active swing ages out, or the active retracement has broken.
+    structural_candidates: list[tuple[str, int, int, float]] = []
     active_leg: tuple[str, int, int] | None = None
     active_tests = 0
     active_last_test: int | None = None
+    active_broken = False
     signalled_leg: tuple[str, int, int] | None = None
+
+    dominant_lookback_bars = max(16, int(dominant_lookback_bars))
+    dominant_recency_penalty = min(0.95, max(0.0, float(dominant_recency_penalty)))
+    dominant_replacement_ratio = max(1.0, float(dominant_replacement_ratio))
+
+    def _candidate_live_score(candidate, now):
+        age = max(0, now - candidate[2])
+        age_fraction = min(1.0, age / float(dominant_lookback_bars))
+        return candidate[3] * (1.0 - dominant_recency_penalty * age_fraction)
 
     for i in range(n):
         # A pivot at j only becomes known after pivot_strength bars have closed.
@@ -135,34 +157,62 @@ def fibonacci_retracement_arrays(
             is_high, is_low = _confirmed_pivot(high_prices, low_prices, j, pivot_strength)
             if is_high:
                 confirmed_highs.append(j)
+                floor = j - dominant_lookback_bars
+                prior_lows = [idx for idx in confirmed_lows if floor <= idx < j]
+                if prior_lows:
+                    lo = min(prior_lows, key=lambda idx: float(low_prices[idx]))
+                    span = float(high_prices[j]) - float(low_prices[lo])
+                    atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
+                    if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
+                        structural_candidates.append(("LONG", lo, j, span / atr_confirm))
             if is_low:
                 confirmed_lows.append(j)
+                floor = j - dominant_lookback_bars
+                prior_highs = [idx for idx in confirmed_highs if floor <= idx < j]
+                if prior_highs:
+                    hi = max(prior_highs, key=lambda idx: float(high_prices[idx]))
+                    span = float(high_prices[hi]) - float(low_prices[j])
+                    atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
+                    if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
+                        structural_candidates.append(("SHORT", hi, j, span / atr_confirm))
 
-        bull_leg = None
-        bear_leg = None
-        if confirmed_highs and confirmed_lows:
-            hi = confirmed_highs[-1]
-            prior_lows = [idx for idx in confirmed_lows if idx < hi]
-            if prior_lows:
-                lo = prior_lows[-1]
-                bull_leg = ("LONG", lo, hi)
-
-            lo = confirmed_lows[-1]
-            prior_highs = [idx for idx in confirmed_highs if idx < lo]
-            if prior_highs:
-                hi = prior_highs[-1]
-                bear_leg = ("SHORT", hi, lo)
-
-        candidates = [leg for leg in (bull_leg, bear_leg) if leg is not None]
-        if not candidates:
+        cutoff = i - dominant_lookback_bars
+        structural_candidates = [
+            candidate for candidate in structural_candidates
+            if candidate[2] >= cutoff
+        ]
+        if not structural_candidates:
             continue
-        # Most recently completed confirmed impulse wins.
-        leg = max(candidates, key=lambda item: item[2])
+
+        best = max(
+            structural_candidates,
+            key=lambda candidate: (
+                _candidate_live_score(candidate, i),
+                candidate[2],
+            ),
+        )
+        best_leg = best[:3]
+        leg = best_leg
+        if active_leg is not None and active_leg != best_leg:
+            active_candidate = next(
+                (
+                    candidate for candidate in structural_candidates
+                    if candidate[:3] == active_leg
+                ),
+                None,
+            )
+            if active_candidate is not None and not active_broken:
+                active_score = _candidate_live_score(active_candidate, i)
+                best_score = _candidate_live_score(best, i)
+                if best_score < active_score * dominant_replacement_ratio:
+                    leg = active_leg
+
         direction, start_i, end_i = leg
         if leg != active_leg:
             active_leg = leg
             active_tests = 0
             active_last_test = None
+            active_broken = False
 
         start_price = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
         end_price = float(high_prices[end_i] if direction == "LONG" else low_prices[end_i])
@@ -233,6 +283,7 @@ def fibonacci_retracement_arrays(
             state = "HELD"
 
         reaction_state[i] = state
+        active_broken = state == "BROKEN"
         test_count[i] = float(active_tests)
         if active_last_test is not None:
             bars_since_test[i] = float(i - active_last_test)
@@ -275,6 +326,9 @@ class FibonacciRetracementMixin:
     fib_pivot_strength = FIB_PIVOT_STRENGTH
     fib_minimum_impulse_atr = FIB_MINIMUM_IMPULSE_ATR
     fib_level_tolerance_atr = FIB_LEVEL_TOLERANCE_ATR
+    fib_dominant_lookback_bars = FIB_DOMINANT_LOOKBACK_BARS
+    fib_dominant_recency_penalty = FIB_DOMINANT_RECENCY_PENALTY
+    fib_dominant_replacement_ratio = FIB_DOMINANT_REPLACEMENT_RATIO
 
     def _fib_features_needed(self) -> bool:
         return fib_features_needed(self.config.strategy_profiles)
@@ -296,6 +350,9 @@ class FibonacciRetracementMixin:
             ema_50_values=getattr(self, "ema_50_values", None),
             ema_100_values=getattr(self, "ema_100_values", None),
             ema_200_values=getattr(self, "ema_200_values", None),
+            dominant_lookback_bars=int(self.fib_dominant_lookback_bars),
+            dominant_recency_penalty=float(self.fib_dominant_recency_penalty),
+            dominant_replacement_ratio=float(self.fib_dominant_replacement_ratio),
         )
 
     def _infer_signal_strategy_mode(self):
