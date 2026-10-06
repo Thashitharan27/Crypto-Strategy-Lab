@@ -2187,6 +2187,21 @@ class CompletedRunVisualizer:
             sr_events = self._snap_timed_items_to_market(sr_events, visible)
 
         request = self.seed.request
+        selected_view_start = None
+        selected_view_end = None
+        if trade_index is not None and self.trade_count:
+            interval = pd.Timedelta(interval_to_timedelta(chart_timeframe))
+            center = self._center_time(trade_index)
+            half_window = 120
+            selected_view_start = max(
+                _utc(request.period_start),
+                center - half_window * interval,
+            )
+            selected_view_end = min(
+                _utc(request.period_end),
+                center + half_window * interval,
+            )
+
         return {
             "run": {
                 "runId": str(self.manifest.get("run_id") or self.run_dir.name),
@@ -2219,6 +2234,16 @@ class CompletedRunVisualizer:
                 _unix_seconds(entry_snapshot) if entry_snapshot is not None else None
             ),
             "selectedTradeChartCandleTime": entry_chart_snapshot,
+            "selectedTradeViewStart": (
+                _unix_seconds(selected_view_start)
+                if selected_view_start is not None
+                else None
+            ),
+            "selectedTradeViewEnd": (
+                _unix_seconds(selected_view_end)
+                if selected_view_end is not None
+                else None
+            ),
             "candles": candles,
             "overlays": self._overlays(
                 market,
