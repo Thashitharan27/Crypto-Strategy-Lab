@@ -47,3 +47,13 @@ def test_v2_server_uses_minimal_payload_path():
     source = __import__("inspect").getsource(strategy_visualizer_browser_v2)
     assert "build_v2_diagnostic_payload" in source
     assert "build_payload(" not in source
+
+
+def test_v2_html_includes_trade_box_and_correct_summary_keys():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+
+    assert 'id="trade-box-layer"' in html
+    assert "function drawTradeBox()" in html
+    assert "timeToCoordinate(Number(open.time))" in html
+    assert "trade.Entry ?? trade.entry" in html
+    assert "trade['Entry Time'] || trade.entryTime" in html
