@@ -1355,6 +1355,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         ? 'Full run loaded · ' + (payload.candles || []).length.toLocaleString() + ' candles. '
         : (payload.candles || []).length.toLocaleString() + ' candles loaded. ') +
         'Pan/zoom freely. Chart view only changes the visible time range; the full run remains loaded. ' +
+        (chartView.value === 'selected' ? 'Selected trade viewport is active. ' : '') +
         'Click aligned strategy candles for exact persisted rule and S/R evidence.';
       if (payload.selectedTradeCandleTime) {
         await inspectTime(payload.selectedTradeCandleTime,false);
@@ -1445,10 +1446,15 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     let last = Math.min(candles.length - 1, first + windowBars - 1);
     first = Math.max(0, last - windowBars + 1);
 
-    chart.timeScale().setVisibleLogicalRange({
-      from: first - 0.5,
-      to: last + 0.5,
-    });
+    const firstTime = Number(candles[first]?.time);
+    const lastTime = Number(candles[last]?.time);
+    if (Number.isFinite(firstTime) && Number.isFinite(lastTime) && lastTime > firstTime) {
+      // Use the exact candle timestamps rather than logical indices. The
+      // browser visualizer already uses setVisibleRange reliably elsewhere,
+      // while logical ranges can be expanded/reinterpreted after series and
+      // marker layout. This makes Selected trade view visibly deterministic.
+      chart.timeScale().setVisibleRange({from:firstTime,to:lastTime});
+    }
 
     if (resetPrice) {
       const localRange = computeSelectedTradePriceRange(first,last);
