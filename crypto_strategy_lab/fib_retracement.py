@@ -4,7 +4,10 @@ A swing is not usable until the right-side confirmation bars have closed. The
 strategy therefore never selects historical pivots with hindsight. Confirmed
 pivot legs are ranked as structural candidates over a bounded recent window;
 the active Fib remains on the dominant swing until a materially stronger swing
-is confirmed, the old swing ages out, or its retracement breaks. Once a
+is confirmed, the old swing ages out, or its retracement breaks. While an active
+swing remains valid, a newly confirmed higher high / lower low extends that same
+leg from its original anchor even when the anchor is older than the discovery
+lookback. Once a
 confirmed impulse exists, the first successful reaction at 0.382, 0.500, or
 0.618 may produce a signal in the impulse direction. All retracement measurements
 remain available as generic Entry/Veto evidence.
@@ -17,7 +20,7 @@ import pandas as pd
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 3
+FIB_RESEARCH_CONTEXT_VERSION = 4
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -139,6 +142,7 @@ def fibonacci_retracement_arrays(
     # active swing ages out, or the active retracement has broken.
     structural_candidates: list[tuple[str, int, int, float]] = []
     active_leg: tuple[str, int, int] | None = None
+    active_extension_leg: tuple[str, int, int] | None = None
     active_tests = 0
     active_last_test: int | None = None
     active_broken = False
@@ -155,11 +159,29 @@ def fibonacci_retracement_arrays(
 
     for i in range(n):
         # A pivot at j only becomes known after pivot_strength bars have closed.
+        # The bounded lookback governs discovery of new structural swings, but
+        # an already-active, unbroken swing may extend to a newly confirmed
+        # higher high / lower low while preserving its original anchor.
+        active_extension_leg = None
         j = i - pivot_strength
         if j >= pivot_strength:
             is_high, is_low = _confirmed_pivot(high_prices, low_prices, j, pivot_strength)
             if is_high:
                 confirmed_highs.append(j)
+                if (
+                    active_leg is not None
+                    and active_leg[0] == "LONG"
+                    and not active_broken
+                    and j > active_leg[2]
+                    and float(high_prices[j]) > float(high_prices[active_leg[2]])
+                ):
+                    anchor = active_leg[1]
+                    span = float(high_prices[j]) - float(low_prices[anchor])
+                    atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
+                    if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
+                        extension = ("LONG", anchor, j, span / atr_confirm)
+                        structural_candidates.append(extension)
+                        active_extension_leg = extension[:3]
                 floor = j - dominant_lookback_bars
                 prior_lows = [idx for idx in confirmed_lows if floor <= idx < j]
                 if prior_lows:
@@ -170,6 +192,20 @@ def fibonacci_retracement_arrays(
                         structural_candidates.append(("LONG", lo, j, span / atr_confirm))
             if is_low:
                 confirmed_lows.append(j)
+                if (
+                    active_leg is not None
+                    and active_leg[0] == "SHORT"
+                    and not active_broken
+                    and j > active_leg[2]
+                    and float(low_prices[j]) < float(low_prices[active_leg[2]])
+                ):
+                    anchor = active_leg[1]
+                    span = float(high_prices[anchor]) - float(low_prices[j])
+                    atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
+                    if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
+                        extension = ("SHORT", anchor, j, span / atr_confirm)
+                        structural_candidates.append(extension)
+                        active_extension_leg = extension[:3]
                 floor = j - dominant_lookback_bars
                 prior_highs = [idx for idx in confirmed_highs if floor <= idx < j]
                 if prior_highs:
@@ -199,8 +235,10 @@ def fibonacci_retracement_arrays(
             ),
         )
         best_leg = best[:3]
-        leg = best_leg
-        if active_leg is not None and active_leg != best_leg:
+        # Extending the same unbroken structural leg is not a competing swing,
+        # so it should not be blocked by the 1.10 replacement threshold.
+        leg = active_extension_leg or best_leg
+        if active_extension_leg is None and active_leg is not None and active_leg != best_leg:
             active_candidate = next(
                 (
                     candidate for candidate in structural_candidates
