@@ -231,7 +231,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "const windowBars = 240" in html
     assert "entryIndex = candleIndexForTime(entryTime)" in html
     assert "chart.timeScale().setVisibleRange({from:firstTime,to:lastTime})" in html
-    assert "Selected trade viewport is active." in html
+    assert "Selected trade viewport is active" in html
+    assert "selectedTradeViewStart" in html
+    assert "selectedTradeViewEnd" in html
     assert "computeSelectedTradePriceRange" in html
     assert "defaultPriceRangeKey = payloadPriceRangeKey() + ':selected:' + currentTrade" in html
     assert "centerSelectedTrade(true)" in html
