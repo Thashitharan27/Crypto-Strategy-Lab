@@ -57,7 +57,15 @@ html,body{height:100%;margin:0;background:#0b121a;color:#e6edf3;font-family:Sego
 button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-radius:5px;padding:5px 8px}
 #trade{min-width:460px;max-width:62vw}
 #diag{font:12px/1.45 Consolas,monospace;padding:7px 10px;background:#0f1720;border-bottom:1px solid #2b3948;white-space:pre-wrap}
-#chart{min-height:0}
+#chart-wrap{position:relative;min-height:0}
+#chart{position:absolute;inset:0}
+#trade-box-layer{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+.trade-rect{position:absolute;box-sizing:border-box;border-radius:2px}
+.trade-rect.risk{background:rgba(219,68,68,.22);border:1px solid rgba(255,105,105,.9)}
+.trade-rect.reward{background:rgba(38,166,91,.23);border:1px solid rgba(83,220,141,.9)}
+.trade-label{position:absolute;padding:2px 5px;border-radius:3px;font:11px/1.2 Segoe UI,Arial,sans-serif;white-space:nowrap}
+.trade-label.entry{background:rgba(43,108,176,.96);color:#fff}
+.trade-label.exit{background:rgba(184,132,50,.96);color:#fff}
 .bad{color:#f08a8a}.good{color:#6fd3a4}.muted{color:#91a0b2}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
@@ -72,7 +80,10 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <label><input id="markers" type="checkbox" checked> OPEN/EXIT markers</label>
   </div>
   <div id="diag">Loading…</div>
-  <div id="chart"></div>
+  <div id="chart-wrap">
+    <div id="chart"></div>
+    <div id="trade-box-layer"></div>
+  </div>
 </div>
 <script>
 (() => {
@@ -81,6 +92,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   const tradeSelect = $('trade');
   const diag = $('diag');
   const showMarkers = $('markers');
+  const tradeBoxLayer = $('trade-box-layer');
   let payload = null;
   let currentTrade = 0;
   let chart = null;
@@ -163,12 +175,12 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     const lines = [
       'FULL RUN CANDLES: ' + (payload.candles || []).length,
       'TRADE: #' + (Number(payload.selectedTradeIndex)+1) + ' ' + String(trade.side || ''),
-      'persisted entry time: ' + String(trade.entryTime || 'n/a'),
+      'persisted entry time: ' + String(trade['Entry Time'] || trade.entryTime || 'n/a'),
       'chart entry time:     ' + fmtTime(entryTime),
       'entry candle index:   ' + String(entryIndex),
       'entry candle time:    ' + fmtTime(entryCandle?.time),
       'entry candle OHLC:    ' + (entryCandle ? [entryCandle.open,entryCandle.high,entryCandle.low,entryCandle.close].join(' / ') : 'n/a'),
-      'persisted entry price:' + String(trade.entry ?? 'n/a'),
+      'persisted entry price:' + String(trade.Entry ?? trade.entry ?? 'n/a'),
       'entry close delta:    ' + (priceDelta == null ? 'n/a' : priceDelta.toFixed(6)),
       'OPEN marker time:     ' + fmtTime(openMarker?.time),
       'EXIT marker time:     ' + fmtTime(exitMarker?.time),
@@ -177,6 +189,59 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       'selected view bounds: ' + fmtTime(payload.selectedTradeViewStart) + ' -> ' + fmtTime(payload.selectedTradeViewEnd),
     ];
     diag.textContent = lines.join('\\n');
+  }
+
+  function addTradeLabel(x,y,className,text) {
+    if (![x,y].every(v => v != null && Number.isFinite(Number(v)))) return;
+    const label=document.createElement('div');
+    label.className='trade-label '+className;
+    label.style.left=Math.max(2,Number(x))+'px';
+    label.style.top=Math.max(2,Number(y)-10)+'px';
+    label.textContent=text;
+    tradeBoxLayer.appendChild(label);
+  }
+
+  function drawTradeBox() {
+    tradeBoxLayer.replaceChildren();
+    if (!payload || !chart || !candles) return;
+    const trade=payload.selectedTrade || {};
+    const markers=payload.markers || [];
+    const open=markers.find(m => String(m.kind)==='selected-open');
+    const exit=markers.find(m => String(m.kind)==='exit');
+    if (!open) return;
+
+    const entry=Number(trade.Entry ?? trade.entry);
+    const stop=Number(trade.Stop ?? trade.stop);
+    const target=Number(trade.Target ?? trade.target);
+    const exitPrice=Number(trade.Exit ?? trade.exit);
+    const x1=chart.timeScale().timeToCoordinate(Number(open.time));
+    const endTime=exit ? Number(exit.time) : Number(payload.selectedTradeViewEnd);
+    const x2=chart.timeScale().timeToCoordinate(endTime);
+    const entryY=candles.priceToCoordinate(entry);
+    const stopY=candles.priceToCoordinate(stop);
+    const targetY=candles.priceToCoordinate(target);
+    const exitY=candles.priceToCoordinate(exitPrice);
+    if ([x1,x2,entryY].some(v => v == null || !Number.isFinite(Number(v)))) return;
+
+    const left=Math.min(Number(x1),Number(x2));
+    const right=Math.max(Number(x1),Number(x2));
+    const width=Math.max(8,right-left);
+
+    function rect(a,b,className){
+      if ([a,b].some(v => v == null || !Number.isFinite(Number(v)))) return;
+      const el=document.createElement('div');
+      el.className='trade-rect '+className;
+      el.style.left=left+'px';
+      el.style.width=width+'px';
+      el.style.top=Math.min(Number(a),Number(b))+'px';
+      el.style.height=Math.max(2,Math.abs(Number(b)-Number(a)))+'px';
+      tradeBoxLayer.appendChild(el);
+    }
+    rect(entryY,stopY,'risk');
+    rect(entryY,targetY,'reward');
+    addTradeLabel(left+4,entryY,'entry','OPEN '+String(trade.Entry ?? trade.entry ?? ''));
+    if (exit && Number.isFinite(exitPrice))
+      addTradeLabel(Math.max(left+4,right-90),exitY,'exit','EXIT '+String(trade.Exit ?? trade.exit ?? ''));
   }
 
   function buildChart() {
@@ -194,6 +259,9 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     });
     candles.setData(payload.candles || []);
     applyMarkers();
+    chart.timeScale().subscribeVisibleTimeRangeChange(drawTradeBox);
+    if (window.ResizeObserver) new ResizeObserver(drawTradeBox).observe($('chart-wrap'));
+    requestAnimationFrame(drawTradeBox);
   }
 
   function centerSelected() {
@@ -203,6 +271,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
     chart.timeScale().setVisibleRange({from:start,to:end});
     chart.priceScale('right').applyOptions({autoScale:true});
+    requestAnimationFrame(drawTradeBox);
   }
 
   async function load() {
