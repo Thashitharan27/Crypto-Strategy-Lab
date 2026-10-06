@@ -1441,13 +1441,22 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const lastTime = Number(payload.selectedTradeViewEnd);
     if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime) || lastTime <= firstTime) return;
 
-    chart.timeScale().setVisibleRange({from:firstTime,to:lastTime});
+    // The server owns the selected-trade time window. Convert those exact
+    // bounds to candle indexes only for Lightweight Charts' logical viewport.
+    // This avoids the timestamp-range path expanding/repositioning the view
+    // when the chart contains full-run candles plus Fib/marker series.
+    const firstIndex = candleIndexForTime(firstTime);
+    const lastIndex = candleIndexForTime(lastTime);
+    if (firstIndex == null || lastIndex == null || lastIndex <= firstIndex) return;
+    chart.timeScale().setVisibleLogicalRange({
+      from:firstIndex - 0.5,
+      to:lastIndex + 0.5,
+    });
 
     if (resetPrice) {
       let low = Infinity, high = -Infinity;
-      for (const bar of candles) {
-        const time = Number(bar?.time);
-        if (!Number.isFinite(time) || time < firstTime || time > lastTime) continue;
+      for (let index = firstIndex; index <= lastIndex; index++) {
+        const bar = candles[index];
         const lo = Number(bar?.low), hi = Number(bar?.high);
         if (Number.isFinite(lo)) low = Math.min(low,lo);
         if (Number.isFinite(hi)) high = Math.max(high,hi);
@@ -1475,8 +1484,15 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         defaultPriceRangeKey = payloadPriceRangeKey() + ':selected:' + currentTrade;
         priceZoomFactor = 1.0;
         pricePanOffset = 0.0;
-        chart?.priceScale('right').applyOptions({autoScale:true});
-        candle?.applyOptions({});
+        // Toggling auto-scale forces Lightweight Charts to re-query the
+        // autoscale provider after changing the selected-window base range.
+        chart?.priceScale('right').applyOptions({autoScale:false});
+        requestAnimationFrame(() => {
+          chart?.priceScale('right').applyOptions({autoScale:true});
+          candle?.applyOptions({});
+          drawFibOverlay();
+          drawPositionBox();
+        });
       }
     }
   }
