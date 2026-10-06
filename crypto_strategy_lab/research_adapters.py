@@ -12,6 +12,9 @@ from .funding_execution import FundingAwareRuleBacktestEngine as RuleAwareDataLa
 from .gui.enhanced_config import enhanced_default_gui_config, build_enhanced_backtest_config
 from .strategy_profiles import StrategyProfile
 from .fib_retracement import (
+    FIB_DOMINANT_LOOKBACK_BARS,
+    FIB_DOMINANT_RECENCY_PENALTY,
+    FIB_DOMINANT_REPLACEMENT_RATIO,
     FIB_LEVEL_TOLERANCE_ATR,
     FIB_MINIMUM_IMPULSE_ATR,
     FIB_PIVOT_STRENGTH,
@@ -43,6 +46,9 @@ class PreparedPolicyConfig:
     fib_pivot_strength: int = FIB_PIVOT_STRENGTH
     fib_minimum_impulse_atr: float = FIB_MINIMUM_IMPULSE_ATR
     fib_level_tolerance_atr: float = FIB_LEVEL_TOLERANCE_ATR
+    fib_dominant_lookback_bars: int = FIB_DOMINANT_LOOKBACK_BARS
+    fib_dominant_recency_penalty: float = FIB_DOMINANT_RECENCY_PENALTY
+    fib_dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO
     market_symbol: str = "POLICY"
 
 
