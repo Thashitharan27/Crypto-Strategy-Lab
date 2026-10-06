@@ -83,6 +83,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <select id="trade"></select>
     <button id="center">Center selected</button>
     <button id="fit">Fit full run</button>
+    <button id="reset-price">Reset price</button>
   </div>
   <div id="diag">Loading…</div>
   <div id="chart-wrap">
@@ -97,12 +98,17 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   const $ = id => document.getElementById(id);
   const tradeSelect = $('trade');
   const diag = $('diag');
+  const chartWrap = $('chart-wrap');
   const fibLayer = $('fib-layer');
   const tradeBoxLayer = $('trade-box-layer');
   let payload = null;
   let currentTrade = 0;
   let chart = null;
   let candles = null;
+  let priceZoomFactor = 1.0;
+  let pricePanOffset = 0.0;
+  let verticalPan = null;
+  let defaultPriceRange = null;
 
   for (const item of boot.trades) {
     const option = document.createElement('option');
@@ -144,6 +150,55 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   function fmtTime(time) {
     if (time == null) return 'n/a';
     return new Date(Number(time)*1000).toISOString().replace('.000Z','Z');
+  }
+
+  function computeSelectedPriceRange() {
+    const items=payload?.candles || [];
+    const start=Number(payload?.selectedTradeViewStart);
+    const end=Number(payload?.selectedTradeViewEnd);
+    let low=Infinity, high=-Infinity;
+    for (const bar of items) {
+      const time=Number(bar?.time);
+      if (Number.isFinite(start) && time < start) continue;
+      if (Number.isFinite(end) && time > end) continue;
+      const lo=Number(bar?.low), hi=Number(bar?.high);
+      if (Number.isFinite(lo)) low=Math.min(low,lo);
+      if (Number.isFinite(hi)) high=Math.max(high,hi);
+    }
+    const trade=payload?.selectedTrade || {};
+    for (const value of [
+      trade.Entry ?? trade.entry, trade.Stop ?? trade.stop,
+      trade.Target ?? trade.target, trade.Exit ?? trade.exit,
+    ]) {
+      const price=Number(value);
+      if (Number.isFinite(price)) { low=Math.min(low,price); high=Math.max(high,price); }
+    }
+    for (const item of (payload?.fibDerivation?.levels || [])) {
+      const price=Number(item?.price);
+      if (Number.isFinite(price)) { low=Math.min(low,price); high=Math.max(high,price); }
+    }
+    if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) return null;
+    const span=high-low;
+    const pad=Math.max(span*.08,Math.abs(high)*.0005);
+    return {minValue:low-pad,maxValue:high+pad};
+  }
+
+  function resetPriceScale() {
+    defaultPriceRange=computeSelectedPriceRange();
+    priceZoomFactor=1.0;
+    pricePanOffset=0.0;
+    chart?.priceScale('right').applyOptions({autoScale:false});
+    requestAnimationFrame(() => {
+      chart?.priceScale('right').applyOptions({autoScale:true});
+      candles?.applyOptions({});
+      drawFibOverlay();
+      drawTradeBox();
+    });
+  }
+
+  function redrawOverlays() {
+    drawFibOverlay();
+    drawTradeBox();
   }
 
   function renderDiagnostics() {
@@ -381,15 +436,32 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       autoSize:true,
       layout:{background:{type:'solid',color:'#0f1720'},textColor:'#b8c2cc'},
       grid:{vertLines:{color:'#1d2937'},horzLines:{color:'#1d2937'}},
-      rightPriceScale:{borderColor:'#334155',autoScale:true},
+      rightPriceScale:{borderColor:'#334155',autoScale:true,entireTextOnly:true,scaleMargins:{top:.08,bottom:.08}},
       timeScale:{borderColor:'#334155',timeVisible:true,secondsVisible:false,rightOffset:8},
+      handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},
+      handleScale:{
+        axisPressedMouseMove:{time:true,price:true},
+        axisDoubleClickReset:{time:true,price:true},
+        mouseWheel:true,pinch:true,
+      },
     });
     candles = chart.addSeries(window.LightweightCharts.CandlestickSeries,{
       upColor:'#22a06b',downColor:'#d84a4a',borderVisible:false,
       wickUpColor:'#22a06b',wickDownColor:'#d84a4a',
+      autoscaleInfoProvider: original => {
+        const info=original();
+        const base=defaultPriceRange || info?.priceRange;
+        if (!base) return info;
+        const min=Number(base.minValue), max=Number(base.maxValue);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return info;
+        const span=max-min;
+        const mid=(min+max)/2 + span*pricePanOffset;
+        const half=(span/2)*priceZoomFactor;
+        return {...(info || {}),priceRange:{minValue:mid-half,maxValue:mid+half}};
+      },
     });
     candles.setData(payload.candles || []);
-    const redraw=() => { drawFibOverlay(); drawTradeBox(); };
+    const redraw=redrawOverlays;
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
     if (window.ResizeObserver) new ResizeObserver(redraw).observe($('chart-wrap'));
     requestAnimationFrame(() => {
@@ -404,13 +476,79 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     const end = Number(payload.selectedTradeViewEnd);
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
     chart.timeScale().setVisibleRange({from:start,to:end});
-    chart.priceScale('right').applyOptions({autoScale:true});
+    defaultPriceRange=computeSelectedPriceRange();
+    priceZoomFactor=1.0;
+    pricePanOffset=0.0;
+    chart.priceScale('right').applyOptions({autoScale:false});
+    requestAnimationFrame(() => chart.priceScale('right').applyOptions({autoScale:true}));
     requestAnimationFrame(() => {
       drawFibOverlay();
       drawTradeBox();
       setTimeout(() => { drawFibOverlay(); drawTradeBox(); }, 40);
     });
   }
+
+  // Wheel over the right price scale changes vertical zoom only.
+  chartWrap.addEventListener('wheel',event => {
+    const rect=chartWrap.getBoundingClientRect();
+    const overPriceScale=event.clientX-rect.left >= rect.width-86;
+    if (!overPriceScale || !candles) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const direction=event.deltaY > 0 ? 1.12 : 0.89;
+    priceZoomFactor=Math.max(.005,Math.min(50,priceZoomFactor*direction));
+    chart?.priceScale('right').applyOptions({autoScale:true});
+    candles.applyOptions({});
+    requestAnimationFrame(redrawOverlays);
+  },{passive:false,capture:true});
+
+  // Primarily vertical left-drag moves the chart price range up/down.
+  // Horizontal drags remain normal time-axis panning.
+  chartWrap.addEventListener('pointerdown',event => {
+    if (event.button !== 0 || !candles) return;
+    const rect=chartWrap.getBoundingClientRect();
+    if (event.clientX-rect.left >= rect.width-86) return;
+    verticalPan={
+      pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
+      lastY:event.clientY,active:false,
+    };
+  },{capture:true});
+
+  chartWrap.addEventListener('pointermove',event => {
+    if (!verticalPan || verticalPan.pointerId !== event.pointerId || !(event.buttons & 1)) {
+      if (event.buttons) requestAnimationFrame(redrawOverlays);
+      return;
+    }
+    const dx=event.clientX-verticalPan.startX;
+    const dyTotal=event.clientY-verticalPan.startY;
+    if (!verticalPan.active) {
+      if (Math.abs(dyTotal) < 7 || Math.abs(dyTotal) <= Math.abs(dx)*1.15) return;
+      verticalPan.active=true;
+      chartWrap.setPointerCapture?.(event.pointerId);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const dy=event.clientY-verticalPan.lastY;
+    verticalPan.lastY=event.clientY;
+    const height=Math.max(120,chartWrap.clientHeight);
+    pricePanOffset += (dy/height)*2.0*priceZoomFactor;
+    pricePanOffset=Math.max(-8,Math.min(8,pricePanOffset));
+    chart?.priceScale('right').applyOptions({autoScale:true});
+    candles.applyOptions({});
+    requestAnimationFrame(redrawOverlays);
+  },{passive:false,capture:true});
+
+  const finishVerticalPan=event => {
+    if (!verticalPan || verticalPan.pointerId !== event.pointerId) return;
+    if (verticalPan.active) {
+      event.preventDefault();
+      event.stopPropagation();
+      chartWrap.releasePointerCapture?.(event.pointerId);
+    }
+    verticalPan=null;
+  };
+  chartWrap.addEventListener('pointerup',finishVerticalPan,{capture:true});
+  chartWrap.addEventListener('pointercancel',finishVerticalPan,{capture:true});
 
   async function load() {
     diag.textContent = 'Loading…';
@@ -433,7 +571,15 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     load();
   });
   $('center').addEventListener('click',centerSelected);
-  $('fit').addEventListener('click',() => chart?.timeScale().fitContent());
+  $('fit').addEventListener('click',() => {
+    chart?.timeScale().fitContent();
+    defaultPriceRange=null;
+    priceZoomFactor=1.0;
+    pricePanOffset=0.0;
+    chart?.priceScale('right').applyOptions({autoScale:true});
+    candles?.applyOptions({});
+  });
+  $('reset-price').addEventListener('click',resetPriceScale);
   if (!window.LightweightCharts) {
     diag.textContent = 'ERROR: Lightweight Charts failed to load.';
     return;
