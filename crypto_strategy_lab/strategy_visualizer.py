@@ -1928,6 +1928,9 @@ class CompletedRunVisualizer:
             "impulseStartPrice": start,
             "impulseEndPrice": end,
             "impulseSpan": span,
+            "impulseBars": _finite(
+                _first_value(row, ("fib_impulse_bars", "FIB_IMPULSE_BARS"))
+            ),
             "impulseStartIndex": _json_value(row.get("fib_impulse_start_index")),
             "impulseEndIndex": _json_value(row.get("fib_impulse_end_index")),
             "impulseStartTime": _unix_seconds(start_time) if start_time is not None else None,
