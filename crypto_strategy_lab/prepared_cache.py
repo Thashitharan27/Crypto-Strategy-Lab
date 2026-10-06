@@ -76,6 +76,15 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
         "fib_level_tolerance_atr": float(
             getattr(config, "fib_level_tolerance_atr", 0.25)
         ),
+        "fib_dominant_lookback_bars": int(
+            getattr(config, "fib_dominant_lookback_bars", 160)
+        ),
+        "fib_dominant_recency_penalty": float(
+            getattr(config, "fib_dominant_recency_penalty", 0.35)
+        ),
+        "fib_dominant_replacement_ratio": float(
+            getattr(config, "fib_dominant_replacement_ratio", 1.10)
+        ),
     }
 
 
