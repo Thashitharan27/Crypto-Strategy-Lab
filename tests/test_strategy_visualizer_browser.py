@@ -232,8 +232,10 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "candidateEnd - impulseBars" in html
     assert "DISPLAY " in html
     assert "nearestIndex" in html
-    assert "chart.timeScale().timeToCoordinate(startTime)" in html
-    assert "chart.timeScale().timeToCoordinate(endTime)" in html
+    assert "candleIndexForTime" in html
+    assert "logicalToCoordinate(index)" in html
+    assert "const x1 = xForCandleTime(startTime)" in html
+    assert "const rawX2 = xForCandleTime(endTime)" in html
     assert "createPriceLine" not in html
     assert BROWSER_DEFAULT_VISIBLE_CANDLES == 120
 
