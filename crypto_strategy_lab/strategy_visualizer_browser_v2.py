@@ -66,6 +66,8 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 .trade-label{position:absolute;padding:2px 5px;border-radius:3px;font:11px/1.2 Segoe UI,Arial,sans-serif;white-space:nowrap}
 .trade-label.entry{background:rgba(43,108,176,.96);color:#fff}
 .trade-label.exit{background:rgba(184,132,50,.96);color:#fff}
+.trade-label.boundary{background:rgba(47,133,90,.96);color:#fff}
+.trade-label.stop{background:rgba(184,50,50,.96);color:#fff}
 .bad{color:#f08a8a}.good{color:#6fd3a4}.muted{color:#91a0b2}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
@@ -77,7 +79,6 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <select id="trade"></select>
     <button id="center">Center selected</button>
     <button id="fit">Fit full run</button>
-    <label><input id="markers" type="checkbox" checked> OPEN/EXIT markers</label>
   </div>
   <div id="diag">Loading…</div>
   <div id="chart-wrap">
@@ -91,7 +92,6 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   const $ = id => document.getElementById(id);
   const tradeSelect = $('trade');
   const diag = $('diag');
-  const showMarkers = $('markers');
   const tradeBoxLayer = $('trade-box-layer');
   let payload = null;
   let currentTrade = 0;
@@ -139,24 +139,6 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   function fmtTime(time) {
     if (time == null) return 'n/a';
     return new Date(Number(time)*1000).toISOString().replace('.000Z','Z');
-  }
-
-  function selectedMarkers() {
-    if (!showMarkers.checked || !payload) return [];
-    const allowed = new Set(['selected-open','exit']);
-    return (payload.markers || []).filter(m => allowed.has(String(m.kind || '')));
-  }
-
-  function applyMarkers() {
-    if (!candles || !window.LightweightCharts?.createSeriesMarkers) return;
-    const source = selectedMarkers().map(m => ({
-      time:Number(m.time),
-      position:m.position,
-      shape:m.shape,
-      text:m.text,
-      color:String(m.kind)==='selected-open' ? '#6fd3a4' : '#ffd166',
-    }));
-    markerApi = window.LightweightCharts.createSeriesMarkers(candles, source);
   }
 
   function renderDiagnostics() {
@@ -242,6 +224,20 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     addTradeLabel(left+4,entryY,'entry','OPEN '+String(trade.Entry ?? trade.entry ?? ''));
     if (exit && Number.isFinite(exitPrice))
       addTradeLabel(Math.max(left+4,right-90),exitY,'exit','EXIT '+String(trade.Exit ?? trade.exit ?? ''));
+
+    const exitReason=String(trade['Exit Reason'] ?? trade.exitReason ?? '').toUpperCase();
+    const exitedAtStop=exitReason.includes('SL') || exitReason.includes('STOP');
+    const exitedAtTarget=exitReason.includes('TP') || exitReason.includes('TARGET');
+    if (exitedAtStop && Number.isFinite(targetY))
+      addTradeLabel(right+6,targetY,'boundary','TP '+String(trade.Target ?? trade.target ?? ''));
+    else if (exitedAtTarget && Number.isFinite(stopY))
+      addTradeLabel(right+6,stopY,'stop','SL '+String(trade.Stop ?? trade.stop ?? ''));
+    else {
+      if (Number.isFinite(targetY))
+        addTradeLabel(right+6,targetY,'boundary','TP '+String(trade.Target ?? trade.target ?? ''));
+      if (Number.isFinite(stopY))
+        addTradeLabel(right+6,stopY,'stop','SL '+String(trade.Stop ?? trade.stop ?? ''));
+    }
   }
 
   function buildChart() {
@@ -258,7 +254,6 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       wickUpColor:'#22a06b',wickDownColor:'#d84a4a',
     });
     candles.setData(payload.candles || []);
-    applyMarkers();
     chart.timeScale().subscribeVisibleTimeRangeChange(drawTradeBox);
     if (window.ResizeObserver) new ResizeObserver(drawTradeBox).observe($('chart-wrap'));
     requestAnimationFrame(() => {
@@ -302,11 +297,6 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   });
   $('center').addEventListener('click',centerSelected);
   $('fit').addEventListener('click',() => chart?.timeScale().fitContent());
-  showMarkers.addEventListener('change',() => {
-    buildChart();
-    renderDiagnostics();
-    requestAnimationFrame(centerSelected);
-  });
 
   if (!window.LightweightCharts) {
     diag.textContent = 'ERROR: Lightweight Charts failed to load.';
