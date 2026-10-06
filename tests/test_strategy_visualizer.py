@@ -996,3 +996,19 @@ def test_strategy_chart_ema_window_uses_native_research_warmup(tmp_path):
     )
     assert calculation_start <= expected_native_start
     assert calculation_start < visible_start
+
+
+def test_snap_to_candle_handles_microsecond_datetime_index_resolution():
+    times = pd.date_range(
+        "2020-06-01",
+        periods=96,
+        freq="15min",
+        tz="UTC",
+    ).astype("datetime64[us, UTC]")
+    market = pd.DataFrame({"period_start": times})
+
+    target = pd.Timestamp("2020-06-01 12:30:00+00:00")
+    snapped = CompletedRunVisualizer._snap_to_candle(target, market)
+
+    assert snapped == int(target.timestamp())
+    assert snapped != int(times[-1].timestamp())
