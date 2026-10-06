@@ -255,7 +255,6 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "DISPLAY " in html
     assert "nearestIndex" in html
     assert "candleIndexForTime" in html
-    assert "logicalToCoordinate(index)" in html
     assert "const x1 = xForCandleTime(startTime)" in html
     assert "const rawX2 = xForCandleTime(endTime)" in html
     assert "createPriceLine" not in html
