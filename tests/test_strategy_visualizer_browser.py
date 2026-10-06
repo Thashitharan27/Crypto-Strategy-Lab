@@ -164,6 +164,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert 'id="show-position-box"' in html
     assert 'id="show-fib"' in html
     assert 'id="position-box-layer"' in html
+    assert 'id="fib-layer"' in html
+    assert ".fib-band" in html
+    assert ".fib-level-label" in html
     assert "Pan/zoom freely" in html
     assert "Click a zone below to isolate it on the chart" in html
     assert "/session/test-token" in html
@@ -171,6 +174,11 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "/api/inspect" in html
     assert "handleScroll" in html
     assert "handleScale" in html
+    assert "axisPressedMouseMove:{time:true,price:true}" in html
+    assert "axisDoubleClickReset:{time:true,price:true}" in html
+    assert "priceZoomFactor" in html
+    assert "overPriceScale" in html
+    assert "event.clientX - rect.left >= rect.width - 86" in html
     assert "full_run" in html
     assert "full_run:'1'" in html
     assert 'id="window-size"' not in html
@@ -181,10 +189,16 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert ".position-box.risk" in html
     assert "addRect('reward'" in html
     assert "addRect('risk'" in html
+    assert "const minWidth = 104" in html
+    assert "right = Math.max(right,left + minWidth)" in html
     assert "OPEN " in html
     assert "CLOSE " in html
     assert "box.exitPrice" in html
     assert "Fib swing" in html
+    assert "drawFibOverlay" in html
+    assert "item.level.toFixed(3)" in html
+    assert "ENTRY" in html
+    assert "STOP" in html
     assert "SWING LOW" in html
     assert "SWING HIGH" in html
     assert "allTradeMarkers" in html

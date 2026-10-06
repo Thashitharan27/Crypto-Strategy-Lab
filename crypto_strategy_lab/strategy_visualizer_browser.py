@@ -101,14 +101,22 @@ label{display:flex;align-items:center;gap:5px;color:#b7c2cf;font-size:12px;white
 #main.inspector-collapsed{grid-template-columns:minmax(0,1fr) 0}
 #chart-wrap{position:relative;min-width:0;min-height:0;background:#0f1720}
 #chart{position:absolute;inset:0;z-index:1}
-#zone-layer,#zone-label-layer,#position-box-layer{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#zone-layer,#fib-layer,#zone-label-layer,#position-box-layer{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 #zone-layer{z-index:2}
-#position-box-layer{z-index:3}
-#zone-label-layer{z-index:4}
+#fib-layer{z-index:3}
+#position-box-layer{z-index:4}
+#zone-label-layer{z-index:5}
 .zone-band{position:absolute;box-sizing:border-box;border-radius:2px}
+.fib-band{position:absolute;box-sizing:border-box;border-top:1px solid rgba(255,255,255,.18)}
+.fib-level-label{
+  position:absolute;transform:translateY(-50%);padding:2px 5px;border-radius:3px;
+  font-size:10px;font-weight:700;white-space:nowrap;color:#f8fafc;
+  background:rgba(15,23,32,.90);border:1px solid rgba(148,163,184,.44);
+  box-shadow:0 1px 3px rgba(0,0,0,.32)
+}
 .position-box{position:absolute;box-sizing:border-box;border-radius:2px}
-.position-box.reward{background:rgba(53,180,119,.18);border:1px solid rgba(86,214,151,.62)}
-.position-box.risk{background:rgba(220,80,80,.17);border:1px solid rgba(240,110,110,.62)}
+.position-box.reward{background:rgba(38,166,91,.25);border:1px solid rgba(83,220,141,.90)}
+.position-box.risk{background:rgba(219,68,68,.24);border:1px solid rgba(255,105,105,.90)}
 .position-label{
   position:absolute;min-width:82px;padding:2px 6px;border-radius:3px;
   font-size:11px;font-weight:650;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.35)
@@ -248,6 +256,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     <div id="chart-wrap">
       <div id="chart"></div>
       <div id="zone-layer"></div>
+      <div id="fib-layer"></div>
       <div id="position-box-layer"></div>
       <div id="zone-label-layer"></div>
       <div id="readout">Loading completed-run chart…</div>
@@ -283,6 +292,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const main = $('main');
   const chartWrap = $('chart-wrap');
   const zoneLayer = $('zone-layer');
+  const fibLayer = $('fib-layer');
   const positionBoxLayer = $('position-box-layer');
   const zoneLabelLayer = $('zone-label-layer');
   const errorBox = $('error');
@@ -305,6 +315,33 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   let inspectedTime = null;
   let focusedZone = null;
   let lastInspection = null;
+  let priceZoomFactor = 1.0;
+
+  // Keep price-axis zoom independent from the time axis.  Wheel over the
+  // right gutter changes only the visible price range; wheel over the chart
+  // retains Lightweight Charts' normal time zoom.
+  chartWrap.addEventListener('wheel', event => {
+    const rect = chartWrap.getBoundingClientRect();
+    const overPriceScale = event.clientX - rect.left >= rect.width - 86;
+    if (!overPriceScale || !candle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const direction = event.deltaY > 0 ? 1.12 : 0.89;
+    priceZoomFactor = Math.max(.18,Math.min(5.5,priceZoomFactor * direction));
+    chart?.priceScale('right').applyOptions({autoScale:true});
+    candle.applyOptions({});
+    requestAnimationFrame(() => {
+      drawFibOverlay();
+      drawPositionBox();
+    });
+  }, {passive:false,capture:true});
+  chartWrap.addEventListener('pointermove', event => {
+    if (!event.buttons) return;
+    requestAnimationFrame(() => {
+      drawFibOverlay();
+      drawPositionBox();
+    });
+  });
 
   function updateRunBadge() {
     const selected = chartTf.value || boot.run.strategyTimeframe;
@@ -608,15 +645,24 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       box.exitChartTime || box.exitTime || box.visibleEnd || payload.visibleEnd
     );
     const x1 = chart.timeScale().timeToCoordinate(startTime);
-    const x2 = chart.timeScale().timeToCoordinate(endTime);
+    const rawX2 = chart.timeScale().timeToCoordinate(endTime);
     const entryY = candle.priceToCoordinate(Number(box.entry));
     const stopY = box.stop == null ? null : candle.priceToCoordinate(Number(box.stop));
     const targetY = box.target == null ? null : candle.priceToCoordinate(Number(box.target));
     const closeY = box.exitPrice == null ? null : candle.priceToCoordinate(Number(box.exitPrice));
-    if ([x1,x2,entryY].some(v => v == null || !Number.isFinite(Number(v)))) return;
+    if ([x1,entryY].some(v => v == null || !Number.isFinite(Number(v)))) return;
 
-    const left = Math.min(Number(x1),Number(x2));
-    const right = Math.max(Number(x1),Number(x2));
+    // Very short trades can enter and exit on the same strategy candle.  Keep
+    // the vertical prices exact, but give the TradingView-style position tool
+    // a minimum review width so it does not collapse to a 1-2px sliver.
+    const chartRight = Math.max(24, chartWrap.clientWidth - 78);
+    const minWidth = 104;
+    const left = Math.max(0,Math.min(Number(x1),chartRight - 2));
+    let right = rawX2 == null || !Number.isFinite(Number(rawX2))
+      ? left + minWidth
+      : Math.max(Number(x1),Number(rawX2));
+    right = Math.max(right,left + minWidth);
+    right = Math.min(chartRight,right);
     const width = Math.max(2,right-left);
 
     function addRect(className, firstY, secondY) {
@@ -630,18 +676,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       positionBoxLayer.appendChild(rect);
     }
 
-    if (String(box.side).toUpperCase() === 'SHORT') {
-      addRect('risk',entryY,stopY);
-      addRect('reward',entryY,targetY);
-    } else {
-      addRect('risk',entryY,stopY);
-      addRect('reward',entryY,targetY);
-    }
+    addRect('risk',entryY,stopY);
+    addRect('reward',entryY,targetY);
 
     const openLeft = left + 6;
     const closeLeft = Math.max(left + 6, right - 112);
     addPositionLabel(openLeft,entryY,'entry','OPEN ' + fmt(box.entry,6));
-    if (closeY != null && Number.isFinite(Number(closeY))) {
+    if (closeY != null && Number.isFinite(Number(closeY)) && rawX2 != null) {
       const reason = box.exitReason ? ' · ' + String(box.exitReason) : '';
       addPositionLabel(closeLeft,closeY,'target','CLOSE ' + fmt(box.exitPrice,6) + reason);
     }
@@ -649,6 +690,74 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       addPositionLabel(right + 6,stopY,'stop','SL ' + fmt(box.stop,6));
     if (targetY != null && Number.isFinite(Number(targetY)))
       addPositionLabel(right + 6,targetY,'target','TP ' + fmt(box.target,6));
+  }
+
+  function drawFibOverlay() {
+    fibLayer.replaceChildren();
+    if (viewMode.value === 'audit' || tradeMode.value !== 'selected' ||
+        !showFib.checked || !payload || !chart || !candle) return;
+    const fib = payload.fibDerivation || {};
+    if (fib.status !== 'AVAILABLE') return;
+
+    const candles = payload.candles || [];
+    const entryTime = Number(
+      fib.entryTime || payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
+    );
+    const anchors = resolveFibAnchorTimes(fib,candles,entryTime);
+    const startTime = Number(anchors.startTime);
+    const endTime = Number.isFinite(entryTime) ? entryTime : Number(anchors.endTime);
+    const x1 = chart.timeScale().timeToCoordinate(startTime);
+    const x2 = chart.timeScale().timeToCoordinate(endTime);
+    if ([x1,x2].some(v => v == null || !Number.isFinite(Number(v)))) return;
+
+    const left = Math.max(0,Math.min(Number(x1),Number(x2)));
+    const right = Math.min(chartWrap.clientWidth - 76,Math.max(Number(x1),Number(x2)));
+    if (right <= left) return;
+
+    const ordered = (fib.levels || [])
+      .map(item => ({...item,level:Number(item.level),price:Number(item.price)}))
+      .filter(item => Number.isFinite(item.level) && Number.isFinite(item.price))
+      .sort((a,b) => a.price - b.price);
+    if (ordered.length < 2) return;
+
+    const palette = [
+      'rgba(133,77,255,.09)',
+      'rgba(46,160,255,.10)',
+      'rgba(0,196,140,.10)',
+      'rgba(82,196,92,.10)',
+      'rgba(230,168,33,.11)',
+      'rgba(222,76,76,.10)',
+    ];
+
+    for (let i=0;i<ordered.length-1;i++) {
+      const aY = candle.priceToCoordinate(ordered[i].price);
+      const bY = candle.priceToCoordinate(ordered[i+1].price);
+      if ([aY,bY].some(v => v == null || !Number.isFinite(Number(v)))) continue;
+      const band = document.createElement('div');
+      band.className = 'fib-band';
+      band.style.left = left + 'px';
+      band.style.width = Math.max(2,right-left) + 'px';
+      band.style.top = Math.min(Number(aY),Number(bY)) + 'px';
+      band.style.height = Math.max(1,Math.abs(Number(bY)-Number(aY))) + 'px';
+      band.style.background = palette[i % palette.length];
+      fibLayer.appendChild(band);
+    }
+
+    for (const item of ordered) {
+      const y = candle.priceToCoordinate(item.price);
+      if (y == null || !Number.isFinite(Number(y))) continue;
+      const label = document.createElement('div');
+      label.className = 'fib-level-label';
+      label.style.left = Math.max(4,left + 6) + 'px';
+      label.style.top = Number(y) + 'px';
+      label.textContent =
+        item.level.toFixed(3).replace(/0+$/,'').replace(/[.]$/,'') +
+        '  (' + fmt(item.price,2) + ')' +
+        (item.selected ? '  ENTRY' : item.stopBoundary ? '  STOP' : '');
+      if (item.selected) label.style.borderColor = '#00e5ff';
+      if (item.stopBoundary) label.style.borderColor = '#ff7b7b';
+      fibLayer.appendChild(label);
+    }
   }
 
   function drawZones() {
@@ -837,6 +946,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       : null;
     if (chart) chart.remove();
     zoneLayer.replaceChildren();
+    fibLayer.replaceChildren();
     positionBoxLayer.replaceChildren();
     zoneLabelLayer.replaceChildren();
     $('chart').replaceChildren();
@@ -847,18 +957,35 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       attributionLogo:true,
       layout:{background:{type:'solid',color:'#0f1720'},textColor:'#b8c2cc'},
       grid:{vertLines:{color:'#1d2937'},horzLines:{color:'#1d2937'}},
-      rightPriceScale:{borderColor:'#334155'},
+      rightPriceScale:{
+        borderColor:'#334155',autoScale:true,entireTextOnly:true,
+        scaleMargins:{top:.08,bottom:.08},
+      },
       timeScale:{
         borderColor:'#334155',timeVisible:true,secondsVisible:false,rightOffset:10,
         shiftVisibleRangeOnNewBar:false,
       },
       crosshair:{mode:0},
       handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},
-      handleScale:{axisPressedMouseMove:true,mouseWheel:true,pinch:true},
+      handleScale:{
+        axisPressedMouseMove:{time:true,price:true},
+        axisDoubleClickReset:{time:true,price:true},
+        mouseWheel:true,pinch:true,
+      },
     });
     candle = chart.addSeries(LC.CandlestickSeries,{
       upColor:'#22a06b',downColor:'#d84a4a',borderVisible:false,
       wickUpColor:'#22a06b',wickDownColor:'#d84a4a',
+      autoscaleInfoProvider: original => {
+        const info = original();
+        if (!info || !info.priceRange || Math.abs(priceZoomFactor - 1) < 1e-6) return info;
+        const min = Number(info.priceRange.minValue);
+        const max = Number(info.priceRange.maxValue);
+        if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return info;
+        const mid = (min + max) / 2;
+        const half = ((max - min) / 2) * priceZoomFactor;
+        return {...info,priceRange:{minValue:mid-half,maxValue:mid+half}};
+      },
     });
     candle.setData(payload.candles || []);
 
@@ -873,7 +1000,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         const style = {...(seriesStyles[overlay.kind] || seriesStyles.sr)};
         const line = chart.addSeries(LC.LineSeries,{
           ...style,title:overlay.name,priceLineVisible:false,lastValueVisible:false,
-          crosshairMarkerVisible:false,
+          crosshairMarkerVisible:false,autoscaleInfoProvider:() => null,
         });
         line.setData(overlay.data || []);
       }
@@ -912,7 +1039,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         ) {
           const swing = chart.addSeries(LC.LineSeries,{
             color:'#ffd166',lineWidth:3,priceLineVisible:false,lastValueVisible:false,
-            crosshairMarkerVisible:true,title:anchors.reconstructed ? 'Fib swing · display anchors reconstructed' : 'Fib swing',
+            crosshairMarkerVisible:true,autoscaleInfoProvider:() => null,
+            title:anchors.reconstructed ? 'Fib swing · display anchors reconstructed' : 'Fib swing',
           });
           swing.setData([
             {time:fibStartTime,value:Number(fib.impulseStartPrice)},
@@ -950,6 +1078,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
               : important ? '#c7a6ff' : '#66717e',
             lineWidth:important ? 2 : 1,lineStyle:important ? 0 : 2,
             priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
+            autoscaleInfoProvider:() => null,
             title:'Fib ' + level.toFixed(3) +
               (item.selected ? ' ENTRY' : item.stopBoundary ? ' STOP LEVEL' : ''),
           });
@@ -970,10 +1099,12 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     });
     chart.timeScale().subscribeVisibleTimeRangeChange(() => {
       drawZones();
+      drawFibOverlay();
       drawPositionBox();
     });
     if (window.ResizeObserver) new ResizeObserver(() => {
       drawZones();
+      drawFibOverlay();
       drawPositionBox();
     }).observe(chartWrap);
 
@@ -986,6 +1117,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     }
     requestAnimationFrame(() => {
       drawZones();
+      drawFibOverlay();
       drawPositionBox();
     });
   }
@@ -1085,6 +1217,17 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   showRejections.addEventListener('change',loadPayload);
   showPositionBox.addEventListener('change',drawPositionBox);
   showFib.addEventListener('change',() => renderChart(false));
+  chartWrap.addEventListener('dblclick',event => {
+    const rect = chartWrap.getBoundingClientRect();
+    if (event.clientX - rect.left < rect.width - 86 || !candle) return;
+    priceZoomFactor = 1.0;
+    chart?.priceScale('right').applyOptions({autoScale:true});
+    candle.applyOptions({});
+    requestAnimationFrame(() => {
+      drawFibOverlay();
+      drawPositionBox();
+    });
+  });
   function centerSelectedTrade() {
     if (!chart || !payload?.selectedTradeCandleTime) return;
     const candles = payload.candles || [];
@@ -1118,7 +1261,16 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     });
   }
   $('center-trade').addEventListener('click',centerSelectedTrade);
-  $('fit-chart').addEventListener('click',() => chart?.timeScale().fitContent());
+  $('fit-chart').addEventListener('click',() => {
+    priceZoomFactor = 1.0;
+    chart?.priceScale('right').applyOptions({autoScale:true});
+    candle?.applyOptions({});
+    chart?.timeScale().fitContent();
+    requestAnimationFrame(() => {
+      drawFibOverlay();
+      drawPositionBox();
+    });
+  });
   $('toggle-inspector').addEventListener('click',toggleInspector);
   $('fullscreen').addEventListener('click',async() => {
     if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.();
@@ -1146,6 +1298,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       event.preventDefault();
       $('center-trade').click();
     } else if (event.key.toLowerCase() === 'f') {
+      priceZoomFactor = 1.0;
+      candle?.applyOptions({});
       chart?.timeScale().fitContent();
     } else if (event.key.toLowerCase() === 'i') {
       toggleInspector();
