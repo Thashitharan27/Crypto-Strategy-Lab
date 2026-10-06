@@ -153,6 +153,7 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert 'id="chart-tf"' in html
     assert 'id="toggle-inspector"' in html
     assert 'id="fullscreen"' in html
+    assert 'id="reset-price"' in html
     assert 'id="view-mode"' in html
     assert 'id="sr-tf"' in html
     assert 'id="sr-snapshot"' in html
@@ -178,11 +179,20 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "axisDoubleClickReset:{time:true,price:true}" in html
     assert "priceZoomFactor" in html
     assert "pricePanOffset" in html
+    assert "defaultPriceRange" in html
+    assert "defaultPriceRangeKey" in html
+    assert "computeDefaultPriceRange" in html
+    assert "ensureDefaultPriceRange(false)" in html
+    assert "Time pan/zoom keeps price size fixed" in html
+    assert "Reset price restores default" in html
     assert "verticalPan" in html
-    assert "Drag horizontally = time pan" in html
-    assert "drag vertically = price pan" in html
+    assert "Time pan/zoom keeps price size fixed" in html
+    assert "vertical drag = price pan" in html
     assert "Math.abs(dyTotal) <= Math.abs(dx) * 1.15" in html
     assert "pricePanOffset += (dy / height) * 2.0 * priceZoomFactor" in html
+    assert "const base = defaultPriceRange || info?.priceRange" in html
+    assert "Time pan/zoom must never silently" in html
+    assert "$('reset-price').addEventListener('click',resetPriceScale)" in html
     assert "overPriceScale" in html
     assert "event.clientX - rect.left >= rect.width - 86" in html
     assert "full_run" in html
