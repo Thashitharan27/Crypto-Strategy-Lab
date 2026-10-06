@@ -1006,8 +1006,11 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       renderTrade(payload.selectedTrade || {});
       updateRunBadge();
       renderChart(true);
-      if (tradeMode.value === 'selected')
-        requestAnimationFrame(() => centerSelectedTrade());
+      if (tradeMode.value === 'selected') {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => centerSelectedTrade())
+        );
+      }
       const referenceNote = payload.chartTimeframe !== payload.run.strategyTimeframe
         ? 'Reference candles: ' + String(payload.chartTimeframe).toUpperCase() +
           ' from current canonical cache; strategy evidence remains ' +
@@ -1044,6 +1047,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     currentTrade = Math.max(0,Math.min(boot.trades.length-1,Number(index)));
     focusedZone = null;
     inspectedTime = null;
+    if (tradeMode.value === 'selected' && windowSize.value === 'full')
+      windowSize.value = '240';
     loadPayload();
   }
   function clearZoneFocus() {
@@ -1066,9 +1071,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   tradeSelect.addEventListener('change',() => setTrade(Number(tradeSelect.value)));
   tradeMode.addEventListener('change',() => {
     updateTradeButtons();
-    renderChart(true);
-    if (tradeMode.value === 'selected')
-      requestAnimationFrame(() => centerSelectedTrade());
+    if (tradeMode.value === 'selected') {
+      windowSize.value = '240';
+      loadPayload();
+    } else {
+      windowSize.value = 'full';
+      loadPayload();
+    }
   });
   chartTf.addEventListener('change',() => {
     focusedZone = null;
