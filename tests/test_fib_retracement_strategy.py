@@ -292,3 +292,62 @@ def test_fib_fixed_r_target_uses_actual_stop_r_while_room_gate_stays_independent
     rejected = p._fib_target_plan(0, 1)
     assert rejected["passed"] is False
     assert rejected["reason"] == "FIB_TARGET_INSUFFICIENT_ROOM"
+
+
+def test_active_long_fib_extends_original_anchor_beyond_discovery_lookback():
+    close = np.array([
+        14, 10, 12, 17, 20, 18, 18.5, 18.2, 18.7, 18.4, 18.8,
+        18.3, 18.9, 18.5, 19.0, 18.6, 19.1, 18.7, 19.2, 22, 25, 23, 22.5,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    # The first active leg is low@1 -> high@4.
+    assert values["_FIB_IMPULSE_START_INDEX"][5] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][5] == 4
+
+    # By the time high@20 is confirmed at candle 21, low@1 is older than the
+    # 16-bar discovery window.  The active unbroken leg must still extend from
+    # its original anchor instead of being rebuilt from a newer local low.
+    assert 20 - 1 > 16
+    assert values["_FIB_IMPULSE_START_INDEX"][21] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][21] == 20
+    assert np.isclose(values["_FIB_IMPULSE_START_PRICE"][21], low[1])
+    assert np.isclose(values["_FIB_IMPULSE_END_PRICE"][21], high[20])
+
+
+def test_active_short_fib_extends_original_anchor_beyond_discovery_lookback():
+    close = np.array([
+        16, 20, 18, 13, 10, 12, 11.5, 11.8, 11.3, 11.6, 11.2,
+        11.7, 11.1, 11.5, 11.0, 11.4, 10.9, 11.3, 10.8, 8, 5, 7, 7.5,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    assert values["_FIB_IMPULSE_START_INDEX"][5] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][5] == 4
+    assert 20 - 1 > 16
+    assert values["_FIB_IMPULSE_START_INDEX"][21] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][21] == 20
+    assert np.isclose(values["_FIB_IMPULSE_START_PRICE"][21], high[1])
+    assert np.isclose(values["_FIB_IMPULSE_END_PRICE"][21], low[20])
