@@ -65,3 +65,15 @@ def test_v2_trade_box_layer_stays_above_chart_canvas():
     assert "#chart{position:absolute;inset:0;z-index:1}" in html
     assert "#trade-box-layer{position:absolute;inset:0;z-index:5" in html
     assert "const width=Math.max(48,right-left)" in html
+
+
+def test_v2_trade_box_shows_opposite_boundary_without_floating_markers():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+
+    assert "OPEN/EXIT markers" not in html
+    assert "createSeriesMarkers" not in html
+    assert "trade['Exit Reason']" in html
+    assert "exitedAtStop" in html
+    assert "exitedAtTarget" in html
+    assert "'TP '+String(trade.Target ?? trade.target ?? '')" in html
+    assert "'SL '+String(trade.Stop ?? trade.stop ?? '')" in html
