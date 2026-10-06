@@ -190,6 +190,8 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "allTradeMarkers" in html
     assert "tradeMode.value === 'selected'" in html
     assert "tradeMode.value === 'all'" in html
+    assert "windowSize.value = '240'" in html
+    assert "windowSize.value = 'full'" in html
     assert "Fib derivation" in html
     assert "centerSelectedTrade()" in html
     assert "setVisibleLogicalRange" in html
