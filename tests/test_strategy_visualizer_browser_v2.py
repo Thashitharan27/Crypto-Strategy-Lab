@@ -33,6 +33,8 @@ def test_v2_html_is_minimal_and_diagnostic():
     assert "OPEN marker time:" in html
     assert "EXIT marker time:" in html
     assert "selected view bounds:" in html
+    assert "lines.join('\\n')" in html
+    assert "lines.join('\n')" not in html
     assert "setVisibleRange({from:start,to:end})" in html
     assert "Fib" not in html
     assert "EMA 20" not in html
