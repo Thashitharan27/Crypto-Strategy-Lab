@@ -116,7 +116,7 @@ def apply_strategy_visualizer_workspace(window) -> None:
     nav.insertWidget(insert_at, button)
 
     try:
-        window.destroyed.connect(launcher.stop)
+        window.destroyed.connect(lambda *_args: launcher.stop())
     except (AttributeError, RuntimeError):
         pass
 
