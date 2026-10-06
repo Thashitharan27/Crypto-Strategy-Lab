@@ -186,8 +186,8 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "Time pan/zoom keeps price size fixed" in html
     assert "Reset price restores default" in html
     assert "verticalPan" in html
-    assert "Drag horizontally = time pan" in html
-    assert "drag vertically = price pan" in html
+    assert "Time pan/zoom keeps price size fixed" in html
+    assert "vertical drag = price pan" in html
     assert "Math.abs(dyTotal) <= Math.abs(dx) * 1.15" in html
     assert "pricePanOffset += (dy / height) * 2.0 * priceZoomFactor" in html
     assert "const base = defaultPriceRange || info?.priceRange" in html
