@@ -36,7 +36,8 @@ def test_v2_html_is_minimal_and_diagnostic():
     assert "lines.join('\\n')" in html
     assert "lines.join('\n')" not in html
     assert "setVisibleRange({from:start,to:end})" in html
-    assert "Fib" not in html
+    assert 'id="fib-layer"' in html
+    assert "function drawFibOverlay()" in html
     assert "EMA 20" not in html
     assert "S/R" not in html
 
@@ -77,3 +78,15 @@ def test_v2_trade_box_shows_opposite_boundary_without_floating_markers():
     assert "exitedAtTarget" in html
     assert "'TP '+String(trade.Target ?? trade.target ?? '')" in html
     assert "'SL '+String(trade.Stop ?? trade.stop ?? '')" in html
+
+
+def test_v2_fib_overlay_has_structure_only_no_trade_specific_fib_labels():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+
+    assert "resolveFibAnchorTimes" in html
+    assert "fib.levels" in html
+    assert "fib.impulseStartPrice" in html
+    assert "fib.impulseEndPrice" in html
+    assert "item.selected ? '  ENTRY'" not in html
+    assert "item.stopBoundary ? '  STOP'" not in html
+    assert "TP" in html  # trade box remains responsible for TP/SL labels
