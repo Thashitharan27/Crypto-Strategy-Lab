@@ -317,6 +317,31 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   let lastInspection = null;
   let priceZoomFactor = 1.0;
 
+  // Keep price-axis zoom independent from the time axis.  Wheel over the
+  // right gutter changes only the visible price range; wheel over the chart
+  // retains Lightweight Charts' normal time zoom.
+  chartWrap.addEventListener('wheel', event => {
+    const rect = chartWrap.getBoundingClientRect();
+    const overPriceScale = event.clientX - rect.left >= rect.width - 86;
+    if (!overPriceScale || !candle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const direction = event.deltaY > 0 ? 1.12 : 0.89;
+    priceZoomFactor = Math.max(.18,Math.min(5.5,priceZoomFactor * direction));
+    candle.applyOptions({});
+    requestAnimationFrame(() => {
+      drawFibOverlay();
+      drawPositionBox();
+    });
+  }, {passive:false,capture:true});
+  chartWrap.addEventListener('pointermove', event => {
+    if (!event.buttons) return;
+    requestAnimationFrame(() => {
+      drawFibOverlay();
+      drawPositionBox();
+    });
+  });
+
   function updateRunBadge() {
     const selected = chartTf.value || boot.run.strategyTimeframe;
     $('run-badge').textContent =
@@ -1080,31 +1105,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       drawPositionBox();
     }).observe(chartWrap);
 
-    // Lightweight Charts uses wheel zoom primarily for time.  When the pointer
-    // is over the right price-scale gutter, reserve the wheel for vertical
-    // price zoom so changing price scale never expands/compresses the date axis.
-    chartWrap.addEventListener('wheel', event => {
-      const rect = chartWrap.getBoundingClientRect();
-      const overPriceScale = event.clientX - rect.left >= rect.width - 86;
-      if (!overPriceScale || !candle) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const direction = event.deltaY > 0 ? 1.12 : 0.89;
-      priceZoomFactor = Math.max(.18,Math.min(5.5,priceZoomFactor * direction));
-      candle.applyOptions({}); // force autoscale provider to re-evaluate
-      requestAnimationFrame(() => {
-        drawFibOverlay();
-        drawPositionBox();
-      });
-    }, {passive:false,capture:true});
-    chartWrap.addEventListener('pointermove', event => {
-      if (!event.buttons) return;
-      requestAnimationFrame(() => {
-        drawFibOverlay();
-        drawPositionBox();
-      });
-    });
-
     if (previousRange) {
       chart.timeScale().setVisibleRange(previousRange);
     } else if (resetRange && payload.visibleStart && payload.visibleEnd) {
@@ -1257,7 +1257,15 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     });
   }
   $('center-trade').addEventListener('click',centerSelectedTrade);
-  $('fit-chart').addEventListener('click',() => chart?.timeScale().fitContent());
+  $('fit-chart').addEventListener('click',() => {
+    priceZoomFactor = 1.0;
+    candle?.applyOptions({});
+    chart?.timeScale().fitContent();
+    requestAnimationFrame(() => {
+      drawFibOverlay();
+      drawPositionBox();
+    });
+  });
   $('toggle-inspector').addEventListener('click',toggleInspector);
   $('fullscreen').addEventListener('click',async() => {
     if (!document.fullscreenElement) await document.documentElement.requestFullscreen?.();
@@ -1285,6 +1293,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       event.preventDefault();
       $('center-trade').click();
     } else if (event.key.toLowerCase() === 'f') {
+      priceZoomFactor = 1.0;
+      candle?.applyOptions({});
       chart?.timeScale().fitContent();
     } else if (event.key.toLowerCase() === 'i') {
       toggleInspector();
