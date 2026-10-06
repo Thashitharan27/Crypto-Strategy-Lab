@@ -959,6 +959,21 @@ def test_trade_stop_target_prefers_original_entry_structure():
     assert target == 94.0
 
 
+def test_trade_stop_target_uses_persisted_fib_execution_geometry():
+    stop, target = trade_stop_target(
+        {
+            "side": "LONG",
+            "fib_stop_price": 95.5,
+            "fib_target_price": 108.25,
+            # Generic fields may be absent or stale on Fib completed runs.
+            "long_original_sl": 96.0,
+            "long_tp": None,
+        }
+    )
+    assert stop == 95.5
+    assert target == 108.25
+
+
 def test_active_app_composes_strategy_visualizer():
     import app
 
