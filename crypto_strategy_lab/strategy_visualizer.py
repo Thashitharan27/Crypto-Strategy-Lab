@@ -2201,6 +2201,7 @@ class CompletedRunVisualizer:
             },
             "selectedTradeIndex": trade_index,
             "selectedTrade": selected_trade,
+            "fibDerivation": self.fib_derivation(trade_index),
             "selectedTradeCandleTime": selected_trade_candle_time,
             "selectedTradeChartCandleTime": selected_trade_chart_candle_time,
             "selectedTradeViewStart": (
