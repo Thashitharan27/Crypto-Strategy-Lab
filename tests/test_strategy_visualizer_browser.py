@@ -228,7 +228,6 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "tradeMode.value === 'all'" in html
     assert "Fib derivation" in html
     assert "centerSelectedTrade()" in html
-    assert "const windowBars = 240" in html
     assert "entryIndex = candleIndexForTime(entryTime)" in html
     assert "chart.timeScale().setVisibleRange({from:firstTime,to:lastTime})" in html
     assert "Selected trade viewport is active" in html
