@@ -231,6 +231,8 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "applyChartView" in html
     assert "chartView.value === 'selected'" in html
     assert "chartView.value = 'selected'" in html
+    assert "tradeMode.value === 'selected'" in html
+    assert "requestAnimationFrame(centerSelectedTrade)" in html
     assert "chartView.value = 'full'" in html
     assert "setVisibleLogicalRange" in html
     assert "Chart view only changes the visible time range; the full run remains loaded." in html
