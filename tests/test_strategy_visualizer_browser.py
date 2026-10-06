@@ -181,6 +181,7 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "axisPressedMouseMove:{time:true,price:true}" in html
     assert "axisDoubleClickReset:{time:true,price:true}" in html
     assert "priceZoomFactor" in html
+    assert "Math.max(.005,Math.min(50,priceZoomFactor * direction))" in html
     assert "pricePanOffset" in html
     assert "defaultPriceRange" in html
     assert "defaultPriceRangeKey" in html
