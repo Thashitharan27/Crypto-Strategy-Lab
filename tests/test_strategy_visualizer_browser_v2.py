@@ -90,3 +90,17 @@ def test_v2_fib_overlay_has_structure_only_no_trade_specific_fib_labels():
     assert "item.selected ? '  ENTRY'" not in html
     assert "item.stopBoundary ? '  STOP'" not in html
     assert "TP" in html  # trade box remains responsible for TP/SL labels
+
+
+def test_v2_supports_price_zoom_and_vertical_pan():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+
+    assert 'id="reset-price"' in html
+    assert "priceZoomFactor" in html
+    assert "pricePanOffset" in html
+    assert "autoscaleInfoProvider" in html
+    assert "chartWrap.addEventListener('wheel'" in html
+    assert "chartWrap.addEventListener('pointerdown'" in html
+    assert "chartWrap.addEventListener('pointermove'" in html
+    assert "Math.abs(dyTotal) <= Math.abs(dx)*1.15" in html
+    assert "axisPressedMouseMove:{time:true,price:true}" in html
