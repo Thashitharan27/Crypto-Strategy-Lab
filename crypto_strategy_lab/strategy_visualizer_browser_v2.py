@@ -176,7 +176,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       'exit candle time:     ' + fmtTime(exitCandle?.time),
       'selected view bounds: ' + fmtTime(payload.selectedTradeViewStart) + ' -> ' + fmtTime(payload.selectedTradeViewEnd),
     ];
-    diag.textContent = lines.join('\n');
+    diag.textContent = lines.join('\\n');
   }
 
   function buildChart() {
