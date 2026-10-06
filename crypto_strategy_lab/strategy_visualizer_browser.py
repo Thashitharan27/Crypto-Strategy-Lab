@@ -723,6 +723,38 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     if (target >= to) return chartWrap.clientWidth;
     return ((target - from) / (to - from)) * chartWrap.clientWidth;
   }
+  function candleIndexForTime(time) {
+    const candles = payload?.candles || [];
+    const target = Number(time);
+    if (!candles.length || !Number.isFinite(target)) return null;
+    let lo = 0, hi = candles.length - 1;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (Number(candles[mid]?.time) < target) lo = mid + 1;
+      else hi = mid;
+    }
+    const candidates = [lo, Math.max(0, lo - 1)];
+    let best = null;
+    for (const index of candidates) {
+      if (index < 0 || index >= candles.length) continue;
+      if (best === null ||
+          Math.abs(Number(candles[index]?.time) - target) <
+          Math.abs(Number(candles[best]?.time) - target)) best = index;
+    }
+    return best;
+  }
+
+  function xForCandleTime(time) {
+    const index = candleIndexForTime(time);
+    if (index == null) return null;
+    const logical = chart.timeScale().logicalToCoordinate(index);
+    if (logical !== null && logical !== undefined && Number.isFinite(Number(logical)))
+      return Number(logical);
+    const candleTime = Number(payload?.candles?.[index]?.time);
+    const direct = chart.timeScale().timeToCoordinate(candleTime);
+    return direct == null || !Number.isFinite(Number(direct)) ? null : Number(direct);
+  }
+
   function addPositionLabel(left, y, type, text) {
     const label = document.createElement('div');
     label.className = 'position-label ' + type;
@@ -743,8 +775,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const endTime = Number(
       box.exitChartTime || box.exitTime || box.visibleEnd || payload.visibleEnd
     );
-    const x1 = chart.timeScale().timeToCoordinate(startTime);
-    const rawX2 = chart.timeScale().timeToCoordinate(endTime);
+    const x1 = xForCandleTime(startTime);
+    const rawX2 = xForCandleTime(endTime);
     const entryY = candle.priceToCoordinate(Number(box.entry));
     const stopY = box.stop == null ? null : candle.priceToCoordinate(Number(box.stop));
     const targetY = box.target == null ? null : candle.priceToCoordinate(Number(box.target));
