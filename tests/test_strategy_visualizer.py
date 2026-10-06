@@ -886,6 +886,7 @@ def test_fib_derivation_uses_persisted_impulse_anchors(tmp_path):
 def test_fib_derivation_reconstructs_legacy_price_ladder(tmp_path):
     service, run_dir, manifest, _market = _fixture(tmp_path)
     model = CompletedRunVisualizer.load(service, run_dir, manifest)
+    model.trades.loc[0, "FIB_IMPULSE_BARS"] = 5
     model.trades.loc[0, "fib_impulse_start_price"] = np.nan
     model.trades.loc[0, "fib_impulse_end_price"] = np.nan
     model.trades.loc[0, "fib_impulse_span"] = np.nan
@@ -906,6 +907,7 @@ def test_fib_derivation_reconstructs_legacy_price_ladder(tmp_path):
     assert np.isclose(prices[0.618], 112.584)
     assert fib["impulseStartTime"] is None
     assert fib["impulseEndTime"] is None
+    assert fib["impulseBars"] == 5
 
 
 def test_rejected_signal_markers_are_explicit_opt_in(tmp_path):

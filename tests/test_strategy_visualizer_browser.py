@@ -194,8 +194,14 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "centerSelectedTrade()" in html
     assert "setVisibleLogicalRange" in html
     assert "resolveFibAnchorTimes" in html
+    assert "rawStartTime !== null" in html
+    assert "rawEndTime !== null" in html
+    assert "fib.impulseBars" in html
+    assert "candidateEnd - impulseBars" in html
     assert "DISPLAY " in html
     assert "nearestIndex" in html
+    assert "chart.timeScale().timeToCoordinate(startTime)" in html
+    assert "chart.timeScale().timeToCoordinate(endTime)" in html
     assert "createPriceLine" not in html
     assert BROWSER_DEFAULT_VISIBLE_CANDLES == 120
 

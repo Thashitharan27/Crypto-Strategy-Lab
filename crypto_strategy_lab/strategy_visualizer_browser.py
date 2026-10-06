@@ -607,8 +607,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const endTime = Number(
       box.exitChartTime || box.exitTime || box.visibleEnd || payload.visibleEnd
     );
-    const x1 = xForTime(startTime,true);
-    const x2 = xForTime(endTime,false);
+    const x1 = chart.timeScale().timeToCoordinate(startTime);
+    const x2 = chart.timeScale().timeToCoordinate(endTime);
     const entryY = candle.priceToCoordinate(Number(box.entry));
     const stopY = box.stop == null ? null : candle.priceToCoordinate(Number(box.stop));
     const targetY = box.target == null ? null : candle.priceToCoordinate(Number(box.target));
@@ -754,10 +754,16 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   }
 
   function resolveFibAnchorTimes(fib, candles, entryTime) {
-    let startTime = Number(fib.impulseStartTime);
-    let endTime = Number(fib.impulseEndTime);
-    if (Number.isFinite(startTime) && Number.isFinite(endTime))
-      return {startTime,endTime,reconstructed:false};
+    const rawStartTime = fib.impulseStartTime;
+    const rawEndTime = fib.impulseEndTime;
+    if (rawStartTime !== null && rawStartTime !== undefined &&
+        rawEndTime !== null && rawEndTime !== undefined) {
+      const startTime = Number(rawStartTime);
+      const endTime = Number(rawEndTime);
+      if (Number.isFinite(startTime) && startTime > 0 &&
+          Number.isFinite(endTime) && endTime > 0)
+        return {startTime,endTime,reconstructed:false};
+    }
 
     const startPrice = Number(fib.impulseStartPrice);
     const endPrice = Number(fib.impulseEndPrice);
@@ -768,6 +774,32 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     if (entryIndex < 0) entryIndex = candles.length;
     const first = Math.max(0, entryIndex - 320);
     const last = Math.max(first + 1, entryIndex);
+
+    const longSide = String(fib.direction || '').toUpperCase() === 'LONG';
+    const endField = longSide ? 'high' : 'low';
+    const startField = longSide ? 'low' : 'high';
+
+    let startIndex = -1;
+    let endIndex = -1;
+    const impulseBars = Math.round(Number(fib.impulseBars));
+    if (Number.isFinite(impulseBars) && impulseBars > 0) {
+      let bestScore = Infinity;
+      for (let candidateEnd = first + impulseBars; candidateEnd < last; candidateEnd++) {
+        const candidateStart = candidateEnd - impulseBars;
+        if (candidateStart < first) continue;
+        const observedStart = Number(candles[candidateStart]?.[startField]);
+        const observedEnd = Number(candles[candidateEnd]?.[endField]);
+        if (!Number.isFinite(observedStart) || !Number.isFinite(observedEnd)) continue;
+        const score =
+          Math.abs(observedStart - startPrice) / Math.max(1,Math.abs(startPrice)) +
+          Math.abs(observedEnd - endPrice) / Math.max(1,Math.abs(endPrice));
+        if (score < bestScore) {
+          bestScore = score;
+          startIndex = candidateStart;
+          endIndex = candidateEnd;
+        }
+      }
+    }
 
     function nearestIndex(from, to, field, price) {
       let best = -1, bestDistance = Infinity;
@@ -783,17 +815,18 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       return best;
     }
 
-    const longSide = String(fib.direction || '').toUpperCase() === 'LONG';
-    const endField = longSide ? 'high' : 'low';
-    const startField = longSide ? 'low' : 'high';
-    let endIndex = nearestIndex(first,last,endField,endPrice);
-    if (endIndex < 0) endIndex = Math.max(first,last - 1);
-    let startIndex = nearestIndex(first,Math.max(first + 1,endIndex),startField,startPrice);
-    if (startIndex < 0 || startIndex >= endIndex)
-      startIndex = Math.max(first,endIndex - 1);
+    if (endIndex < 0) {
+      endIndex = nearestIndex(first,last,endField,endPrice);
+      if (endIndex < 0) endIndex = Math.max(first,last - 1);
+    }
+    if (startIndex < 0) {
+      startIndex = nearestIndex(first,Math.max(first + 1,endIndex),startField,startPrice);
+      if (startIndex < 0 || startIndex >= endIndex)
+        startIndex = Math.max(first,endIndex - 1);
+    }
 
-    startTime = Number(candles[startIndex]?.time || entryTime);
-    endTime = Number(candles[endIndex]?.time || entryTime);
+    const startTime = Number(candles[startIndex]?.time || entryTime);
+    const endTime = Number(candles[endIndex]?.time || entryTime);
     return {startTime,endTime,reconstructed:true};
   }
 
