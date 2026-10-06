@@ -36,6 +36,42 @@ def test_fib_arrays_do_not_use_unconfirmed_future_pivot():
     assert values["FIB_IMPULSE_DIRECTION"][7] == "LONG"
 
 
+def test_fib_prefers_dominant_confirmed_swing_over_new_local_wiggles():
+    close = np.array(
+        [10, 8, 10, 14, 16, 13, 12, 11, 13, 15, 14, 16, 19, 17, 16],
+        dtype=float,
+    )
+    open_ = close.copy()
+    high = close + 0.4
+    low = close - 0.4
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_,
+        high,
+        low,
+        close,
+        atr,
+        pivot_strength=1,
+        dominant_lookback_bars=32,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    # The large low@1 -> high@4 swing remains active even after newer local
+    # pivots appear.  The previous implementation would switch to the newest
+    # small pivot-to-pivot leg.
+    assert values["_FIB_IMPULSE_START_INDEX"][10] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][10] == 4
+
+    # The future high at 12 is not usable until candle 13 confirms it.
+    assert values["_FIB_IMPULSE_END_INDEX"][12] == 4
+    # Once confirmed, it is materially stronger (>10%) and may replace the
+    # prior structural leg while preserving the same dominant swing low.
+    assert values["_FIB_IMPULSE_START_INDEX"][13] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][13] == 12
+
+
 def test_fib_ema_confluence_measures_level_to_ema_not_price_to_ema():
     n = 220
     open_ = np.linspace(90.0, 110.0, n)
