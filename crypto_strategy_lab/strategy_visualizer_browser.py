@@ -281,7 +281,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   </div>
   <div id="footer">
     <span>Read-only completed-run browser · no strategy re-evaluation · loopback only</span>
-    <span>Shortcuts: <kbd>F</kbd> fit · <kbd>Home</kbd> center · <kbd>I</kbd> inspector · <kbd>Esc</kbd> clear zone</span>
+    <span>Drag horizontally = time pan · drag vertically = price pan · right axis wheel = price zoom · <kbd>F</kbd> fit</span>
     <span>Charting by <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™</a></span>
   </div>
 </div>
@@ -316,9 +316,11 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   let focusedZone = null;
   let lastInspection = null;
   let priceZoomFactor = 1.0;
+  let pricePanOffset = 0.0;
+  let verticalPan = null;
 
-  // Keep price-axis zoom independent from the time axis.  Wheel over the
-  // right gutter changes only the visible price range; wheel over the chart
+  // Keep price-axis zoom independent from the time axis. Wheel over the
+  // right gutter changes only the vertical scale; wheel over the candle area
   // retains Lightweight Charts' normal time zoom.
   chartWrap.addEventListener('wheel', event => {
     const rect = chartWrap.getBoundingClientRect();
@@ -335,13 +337,62 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       drawPositionBox();
     });
   }, {passive:false,capture:true});
+
+  // TradingView-like vertical chart movement: a primarily vertical left-drag
+  // in the candle pane pans the price range up/down, while a horizontal drag
+  // is left to Lightweight Charts for normal time panning.
+  chartWrap.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || !candle) return;
+    const rect = chartWrap.getBoundingClientRect();
+    if (event.clientX - rect.left >= rect.width - 86) return;
+    verticalPan = {
+      pointerId:event.pointerId,
+      startX:event.clientX,
+      startY:event.clientY,
+      lastY:event.clientY,
+      active:false,
+    };
+  }, {capture:true});
   chartWrap.addEventListener('pointermove', event => {
-    if (!event.buttons) return;
+    if (!verticalPan || verticalPan.pointerId !== event.pointerId || !(event.buttons & 1)) {
+      if (event.buttons) requestAnimationFrame(() => {
+        drawFibOverlay();
+        drawPositionBox();
+      });
+      return;
+    }
+    const dx = event.clientX - verticalPan.startX;
+    const dyTotal = event.clientY - verticalPan.startY;
+    if (!verticalPan.active) {
+      if (Math.abs(dyTotal) < 7 || Math.abs(dyTotal) <= Math.abs(dx) * 1.15) return;
+      verticalPan.active = true;
+      chartWrap.setPointerCapture?.(event.pointerId);
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const dy = event.clientY - verticalPan.lastY;
+    verticalPan.lastY = event.clientY;
+    const height = Math.max(120,chartWrap.clientHeight);
+    pricePanOffset += (dy / height) * 2.0 * priceZoomFactor;
+    pricePanOffset = Math.max(-8,Math.min(8,pricePanOffset));
+    chart?.priceScale('right').applyOptions({autoScale:true});
+    candle.applyOptions({});
     requestAnimationFrame(() => {
       drawFibOverlay();
       drawPositionBox();
     });
-  });
+  }, {passive:false,capture:true});
+  const finishVerticalPan = event => {
+    if (!verticalPan || verticalPan.pointerId !== event.pointerId) return;
+    if (verticalPan.active) {
+      event.preventDefault();
+      event.stopPropagation();
+      chartWrap.releasePointerCapture?.(event.pointerId);
+    }
+    verticalPan = null;
+  };
+  chartWrap.addEventListener('pointerup',finishVerticalPan,{capture:true});
+  chartWrap.addEventListener('pointercancel',finishVerticalPan,{capture:true});
 
   function updateRunBadge() {
     const selected = chartTf.value || boot.run.strategyTimeframe;
@@ -652,18 +703,25 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const closeY = box.exitPrice == null ? null : candle.priceToCoordinate(Number(box.exitPrice));
     if ([x1,entryY].some(v => v == null || !Number.isFinite(Number(v)))) return;
 
-    // Very short trades can enter and exit on the same strategy candle.  Keep
+    // Very short trades can enter and exit on the same strategy candle. Keep
     // the vertical prices exact, but give the TradingView-style position tool
     // a minimum review width so it does not collapse to a 1-2px sliver.
+    //
+    // Crucially, never clamp an off-screen entry onto a chart edge. That made
+    // a June trade appear as a floating box at the far-right August edge after
+    // the user panned/zoomed away from the actual entry candle.
     const chartRight = Math.max(24, chartWrap.clientWidth - 78);
     const minWidth = 104;
-    const left = Math.max(0,Math.min(Number(x1),chartRight - 2));
+    const entryX = Number(x1);
+    if (entryX < 0 || entryX > chartRight) return;
+    const left = entryX;
     let right = rawX2 == null || !Number.isFinite(Number(rawX2))
       ? left + minWidth
-      : Math.max(Number(x1),Number(rawX2));
+      : Math.max(left,Number(rawX2));
     right = Math.max(right,left + minWidth);
-    right = Math.min(chartRight,right);
-    const width = Math.max(2,right-left);
+    const width = Math.max(2,Math.min(chartRight,right)-left);
+    if (width <= 2) return;
+    right = left + width;
 
     function addRect(className, firstY, secondY) {
       if ([firstY,secondY].some(v => v == null || !Number.isFinite(Number(v)))) return;
@@ -978,12 +1036,15 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       wickUpColor:'#22a06b',wickDownColor:'#d84a4a',
       autoscaleInfoProvider: original => {
         const info = original();
-        if (!info || !info.priceRange || Math.abs(priceZoomFactor - 1) < 1e-6) return info;
+        if (!info || !info.priceRange) return info;
         const min = Number(info.priceRange.minValue);
         const max = Number(info.priceRange.maxValue);
         if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return info;
-        const mid = (min + max) / 2;
-        const half = ((max - min) / 2) * priceZoomFactor;
+        if (Math.abs(priceZoomFactor - 1) < 1e-6 && Math.abs(pricePanOffset) < 1e-9)
+          return info;
+        const span = max - min;
+        const mid = (min + max) / 2 + span * pricePanOffset;
+        const half = (span / 2) * priceZoomFactor;
         return {...info,priceRange:{minValue:mid-half,maxValue:mid+half}};
       },
     });
@@ -1221,6 +1282,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const rect = chartWrap.getBoundingClientRect();
     if (event.clientX - rect.left < rect.width - 86 || !candle) return;
     priceZoomFactor = 1.0;
+    pricePanOffset = 0.0;
     chart?.priceScale('right').applyOptions({autoScale:true});
     candle.applyOptions({});
     requestAnimationFrame(() => {
@@ -1263,6 +1325,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   $('center-trade').addEventListener('click',centerSelectedTrade);
   $('fit-chart').addEventListener('click',() => {
     priceZoomFactor = 1.0;
+    pricePanOffset = 0.0;
     chart?.priceScale('right').applyOptions({autoScale:true});
     candle?.applyOptions({});
     chart?.timeScale().fitContent();
@@ -1299,6 +1362,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       $('center-trade').click();
     } else if (event.key.toLowerCase() === 'f') {
       priceZoomFactor = 1.0;
+      pricePanOffset = 0.0;
+      chart?.priceScale('right').applyOptions({autoScale:true});
       candle?.applyOptions({});
       chart?.timeScale().fitContent();
     } else if (event.key.toLowerCase() === 'i') {
