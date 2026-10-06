@@ -1,7 +1,10 @@
 """Causal Fibonacci retracement reaction signal and reusable rule evidence.
 
 A swing is not usable until the right-side confirmation bars have closed. The
-strategy therefore never selects historical pivots with hindsight. Once a
+strategy therefore never selects historical pivots with hindsight. Confirmed
+pivot legs are ranked as structural candidates over a bounded recent window;
+the active Fib remains on the dominant swing until a materially stronger swing
+is confirmed, the old swing ages out, or its retracement breaks. Once a
 confirmed impulse exists, the first successful reaction at 0.382, 0.500, or
 0.618 may produce a signal in the impulse direction. All retracement measurements
 remain available as generic Entry/Veto evidence.
@@ -175,6 +178,10 @@ def fibonacci_retracement_arrays(
                     atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
                     if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
                         structural_candidates.append(("SHORT", hi, j, span / atr_confirm))
+
+            pivot_cutoff = j - dominant_lookback_bars
+            confirmed_highs = [idx for idx in confirmed_highs if idx >= pivot_cutoff]
+            confirmed_lows = [idx for idx in confirmed_lows if idx >= pivot_cutoff]
 
         cutoff = i - dominant_lookback_bars
         structural_candidates = [
