@@ -192,9 +192,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     <label>Chart TF
       <select id="chart-tf"></select>
     </label>
-    <label>Window
-      <select id="window-size"></select>
-    </label>
     <button id="center-trade">Center trade</button>
     <button id="fit-chart">Fit loaded</button>
     <span class="spacer"></span>
@@ -293,7 +290,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const tradeSelect = $('trade-select');
   const tradeMode = $('trade-mode');
   const chartTf = $('chart-tf');
-  const windowSize = $('window-size');
   const viewMode = $('view-mode');
   const srTf = $('sr-tf');
   const srSnapshot = $('sr-snapshot');
@@ -343,24 +339,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     chartTf.appendChild(option);
   }
   updateRunBadge();
-
-  const windowChoices = [240, 500, 1000, 2000, 5000]
-    .filter(value => value <= Number(boot.maxVisibleCandles));
-  if (!windowChoices.includes(Number(boot.defaultVisibleCandles)))
-    windowChoices.push(Number(boot.defaultVisibleCandles));
-  windowChoices.sort((a,b) => a-b);
-  for (const value of windowChoices) {
-    const option = document.createElement('option');
-    option.value = String(value);
-    option.textContent = value.toLocaleString() + ' candles';
-    if (value === Number(boot.defaultVisibleCandles)) option.selected = true;
-    windowSize.appendChild(option);
-  }
-  const fullRunOption = document.createElement('option');
-  fullRunOption.value = 'full';
-  fullRunOption.textContent = 'Full run';
-  fullRunOption.selected = true;
-  windowSize.appendChild(fullRunOption);
 
   function api(path, params={}) {
     const query = new URLSearchParams(params);
@@ -995,22 +973,16 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     readout.textContent = 'Loading completed-run chart…';
     const trade = boot.trades.length ? currentTrade : '';
     try {
-      const fullRun = windowSize.value === 'full';
       payload = await fetchJson(api('/api/payload',{
         trade_index:String(trade),
         chart_timeframe:chartTf.value || boot.run.strategyTimeframe,
-        visible_candles:fullRun ? String(boot.defaultVisibleCandles) : windowSize.value,
-        full_run:fullRun ? '1' : '0',
+        visible_candles:String(boot.defaultVisibleCandles),
+        full_run:'1',
         show_rejections:showRejections.checked ? '1' : '0',
       }));
       renderTrade(payload.selectedTrade || {});
       updateRunBadge();
       renderChart(true);
-      if (tradeMode.value === 'selected') {
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => centerSelectedTrade())
-        );
-      }
       const referenceNote = payload.chartTimeframe !== payload.run.strategyTimeframe
         ? 'Reference candles: ' + String(payload.chartTimeframe).toUpperCase() +
           ' from current canonical cache; strategy evidence remains ' +
@@ -1047,8 +1019,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     currentTrade = Math.max(0,Math.min(boot.trades.length-1,Number(index)));
     focusedZone = null;
     inspectedTime = null;
-    if (tradeMode.value === 'selected' && windowSize.value === 'full')
-      windowSize.value = '240';
     loadPayload();
   }
   function clearZoneFocus() {
@@ -1071,13 +1041,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   tradeSelect.addEventListener('change',() => setTrade(Number(tradeSelect.value)));
   tradeMode.addEventListener('change',() => {
     updateTradeButtons();
-    if (tradeMode.value === 'selected') {
-      windowSize.value = '240';
-      loadPayload();
-    } else {
-      windowSize.value = 'full';
-      loadPayload();
-    }
+    renderChart(false);
   });
   chartTf.addEventListener('change',() => {
     focusedZone = null;
@@ -1085,7 +1049,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     updateRunBadge();
     loadPayload();
   });
-  windowSize.addEventListener('change',loadPayload);
   showRejections.addEventListener('change',loadPayload);
   showPositionBox.addEventListener('change',drawPositionBox);
   showFib.addEventListener('change',() => renderChart(false));
@@ -1121,11 +1084,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       to: last + 0.5,
     });
   }
-  $('center-trade').addEventListener('click',() => {
-    if (payload?.fullRun) centerSelectedTrade();
-    else if (chart && payload?.visibleStart && payload?.visibleEnd)
-      chart.timeScale().setVisibleRange({from:payload.visibleStart,to:payload.visibleEnd});
-  });
+  $('center-trade').addEventListener('click',centerSelectedTrade);
   $('fit-chart').addEventListener('click',() => chart?.timeScale().fitContent());
   $('toggle-inspector').addEventListener('click',toggleInspector);
   $('fullscreen').addEventListener('click',async() => {
