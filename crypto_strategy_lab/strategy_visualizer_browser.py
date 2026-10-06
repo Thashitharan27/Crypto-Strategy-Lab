@@ -328,6 +328,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     event.stopPropagation();
     const direction = event.deltaY > 0 ? 1.12 : 0.89;
     priceZoomFactor = Math.max(.18,Math.min(5.5,priceZoomFactor * direction));
+    chart?.priceScale('right').applyOptions({autoScale:true});
     candle.applyOptions({});
     requestAnimationFrame(() => {
       drawFibOverlay();
@@ -750,7 +751,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       label.style.left = Math.max(4,left + 6) + 'px';
       label.style.top = Number(y) + 'px';
       label.textContent =
-        item.level.toFixed(3).replace(/0+$/,'').replace(/\.$/,'') +
+        item.level.toFixed(3).replace(/0+$/,'').replace(/[.]$/,'') +
         '  (' + fmt(item.price,2) + ')' +
         (item.selected ? '  ENTRY' : item.stopBoundary ? '  STOP' : '');
       if (item.selected) label.style.borderColor = '#00e5ff';
@@ -999,7 +1000,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         const style = {...(seriesStyles[overlay.kind] || seriesStyles.sr)};
         const line = chart.addSeries(LC.LineSeries,{
           ...style,title:overlay.name,priceLineVisible:false,lastValueVisible:false,
-          crosshairMarkerVisible:false,
+          crosshairMarkerVisible:false,autoscaleInfoProvider:() => null,
         });
         line.setData(overlay.data || []);
       }
@@ -1038,7 +1039,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         ) {
           const swing = chart.addSeries(LC.LineSeries,{
             color:'#ffd166',lineWidth:3,priceLineVisible:false,lastValueVisible:false,
-            crosshairMarkerVisible:true,title:anchors.reconstructed ? 'Fib swing · display anchors reconstructed' : 'Fib swing',
+            crosshairMarkerVisible:true,autoscaleInfoProvider:() => null,
+            title:anchors.reconstructed ? 'Fib swing · display anchors reconstructed' : 'Fib swing',
           });
           swing.setData([
             {time:fibStartTime,value:Number(fib.impulseStartPrice)},
@@ -1076,6 +1078,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
               : important ? '#c7a6ff' : '#66717e',
             lineWidth:important ? 2 : 1,lineStyle:important ? 0 : 2,
             priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
+            autoscaleInfoProvider:() => null,
             title:'Fib ' + level.toFixed(3) +
               (item.selected ? ' ENTRY' : item.stopBoundary ? ' STOP LEVEL' : ''),
           });
@@ -1218,6 +1221,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const rect = chartWrap.getBoundingClientRect();
     if (event.clientX - rect.left < rect.width - 86 || !candle) return;
     priceZoomFactor = 1.0;
+    chart?.priceScale('right').applyOptions({autoScale:true});
     candle.applyOptions({});
     requestAnimationFrame(() => {
       drawFibOverlay();
@@ -1259,6 +1263,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   $('center-trade').addEventListener('click',centerSelectedTrade);
   $('fit-chart').addEventListener('click',() => {
     priceZoomFactor = 1.0;
+    chart?.priceScale('right').applyOptions({autoScale:true});
     candle?.applyOptions({});
     chart?.timeScale().fitContent();
     requestAnimationFrame(() => {
