@@ -790,13 +790,16 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     return best;
   }
 
-  function xForCandleTime(time) {
+  function canonicalCandleTime(time) {
     const index = candleIndexForTime(time);
     if (index == null) return null;
-    const logical = chart.timeScale().logicalToCoordinate(index);
-    if (logical !== null && logical !== undefined && Number.isFinite(Number(logical)))
-      return Number(logical);
     const candleTime = Number(payload?.candles?.[index]?.time);
+    return Number.isFinite(candleTime) ? candleTime : null;
+  }
+
+  function xForCandleTime(time) {
+    const candleTime = canonicalCandleTime(time);
+    if (candleTime == null) return null;
     const direct = chart.timeScale().timeToCoordinate(candleTime);
     return direct == null || !Number.isFinite(Number(direct)) ? null : Number(direct);
   }
@@ -1043,7 +1046,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         text:'S/R SNAPSHOT', kind:'sr-snapshot',
       });
     }
-    return result.sort((a,b) => Number(a.time)-Number(b.time));
+    return result
+      .map(item => {
+        const candleTime = canonicalCandleTime(item.time);
+        return candleTime == null ? null : {...item,time:candleTime};
+      })
+      .filter(Boolean)
+      .sort((a,b) => Number(a.time)-Number(b.time));
   }
 
   function resolveFibAnchorTimes(fib, candles, entryTime) {
@@ -1441,13 +1450,34 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const lastTime = Number(payload.selectedTradeViewEnd);
     if (!Number.isFinite(firstTime) || !Number.isFinite(lastTime) || lastTime <= firstTime) return;
 
-    chart.timeScale().setVisibleRange({from:firstTime,to:lastTime});
+    // The server owns the selected-trade time window. Convert those exact
+    // bounds to candle indexes only for Lightweight Charts' logical viewport.
+    // This avoids the timestamp-range path expanding/repositioning the view
+    // when the chart contains full-run candles plus Fib/marker series.
+    const firstIndex = candleIndexForTime(firstTime);
+    const lastIndex = candleIndexForTime(lastTime);
+    if (firstIndex == null || lastIndex == null || lastIndex <= firstIndex) return;
+    const firstCandleTime = Number(candles[firstIndex]?.time);
+    const lastCandleTime = Number(candles[lastIndex]?.time);
+    const firstCoordinate = chart.timeScale().timeToCoordinate(firstCandleTime);
+    const lastCoordinate = chart.timeScale().timeToCoordinate(lastCandleTime);
+    if ([firstCoordinate,lastCoordinate].some(
+      value => value == null || !Number.isFinite(Number(value))
+    )) return;
+    const firstLogical = chart.timeScale().coordinateToLogical(Number(firstCoordinate));
+    const lastLogical = chart.timeScale().coordinateToLogical(Number(lastCoordinate));
+    if ([firstLogical,lastLogical].some(
+      value => value == null || !Number.isFinite(Number(value))
+    ) || Number(lastLogical) <= Number(firstLogical)) return;
+    chart.timeScale().setVisibleLogicalRange({
+      from:Number(firstLogical) - 0.5,
+      to:Number(lastLogical) + 0.5,
+    });
 
     if (resetPrice) {
       let low = Infinity, high = -Infinity;
-      for (const bar of candles) {
-        const time = Number(bar?.time);
-        if (!Number.isFinite(time) || time < firstTime || time > lastTime) continue;
+      for (let index = firstIndex; index <= lastIndex; index++) {
+        const bar = candles[index];
         const lo = Number(bar?.low), hi = Number(bar?.high);
         if (Number.isFinite(lo)) low = Math.min(low,lo);
         if (Number.isFinite(hi)) high = Math.max(high,hi);
@@ -1475,8 +1505,15 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         defaultPriceRangeKey = payloadPriceRangeKey() + ':selected:' + currentTrade;
         priceZoomFactor = 1.0;
         pricePanOffset = 0.0;
-        chart?.priceScale('right').applyOptions({autoScale:true});
-        candle?.applyOptions({});
+        // Toggling auto-scale forces Lightweight Charts to re-query the
+        // autoscale provider after changing the selected-window base range.
+        chart?.priceScale('right').applyOptions({autoScale:false});
+        requestAnimationFrame(() => {
+          chart?.priceScale('right').applyOptions({autoScale:true});
+          candle?.applyOptions({});
+          drawFibOverlay();
+          drawPositionBox();
+        });
       }
     }
   }

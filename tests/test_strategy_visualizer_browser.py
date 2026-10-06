@@ -228,7 +228,12 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "tradeMode.value === 'all'" in html
     assert "Fib derivation" in html
     assert "centerSelectedTrade()" in html
-    assert "chart.timeScale().setVisibleRange({from:firstTime,to:lastTime})" in html
+    assert "setVisibleLogicalRange" in html
+    assert "const firstIndex = candleIndexForTime(firstTime)" in html
+    assert "const lastIndex = candleIndexForTime(lastTime)" in html
+    assert "const firstLogical = chart.timeScale().coordinateToLogical" in html
+    assert "function canonicalCandleTime(time)" in html
+    assert "const candleTime = canonicalCandleTime(item.time)" in html
     assert "Selected trade viewport is active" in html
     assert "selectedTradeViewStart" in html
     assert "selectedTradeViewEnd" in html
@@ -250,7 +255,6 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "DISPLAY " in html
     assert "nearestIndex" in html
     assert "candleIndexForTime" in html
-    assert "logicalToCoordinate(index)" in html
     assert "const x1 = xForCandleTime(startTime)" in html
     assert "const rawX2 = xForCandleTime(endTime)" in html
     assert "createPriceLine" not in html
