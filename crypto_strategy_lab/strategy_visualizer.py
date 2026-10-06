@@ -216,16 +216,35 @@ def _rule_timeframe_label(evidence: str, value: Any) -> str:
 def trade_stop_target(row: Mapping[str, Any]) -> tuple[float | None, float | None]:
     """Return the best immutable entry-stop / target representation available.
 
-    Fib executions persist their exact native stop/target in dedicated columns.
-    Prefer those values when present so the browser position box reflects the
-    actual Fib trade plan rather than falling back to generic TP/SL fields that
-    may be absent on completed Fib runs.
+    Fib executions persist exact native stop/target columns, but legacy/test
+    rows may also carry stale Fib fields after their side is changed. Use Fib
+    geometry only when it is directionally coherent with the actual entry;
+    otherwise fall back to the generic side-specific entry structure.
     """
     side = _trade_side(row).lower()
+    entry = _finite(
+        _first_value(
+            row,
+            ("entry_price", "actual_entry_price", "strategy_entry_price"),
+        )
+    )
+    fib_stop = _finite(row.get("fib_stop_price"))
+    fib_target = _finite(row.get("fib_target_price"))
+    fib_coherent = False
+    if entry is not None and fib_stop is not None and fib_target is not None:
+        fib_coherent = (
+            fib_stop < entry < fib_target
+            if side == "long"
+            else fib_stop > entry > fib_target
+            if side == "short"
+            else False
+        )
+    if fib_coherent:
+        return fib_stop, fib_target
+
     stop = _first_value(
         row,
         (
-            "fib_stop_price",
             "initial_stop_price",
             f"{side}_original_sl",
             f"{side}_sl_price",
@@ -236,7 +255,6 @@ def trade_stop_target(row: Mapping[str, Any]) -> tuple[float | None, float | Non
     target = _first_value(
         row,
         (
-            "fib_target_price",
             "initial_target_price",
             f"{side}_tp",
             f"{side}_tp2_price",
