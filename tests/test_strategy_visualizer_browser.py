@@ -177,6 +177,12 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "axisPressedMouseMove:{time:true,price:true}" in html
     assert "axisDoubleClickReset:{time:true,price:true}" in html
     assert "priceZoomFactor" in html
+    assert "pricePanOffset" in html
+    assert "verticalPan" in html
+    assert "Drag horizontally = time pan" in html
+    assert "drag vertically = price pan" in html
+    assert "Math.abs(dyTotal) <= Math.abs(dx) * 1.15" in html
+    assert "pricePanOffset += (dy / height) * 2.0 * priceZoomFactor" in html
     assert "overPriceScale" in html
     assert "event.clientX - rect.left >= rect.width - 86" in html
     assert "full_run" in html
@@ -191,6 +197,8 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "addRect('risk'" in html
     assert "const minWidth = 104" in html
     assert "right = Math.max(right,left + minWidth)" in html
+    assert "if (entryX < 0 || entryX > chartRight) return" in html
+    assert "never clamp an off-screen entry" in html
     assert "OPEN " in html
     assert "CLOSE " in html
     assert "box.exitPrice" in html
