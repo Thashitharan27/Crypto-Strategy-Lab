@@ -228,6 +228,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "tradeMode.value === 'all'" in html
     assert "Fib derivation" in html
     assert "centerSelectedTrade()" in html
+    assert "const windowBars = 240" in html
+    assert "entryIndex = candleIndexForTime(entryTime)" in html
+    assert "Do not let a long/legacy Fib reconstruction" in html
     assert "applyChartView" in html
     assert "chartView.value === 'selected'" in html
     assert "chartView.value = 'selected'" in html
