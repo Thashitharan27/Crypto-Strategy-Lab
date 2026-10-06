@@ -434,6 +434,37 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     return {minValue:low-pad,maxValue:high+pad};
   }
 
+  function computeSelectedTradePriceRange(first,last) {
+    const candles = payload?.candles || [];
+    let low = Infinity, high = -Infinity;
+    for (let index = Math.max(0,first); index <= Math.min(candles.length-1,last); index++) {
+      const bar = candles[index];
+      const lo = Number(bar?.low), hi = Number(bar?.high);
+      if (Number.isFinite(lo)) low = Math.min(low,lo);
+      if (Number.isFinite(hi)) high = Math.max(high,hi);
+    }
+    const box = payload?.positionBox || {};
+    for (const value of [box.entry,box.stop,box.target,box.exitPrice]) {
+      const price = Number(value);
+      if (Number.isFinite(price)) {
+        low = Math.min(low,price);
+        high = Math.max(high,price);
+      }
+    }
+    const fib = payload?.fibDerivation || {};
+    for (const item of (fib.levels || [])) {
+      const price = Number(item?.price);
+      if (Number.isFinite(price)) {
+        low = Math.min(low,price);
+        high = Math.max(high,price);
+      }
+    }
+    if (!Number.isFinite(low) || !Number.isFinite(high) || high <= low) return null;
+    const span = high - low;
+    const pad = Math.max(span * .08, Math.abs(high) * .0005);
+    return {minValue:low-pad,maxValue:high+pad};
+  }
+
   function ensureDefaultPriceRange(force=false) {
     const key = payloadPriceRangeKey();
     if (!force && defaultPriceRange && defaultPriceRangeKey === key) return;
@@ -444,6 +475,10 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   }
 
   function resetPriceScale() {
+    if (chartView?.value === 'selected' && payload?.selectedTradeCandleTime) {
+      centerSelectedTrade(true);
+      return;
+    }
     ensureDefaultPriceRange(true);
     chart?.priceScale('right').applyOptions({autoScale:true});
     candle?.applyOptions({});
@@ -1271,7 +1306,10 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     } else if (resetRange && payload.visibleStart && payload.visibleEnd) {
       chart.timeScale().setVisibleRange({from:payload.visibleStart,to:payload.visibleEnd});
     } else {
+      ensureDefaultPriceRange(true);
       chart.timeScale().fitContent();
+      chart?.priceScale('right').applyOptions({autoScale:true});
+      candle?.applyOptions({});
     }
     requestAnimationFrame(() => {
       drawZones();
@@ -1390,7 +1428,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     if (event.clientX - rect.left < rect.width - 86 || !candle) return;
     resetPriceScale();
   });
-  function centerSelectedTrade() {
+  function centerSelectedTrade(resetPrice=true) {
     if (!chart || !payload?.selectedTradeCandleTime) return;
     const candles = payload.candles || [];
     if (!candles.length) return;
@@ -1401,11 +1439,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const entryIndex = candleIndexForTime(entryTime);
     if (entryIndex == null) return;
 
-    // Selected-trade view is a display-only 240-candle viewport, matching the
-    // compact review behavior of the original browser visualizer. Keep the
-    // entire run loaded underneath; only the visible logical range changes.
-    // Do not let a long/legacy Fib reconstruction or distant exit expand the
-    // viewport until it is effectively indistinguishable from Full run.
     const windowBars = 240;
     const half = Math.floor(windowBars / 2);
     let first = Math.max(0, entryIndex - half);
@@ -1416,6 +1449,18 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       from: first - 0.5,
       to: last + 0.5,
     });
+
+    if (resetPrice) {
+      const localRange = computeSelectedTradePriceRange(first,last);
+      if (localRange) {
+        defaultPriceRange = localRange;
+        defaultPriceRangeKey = payloadPriceRangeKey() + ':selected:' + currentTrade;
+        priceZoomFactor = 1.0;
+        pricePanOffset = 0.0;
+        chart?.priceScale('right').applyOptions({autoScale:true});
+        candle?.applyOptions({});
+      }
+    }
   }
 
   function applyChartView() {
@@ -1432,7 +1477,9 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   });
   $('fit-chart').addEventListener('click',() => {
     chartView.value = 'full';
-    resetPriceScale();
+    ensureDefaultPriceRange(true);
+    chart?.priceScale('right').applyOptions({autoScale:true});
+    candle?.applyOptions({});
     chart?.timeScale().fitContent();
   });
   $('reset-price').addEventListener('click',resetPriceScale);
@@ -1464,7 +1511,9 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       $('center-trade').click();
     } else if (event.key.toLowerCase() === 'f') {
       chartView.value = 'full';
-      resetPriceScale();
+      ensureDefaultPriceRange(true);
+      chart?.priceScale('right').applyOptions({autoScale:true});
+      candle?.applyOptions({});
       chart?.timeScale().fitContent();
     } else if (event.key.toLowerCase() === 'i') {
       toggleInspector();
