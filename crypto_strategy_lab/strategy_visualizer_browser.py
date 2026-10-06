@@ -775,8 +775,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const endTime = Number(
       box.exitChartTime || box.exitTime || box.visibleEnd || payload.visibleEnd
     );
-    const x1 = chart.timeScale().timeToCoordinate(startTime);
-    const rawX2 = chart.timeScale().timeToCoordinate(endTime);
+    const x1 = xForCandleTime(startTime);
+    const rawX2 = xForCandleTime(endTime);
     const entryY = candle.priceToCoordinate(Number(box.entry));
     const stopY = box.stop == null ? null : candle.priceToCoordinate(Number(box.stop));
     const targetY = box.target == null ? null : candle.priceToCoordinate(Number(box.target));
