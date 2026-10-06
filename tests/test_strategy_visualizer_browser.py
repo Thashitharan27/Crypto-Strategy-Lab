@@ -230,6 +230,8 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "centerSelectedTrade()" in html
     assert "const windowBars = 240" in html
     assert "entryIndex = candleIndexForTime(entryTime)" in html
+    assert "chart.timeScale().setVisibleRange({from:firstTime,to:lastTime})" in html
+    assert "Selected trade viewport is active." in html
     assert "computeSelectedTradePriceRange" in html
     assert "defaultPriceRangeKey = payloadPriceRangeKey() + ':selected:' + currentTrade" in html
     assert "centerSelectedTrade(true)" in html
@@ -239,7 +241,6 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "tradeMode.value === 'selected'" in html
     assert "requestAnimationFrame(centerSelectedTrade)" in html
     assert "chartView.value = 'full'" in html
-    assert "setVisibleLogicalRange" in html
     assert "Chart view only changes the visible time range; the full run remains loaded." in html
     assert "resolveFibAnchorTimes" in html
     assert "rawStartTime !== null" in html
