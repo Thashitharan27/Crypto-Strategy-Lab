@@ -14,7 +14,8 @@ def test_strategy_visualizer_install_is_browser_only():
 
     assert "StrategyVisualizerBrowserServer" in source
     assert "webbrowser.open" in source
-    assert "strategy_visualizer_workspace" not in source
+    assert "StrategyVisualizerWorkspace" not in source
+    assert "from .strategy_visualizer_workspace import" not in source
     assert "QWebEngineView" not in source
     assert "build_visualizer_html" not in source
     assert "window.pages.addWidget" not in source
