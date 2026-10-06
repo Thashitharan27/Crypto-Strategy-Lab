@@ -1398,25 +1398,20 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const entryTime = Number(
       payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
     );
-    const fib = payload.fibDerivation || {};
-    const anchors = fib.status === 'AVAILABLE'
-      ? resolveFibAnchorTimes(fib,candles,entryTime)
-      : {startTime:entryTime,endTime:entryTime};
-    const box = payload.positionBox || {};
-    const times = [
-      Number(anchors.startTime),
-      Number(anchors.endTime),
-      entryTime,
-      Number(box.exitChartTime || box.exitTime),
-    ].filter(Number.isFinite);
+    const entryIndex = candleIndexForTime(entryTime);
+    if (entryIndex == null) return;
 
-    const indices = times.map(time => {
-      const index = candles.findIndex(item => Number(item.time) >= time);
-      return index < 0 ? candles.length - 1 : index;
-    });
-    if (!indices.length) return;
-    const first = Math.max(0,Math.min(...indices) - 14);
-    const last = Math.min(candles.length - 1,Math.max(...indices) + 18);
+    // Selected-trade view is a display-only 240-candle viewport, matching the
+    // compact review behavior of the original browser visualizer. Keep the
+    // entire run loaded underneath; only the visible logical range changes.
+    // Do not let a long/legacy Fib reconstruction or distant exit expand the
+    // viewport until it is effectively indistinguishable from Full run.
+    const windowBars = 240;
+    const half = Math.floor(windowBars / 2);
+    let first = Math.max(0, entryIndex - half);
+    let last = Math.min(candles.length - 1, first + windowBars - 1);
+    first = Math.max(0, last - windowBars + 1);
+
     chart.timeScale().setVisibleLogicalRange({
       from: first - 0.5,
       to: last + 0.5,
