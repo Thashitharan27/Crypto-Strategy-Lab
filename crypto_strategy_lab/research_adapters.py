@@ -15,6 +15,7 @@ from .fib_retracement import (
     FIB_DOMINANT_LOOKBACK_BARS,
     FIB_DOMINANT_RECENCY_PENALTY,
     FIB_DOMINANT_REPLACEMENT_RATIO,
+    FIB_ACTIVE_STRUCTURE_RESET_DEPTH,
     FIB_LEVEL_TOLERANCE_ATR,
     FIB_MINIMUM_IMPULSE_ATR,
     FIB_PIVOT_STRENGTH,
@@ -49,6 +50,7 @@ class PreparedPolicyConfig:
     fib_dominant_lookback_bars: int = FIB_DOMINANT_LOOKBACK_BARS
     fib_dominant_recency_penalty: float = FIB_DOMINANT_RECENCY_PENALTY
     fib_dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO
+    fib_active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH
     market_symbol: str = "POLICY"
 
 
