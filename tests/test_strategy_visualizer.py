@@ -963,6 +963,7 @@ def test_trade_stop_target_uses_persisted_fib_execution_geometry():
     stop, target = trade_stop_target(
         {
             "side": "LONG",
+            "entry_price": 100.0,
             "fib_stop_price": 95.5,
             "fib_target_price": 108.25,
             # Generic fields may be absent or stale on Fib completed runs.
