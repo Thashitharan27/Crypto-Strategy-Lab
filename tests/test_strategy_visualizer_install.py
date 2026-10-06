@@ -31,3 +31,12 @@ def test_strategy_visualizer_launcher_reuses_current_run_server_until_run_change
     assert "if self.model is not None and self._run_key == run_key" in source
     assert "self.stop()" in source
     assert "StrategyVisualizerBrowserServer(model)" in source
+
+
+def test_strategy_visualizer_v2_launcher_is_installed_alongside_legacy():
+    source = inspect.getsource(strategy_visualizer_install)
+
+    assert "StrategyVisualizerV2BrowserServer" in source
+    assert 'QPushButton("Strategy Visualizer V2")' in source
+    assert "strategy_visualizer_v2_launcher" in source
+    assert "strategy_visualizer_v2_button" in source
