@@ -23,7 +23,7 @@ from crypto_strategy_lab.strategy_visualizer import (
 )
 
 
-BROWSER_DEFAULT_VISIBLE_CANDLES = min(240, MAX_VISIBLE_CANDLES)
+BROWSER_DEFAULT_VISIBLE_CANDLES = min(120, MAX_VISIBLE_CANDLES)
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -179,6 +179,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
 <div id="app">
   <div id="toolbar">
     <span class="run-badge" id="run-badge"></span>
+    <label>Trades
+      <select id="trade-mode">
+        <option value="none" selected>No trades</option>
+        <option value="selected">Selected trade</option>
+        <option value="all">All trades</option>
+      </select>
+    </label>
     <button id="prev-trade" title="Previous trade">◀</button>
     <select id="trade-select" title="Completed trade"></select>
     <button id="next-trade" title="Next trade">▶</button>
@@ -284,6 +291,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const errorBox = $('error');
   const readout = $('readout');
   const tradeSelect = $('trade-select');
+  const tradeMode = $('trade-mode');
   const chartTf = $('chart-tf');
   const windowSize = $('window-size');
   const viewMode = $('view-mode');
@@ -351,6 +359,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const fullRunOption = document.createElement('option');
   fullRunOption.value = 'full';
   fullRunOption.textContent = 'Full run';
+  fullRunOption.selected = true;
   windowSize.appendChild(fullRunOption);
 
   function api(path, params={}) {
@@ -612,7 +621,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
 
   function drawPositionBox() {
     positionBoxLayer.replaceChildren();
-    if (!showPositionBox.checked || !payload || !chart || !candle) return;
+    if (tradeMode.value !== 'selected' || !showPositionBox.checked || !payload || !chart || !candle) return;
     const box = payload.positionBox;
     if (!box || !box.enabled) return;
 
@@ -732,7 +741,18 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   }
 
   function seriesMarkerSource() {
-    const result = [...(payload?.markers || [])];
+    const base = payload?.markers || [];
+    const result = [];
+    if (tradeMode.value === 'selected') {
+      result.push(...base.filter(item =>
+        ['selected-open','exit','reject'].includes(String(item.kind || ''))
+      ));
+    } else if (tradeMode.value === 'all') {
+      result.push(...(payload?.allTradeMarkers || []));
+      result.push(...base.filter(item => String(item.kind || '') === 'reject'));
+    } else {
+      result.push(...base.filter(item => String(item.kind || '') === 'reject'));
+    }
     if (viewMode.value === 'audit' && ['lifecycle','all'].includes(srDetails.value)) {
       const tfs = selectedTimeframes();
       result.push(...(payload.srEvents || []).filter(event => tfs.has(String(event.timeframe))));
@@ -819,7 +839,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       LC.createSeriesMarkers(candle,markers);
     }
 
-    if (viewMode.value !== 'audit' && showFib.checked) {
+    if (viewMode.value !== 'audit' && tradeMode.value === 'selected' && showFib.checked) {
       const fib = payload.fibDerivation || {};
       if (fib.status === 'AVAILABLE') {
         const candles = payload.candles || [];
@@ -848,6 +868,25 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
             {time:fibStartTime,value:Number(fib.impulseStartPrice)},
             {time:fibEndTime,value:Number(fib.impulseEndPrice)},
           ]);
+          if (LC.createSeriesMarkers) {
+            const longSide = String(fib.direction || '').toUpperCase() === 'LONG';
+            LC.createSeriesMarkers(swing,[
+              {
+                time:fibStartTime,
+                position:longSide ? 'belowBar' : 'aboveBar',
+                shape:'circle',
+                color:'#ffd166',
+                text:longSide ? 'SWING LOW' : 'SWING HIGH',
+              },
+              {
+                time:fibEndTime,
+                position:longSide ? 'aboveBar' : 'belowBar',
+                shape:'circle',
+                color:'#ffd166',
+                text:longSide ? 'SWING HIGH' : 'SWING LOW',
+              },
+            ]);
+          }
         }
         const levelEnd = Number.isFinite(entryTime) ? entryTime : fibEndTime;
         for (const item of fib.levels || []) {
@@ -869,7 +908,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       }
     }
 
-    if (viewMode.value !== 'audit') {
+    if (viewMode.value !== 'audit' && tradeMode.value === 'selected') {
       for (const line of payload.priceLines || []) {
         const color = line.kind==='entry' ? '#7db7ff' : line.kind==='stop' ? '#f08a8a' : '#79d39d';
         candle.createPriceLine({
@@ -937,7 +976,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       renderTrade(payload.selectedTrade || {});
       updateRunBadge();
       renderChart(true);
-      if (!fullRun) centerSelectedTrade();
       const referenceNote = payload.chartTimeframe !== payload.run.strategyTimeframe
         ? 'Reference candles: ' + String(payload.chartTimeframe).toUpperCase() +
           ' from current canonical cache; strategy evidence remains ' +
@@ -960,8 +998,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   }
 
   function updateTradeButtons() {
-    $('prev-trade').disabled = currentTrade <= 0 || !boot.trades.length;
-    $('next-trade').disabled = currentTrade >= boot.trades.length - 1 || !boot.trades.length;
+    const selectedMode = tradeMode.value === 'selected';
+    $('prev-trade').disabled = !selectedMode || currentTrade <= 0 || !boot.trades.length;
+    $('next-trade').disabled = !selectedMode || currentTrade >= boot.trades.length - 1 || !boot.trades.length;
+    tradeSelect.disabled = !selectedMode;
+    $('center-trade').disabled = !selectedMode;
+    showPositionBox.disabled = !selectedMode;
+    showFib.disabled = !selectedMode;
     tradeSelect.value = String(currentTrade);
   }
   function setTrade(index) {
@@ -989,6 +1032,10 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   $('prev-trade').addEventListener('click',() => setTrade(currentTrade-1));
   $('next-trade').addEventListener('click',() => setTrade(currentTrade+1));
   tradeSelect.addEventListener('change',() => setTrade(Number(tradeSelect.value)));
+  tradeMode.addEventListener('change',() => {
+    updateTradeButtons();
+    renderChart(false);
+  });
   chartTf.addEventListener('change',() => {
     focusedZone = null;
     inspectedTime = null;
@@ -1008,11 +1055,16 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     );
     let index = candles.findIndex(item => Number(item.time) >= target);
     if (index < 0) index = candles.length - 1;
-    const radius = 70;
-    const from = Number(candles[Math.max(0,index-radius)]?.time);
-    const to = Number(candles[Math.min(candles.length-1,index+radius)]?.time);
-    if (Number.isFinite(from) && Number.isFinite(to) && from < to)
-      chart.timeScale().setVisibleRange({from,to});
+
+    // Use logical bars rather than a timestamp span. This keeps the selected
+    // trade genuinely centered even during fast rallies/crashes, and lets the
+    // chart's normal autoscale focus the price axis on the local trade geometry.
+    const leftBars = 32;
+    const rightBars = 32;
+    chart.timeScale().setVisibleLogicalRange({
+      from: Math.max(-0.5, index - leftBars),
+      to: Math.min(candles.length - 0.5, index + rightBars),
+    });
   }
   $('center-trade').addEventListener('click',() => {
     if (payload?.fullRun) centerSelectedTrade();

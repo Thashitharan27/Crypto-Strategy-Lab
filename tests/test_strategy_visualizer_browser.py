@@ -101,6 +101,10 @@ class _FakeVisualizer:
             "srZones": [],
             "srEvents": [],
             "markers": [],
+            "allTradeMarkers": [
+                {"time": 1_700_000_000, "position": "belowBar", "shape": "arrowUp", "text": "#1 LONG", "kind": "all-trade-entry"},
+                {"time": 1_700_003_600, "position": "aboveBar", "shape": "square", "text": "#1 EXIT", "kind": "all-trade-exit"},
+            ],
             "priceLines": [],
             "positionBox": {
                 "enabled": True,
@@ -154,6 +158,10 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert 'id="sr-tf"' in html
     assert 'id="sr-snapshot"' in html
     assert 'id="nearest-only"' in html
+    assert 'id="trade-mode"' in html
+    assert "No trades" in html
+    assert "Selected trade" in html
+    assert "All trades" in html
     assert 'id="show-position-box"' in html
     assert 'id="show-fib"' in html
     assert 'id="position-box-layer"' in html
@@ -177,8 +185,16 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "CLOSE " in html
     assert "box.exitPrice" in html
     assert "Fib swing" in html
+    assert "SWING LOW" in html
+    assert "SWING HIGH" in html
+    assert "allTradeMarkers" in html
+    assert "tradeMode.value === 'selected'" in html
+    assert "tradeMode.value === 'all'" in html
     assert "Fib derivation" in html
     assert "centerSelectedTrade()" in html
+    assert "setVisibleLogicalRange" in html
+    assert "const leftBars = 32" in html
+    assert BROWSER_DEFAULT_VISIBLE_CANDLES == 120
 
 
 def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():
