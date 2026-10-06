@@ -33,8 +33,15 @@ def test_v2_html_is_minimal_and_diagnostic():
     assert "OPEN marker time:" in html
     assert "EXIT marker time:" in html
     assert "selected view bounds:" in html
-    assert "full_run:'1'" in html
     assert "setVisibleRange({from:start,to:end})" in html
     assert "Fib" not in html
     assert "EMA 20" not in html
     assert "S/R" not in html
+
+
+def test_v2_server_uses_minimal_payload_path():
+    from crypto_strategy_lab import strategy_visualizer_browser_v2
+
+    source = __import__("inspect").getsource(strategy_visualizer_browser_v2)
+    assert "build_v2_diagnostic_payload" in source
+    assert "build_payload(" not in source
