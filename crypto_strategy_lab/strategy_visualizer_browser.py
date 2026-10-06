@@ -332,7 +332,11 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     event.preventDefault();
     event.stopPropagation();
     const direction = event.deltaY > 0 ? 1.12 : 0.89;
-    priceZoomFactor = Math.max(.18,Math.min(5.5,priceZoomFactor * direction));
+    // Allow much deeper vertical zoom than the previous 0.18 floor. The old
+    // clamp stopped around ~5.5x magnification, which is too shallow when the
+    // full run has a wide price range. Keep only a very small numerical floor
+    // and a generous zoom-out ceiling.
+    priceZoomFactor = Math.max(.005,Math.min(50,priceZoomFactor * direction));
     chart?.priceScale('right').applyOptions({autoScale:true});
     candle.applyOptions({});
     requestAnimationFrame(() => {
