@@ -230,6 +230,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "centerSelectedTrade()" in html
     assert "const windowBars = 240" in html
     assert "entryIndex = candleIndexForTime(entryTime)" in html
+    assert "computeSelectedTradePriceRange" in html
+    assert "defaultPriceRangeKey = payloadPriceRangeKey() + ':selected:' + currentTrade" in html
+    assert "centerSelectedTrade(true)" in html
     assert "Do not let a long/legacy Fib reconstruction" in html
     assert "applyChartView" in html
     assert "chartView.value === 'selected'" in html
