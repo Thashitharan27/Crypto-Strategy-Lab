@@ -151,7 +151,6 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
 
     assert "Strategy Visualizer · Browser Audit" in html
     assert 'id="chart-tf"' in html
-    assert 'id="window-size"' in html
     assert 'id="toggle-inspector"' in html
     assert 'id="fullscreen"' in html
     assert 'id="view-mode"' in html
@@ -172,8 +171,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "/api/inspect" in html
     assert "handleScroll" in html
     assert "handleScale" in html
-    assert "Full run" in html
     assert "full_run" in html
+    assert "full_run:'1'" in html
+    assert 'id="window-size"' not in html
     assert "chart_timeframe" in html
     assert "current canonical cache" in html
     assert "drawPositionBox" in html
