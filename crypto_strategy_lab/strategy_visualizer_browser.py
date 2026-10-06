@@ -200,6 +200,12 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     <label>Chart TF
       <select id="chart-tf"></select>
     </label>
+    <label>Chart view
+      <select id="chart-view">
+        <option value="full" selected>Full run</option>
+        <option value="selected">Selected trade view</option>
+      </select>
+    </label>
     <button id="center-trade">Center trade</button>
     <button id="fit-chart">Fit loaded</button>
     <button id="reset-price">Reset price</button>
@@ -301,6 +307,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   const tradeSelect = $('trade-select');
   const tradeMode = $('trade-mode');
   const chartTf = $('chart-tf');
+  const chartView = $('chart-view');
   const viewMode = $('view-mode');
   const srTf = $('sr-tf');
   const srSnapshot = $('sr-snapshot');
@@ -1295,6 +1302,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       renderTrade(payload.selectedTrade || {});
       updateRunBadge();
       renderChart(true);
+      if (chartView.value === 'selected')
+        requestAnimationFrame(centerSelectedTrade);
       const referenceNote = payload.chartTimeframe !== payload.run.strategyTimeframe
         ? 'Reference candles: ' + String(payload.chartTimeframe).toUpperCase() +
           ' from current canonical cache; strategy evidence remains ' +
@@ -1303,7 +1312,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       readout.textContent = referenceNote + (payload.fullRun
         ? 'Full run loaded · ' + (payload.candles || []).length.toLocaleString() + ' candles. '
         : (payload.candles || []).length.toLocaleString() + ' candles loaded. ') +
-        'Pan/zoom freely. Click aligned strategy candles for exact persisted rule and S/R evidence.';
+        'Pan/zoom freely. Chart view only changes the visible time range; the full run remains loaded. ' +
+        'Click aligned strategy candles for exact persisted rule and S/R evidence.';
       if (payload.selectedTradeCandleTime) {
         await inspectTime(payload.selectedTradeCandleTime,false);
         inspectedTime = Number(
@@ -1361,6 +1371,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     updateRunBadge();
     loadPayload();
   });
+  chartView.addEventListener('change',applyChartView);
   showRejections.addEventListener('change',loadPayload);
   showPositionBox.addEventListener('change',drawPositionBox);
   showFib.addEventListener('change',() => renderChart(false));
@@ -1401,8 +1412,21 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       to: last + 0.5,
     });
   }
-  $('center-trade').addEventListener('click',centerSelectedTrade);
+
+  function applyChartView() {
+    if (!chart) return;
+    if (chartView.value === 'selected') {
+      centerSelectedTrade();
+    } else {
+      chart.timeScale().fitContent();
+    }
+  }
+  $('center-trade').addEventListener('click',() => {
+    chartView.value = 'selected';
+    centerSelectedTrade();
+  });
   $('fit-chart').addEventListener('click',() => {
+    chartView.value = 'full';
     resetPriceScale();
     chart?.timeScale().fitContent();
   });
@@ -1434,6 +1458,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       event.preventDefault();
       $('center-trade').click();
     } else if (event.key.toLowerCase() === 'f') {
+      chartView.value = 'full';
       resetPriceScale();
       chart?.timeScale().fitContent();
     } else if (event.key.toLowerCase() === 'i') {
