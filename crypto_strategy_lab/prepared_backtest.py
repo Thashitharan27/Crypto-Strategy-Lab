@@ -474,6 +474,15 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
             level_tolerance_atr=float(
                 getattr(config, "fib_level_tolerance_atr", 0.25)
             ),
+            dominant_lookback_bars=int(
+                getattr(config, "fib_dominant_lookback_bars", 160)
+            ),
+            dominant_recency_penalty=float(
+                getattr(config, "fib_dominant_recency_penalty", 0.35)
+            ),
+            dominant_replacement_ratio=float(
+                getattr(config, "fib_dominant_replacement_ratio", 1.10)
+            ),
         )
         research_blocks.append(
             ResearchContext(
