@@ -483,6 +483,9 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
             dominant_replacement_ratio=float(
                 getattr(config, "fib_dominant_replacement_ratio", 1.10)
             ),
+            active_structure_reset_depth=float(
+                getattr(config, "fib_active_structure_reset_depth", 0.618)
+            ),
         )
         research_blocks.append(
             ResearchContext(
