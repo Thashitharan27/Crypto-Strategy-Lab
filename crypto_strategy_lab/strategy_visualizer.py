@@ -2068,6 +2068,151 @@ class CompletedRunVisualizer:
             "visibleEnd": _unix_seconds(visible_end),
         }
 
+    def build_v2_diagnostic_payload(
+        self,
+        *,
+        trade_index: int | None = None,
+        chart_timeframe: str | None = None,
+    ) -> dict[str, Any]:
+        """Build the minimal V2 payload without loading context, S/R, or overlays."""
+        if self.trade_count:
+            if trade_index is None:
+                trade_index = 0
+            trade_index = max(0, min(self.trade_count - 1, int(trade_index)))
+        else:
+            trade_index = None
+
+        request = self.seed.request
+        strategy_timeframe = str(request.strategy_timeframe)
+        chart_timeframe = str(chart_timeframe or strategy_timeframe)
+        run_start = _utc(request.period_start)
+        run_end = _utc(request.period_end)
+
+        market = self._market_frame(
+            run_start,
+            run_end,
+            chart_timeframe=chart_timeframe,
+        )
+        if market.empty:
+            raise ValueError("no canonical strategy candles are available for this run")
+
+        candles = [
+            {
+                "time": _unix_seconds(row["period_start"]),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+            }
+            for _, row in market.iterrows()
+        ]
+
+        selected_trade = self.selected_trade_summary(trade_index)
+        markers: list[dict[str, Any]] = []
+        selected_trade_candle_time = None
+        selected_trade_chart_candle_time = None
+        selected_view_start = None
+        selected_view_end = None
+
+        if trade_index is not None and self.trade_count:
+            row = self._trade_row(trade_index)
+            side = _trade_side(row)
+
+            signal_time = self.selected_trade_candle_time(trade_index)
+            selected_trade_candle_time = (
+                _unix_seconds(signal_time) if signal_time is not None else None
+            )
+
+            entry_raw = _first_value(
+                row,
+                ("entry_time", "strategy_entry_time", "actual_entry_timestamp"),
+            )
+            if entry_raw is not None:
+                selected_trade_chart_candle_time = self._snap_to_candle(
+                    entry_raw, market
+                )
+                entry_price = _finite(
+                    _first_value(
+                        row,
+                        ("entry_price", "actual_entry_price", "strategy_entry_price"),
+                    )
+                )
+                if selected_trade_chart_candle_time is not None:
+                    markers.append(
+                        {
+                            "time": selected_trade_chart_candle_time,
+                            "position": "belowBar" if side == "LONG" else "aboveBar",
+                            "shape": "arrowUp" if side == "LONG" else "arrowDown",
+                            "text": (
+                                f"OPEN · {entry_price:,.2f}"
+                                if entry_price is not None
+                                else "OPEN"
+                            ),
+                            "kind": "selected-open",
+                        }
+                    )
+
+            exit_raw = _first_value(
+                row,
+                ("exit_time", "actual_exit_timestamp", "strategy_exit_time"),
+            )
+            if exit_raw is not None and not pd.isna(exit_raw):
+                exit_chart_time = self._snap_to_candle(exit_raw, market)
+                if exit_chart_time is not None:
+                    reason = _first_value(
+                        row,
+                        (
+                            f"{side.lower()}_final_exit_reason",
+                            f"{side.lower()}_exit_reason",
+                            "exit_reason",
+                        ),
+                    )
+                    markers.append(
+                        {
+                            "time": exit_chart_time,
+                            "position": "aboveBar" if side == "LONG" else "belowBar",
+                            "shape": "square",
+                            "text": f"EXIT · {reason or ''}".strip(),
+                            "kind": "exit",
+                        }
+                    )
+
+            interval = pd.Timedelta(interval_to_timedelta(chart_timeframe))
+            center = self._center_time(trade_index)
+            selected_view_start = max(run_start, center - 120 * interval)
+            selected_view_end = min(run_end, center + 120 * interval)
+
+        markers.sort(key=lambda item: int(item["time"]))
+
+        return {
+            "run": {
+                "runId": str(self.manifest.get("run_id") or self.run_dir.name),
+                "symbol": request.symbol,
+                "timeframe": strategy_timeframe,
+                "strategyTimeframe": strategy_timeframe,
+                "chartTimeframe": chart_timeframe,
+            },
+            "selectedTradeIndex": trade_index,
+            "selectedTrade": selected_trade,
+            "selectedTradeCandleTime": selected_trade_candle_time,
+            "selectedTradeChartCandleTime": selected_trade_chart_candle_time,
+            "selectedTradeViewStart": (
+                _unix_seconds(selected_view_start)
+                if selected_view_start is not None
+                else None
+            ),
+            "selectedTradeViewEnd": (
+                _unix_seconds(selected_view_end)
+                if selected_view_end is not None
+                else None
+            ),
+            "candles": candles,
+            "markers": markers,
+            "fullRun": True,
+            "chartTimeframe": chart_timeframe,
+        }
+
+
     def build_payload(
         self,
         *,
