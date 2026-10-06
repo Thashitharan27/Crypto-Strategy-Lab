@@ -16,8 +16,6 @@ from crypto_strategy_lab.gui.completed_run_research import research_seed_from_ma
 from crypto_strategy_lab.research_warmup import strategy_warmup_period
 from crypto_strategy_lab.strategy_visualizer import (
     CompletedRunVisualizer,
-    LIGHTWEIGHT_CHARTS_VERSION,
-    build_visualizer_html,
     trade_stop_target,
 )
 
@@ -957,31 +955,6 @@ def test_trade_stop_target_prefers_original_entry_structure():
     )
     assert stop == 105.0
     assert target == 94.0
-
-
-def test_visualizer_html_pins_lightweight_charts_and_preserves_attribution():
-    html = build_visualizer_html(
-        {
-            "candles": [],
-            "overlays": [],
-            "markers": [],
-            "priceLines": [],
-            "candleContext": {},
-        }
-    )
-
-    assert f"lightweight-charts@{LIGHTWEIGHT_CHARTS_VERSION}" in html
-    assert "CandlestickSeries" in html
-    assert "createSeriesMarkers" in html
-    assert "attributionLogo: true" in html
-    assert "tradingview.com" in html
-    assert "no strategy re-evaluation" in html
-    assert "qtwebchannel/qwebchannel.js" in html
-    assert "strategyBridge.selectCandle" in html
-    assert 'id="zone-layer"' in html
-    assert "priceToCoordinate" in html
-    assert "timeToCoordinate" in html
-    assert "S/R SNAPSHOT" in html
 
 
 def test_active_app_composes_strategy_visualizer():

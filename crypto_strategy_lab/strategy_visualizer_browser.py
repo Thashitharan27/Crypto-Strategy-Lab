@@ -438,8 +438,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   function renderFibSummary(fib) {
     if (!fib || fib.status !== 'AVAILABLE') return '';
     const mode = fib.reconstructedLegacy
-      ? '<div class="note status-warn">Fib price ladder reconstructed from persisted execution geometry. Older run did not save swing candle timestamps.</div>'
-      : '<div class="note status-pass">Exact persisted Fib swing geometry.</div>';
+      ? '<div class="note status-warn">Fib prices are reconstructed exactly from persisted execution geometry. Swing candle timing is display-only and matched to the nearest pre-entry candles at those persisted prices.</div>'
+      : '<div class="note status-pass">Exact persisted Fib swing geometry and candle anchors.</div>';
     const rows = [
       ['Direction', fib.direction],
       ['Impulse start', fib.impulseStartPrice],
@@ -775,6 +775,50 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     return result.sort((a,b) => Number(a.time)-Number(b.time));
   }
 
+  function resolveFibAnchorTimes(fib, candles, entryTime) {
+    let startTime = Number(fib.impulseStartTime);
+    let endTime = Number(fib.impulseEndTime);
+    if (Number.isFinite(startTime) && Number.isFinite(endTime))
+      return {startTime,endTime,reconstructed:false};
+
+    const startPrice = Number(fib.impulseStartPrice);
+    const endPrice = Number(fib.impulseEndPrice);
+    if (!Number.isFinite(startPrice) || !Number.isFinite(endPrice) || !candles.length)
+      return {startTime:entryTime,endTime:entryTime,reconstructed:true};
+
+    let entryIndex = candles.findIndex(item => Number(item.time) >= Number(entryTime));
+    if (entryIndex < 0) entryIndex = candles.length;
+    const first = Math.max(0, entryIndex - 320);
+    const last = Math.max(first + 1, entryIndex);
+
+    function nearestIndex(from, to, field, price) {
+      let best = -1, bestDistance = Infinity;
+      for (let index = from; index < to; index++) {
+        const value = Number(candles[index]?.[field]);
+        if (!Number.isFinite(value)) continue;
+        const distance = Math.abs(value - price);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = index;
+        }
+      }
+      return best;
+    }
+
+    const longSide = String(fib.direction || '').toUpperCase() === 'LONG';
+    const endField = longSide ? 'high' : 'low';
+    const startField = longSide ? 'low' : 'high';
+    let endIndex = nearestIndex(first,last,endField,endPrice);
+    if (endIndex < 0) endIndex = Math.max(first,last - 1);
+    let startIndex = nearestIndex(first,Math.max(first + 1,endIndex),startField,startPrice);
+    if (startIndex < 0 || startIndex >= endIndex)
+      startIndex = Math.max(first,endIndex - 1);
+
+    startTime = Number(candles[startIndex]?.time || entryTime);
+    endTime = Number(candles[endIndex]?.time || entryTime);
+    return {startTime,endTime,reconstructed:true};
+  }
+
   function renderChart(resetRange=true) {
     if (!payload || !window.LightweightCharts) return;
     const previousRange = (!resetRange && chart)
@@ -846,14 +890,9 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         const entryTime = Number(
           fib.entryTime || payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
         );
-        let fibStartTime = Number(fib.impulseStartTime);
-        let fibEndTime = Number(fib.impulseEndTime);
-        if (!Number.isFinite(fibStartTime) || !Number.isFinite(fibEndTime)) {
-          let index = candles.findIndex(item => Number(item.time) >= entryTime);
-          if (index < 0) index = Math.max(0,candles.length-1);
-          fibStartTime = Number(candles[Math.max(0,index-80)]?.time || entryTime);
-          fibEndTime = Number(candles[Math.max(0,index-1)]?.time || entryTime);
-        }
+        const anchors = resolveFibAnchorTimes(fib,candles,entryTime);
+        const fibStartTime = Number(anchors.startTime);
+        const fibEndTime = Number(anchors.endTime);
         if (
           Number.isFinite(fib.impulseStartPrice) &&
           Number.isFinite(fib.impulseEndPrice) &&
@@ -862,7 +901,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         ) {
           const swing = chart.addSeries(LC.LineSeries,{
             color:'#ffd166',lineWidth:3,priceLineVisible:false,lastValueVisible:false,
-            crosshairMarkerVisible:true,title:fib.reconstructedLegacy ? 'Fib swing · timing reconstructed' : 'Fib swing',
+            crosshairMarkerVisible:true,title:anchors.reconstructed ? 'Fib swing · display anchors reconstructed' : 'Fib swing',
           });
           swing.setData([
             {time:fibStartTime,value:Number(fib.impulseStartPrice)},
@@ -876,14 +915,14 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
                 position:longSide ? 'belowBar' : 'aboveBar',
                 shape:'circle',
                 color:'#ffd166',
-                text:longSide ? 'SWING LOW' : 'SWING HIGH',
+                text:(anchors.reconstructed ? 'DISPLAY ' : '') + (longSide ? 'SWING LOW' : 'SWING HIGH'),
               },
               {
                 time:fibEndTime,
                 position:longSide ? 'aboveBar' : 'belowBar',
                 shape:'circle',
                 color:'#ffd166',
-                text:longSide ? 'SWING HIGH' : 'SWING LOW',
+                text:(anchors.reconstructed ? 'DISPLAY ' : '') + (longSide ? 'SWING HIGH' : 'SWING LOW'),
               },
             ]);
           }
@@ -905,15 +944,6 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
           });
           line.setData([{time:fibStartTime,value:price},{time:levelEnd,value:price}]);
         }
-      }
-    }
-
-    if (viewMode.value !== 'audit' && tradeMode.value === 'selected') {
-      for (const line of payload.priceLines || []) {
-        const color = line.kind==='entry' ? '#7db7ff' : line.kind==='stop' ? '#f08a8a' : '#79d39d';
-        candle.createPriceLine({
-          price:line.price,color,lineWidth:2,lineStyle:2,axisLabelVisible:true,title:line.title,
-        });
       }
     }
 
@@ -976,6 +1006,8 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       renderTrade(payload.selectedTrade || {});
       updateRunBadge();
       renderChart(true);
+      if (tradeMode.value === 'selected')
+        requestAnimationFrame(() => centerSelectedTrade());
       const referenceNote = payload.chartTimeframe !== payload.run.strategyTimeframe
         ? 'Reference candles: ' + String(payload.chartTimeframe).toUpperCase() +
           ' from current canonical cache; strategy evidence remains ' +
@@ -1034,7 +1066,9 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   tradeSelect.addEventListener('change',() => setTrade(Number(tradeSelect.value)));
   tradeMode.addEventListener('change',() => {
     updateTradeButtons();
-    renderChart(false);
+    renderChart(true);
+    if (tradeMode.value === 'selected')
+      requestAnimationFrame(() => centerSelectedTrade());
   });
   chartTf.addEventListener('change',() => {
     focusedZone = null;
@@ -1050,20 +1084,32 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     if (!chart || !payload?.selectedTradeCandleTime) return;
     const candles = payload.candles || [];
     if (!candles.length) return;
-    const target = Number(
+
+    const entryTime = Number(
       payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime
     );
-    let index = candles.findIndex(item => Number(item.time) >= target);
-    if (index < 0) index = candles.length - 1;
+    const fib = payload.fibDerivation || {};
+    const anchors = fib.status === 'AVAILABLE'
+      ? resolveFibAnchorTimes(fib,candles,entryTime)
+      : {startTime:entryTime,endTime:entryTime};
+    const box = payload.positionBox || {};
+    const times = [
+      Number(anchors.startTime),
+      Number(anchors.endTime),
+      entryTime,
+      Number(box.exitChartTime || box.exitTime),
+    ].filter(Number.isFinite);
 
-    // Use logical bars rather than a timestamp span. This keeps the selected
-    // trade genuinely centered even during fast rallies/crashes, and lets the
-    // chart's normal autoscale focus the price axis on the local trade geometry.
-    const leftBars = 32;
-    const rightBars = 32;
+    const indices = times.map(time => {
+      const index = candles.findIndex(item => Number(item.time) >= time);
+      return index < 0 ? candles.length - 1 : index;
+    });
+    if (!indices.length) return;
+    const first = Math.max(0,Math.min(...indices) - 14);
+    const last = Math.min(candles.length - 1,Math.max(...indices) + 18);
     chart.timeScale().setVisibleLogicalRange({
-      from: Math.max(-0.5, index - leftBars),
-      to: Math.min(candles.length - 0.5, index + rightBars),
+      from: first - 0.5,
+      to: last + 0.5,
     });
   }
   $('center-trade').addEventListener('click',() => {
