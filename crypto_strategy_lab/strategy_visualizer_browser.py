@@ -1367,6 +1367,12 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
   tradeSelect.addEventListener('change',() => setTrade(Number(tradeSelect.value)));
   tradeMode.addEventListener('change',() => {
     updateTradeButtons();
+    if (tradeMode.value === 'selected') {
+      chartView.value = 'selected';
+      renderChart(false);
+      requestAnimationFrame(centerSelectedTrade);
+      return;
+    }
     renderChart(false);
   });
   chartTf.addEventListener('change',() => {
