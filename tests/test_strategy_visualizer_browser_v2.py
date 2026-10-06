@@ -57,3 +57,11 @@ def test_v2_html_includes_trade_box_and_correct_summary_keys():
     assert "timeToCoordinate(Number(open.time))" in html
     assert "trade.Entry ?? trade.entry" in html
     assert "trade['Entry Time'] || trade.entryTime" in html
+
+
+def test_v2_trade_box_layer_stays_above_chart_canvas():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+
+    assert "#chart{position:absolute;inset:0;z-index:1}" in html
+    assert "#trade-box-layer{position:absolute;inset:0;z-index:5" in html
+    assert "const width=Math.max(48,right-left)" in html
