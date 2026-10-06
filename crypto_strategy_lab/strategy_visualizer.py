@@ -1694,14 +1694,21 @@ class CompletedRunVisualizer:
             return None
         if target < times[0]:
             return None
-        interval_ns = (
-            int(np.median(np.diff(times.asi8)))
+
+        # Keep all comparisons in timestamp space. With pandas 2.x, a
+        # DatetimeIndex loaded from parquet may retain microsecond resolution,
+        # while Timestamp.value is always nanoseconds. Comparing asi8 to
+        # Timestamp.value can therefore make every valid trade look newer than
+        # the whole run and clamp it to the final candle.
+        interval = (
+            pd.Series(times[1:] - times[:-1]).median()
             if len(times) > 1
-            else int(pd.Timedelta(minutes=1).value)
+            else pd.Timedelta(minutes=1)
         )
-        if target.value >= times[-1].value + max(1, interval_ns):
+        if target >= times[-1] + max(interval, pd.Timedelta(nanoseconds=1)):
             return None
-        index = int(np.searchsorted(times.asi8, target.value, side="right") - 1)
+
+        index = int(times.searchsorted(target, side="right") - 1)
         index = max(0, min(index, len(times) - 1))
         return _unix_seconds(times[index])
 
