@@ -4,10 +4,11 @@ A swing is not usable until the right-side confirmation bars have closed. The
 strategy therefore never selects historical pivots with hindsight. Confirmed
 pivot legs are ranked as structural candidates over a bounded recent window;
 the active Fib remains on the dominant swing until a materially stronger swing
-is confirmed, the old swing ages out, or its retracement breaks. While an active
-swing remains valid, a newly confirmed higher high / lower low extends that same
-leg from its original anchor even when the anchor is older than the discovery
-lookback. Once a
+is confirmed, the old swing ages out, or a deep retracement resets the structure.
+While an active swing remains valid, a newly confirmed higher high / lower low
+extends that same leg from its original anchor even when the anchor is older than
+the discovery lookback. A close retracement to 0.618 or deeper ends that extension
+privilege so a completed cycle cannot keep dragging an old anchor forward. Once a
 confirmed impulse exists, the first successful reaction at 0.382, 0.500, or
 0.618 may produce a signal in the impulse direction. All retracement measurements
 remain available as generic Entry/Veto evidence.
@@ -20,13 +21,14 @@ import pandas as pd
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 4
+FIB_RESEARCH_CONTEXT_VERSION = 5
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
 FIB_DOMINANT_LOOKBACK_BARS = 160
 FIB_DOMINANT_RECENCY_PENALTY = 0.35
 FIB_DOMINANT_REPLACEMENT_RATIO = 1.10
+FIB_ACTIVE_STRUCTURE_RESET_DEPTH = 0.618
 FIB_LEVELS = (0.236, 0.382, 0.500, 0.618, 0.786)
 FIB_SIGNAL_LEVELS = frozenset({0.382, 0.500, 0.618})
 FIB_RULE_INDICATORS = frozenset({
@@ -99,6 +101,7 @@ def fibonacci_retracement_arrays(
     dominant_lookback_bars: int = FIB_DOMINANT_LOOKBACK_BARS,
     dominant_recency_penalty: float = FIB_DOMINANT_RECENCY_PENALTY,
     dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO,
+    active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -146,11 +149,13 @@ def fibonacci_retracement_arrays(
     active_tests = 0
     active_last_test: int | None = None
     active_broken = False
+    active_structure_reset = False
     signalled_leg: tuple[str, int, int] | None = None
 
     dominant_lookback_bars = max(16, int(dominant_lookback_bars))
     dominant_recency_penalty = min(0.95, max(0.0, float(dominant_recency_penalty)))
     dominant_replacement_ratio = max(1.0, float(dominant_replacement_ratio))
+    active_structure_reset_depth = min(0.786, max(0.236, float(active_structure_reset_depth)))
 
     def _candidate_live_score(candidate, now):
         age = max(0, now - candidate[2])
@@ -158,6 +163,32 @@ def fibonacci_retracement_arrays(
         return candidate[3] * (1.0 - dominant_recency_penalty * age_fraction)
 
     for i in range(n):
+        # Once an active leg has retraced deeply enough, treat that move as a
+        # completed structural cycle. From that bar onward the old anchor may
+        # no longer extend to future extremes and no longer receives sticky
+        # replacement protection. This is latched until a new leg is selected.
+        if active_leg is not None and i > active_leg[2] and not active_structure_reset:
+            active_direction, active_start_i, active_end_i = active_leg
+            active_start_price = float(
+                low_prices[active_start_i]
+                if active_direction == "LONG"
+                else high_prices[active_start_i]
+            )
+            active_end_price = float(
+                high_prices[active_end_i]
+                if active_direction == "LONG"
+                else low_prices[active_end_i]
+            )
+            active_span = abs(active_end_price - active_start_price)
+            if np.isfinite(active_span) and active_span > 0:
+                active_retracement = (
+                    (active_end_price - float(close_prices[i])) / active_span
+                    if active_direction == "LONG"
+                    else (float(close_prices[i]) - active_end_price) / active_span
+                )
+                if active_retracement >= active_structure_reset_depth:
+                    active_structure_reset = True
+
         # A pivot at j only becomes known after pivot_strength bars have closed.
         # The bounded lookback governs discovery of new structural swings, but
         # an already-active, unbroken swing may extend to a newly confirmed
@@ -172,6 +203,7 @@ def fibonacci_retracement_arrays(
                     active_leg is not None
                     and active_leg[0] == "LONG"
                     and not active_broken
+                    and not active_structure_reset
                     and j > active_leg[2]
                     and float(high_prices[j]) > float(high_prices[active_leg[2]])
                 ):
@@ -196,6 +228,7 @@ def fibonacci_retracement_arrays(
                     active_leg is not None
                     and active_leg[0] == "SHORT"
                     and not active_broken
+                    and not active_structure_reset
                     and j > active_leg[2]
                     and float(low_prices[j]) < float(low_prices[active_leg[2]])
                 ):
@@ -238,7 +271,12 @@ def fibonacci_retracement_arrays(
         # Extending the same unbroken structural leg is not a competing swing,
         # so it should not be blocked by the 1.10 replacement threshold.
         leg = active_extension_leg or best_leg
-        if active_extension_leg is None and active_leg is not None and active_leg != best_leg:
+        if (
+            active_extension_leg is None
+            and active_leg is not None
+            and active_leg != best_leg
+            and not active_structure_reset
+        ):
             active_candidate = next(
                 (
                     candidate for candidate in structural_candidates
@@ -258,6 +296,7 @@ def fibonacci_retracement_arrays(
             active_tests = 0
             active_last_test = None
             active_broken = False
+            active_structure_reset = False
 
         start_price = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
         end_price = float(high_prices[end_i] if direction == "LONG" else low_prices[end_i])
@@ -374,6 +413,7 @@ class FibonacciRetracementMixin:
     fib_dominant_lookback_bars = FIB_DOMINANT_LOOKBACK_BARS
     fib_dominant_recency_penalty = FIB_DOMINANT_RECENCY_PENALTY
     fib_dominant_replacement_ratio = FIB_DOMINANT_REPLACEMENT_RATIO
+    fib_active_structure_reset_depth = FIB_ACTIVE_STRUCTURE_RESET_DEPTH
 
     def _fib_features_needed(self) -> bool:
         return fib_features_needed(self.config.strategy_profiles)
@@ -398,6 +438,7 @@ class FibonacciRetracementMixin:
             dominant_lookback_bars=int(self.fib_dominant_lookback_bars),
             dominant_recency_penalty=float(self.fib_dominant_recency_penalty),
             dominant_replacement_ratio=float(self.fib_dominant_replacement_ratio),
+            active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
         )
 
     def _infer_signal_strategy_mode(self):

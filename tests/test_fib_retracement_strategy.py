@@ -351,3 +351,66 @@ def test_active_short_fib_extends_original_anchor_beyond_discovery_lookback():
     assert values["_FIB_IMPULSE_END_INDEX"][21] == 20
     assert np.isclose(values["_FIB_IMPULSE_START_PRICE"][21], high[1])
     assert np.isclose(values["_FIB_IMPULSE_END_PRICE"][21], low[20])
+
+
+def test_deep_long_retracement_resets_old_anchor_before_future_extension():
+    close = np.array([
+        14, 10, 12, 17, 20, 18, 18.5, 18.2, 18.7, 18.4, 13.0,
+        14.0, 15.0, 15.5, 16.0, 16.5, 17.0, 17.5, 18.0, 22.0, 25.0, 23.0, 22.5,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+        active_structure_reset_depth=0.618,
+    )
+
+    assert values["_FIB_IMPULSE_START_INDEX"][5] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][5] == 4
+
+    # The close at 10 retraces more than 61.8% of low@1 -> high@4.
+    initial_span = high[4] - low[1]
+    assert (high[4] - close[10]) / initial_span >= 0.618
+
+    # The later confirmed higher high must be treated as a new cycle rather
+    # than extending the stale low@1 anchor beyond the discovery window.
+    assert values["_FIB_IMPULSE_END_INDEX"][21] == 20
+    assert values["_FIB_IMPULSE_START_INDEX"][21] != 1
+    assert values["_FIB_IMPULSE_START_INDEX"][21] == 10
+
+
+def test_deep_short_retracement_resets_old_anchor_before_future_extension():
+    close = np.array([
+        16, 20, 18, 13, 10, 12, 11.5, 11.8, 11.3, 11.6, 17.0,
+        16.0, 15.0, 14.5, 14.0, 13.5, 13.0, 12.5, 12.0, 8.0, 5.0, 7.0, 7.5,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+        active_structure_reset_depth=0.618,
+    )
+
+    assert values["_FIB_IMPULSE_START_INDEX"][5] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][5] == 4
+
+    initial_span = high[1] - low[4]
+    assert (close[10] - low[4]) / initial_span >= 0.618
+
+    assert values["_FIB_IMPULSE_END_INDEX"][21] == 20
+    assert values["_FIB_IMPULSE_START_INDEX"][21] != 1
+    assert values["_FIB_IMPULSE_START_INDEX"][21] == 10
