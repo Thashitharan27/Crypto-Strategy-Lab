@@ -58,8 +58,8 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 #trade{min-width:460px;max-width:62vw}
 #diag{font:12px/1.45 Consolas,monospace;padding:7px 10px;background:#0f1720;border-bottom:1px solid #2b3948;white-space:pre-wrap}
 #chart-wrap{position:relative;min-height:0}
-#chart{position:absolute;inset:0}
-#trade-box-layer{position:absolute;inset:0;pointer-events:none;overflow:hidden}
+#chart{position:absolute;inset:0;z-index:1}
+#trade-box-layer{position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden}
 .trade-rect{position:absolute;box-sizing:border-box;border-radius:2px}
 .trade-rect.risk{background:rgba(219,68,68,.22);border:1px solid rgba(255,105,105,.9)}
 .trade-rect.reward{background:rgba(38,166,91,.23);border:1px solid rgba(83,220,141,.9)}
@@ -225,7 +225,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 
     const left=Math.min(Number(x1),Number(x2));
     const right=Math.max(Number(x1),Number(x2));
-    const width=Math.max(8,right-left);
+    const width=Math.max(48,right-left);
 
     function rect(a,b,className){
       if ([a,b].some(v => v == null || !Number.isFinite(Number(v)))) return;
@@ -261,7 +261,10 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     applyMarkers();
     chart.timeScale().subscribeVisibleTimeRangeChange(drawTradeBox);
     if (window.ResizeObserver) new ResizeObserver(drawTradeBox).observe($('chart-wrap'));
-    requestAnimationFrame(drawTradeBox);
+    requestAnimationFrame(() => {
+      drawTradeBox();
+      setTimeout(drawTradeBox, 40);
+    });
   }
 
   function centerSelected() {
@@ -271,7 +274,10 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
     chart.timeScale().setVisibleRange({from:start,to:end});
     chart.priceScale('right').applyOptions({autoScale:true});
-    requestAnimationFrame(drawTradeBox);
+    requestAnimationFrame(() => {
+      drawTradeBox();
+      setTimeout(drawTradeBox, 40);
+    });
   }
 
   async function load() {
