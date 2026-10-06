@@ -231,6 +231,9 @@ def test_browser_visualizer_html_exposes_full_window_audit_controls():
     assert "setVisibleLogicalRange" in html
     assert "const firstIndex = candleIndexForTime(firstTime)" in html
     assert "const lastIndex = candleIndexForTime(lastTime)" in html
+    assert "const firstLogical = chart.timeScale().coordinateToLogical" in html
+    assert "function canonicalCandleTime(time)" in html
+    assert "const candleTime = canonicalCandleTime(item.time)" in html
     assert "Selected trade viewport is active" in html
     assert "selectedTradeViewStart" in html
     assert "selectedTradeViewEnd" in html
