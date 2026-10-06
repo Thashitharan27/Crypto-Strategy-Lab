@@ -309,11 +309,8 @@ class StrategyVisualizerV2BrowserServer:
                     trade_index = int(trade_raw) if trade_raw else 0
                     chart_timeframe = (query.get("chart_timeframe") or [""])[0].strip() or None
                     with owner._lock:
-                        result = owner.model.build_payload(
+                        result = owner.model.build_v2_diagnostic_payload(
                             trade_index=trade_index,
-                            visible_candles=240,
-                            show_rejections=False,
-                            full_run=True,
                             chart_timeframe=chart_timeframe,
                         )
                     self._json(result)
