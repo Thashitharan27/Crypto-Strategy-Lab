@@ -790,13 +790,16 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     return best;
   }
 
-  function xForCandleTime(time) {
+  function canonicalCandleTime(time) {
     const index = candleIndexForTime(time);
     if (index == null) return null;
-    const logical = chart.timeScale().logicalToCoordinate(index);
-    if (logical !== null && logical !== undefined && Number.isFinite(Number(logical)))
-      return Number(logical);
     const candleTime = Number(payload?.candles?.[index]?.time);
+    return Number.isFinite(candleTime) ? candleTime : null;
+  }
+
+  function xForCandleTime(time) {
+    const candleTime = canonicalCandleTime(time);
+    if (candleTime == null) return null;
     const direct = chart.timeScale().timeToCoordinate(candleTime);
     return direct == null || !Number.isFinite(Number(direct)) ? null : Number(direct);
   }
@@ -1043,7 +1046,13 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
         text:'S/R SNAPSHOT', kind:'sr-snapshot',
       });
     }
-    return result.sort((a,b) => Number(a.time)-Number(b.time));
+    return result
+      .map(item => {
+        const candleTime = canonicalCandleTime(item.time);
+        return candleTime == null ? null : {...item,time:candleTime};
+      })
+      .filter(Boolean)
+      .sort((a,b) => Number(a.time)-Number(b.time));
   }
 
   function resolveFibAnchorTimes(fib, candles, entryTime) {
@@ -1448,9 +1457,21 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
     const firstIndex = candleIndexForTime(firstTime);
     const lastIndex = candleIndexForTime(lastTime);
     if (firstIndex == null || lastIndex == null || lastIndex <= firstIndex) return;
+    const firstCandleTime = Number(candles[firstIndex]?.time);
+    const lastCandleTime = Number(candles[lastIndex]?.time);
+    const firstCoordinate = chart.timeScale().timeToCoordinate(firstCandleTime);
+    const lastCoordinate = chart.timeScale().timeToCoordinate(lastCandleTime);
+    if ([firstCoordinate,lastCoordinate].some(
+      value => value == null || !Number.isFinite(Number(value))
+    )) return;
+    const firstLogical = chart.timeScale().coordinateToLogical(Number(firstCoordinate));
+    const lastLogical = chart.timeScale().coordinateToLogical(Number(lastCoordinate));
+    if ([firstLogical,lastLogical].some(
+      value => value == null || !Number.isFinite(Number(value))
+    ) || Number(lastLogical) <= Number(firstLogical)) return;
     chart.timeScale().setVisibleLogicalRange({
-      from:firstIndex - 0.5,
-      to:lastIndex + 0.5,
+      from:Number(firstLogical) - 0.5,
+      to:Number(lastLogical) + 0.5,
     });
 
     if (resetPrice) {
