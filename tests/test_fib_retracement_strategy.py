@@ -414,3 +414,68 @@ def test_deep_short_retracement_resets_old_anchor_before_future_extension():
     assert values["_FIB_IMPULSE_END_INDEX"][21] == 20
     assert values["_FIB_IMPULSE_START_INDEX"][21] != 1
     assert values["_FIB_IMPULSE_START_INDEX"][21] == 10
+
+
+def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration():
+    # Confirmed LONG impulse: low@1=8.0 -> high@3=12.0.
+    # 0.382=10.472, midpoint to 0.500=10.236, 0.500=10.0.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.3], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.8, 10.4, 10.5], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 10.1], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.2, 10.4], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    # Candle 5 wicks more than halfway from 0.382 toward 0.500 and closes
+    # bullish back above 0.382. The old first-touch logic could signal 0.382;
+    # progressive zoning must instead arm 0.500 and wait.
+    assert np.isclose(values["_FIB_ARMED_LEVEL"][5], 0.500)
+    assert values["_FIB_SIGNAL_DIRECTION"][5] is None
+    assert np.isnan(values["_FIB_SIGNAL_LEVEL"][5])
+
+    # Candle 6 reaches 0.500 and closes bullish above it, so the same leg
+    # finally signals from the deeper armed level.
+    assert values["_FIB_SIGNAL_DIRECTION"][6] == "LONG"
+    assert np.isclose(values["_FIB_SIGNAL_LEVEL"][6], 0.500)
+
+
+def test_fib_native_plan_uses_actual_progressive_signal_level():
+    class Base:
+        def _sr_stop_plan(self, i, execution_i=None):
+            return {"passed": True, "applied": False, "reason": "BASE", "distance": 1.0}
+        def _effective_trade_direction(self, _i):
+            return "LONG"
+        def _expected_entry_price(self, i, execution_i, direction):
+            return 10.2
+
+    class Probe(FibonacciRetracementMixin, Base):
+        pass
+
+    p = Probe.__new__(Probe)
+    p.signal_strategy_mode = FIB_RETRACEMENT_MODE
+    p.config = SimpleNamespace(
+        strategy_timeframe_minutes=15,
+        fib_stop_buffer_atr=0.0,
+    )
+    p.open = np.array([10.2])
+    p.atr_values = np.array([1.0])
+    p.fib_retracement = {
+        # Close may still be nearest 0.382 after a bullish rejection, but the
+        # progressive entry was actually armed and triggered at 0.500.
+        "FIB_NEAREST_LEVEL": np.array([0.382]),
+        "_FIB_SIGNAL_LEVEL": np.array([0.500]),
+        "_FIB_IMPULSE_START_PRICE": np.array([8.0]),
+        "_FIB_IMPULSE_END_PRICE": np.array([12.0]),
+    }
+
+    plan = p._fib_native_plan_values(0, "LONG")
+    assert plan["nearest_level"] == 0.500
+    assert plan["stop_level"] == 0.618
+    assert np.isclose(plan["stop_boundary"], 12.0 - 0.618 * 4.0)
