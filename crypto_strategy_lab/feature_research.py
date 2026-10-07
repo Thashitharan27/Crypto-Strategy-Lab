@@ -14,6 +14,7 @@ import time
 from typing import Any, Mapping
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 
