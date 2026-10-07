@@ -20,7 +20,7 @@ import pandas as pd
 
 FEATURE_RESEARCH_ARTIFACT_CONTRACT = "feature_research_v1"
 FEATURE_RESEARCH_ARTIFACT_VERSION = 1
-FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 3
+FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 4
 REQUIRED_TRADE_COLUMNS = {
     "pair_id",
     "side",
@@ -147,6 +147,8 @@ FIB_CANDIDATE_ARTIFACT_COLUMNS = (
     "structure_reset",
     "invalidated",
     "signalled",
+    "prior_signal_held_count",
+    "prior_hold_eligible",
     "entry_valid",
     "selected",
 )
