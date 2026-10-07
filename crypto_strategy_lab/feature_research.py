@@ -19,7 +19,8 @@ import pandas as pd
 
 
 FEATURE_RESEARCH_ARTIFACT_CONTRACT = "feature_research_v1"
-FEATURE_RESEARCH_ARTIFACT_VERSION = 2
+FEATURE_RESEARCH_ARTIFACT_VERSION = 1
+FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 2
 REQUIRED_TRADE_COLUMNS = {
     "pair_id",
     "side",
@@ -930,6 +931,7 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
         "feature_context_row_count": len(feature_context),
         "sr_zone_row_count": len(sr_zones),
         "fib_candidate_row_count": len(fib_candidates),
+        "fib_candidate_schema_version": FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
         "sr_zone_expanded_row_count": int(
             sr_zones.attrs.get("expanded_zone_rows", len(sr_zones))
         ),
