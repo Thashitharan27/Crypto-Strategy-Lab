@@ -637,6 +637,8 @@ def test_empty_fib_candidate_inventory_has_canonical_schema(tmp_path):
     assert str(candidates["strategy_index"].dtype) == "int64"
     assert str(candidates["last_test_index"].dtype) == "Int64"
     assert str(candidates["start_price"].dtype) == "float64"
+    assert str(candidates["final_score"].dtype) == "float64"
+    assert str(candidates["rsi_divergence"].dtype) == "string"
     assert str(candidates["selected"].dtype) == "bool"
 
     path = tmp_path / "fib_candidates.parquet"
@@ -652,6 +654,8 @@ def test_empty_fib_candidate_inventory_has_canonical_schema(tmp_path):
     assert schema["direction"] == "VARCHAR"
     assert schema["strategy_index"] == "BIGINT"
     assert schema["start_price"] == "DOUBLE"
+    assert schema["final_score"] == "DOUBLE"
+    assert schema["rsi_divergence"] == "VARCHAR"
     assert schema["selected"] == "BOOLEAN"
 
 
@@ -667,6 +671,14 @@ def test_fib_candidate_inventory_frame_expands_all_candidates():
                 "end_price": 110.0,
                 "structural_strength_atr": 5.0,
                 "live_score": 4.5,
+                "structural_score": 4.5,
+                "confluence_score": 0.08,
+                "final_score": 4.86,
+                "ema_50_distance_atr": 0.2,
+                "ema_100_distance_atr": 0.1,
+                "ema_200_distance_atr": 0.5,
+                "rsi_divergence": "BULLISH",
+                "rsi_divergence_code": 1.0,
                 "signal_level": 0.5,
                 "test_count": 2,
                 "last_test_index": 7,
@@ -722,3 +734,7 @@ def test_fib_candidate_inventory_frame_expands_all_candidates():
     invalid = candidates.loc[candidates["candidate_id"] == "LONG:3:6"].iloc[0]
     assert bool(invalid["invalidated"]) is True
     assert bool(invalid["entry_valid"]) is False
+    selected = candidates.loc[candidates["candidate_id"] == "LONG:1:4"].iloc[0]
+    assert selected["confluence_score"] == pytest.approx(0.08)
+    assert selected["final_score"] == pytest.approx(4.86)
+    assert selected["rsi_divergence"] == "BULLISH"
