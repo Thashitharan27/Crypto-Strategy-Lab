@@ -8,9 +8,11 @@ is confirmed, the old swing ages out, or a deep retracement resets the structure
 While an active swing remains valid, a newly confirmed higher high / lower low
 extends that same leg from its original anchor even when the anchor is older than
 the discovery lookback. A close retracement to 0.618 or deeper ends that extension
-privilege so a completed cycle cannot keep dragging an old anchor forward. Once a
-confirmed impulse exists, the first successful reaction at 0.382, 0.500, or
-0.618 may produce a signal in the impulse direction. All retracement measurements
+privilege so a completed cycle cannot keep dragging an old anchor forward. Once a confirmed impulse exists, entry uses progressive Fib zones: 0.382 is
+armed first, but penetration beyond the midpoint toward 0.500 permanently arms
+0.500 for that leg, and penetration beyond the midpoint toward 0.618 arms 0.618.
+A successful reaction at the currently armed level may produce a signal in the
+impulse direction. All retracement measurements
 remain available as generic Entry/Veto evidence.
 """
 from __future__ import annotations
@@ -21,7 +23,7 @@ import pandas as pd
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 5
+FIB_RESEARCH_CONTEXT_VERSION = 6
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -130,6 +132,8 @@ def fibonacci_retracement_arrays(
     impulse_bars = np.full(n, np.nan, dtype=float)
     impulse_direction = np.full(n, "UNKNOWN", dtype=object)
     signal_direction = np.full(n, None, dtype=object)
+    signal_level = np.full(n, np.nan, dtype=float)
+    armed_level = np.full(n, np.nan, dtype=float)
     impulse_start_price = np.full(n, np.nan, dtype=float)
     impulse_end_price = np.full(n, np.nan, dtype=float)
     impulse_start_index = np.full(n, np.nan, dtype=float)
@@ -150,6 +154,7 @@ def fibonacci_retracement_arrays(
     active_last_test: int | None = None
     active_broken = False
     active_structure_reset = False
+    active_signal_level = 0.382
     signalled_leg: tuple[str, int, int] | None = None
 
     dominant_lookback_bars = max(16, int(dominant_lookback_bars))
@@ -297,6 +302,7 @@ def fibonacci_retracement_arrays(
             active_last_test = None
             active_broken = False
             active_structure_reset = False
+            active_signal_level = 0.382
 
         start_price = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
         end_price = float(high_prices[end_i] if direction == "LONG" else low_prices[end_i])
@@ -321,11 +327,26 @@ def fibonacci_retracement_arrays(
 
         if direction == "LONG":
             retracement = (end_price - float(close_prices[i])) / span
+            penetration = (end_price - float(low_prices[i])) / span
             levels_price = {level: end_price - level * span for level in FIB_LEVELS}
         else:
             retracement = (float(close_prices[i]) - end_price) / span
+            penetration = (float(high_prices[i]) - end_price) / span
             levels_price = {level: end_price + level * span for level in FIB_LEVELS}
         depth[i] = retracement
+
+        # Progressive entry zoning: once price materially penetrates more than
+        # halfway toward the next deeper signal level, permanently arm that
+        # deeper level for the current leg. Wick penetration is used so a bar
+        # that reaches deep into the next zone cannot later trigger a shallower
+        # entry merely because it closes back above/below the old level.
+        midpoint_382_500 = (0.382 + 0.500) / 2.0
+        midpoint_500_618 = (0.500 + 0.618) / 2.0
+        if penetration >= midpoint_500_618:
+            active_signal_level = 0.618
+        elif penetration >= midpoint_382_500 and active_signal_level < 0.500:
+            active_signal_level = 0.500
+        armed_level[i] = active_signal_level
 
         nearest = min(FIB_LEVELS, key=lambda level: abs(float(close_prices[i]) - levels_price[level]))
         nearest_level[i] = nearest
@@ -372,13 +393,30 @@ def fibonacci_retracement_arrays(
         if active_last_test is not None:
             bars_since_test[i] = float(i - active_last_test)
 
+        signal_level_price = levels_price[active_signal_level]
+        signal_touched = (
+            float(low_prices[i]) <= signal_level_price <= float(high_prices[i])
+        )
+        signal_held = False
+        if signal_touched:
+            if direction == "LONG":
+                signal_held = (
+                    float(close_prices[i]) > signal_level_price
+                    and float(close_prices[i]) > float(open_prices[i])
+                )
+            else:
+                signal_held = (
+                    float(close_prices[i]) < signal_level_price
+                    and float(close_prices[i]) < float(open_prices[i])
+                )
+
         if (
-            state == "HELD"
-            and nearest in FIB_SIGNAL_LEVELS
+            signal_held
             and leg_atr >= minimum_impulse_atr
             and signalled_leg != leg
         ):
             signal_direction[i] = direction
+            signal_level[i] = active_signal_level
             signalled_leg = leg
 
     return {
@@ -396,6 +434,8 @@ def fibonacci_retracement_arrays(
         "FIB_IMPULSE_BARS": impulse_bars,
         "FIB_IMPULSE_DIRECTION": impulse_direction,
         "_FIB_SIGNAL_DIRECTION": signal_direction,
+        "_FIB_SIGNAL_LEVEL": signal_level,
+        "_FIB_ARMED_LEVEL": armed_level,
         "_FIB_IMPULSE_START_PRICE": impulse_start_price,
         "_FIB_IMPULSE_END_PRICE": impulse_end_price,
         "_FIB_IMPULSE_START_INDEX": impulse_start_index,
@@ -463,6 +503,11 @@ class FibonacciRetracementMixin:
         values = getattr(self, "fib_retracement", {})
         try:
             nearest = float(values["FIB_NEAREST_LEVEL"][i])
+            signal_level_values = values.get("_FIB_SIGNAL_LEVEL")
+            if signal_level_values is not None:
+                selected_signal_level = float(signal_level_values[i])
+                if np.isfinite(selected_signal_level):
+                    nearest = selected_signal_level
             start = float(values["_FIB_IMPULSE_START_PRICE"][i])
             end = float(values["_FIB_IMPULSE_END_PRICE"][i])
         except (KeyError, IndexError, TypeError, ValueError):
