@@ -619,6 +619,42 @@ def test_parquet_writer_normalizes_mixed_naive_and_aware_datetimes(tmp_path):
     assert rows == (2, 2)
 
 
+def test_empty_fib_candidate_inventory_has_canonical_schema(tmp_path):
+    frame = pd.DataFrame(
+        {
+            "strategy_index": [0],
+            "strategy_candle_open_time": [pd.Timestamp("2026-01-01T00:00:00Z")],
+            "decision_available_at": [pd.Timestamp("2026-01-01T00:15:00Z")],
+            "_FIB_CANDIDATE_INVENTORY_JSON": ["[]"],
+            "_FIB_SELECTED_CANDIDATE_ID": [None],
+        }
+    )
+
+    candidates, _ = _fib_candidate_inventory_frame(frame)
+    assert candidates.empty
+    assert str(candidates["candidate_id"].dtype) == "string"
+    assert str(candidates["direction"].dtype) == "string"
+    assert str(candidates["strategy_index"].dtype) == "int64"
+    assert str(candidates["last_test_index"].dtype) == "Int64"
+    assert str(candidates["start_price"].dtype) == "float64"
+    assert str(candidates["selected"].dtype) == "bool"
+
+    path = tmp_path / "fib_candidates.parquet"
+    _write_parquet_atomic(candidates, path)
+    with duckdb.connect() as connection:
+        schema = {
+            row[0]: row[1]
+            for row in connection.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{path}')"
+            ).fetchall()
+        }
+    assert schema["candidate_id"] == "VARCHAR"
+    assert schema["direction"] == "VARCHAR"
+    assert schema["strategy_index"] == "BIGINT"
+    assert schema["start_price"] == "DOUBLE"
+    assert schema["selected"] == "BOOLEAN"
+
+
 def test_fib_candidate_inventory_frame_expands_all_candidates():
     payload = json.dumps(
         [
