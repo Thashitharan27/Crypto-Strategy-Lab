@@ -603,8 +603,8 @@ def _fib_candidate_inventory_frame(
         )
         return empty.loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS], consumed
 
-    for row in feature_context.itertuples(index=False):
-        payload = getattr(row, inventory_column, None)
+    for position, payload in enumerate(feature_context[inventory_column].tolist()):
+        row = feature_context.iloc[position]
         if payload is None or pd.isna(payload):
             continue
         payload_text = str(payload).strip()
@@ -628,9 +628,9 @@ def _fib_candidate_inventory_frame(
             selected = bool(candidate.get("selected"))
             selected_count += int(selected)
             records.append({
-                "strategy_index": int(getattr(row, "strategy_index")),
-                "strategy_candle_open_time": getattr(row, "strategy_candle_open_time"),
-                "decision_available_at": getattr(row, "decision_available_at"),
+                "strategy_index": int(row["strategy_index"]),
+                "strategy_candle_open_time": row["strategy_candle_open_time"],
+                "decision_available_at": row["decision_available_at"],
                 "candidate_id": candidate_id,
                 "direction": str(candidate.get("direction") or "").upper(),
                 "start_index": int(candidate["start_index"]),
@@ -1015,10 +1015,18 @@ class ResearchQueryService:
                 if isinstance(sr_zones_name, str) and sr_zones_name
                 else None
             )
+            fib_candidates_name = self.manifest.get("fib_candidates_parquet")
+            self._fib_candidates = (
+                self._context.parent / str(fib_candidates_name)
+                if isinstance(fib_candidates_name, str) and fib_candidates_name
+                else None
+            )
             if not self._trades.is_file() or not self._context.is_file():
                 raise ResearchArtifactError("research parquet artifact is missing")
             if self._sr_zones is not None and not self._sr_zones.is_file():
                 raise ResearchArtifactError("S/R zone research artifact is missing")
+            if self._fib_candidates is not None and not self._fib_candidates.is_file():
+                raise ResearchArtifactError("Fib candidate research artifact is missing")
             self._validate_file_hashes()
             self._install_relations()
             self._validate()
@@ -1059,6 +1067,8 @@ class ResearchQueryService:
         }
         if self._sr_zones is not None:
             actual["sr_zones"] = _file_sha256(self._sr_zones)
+        if self._fib_candidates is not None:
+            actual["fib_candidates"] = _file_sha256(self._fib_candidates)
         comparable_expected = {
             key: value
             for key, value in dict(expected).items()
@@ -1076,6 +1086,13 @@ class ResearchQueryService:
         self.connection.execute(
             f"CREATE VIEW feature_context AS SELECT * FROM read_parquet('{context_path}')"
         )
+        if self._fib_candidates is not None:
+            fib_candidates_path = str(self._fib_candidates).replace("'", "''")
+            self.connection.execute(
+                "CREATE VIEW fib_candidates AS SELECT * FROM read_parquet('"
+                + fib_candidates_path
+                + "')"
+            )
 
         trade_columns = {
             row[0] for row in self.connection.execute("DESCRIBE trades").fetchall()
