@@ -422,10 +422,10 @@ def test_deep_short_retracement_resets_old_anchor_before_future_extension():
 def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration():
     # Confirmed LONG impulse: low@1=8.0 -> high@3=12.0.
     # 0.382=10.472, midpoint to 0.500=10.236, 0.500=10.0.
-    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.3], dtype=float)
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.1], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.8, 10.4, 10.5], dtype=float)
-    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 10.1], dtype=float)
-    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.2, 10.4], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.2, 10.3], dtype=float)
     atr = np.ones(len(close))
 
     values = fibonacci_retracement_arrays(
@@ -443,12 +443,26 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     assert values["_FIB_SIGNAL_DIRECTION"][5] is None
     assert np.isnan(values["_FIB_SIGNAL_LEVEL"][5])
 
-    # Candle 6 reaches 0.500 and closes bullish above it, so the same leg
-    # finally signals from the deeper armed level.
-    assert values["_FIB_SIGNAL_DIRECTION"][6] == "LONG"
-    assert np.isclose(values["_FIB_SIGNAL_LEVEL"][6], 0.500)
-    signal_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    # Candle 6 reaches 0.500 and closes bullish above it, but this is only the
+    # first completed held reaction. It becomes eligibility evidence for the
+    # next candle and cannot signal immediately.
+    assert values["_FIB_SIGNAL_DIRECTION"][6] is None
+    first_hold_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    first_hold = next(item for item in first_hold_snapshot if item["selected"])
+    assert first_hold["signal_held_count"] >= 1
+    assert first_hold["prior_signal_held_count"] == 0
+    assert first_hold["prior_hold_eligible"] is False
+    assert first_hold["entry_valid"] is False
+
+    # Candle 7 retests and holds the same 0.500 level. The prior completed hold
+    # now makes this candidate eligible before ranking, so it may signal.
+    assert values["_FIB_SIGNAL_DIRECTION"][7] == "LONG"
+    assert np.isclose(values["_FIB_SIGNAL_LEVEL"][7], 0.500)
+    signal_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
     selected = next(item for item in signal_snapshot if item["selected"])
+    assert selected["prior_signal_held_count"] >= 1
+    assert selected["prior_hold_eligible"] is True
+    assert selected["entry_valid"] is True
     assert selected["signalled"] is True
 
 
@@ -674,11 +688,17 @@ def test_fib_reaction_quality_rewards_respected_repeat_tests_without_linear_touc
     assert first["signal_level"] == 0.5
     assert first["signal_test_count"] == 1
     assert first["signal_held_count"] == 1
+    assert first["prior_signal_held_count"] == 0
+    assert first["prior_hold_eligible"] is False
+    assert first["entry_valid"] is False
     # The first held reaction is visible in the audit counters immediately,
     # but it must not boost ranking on the same candle that created it.
     assert first["reaction_score"] == 0.0
     assert second["signal_test_count"] == 2
     assert second["signal_held_count"] == 2
+    assert second["prior_signal_held_count"] >= 1
+    assert second["prior_hold_eligible"] is True
+    assert second["entry_valid"] is True
     assert second["signal_held_ratio"] == 1.0
     assert second["last_signal_rejection_atr"] > first["last_signal_rejection_atr"]
     # Candle 13 may score candle 12's completed held reaction, but not its own.
@@ -876,7 +896,8 @@ def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate(
     )
     selected = next(item for item in inventory if item["selected"])
 
-    assert extension["entry_valid"] is True
+    assert extension["entry_valid"] is False
+    assert extension["prior_hold_eligible"] is False
     assert selected["candidate_id"] == "LONG:7:8"
     assert selected["live_score"] > extension["live_score"]
     assert values["_FIB_SELECTED_CANDIDATE_ID"][15] == "LONG:7:8"
@@ -884,7 +905,7 @@ def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate(
 
 def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache():
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
-    assert FIB_RESEARCH_CONTEXT_VERSION == 14
+    assert FIB_RESEARCH_CONTEXT_VERSION == 15
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
@@ -920,7 +941,8 @@ def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
     local = next(item for item in inventory if item["candidate_id"] == "LONG:7:10")
     assert local["start_price"] == low[7]
     assert local["end_price"] == high[10]
-    assert local["entry_valid"] is True
+    assert local["entry_valid"] is False
+    assert local["prior_hold_eligible"] is False
 
 
 def test_fib_rsi_confluence_resets_when_armed_level_advances():
@@ -1045,7 +1067,8 @@ def test_fib_tracks_recent_local_short_subswing_alongside_dominant_anchor():
     local = next(item for item in inventory if item["candidate_id"] == "SHORT:7:10")
     assert local["start_price"] == high[7]
     assert local["end_price"] == low[10]
-    assert local["entry_valid"] is True
+    assert local["entry_valid"] is False
+    assert local["prior_hold_eligible"] is False
 
 
 def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
@@ -1076,5 +1099,7 @@ def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
         "ema_200_distance_atr", "rsi_divergence", "rsi_divergence_code",
         "signal_test_count", "signal_held_count", "signal_held_ratio",
         "last_signal_rejection_atr", "bars_since_signal_test",
-        "signal_level", "test_count", "invalidated", "entry_valid", "selected",
+        "signal_level", "test_count", "invalidated",
+        "prior_signal_held_count", "prior_hold_eligible",
+        "entry_valid", "selected",
     } <= set(selected)
