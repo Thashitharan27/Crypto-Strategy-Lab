@@ -904,25 +904,27 @@ def test_fib_candidate_confluence_can_promote_close_structural_competitor():
     # strength. The recent/local Fib is slightly weaker structurally, while its
     # armed 0.382 level sits directly on EMA100 and the dominant Fib does not.
     close = np.array(
-        [10.0, 8.0, 9.0, 10.0, 11.0, 10.0, 9.2, 8.4, 9.5, 10.5, 12.0, 10.4],
+        [10.0, 8.0, 9.0, 10.0, 11.0, 10.0, 9.2, 8.1, 9.5, 10.5, 12.0, 10.4],
         dtype=float,
     )
     open_ = close.copy()
     high = close + 0.1
     low = close - 0.1
     low[1] = 8.0
-    low[7] = 8.4
+    low[7] = 8.1
     high[10] = 12.0
     atr = np.ones(len(close))
-    atr[11] = 0.5
+    atr[11] = 0.1
 
     # At candle 11 the local Fib's 0.382 level is:
-    # 12 - .382 * (12 - 8.4) = 10.6248. Keep EMA100 there while EMA50/200
-    # are unavailable so only the candidate-specific EMA100 bonus is active.
+    # 12 - .382 * (12 - 8.1) = 10.5102. The dominant candidate's same
+    # level is 10.472, which is 0.382 ATR away at ATR=0.1 and therefore
+    # outside the 0.25 ATR confluence window. This leaves the local Fib only
+    # 2.5% weaker structurally, so its 3% EMA100 bonus can legitimately win.
     ema50 = np.full(len(close), np.nan)
     ema100 = np.full(len(close), np.nan)
     ema200 = np.full(len(close), np.nan)
-    ema100[11] = 10.6248
+    ema100[11] = 10.5102
     rsi_values = np.full(len(close), 50.0)
 
     values = fibonacci_retracement_arrays(
