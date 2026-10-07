@@ -15,6 +15,7 @@ from crypto_strategy_lab.feature_research import (
     FEATURE_RESEARCH_ARTIFACT_CONTRACT,
     ResearchArtifactError,
     ResearchQueryService,
+    _fib_candidate_inventory_frame,
     _sr_zone_inventory_frame,
     _validate_sr_zone_inventory,
     _write_parquet_atomic,
@@ -338,17 +339,20 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert (research / "trades.parquet").is_file()
     assert (research / "feature_context.parquet").is_file()
     assert (research / "sr_zones.parquet").is_file()
+    assert (research / "fib_candidates.parquet").is_file()
     manifest = json.loads((research / "research_manifest.json").read_text(encoding="utf-8"))
     assert manifest["artifact_contract"] == FEATURE_RESEARCH_ARTIFACT_CONTRACT
     assert manifest["artifact_version"] == 1
     assert manifest["trade_row_count"] == 5
     assert manifest["feature_context_row_count"] == 5
     assert manifest["sr_zone_row_count"] == 5
+    assert manifest["fib_candidate_row_count"] == 0
     assert manifest["sr_zone_expanded_row_count"] == 10
     assert manifest["sr_zone_storage_contract"] == "SNAPSHOT_JSON_V3"
     assert manifest["artifact_sizes_bytes"]["trades"] > 0
     assert manifest["artifact_sizes_bytes"]["feature_context"] > 0
     assert manifest["artifact_sizes_bytes"]["sr_zones"] > 0
+    assert manifest["artifact_sizes_bytes"]["fib_candidates"] > 0
     timings = manifest["artifact_stage_timings"]
     assert {
         "setup_and_trade_validation",
@@ -607,3 +611,72 @@ def test_parquet_writer_normalizes_mixed_naive_and_aware_datetimes(tmp_path):
             [str(path)],
         ).fetchone()
     assert rows == (2, 2)
+
+
+def test_fib_candidate_inventory_frame_expands_all_candidates():
+    payload = json.dumps(
+        [
+            {
+                "candidate_id": "LONG:1:4",
+                "direction": "LONG",
+                "start_index": 1,
+                "end_index": 4,
+                "start_price": 90.0,
+                "end_price": 110.0,
+                "structural_strength_atr": 5.0,
+                "live_score": 4.5,
+                "signal_level": 0.5,
+                "test_count": 2,
+                "last_test_index": 7,
+                "broken": False,
+                "structure_reset": False,
+                "invalidated": False,
+                "signalled": False,
+                "entry_valid": True,
+                "selected": True,
+            },
+            {
+                "candidate_id": "LONG:3:6",
+                "direction": "LONG",
+                "start_index": 3,
+                "end_index": 6,
+                "start_price": 95.0,
+                "end_price": 108.0,
+                "structural_strength_atr": 3.0,
+                "live_score": 2.8,
+                "signal_level": 0.618,
+                "test_count": 1,
+                "last_test_index": None,
+                "broken": False,
+                "structure_reset": True,
+                "invalidated": True,
+                "signalled": False,
+                "entry_valid": False,
+                "selected": False,
+            },
+        ],
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    frame = pd.DataFrame(
+        {
+            "strategy_index": [10],
+            "strategy_candle_open_time": [pd.Timestamp("2026-01-01T00:00:00Z")],
+            "decision_available_at": [pd.Timestamp("2026-01-01T00:15:00Z")],
+            "_FIB_CANDIDATE_INVENTORY_JSON": [payload],
+            "_FIB_SELECTED_CANDIDATE_ID": ["LONG:1:4"],
+        }
+    )
+
+    candidates, consumed = _fib_candidate_inventory_frame(frame)
+
+    assert len(candidates) == 2
+    assert int(candidates["selected"].sum()) == 1
+    assert set(candidates["candidate_id"]) == {"LONG:1:4", "LONG:3:6"}
+    assert {
+        "_FIB_CANDIDATE_INVENTORY_JSON",
+        "_FIB_SELECTED_CANDIDATE_ID",
+    } <= set(consumed)
+    invalid = candidates.loc[candidates["candidate_id"] == "LONG:3:6"].iloc[0]
+    assert bool(invalid["invalidated"]) is True
+    assert bool(invalid["entry_valid"]) is False
