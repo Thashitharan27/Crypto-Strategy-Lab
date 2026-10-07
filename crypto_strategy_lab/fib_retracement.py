@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 13
+FIB_RESEARCH_CONTEXT_VERSION = 14
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -304,12 +304,14 @@ def fibonacci_retracement_arrays(
 
         signal_test_count = int(state.get("signal_test_count", 0))
         signal_held_count = int(state.get("signal_held_count", 0))
+        score_signal_test_count = int(state.get("score_signal_test_count", 0))
+        score_signal_held_count = int(state.get("score_signal_held_count", 0))
         reaction_score = 0.0
-        if signal_held_count >= 1:
+        if score_signal_held_count >= 1:
             reaction_score += FIB_REACTION_FIRST_HELD_WEIGHT
-        if signal_held_count >= 2:
+        if score_signal_held_count >= 2:
             reaction_score += FIB_REACTION_SECOND_HELD_WEIGHT
-        if signal_held_count >= 3:
+        if score_signal_held_count >= 3:
             reaction_score += FIB_REACTION_THIRD_HELD_WEIGHT
 
         last_signal_rejection_atr = state.get("last_signal_rejection_atr")
@@ -318,9 +320,15 @@ def fibonacci_retracement_arrays(
             if last_signal_rejection_atr is not None
             else float("nan")
         )
-        if signal_held_count > 0 and np.isfinite(rejection_value):
+        score_last_signal_rejection_atr = state.get("score_last_signal_rejection_atr")
+        score_rejection_value = (
+            float(score_last_signal_rejection_atr)
+            if score_last_signal_rejection_atr is not None
+            else float("nan")
+        )
+        if score_signal_held_count > 0 and np.isfinite(score_rejection_value):
             reaction_score += FIB_REACTION_MAX_REJECTION_WEIGHT * min(
-                1.0, max(0.0, rejection_value)
+                1.0, max(0.0, score_rejection_value)
             )
 
         held_ratio = (
@@ -328,7 +336,16 @@ def fibonacci_retracement_arrays(
             if signal_test_count > 0
             else float("nan")
         )
-        if signal_test_count >= 4 and np.isfinite(held_ratio) and held_ratio < 0.5:
+        score_held_ratio = (
+            score_signal_held_count / float(score_signal_test_count)
+            if score_signal_test_count > 0
+            else float("nan")
+        )
+        if (
+            score_signal_test_count >= 4
+            and np.isfinite(score_held_ratio)
+            and score_held_ratio < 0.5
+        ):
             reaction_score -= FIB_REACTION_WEAK_OVERTEST_PENALTY
 
         bars_since_signal_test = (
@@ -383,6 +400,9 @@ def fibonacci_retracement_arrays(
                 "signal_test_count": 0,
                 "signal_held_count": 0,
                 "last_signal_rejection_atr": None,
+                "score_signal_test_count": 0,
+                "score_signal_held_count": 0,
+                "score_last_signal_rejection_atr": None,
                 "broken": False,
                 "structure_reset": False,
                 "invalidated": False,
@@ -444,6 +464,13 @@ def fibonacci_retracement_arrays(
         if retracement >= active_structure_reset_depth:
             state["structure_reset"] = True
         state["broken"] = bool(retracement > FIB_LEVELS[-1])
+
+        # Candidate ranking must only use reaction evidence that existed before
+        # this candle. Preserve the live counters for audit/output, but snapshot
+        # the scoring state before the current bar can add a test or held reaction.
+        state["score_signal_test_count"] = int(state["signal_test_count"])
+        state["score_signal_held_count"] = int(state["signal_held_count"])
+        state["score_last_signal_rejection_atr"] = state["last_signal_rejection_atr"]
 
         levels_price = {
             level: (
