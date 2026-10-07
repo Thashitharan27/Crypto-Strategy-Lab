@@ -354,7 +354,7 @@ def test_prepared_run_cache_uses_larger_budget_for_store_and_load(tmp_path, monk
 
     assert seen[0] == (PREPARED_CACHE_STORE_MEMORY_LIMIT, 1)
     assert seen[1] == (PREPARED_CACHE_LOAD_MEMORY_LIMIT, 1)
-    assert PREPARED_CACHE_STORE_MEMORY_LIMIT == "2GB"
+    assert PREPARED_CACHE_STORE_MEMORY_LIMIT == "3GB"
     assert PREPARED_CACHE_LOAD_MEMORY_LIMIT == "1GB"
 
 
