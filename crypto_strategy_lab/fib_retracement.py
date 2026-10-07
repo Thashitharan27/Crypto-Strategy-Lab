@@ -591,6 +591,16 @@ def fibonacci_retracement_arrays(
             signal_direction[i] = direction
             signal_level[i] = active_signal_level
             selected_state["signalled"] = True
+            # The research snapshot was assembled earlier on this same bar.
+            # Reflect the signal immediately so the candidate that generated an
+            # entry is not reported as unsignalled until the following candle.
+            for candidate_snapshot in snapshot:
+                if candidate_snapshot["selected"]:
+                    candidate_snapshot["signalled"] = True
+                    break
+            candidate_inventory_json[i] = json.dumps(
+                snapshot, separators=(",", ":"), sort_keys=True
+            )
 
     return {
         "FIB_RETRACEMENT_DEPTH": depth,
