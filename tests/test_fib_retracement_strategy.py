@@ -755,6 +755,36 @@ def test_fib_candidate_state_memory_stays_bounded_by_recent_structure():
     assert counts[-1] < 80
 
 
+def test_new_fib_replays_confirmation_window_invalidation():
+    # low@2=8.0 -> high@6=12.0 is only confirmed at candle 8 with
+    # pivot_strength=2. Candle 7 wicks through the 0.786 retracement before
+    # confirmation, so the candidate must already be invalid when first exported.
+    open_ = np.array([10.0, 9.5, 8.2, 9.0, 10.0, 11.0, 11.8, 9.0, 9.4, 9.6])
+    high = np.array([10.4, 9.9, 8.6, 9.4, 10.4, 11.4, 12.0, 10.0, 9.8, 10.0])
+    low = np.array([9.6, 9.1, 8.0, 8.7, 9.6, 10.6, 11.2, 8.5, 9.0, 9.2])
+    close = np.array([10.0, 9.5, 8.2, 9.0, 10.0, 11.0, 11.8, 9.2, 9.4, 9.6])
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_,
+        high,
+        low,
+        close,
+        atr,
+        pivot_strength=2,
+        dominant_lookback_bars=32,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
+    candidate = next(
+        item for item in inventory if item["candidate_id"] == "LONG:2:6"
+    )
+    assert candidate["invalidated"] is True
+    assert candidate["entry_valid"] is False
+
+
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
     close = np.array(
         [12, 8, 10, 16, 20, 18, 16, 14, 16, 18, 19, 17, 16],
