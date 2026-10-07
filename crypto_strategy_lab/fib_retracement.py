@@ -337,6 +337,17 @@ def fibonacci_retracement_arrays(
             if candidate[2] >= cutoff
         ]
 
+        # Keep lifecycle memory bounded to candidates that can still be reached
+        # by the structural selector (plus the currently selected/extended leg).
+        reachable_legs = {candidate[:3] for candidate in structural_candidates}
+        if active_leg is not None:
+            reachable_legs.add(active_leg)
+        if active_extension_leg is not None:
+            reachable_legs.add(active_extension_leg)
+        for stale_leg in list(candidate_states):
+            if stale_leg not in reachable_legs:
+                del candidate_states[stale_leg]
+
         # Advance every confirmed candidate on every bar, including candidates
         # that are not currently selected. This is the core multi-Fib tracking
         # contract: each leg retains its own progressive zone, test history,
@@ -347,29 +358,37 @@ def fibonacci_retracement_arrays(
         if not structural_candidates:
             continue
 
-        # Execution remains single-candidate. Rank only entry-valid Fibs so a
-        # stronger but already-invalidated swing cannot hide a weaker valid one.
+        # Entry selection remains single-candidate and considers only valid
+        # Fibs. Evidence selection is allowed to fall back to the strongest
+        # structural candidate when all Fibs are entry-invalid so public Fib
+        # indicators continue to populate for generic Entry/Veto rules.
         valid_candidates = [
             candidate
             for candidate in structural_candidates
             if not bool(_candidate_state(candidate[:3])["invalidated"])
         ]
-        if not valid_candidates:
-            continue
+        selection_pool = valid_candidates if valid_candidates else structural_candidates
 
         best = max(
-            valid_candidates,
+            selection_pool,
             key=lambda candidate: (
                 _candidate_live_score(candidate, i),
                 candidate[2],
             ),
         )
         best_leg = best[:3]
-        # Extending the same unbroken structural leg is not a competing swing,
-        # so it should not be blocked by the 1.10 replacement threshold.
-        leg = active_extension_leg or best_leg
+
+        # An extension receives the old leg's priority only when that extension
+        # itself is entry-valid. Otherwise fall back to the best valid candidate
+        # (or evidence-only structural candidate when none are valid).
+        valid_legs = {candidate[:3] for candidate in valid_candidates}
+        active_extension_is_valid = (
+            active_extension_leg is not None
+            and active_extension_leg in valid_legs
+        )
+        leg = active_extension_leg if active_extension_is_valid else best_leg
         if (
-            active_extension_leg is None
+            not active_extension_is_valid
             and active_leg is not None
             and active_leg != best_leg
             and not active_structure_reset
