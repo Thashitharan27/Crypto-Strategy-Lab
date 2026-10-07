@@ -156,6 +156,7 @@ def fibonacci_retracement_arrays(
     active_broken = False
     active_structure_reset = False
     active_entry_invalidated = False
+    invalidated_legs: set[tuple[str, int, int]] = set()
     active_signal_level = 0.382
     signalled_leg: tuple[str, int, int] | None = None
 
@@ -169,7 +170,27 @@ def fibonacci_retracement_arrays(
         age_fraction = min(1.0, age / float(dominant_lookback_bars))
         return candidate[3] * (1.0 - dominant_recency_penalty * age_fraction)
 
+    def _leg_wick_penetration(leg, now):
+        direction, start_i, end_i = leg
+        if now <= end_i:
+            return float("-inf")
+        start_price = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
+        end_price = float(high_prices[end_i] if direction == "LONG" else low_prices[end_i])
+        span = abs(end_price - start_price)
+        if not np.isfinite(span) or span <= 0:
+            return float("-inf")
+        if direction == "LONG":
+            return (end_price - float(low_prices[now])) / span
+        return (float(high_prices[now]) - end_price) / span
+
     for i in range(n):
+        # Invalidation belongs to the structural leg, not to whichever candidate
+        # happens to be selected on this bar. Latch the active leg immediately
+        # so it cannot extend or retain sticky protection after a 0.786 wick.
+        if active_leg is not None:
+            if _leg_wick_penetration(active_leg, i) >= FIB_LEVELS[-1]:
+                invalidated_legs.add(active_leg)
+            active_entry_invalidated = active_leg in invalidated_legs
         # Once an active leg has retraced deeply enough, treat that move as a
         # completed structural cycle. From that bar onward the old anchor may
         # no longer extend to future extremes and no longer receives sticky
@@ -266,6 +287,21 @@ def fibonacci_retracement_arrays(
             candidate for candidate in structural_candidates
             if candidate[2] >= cutoff
         ]
+
+        # Preserve invalidation history for every confirmed candidate, including
+        # candidates that are currently inactive because an older dominant swing
+        # still has sticky selection. A later selector switch must not resurrect
+        # a Fib that already wicked through its 0.786 level.
+        for candidate in structural_candidates:
+            candidate_leg = candidate[:3]
+            if (
+                candidate_leg not in invalidated_legs
+                and _leg_wick_penetration(candidate_leg, i) >= FIB_LEVELS[-1]
+            ):
+                invalidated_legs.add(candidate_leg)
+        if active_leg is not None:
+            active_entry_invalidated = active_leg in invalidated_legs
+
         if not structural_candidates:
             continue
 
@@ -307,7 +343,7 @@ def fibonacci_retracement_arrays(
             active_last_test = None
             active_broken = False
             active_structure_reset = False
-            active_entry_invalidated = False
+            active_entry_invalidated = leg in invalidated_legs
             active_signal_level = 0.382
 
         start_price = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
@@ -352,6 +388,7 @@ def fibonacci_retracement_arrays(
             # A wick through 0.786 invalidates this Fib for any future entry.
             # This is latched for the life of the leg, even if price later
             # closes back above 0.786 and produces a bullish/bearish reaction.
+            invalidated_legs.add(leg)
             active_entry_invalidated = True
         elif penetration >= midpoint_500_618:
             active_signal_level = 0.618
