@@ -124,6 +124,14 @@ FIB_CANDIDATE_ARTIFACT_COLUMNS = (
     "end_price",
     "structural_strength_atr",
     "live_score",
+    "structural_score",
+    "confluence_score",
+    "final_score",
+    "ema_50_distance_atr",
+    "ema_100_distance_atr",
+    "ema_200_distance_atr",
+    "rsi_divergence",
+    "rsi_divergence_code",
     "signal_level",
     "test_count",
     "last_test_index",
@@ -602,6 +610,14 @@ def _empty_fib_candidate_frame() -> pd.DataFrame:
             "end_price": pd.Series(dtype="float64"),
             "structural_strength_atr": pd.Series(dtype="float64"),
             "live_score": pd.Series(dtype="float64"),
+            "structural_score": pd.Series(dtype="float64"),
+            "confluence_score": pd.Series(dtype="float64"),
+            "final_score": pd.Series(dtype="float64"),
+            "ema_50_distance_atr": pd.Series(dtype="float64"),
+            "ema_100_distance_atr": pd.Series(dtype="float64"),
+            "ema_200_distance_atr": pd.Series(dtype="float64"),
+            "rsi_divergence": pd.Series(dtype="string"),
+            "rsi_divergence_code": pd.Series(dtype="float64"),
             "signal_level": pd.Series(dtype="float64"),
             "test_count": pd.Series(dtype="int64"),
             "last_test_index": pd.Series(dtype="Int64"),
@@ -664,6 +680,14 @@ def _fib_candidate_inventory_frame(
                 "end_price": float(candidate["end_price"]),
                 "structural_strength_atr": float(candidate["structural_strength_atr"]),
                 "live_score": float(candidate["live_score"]),
+                "structural_score": float(candidate.get("structural_score", candidate["live_score"])),
+                "confluence_score": float(candidate.get("confluence_score", 0.0)),
+                "final_score": float(candidate.get("final_score", candidate["live_score"])),
+                "ema_50_distance_atr": float(candidate.get("ema_50_distance_atr", np.nan)),
+                "ema_100_distance_atr": float(candidate.get("ema_100_distance_atr", np.nan)),
+                "ema_200_distance_atr": float(candidate.get("ema_200_distance_atr", np.nan)),
+                "rsi_divergence": str(candidate.get("rsi_divergence", "UNKNOWN")),
+                "rsi_divergence_code": float(candidate.get("rsi_divergence_code", np.nan)),
                 "signal_level": float(candidate["signal_level"]),
                 "test_count": int(candidate["test_count"]),
                 "last_test_index": candidate.get("last_test_index"),
@@ -691,11 +715,14 @@ def _fib_candidate_inventory_frame(
     ).astype("Int64")
     for name in (
         "start_price", "end_price", "structural_strength_atr",
-        "live_score", "signal_level",
+        "live_score", "structural_score", "confluence_score", "final_score",
+        "ema_50_distance_atr", "ema_100_distance_atr", "ema_200_distance_atr",
+        "rsi_divergence_code", "signal_level",
     ):
         frame[name] = pd.to_numeric(frame[name], errors="raise").astype("float64")
     frame["candidate_id"] = frame["candidate_id"].astype("string")
     frame["direction"] = frame["direction"].astype("string")
+    frame["rsi_divergence"] = frame["rsi_divergence"].astype("string")
     return frame.loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS].copy(), consumed
 
 
