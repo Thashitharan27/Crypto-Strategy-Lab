@@ -14,6 +14,7 @@ import pandas as pd
 from .feature_research import (
     FEATURE_RESEARCH_ARTIFACT_CONTRACT,
     FEATURE_RESEARCH_ARTIFACT_VERSION,
+    FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION,
     _bounded_duckdb_context,
     _trade_fingerprint,
     _write_parquet_atomic,
