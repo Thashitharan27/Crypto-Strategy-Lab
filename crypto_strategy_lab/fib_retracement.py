@@ -207,6 +207,20 @@ def fibonacci_retracement_arrays(
             candidate_states[leg] = state
         return state
 
+    def _register_candidate(candidate, confirmed_at):
+        """Register a confirmed candidate and replay its closed confirmation window."""
+        leg = candidate[:3]
+        is_new = leg not in candidate_states
+        structural_candidates.append(candidate)
+        if is_new:
+            # The pivot at leg[2] becomes known only after pivot_strength bars.
+            # Replay every already-closed post-pivot candle so invalidation,
+            # progressive arming, tests, and reset history are not lost.
+            for replay_i in range(leg[2] + 1, confirmed_at + 1):
+                _update_candidate_state(leg, replay_i)
+        return candidate
+
+
     def _update_candidate_state(leg, now):
         state = _candidate_state(leg)
         if state["last_updated"] == now or now <= leg[2]:
@@ -295,7 +309,7 @@ def fibonacci_retracement_arrays(
                     atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
                     if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
                         extension = ("LONG", anchor, j, span / atr_confirm)
-                        structural_candidates.append(extension)
+                        _register_candidate(extension, i)
                         active_extension_leg = extension[:3]
                 floor = j - dominant_lookback_bars
                 prior_lows = [idx for idx in confirmed_lows if floor <= idx < j]
@@ -317,8 +331,8 @@ def fibonacci_retracement_arrays(
                             and np.isfinite(atr_confirm)
                             and atr_confirm > 0
                         ):
-                            structural_candidates.append(
-                                ("LONG", lo, j, span / atr_confirm)
+                            _register_candidate(
+                                ("LONG", lo, j, span / atr_confirm), i
                             )
             if is_low:
                 confirmed_lows.append(j)
@@ -336,7 +350,7 @@ def fibonacci_retracement_arrays(
                     atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
                     if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
                         extension = ("SHORT", anchor, j, span / atr_confirm)
-                        structural_candidates.append(extension)
+                        _register_candidate(extension, i)
                         active_extension_leg = extension[:3]
                 floor = j - dominant_lookback_bars
                 prior_highs = [idx for idx in confirmed_highs if floor <= idx < j]
@@ -357,8 +371,8 @@ def fibonacci_retracement_arrays(
                             and np.isfinite(atr_confirm)
                             and atr_confirm > 0
                         ):
-                            structural_candidates.append(
-                                ("SHORT", hi, j, span / atr_confirm)
+                            _register_candidate(
+                                ("SHORT", hi, j, span / atr_confirm), i
                             )
 
             pivot_cutoff = j - dominant_lookback_bars
