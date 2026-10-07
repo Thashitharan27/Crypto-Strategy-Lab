@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 14
+FIB_RESEARCH_CONTEXT_VERSION = 15
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -650,16 +650,28 @@ def fibonacci_retracement_arrays(
         if not structural_candidates:
             continue
 
-        # Entry selection remains single-candidate and considers only valid
-        # Fibs. Evidence selection is allowed to fall back to the strongest
-        # structural candidate when all Fibs are entry-invalid so public Fib
-        # indicators continue to populate for generic Entry/Veto rules.
+        # Entry selection remains single-candidate, but only candidates whose
+        # currently armed level has already held on a prior completed candle
+        # may compete for execution. This happens before ranking so a stronger
+        # no-hold Fib cannot block a weaker/local Fib with proven reaction.
+        # When none qualify, keep selecting fallback evidence so generic Fib
+        # indicators remain populated, but do not emit an entry signal.
         valid_candidates = [
             candidate
             for candidate in structural_candidates
             if not bool(_candidate_state(candidate[:3])["invalidated"])
         ]
-        selection_pool = valid_candidates if valid_candidates else structural_candidates
+        entry_candidates = [
+            candidate
+            for candidate in valid_candidates
+            if int(_candidate_state(candidate[:3]).get("score_signal_held_count", 0)) >= 1
+        ]
+        entry_candidate_available = bool(entry_candidates)
+        selection_pool = (
+            entry_candidates
+            if entry_candidates
+            else (valid_candidates if valid_candidates else structural_candidates)
+        )
 
         best = max(
             selection_pool,
@@ -683,7 +695,7 @@ def fibonacci_retracement_arrays(
         ):
             active_candidate = next(
                 (
-                    candidate for candidate in valid_candidates
+                    candidate for candidate in entry_candidates
                     if candidate[:3] == active_leg
                 ),
                 None,
@@ -769,7 +781,17 @@ def fibonacci_retracement_arrays(
                     "structure_reset": bool(state["structure_reset"]),
                     "invalidated": bool(state["invalidated"]),
                     "signalled": bool(state["signalled"]),
-                    "entry_valid": not bool(state["invalidated"]),
+                    "prior_signal_held_count": int(
+                        state.get("score_signal_held_count", 0)
+                    ),
+                    "prior_hold_eligible": (
+                        not bool(state["invalidated"])
+                        and int(state.get("score_signal_held_count", 0)) >= 1
+                    ),
+                    "entry_valid": (
+                        not bool(state["invalidated"])
+                        and int(state.get("score_signal_held_count", 0)) >= 1
+                    ),
                     "selected": candidate_leg == leg,
                 }
             )
@@ -880,6 +902,8 @@ def fibonacci_retracement_arrays(
 
         if (
             signal_held
+            and entry_candidate_available
+            and int(selected_state.get("score_signal_held_count", 0)) >= 1
             and not active_entry_invalidated
             and leg_atr >= minimum_impulse_atr
             and not bool(selected_state["signalled"])
