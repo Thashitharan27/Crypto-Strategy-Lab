@@ -479,3 +479,50 @@ def test_fib_native_plan_uses_actual_progressive_signal_level():
     assert plan["nearest_level"] == 0.500
     assert plan["stop_level"] == 0.618
     assert np.isclose(plan["stop_boundary"], 12.0 - 0.618 * 4.0)
+
+
+def test_fib_wick_through_786_invalidates_future_long_entry():
+    # Confirmed LONG impulse: low@1=8.0 -> high@3=12.0.
+    # 0.786 is 8.856. Candle 5 wicks below it but closes back above,
+    # then candle 6 gives a bullish reaction near 0.618. The leg must stay
+    # invalidated and cannot generate a later LONG signal.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 9.2, 9.4, 9.8], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 9.8, 10.0, 10.1], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 8.7, 9.3, 9.6], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 9.5, 9.8, 9.9], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    assert (12.0 - low[5]) / (12.0 - 8.0) >= 0.786
+    assert values["_FIB_SIGNAL_DIRECTION"][5] is None
+    assert values["_FIB_SIGNAL_DIRECTION"][6] is None
+    assert values["_FIB_SIGNAL_DIRECTION"][7] is None
+
+
+def test_fib_wick_through_786_invalidates_future_short_entry():
+    # Mirror case for a SHORT impulse: high@1=12.0 -> low@3=8.0.
+    open_ = np.array([10.0, 11.8, 11.0, 8.5, 8.8, 10.8, 10.6, 10.2], dtype=float)
+    high = np.array([10.2, 12.0, 11.2, 8.7, 9.1, 11.3, 10.7, 10.4], dtype=float)
+    low = np.array([9.8, 11.6, 10.8, 8.0, 8.6, 10.2, 10.0, 10.0], dtype=float)
+    close = np.array([10.0, 11.8, 11.0, 8.2, 8.9, 10.5, 10.2, 10.1], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    assert (high[5] - 8.0) / (12.0 - 8.0) >= 0.786
+    assert values["_FIB_SIGNAL_DIRECTION"][5] is None
+    assert values["_FIB_SIGNAL_DIRECTION"][6] is None
+    assert values["_FIB_SIGNAL_DIRECTION"][7] is None
