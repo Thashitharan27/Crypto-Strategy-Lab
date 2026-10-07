@@ -11,8 +11,9 @@ the discovery lookback. A close retracement to 0.618 or deeper ends that extensi
 privilege so a completed cycle cannot keep dragging an old anchor forward. Once a confirmed impulse exists, entry uses progressive Fib zones: 0.382 is
 armed first, but penetration beyond the midpoint toward 0.500 permanently arms
 0.500 for that leg, and penetration beyond the midpoint toward 0.618 arms 0.618.
-A successful reaction at the currently armed level may produce a signal in the
-impulse direction. All retracement measurements
+If price wicks to 0.786 or deeper, that Fib is permanently invalidated for new
+entries. A successful reaction at the currently armed level may produce a signal
+in the impulse direction only while the leg remains entry-valid. All retracement measurements
 remain available as generic Entry/Veto evidence.
 """
 from __future__ import annotations
@@ -23,7 +24,7 @@ import pandas as pd
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 6
+FIB_RESEARCH_CONTEXT_VERSION = 7
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -154,6 +155,7 @@ def fibonacci_retracement_arrays(
     active_last_test: int | None = None
     active_broken = False
     active_structure_reset = False
+    active_entry_invalidated = False
     active_signal_level = 0.382
     signalled_leg: tuple[str, int, int] | None = None
 
@@ -209,6 +211,7 @@ def fibonacci_retracement_arrays(
                     and active_leg[0] == "LONG"
                     and not active_broken
                     and not active_structure_reset
+                    and not active_entry_invalidated
                     and j > active_leg[2]
                     and float(high_prices[j]) > float(high_prices[active_leg[2]])
                 ):
@@ -234,6 +237,7 @@ def fibonacci_retracement_arrays(
                     and active_leg[0] == "SHORT"
                     and not active_broken
                     and not active_structure_reset
+                    and not active_entry_invalidated
                     and j > active_leg[2]
                     and float(low_prices[j]) < float(low_prices[active_leg[2]])
                 ):
@@ -281,6 +285,7 @@ def fibonacci_retracement_arrays(
             and active_leg is not None
             and active_leg != best_leg
             and not active_structure_reset
+            and not active_entry_invalidated
         ):
             active_candidate = next(
                 (
@@ -302,6 +307,7 @@ def fibonacci_retracement_arrays(
             active_last_test = None
             active_broken = False
             active_structure_reset = False
+            active_entry_invalidated = False
             active_signal_level = 0.382
 
         start_price = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
@@ -342,7 +348,12 @@ def fibonacci_retracement_arrays(
         # entry merely because it closes back above/below the old level.
         midpoint_382_500 = (0.382 + 0.500) / 2.0
         midpoint_500_618 = (0.500 + 0.618) / 2.0
-        if penetration >= midpoint_500_618:
+        if penetration >= FIB_LEVELS[-1]:
+            # A wick through 0.786 invalidates this Fib for any future entry.
+            # This is latched for the life of the leg, even if price later
+            # closes back above 0.786 and produces a bullish/bearish reaction.
+            active_entry_invalidated = True
+        elif penetration >= midpoint_500_618:
             active_signal_level = 0.618
         elif penetration >= midpoint_382_500 and active_signal_level < 0.500:
             active_signal_level = 0.500
@@ -412,6 +423,7 @@ def fibonacci_retracement_arrays(
 
         if (
             signal_held
+            and not active_entry_invalidated
             and leg_atr >= minimum_impulse_atr
             and signalled_leg != leg
         ):
