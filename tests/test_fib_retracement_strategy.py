@@ -4,6 +4,8 @@ import json
 
 from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.fib_retracement import (
+    FIB_DOMINANT_REPLACEMENT_RATIO,
+    FIB_RESEARCH_CONTEXT_VERSION,
     FIB_RETRACEMENT_MODE,
     FIB_RULE_INDICATORS,
     FibonacciRetracementMixin,
@@ -783,6 +785,49 @@ def test_new_fib_replays_confirmation_window_invalidation():
     )
     assert candidate["invalidated"] is True
     assert candidate["entry_valid"] is False
+
+
+def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate():
+    # Build a dominant LONG, then a stronger/recent local LONG. A later higher
+    # high creates an extension from the active local anchor, but the extension
+    # is deliberately weaker because ATR is much larger on confirmation.
+    close = np.array(
+        [12, 8, 10, 16, 20, 18, 16, 14, 19, 18, 17, 16, 17, 18, 22, 19, 18, 18],
+        dtype=float,
+    )
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+    atr[9] = 0.6   # local low@7 -> high@8 strength ~= 9 ATR
+    atr[15] = 4.0  # active extension to high@14 is intentionally much weaker
+
+    values = fibonacci_retracement_arrays(
+        open_,
+        high,
+        low,
+        close,
+        atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.95,
+    )
+
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][15])
+    extension = next(
+        item for item in inventory if item["candidate_id"] == "LONG:7:14"
+    )
+    selected = next(item for item in inventory if item["selected"])
+
+    assert extension["entry_valid"] is True
+    assert selected["candidate_id"] == "LONG:7:8"
+    assert selected["live_score"] > extension["live_score"]
+    assert values["_FIB_SELECTED_CANDIDATE_ID"][15] == "LONG:7:8"
+
+
+def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache():
+    assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
+    assert FIB_RESEARCH_CONTEXT_VERSION == 11
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
