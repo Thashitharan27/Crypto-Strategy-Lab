@@ -112,6 +112,29 @@ SR_ZONE_ARTIFACT_COLUMNS = (
 )
 
 # Lossless compact storage for completed-run S/R zone inventories.
+FIB_CANDIDATE_ARTIFACT_COLUMNS = (
+    "strategy_index",
+    "strategy_candle_open_time",
+    "decision_available_at",
+    "candidate_id",
+    "direction",
+    "start_index",
+    "end_index",
+    "start_price",
+    "end_price",
+    "structural_strength_atr",
+    "live_score",
+    "signal_level",
+    "test_count",
+    "last_test_index",
+    "broken",
+    "structure_reset",
+    "invalidated",
+    "signalled",
+    "entry_valid",
+    "selected",
+)
+
 SR_ZONE_SNAPSHOT_STORAGE_CONTRACT = "SNAPSHOT_JSON_V3"
 SR_ZONE_SNAPSHOT_COLUMNS = (
     "strategy_index",
@@ -564,6 +587,96 @@ def _sr_zone_inventory_frame(
     return frame, tuple(consumed)
 
 
+def _fib_candidate_inventory_frame(
+    feature_context: pd.DataFrame,
+) -> tuple[pd.DataFrame, tuple[str, ...]]:
+    inventory_column = "_FIB_CANDIDATE_INVENTORY_JSON"
+    selected_column = "_FIB_SELECTED_CANDIDATE_ID"
+    consumed = tuple(
+        name for name in (inventory_column, selected_column)
+        if name in feature_context.columns
+    )
+    records: list[dict[str, Any]] = []
+    if inventory_column not in feature_context.columns:
+        empty = pd.DataFrame(
+            {name: pd.Series(dtype="object") for name in FIB_CANDIDATE_ARTIFACT_COLUMNS}
+        )
+        return empty.loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS], consumed
+
+    for row in feature_context.itertuples(index=False):
+        payload = getattr(row, inventory_column, None)
+        if payload is None or pd.isna(payload):
+            continue
+        payload_text = str(payload).strip()
+        if not payload_text or payload_text == "[]":
+            continue
+        try:
+            candidates = json.loads(payload_text)
+        except json.JSONDecodeError as exc:
+            raise ResearchArtifactError("invalid Fib candidate inventory JSON") from exc
+        if not isinstance(candidates, list):
+            raise ResearchArtifactError("Fib candidate inventory must be a list")
+        seen: set[str] = set()
+        selected_count = 0
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                raise ResearchArtifactError("Fib candidate inventory entry must be an object")
+            candidate_id = str(candidate.get("candidate_id") or "").strip()
+            if not candidate_id or candidate_id in seen:
+                raise ResearchArtifactError("Fib candidate inventory has duplicate/empty id")
+            seen.add(candidate_id)
+            selected = bool(candidate.get("selected"))
+            selected_count += int(selected)
+            records.append({
+                "strategy_index": int(getattr(row, "strategy_index")),
+                "strategy_candle_open_time": getattr(row, "strategy_candle_open_time"),
+                "decision_available_at": getattr(row, "decision_available_at"),
+                "candidate_id": candidate_id,
+                "direction": str(candidate.get("direction") or "").upper(),
+                "start_index": int(candidate["start_index"]),
+                "end_index": int(candidate["end_index"]),
+                "start_price": float(candidate["start_price"]),
+                "end_price": float(candidate["end_price"]),
+                "structural_strength_atr": float(candidate["structural_strength_atr"]),
+                "live_score": float(candidate["live_score"]),
+                "signal_level": float(candidate["signal_level"]),
+                "test_count": int(candidate["test_count"]),
+                "last_test_index": candidate.get("last_test_index"),
+                "broken": bool(candidate.get("broken")),
+                "structure_reset": bool(candidate.get("structure_reset")),
+                "invalidated": bool(candidate.get("invalidated")),
+                "signalled": bool(candidate.get("signalled")),
+                "entry_valid": bool(candidate.get("entry_valid")),
+                "selected": selected,
+            })
+        if selected_count > 1:
+            raise ResearchArtifactError("Fib candidate inventory has multiple selected candidates")
+
+    if not records:
+        empty = pd.DataFrame(
+            {name: pd.Series(dtype="object") for name in FIB_CANDIDATE_ARTIFACT_COLUMNS}
+        )
+        return empty.loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS], consumed
+
+    frame = pd.DataFrame.from_records(records, columns=FIB_CANDIDATE_ARTIFACT_COLUMNS)
+    for name in ("strategy_candle_open_time", "decision_available_at"):
+        parsed = pd.to_datetime(frame[name], utc=True, errors="coerce")
+        frame[name] = parsed.dt.tz_convert("UTC").dt.tz_localize(None)
+    for name in ("strategy_index", "start_index", "end_index", "test_count"):
+        frame[name] = pd.to_numeric(frame[name], errors="raise").astype("int64")
+    frame["last_test_index"] = pd.to_numeric(
+        frame["last_test_index"], errors="coerce"
+    ).astype("Int64")
+    for name in (
+        "start_price", "end_price", "structural_strength_atr",
+        "live_score", "signal_level",
+    ):
+        frame[name] = pd.to_numeric(frame[name], errors="raise").astype("float64")
+    frame["candidate_id"] = frame["candidate_id"].astype("string")
+    frame["direction"] = frame["direction"].astype("string")
+    return frame.loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS].copy(), consumed
+
+
 def _normalize_datetime_object_columns(frame: pd.DataFrame) -> pd.DataFrame:
     """Normalize mixed naive/aware datetime object columns before DuckDB registration."""
     result = frame.copy()
@@ -686,10 +799,17 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
     finish_stage("sr_snapshot_build", stage_started)
 
     stage_started = time.perf_counter()
+    fib_candidates, fib_inventory_columns = _fib_candidate_inventory_frame(
+        feature_context
+    )
+    finish_stage("fib_candidate_snapshot_build", stage_started)
+
+    stage_started = time.perf_counter()
     research_parity = set(feature_context.attrs.get("research_parity_columns", ()))
-    if inventory_columns:
-        feature_context = feature_context.drop(columns=list(inventory_columns))
-        research_parity.difference_update(inventory_columns)
+    consumed_columns = tuple(inventory_columns) + tuple(fib_inventory_columns)
+    if consumed_columns:
+        feature_context = feature_context.drop(columns=list(consumed_columns))
+        research_parity.difference_update(consumed_columns)
 
     parity_candidates = research_parity
     parity_columns = sorted(parity_candidates & set(trades.columns))
@@ -698,6 +818,7 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
     trades_path = research_dir / "trades.parquet"
     context_path = research_dir / "feature_context.parquet"
     sr_zones_path = research_dir / "sr_zones.parquet"
+    fib_candidates_path = research_dir / "fib_candidates.parquet"
 
     stage_started = time.perf_counter()
     _write_parquet_atomic(trades, trades_path)
@@ -710,6 +831,10 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
     stage_started = time.perf_counter()
     _write_parquet_atomic(sr_zones, sr_zones_path)
     finish_stage("write_sr_zones_parquet", stage_started)
+
+    stage_started = time.perf_counter()
+    _write_parquet_atomic(fib_candidates, fib_candidates_path)
+    finish_stage("write_fib_candidates_parquet", stage_started)
 
     stage_started = time.perf_counter()
     trade_fingerprint = _trade_fingerprint(trades)
@@ -726,6 +851,10 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
     stage_started = time.perf_counter()
     sr_zones_sha256 = _file_sha256(sr_zones_path)
     finish_stage("hash_sr_zones_parquet", stage_started)
+
+    stage_started = time.perf_counter()
+    fib_candidates_sha256 = _file_sha256(fib_candidates_path)
+    finish_stage("hash_fib_candidates_parquet", stage_started)
 
     request = result.request
     manifest = {
@@ -750,6 +879,7 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
         "trade_row_count": len(trades),
         "feature_context_row_count": len(feature_context),
         "sr_zone_row_count": len(sr_zones),
+        "fib_candidate_row_count": len(fib_candidates),
         "sr_zone_expanded_row_count": int(
             sr_zones.attrs.get("expanded_zone_rows", len(sr_zones))
         ),
@@ -764,17 +894,20 @@ def write_research_artifacts(run_dir: Path, result, context, *, authoritative_la
         "trades_parquet": "trades.parquet",
         "context_parquet": "feature_context.parquet",
         "sr_zones_parquet": "sr_zones.parquet",
+        "fib_candidates_parquet": "fib_candidates.parquet",
         "trade_fingerprint": trade_fingerprint,
         "trade_fingerprint_contract": "completed_trade_semantics_v1",
         "artifact_sha256": {
             "trades": trades_sha256,
             "feature_context": feature_context_sha256,
             "sr_zones": sr_zones_sha256,
+            "fib_candidates": fib_candidates_sha256,
         },
         "artifact_sizes_bytes": {
             "trades": trades_path.stat().st_size,
             "feature_context": context_path.stat().st_size,
             "sr_zones": sr_zones_path.stat().st_size,
+            "fib_candidates": fib_candidates_path.stat().st_size,
         },
         "artifact_stage_timings": artifact_stage_timings,
         "artifact_write_seconds": time.perf_counter() - started,
