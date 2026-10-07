@@ -23,10 +23,12 @@ import json
 import numpy as np
 import pandas as pd
 
+from crypto_strategy_lab.indicators import rsi
+
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 11
+FIB_RESEARCH_CONTEXT_VERSION = 12
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -34,6 +36,12 @@ FIB_DOMINANT_LOOKBACK_BARS = 160
 FIB_DOMINANT_RECENCY_PENALTY = 0.35
 FIB_DOMINANT_REPLACEMENT_RATIO = 1.05
 FIB_ACTIVE_STRUCTURE_RESET_DEPTH = 0.618
+FIB_CONFLUENCE_MAX_EMA_DISTANCE_ATR = 0.25
+FIB_CONFLUENCE_EMA_50_WEIGHT = 0.02
+FIB_CONFLUENCE_EMA_100_WEIGHT = 0.03
+FIB_CONFLUENCE_EMA_200_WEIGHT = 0.04
+FIB_CONFLUENCE_RSI_DIVERGENCE_WEIGHT = 0.05
+FIB_CONFLUENCE_RSI_PERIOD = 14
 FIB_LEVELS = (0.236, 0.382, 0.500, 0.618, 0.786)
 FIB_SIGNAL_LEVELS = frozenset({0.382, 0.500, 0.618})
 FIB_RULE_INDICATORS = frozenset({
@@ -75,6 +83,51 @@ def _causal_ema(values, period: int) -> np.ndarray:
     )
 
 
+def _causal_rsi_divergence_codes(
+    high_prices,
+    low_prices,
+    rsi_values,
+    period: int,
+) -> np.ndarray:
+    """Return causal RSI divergence codes matching the strategy rule contract."""
+    high_prices = np.asarray(high_prices, dtype=float)
+    low_prices = np.asarray(low_prices, dtype=float)
+    rsi_values = np.asarray(rsi_values, dtype=float)
+    n = len(rsi_values)
+    result = np.full(n, np.nan, dtype=float)
+    lookback = max(5, int(period))
+    for i in range(n):
+        start = max(0, i - lookback)
+        if i - start < 5:
+            continue
+        current_rsi = float(rsi_values[i])
+        if not np.isfinite(current_rsi):
+            continue
+        prior_lows = low_prices[start:i]
+        prior_highs = high_prices[start:i]
+        prior_rsi = rsi_values[start:i]
+        valid_low = np.isfinite(prior_lows) & np.isfinite(prior_rsi)
+        valid_high = np.isfinite(prior_highs) & np.isfinite(prior_rsi)
+        if not valid_low.any() or not valid_high.any():
+            continue
+        low_candidates = np.where(valid_low, prior_lows, np.inf)
+        high_candidates = np.where(valid_high, prior_highs, -np.inf)
+        low_offset = int(np.argmin(low_candidates))
+        high_offset = int(np.argmax(high_candidates))
+        bullish = (
+            np.isfinite(low_prices[i])
+            and float(low_prices[i]) < float(prior_lows[low_offset])
+            and current_rsi >= float(prior_rsi[low_offset]) + 2.0
+        )
+        bearish = (
+            np.isfinite(high_prices[i])
+            and float(high_prices[i]) > float(prior_highs[high_offset])
+            and current_rsi <= float(prior_rsi[high_offset]) - 2.0
+        )
+        result[i] = 1.0 if bullish and not bearish else 2.0 if bearish and not bullish else 3.0
+    return result
+
+
 def _confirmed_pivot(high, low, j: int, strength: int) -> tuple[bool, bool]:
     """Return whether j is a confirmed high/low using only closed neighbours."""
     if j < strength or j + strength >= len(high):
@@ -103,6 +156,8 @@ def fibonacci_retracement_arrays(
     ema_50_values=None,
     ema_100_values=None,
     ema_200_values=None,
+    rsi_values=None,
+    rsi_period: int = FIB_CONFLUENCE_RSI_PERIOD,
     dominant_lookback_bars: int = FIB_DOMINANT_LOOKBACK_BARS,
     dominant_recency_penalty: float = FIB_DOMINANT_RECENCY_PENALTY,
     dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO,
@@ -117,9 +172,16 @@ def fibonacci_retracement_arrays(
     ema_50_values = _causal_ema(close_prices, 50) if ema_50_values is None else np.asarray(ema_50_values, dtype=float)
     ema_100_values = _causal_ema(close_prices, 100) if ema_100_values is None else np.asarray(ema_100_values, dtype=float)
     ema_200_values = _causal_ema(close_prices, 200) if ema_200_values is None else np.asarray(ema_200_values, dtype=float)
+    rsi_period = max(2, int(rsi_period))
+    rsi_values = rsi(close_prices, rsi_period) if rsi_values is None else np.asarray(rsi_values, dtype=float)
     n = len(close_prices)
     if any(len(values) != n for values in (ema_50_values, ema_100_values, ema_200_values)):
         raise ValueError("Fib EMA arrays must match price length")
+    if len(rsi_values) != n:
+        raise ValueError("Fib RSI array must match price length")
+    rsi_divergence_codes = _causal_rsi_divergence_codes(
+        high_prices, low_prices, rsi_values, rsi_period
+    )
 
     depth = np.full(n, np.nan, dtype=float)
     nearest_level = np.full(n, np.nan, dtype=float)
@@ -178,6 +240,80 @@ def fibonacci_retracement_arrays(
         age_fraction = min(1.0, age / float(dominant_lookback_bars))
         return candidate[3] * (1.0 - dominant_recency_penalty * age_fraction)
 
+    def _candidate_confluence(candidate, now):
+        """Score causal EMA/RSI confluence for one candidate before selection."""
+        direction, start_i, end_i = candidate[:3]
+        state = _candidate_state((direction, start_i, end_i))
+        start_price = float(
+            low_prices[start_i] if direction == "LONG" else high_prices[start_i]
+        )
+        end_price = float(
+            high_prices[end_i] if direction == "LONG" else low_prices[end_i]
+        )
+        span = abs(end_price - start_price)
+        atr_now = float(atr_values[now]) if now < len(atr_values) else np.nan
+        signal_level_value = float(state["signal_level"])
+        signal_price = (
+            end_price - signal_level_value * span
+            if direction == "LONG"
+            else end_price + signal_level_value * span
+        )
+        distances = []
+        for ema_values in (ema_50_values, ema_100_values, ema_200_values):
+            ema_value = float(ema_values[now])
+            if (
+                np.isfinite(ema_value)
+                and np.isfinite(atr_now)
+                and atr_now > 0
+                and np.isfinite(signal_price)
+            ):
+                distances.append(abs(signal_price - ema_value) / atr_now)
+            else:
+                distances.append(float("nan"))
+
+        bonus = 0.0
+        for distance, weight in zip(
+            distances,
+            (
+                FIB_CONFLUENCE_EMA_50_WEIGHT,
+                FIB_CONFLUENCE_EMA_100_WEIGHT,
+                FIB_CONFLUENCE_EMA_200_WEIGHT,
+            ),
+        ):
+            if np.isfinite(distance) and distance <= FIB_CONFLUENCE_MAX_EMA_DISTANCE_ATR:
+                bonus += weight
+
+        divergence_code = float("nan")
+        divergence_label = "UNKNOWN"
+        test_i = state.get("last_signal_test")
+        if test_i is not None:
+            divergence_code = float(rsi_divergence_codes[int(test_i)])
+            divergence_label = {
+                1.0: "BULLISH",
+                2.0: "BEARISH",
+                3.0: "NONE",
+            }.get(divergence_code, "UNKNOWN")
+            matching_code = 1.0 if direction == "LONG" else 2.0
+            if divergence_code == matching_code:
+                bonus += FIB_CONFLUENCE_RSI_DIVERGENCE_WEIGHT
+
+        structural_score = float(_candidate_live_score(candidate, now))
+        final_score = structural_score * (1.0 + bonus)
+        return {
+            "structural_score": structural_score,
+            "confluence_score": float(bonus),
+            "final_score": float(final_score),
+            "ema_50_distance_atr": float(distances[0]),
+            "ema_100_distance_atr": float(distances[1]),
+            "ema_200_distance_atr": float(distances[2]),
+            "rsi_divergence": divergence_label,
+            "rsi_divergence_code": divergence_code,
+        }
+
+    def _candidate_final_score(candidate, now):
+        return _candidate_confluence(candidate, now)["final_score"]
+
+
     def _leg_wick_penetration(leg, now):
         direction, start_i, end_i = leg
         if now <= end_i:
@@ -198,6 +334,7 @@ def fibonacci_retracement_arrays(
                 "signal_level": 0.382,
                 "tests": 0,
                 "last_test": None,
+                "last_signal_test": None,
                 "broken": False,
                 "structure_reset": False,
                 "invalidated": False,
@@ -267,6 +404,10 @@ def fibonacci_retracement_arrays(
         if float(low_prices[now]) <= nearest_price <= float(high_prices[now]):
             state["tests"] = int(state["tests"]) + 1
             state["last_test"] = now
+
+        signal_price = levels_price[float(state["signal_level"])]
+        if float(low_prices[now]) <= signal_price <= float(high_prices[now]):
+            state["last_signal_test"] = now
 
         state["last_updated"] = now
         return state
@@ -421,7 +562,7 @@ def fibonacci_retracement_arrays(
         best = max(
             selection_pool,
             key=lambda candidate: (
-                _candidate_live_score(candidate, i),
+                _candidate_final_score(candidate, i),
                 candidate[2],
             ),
         )
@@ -446,8 +587,8 @@ def fibonacci_retracement_arrays(
                 None,
             )
             if active_candidate is not None and not active_broken:
-                active_score = _candidate_live_score(active_candidate, i)
-                best_score = _candidate_live_score(best, i)
+                active_score = _candidate_final_score(active_candidate, i)
+                best_score = _candidate_final_score(best, i)
                 if best_score < active_score * dominant_replacement_ratio:
                     leg = active_leg
 
@@ -470,7 +611,7 @@ def fibonacci_retracement_arrays(
         for candidate_leg, candidate in sorted(
             candidate_by_leg.items(),
             key=lambda item: (
-                -_candidate_live_score(item[1], i),
+                -_candidate_final_score(item[1], i),
                 item[0][2],
                 item[0][1],
             ),
@@ -490,6 +631,7 @@ def fibonacci_retracement_arrays(
             candidate_id = (
                 f"{candidate_direction}:{candidate_start_i}:{candidate_end_i}"
             )
+            confluence = _candidate_confluence(candidate, i)
             snapshot.append(
                 {
                     "candidate_id": candidate_id,
@@ -500,6 +642,14 @@ def fibonacci_retracement_arrays(
                     "end_price": candidate_end_price,
                     "structural_strength_atr": float(candidate[3]),
                     "live_score": float(_candidate_live_score(candidate, i)),
+                    "structural_score": confluence["structural_score"],
+                    "confluence_score": confluence["confluence_score"],
+                    "final_score": confluence["final_score"],
+                    "ema_50_distance_atr": confluence["ema_50_distance_atr"],
+                    "ema_100_distance_atr": confluence["ema_100_distance_atr"],
+                    "ema_200_distance_atr": confluence["ema_200_distance_atr"],
+                    "rsi_divergence": confluence["rsi_divergence"],
+                    "rsi_divergence_code": confluence["rsi_divergence_code"],
                     "signal_level": float(state["signal_level"]),
                     "test_count": int(state["tests"]),
                     "last_test_index": (
