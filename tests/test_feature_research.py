@@ -548,6 +548,12 @@ def test_corrupt_artifact_missing_legacy_and_unavailable_column_are_explicit(tmp
     with pytest.raises(ResearchArtifactError, match="hash mismatch"):
         ResearchQueryService(run)
 
+    fib_run = _write_run(tmp_path / "fib-hash")
+    fib_path = fib_run / "research" / "fib_candidates.parquet"
+    fib_path.write_bytes(fib_path.read_bytes() + b"corrupt")
+    with pytest.raises(ResearchArtifactError, match="hash mismatch"):
+        ResearchQueryService(fib_run)
+
 
 def test_artifact_queries_need_no_raw_data_runner_or_pandas_parquet(tmp_path, monkeypatch):
     run = _write_run(tmp_path)
