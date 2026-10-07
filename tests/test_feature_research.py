@@ -348,7 +348,7 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert manifest["feature_context_row_count"] == 5
     assert manifest["sr_zone_row_count"] == 5
     assert manifest["fib_candidate_row_count"] == 0
-    assert manifest["fib_candidate_schema_version"] == FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION == 2
+    assert manifest["fib_candidate_schema_version"] == FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION == 3
     assert manifest["sr_zone_expanded_row_count"] == 10
     assert manifest["sr_zone_storage_contract"] == "SNAPSHOT_JSON_V3"
     assert manifest["artifact_sizes_bytes"]["trades"] > 0
@@ -639,6 +639,9 @@ def test_empty_fib_candidate_inventory_has_canonical_schema(tmp_path):
     assert str(candidates["strategy_index"].dtype) == "int64"
     assert str(candidates["last_test_index"].dtype) == "Int64"
     assert str(candidates["start_price"].dtype) == "float64"
+    assert str(candidates["reaction_score"].dtype) == "float64"
+    assert str(candidates["signal_test_count"].dtype) == "int64"
+    assert str(candidates["bars_since_signal_test"].dtype) == "Int64"
     assert str(candidates["final_score"].dtype) == "float64"
     assert str(candidates["rsi_divergence"].dtype) == "string"
     assert str(candidates["selected"].dtype) == "bool"
@@ -656,6 +659,8 @@ def test_empty_fib_candidate_inventory_has_canonical_schema(tmp_path):
     assert schema["direction"] == "VARCHAR"
     assert schema["strategy_index"] == "BIGINT"
     assert schema["start_price"] == "DOUBLE"
+    assert schema["reaction_score"] == "DOUBLE"
+    assert schema["signal_test_count"] == "BIGINT"
     assert schema["final_score"] == "DOUBLE"
     assert schema["rsi_divergence"] == "VARCHAR"
     assert schema["selected"] == "BOOLEAN"
@@ -675,12 +680,18 @@ def test_fib_candidate_inventory_frame_expands_all_candidates():
                 "live_score": 4.5,
                 "structural_score": 4.5,
                 "confluence_score": 0.08,
-                "final_score": 4.86,
+                "reaction_score": 0.02,
+                "final_score": 4.95,
                 "ema_50_distance_atr": 0.2,
                 "ema_100_distance_atr": 0.1,
                 "ema_200_distance_atr": 0.5,
                 "rsi_divergence": "BULLISH",
                 "rsi_divergence_code": 1.0,
+                "signal_test_count": 2,
+                "signal_held_count": 2,
+                "signal_held_ratio": 1.0,
+                "last_signal_rejection_atr": 0.6,
+                "bars_since_signal_test": 1,
                 "signal_level": 0.5,
                 "test_count": 2,
                 "last_test_index": 7,
@@ -738,5 +749,11 @@ def test_fib_candidate_inventory_frame_expands_all_candidates():
     assert bool(invalid["entry_valid"]) is False
     selected = candidates.loc[candidates["candidate_id"] == "LONG:1:4"].iloc[0]
     assert selected["confluence_score"] == pytest.approx(0.08)
-    assert selected["final_score"] == pytest.approx(4.86)
+    assert selected["reaction_score"] == pytest.approx(0.02)
+    assert selected["signal_test_count"] == 2
+    assert selected["signal_held_count"] == 2
+    assert selected["signal_held_ratio"] == pytest.approx(1.0)
+    assert selected["last_signal_rejection_atr"] == pytest.approx(0.6)
+    assert selected["bars_since_signal_test"] == 1
+    assert selected["final_score"] == pytest.approx(4.95)
     assert selected["rsi_divergence"] == "BULLISH"
