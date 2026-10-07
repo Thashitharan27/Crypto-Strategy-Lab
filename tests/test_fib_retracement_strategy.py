@@ -445,6 +445,9 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     # finally signals from the deeper armed level.
     assert values["_FIB_SIGNAL_DIRECTION"][6] == "LONG"
     assert np.isclose(values["_FIB_SIGNAL_LEVEL"][6], 0.500)
+    signal_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    selected = next(item for item in signal_snapshot if item["selected"])
+    assert selected["signalled"] is True
 
 
 def test_fib_native_plan_uses_actual_progressive_signal_level():
