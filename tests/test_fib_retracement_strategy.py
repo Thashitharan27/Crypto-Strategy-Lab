@@ -827,7 +827,7 @@ def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate(
 
 def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache():
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
-    assert FIB_RESEARCH_CONTEXT_VERSION == 11
+    assert FIB_RESEARCH_CONTEXT_VERSION == 12
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
@@ -864,6 +864,96 @@ def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
     assert local["start_price"] == low[7]
     assert local["end_price"] == high[10]
     assert local["entry_valid"] is True
+
+
+def test_fib_rsi_confluence_resets_when_armed_level_advances():
+    # Candidate first tests 0.382 with bullish RSI divergence, then a deeper
+    # wick advances the armed level to 0.500 without touching that new level.
+    # The old 0.382 RSI test must not continue to boost the candidate.
+    open_ = np.array([10.0, 8.0, 9.0, 10.0, 12.0, 11.0, 10.5, 9.6, 10.0], dtype=float)
+    high = np.array([10.2, 8.2, 9.2, 10.2, 12.2, 11.2, 10.8, 10.1, 10.2], dtype=float)
+    low = np.array([9.8, 7.8, 8.8, 9.8, 11.8, 10.8, 10.0, 9.5, 9.8], dtype=float)
+    close = np.array([10.0, 8.0, 9.0, 10.0, 12.0, 11.0, 10.6, 9.8, 10.0], dtype=float)
+    atr = np.ones(len(close))
+    ema50 = np.full(len(close), np.nan)
+    ema100 = np.full(len(close), np.nan)
+    ema200 = np.full(len(close), np.nan)
+    rsi_values = np.array([50, 40, 45, 48, 55, 50, 52, 60, 58], dtype=float)
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        ema_50_values=ema50,
+        ema_100_values=ema100,
+        ema_200_values=ema200,
+        rsi_values=rsi_values,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.0,
+    )
+
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    candidate = next(item for item in inventory if item["candidate_id"] == "LONG:1:4")
+    assert candidate["signal_level"] == 0.5
+    assert candidate["rsi_divergence"] in {"UNKNOWN", "NONE"}
+    assert candidate["confluence_score"] == 0.0
+
+
+def test_fib_candidate_confluence_can_promote_close_structural_competitor():
+    # Two bullish candidates share the same high but have close structural
+    # strength. The recent/local Fib is slightly weaker structurally, while its
+    # armed 0.382 level sits directly on EMA100 and the dominant Fib does not.
+    close = np.array(
+        [10.0, 8.0, 9.0, 10.0, 11.0, 10.0, 9.2, 8.1, 9.5, 10.5, 12.0, 10.4],
+        dtype=float,
+    )
+    open_ = close.copy()
+    high = close + 0.1
+    low = close - 0.1
+    low[1] = 8.0
+    low[7] = 8.1
+    high[10] = 12.0
+    atr = np.ones(len(close))
+    atr[11] = 0.1
+
+    # At candle 11 the local Fib's 0.382 level is:
+    # 12 - .382 * (12 - 8.1) = 10.5102. The dominant candidate's same
+    # level is 10.472, which is 0.382 ATR away at ATR=0.1 and therefore
+    # outside the 0.25 ATR confluence window. This leaves the local Fib only
+    # 2.5% weaker structurally, so its 3% EMA100 bonus can legitimately win.
+    ema50 = np.full(len(close), np.nan)
+    ema100 = np.full(len(close), np.nan)
+    ema200 = np.full(len(close), np.nan)
+    ema100[11] = 10.5102
+    rsi_values = np.full(len(close), 50.0)
+
+    values = fibonacci_retracement_arrays(
+        open_,
+        high,
+        low,
+        close,
+        atr,
+        pivot_strength=1,
+        ema_50_values=ema50,
+        ema_100_values=ema100,
+        ema_200_values=ema200,
+        rsi_values=rsi_values,
+        dominant_lookback_bars=32,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.0,
+    )
+
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][11])
+    dominant = next(item for item in inventory if item["candidate_id"] == "LONG:1:10")
+    local = next(item for item in inventory if item["candidate_id"] == "LONG:7:10")
+
+    assert dominant["structural_score"] > local["structural_score"]
+    assert dominant["confluence_score"] == 0.0
+    assert local["confluence_score"] >= 0.03
+    assert local["ema_100_distance_atr"] <= 0.25
+    assert local["final_score"] > dominant["final_score"]
+    assert local["selected"] is True
+    assert values["_FIB_SELECTED_CANDIDATE_ID"][11] == "LONG:7:10"
 
 
 def test_fib_tracks_recent_local_short_subswing_alongside_dominant_anchor():
@@ -924,6 +1014,8 @@ def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
     assert {
         "candidate_id", "direction", "start_index", "end_index",
         "start_price", "end_price", "structural_strength_atr",
-        "live_score", "signal_level", "test_count", "invalidated",
-        "entry_valid", "selected",
+        "live_score", "structural_score", "confluence_score", "final_score",
+        "ema_50_distance_atr", "ema_100_distance_atr", "ema_200_distance_atr",
+        "rsi_divergence", "rsi_divergence_code",
+        "signal_level", "test_count", "invalidated", "entry_valid", "selected",
     } <= set(selected)
