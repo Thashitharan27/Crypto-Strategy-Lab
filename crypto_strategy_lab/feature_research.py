@@ -20,7 +20,7 @@ import pandas as pd
 
 FEATURE_RESEARCH_ARTIFACT_CONTRACT = "feature_research_v1"
 FEATURE_RESEARCH_ARTIFACT_VERSION = 1
-FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 2
+FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 3
 REQUIRED_TRADE_COLUMNS = {
     "pair_id",
     "side",
@@ -128,12 +128,18 @@ FIB_CANDIDATE_ARTIFACT_COLUMNS = (
     "live_score",
     "structural_score",
     "confluence_score",
+    "reaction_score",
     "final_score",
     "ema_50_distance_atr",
     "ema_100_distance_atr",
     "ema_200_distance_atr",
     "rsi_divergence",
     "rsi_divergence_code",
+    "signal_test_count",
+    "signal_held_count",
+    "signal_held_ratio",
+    "last_signal_rejection_atr",
+    "bars_since_signal_test",
     "signal_level",
     "test_count",
     "last_test_index",
@@ -684,12 +690,18 @@ def _fib_candidate_inventory_frame(
                 "live_score": float(candidate["live_score"]),
                 "structural_score": float(candidate.get("structural_score", candidate["live_score"])),
                 "confluence_score": float(candidate.get("confluence_score", 0.0)),
+                "reaction_score": float(candidate.get("reaction_score", 0.0)),
                 "final_score": float(candidate.get("final_score", candidate["live_score"])),
                 "ema_50_distance_atr": float(candidate.get("ema_50_distance_atr", np.nan)),
                 "ema_100_distance_atr": float(candidate.get("ema_100_distance_atr", np.nan)),
                 "ema_200_distance_atr": float(candidate.get("ema_200_distance_atr", np.nan)),
                 "rsi_divergence": str(candidate.get("rsi_divergence", "UNKNOWN")),
                 "rsi_divergence_code": float(candidate.get("rsi_divergence_code", np.nan)),
+                "signal_test_count": int(candidate.get("signal_test_count", 0)),
+                "signal_held_count": int(candidate.get("signal_held_count", 0)),
+                "signal_held_ratio": float(candidate.get("signal_held_ratio", np.nan)),
+                "last_signal_rejection_atr": float(candidate.get("last_signal_rejection_atr", np.nan)),
+                "bars_since_signal_test": candidate.get("bars_since_signal_test"),
                 "signal_level": float(candidate["signal_level"]),
                 "test_count": int(candidate["test_count"]),
                 "last_test_index": candidate.get("last_test_index"),
@@ -710,16 +722,23 @@ def _fib_candidate_inventory_frame(
     for name in ("strategy_candle_open_time", "decision_available_at"):
         parsed = pd.to_datetime(frame[name], utc=True, errors="coerce")
         frame[name] = parsed.dt.tz_convert("UTC").dt.tz_localize(None)
-    for name in ("strategy_index", "start_index", "end_index", "test_count"):
+    for name in (
+        "strategy_index", "start_index", "end_index", "test_count",
+        "signal_test_count", "signal_held_count",
+    ):
         frame[name] = pd.to_numeric(frame[name], errors="raise").astype("int64")
     frame["last_test_index"] = pd.to_numeric(
         frame["last_test_index"], errors="coerce"
     ).astype("Int64")
+    frame["bars_since_signal_test"] = pd.to_numeric(
+        frame["bars_since_signal_test"], errors="coerce"
+    ).astype("Int64")
     for name in (
         "start_price", "end_price", "structural_strength_atr",
-        "live_score", "structural_score", "confluence_score", "final_score",
-        "ema_50_distance_atr", "ema_100_distance_atr", "ema_200_distance_atr",
-        "rsi_divergence_code", "signal_level",
+        "live_score", "structural_score", "confluence_score", "reaction_score",
+        "final_score", "ema_50_distance_atr", "ema_100_distance_atr",
+        "ema_200_distance_atr", "rsi_divergence_code", "signal_held_ratio",
+        "last_signal_rejection_atr", "signal_level",
     ):
         frame[name] = pd.to_numeric(frame[name], errors="raise").astype("float64")
     frame["candidate_id"] = frame["candidate_id"].astype("string")
