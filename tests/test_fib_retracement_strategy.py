@@ -573,8 +573,93 @@ def test_inactive_candidate_keeps_786_invalidation_when_selected_later():
     newer_penetration = (high[10] - low[12]) / (high[10] - low[8])
     assert newer_penetration >= 0.786
 
-    # Once the old swing ages out, the newer candidate may become selected,
-    # but it must remain entry-invalid and emit no LONG signal.
+    # Once the old swing ages out, the invalidated newer candidate must not be
+    # resurrected as the selected entry Fib.
+    assert not (
+        values["_FIB_IMPULSE_START_INDEX"][21] == 8
+        and values["_FIB_IMPULSE_END_INDEX"][21] == 10
+    )
+    assert values["_FIB_SIGNAL_DIRECTION"][21] is None
+
+
+def test_inactive_candidate_keeps_progressive_zone_and_test_history():
+    # Older dominant LONG: low@1 -> high@4. Newer weaker LONG: low@8 -> high@10.
+    # The newer leg remains inactive at candle 12, where it penetrates far
+    # enough to arm 0.500 and tests that level. When the older Fib ages out,
+    # selecting the newer leg must restore that history instead of resetting it.
+    close = np.array([
+        14.0, 8.0, 10.0, 16.0, 20.0, 18.5, 17.0, 14.0,
+        12.0, 15.0, 18.0, 16.0, 15.2, 15.4, 15.5, 15.6,
+        15.7, 15.8, 15.9, 16.0, 16.1, 15.2, 15.4, 15.6,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    # Newer candidate geometry: low@8=11.8 -> high@10=18.2, so 0.500=15.0.
+    # Candle 12 reaches through the 0.382->0.500 midpoint but stays shallower
+    # than the midpoint to 0.618; it should permanently arm 0.500.
+    open_[12] = 15.1
+    low[12] = 14.9
+    high[12] = 15.4
+    close[12] = 15.2
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    # The older structural Fib is still selected when the newer candidate's
+    # state is updated, proving that the state was accumulated while inactive.
+    assert values["_FIB_IMPULSE_START_INDEX"][12] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][12] == 4
+
+    # Once the old candidate ages out, the newer valid candidate becomes active
+    # with its previously armed 0.500 level and prior test count intact.
     assert values["_FIB_IMPULSE_START_INDEX"][21] == 8
     assert values["_FIB_IMPULSE_END_INDEX"][21] == 10
-    assert values["_FIB_SIGNAL_DIRECTION"][21] is None
+    assert np.isclose(values["_FIB_ARMED_LEVEL"][21], 0.500)
+    assert values["FIB_TEST_COUNT"][21] >= 1.0
+
+
+def test_invalidated_stronger_fib_does_not_hide_valid_secondary_candidate():
+    # Build two confirmed LONG candidates. The older/stronger candidate is
+    # invalidated by a deep wick, while the newer candidate remains valid.
+    # Selection must move to the best valid candidate instead of keeping the
+    # invalidated dominant Fib as a non-signalling blocker.
+    close = np.array([
+        14.0, 8.0, 10.0, 16.0, 20.0, 18.0, 16.0, 14.0,
+        12.0, 15.0, 18.0, 16.0, 13.0, 15.0, 15.5, 15.8,
+        16.0, 16.2,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    # At candle 12 the old low@1 -> high@4 leg is penetrated beyond 0.786.
+    low[12] = 9.5
+    open_[12] = 12.8
+    close[12] = 13.0
+    high[12] = 13.2
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    old_penetration = (high[4] - low[12]) / (high[4] - low[1])
+    assert old_penetration >= 0.786
+
+    # The invalidated old dominant leg must not remain selected after the wick.
+    assert not (
+        values["_FIB_IMPULSE_START_INDEX"][12] == 1
+        and values["_FIB_IMPULSE_END_INDEX"][12] == 4
+    )
