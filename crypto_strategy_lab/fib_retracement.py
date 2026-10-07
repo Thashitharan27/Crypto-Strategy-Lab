@@ -24,7 +24,7 @@ import pandas as pd
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 7
+FIB_RESEARCH_CONTEXT_VERSION = 8
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -140,6 +140,7 @@ def fibonacci_retracement_arrays(
     impulse_start_index = np.full(n, np.nan, dtype=float)
     impulse_end_index = np.full(n, np.nan, dtype=float)
     active_level_price = np.full(n, np.nan, dtype=float)
+    candidate_state_count = np.zeros(n, dtype=float)
 
     confirmed_highs: list[int] = []
     confirmed_lows: list[int] = []
@@ -156,9 +157,12 @@ def fibonacci_retracement_arrays(
     active_broken = False
     active_structure_reset = False
     active_entry_invalidated = False
-    invalidated_legs: set[tuple[str, int, int]] = set()
     active_signal_level = 0.382
-    signalled_leg: tuple[str, int, int] | None = None
+    # Every confirmed Fib keeps its own causal lifecycle state even while it is
+    # not selected for execution. The selector still emits from one best valid
+    # candidate only; this state prevents switching candidates from erasing
+    # progressive zoning, test history, reset/invalidation, or prior signalling.
+    candidate_states: dict[tuple[str, int, int], dict[str, object]] = {}
 
     dominant_lookback_bars = max(16, int(dominant_lookback_bars))
     dominant_recency_penalty = min(0.95, max(0.0, float(dominant_recency_penalty)))
@@ -183,39 +187,85 @@ def fibonacci_retracement_arrays(
             return (end_price - float(low_prices[now])) / span
         return (float(high_prices[now]) - end_price) / span
 
+    def _candidate_state(leg):
+        state = candidate_states.get(leg)
+        if state is None:
+            state = {
+                "signal_level": 0.382,
+                "tests": 0,
+                "last_test": None,
+                "broken": False,
+                "structure_reset": False,
+                "invalidated": False,
+                "signalled": False,
+                "last_updated": None,
+            }
+            candidate_states[leg] = state
+        return state
+
+    def _update_candidate_state(leg, now):
+        state = _candidate_state(leg)
+        if state["last_updated"] == now or now <= leg[2]:
+            return state
+
+        direction, start_i, end_i = leg
+        start_price = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
+        end_price = float(high_prices[end_i] if direction == "LONG" else low_prices[end_i])
+        span = abs(end_price - start_price)
+        if not np.isfinite(span) or span <= 0:
+            state["last_updated"] = now
+            return state
+
+        retracement = (
+            (end_price - float(close_prices[now])) / span
+            if direction == "LONG"
+            else (float(close_prices[now]) - end_price) / span
+        )
+        penetration = _leg_wick_penetration(leg, now)
+        if penetration >= FIB_LEVELS[-1]:
+            state["invalidated"] = True
+        elif penetration >= (0.500 + 0.618) / 2.0:
+            state["signal_level"] = 0.618
+        elif penetration >= (0.382 + 0.500) / 2.0 and float(state["signal_level"]) < 0.500:
+            state["signal_level"] = 0.500
+
+        if retracement >= active_structure_reset_depth:
+            state["structure_reset"] = True
+        state["broken"] = bool(retracement > FIB_LEVELS[-1])
+
+        levels_price = {
+            level: (
+                end_price - level * span
+                if direction == "LONG"
+                else end_price + level * span
+            )
+            for level in FIB_LEVELS
+        }
+        nearest = min(
+            FIB_LEVELS,
+            key=lambda level: abs(float(close_prices[now]) - levels_price[level]),
+        )
+        nearest_price = levels_price[nearest]
+        if float(low_prices[now]) <= nearest_price <= float(high_prices[now]):
+            state["tests"] = int(state["tests"]) + 1
+            state["last_test"] = now
+
+        state["last_updated"] = now
+        return state
+
     for i in range(n):
-        # Invalidation belongs to the structural leg, not to whichever candidate
-        # happens to be selected on this bar. Latch the active leg immediately
-        # so it cannot extend or retain sticky protection after a 0.786 wick.
+        # Update the selected Fib before pivot discovery so an invalidation or
+        # structural reset on this bar immediately removes extension/sticky
+        # privileges. The same state updater is also run for every inactive
+        # confirmed candidate below.
         if active_leg is not None:
-            if _leg_wick_penetration(active_leg, i) >= FIB_LEVELS[-1]:
-                invalidated_legs.add(active_leg)
-            active_entry_invalidated = active_leg in invalidated_legs
-        # Once an active leg has retraced deeply enough, treat that move as a
-        # completed structural cycle. From that bar onward the old anchor may
-        # no longer extend to future extremes and no longer receives sticky
-        # replacement protection. This is latched until a new leg is selected.
-        if active_leg is not None and i > active_leg[2] and not active_structure_reset:
-            active_direction, active_start_i, active_end_i = active_leg
-            active_start_price = float(
-                low_prices[active_start_i]
-                if active_direction == "LONG"
-                else high_prices[active_start_i]
-            )
-            active_end_price = float(
-                high_prices[active_end_i]
-                if active_direction == "LONG"
-                else low_prices[active_end_i]
-            )
-            active_span = abs(active_end_price - active_start_price)
-            if np.isfinite(active_span) and active_span > 0:
-                active_retracement = (
-                    (active_end_price - float(close_prices[i])) / active_span
-                    if active_direction == "LONG"
-                    else (float(close_prices[i]) - active_end_price) / active_span
-                )
-                if active_retracement >= active_structure_reset_depth:
-                    active_structure_reset = True
+            selected_state = _update_candidate_state(active_leg, i)
+            active_tests = int(selected_state["tests"])
+            active_last_test = selected_state["last_test"]
+            active_broken = bool(selected_state["broken"])
+            active_structure_reset = bool(selected_state["structure_reset"])
+            active_entry_invalidated = bool(selected_state["invalidated"])
+            active_signal_level = float(selected_state["signal_level"])
 
         # A pivot at j only becomes known after pivot_strength bars have closed.
         # The bounded lookback governs discovery of new structural swings, but
@@ -288,36 +338,59 @@ def fibonacci_retracement_arrays(
             if candidate[2] >= cutoff
         ]
 
-        # Preserve invalidation history for every confirmed candidate, including
-        # candidates that are currently inactive because an older dominant swing
-        # still has sticky selection. A later selector switch must not resurrect
-        # a Fib that already wicked through its 0.786 level.
-        for candidate in structural_candidates:
-            candidate_leg = candidate[:3]
-            if (
-                candidate_leg not in invalidated_legs
-                and _leg_wick_penetration(candidate_leg, i) >= FIB_LEVELS[-1]
-            ):
-                invalidated_legs.add(candidate_leg)
+        # Keep lifecycle memory bounded to candidates that can still be reached
+        # by the structural selector (plus the currently selected/extended leg).
+        reachable_legs = {candidate[:3] for candidate in structural_candidates}
         if active_leg is not None:
-            active_entry_invalidated = active_leg in invalidated_legs
+            reachable_legs.add(active_leg)
+        if active_extension_leg is not None:
+            reachable_legs.add(active_extension_leg)
+        for stale_leg in list(candidate_states):
+            if stale_leg not in reachable_legs:
+                del candidate_states[stale_leg]
+        candidate_state_count[i] = float(len(candidate_states))
+
+        # Advance every confirmed candidate on every bar, including candidates
+        # that are not currently selected. This is the core multi-Fib tracking
+        # contract: each leg retains its own progressive zone, test history,
+        # reset state, and permanent 0.786 invalidation.
+        for candidate in structural_candidates:
+            _update_candidate_state(candidate[:3], i)
 
         if not structural_candidates:
             continue
 
+        # Entry selection remains single-candidate and considers only valid
+        # Fibs. Evidence selection is allowed to fall back to the strongest
+        # structural candidate when all Fibs are entry-invalid so public Fib
+        # indicators continue to populate for generic Entry/Veto rules.
+        valid_candidates = [
+            candidate
+            for candidate in structural_candidates
+            if not bool(_candidate_state(candidate[:3])["invalidated"])
+        ]
+        selection_pool = valid_candidates if valid_candidates else structural_candidates
+
         best = max(
-            structural_candidates,
+            selection_pool,
             key=lambda candidate: (
                 _candidate_live_score(candidate, i),
                 candidate[2],
             ),
         )
         best_leg = best[:3]
-        # Extending the same unbroken structural leg is not a competing swing,
-        # so it should not be blocked by the 1.10 replacement threshold.
-        leg = active_extension_leg or best_leg
+
+        # An extension receives the old leg's priority only when that extension
+        # itself is entry-valid. Otherwise fall back to the best valid candidate
+        # (or evidence-only structural candidate when none are valid).
+        valid_legs = {candidate[:3] for candidate in valid_candidates}
+        active_extension_is_valid = (
+            active_extension_leg is not None
+            and active_extension_leg in valid_legs
+        )
+        leg = active_extension_leg if active_extension_is_valid else best_leg
         if (
-            active_extension_leg is None
+            not active_extension_is_valid
             and active_leg is not None
             and active_leg != best_leg
             and not active_structure_reset
@@ -325,7 +398,7 @@ def fibonacci_retracement_arrays(
         ):
             active_candidate = next(
                 (
-                    candidate for candidate in structural_candidates
+                    candidate for candidate in valid_candidates
                     if candidate[:3] == active_leg
                 ),
                 None,
@@ -339,12 +412,13 @@ def fibonacci_retracement_arrays(
         direction, start_i, end_i = leg
         if leg != active_leg:
             active_leg = leg
-            active_tests = 0
-            active_last_test = None
-            active_broken = False
-            active_structure_reset = False
-            active_entry_invalidated = leg in invalidated_legs
-            active_signal_level = 0.382
+        selected_state = _update_candidate_state(leg, i)
+        active_tests = int(selected_state["tests"])
+        active_last_test = selected_state["last_test"]
+        active_broken = bool(selected_state["broken"])
+        active_structure_reset = bool(selected_state["structure_reset"])
+        active_entry_invalidated = bool(selected_state["invalidated"])
+        active_signal_level = float(selected_state["signal_level"])
 
         start_price = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
         end_price = float(high_prices[end_i] if direction == "LONG" else low_prices[end_i])
@@ -377,23 +451,8 @@ def fibonacci_retracement_arrays(
             levels_price = {level: end_price + level * span for level in FIB_LEVELS}
         depth[i] = retracement
 
-        # Progressive entry zoning: once price materially penetrates more than
-        # halfway toward the next deeper signal level, permanently arm that
-        # deeper level for the current leg. Wick penetration is used so a bar
-        # that reaches deep into the next zone cannot later trigger a shallower
-        # entry merely because it closes back above/below the old level.
-        midpoint_382_500 = (0.382 + 0.500) / 2.0
-        midpoint_500_618 = (0.500 + 0.618) / 2.0
-        if penetration >= FIB_LEVELS[-1]:
-            # A wick through 0.786 invalidates this Fib for any future entry.
-            # This is latched for the life of the leg, even if price later
-            # closes back above 0.786 and produces a bullish/bearish reaction.
-            invalidated_legs.add(leg)
-            active_entry_invalidated = True
-        elif penetration >= midpoint_500_618:
-            active_signal_level = 0.618
-        elif penetration >= midpoint_382_500 and active_signal_level < 0.500:
-            active_signal_level = 0.500
+        # Progressive zoning and 0.786 invalidation were already advanced for
+        # this candidate by _update_candidate_state(), even if it was inactive.
         armed_level[i] = active_signal_level
 
         nearest = min(FIB_LEVELS, key=lambda level: abs(float(close_prices[i]) - levels_price[level]))
@@ -424,8 +483,6 @@ def fibonacci_retracement_arrays(
         )
         held = False
         if touched:
-            active_tests += 1
-            active_last_test = i
             if direction == "LONG":
                 held = float(close_prices[i]) > level_price and float(close_prices[i]) > float(open_prices[i])
                 rejection_atr[i] = max(0.0, float(close_prices[i]) - float(low_prices[i])) / atr_now
@@ -436,7 +493,6 @@ def fibonacci_retracement_arrays(
             state = "HELD"
 
         reaction_state[i] = state
-        active_broken = state == "BROKEN"
         test_count[i] = float(active_tests)
         if active_last_test is not None:
             bars_since_test[i] = float(i - active_last_test)
@@ -462,11 +518,11 @@ def fibonacci_retracement_arrays(
             signal_held
             and not active_entry_invalidated
             and leg_atr >= minimum_impulse_atr
-            and signalled_leg != leg
+            and not bool(selected_state["signalled"])
         ):
             signal_direction[i] = direction
             signal_level[i] = active_signal_level
-            signalled_leg = leg
+            selected_state["signalled"] = True
 
     return {
         "FIB_RETRACEMENT_DEPTH": depth,
@@ -490,6 +546,7 @@ def fibonacci_retracement_arrays(
         "_FIB_IMPULSE_START_INDEX": impulse_start_index,
         "_FIB_IMPULSE_END_INDEX": impulse_end_index,
         "_FIB_ACTIVE_LEVEL_PRICE": active_level_price,
+        "_FIB_CANDIDATE_STATE_COUNT": candidate_state_count,
     }
 
 
