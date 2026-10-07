@@ -663,3 +663,89 @@ def test_invalidated_stronger_fib_does_not_hide_valid_secondary_candidate():
         values["_FIB_IMPULSE_START_INDEX"][12] == 1
         and values["_FIB_IMPULSE_END_INDEX"][12] == 4
     )
+
+
+def test_invalidated_fib_still_populates_generic_rule_evidence():
+    # A sole LONG Fib is invalidated through 0.786. Entry must remain disabled,
+    # but generic Fib evidence must continue to be populated on later bars.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 9.2, 9.4, 9.8], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 9.8, 10.0, 10.1], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 8.7, 9.3, 9.6], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 9.5, 9.8, 9.9], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    assert values["_FIB_SIGNAL_DIRECTION"][6] is None
+    assert np.isfinite(values["FIB_RETRACEMENT_DEPTH"][6])
+    assert np.isfinite(values["FIB_NEAREST_LEVEL"][6])
+    assert values["FIB_IMPULSE_DIRECTION"][6] == "LONG"
+    assert values["FIB_REACTION_STATE"][6] != "UNKNOWN"
+
+
+def test_invalid_active_extension_falls_back_to_valid_existing_leg():
+    # Initial active LONG: low@1 -> high@4. A later higher high at 10 creates
+    # an extension from the same anchor. On its confirmation bar (11), the wick
+    # invalidates the longer extension but not the original leg. Selection must
+    # therefore stay on/fall back to the valid original leg.
+    close = np.array([
+        14.0, 8.0, 10.0, 16.0, 20.0, 18.5, 17.5, 18.0,
+        19.0, 20.5, 22.0, 18.0, 18.5, 19.0,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    # Keep the confirmation-bar wick between the old leg's 0.786 threshold and
+    # the longer extension's 0.786 threshold.
+    low[11] = 10.7
+    open_[11] = 17.8
+    close[11] = 18.0
+    high[11] = 18.2
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    old_penetration = (high[4] - low[11]) / (high[4] - low[1])
+    extension_penetration = (high[10] - low[11]) / (high[10] - low[1])
+    assert old_penetration < 0.786
+    assert extension_penetration >= 0.786
+
+    assert values["_FIB_IMPULSE_START_INDEX"][11] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][11] == 4
+
+
+def test_fib_candidate_state_memory_stays_bounded_by_recent_structure():
+    # Repeated pivots over a long series should not make candidate lifecycle
+    # memory grow with total history when the structural lookback is only 16.
+    n = 320
+    base = np.arange(n, dtype=float)
+    close = 100.0 + np.where((base.astype(int) % 2) == 0, 2.0, -2.0)
+    open_ = close.copy()
+    high = close + 0.5
+    low = close - 0.5
+    atr = np.ones(n)
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    counts = values["_FIB_CANDIDATE_STATE_COUNT"]
+    assert np.nanmax(counts) < 80
+    assert counts[-1] < 80
