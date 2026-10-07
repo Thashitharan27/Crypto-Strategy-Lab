@@ -587,6 +587,34 @@ def _sr_zone_inventory_frame(
     return frame, tuple(consumed)
 
 
+def _empty_fib_candidate_frame() -> pd.DataFrame:
+    """Return a zero-row Fib candidate frame with the canonical artifact schema."""
+    return pd.DataFrame(
+        {
+            "strategy_index": pd.Series(dtype="int64"),
+            "strategy_candle_open_time": pd.Series(dtype="datetime64[ns]"),
+            "decision_available_at": pd.Series(dtype="datetime64[ns]"),
+            "candidate_id": pd.Series(dtype="string"),
+            "direction": pd.Series(dtype="string"),
+            "start_index": pd.Series(dtype="int64"),
+            "end_index": pd.Series(dtype="int64"),
+            "start_price": pd.Series(dtype="float64"),
+            "end_price": pd.Series(dtype="float64"),
+            "structural_strength_atr": pd.Series(dtype="float64"),
+            "live_score": pd.Series(dtype="float64"),
+            "signal_level": pd.Series(dtype="float64"),
+            "test_count": pd.Series(dtype="int64"),
+            "last_test_index": pd.Series(dtype="Int64"),
+            "broken": pd.Series(dtype="bool"),
+            "structure_reset": pd.Series(dtype="bool"),
+            "invalidated": pd.Series(dtype="bool"),
+            "signalled": pd.Series(dtype="bool"),
+            "entry_valid": pd.Series(dtype="bool"),
+            "selected": pd.Series(dtype="bool"),
+        }
+    ).loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS]
+
+
 def _fib_candidate_inventory_frame(
     feature_context: pd.DataFrame,
 ) -> tuple[pd.DataFrame, tuple[str, ...]]:
@@ -598,10 +626,7 @@ def _fib_candidate_inventory_frame(
     )
     records: list[dict[str, Any]] = []
     if inventory_column not in feature_context.columns:
-        empty = pd.DataFrame(
-            {name: pd.Series(dtype="object") for name in FIB_CANDIDATE_ARTIFACT_COLUMNS}
-        )
-        return empty.loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS], consumed
+        return _empty_fib_candidate_frame(), consumed
 
     for position, payload in enumerate(feature_context[inventory_column].tolist()):
         row = feature_context.iloc[position]
@@ -653,10 +678,7 @@ def _fib_candidate_inventory_frame(
             raise ResearchArtifactError("Fib candidate inventory has multiple selected candidates")
 
     if not records:
-        empty = pd.DataFrame(
-            {name: pd.Series(dtype="object") for name in FIB_CANDIDATE_ARTIFACT_COLUMNS}
-        )
-        return empty.loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS], consumed
+        return _empty_fib_candidate_frame(), consumed
 
     frame = pd.DataFrame.from_records(records, columns=FIB_CANDIDATE_ARTIFACT_COLUMNS)
     for name in ("strategy_candle_open_time", "decision_available_at"):
