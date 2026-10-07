@@ -18,13 +18,15 @@ remain available as generic Entry/Veto evidence.
 """
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 8
+FIB_RESEARCH_CONTEXT_VERSION = 9
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -141,6 +143,8 @@ def fibonacci_retracement_arrays(
     impulse_end_index = np.full(n, np.nan, dtype=float)
     active_level_price = np.full(n, np.nan, dtype=float)
     candidate_state_count = np.zeros(n, dtype=float)
+    candidate_inventory_json = np.full(n, "[]", dtype=object)
+    selected_candidate_id = np.full(n, None, dtype=object)
 
     confirmed_highs: list[int] = []
     confirmed_lows: list[int] = []
@@ -413,6 +417,70 @@ def fibonacci_retracement_arrays(
         if leg != active_leg:
             active_leg = leg
         selected_state = _update_candidate_state(leg, i)
+
+        # Persist a causal snapshot of every currently reachable Fib candidate.
+        # This is research/debug context only; execution still uses one selected
+        # candidate. Deduplicate by leg identity because structural discovery can
+        # append the same leg more than once.
+        candidate_by_leg = {}
+        for candidate in structural_candidates:
+            key = candidate[:3]
+            current = candidate_by_leg.get(key)
+            if current is None or candidate[3] > current[3]:
+                candidate_by_leg[key] = candidate
+        snapshot = []
+        for candidate_leg, candidate in sorted(
+            candidate_by_leg.items(),
+            key=lambda item: (
+                -_candidate_live_score(item[1], i),
+                item[0][2],
+                item[0][1],
+            ),
+        ):
+            state = _candidate_state(candidate_leg)
+            candidate_direction, candidate_start_i, candidate_end_i = candidate_leg
+            candidate_start_price = float(
+                low_prices[candidate_start_i]
+                if candidate_direction == "LONG"
+                else high_prices[candidate_start_i]
+            )
+            candidate_end_price = float(
+                high_prices[candidate_end_i]
+                if candidate_direction == "LONG"
+                else low_prices[candidate_end_i]
+            )
+            candidate_id = (
+                f"{candidate_direction}:{candidate_start_i}:{candidate_end_i}"
+            )
+            snapshot.append(
+                {
+                    "candidate_id": candidate_id,
+                    "direction": candidate_direction,
+                    "start_index": int(candidate_start_i),
+                    "end_index": int(candidate_end_i),
+                    "start_price": candidate_start_price,
+                    "end_price": candidate_end_price,
+                    "structural_strength_atr": float(candidate[3]),
+                    "live_score": float(_candidate_live_score(candidate, i)),
+                    "signal_level": float(state["signal_level"]),
+                    "test_count": int(state["tests"]),
+                    "last_test_index": (
+                        None
+                        if state["last_test"] is None
+                        else int(state["last_test"])
+                    ),
+                    "broken": bool(state["broken"]),
+                    "structure_reset": bool(state["structure_reset"]),
+                    "invalidated": bool(state["invalidated"]),
+                    "signalled": bool(state["signalled"]),
+                    "entry_valid": not bool(state["invalidated"]),
+                    "selected": candidate_leg == leg,
+                }
+            )
+        candidate_inventory_json[i] = json.dumps(
+            snapshot, separators=(",", ":"), sort_keys=True
+        )
+        selected_candidate_id[i] = f"{direction}:{start_i}:{end_i}"
         active_tests = int(selected_state["tests"])
         active_last_test = selected_state["last_test"]
         active_broken = bool(selected_state["broken"])
@@ -523,6 +591,16 @@ def fibonacci_retracement_arrays(
             signal_direction[i] = direction
             signal_level[i] = active_signal_level
             selected_state["signalled"] = True
+            # The research snapshot was assembled earlier on this same bar.
+            # Reflect the signal immediately so the candidate that generated an
+            # entry is not reported as unsignalled until the following candle.
+            for candidate_snapshot in snapshot:
+                if candidate_snapshot["selected"]:
+                    candidate_snapshot["signalled"] = True
+                    break
+            candidate_inventory_json[i] = json.dumps(
+                snapshot, separators=(",", ":"), sort_keys=True
+            )
 
     return {
         "FIB_RETRACEMENT_DEPTH": depth,
@@ -547,6 +625,8 @@ def fibonacci_retracement_arrays(
         "_FIB_IMPULSE_END_INDEX": impulse_end_index,
         "_FIB_ACTIVE_LEVEL_PRICE": active_level_price,
         "_FIB_CANDIDATE_STATE_COUNT": candidate_state_count,
+        "_FIB_CANDIDATE_INVENTORY_JSON": candidate_inventory_json,
+        "_FIB_SELECTED_CANDIDATE_ID": selected_candidate_id,
     }
 
 

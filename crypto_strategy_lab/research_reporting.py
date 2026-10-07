@@ -479,6 +479,85 @@ def _validate_sr_zone_artifact(
             )
 
 
+def _validate_fib_candidate_artifact(
+    candidates_path: Path, context_path: Path, expected_rows: int
+) -> None:
+    required = {
+        "strategy_index", "strategy_candle_open_time", "decision_available_at",
+        "candidate_id", "direction", "start_index", "end_index",
+        "start_price", "end_price", "structural_strength_atr", "live_score",
+        "signal_level", "test_count", "broken", "structure_reset",
+        "invalidated", "signalled", "entry_valid", "selected",
+    }
+    with _bounded_duckdb_context(candidates_path.parent) as con:
+        columns = {
+            row[0]
+            for row in con.execute(
+                "DESCRIBE SELECT * FROM read_parquet(?)", [str(candidates_path)]
+            ).fetchall()
+        }
+        missing = required - columns
+        if missing:
+            raise ValueError(
+                f"Fib candidate artifact missing required columns: {sorted(missing)}"
+            )
+        rows = con.execute(
+            "SELECT count(*) FROM read_parquet(?)", [str(candidates_path)]
+        ).fetchone()[0]
+        if int(rows) != int(expected_rows):
+            raise ValueError("Fib candidate artifact row count mismatch")
+        if not rows:
+            return
+        bad = con.execute(
+            """
+            SELECT count(*)
+            FROM read_parquet(?) f
+            LEFT JOIN read_parquet(?) c ON f.strategy_index=c.strategy_index
+            WHERE c.strategy_index IS NULL
+               OR f.strategy_candle_open_time
+                    IS DISTINCT FROM c.strategy_candle_open_time
+               OR f.decision_available_at
+                    IS DISTINCT FROM c.decision_available_at
+               OR upper(cast(f.direction AS VARCHAR)) NOT IN ('LONG','SHORT')
+               OR f.start_index < 0
+               OR f.end_index <= f.start_index
+               OR trim(cast(f.candidate_id AS VARCHAR)) = ''
+               OR f.test_count < 0
+               OR (f.entry_valid AND f.invalidated)
+            """,
+            [str(candidates_path), str(context_path)],
+        ).fetchone()[0]
+        if bad:
+            raise ValueError("Fib candidate artifact causal/schema validation failed")
+        duplicates = con.execute(
+            """
+            SELECT count(*) FROM (
+              SELECT strategy_index, candidate_id, count(*) n
+              FROM read_parquet(?)
+              GROUP BY 1,2
+              HAVING count(*) > 1
+            )
+            """,
+            [str(candidates_path)],
+        ).fetchone()[0]
+        if duplicates:
+            raise ValueError("Fib candidate artifact contains duplicate candidate rows")
+        multiple_selected = con.execute(
+            """
+            SELECT count(*) FROM (
+              SELECT strategy_index,
+                     sum(CASE WHEN selected THEN 1 ELSE 0 END) n
+              FROM read_parquet(?)
+              GROUP BY 1
+              HAVING n > 1
+            )
+            """,
+            [str(candidates_path)],
+        ).fetchone()[0]
+        if multiple_selected:
+            raise ValueError("Fib candidate artifact has multiple selected candidates")
+
+
 def _validate_signal_artifact(
     signals_path: Path, context_path: Path, trade_rows: int
 ) -> None:
@@ -653,6 +732,7 @@ class CsvManifestReporter:
         trades_path = artifacts_dir / "trades.parquet"
         context_path = artifacts_dir / "feature_context.parquet"
         sr_zones_path = artifacts_dir / "sr_zones.parquet"
+        fib_candidates_path = artifacts_dir / "fib_candidates.parquet"
         phase_started = time.perf_counter()
         _validate_research_artifacts(trades_path, context_path, research)
         finish_phase("research_validation", phase_started)
@@ -663,6 +743,13 @@ class CsvManifestReporter:
             int(research.get("sr_zone_row_count", -1)),
         )
         finish_phase("sr_zone_validation", phase_started)
+        phase_started = time.perf_counter()
+        _validate_fib_candidate_artifact(
+            fib_candidates_path,
+            context_path,
+            int(research.get("fib_candidate_row_count", -1)),
+        )
+        finish_phase("fib_candidate_validation", phase_started)
 
         phase_started = time.perf_counter()
         trade_csv = run_dir / "trade_list.csv"
@@ -907,6 +994,14 @@ class CsvManifestReporter:
                         research.get("sr_zone_row_count", 0),
                     )
                 ),
+            ),
+            "fib_candidates": _catalog_entry(
+                fib_candidates_path,
+                run_dir,
+                "parquet",
+                int(research.get("fib_candidate_row_count", 0)),
+                schema_version=1,
+                collection_status="COLLECTED",
             ),
             "signals": _catalog_entry(
                 signals_path,

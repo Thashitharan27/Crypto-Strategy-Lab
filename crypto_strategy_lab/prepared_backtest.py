@@ -494,6 +494,14 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
                 {
                     name: fib_values[name]
                     for name in sorted(FIB_RULE_INDICATORS)
+                }
+                | {
+                    "_FIB_CANDIDATE_INVENTORY_JSON": fib_values[
+                        "_FIB_CANDIDATE_INVENTORY_JSON"
+                    ],
+                    "_FIB_SELECTED_CANDIDATE_ID": fib_values[
+                        "_FIB_SELECTED_CANDIDATE_ID"
+                    ],
                 },
             )
         )

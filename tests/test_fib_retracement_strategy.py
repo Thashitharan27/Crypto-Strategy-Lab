@@ -1,5 +1,6 @@
 import numpy as np
 from types import SimpleNamespace
+import json
 
 from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.fib_retracement import (
@@ -444,6 +445,9 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     # finally signals from the deeper armed level.
     assert values["_FIB_SIGNAL_DIRECTION"][6] == "LONG"
     assert np.isclose(values["_FIB_SIGNAL_LEVEL"][6], 0.500)
+    signal_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    selected = next(item for item in signal_snapshot if item["selected"])
+    assert selected["signalled"] is True
 
 
 def test_fib_native_plan_uses_actual_progressive_signal_level():
@@ -749,3 +753,31 @@ def test_fib_candidate_state_memory_stays_bounded_by_recent_structure():
     counts = values["_FIB_CANDIDATE_STATE_COUNT"]
     assert np.nanmax(counts) < 80
     assert counts[-1] < 80
+
+
+def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
+    open_ = np.array([14.0, 8.0, 10.0, 16.0, 20.0, 18.0, 14.0, 12.0, 15.0, 18.0, 16.0, 15.0], dtype=float)
+    high = open_ + 0.2
+    low = open_ - 0.2
+    close = open_.copy()
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    payload = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][11])
+    assert len(payload) >= 2
+    assert sum(bool(item["selected"]) for item in payload) == 1
+    selected = next(item for item in payload if item["selected"])
+    assert values["_FIB_SELECTED_CANDIDATE_ID"][11] == selected["candidate_id"]
+    assert {
+        "candidate_id", "direction", "start_index", "end_index",
+        "start_price", "end_price", "structural_strength_atr",
+        "live_score", "signal_level", "test_count", "invalidated",
+        "entry_valid", "selected",
+    } <= set(selected)
