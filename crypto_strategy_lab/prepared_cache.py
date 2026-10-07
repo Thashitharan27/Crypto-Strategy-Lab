@@ -24,6 +24,8 @@ from .prepared_backtest import (
 
 PREPARED_CACHE_FORMAT_VERSION = 1
 PREPARED_CONTRACT_VERSION = 1
+PREPARED_CACHE_STORE_MEMORY_LIMIT = "2GB"
+PREPARED_CACHE_LOAD_MEMORY_LIMIT = "1GB"
 
 
 def _digest(payload: object) -> str:
@@ -182,7 +184,7 @@ class PreparedRunCache:
         for path in (temp_parquet, temp_manifest):
             path.unlink(missing_ok=True)
         con, temporary = self._bounded_connection(
-            memory_limit="1GB",
+            memory_limit=PREPARED_CACHE_STORE_MEMORY_LIMIT,
             threads=1,
         )
         try:
@@ -226,7 +228,7 @@ class PreparedRunCache:
             ):
                 return None
             con, temporary = self._bounded_connection(
-                memory_limit="512MB",
+                memory_limit=PREPARED_CACHE_LOAD_MEMORY_LIMIT,
                 threads=1,
             )
             try:

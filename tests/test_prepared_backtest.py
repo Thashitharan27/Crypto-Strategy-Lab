@@ -11,7 +11,11 @@ from crypto_strategy_lab.prepared_backtest import (
 )
 from crypto_strategy_lab.config import BacktestConfig
 from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
-from crypto_strategy_lab.prepared_cache import PreparedRunCache
+from crypto_strategy_lab.prepared_cache import (
+    PREPARED_CACHE_LOAD_MEMORY_LIMIT,
+    PREPARED_CACHE_STORE_MEMORY_LIMIT,
+    PreparedRunCache,
+)
 from crypto_strategy_lab.feature_research import feature_context_frame
 from crypto_strategy_lab.fib_retracement import FIB_RULE_INDICATORS
 from crypto_strategy_lab.research_adapters import PreparedPolicyConfig
@@ -326,6 +330,32 @@ def test_bundle_feature_timestamps_must_exactly_match_strategy(block):
 
     with pytest.raises(ValueError, match=expected):
         from_data_lake_bundle(bundle)
+
+
+def test_prepared_run_cache_uses_larger_budget_for_store_and_load(tmp_path, monkeypatch):
+    cache = PreparedRunCache(tmp_path)
+    original_bounded_connection = cache._bounded_connection
+    seen = []
+
+    def recording_connection(*, memory_limit, threads=1):
+        seen.append((memory_limit, threads))
+        return original_bounded_connection(memory_limit=memory_limit, threads=threads)
+
+    monkeypatch.setattr(cache, "_bounded_connection", recording_connection)
+    key = cache.identity(
+        request_identity="memory-budget",
+        feature_identities={},
+        canonical_identities={},
+        prepared_inputs={},
+    )
+    frame = PreparedBacktestFrame(**valid_kwargs())
+    cache.store(key, frame, provenance={"request_identity": "memory-budget"})
+    assert cache.load(key) is not None
+
+    assert seen[0] == (PREPARED_CACHE_STORE_MEMORY_LIMIT, 1)
+    assert seen[1] == (PREPARED_CACHE_LOAD_MEMORY_LIMIT, 1)
+    assert PREPARED_CACHE_STORE_MEMORY_LIMIT == "2GB"
+    assert PREPARED_CACHE_LOAD_MEMORY_LIMIT == "1GB"
 
 
 def test_prepared_run_cache_duckdb_connection_is_memory_bounded_and_spillable(tmp_path):
