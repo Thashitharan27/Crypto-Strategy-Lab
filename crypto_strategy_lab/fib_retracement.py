@@ -377,12 +377,18 @@ def fibonacci_retracement_arrays(
             else (float(close_prices[now]) - end_price) / span
         )
         penetration = _leg_wick_penetration(leg, now)
+        previous_signal_level = float(state["signal_level"])
         if penetration >= FIB_LEVELS[-1]:
             state["invalidated"] = True
         elif penetration >= (0.500 + 0.618) / 2.0:
             state["signal_level"] = 0.618
-        elif penetration >= (0.382 + 0.500) / 2.0 and float(state["signal_level"]) < 0.500:
+        elif penetration >= (0.382 + 0.500) / 2.0 and previous_signal_level < 0.500:
             state["signal_level"] = 0.500
+        if float(state["signal_level"]) != previous_signal_level:
+            # RSI confluence belongs to the currently armed Fib level only.
+            # Advancing from 0.382 -> 0.500/0.618 must not reuse a divergence
+            # observed when the shallower level was tested.
+            state["last_signal_test"] = None
 
         if retracement >= active_structure_reset_depth:
             state["structure_reset"] = True
