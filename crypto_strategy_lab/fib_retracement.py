@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 12
+FIB_RESEARCH_CONTEXT_VERSION = 13
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -41,6 +41,11 @@ FIB_CONFLUENCE_EMA_50_WEIGHT = 0.02
 FIB_CONFLUENCE_EMA_100_WEIGHT = 0.03
 FIB_CONFLUENCE_EMA_200_WEIGHT = 0.04
 FIB_CONFLUENCE_RSI_DIVERGENCE_WEIGHT = 0.05
+FIB_REACTION_FIRST_HELD_WEIGHT = 0.005
+FIB_REACTION_SECOND_HELD_WEIGHT = 0.020
+FIB_REACTION_THIRD_HELD_WEIGHT = 0.005
+FIB_REACTION_MAX_REJECTION_WEIGHT = 0.010
+FIB_REACTION_WEAK_OVERTEST_PENALTY = 0.010
 FIB_CONFLUENCE_RSI_PERIOD = 14
 FIB_LEVELS = (0.236, 0.382, 0.500, 0.618, 0.786)
 FIB_SIGNAL_LEVELS = frozenset({0.382, 0.500, 0.618})
@@ -297,17 +302,57 @@ def fibonacci_retracement_arrays(
             if divergence_code == matching_code:
                 bonus += FIB_CONFLUENCE_RSI_DIVERGENCE_WEIGHT
 
+        signal_test_count = int(state.get("signal_test_count", 0))
+        signal_held_count = int(state.get("signal_held_count", 0))
+        reaction_score = 0.0
+        if signal_held_count >= 1:
+            reaction_score += FIB_REACTION_FIRST_HELD_WEIGHT
+        if signal_held_count >= 2:
+            reaction_score += FIB_REACTION_SECOND_HELD_WEIGHT
+        if signal_held_count >= 3:
+            reaction_score += FIB_REACTION_THIRD_HELD_WEIGHT
+
+        last_signal_rejection_atr = state.get("last_signal_rejection_atr")
+        rejection_value = (
+            float(last_signal_rejection_atr)
+            if last_signal_rejection_atr is not None
+            else float("nan")
+        )
+        if signal_held_count > 0 and np.isfinite(rejection_value):
+            reaction_score += FIB_REACTION_MAX_REJECTION_WEIGHT * min(
+                1.0, max(0.0, rejection_value)
+            )
+
+        held_ratio = (
+            signal_held_count / float(signal_test_count)
+            if signal_test_count > 0
+            else float("nan")
+        )
+        if signal_test_count >= 4 and np.isfinite(held_ratio) and held_ratio < 0.5:
+            reaction_score -= FIB_REACTION_WEAK_OVERTEST_PENALTY
+
+        bars_since_signal_test = (
+            None
+            if state.get("last_signal_test") is None
+            else int(now - int(state["last_signal_test"]))
+        )
         structural_score = float(_candidate_live_score(candidate, now))
-        final_score = structural_score * (1.0 + bonus)
+        final_score = structural_score * (1.0 + bonus + reaction_score)
         return {
             "structural_score": structural_score,
             "confluence_score": float(bonus),
+            "reaction_score": float(reaction_score),
             "final_score": float(final_score),
             "ema_50_distance_atr": float(distances[0]),
             "ema_100_distance_atr": float(distances[1]),
             "ema_200_distance_atr": float(distances[2]),
             "rsi_divergence": divergence_label,
             "rsi_divergence_code": divergence_code,
+            "signal_test_count": signal_test_count,
+            "signal_held_count": signal_held_count,
+            "signal_held_ratio": float(held_ratio),
+            "last_signal_rejection_atr": rejection_value,
+            "bars_since_signal_test": bars_since_signal_test,
         }
 
     def _candidate_final_score(candidate, now):
@@ -335,6 +380,9 @@ def fibonacci_retracement_arrays(
                 "tests": 0,
                 "last_test": None,
                 "last_signal_test": None,
+                "signal_test_count": 0,
+                "signal_held_count": 0,
+                "last_signal_rejection_atr": None,
                 "broken": False,
                 "structure_reset": False,
                 "invalidated": False,
@@ -389,6 +437,9 @@ def fibonacci_retracement_arrays(
             # Advancing from 0.382 -> 0.500/0.618 must not reuse a divergence
             # observed when the shallower level was tested.
             state["last_signal_test"] = None
+            state["signal_test_count"] = 0
+            state["signal_held_count"] = 0
+            state["last_signal_rejection_atr"] = None
 
         if retracement >= active_structure_reset_depth:
             state["structure_reset"] = True
@@ -414,6 +465,24 @@ def fibonacci_retracement_arrays(
         signal_price = levels_price[float(state["signal_level"])]
         if float(low_prices[now]) <= signal_price <= float(high_prices[now]):
             state["last_signal_test"] = now
+            state["signal_test_count"] = int(state["signal_test_count"]) + 1
+            signal_held = (
+                float(close_prices[now]) > signal_price
+                and float(close_prices[now]) > float(open_prices[now])
+                if direction == "LONG"
+                else float(close_prices[now]) < signal_price
+                and float(close_prices[now]) < float(open_prices[now])
+            )
+            if signal_held:
+                state["signal_held_count"] = int(state["signal_held_count"]) + 1
+                atr_now = float(atr_values[now]) if now < len(atr_values) else np.nan
+                if np.isfinite(atr_now) and atr_now > 0:
+                    rejection = (
+                        max(0.0, float(close_prices[now]) - float(low_prices[now])) / atr_now
+                        if direction == "LONG"
+                        else max(0.0, float(high_prices[now]) - float(close_prices[now])) / atr_now
+                    )
+                    state["last_signal_rejection_atr"] = float(rejection)
 
         state["last_updated"] = now
         return state
@@ -650,12 +719,18 @@ def fibonacci_retracement_arrays(
                     "live_score": float(_candidate_live_score(candidate, i)),
                     "structural_score": confluence["structural_score"],
                     "confluence_score": confluence["confluence_score"],
+                    "reaction_score": confluence["reaction_score"],
                     "final_score": confluence["final_score"],
                     "ema_50_distance_atr": confluence["ema_50_distance_atr"],
                     "ema_100_distance_atr": confluence["ema_100_distance_atr"],
                     "ema_200_distance_atr": confluence["ema_200_distance_atr"],
                     "rsi_divergence": confluence["rsi_divergence"],
                     "rsi_divergence_code": confluence["rsi_divergence_code"],
+                    "signal_test_count": confluence["signal_test_count"],
+                    "signal_held_count": confluence["signal_held_count"],
+                    "signal_held_ratio": confluence["signal_held_ratio"],
+                    "last_signal_rejection_atr": confluence["last_signal_rejection_atr"],
+                    "bars_since_signal_test": confluence["bars_since_signal_test"],
                     "signal_level": float(state["signal_level"]),
                     "test_count": int(state["tests"]),
                     "last_test_index": (

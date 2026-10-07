@@ -632,6 +632,59 @@ def test_inactive_candidate_keeps_progressive_zone_and_test_history():
     assert values["FIB_TEST_COUNT"][21] >= 1.0
 
 
+def test_fib_reaction_quality_rewards_respected_repeat_tests_without_linear_touch_bonus():
+    # Newer LONG candidate is inactive while its 0.500 armed level is tested
+    # twice with bullish closes. Reaction quality should rise because the level
+    # is respected, not merely because raw test_count increased.
+    close = np.array([
+        14.0, 8.0, 10.0, 16.0, 20.0, 18.5, 17.0, 14.0,
+        12.0, 15.0, 18.0, 16.0, 15.2, 15.3, 15.5, 15.6,
+        15.7, 15.8, 15.9, 16.0, 16.1, 15.2, 15.4, 15.6,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    # Candidate low@8=11.8 -> high@10=18.2, so armed 0.500 is 15.0.
+    # Candle 12 is first respected test.
+    open_[12] = 15.05
+    low[12] = 14.9
+    high[12] = 15.4
+    close[12] = 15.2
+    # Candle 13 is a second respected test with a stronger rejection.
+    open_[13] = 15.0
+    low[13] = 14.85
+    high[13] = 15.5
+    close[13] = 15.35
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    first_inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][12])
+    second_inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][13])
+    first = next(item for item in first_inventory if item["candidate_id"] == "LONG:8:10")
+    second = next(item for item in second_inventory if item["candidate_id"] == "LONG:8:10")
+
+    assert first["signal_level"] == 0.5
+    assert first["signal_test_count"] == 1
+    assert first["signal_held_count"] == 1
+    assert first["reaction_score"] > 0.0
+    assert second["signal_test_count"] == 2
+    assert second["signal_held_count"] == 2
+    assert second["signal_held_ratio"] == 1.0
+    assert second["last_signal_rejection_atr"] > first["last_signal_rejection_atr"]
+    assert second["reaction_score"] > first["reaction_score"]
+    assert second["final_score"] > second["structural_score"] * (
+        1.0 + second["confluence_score"]
+    )
+
+
 def test_invalidated_stronger_fib_does_not_hide_valid_secondary_candidate():
     # Build two confirmed LONG candidates. The older/stronger candidate is
     # invalidated by a deep wick, while the newer candidate remains valid.
@@ -827,7 +880,7 @@ def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate(
 
 def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache():
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
-    assert FIB_RESEARCH_CONTEXT_VERSION == 12
+    assert FIB_RESEARCH_CONTEXT_VERSION == 13
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
@@ -1014,8 +1067,10 @@ def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
     assert {
         "candidate_id", "direction", "start_index", "end_index",
         "start_price", "end_price", "structural_strength_atr",
-        "live_score", "structural_score", "confluence_score", "final_score",
-        "ema_50_distance_atr", "ema_100_distance_atr", "ema_200_distance_atr",
-        "rsi_divergence", "rsi_divergence_code",
+        "live_score", "structural_score", "confluence_score", "reaction_score",
+        "final_score", "ema_50_distance_atr", "ema_100_distance_atr",
+        "ema_200_distance_atr", "rsi_divergence", "rsi_divergence_code",
+        "signal_test_count", "signal_held_count", "signal_held_ratio",
+        "last_signal_rejection_atr", "bars_since_signal_test",
         "signal_level", "test_count", "invalidated", "entry_valid", "selected",
     } <= set(selected)
