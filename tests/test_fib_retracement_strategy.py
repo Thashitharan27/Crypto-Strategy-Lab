@@ -866,6 +866,39 @@ def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
     assert local["entry_valid"] is True
 
 
+def test_fib_rsi_confluence_resets_when_armed_level_advances():
+    # Candidate first tests 0.382 with bullish RSI divergence, then a deeper
+    # wick advances the armed level to 0.500 without touching that new level.
+    # The old 0.382 RSI test must not continue to boost the candidate.
+    open_ = np.array([10.0, 8.0, 9.0, 10.0, 12.0, 11.0, 10.5, 9.6, 10.0], dtype=float)
+    high = np.array([10.2, 8.2, 9.2, 10.2, 12.2, 11.2, 10.8, 10.1, 10.2], dtype=float)
+    low = np.array([9.8, 7.8, 8.8, 9.8, 11.8, 10.8, 10.0, 9.5, 9.8], dtype=float)
+    close = np.array([10.0, 8.0, 9.0, 10.0, 12.0, 11.0, 10.6, 9.8, 10.0], dtype=float)
+    atr = np.ones(len(close))
+    ema50 = np.full(len(close), np.nan)
+    ema100 = np.full(len(close), np.nan)
+    ema200 = np.full(len(close), np.nan)
+    rsi_values = np.array([50, 40, 45, 48, 55, 50, 52, 60, 58], dtype=float)
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        ema_50_values=ema50,
+        ema_100_values=ema100,
+        ema_200_values=ema200,
+        rsi_values=rsi_values,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.0,
+    )
+
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    candidate = next(item for item in inventory if item["candidate_id"] == "LONG:1:4")
+    assert candidate["signal_level"] == 0.5
+    assert candidate["rsi_divergence"] in {"UNKNOWN", "NONE"}
+    assert candidate["confluence_score"] == 0.0
+
+
 def test_fib_candidate_confluence_can_promote_close_structural_competitor():
     # Two bullish candidates share the same high but have close structural
     # strength. The recent/local Fib is slightly weaker structurally, while its
