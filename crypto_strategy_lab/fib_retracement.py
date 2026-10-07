@@ -26,7 +26,7 @@ import pandas as pd
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 9
+FIB_RESEARCH_CONTEXT_VERSION = 10
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -207,6 +207,20 @@ def fibonacci_retracement_arrays(
             candidate_states[leg] = state
         return state
 
+    def _register_candidate(candidate, confirmed_at):
+        """Register a confirmed candidate and replay its closed confirmation window."""
+        leg = candidate[:3]
+        is_new = leg not in candidate_states
+        structural_candidates.append(candidate)
+        if is_new:
+            # The pivot at leg[2] becomes known only after pivot_strength bars.
+            # Replay every already-closed post-pivot candle so invalidation,
+            # progressive arming, tests, and reset history are not lost.
+            for replay_i in range(leg[2] + 1, confirmed_at + 1):
+                _update_candidate_state(leg, replay_i)
+        return candidate
+
+
     def _update_candidate_state(leg, now):
         state = _candidate_state(leg)
         if state["last_updated"] == now or now <= leg[2]:
@@ -295,16 +309,31 @@ def fibonacci_retracement_arrays(
                     atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
                     if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
                         extension = ("LONG", anchor, j, span / atr_confirm)
-                        structural_candidates.append(extension)
+                        _register_candidate(extension, i)
                         active_extension_leg = extension[:3]
                 floor = j - dominant_lookback_bars
                 prior_lows = [idx for idx in confirmed_lows if floor <= idx < j]
                 if prior_lows:
-                    lo = min(prior_lows, key=lambda idx: float(low_prices[idx]))
-                    span = float(high_prices[j]) - float(low_prices[lo])
+                    # Keep both the dominant swing anchor and the most recent
+                    # confirmed local pivot low. This lets nested/sub-swing Fibs
+                    # coexist with the larger structural Fib instead of forcing
+                    # every new high to inherit the oldest/deepest low.
+                    long_anchors = {
+                        min(prior_lows, key=lambda idx: float(low_prices[idx])),
+                        max(prior_lows),
+                    }
                     atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
-                    if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
-                        structural_candidates.append(("LONG", lo, j, span / atr_confirm))
+                    for lo in long_anchors:
+                        span = float(high_prices[j]) - float(low_prices[lo])
+                        if (
+                            np.isfinite(span)
+                            and span > 0
+                            and np.isfinite(atr_confirm)
+                            and atr_confirm > 0
+                        ):
+                            _register_candidate(
+                                ("LONG", lo, j, span / atr_confirm), i
+                            )
             if is_low:
                 confirmed_lows.append(j)
                 if (
@@ -321,16 +350,30 @@ def fibonacci_retracement_arrays(
                     atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
                     if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
                         extension = ("SHORT", anchor, j, span / atr_confirm)
-                        structural_candidates.append(extension)
+                        _register_candidate(extension, i)
                         active_extension_leg = extension[:3]
                 floor = j - dominant_lookback_bars
                 prior_highs = [idx for idx in confirmed_highs if floor <= idx < j]
                 if prior_highs:
-                    hi = max(prior_highs, key=lambda idx: float(high_prices[idx]))
-                    span = float(high_prices[hi]) - float(low_prices[j])
+                    # Mirror LONG discovery: retain both the dominant swing
+                    # high and the most recent confirmed local pivot high so
+                    # nested bearish impulses can be tracked independently.
+                    short_anchors = {
+                        max(prior_highs, key=lambda idx: float(high_prices[idx])),
+                        max(prior_highs),
+                    }
                     atr_confirm = float(atr_values[i]) if i < len(atr_values) else np.nan
-                    if np.isfinite(span) and span > 0 and np.isfinite(atr_confirm) and atr_confirm > 0:
-                        structural_candidates.append(("SHORT", hi, j, span / atr_confirm))
+                    for hi in short_anchors:
+                        span = float(high_prices[hi]) - float(low_prices[j])
+                        if (
+                            np.isfinite(span)
+                            and span > 0
+                            and np.isfinite(atr_confirm)
+                            and atr_confirm > 0
+                        ):
+                            _register_candidate(
+                                ("SHORT", hi, j, span / atr_confirm), i
+                            )
 
             pivot_cutoff = j - dominant_lookback_bars
             confirmed_highs = [idx for idx in confirmed_highs if idx >= pivot_cutoff]
