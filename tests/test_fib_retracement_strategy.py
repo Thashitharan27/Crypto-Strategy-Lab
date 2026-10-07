@@ -526,3 +526,55 @@ def test_fib_wick_through_786_invalidates_future_short_entry():
     assert values["_FIB_SIGNAL_DIRECTION"][5] is None
     assert values["_FIB_SIGNAL_DIRECTION"][6] is None
     assert values["_FIB_SIGNAL_DIRECTION"][7] is None
+
+
+def test_inactive_candidate_keeps_786_invalidation_when_selected_later():
+    # Older dominant LONG: low@1 -> high@4. Newer weaker LONG: low@8 -> high@10.
+    # The newer candidate is confirmed but remains inactive while the older swing
+    # still has sticky selection. Candle 12 wicks through the newer leg's 0.786
+    # level without invalidating the older dominant leg. When the old leg ages
+    # out of the 16-bar window, the newer candidate must not resurrect.
+    close = np.array([
+        14.0, 8.0, 10.0, 16.0, 20.0, 18.5, 17.0, 14.0,
+        12.0, 15.0, 18.0, 16.0, 14.5, 15.0, 15.2, 15.1,
+        15.3, 15.2, 15.4, 15.3, 15.2, 14.4, 15.0, 15.2,
+    ], dtype=float)
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    # Make candle 12 penetrate the newer LONG candidate's 0.786 level.
+    # Newer span is low@8=11.8 -> high@10=18.2, so 0.786 ~= 13.17.
+    low[12] = 13.0
+    open_[12] = 14.2
+    close[12] = 14.5
+    high[12] = 14.8
+
+    # Later bullish reaction around the newer leg's 0.618 level (~14.245).
+    open_[21] = 14.1
+    low[21] = 14.0
+    high[21] = 14.8
+    close[21] = 14.6
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    # At candle 12, the older dominant swing is still selected, proving the
+    # penetrated newer candidate was inactive when its invalidation happened.
+    assert values["_FIB_IMPULSE_START_INDEX"][12] == 1
+    assert values["_FIB_IMPULSE_END_INDEX"][12] == 4
+
+    newer_penetration = (high[10] - low[12]) / (high[10] - low[8])
+    assert newer_penetration >= 0.786
+
+    # Once the old swing ages out, the newer candidate may become selected,
+    # but it must remain entry-invalid and emit no LONG signal.
+    assert values["_FIB_IMPULSE_START_INDEX"][21] == 8
+    assert values["_FIB_IMPULSE_END_INDEX"][21] == 10
+    assert values["_FIB_SIGNAL_DIRECTION"][21] is None
