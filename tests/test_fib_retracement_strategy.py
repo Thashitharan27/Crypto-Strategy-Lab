@@ -896,7 +896,8 @@ def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate(
     )
     selected = next(item for item in inventory if item["selected"])
 
-    assert extension["entry_valid"] is True
+    assert extension["entry_valid"] is False
+    assert extension["prior_hold_eligible"] is False
     assert selected["candidate_id"] == "LONG:7:8"
     assert selected["live_score"] > extension["live_score"]
     assert values["_FIB_SELECTED_CANDIDATE_ID"][15] == "LONG:7:8"
@@ -940,7 +941,8 @@ def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
     local = next(item for item in inventory if item["candidate_id"] == "LONG:7:10")
     assert local["start_price"] == low[7]
     assert local["end_price"] == high[10]
-    assert local["entry_valid"] is True
+    assert local["entry_valid"] is False
+    assert local["prior_hold_eligible"] is False
 
 
 def test_fib_rsi_confluence_resets_when_armed_level_advances():
@@ -1065,7 +1067,8 @@ def test_fib_tracks_recent_local_short_subswing_alongside_dominant_anchor():
     local = next(item for item in inventory if item["candidate_id"] == "SHORT:7:10")
     assert local["start_price"] == high[7]
     assert local["end_price"] == low[10]
-    assert local["entry_valid"] is True
+    assert local["entry_valid"] is False
+    assert local["prior_hold_eligible"] is False
 
 
 def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
@@ -1096,5 +1099,7 @@ def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
         "ema_200_distance_atr", "rsi_divergence", "rsi_divergence_code",
         "signal_test_count", "signal_held_count", "signal_held_ratio",
         "last_signal_rejection_atr", "bars_since_signal_test",
-        "signal_level", "test_count", "invalidated", "entry_valid", "selected",
+        "signal_level", "test_count", "invalidated",
+        "prior_signal_held_count", "prior_hold_eligible",
+        "entry_valid", "selected",
     } <= set(selected)
