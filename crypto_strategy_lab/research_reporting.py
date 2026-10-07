@@ -525,6 +525,8 @@ def _validate_fib_candidate_artifact(
                OR f.end_index <= f.start_index
                OR trim(cast(f.candidate_id AS VARCHAR)) = ''
                OR f.test_count < 0
+               OR f.prior_signal_held_count IS NULL
+               OR f.prior_hold_eligible IS NULL
                OR f.prior_signal_held_count < 0
                OR (f.prior_hold_eligible AND f.prior_signal_held_count < 1)
                OR (f.entry_valid AND NOT f.prior_hold_eligible)
