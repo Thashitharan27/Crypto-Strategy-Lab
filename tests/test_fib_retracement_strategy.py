@@ -755,6 +755,77 @@ def test_fib_candidate_state_memory_stays_bounded_by_recent_structure():
     assert counts[-1] < 80
 
 
+def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
+    close = np.array(
+        [12, 8, 10, 16, 20, 18, 16, 14, 16, 18, 19, 17, 16],
+        dtype=float,
+    )
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_,
+        high,
+        low,
+        close,
+        atr,
+        pivot_strength=1,
+        dominant_lookback_bars=32,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    # high@10 is confirmed on candle 11. The large Fib can still originate
+    # from low@1, but the most recent confirmed local low@7 must also become
+    # an independent candidate for the same high.
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][11])
+    ids = {item["candidate_id"] for item in inventory}
+    assert "LONG:1:10" in ids
+    assert "LONG:7:10" in ids
+
+    local = next(item for item in inventory if item["candidate_id"] == "LONG:7:10")
+    assert local["start_price"] == low[7]
+    assert local["end_price"] == high[10]
+    assert local["entry_valid"] is True
+
+
+def test_fib_tracks_recent_local_short_subswing_alongside_dominant_anchor():
+    close = np.array(
+        [12, 20, 18, 14, 10, 12, 14, 16, 14, 12, 11, 13, 14],
+        dtype=float,
+    )
+    open_ = close.copy()
+    high = close + 0.2
+    low = close - 0.2
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_,
+        high,
+        low,
+        close,
+        atr,
+        pivot_strength=1,
+        dominant_lookback_bars=32,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    # low@10 is confirmed on candle 11. Track both dominant high@1 and
+    # recent local high@7 as independent SHORT candidates.
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][11])
+    ids = {item["candidate_id"] for item in inventory}
+    assert "SHORT:1:10" in ids
+    assert "SHORT:7:10" in ids
+
+    local = next(item for item in inventory if item["candidate_id"] == "SHORT:7:10")
+    assert local["start_price"] == high[7]
+    assert local["end_price"] == low[10]
+    assert local["entry_valid"] is True
+
+
 def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
     open_ = np.array([14.0, 8.0, 10.0, 16.0, 20.0, 18.0, 14.0, 12.0, 15.0, 18.0, 16.0, 15.0], dtype=float)
     high = open_ + 0.2
