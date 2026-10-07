@@ -85,7 +85,7 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
             getattr(config, "fib_dominant_recency_penalty", 0.35)
         ),
         "fib_dominant_replacement_ratio": float(
-            getattr(config, "fib_dominant_replacement_ratio", 1.10)
+            getattr(config, "fib_dominant_replacement_ratio", 1.05)
         ),
         "fib_active_structure_reset_depth": float(
             getattr(config, "fib_active_structure_reset_depth", 0.618)

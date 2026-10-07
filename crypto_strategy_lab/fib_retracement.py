@@ -26,13 +26,13 @@ import pandas as pd
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 10
+FIB_RESEARCH_CONTEXT_VERSION = 11
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
 FIB_DOMINANT_LOOKBACK_BARS = 160
 FIB_DOMINANT_RECENCY_PENALTY = 0.35
-FIB_DOMINANT_REPLACEMENT_RATIO = 1.10
+FIB_DOMINANT_REPLACEMENT_RATIO = 1.05
 FIB_ACTIVE_STRUCTURE_RESET_DEPTH = 0.618
 FIB_LEVELS = (0.236, 0.382, 0.500, 0.618, 0.786)
 FIB_SIGNAL_LEVELS = frozenset({0.382, 0.500, 0.618})
@@ -427,18 +427,13 @@ def fibonacci_retracement_arrays(
         )
         best_leg = best[:3]
 
-        # An extension receives the old leg's priority only when that extension
-        # itself is entry-valid. Otherwise fall back to the best valid candidate
-        # (or evidence-only structural candidate when none are valid).
-        valid_legs = {candidate[:3] for candidate in valid_candidates}
-        active_extension_is_valid = (
-            active_extension_leg is not None
-            and active_extension_leg in valid_legs
-        )
-        leg = active_extension_leg if active_extension_is_valid else best_leg
+        # Extensions compete in the same pool as every other valid Fib.
+        # They no longer receive automatic priority merely because they extend
+        # the currently active anchor. This allows a materially stronger local
+        # subswing to take control while retaining normal active-leg hysteresis.
+        leg = best_leg
         if (
-            not active_extension_is_valid
-            and active_leg is not None
+            active_leg is not None
             and active_leg != best_leg
             and not active_structure_reset
             and not active_entry_invalidated
