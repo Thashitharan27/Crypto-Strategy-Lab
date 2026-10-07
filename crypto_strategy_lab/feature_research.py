@@ -641,6 +641,8 @@ def _empty_fib_candidate_frame() -> pd.DataFrame:
             "structure_reset": pd.Series(dtype="bool"),
             "invalidated": pd.Series(dtype="bool"),
             "signalled": pd.Series(dtype="bool"),
+            "prior_signal_held_count": pd.Series(dtype="int64"),
+            "prior_hold_eligible": pd.Series(dtype="bool"),
             "entry_valid": pd.Series(dtype="bool"),
             "selected": pd.Series(dtype="bool"),
         }
@@ -717,6 +719,8 @@ def _fib_candidate_inventory_frame(
                 "structure_reset": bool(candidate.get("structure_reset")),
                 "invalidated": bool(candidate.get("invalidated")),
                 "signalled": bool(candidate.get("signalled")),
+                "prior_signal_held_count": int(candidate.get("prior_signal_held_count", 0)),
+                "prior_hold_eligible": bool(candidate.get("prior_hold_eligible")),
                 "entry_valid": bool(candidate.get("entry_valid")),
                 "selected": selected,
             })
@@ -732,7 +736,7 @@ def _fib_candidate_inventory_frame(
         frame[name] = parsed.dt.tz_convert("UTC").dt.tz_localize(None)
     for name in (
         "strategy_index", "start_index", "end_index", "test_count",
-        "signal_test_count", "signal_held_count",
+        "signal_test_count", "signal_held_count", "prior_signal_held_count",
     ):
         frame[name] = pd.to_numeric(frame[name], errors="raise").astype("int64")
     frame["last_test_index"] = pd.to_numeric(
