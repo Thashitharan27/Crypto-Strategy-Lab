@@ -140,6 +140,7 @@ def fibonacci_retracement_arrays(
     impulse_start_index = np.full(n, np.nan, dtype=float)
     impulse_end_index = np.full(n, np.nan, dtype=float)
     active_level_price = np.full(n, np.nan, dtype=float)
+    candidate_state_count = np.zeros(n, dtype=float)
 
     confirmed_highs: list[int] = []
     confirmed_lows: list[int] = []
@@ -347,6 +348,7 @@ def fibonacci_retracement_arrays(
         for stale_leg in list(candidate_states):
             if stale_leg not in reachable_legs:
                 del candidate_states[stale_leg]
+        candidate_state_count[i] = float(len(candidate_states))
 
         # Advance every confirmed candidate on every bar, including candidates
         # that are not currently selected. This is the core multi-Fib tracking
@@ -544,6 +546,7 @@ def fibonacci_retracement_arrays(
         "_FIB_IMPULSE_START_INDEX": impulse_start_index,
         "_FIB_IMPULSE_END_INDEX": impulse_end_index,
         "_FIB_ACTIVE_LEVEL_PRICE": active_level_price,
+        "_FIB_CANDIDATE_STATE_COUNT": candidate_state_count,
     }
 
 
