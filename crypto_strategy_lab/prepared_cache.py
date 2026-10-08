@@ -26,6 +26,7 @@ PREPARED_CACHE_FORMAT_VERSION = 1
 PREPARED_CONTRACT_VERSION = 1
 PREPARED_CACHE_STORE_MEMORY_LIMIT = "3GB"
 PREPARED_CACHE_LOAD_MEMORY_LIMIT = "1GB"
+PREPARED_CACHE_STORE_ROW_GROUP_SIZE = 16384
 
 
 def _digest(payload: object) -> str:
@@ -190,7 +191,9 @@ class PreparedRunCache:
         try:
             con.register("prepared_frame", table)
             con.execute(
-                "COPY prepared_frame TO ? (FORMAT PARQUET, COMPRESSION ZSTD)",
+                "COPY prepared_frame TO ? "
+                f"(FORMAT PARQUET, COMPRESSION ZSTD, "
+                f"ROW_GROUP_SIZE {PREPARED_CACHE_STORE_ROW_GROUP_SIZE})",
                 [str(temp_parquet)],
             )
             con.unregister("prepared_frame")
