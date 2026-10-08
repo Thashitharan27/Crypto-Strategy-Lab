@@ -412,6 +412,7 @@ def fibonacci_retracement_arrays(
                 "signal_held_count": 0,
                 "last_signal_rejection_atr": None,
                 "hold_rearmed": True,
+                "hold_accepted_now": False,
                 "score_signal_test_count": 0,
                 "score_signal_held_count": 0,
                 "score_last_signal_rejection_atr": None,
@@ -473,6 +474,7 @@ def fibonacci_retracement_arrays(
             state["signal_held_count"] = 0
             state["last_signal_rejection_atr"] = None
             state["hold_rearmed"] = True
+            state["hold_accepted_now"] = False
 
         if retracement >= active_structure_reset_depth:
             state["structure_reset"] = True
@@ -503,6 +505,7 @@ def fibonacci_retracement_arrays(
             state["last_test"] = now
 
         signal_price = levels_price[float(state["signal_level"])]
+        state["hold_accepted_now"] = False
         signal_touched_now = float(low_prices[now]) <= signal_price <= float(high_prices[now])
         atr_now = float(atr_values[now]) if now < len(atr_values) else np.nan
 
@@ -549,6 +552,7 @@ def fibonacci_retracement_arrays(
                 state["signal_held_count"] = int(state["signal_held_count"]) + 1
                 state["last_signal_rejection_atr"] = float(rejection)
                 state["hold_rearmed"] = False
+                state["hold_accepted_now"] = True
             elif not reaction_valid:
                 # Any weak/failed touch breaks the clean sequence, even if the
                 # prior hold has not rearmed yet. A strong touch inside the same
@@ -989,7 +993,7 @@ def fibonacci_retracement_arrays(
                 )
 
         if (
-            signal_held
+            bool(selected_state.get("hold_accepted_now", False))
             and entry_candidate_available
             and int(selected_state.get("signal_held_count", 0)) >= 2
             and not active_entry_invalidated
