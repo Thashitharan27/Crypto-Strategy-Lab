@@ -1107,5 +1107,5 @@ def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
         "last_signal_rejection_atr", "bars_since_signal_test",
         "signal_level", "test_count", "invalidated",
         "prior_signal_held_count", "prior_hold_eligible",
-        "entry_valid", "selected",
+        "structural_quality_eligible", "entry_valid", "selected",
     } <= set(selected)
