@@ -348,7 +348,7 @@ def test_writer_persists_compact_versioned_artifacts_and_queries_multiple_famili
     assert manifest["feature_context_row_count"] == 5
     assert manifest["sr_zone_row_count"] == 5
     assert manifest["fib_candidate_row_count"] == 0
-    assert manifest["fib_candidate_schema_version"] == FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION == 4
+    assert manifest["fib_candidate_schema_version"] == FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION == 5
     assert manifest["sr_zone_expanded_row_count"] == 10
     assert manifest["sr_zone_storage_contract"] == "SNAPSHOT_JSON_V3"
     assert manifest["artifact_sizes_bytes"]["trades"] > 0

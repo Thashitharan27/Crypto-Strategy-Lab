@@ -20,7 +20,7 @@ import pandas as pd
 
 FEATURE_RESEARCH_ARTIFACT_CONTRACT = "feature_research_v1"
 FEATURE_RESEARCH_ARTIFACT_VERSION = 1
-FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 4
+FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 5
 REQUIRED_TRADE_COLUMNS = {
     "pair_id",
     "side",
@@ -149,6 +149,7 @@ FIB_CANDIDATE_ARTIFACT_COLUMNS = (
     "signalled",
     "prior_signal_held_count",
     "prior_hold_eligible",
+    "structural_quality_eligible",
     "entry_valid",
     "selected",
 )
@@ -643,6 +644,7 @@ def _empty_fib_candidate_frame() -> pd.DataFrame:
             "signalled": pd.Series(dtype="bool"),
             "prior_signal_held_count": pd.Series(dtype="int64"),
             "prior_hold_eligible": pd.Series(dtype="bool"),
+            "structural_quality_eligible": pd.Series(dtype="bool"),
             "entry_valid": pd.Series(dtype="bool"),
             "selected": pd.Series(dtype="bool"),
         }
@@ -721,6 +723,7 @@ def _fib_candidate_inventory_frame(
                 "signalled": bool(candidate.get("signalled")),
                 "prior_signal_held_count": int(candidate.get("prior_signal_held_count", 0)),
                 "prior_hold_eligible": bool(candidate.get("prior_hold_eligible")),
+                "structural_quality_eligible": bool(candidate.get("structural_quality_eligible")),
                 "entry_valid": bool(candidate.get("entry_valid")),
                 "selected": selected,
             })
