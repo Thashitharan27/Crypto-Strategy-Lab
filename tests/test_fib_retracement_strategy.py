@@ -425,10 +425,10 @@ def test_deep_short_retracement_resets_old_anchor_before_future_extension():
 def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration():
     # Confirmed LONG impulse: low@1=8.0 -> high@3=12.0.
     # 0.382=10.472, midpoint to 0.500=10.236, 0.500=10.0.
-    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.1], dtype=float)
-    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.8, 10.4, 10.5], dtype=float)
-    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 9.95], dtype=float)
-    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.3, 10.35], dtype=float)
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.6, 10.1], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.8, 10.4, 10.9, 10.5], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 10.55, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.3, 10.7, 10.35], dtype=float)
     atr = np.ones(len(close))
 
     values = fibonacci_retracement_arrays(
@@ -458,11 +458,13 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     assert first_hold["structural_quality_eligible"] is True
     assert first_hold["entry_valid"] is False
 
-    # Candle 7 retests and holds the same 0.500 level. The prior completed hold
-    # now makes this candidate eligible before ranking, so it may signal.
-    assert values["_FIB_SIGNAL_DIRECTION"][7] == "LONG"
-    assert np.isclose(values["_FIB_SIGNAL_LEVEL"][7], 0.500)
-    signal_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    # Candle 7 moves more than 0.50 ATR away without touching the armed level,
+    # which rearms the candidate for a distinct second reaction. Candle 8 then
+    # retests and holds 0.500, so the prior completed hold makes it eligible.
+    assert values["_FIB_SIGNAL_DIRECTION"][7] is None
+    assert values["_FIB_SIGNAL_DIRECTION"][8] == "LONG"
+    assert np.isclose(values["_FIB_SIGNAL_LEVEL"][8], 0.500)
+    signal_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
     selected = next(item for item in signal_snapshot if item["selected"])
     assert selected["prior_signal_held_count"] >= 1
     assert selected["prior_hold_eligible"] is True
@@ -639,20 +641,22 @@ def test_fib_failed_unrearmed_retest_breaks_sequence():
 
 
 def test_fib_unrearmed_duplicate_touch_cannot_trigger_entry():
-    # Build two accepted distinct holds, but block entry on the second one via
-    # an artificially high minimum impulse threshold. A later strong touch in
-    # the same unrearmed cluster must still not trigger, even after the blocker
-    # is removed by calling with a normal threshold in a fresh equivalent setup.
-    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.7, 10.05, 10.02], dtype=float)
-    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.9, 10.45, 10.40], dtype=float)
-    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 10.6, 9.95, 9.95], dtype=float)
-    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.70, 10.35, 10.32], dtype=float)
+    # Build two accepted distinct holds. On candle 8, a temporarily large ATR
+    # makes the 4-point impulse <2 ATR, so the second accepted hold cannot
+    # signal. Candle 9 restores normal ATR and gives another strong touch in
+    # the same unrearmed cluster. Under the old raw-trigger gate it would now
+    # enter; the accepted-hold gate must keep it blocked.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.6, 10.05, 10.02], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.9, 10.8, 10.45], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 10.55, 9.95, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.70, 10.70, 10.35], dtype=float)
     atr = np.ones(len(close))
+    atr[8] = 2.2
 
     values = fibonacci_retracement_arrays(
         open_, high, low, close, atr,
         pivot_strength=1,
-        minimum_impulse_atr=100.0,
+        minimum_impulse_atr=2.0,
         dominant_lookback_bars=16,
         dominant_recency_penalty=0.0,
         dominant_replacement_ratio=1.10,
@@ -666,8 +670,8 @@ def test_fib_unrearmed_duplicate_touch_cannot_trigger_entry():
     duplicate = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][9])
     duplicate_selected = next(item for item in duplicate if item["selected"])
     assert duplicate_selected["signal_held_count"] >= 2
+    assert duplicate_selected["entry_valid"] is True
     assert values["_FIB_SIGNAL_DIRECTION"][9] is None
-
 
 def test_fib_native_plan_uses_actual_progressive_signal_level():
     class Base:
