@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 19
+FIB_RESEARCH_CONTEXT_VERSION = 20
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -48,7 +48,6 @@ FIB_REACTION_THIRD_HELD_WEIGHT = 0.005
 FIB_REACTION_MAX_REJECTION_WEIGHT = 0.010
 FIB_REACTION_WEAK_OVERTEST_PENALTY = 0.010
 FIB_MINIMUM_HOLD_REJECTION_ATR = 0.25
-FIB_HOLD_REARM_DISTANCE_ATR = 0.50
 FIB_CONFLUENCE_RSI_PERIOD = 14
 FIB_LEVELS = (0.236, 0.382, 0.500, 0.618, 0.786)
 FIB_SIGNAL_LEVELS = frozenset({0.382, 0.500, 0.618})
@@ -172,7 +171,6 @@ def fibonacci_retracement_arrays(
     minimum_structural_competition_ratio: float = FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO,
     active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH,
     minimum_hold_rejection_atr: float = FIB_MINIMUM_HOLD_REJECTION_ATR,
-    hold_rearm_distance_atr: float = FIB_HOLD_REARM_DISTANCE_ATR,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -185,7 +183,6 @@ def fibonacci_retracement_arrays(
     ema_200_values = _causal_ema(close_prices, 200) if ema_200_values is None else np.asarray(ema_200_values, dtype=float)
     rsi_period = max(2, int(rsi_period))
     minimum_hold_rejection_atr = max(0.0, float(minimum_hold_rejection_atr))
-    hold_rearm_distance_atr = max(0.0, float(hold_rearm_distance_atr))
     rsi_values = rsi(close_prices, rsi_period) if rsi_values is None else np.asarray(rsi_values, dtype=float)
     n = len(close_prices)
     if any(len(values) != n for values in (ema_50_values, ema_100_values, ema_200_values)):
@@ -509,21 +506,31 @@ def fibonacci_retracement_arrays(
         signal_touched_now = float(low_prices[now]) <= signal_price <= float(high_prices[now])
         atr_now = float(atr_values[now]) if now < len(atr_values) else np.nan
 
-        # After a valid hold, require price to leave the Fib area before another
-        # touch can count as a distinct reaction episode. Merely hovering around
-        # the level for multiple candles remains one hold.
+        # After a valid hold, price must first reclaim the immediately
+        # shallower Fib level before a later return can count as a distinct
+        # reaction episode. Require both open and close beyond that shallower
+        # level, and do not rearm on a candle that also retouches the held level.
+        # This keeps range-hover candles inside one reaction episode while
+        # defining separation from the Fib structure itself rather than ATR.
+        shallower_level = {
+            0.382: 0.236,
+            0.500: 0.382,
+            0.618: 0.500,
+        }.get(round(float(state["signal_level"]), 3))
         if (
-            not signal_touched_now
+            shallower_level is not None
+            and not signal_touched_now
             and not bool(state.get("hold_rearmed", True))
-            and np.isfinite(atr_now)
-            and atr_now > 0
         ):
-            away_atr = (
-                max(0.0, float(close_prices[now]) - signal_price) / atr_now
+            shallower_price = levels_price[shallower_level]
+            open_now = float(open_prices[now])
+            close_now = float(close_prices[now])
+            reclaimed_shallower = (
+                open_now > shallower_price and close_now > shallower_price
                 if direction == "LONG"
-                else max(0.0, signal_price - float(close_prices[now])) / atr_now
+                else open_now < shallower_price and close_now < shallower_price
             )
-            if away_atr >= hold_rearm_distance_atr:
+            if reclaimed_shallower:
                 state["hold_rearmed"] = True
 
         if signal_touched_now:
@@ -1054,7 +1061,6 @@ class FibonacciRetracementMixin:
     fib_minimum_structural_competition_ratio = FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO
     fib_active_structure_reset_depth = FIB_ACTIVE_STRUCTURE_RESET_DEPTH
     fib_minimum_hold_rejection_atr = FIB_MINIMUM_HOLD_REJECTION_ATR
-    fib_hold_rearm_distance_atr = FIB_HOLD_REARM_DISTANCE_ATR
 
     def _fib_features_needed(self) -> bool:
         return fib_features_needed(self.config.strategy_profiles)
@@ -1084,7 +1090,6 @@ class FibonacciRetracementMixin:
             ),
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
             minimum_hold_rejection_atr=float(self.fib_minimum_hold_rejection_atr),
-            hold_rearm_distance_atr=float(self.fib_hold_rearm_distance_atr),
         )
 
     def _infer_signal_strategy_mode(self):
