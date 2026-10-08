@@ -533,27 +533,27 @@ def fibonacci_retracement_arrays(
                     if direction == "LONG"
                     else max(0.0, signal_price - float(close_prices[now])) / atr_now
                 )
-            signal_held = (
-                bool(state.get("hold_rearmed", True))
-                and (
-                    float(close_prices[now]) > signal_price
-                    and float(close_prices[now]) > float(open_prices[now])
-                    and np.isfinite(rejection)
-                    and rejection >= minimum_hold_rejection_atr
-                    if direction == "LONG"
-                    else float(close_prices[now]) < signal_price
-                    and float(close_prices[now]) < float(open_prices[now])
-                    and np.isfinite(rejection)
-                    and rejection >= minimum_hold_rejection_atr
-                )
+            reaction_valid = (
+                float(close_prices[now]) > signal_price
+                and float(close_prices[now]) > float(open_prices[now])
+                and np.isfinite(rejection)
+                and rejection >= minimum_hold_rejection_atr
+                if direction == "LONG"
+                else float(close_prices[now]) < signal_price
+                and float(close_prices[now]) < float(open_prices[now])
+                and np.isfinite(rejection)
+                and rejection >= minimum_hold_rejection_atr
             )
+            signal_held = bool(state.get("hold_rearmed", True)) and reaction_valid
             if signal_held:
                 state["signal_held_count"] = int(state["signal_held_count"]) + 1
                 state["last_signal_rejection_atr"] = float(rejection)
                 state["hold_rearmed"] = False
-            elif bool(state.get("hold_rearmed", True)):
-                # A failed retest breaks the clean hold sequence. A later
-                # successful reaction starts again from hold #1.
+            elif not reaction_valid:
+                # Any weak/failed touch breaks the clean sequence, even if the
+                # prior hold has not rearmed yet. A strong touch inside the same
+                # congestion episode is simply ignored until price first moves
+                # far enough away to rearm.
                 state["signal_held_count"] = 0
                 state["last_signal_rejection_atr"] = None
                 state["hold_rearmed"] = True
