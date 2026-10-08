@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 15
+FIB_RESEARCH_CONTEXT_VERSION = 16
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -686,6 +686,7 @@ def fibonacci_retracement_arrays(
             if _candidate_live_score(candidate, i)
             >= strongest_structural_score * minimum_structural_competition_ratio
         ]
+        quality_candidate_legs = {candidate[:3] for candidate in quality_candidates}
         entry_candidates = [
             candidate
             for candidate in quality_candidates
@@ -813,8 +814,10 @@ def fibonacci_retracement_arrays(
                         not bool(state["invalidated"])
                         and int(state.get("score_signal_held_count", 0)) >= 1
                     ),
+                    "structural_quality_eligible": candidate_leg in quality_candidate_legs,
                     "entry_valid": (
-                        not bool(state["invalidated"])
+                        candidate_leg in quality_candidate_legs
+                        and not bool(state["invalidated"])
                         and int(state.get("score_signal_held_count", 0)) >= 1
                     ),
                     "selected": candidate_leg == leg,
