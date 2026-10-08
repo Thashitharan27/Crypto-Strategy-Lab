@@ -190,7 +190,8 @@ class PreparedRunCache:
         try:
             con.register("prepared_frame", table)
             con.execute(
-                "COPY prepared_frame TO ? (FORMAT PARQUET, COMPRESSION ZSTD)",
+                "COPY prepared_frame TO ? "
+                "(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 16384)",
                 [str(temp_parquet)],
             )
             con.unregister("prepared_frame")
