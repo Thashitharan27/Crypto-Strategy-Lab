@@ -474,6 +474,24 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
 
 
 
+
+def test_held_candle_requires_open_and_close_above_armed_fib():
+    # Both prices must hold the level; candle colour and 0.25 ATR rejection
+    # are not required. A wick may still test the level.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.04], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.4], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.03], dtype=float)
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, np.ones(len(close)),
+        pivot_strength=1, dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0, dominant_replacement_ratio=1.10,
+    )
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    selected = next(item for item in inventory if item["selected"])
+    assert selected["signal_level"] == 0.5
+    assert selected["signal_held_count"] == 1
+
 def test_fib_touch_requires_minimum_rejection_distance_to_count_as_held():
     # Confirmed LONG impulse low@1=8 -> high@3=12, armed 0.500 = 10.0.
     # Candle 6 is bullish and closes above the level, but only 0.10 ATR away:
@@ -1158,7 +1176,7 @@ def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
     assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
     assert FIB_MINIMUM_HOLD_REJECTION_ATR == 0.25
-    assert FIB_RESEARCH_CONTEXT_VERSION == 20
+    assert FIB_RESEARCH_CONTEXT_VERSION == 21
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
