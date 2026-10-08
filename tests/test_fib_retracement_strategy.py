@@ -5,6 +5,7 @@ import json
 from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.fib_retracement import (
     FIB_DOMINANT_REPLACEMENT_RATIO,
+    FIB_MINIMUM_HOLD_REJECTION_ATR,
     FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO,
     FIB_RESEARCH_CONTEXT_VERSION,
     FIB_RETRACEMENT_MODE,
@@ -426,7 +427,7 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.1], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.8, 10.4, 10.5], dtype=float)
     low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 9.95], dtype=float)
-    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.2, 10.3], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.3, 10.35], dtype=float)
     atr = np.ones(len(close))
 
     values = fibonacci_retracement_arrays(
@@ -467,6 +468,72 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     assert selected["structural_quality_eligible"] is True
     assert selected["entry_valid"] is True
     assert selected["signalled"] is True
+
+
+
+def test_fib_touch_requires_minimum_rejection_distance_to_count_as_held():
+    # Confirmed LONG impulse low@1=8 -> high@3=12, armed 0.500 = 10.0.
+    # Candle 6 is bullish and closes above the level, but only 0.10 ATR away:
+    # it must remain a test, not a held reaction. Candle 7 closes 0.30 ATR
+    # above the same level and therefore qualifies as the first held reaction.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.02, 10.05], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.25, 10.4], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.10, 10.30], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    weak = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    weak_selected = next(item for item in weak if item["selected"])
+    assert weak_selected["signal_level"] == 0.5
+    assert weak_selected["signal_test_count"] >= 1
+    assert weak_selected["signal_held_count"] == 0
+    assert weak_selected["prior_hold_eligible"] is False
+    assert values["_FIB_SIGNAL_DIRECTION"][6] is None
+
+    strong = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    strong_selected = next(item for item in strong if item["selected"])
+    assert strong_selected["signal_held_count"] == 1
+    assert np.isclose(strong_selected["last_signal_rejection_atr"], 0.30)
+    # This is only the first completed hold, so it still cannot signal yet.
+    assert values["_FIB_SIGNAL_DIRECTION"][7] is None
+
+
+
+def test_fib_trigger_candle_must_meet_minimum_rejection_even_after_prior_hold():
+    # Build a LONG 0.500 setup with one valid prior held reaction. A later
+    # bullish retest that closes only 0.10 ATR above the Fib must not trigger.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.02], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.25], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.10], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    prior = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    prior_selected = next(item for item in prior if item["selected"])
+    assert prior_selected["signal_held_count"] == 1
+
+    weak_trigger = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    weak_selected = next(item for item in weak_trigger if item["selected"])
+    assert weak_selected["prior_signal_held_count"] >= 1
+    assert weak_selected["prior_hold_eligible"] is True
+    assert weak_selected["signal_held_count"] == 1
+    assert values["_FIB_SIGNAL_DIRECTION"][7] is None
 
 
 def test_fib_native_plan_uses_actual_progressive_signal_level():
@@ -668,7 +735,7 @@ def test_fib_reaction_quality_rewards_respected_repeat_tests_without_linear_touc
     open_[12] = 15.05
     low[12] = 14.9
     high[12] = 15.4
-    close[12] = 15.2
+    close[12] = 15.3
     # Candle 13 is a second respected test with a stronger rejection.
     open_[13] = 15.0
     low[13] = 14.85
@@ -911,7 +978,8 @@ def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate(
 def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache():
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
     assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
-    assert FIB_RESEARCH_CONTEXT_VERSION == 16
+    assert FIB_MINIMUM_HOLD_REJECTION_ATR == 0.25
+    assert FIB_RESEARCH_CONTEXT_VERSION == 17
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():

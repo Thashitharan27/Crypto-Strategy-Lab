@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 16
+FIB_RESEARCH_CONTEXT_VERSION = 17
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -47,6 +47,7 @@ FIB_REACTION_SECOND_HELD_WEIGHT = 0.020
 FIB_REACTION_THIRD_HELD_WEIGHT = 0.005
 FIB_REACTION_MAX_REJECTION_WEIGHT = 0.010
 FIB_REACTION_WEAK_OVERTEST_PENALTY = 0.010
+FIB_MINIMUM_HOLD_REJECTION_ATR = 0.25
 FIB_CONFLUENCE_RSI_PERIOD = 14
 FIB_LEVELS = (0.236, 0.382, 0.500, 0.618, 0.786)
 FIB_SIGNAL_LEVELS = frozenset({0.382, 0.500, 0.618})
@@ -169,6 +170,7 @@ def fibonacci_retracement_arrays(
     dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO,
     minimum_structural_competition_ratio: float = FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO,
     active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH,
+    minimum_hold_rejection_atr: float = FIB_MINIMUM_HOLD_REJECTION_ATR,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -180,6 +182,7 @@ def fibonacci_retracement_arrays(
     ema_100_values = _causal_ema(close_prices, 100) if ema_100_values is None else np.asarray(ema_100_values, dtype=float)
     ema_200_values = _causal_ema(close_prices, 200) if ema_200_values is None else np.asarray(ema_200_values, dtype=float)
     rsi_period = max(2, int(rsi_period))
+    minimum_hold_rejection_atr = max(0.0, float(minimum_hold_rejection_atr))
     rsi_values = rsi(close_prices, rsi_period) if rsi_values is None else np.asarray(rsi_values, dtype=float)
     n = len(close_prices)
     if any(len(values) != n for values in (ema_50_values, ema_100_values, ema_200_values)):
@@ -498,23 +501,28 @@ def fibonacci_retracement_arrays(
         if float(low_prices[now]) <= signal_price <= float(high_prices[now]):
             state["last_signal_test"] = now
             state["signal_test_count"] = int(state["signal_test_count"]) + 1
+            atr_now = float(atr_values[now]) if now < len(atr_values) else np.nan
+            rejection = float("nan")
+            if np.isfinite(atr_now) and atr_now > 0:
+                rejection = (
+                    max(0.0, float(close_prices[now]) - signal_price) / atr_now
+                    if direction == "LONG"
+                    else max(0.0, signal_price - float(close_prices[now])) / atr_now
+                )
             signal_held = (
                 float(close_prices[now]) > signal_price
                 and float(close_prices[now]) > float(open_prices[now])
+                and np.isfinite(rejection)
+                and rejection >= minimum_hold_rejection_atr
                 if direction == "LONG"
                 else float(close_prices[now]) < signal_price
                 and float(close_prices[now]) < float(open_prices[now])
+                and np.isfinite(rejection)
+                and rejection >= minimum_hold_rejection_atr
             )
             if signal_held:
                 state["signal_held_count"] = int(state["signal_held_count"]) + 1
-                atr_now = float(atr_values[now]) if now < len(atr_values) else np.nan
-                if np.isfinite(atr_now) and atr_now > 0:
-                    rejection = (
-                        max(0.0, float(close_prices[now]) - float(low_prices[now])) / atr_now
-                        if direction == "LONG"
-                        else max(0.0, float(high_prices[now]) - float(close_prices[now])) / atr_now
-                    )
-                    state["last_signal_rejection_atr"] = float(rejection)
+                state["last_signal_rejection_atr"] = float(rejection)
 
         state["last_updated"] = now
         return state
@@ -897,12 +905,23 @@ def fibonacci_retracement_arrays(
         )
         held = False
         if touched:
+            rejection_atr[i] = (
+                max(0.0, float(close_prices[i]) - level_price) / atr_now
+                if direction == "LONG"
+                else max(0.0, level_price - float(close_prices[i])) / atr_now
+            )
             if direction == "LONG":
-                held = float(close_prices[i]) > level_price and float(close_prices[i]) > float(open_prices[i])
-                rejection_atr[i] = max(0.0, float(close_prices[i]) - float(low_prices[i])) / atr_now
+                held = (
+                    float(close_prices[i]) > level_price
+                    and float(close_prices[i]) > float(open_prices[i])
+                    and rejection_atr[i] >= minimum_hold_rejection_atr
+                )
             else:
-                held = float(close_prices[i]) < level_price and float(close_prices[i]) < float(open_prices[i])
-                rejection_atr[i] = max(0.0, float(high_prices[i]) - float(close_prices[i])) / atr_now
+                held = (
+                    float(close_prices[i]) < level_price
+                    and float(close_prices[i]) < float(open_prices[i])
+                    and rejection_atr[i] >= minimum_hold_rejection_atr
+                )
         if held:
             state = "HELD"
 
@@ -917,15 +936,22 @@ def fibonacci_retracement_arrays(
         )
         signal_held = False
         if signal_touched:
+            signal_rejection_atr = (
+                max(0.0, float(close_prices[i]) - signal_level_price) / atr_now
+                if direction == "LONG"
+                else max(0.0, signal_level_price - float(close_prices[i])) / atr_now
+            )
             if direction == "LONG":
                 signal_held = (
                     float(close_prices[i]) > signal_level_price
                     and float(close_prices[i]) > float(open_prices[i])
+                    and signal_rejection_atr >= minimum_hold_rejection_atr
                 )
             else:
                 signal_held = (
                     float(close_prices[i]) < signal_level_price
                     and float(close_prices[i]) < float(open_prices[i])
+                    and signal_rejection_atr >= minimum_hold_rejection_atr
                 )
 
         if (
@@ -989,6 +1015,7 @@ class FibonacciRetracementMixin:
     fib_dominant_replacement_ratio = FIB_DOMINANT_REPLACEMENT_RATIO
     fib_minimum_structural_competition_ratio = FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO
     fib_active_structure_reset_depth = FIB_ACTIVE_STRUCTURE_RESET_DEPTH
+    fib_minimum_hold_rejection_atr = FIB_MINIMUM_HOLD_REJECTION_ATR
 
     def _fib_features_needed(self) -> bool:
         return fib_features_needed(self.config.strategy_profiles)
@@ -1017,6 +1044,7 @@ class FibonacciRetracementMixin:
                 self.fib_minimum_structural_competition_ratio
             ),
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
+            minimum_hold_rejection_atr=float(self.fib_minimum_hold_rejection_atr),
         )
 
     def _infer_signal_strategy_mode(self):
