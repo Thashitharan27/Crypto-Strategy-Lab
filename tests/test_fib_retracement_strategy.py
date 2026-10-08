@@ -5,7 +5,6 @@ import json
 from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.fib_retracement import (
     FIB_DOMINANT_REPLACEMENT_RATIO,
-    FIB_HOLD_REARM_DISTANCE_ATR,
     FIB_MINIMUM_HOLD_REJECTION_ATR,
     FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO,
     FIB_RESEARCH_CONTEXT_VERSION,
@@ -458,8 +457,9 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     assert first_hold["structural_quality_eligible"] is True
     assert first_hold["entry_valid"] is False
 
-    # Candle 7 moves more than 0.50 ATR away without touching the armed level,
-    # which rearms the candidate for a distinct second reaction. Candle 8 then
+    # Candle 7 opens and closes above the immediately shallower 0.382 Fib
+    # without touching the armed 0.500 level, which rearms a distinct reaction.
+    # Candle 8 then
     # retests and holds 0.500, so the prior completed hold makes it eligible.
     assert values["_FIB_SIGNAL_DIRECTION"][7] is None
     assert values["_FIB_SIGNAL_DIRECTION"][8] == "LONG"
@@ -578,8 +578,8 @@ def test_fib_failed_retests_reset_clean_hold_sequence():
 
 
 def test_fib_range_hover_does_not_count_as_second_reaction_episode():
-    # LONG 0.500 setup. Candle 6 is a valid first hold. Candle 7 moves only
-    # 0.30 ATR away without touching, which is below the 0.50 ATR rearm rule.
+    # LONG 0.500 setup. Candle 6 is a valid first hold. Candle 7 stays below
+    # the immediately shallower 0.382 Fib even though it does not touch 0.500.
     # Candle 8 retests with a strong close, but it is still the same reaction
     # episode and must not become hold #2 or emit a signal.
     open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.20, 10.05], dtype=float)
@@ -608,8 +608,44 @@ def test_fib_range_hover_does_not_count_as_second_reaction_episode():
 
 
 
+def test_fib_rearm_requires_open_and_close_beyond_shallower_level():
+    # LONG 0.500 setup: after hold #1, crossing above the shallower 0.382 Fib
+    # with only the close is not enough. Both open and close must be above
+    # 0.382 on a non-touch candle before a later 0.500 retest can be hold #2.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.30, 10.05, 10.60, 10.05], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.7, 10.45, 10.8, 10.45], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 10.25, 9.95, 10.55, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.60, 10.35, 10.70, 10.35], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    first = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    first_selected = next(item for item in first if item["selected"])
+    assert first_selected["signal_held_count"] == 1
+
+    # Candle 7 closes above 0.382 (~10.472) but opens below it, so no rearm.
+    not_rearmed = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
+    not_rearmed_selected = next(item for item in not_rearmed if item["selected"])
+    assert not_rearmed_selected["signal_held_count"] == 1
+    assert values["_FIB_SIGNAL_DIRECTION"][8] is None
+
+    # Candle 9 opens and closes above 0.382 without touching 0.500; candle 10
+    # can therefore become the distinct second held reaction.
+    rearmed = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][10])
+    rearmed_selected = next(item for item in rearmed if item["selected"])
+    assert rearmed_selected["signal_held_count"] >= 2
+    assert values["_FIB_SIGNAL_DIRECTION"][10] == "LONG"
+
+
 def test_fib_failed_unrearmed_retest_breaks_sequence():
-    # Hold #1, then a weak retest before the 0.50 ATR move-away. The weak
+    # Hold #1, then a weak retest before reclaiming the shallower Fib. The weak
     # retest must reset the sequence immediately rather than preserving hold #1.
     open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.02, 10.6, 10.05], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.25, 10.8, 10.45], dtype=float)
@@ -1122,8 +1158,7 @@ def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
     assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
     assert FIB_MINIMUM_HOLD_REJECTION_ATR == 0.25
-    assert FIB_HOLD_REARM_DISTANCE_ATR == 0.50
-    assert FIB_RESEARCH_CONTEXT_VERSION == 19
+    assert FIB_RESEARCH_CONTEXT_VERSION == 20
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
