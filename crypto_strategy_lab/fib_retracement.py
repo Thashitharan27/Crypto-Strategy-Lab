@@ -35,6 +35,7 @@ FIB_LEVEL_TOLERANCE_ATR = 0.25
 FIB_DOMINANT_LOOKBACK_BARS = 160
 FIB_DOMINANT_RECENCY_PENALTY = 0.35
 FIB_DOMINANT_REPLACEMENT_RATIO = 1.05
+FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO = 0.70
 FIB_ACTIVE_STRUCTURE_RESET_DEPTH = 0.618
 FIB_CONFLUENCE_MAX_EMA_DISTANCE_ATR = 0.25
 FIB_CONFLUENCE_EMA_50_WEIGHT = 0.02
@@ -166,6 +167,7 @@ def fibonacci_retracement_arrays(
     dominant_lookback_bars: int = FIB_DOMINANT_LOOKBACK_BARS,
     dominant_recency_penalty: float = FIB_DOMINANT_RECENCY_PENALTY,
     dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO,
+    minimum_structural_competition_ratio: float = FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO,
     active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
@@ -238,6 +240,9 @@ def fibonacci_retracement_arrays(
     dominant_lookback_bars = max(16, int(dominant_lookback_bars))
     dominant_recency_penalty = min(0.95, max(0.0, float(dominant_recency_penalty)))
     dominant_replacement_ratio = max(1.0, float(dominant_replacement_ratio))
+    minimum_structural_competition_ratio = min(
+        1.0, max(0.0, float(minimum_structural_competition_ratio))
+    )
     active_structure_reset_depth = min(0.786, max(0.236, float(active_structure_reset_depth)))
 
     def _candidate_live_score(candidate, now):
@@ -650,10 +655,12 @@ def fibonacci_retracement_arrays(
         if not structural_candidates:
             continue
 
-        # Entry selection remains single-candidate, but only candidates whose
-        # currently armed level has already held on a prior completed candle
-        # may compete for execution. This happens before ranking so a stronger
-        # no-hold Fib cannot block a weaker/local Fib with proven reaction.
+        # Entry selection remains single-candidate. Candidates must first clear
+        # structural quality: at least the configured minimum impulse and close
+        # enough in live structural strength to the strongest valid Fib. Only
+        # then may prior completed held reactions make them execution candidates.
+        # This prevents a tiny/noisy local Fib from replacing the dominant
+        # structure merely because it happens to have one historical hold.
         # When none qualify, keep selecting fallback evidence so generic Fib
         # indicators remain populated, but do not emit an entry signal.
         valid_candidates = [
@@ -661,9 +668,27 @@ def fibonacci_retracement_arrays(
             for candidate in structural_candidates
             if not bool(_candidate_state(candidate[:3])["invalidated"])
         ]
-        entry_candidates = [
+        structurally_viable_candidates = [
             candidate
             for candidate in valid_candidates
+            if float(candidate[3]) >= float(minimum_impulse_atr)
+        ]
+        strongest_structural_score = max(
+            (
+                _candidate_live_score(candidate, i)
+                for candidate in structurally_viable_candidates
+            ),
+            default=float("-inf"),
+        )
+        quality_candidates = [
+            candidate
+            for candidate in structurally_viable_candidates
+            if _candidate_live_score(candidate, i)
+            >= strongest_structural_score * minimum_structural_competition_ratio
+        ]
+        entry_candidates = [
+            candidate
+            for candidate in quality_candidates
             if int(_candidate_state(candidate[:3]).get("score_signal_held_count", 0)) >= 1
         ]
         entry_candidate_available = bool(entry_candidates)
@@ -959,6 +984,7 @@ class FibonacciRetracementMixin:
     fib_dominant_lookback_bars = FIB_DOMINANT_LOOKBACK_BARS
     fib_dominant_recency_penalty = FIB_DOMINANT_RECENCY_PENALTY
     fib_dominant_replacement_ratio = FIB_DOMINANT_REPLACEMENT_RATIO
+    fib_minimum_structural_competition_ratio = FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO
     fib_active_structure_reset_depth = FIB_ACTIVE_STRUCTURE_RESET_DEPTH
 
     def _fib_features_needed(self) -> bool:
@@ -984,6 +1010,9 @@ class FibonacciRetracementMixin:
             dominant_lookback_bars=int(self.fib_dominant_lookback_bars),
             dominant_recency_penalty=float(self.fib_dominant_recency_penalty),
             dominant_replacement_ratio=float(self.fib_dominant_replacement_ratio),
+            minimum_structural_competition_ratio=float(
+                self.fib_minimum_structural_competition_ratio
+            ),
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
         )
 
