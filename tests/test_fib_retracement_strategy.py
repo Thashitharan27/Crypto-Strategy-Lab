@@ -605,6 +605,38 @@ def test_fib_range_hover_does_not_count_as_second_reaction_episode():
     assert values["_FIB_SIGNAL_DIRECTION"][8] is None
 
 
+
+def test_fib_failed_unrearmed_retest_breaks_sequence():
+    # Hold #1, then a weak retest before the 0.50 ATR move-away. The weak
+    # retest must reset the sequence immediately rather than preserving hold #1.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.02, 10.6, 10.05], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.25, 10.8, 10.45], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95, 10.55, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.10, 10.65, 10.35], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    first = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    first_selected = next(item for item in first if item["selected"])
+    assert first_selected["signal_held_count"] == 1
+
+    failed = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    failed_selected = next(item for item in failed if item["selected"])
+    assert failed_selected["signal_held_count"] == 0
+
+    later = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][9])
+    later_selected = next(item for item in later if item["selected"])
+    assert later_selected["signal_held_count"] == 1
+    assert values["_FIB_SIGNAL_DIRECTION"][9] is None
+
+
 def test_fib_native_plan_uses_actual_progressive_signal_level():
     class Base:
         def _sr_stop_plan(self, i, execution_i=None):
