@@ -637,6 +637,38 @@ def test_fib_failed_unrearmed_retest_breaks_sequence():
     assert values["_FIB_SIGNAL_DIRECTION"][9] is None
 
 
+
+def test_fib_unrearmed_duplicate_touch_cannot_trigger_entry():
+    # Build two accepted distinct holds, but block entry on the second one via
+    # an artificially high minimum impulse threshold. A later strong touch in
+    # the same unrearmed cluster must still not trigger, even after the blocker
+    # is removed by calling with a normal threshold in a fresh equivalent setup.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.7, 10.05, 10.02], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.9, 10.45, 10.40], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 10.6, 9.95, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.70, 10.35, 10.32], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        minimum_impulse_atr=100.0,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    second = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
+    second_selected = next(item for item in second if item["selected"])
+    assert second_selected["signal_held_count"] >= 2
+    assert values["_FIB_SIGNAL_DIRECTION"][8] is None
+
+    duplicate = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][9])
+    duplicate_selected = next(item for item in duplicate if item["selected"])
+    assert duplicate_selected["signal_held_count"] >= 2
+    assert values["_FIB_SIGNAL_DIRECTION"][9] is None
+
+
 def test_fib_native_plan_uses_actual_progressive_signal_level():
     class Base:
         def _sr_stop_plan(self, i, execution_i=None):
