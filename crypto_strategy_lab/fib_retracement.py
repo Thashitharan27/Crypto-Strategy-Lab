@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 20
+FIB_RESEARCH_CONTEXT_VERSION = 21
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -544,15 +544,11 @@ def fibonacci_retracement_arrays(
                     else max(0.0, signal_price - float(close_prices[now])) / atr_now
                 )
             reaction_valid = (
-                float(close_prices[now]) > signal_price
-                and float(close_prices[now]) > float(open_prices[now])
-                and np.isfinite(rejection)
-                and rejection >= minimum_hold_rejection_atr
+                float(open_prices[now]) > signal_price
+                and float(close_prices[now]) > signal_price
                 if direction == "LONG"
-                else float(close_prices[now]) < signal_price
-                and float(close_prices[now]) < float(open_prices[now])
-                and np.isfinite(rejection)
-                and rejection >= minimum_hold_rejection_atr
+                else float(open_prices[now]) < signal_price
+                and float(close_prices[now]) < signal_price
             )
             signal_held = bool(state.get("hold_rearmed", True)) and reaction_valid
             if signal_held:
@@ -957,15 +953,13 @@ def fibonacci_retracement_arrays(
             )
             if direction == "LONG":
                 held = (
-                    float(close_prices[i]) > level_price
-                    and float(close_prices[i]) > float(open_prices[i])
-                    and rejection_atr[i] >= minimum_hold_rejection_atr
+                    float(open_prices[i]) > level_price
+                    and float(close_prices[i]) > level_price
                 )
             else:
                 held = (
-                    float(close_prices[i]) < level_price
-                    and float(close_prices[i]) < float(open_prices[i])
-                    and rejection_atr[i] >= minimum_hold_rejection_atr
+                    float(open_prices[i]) < level_price
+                    and float(close_prices[i]) < level_price
                 )
         if held:
             state = "HELD"
@@ -988,15 +982,13 @@ def fibonacci_retracement_arrays(
             )
             if direction == "LONG":
                 signal_held = (
-                    float(close_prices[i]) > signal_level_price
-                    and float(close_prices[i]) > float(open_prices[i])
-                    and signal_rejection_atr >= minimum_hold_rejection_atr
+                    float(open_prices[i]) > signal_level_price
+                    and float(close_prices[i]) > signal_level_price
                 )
             else:
                 signal_held = (
-                    float(close_prices[i]) < signal_level_price
-                    and float(close_prices[i]) < float(open_prices[i])
-                    and signal_rejection_atr >= minimum_hold_rejection_atr
+                    float(open_prices[i]) < signal_level_price
+                    and float(close_prices[i]) < signal_level_price
                 )
 
         if (
