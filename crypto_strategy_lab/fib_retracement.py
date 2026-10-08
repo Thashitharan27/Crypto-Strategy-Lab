@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 17
+FIB_RESEARCH_CONTEXT_VERSION = 18
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -523,6 +523,12 @@ def fibonacci_retracement_arrays(
             if signal_held:
                 state["signal_held_count"] = int(state["signal_held_count"]) + 1
                 state["last_signal_rejection_atr"] = float(rejection)
+            else:
+                # A failed retest breaks the clean hold sequence. A later
+                # successful reaction starts again from hold #1 instead of
+                # resurrecting an older hold as hold #2.
+                state["signal_held_count"] = 0
+                state["last_signal_rejection_atr"] = None
 
         state["last_updated"] = now
         return state

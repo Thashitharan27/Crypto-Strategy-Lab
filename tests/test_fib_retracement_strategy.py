@@ -532,8 +532,45 @@ def test_fib_trigger_candle_must_meet_minimum_rejection_even_after_prior_hold():
     weak_selected = next(item for item in weak_trigger if item["selected"])
     assert weak_selected["prior_signal_held_count"] >= 1
     assert weak_selected["prior_hold_eligible"] is True
-    assert weak_selected["signal_held_count"] == 1
+    assert weak_selected["signal_held_count"] == 0
     assert values["_FIB_SIGNAL_DIRECTION"][7] is None
+
+
+
+def test_fib_failed_retests_reset_clean_hold_sequence():
+    # LONG 0.500 setup: candle 6 is a valid first hold, candle 7 is a weak
+    # failed retest, and candle 8 is another strong hold. Candle 8 must start a
+    # new sequence at hold #1 instead of becoming hold #2.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.02, 10.05], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.25, 10.45], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.10, 10.35], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    first = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    first_selected = next(item for item in first if item["selected"])
+    assert first_selected["signal_held_count"] == 1
+
+    failed = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    failed_selected = next(item for item in failed if item["selected"])
+    assert failed_selected["signal_test_count"] >= 2
+    assert failed_selected["signal_held_count"] == 0
+    assert values["_FIB_SIGNAL_DIRECTION"][7] is None
+
+    later = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
+    later_selected = next(item for item in later if item["selected"])
+    assert later_selected["signal_held_count"] == 1
+    assert later_selected["prior_signal_held_count"] == 0
+    assert later_selected["prior_hold_eligible"] is False
+    assert values["_FIB_SIGNAL_DIRECTION"][8] is None
 
 
 def test_fib_native_plan_uses_actual_progressive_signal_level():
@@ -979,7 +1016,7 @@ def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
     assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
     assert FIB_MINIMUM_HOLD_REJECTION_ATR == 0.25
-    assert FIB_RESEARCH_CONTEXT_VERSION == 17
+    assert FIB_RESEARCH_CONTEXT_VERSION == 18
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
