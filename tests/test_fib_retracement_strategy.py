@@ -492,77 +492,51 @@ def test_held_candle_requires_open_and_close_above_armed_fib():
     assert selected["signal_level"] == 0.5
     assert selected["signal_held_count"] == 1
 
-def test_fib_touch_requires_minimum_rejection_distance_to_count_as_held():
-    # Confirmed LONG impulse low@1=8 -> high@3=12, armed 0.500 = 10.0.
-    # Candle 6 is bullish and closes above the level, but only 0.10 ATR away:
-    # it must remain a test, not a held reaction. Candle 7 closes 0.30 ATR
-    # above the same level and therefore qualifies as the first held reaction.
+def test_fib_small_rejection_counts_as_held_but_duplicate_touch_does_not():
+    # Open and close above 0.500 count as the first hold, even at 0.10 ATR.
+    # The following touch is in the same unrearmed episode and cannot be hold #2.
     open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.02, 10.05], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.25, 10.4], dtype=float)
     low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95], dtype=float)
     close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.10, 10.30], dtype=float)
-    atr = np.ones(len(close))
-
     values = fibonacci_retracement_arrays(
-        open_, high, low, close, atr,
-        pivot_strength=1,
-        dominant_lookback_bars=16,
-        dominant_recency_penalty=0.0,
-        dominant_replacement_ratio=1.10,
+        open_, high, low, close, np.ones(len(close)),
+        pivot_strength=1, dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0, dominant_replacement_ratio=1.10,
     )
-
-    weak = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
-    weak_selected = next(item for item in weak if item["selected"])
-    assert weak_selected["signal_level"] == 0.5
-    assert weak_selected["signal_test_count"] >= 1
-    assert weak_selected["signal_held_count"] == 0
-    assert weak_selected["prior_hold_eligible"] is False
-    assert values["_FIB_SIGNAL_DIRECTION"][6] is None
-
-    strong = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
-    strong_selected = next(item for item in strong if item["selected"])
-    assert strong_selected["signal_held_count"] == 1
-    assert np.isclose(strong_selected["last_signal_rejection_atr"], 0.30)
-    # This is only the first completed hold, so it still cannot signal yet.
+    first = next(item for item in json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6]) if item["selected"])
+    assert first["signal_level"] == 0.5
+    assert first["signal_held_count"] == 1
+    assert np.isclose(first["last_signal_rejection_atr"], 0.10)
+    duplicate = next(item for item in json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7]) if item["selected"])
+    assert duplicate["signal_held_count"] == 1
     assert values["_FIB_SIGNAL_DIRECTION"][7] is None
 
 
-
-def test_fib_trigger_candle_must_meet_minimum_rejection_even_after_prior_hold():
-    # Build a LONG 0.500 setup with one valid prior held reaction. A later
-    # bullish retest that closes only 0.10 ATR above the Fib must not trigger.
-    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.02], dtype=float)
+def test_fib_retest_opening_below_level_resets_prior_hold():
+    # Even a bullish candle that closes above 0.500 fails if it opened below.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 9.98], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.25], dtype=float)
     low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95], dtype=float)
     close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.10], dtype=float)
-    atr = np.ones(len(close))
-
     values = fibonacci_retracement_arrays(
-        open_, high, low, close, atr,
-        pivot_strength=1,
-        dominant_lookback_bars=16,
-        dominant_recency_penalty=0.0,
-        dominant_replacement_ratio=1.10,
+        open_, high, low, close, np.ones(len(close)),
+        pivot_strength=1, dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0, dominant_replacement_ratio=1.10,
     )
-
-    prior = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
-    prior_selected = next(item for item in prior if item["selected"])
-    assert prior_selected["signal_held_count"] == 1
-
-    weak_trigger = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
-    weak_selected = next(item for item in weak_trigger if item["selected"])
-    assert weak_selected["prior_signal_held_count"] >= 1
-    assert weak_selected["prior_hold_eligible"] is True
-    assert weak_selected["signal_held_count"] == 0
+    prior = next(item for item in json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6]) if item["selected"])
+    assert prior["signal_held_count"] == 1
+    retest = next(item for item in json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7]) if item["selected"])
+    assert retest["prior_signal_held_count"] >= 1
+    assert retest["signal_held_count"] == 0
     assert values["_FIB_SIGNAL_DIRECTION"][7] is None
-
 
 
 def test_fib_failed_retests_reset_clean_hold_sequence():
     # LONG 0.500 setup: candle 6 is a valid first hold, candle 7 is a weak
     # failed retest, and candle 8 is another strong hold. Candle 8 must start a
     # new sequence at hold #1 instead of becoming hold #2.
-    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.02, 10.05], dtype=float)
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 9.98, 10.05], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.25, 10.45], dtype=float)
     low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95, 9.95], dtype=float)
     close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.10, 10.35], dtype=float)
