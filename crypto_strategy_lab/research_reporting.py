@@ -489,7 +489,8 @@ def _validate_fib_candidate_artifact(
         "start_price", "end_price", "structural_strength_atr", "live_score",
         "signal_level", "test_count", "broken", "structure_reset",
         "invalidated", "signalled", "prior_signal_held_count",
-        "prior_hold_eligible", "entry_valid", "selected",
+        "prior_hold_eligible", "structural_quality_eligible",
+        "entry_valid", "selected",
     }
     with _bounded_duckdb_context(candidates_path.parent) as con:
         columns = {
@@ -529,11 +530,14 @@ def _validate_fib_candidate_artifact(
                OR f.entry_valid IS NULL
                OR f.prior_signal_held_count IS NULL
                OR f.prior_hold_eligible IS NULL
+               OR f.structural_quality_eligible IS NULL
                OR f.prior_signal_held_count < 0
                OR f.prior_hold_eligible IS DISTINCT FROM (
                     (NOT f.invalidated) AND f.prior_signal_held_count >= 1
                   )
-               OR f.entry_valid IS DISTINCT FROM f.prior_hold_eligible
+               OR f.entry_valid IS DISTINCT FROM (
+                    f.prior_hold_eligible AND f.structural_quality_eligible
+                  )
             """,
             [str(candidates_path), str(context_path)],
         ).fetchone()[0]
