@@ -5,6 +5,7 @@ import json
 from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.fib_retracement import (
     FIB_DOMINANT_REPLACEMENT_RATIO,
+    FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO,
     FIB_RESEARCH_CONTEXT_VERSION,
     FIB_RETRACEMENT_MODE,
     FIB_RULE_INDICATORS,
@@ -452,6 +453,7 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     assert first_hold["signal_held_count"] >= 1
     assert first_hold["prior_signal_held_count"] == 0
     assert first_hold["prior_hold_eligible"] is False
+    assert first_hold["structural_quality_eligible"] is True
     assert first_hold["entry_valid"] is False
 
     # Candle 7 retests and holds the same 0.500 level. The prior completed hold
@@ -462,6 +464,7 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     selected = next(item for item in signal_snapshot if item["selected"])
     assert selected["prior_signal_held_count"] >= 1
     assert selected["prior_hold_eligible"] is True
+    assert selected["structural_quality_eligible"] is True
     assert selected["entry_valid"] is True
     assert selected["signalled"] is True
 
@@ -898,14 +901,17 @@ def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate(
 
     assert extension["entry_valid"] is False
     assert extension["prior_hold_eligible"] is False
+    assert extension["structural_quality_eligible"] is False
     assert selected["candidate_id"] == "LONG:7:8"
+    assert selected["structural_quality_eligible"] is True
     assert selected["live_score"] > extension["live_score"]
     assert values["_FIB_SELECTED_CANDIDATE_ID"][15] == "LONG:7:8"
 
 
 def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache():
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
-    assert FIB_RESEARCH_CONTEXT_VERSION == 15
+    assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
+    assert FIB_RESEARCH_CONTEXT_VERSION == 16
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
