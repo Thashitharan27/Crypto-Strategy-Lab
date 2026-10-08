@@ -5,6 +5,7 @@ import json
 from crypto_strategy_core.rules import RULE_INDICATORS
 from crypto_strategy_lab.fib_retracement import (
     FIB_DOMINANT_REPLACEMENT_RATIO,
+    FIB_HOLD_REARM_DISTANCE_ATR,
     FIB_MINIMUM_HOLD_REJECTION_ATR,
     FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO,
     FIB_RESEARCH_CONTEXT_VERSION,
@@ -424,10 +425,10 @@ def test_deep_short_retracement_resets_old_anchor_before_future_extension():
 def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration():
     # Confirmed LONG impulse: low@1=8.0 -> high@3=12.0.
     # 0.382=10.472, midpoint to 0.500=10.236, 0.500=10.0.
-    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.1], dtype=float)
-    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.8, 10.4, 10.5], dtype=float)
-    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 9.95], dtype=float)
-    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.3, 10.35], dtype=float)
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.6, 10.1], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.8, 10.4, 10.9, 10.5], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 10.55, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.3, 10.7, 10.35], dtype=float)
     atr = np.ones(len(close))
 
     values = fibonacci_retracement_arrays(
@@ -457,11 +458,13 @@ def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration(
     assert first_hold["structural_quality_eligible"] is True
     assert first_hold["entry_valid"] is False
 
-    # Candle 7 retests and holds the same 0.500 level. The prior completed hold
-    # now makes this candidate eligible before ranking, so it may signal.
-    assert values["_FIB_SIGNAL_DIRECTION"][7] == "LONG"
-    assert np.isclose(values["_FIB_SIGNAL_LEVEL"][7], 0.500)
-    signal_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    # Candle 7 moves more than 0.50 ATR away without touching the armed level,
+    # which rearms the candidate for a distinct second reaction. Candle 8 then
+    # retests and holds 0.500, so the prior completed hold makes it eligible.
+    assert values["_FIB_SIGNAL_DIRECTION"][7] is None
+    assert values["_FIB_SIGNAL_DIRECTION"][8] == "LONG"
+    assert np.isclose(values["_FIB_SIGNAL_LEVEL"][8], 0.500)
+    signal_snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
     selected = next(item for item in signal_snapshot if item["selected"])
     assert selected["prior_signal_held_count"] >= 1
     assert selected["prior_hold_eligible"] is True
@@ -572,6 +575,103 @@ def test_fib_failed_retests_reset_clean_hold_sequence():
     assert later_selected["prior_hold_eligible"] is False
     assert values["_FIB_SIGNAL_DIRECTION"][8] is None
 
+
+
+def test_fib_range_hover_does_not_count_as_second_reaction_episode():
+    # LONG 0.500 setup. Candle 6 is a valid first hold. Candle 7 moves only
+    # 0.30 ATR away without touching, which is below the 0.50 ATR rearm rule.
+    # Candle 8 retests with a strong close, but it is still the same reaction
+    # episode and must not become hold #2 or emit a signal.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.20, 10.05], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.4, 10.45], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 10.15, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.30, 10.35], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    first = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    first_selected = next(item for item in first if item["selected"])
+    assert first_selected["signal_held_count"] == 1
+
+    same_episode = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
+    selected = next(item for item in same_episode if item["selected"])
+    assert selected["prior_signal_held_count"] >= 1
+    assert selected["signal_held_count"] == 1
+    assert values["_FIB_SIGNAL_DIRECTION"][8] is None
+
+
+
+def test_fib_failed_unrearmed_retest_breaks_sequence():
+    # Hold #1, then a weak retest before the 0.50 ATR move-away. The weak
+    # retest must reset the sequence immediately rather than preserving hold #1.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.02, 10.6, 10.05], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.25, 10.8, 10.45], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95, 10.55, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.10, 10.65, 10.35], dtype=float)
+    atr = np.ones(len(close))
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    first = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][6])
+    first_selected = next(item for item in first if item["selected"])
+    assert first_selected["signal_held_count"] == 1
+
+    failed = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][7])
+    failed_selected = next(item for item in failed if item["selected"])
+    assert failed_selected["signal_held_count"] == 0
+
+    later = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][9])
+    later_selected = next(item for item in later if item["selected"])
+    assert later_selected["signal_held_count"] == 1
+    assert values["_FIB_SIGNAL_DIRECTION"][9] is None
+
+
+
+def test_fib_unrearmed_duplicate_touch_cannot_trigger_entry():
+    # Build two accepted distinct holds. On candle 8, a temporarily large ATR
+    # makes the 4-point impulse <2 ATR, so the second accepted hold cannot
+    # signal. Candle 9 restores normal ATR and gives another strong touch in
+    # the same unrearmed cluster. Under the old raw-trigger gate it would now
+    # enter; the accepted-hold gate must keep it blocked.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.6, 10.05, 10.02], dtype=float)
+    high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.9, 10.8, 10.45], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 10.55, 9.95, 9.95], dtype=float)
+    close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.70, 10.70, 10.35], dtype=float)
+    atr = np.ones(len(close))
+    atr[8] = 2.2
+
+    values = fibonacci_retracement_arrays(
+        open_, high, low, close, atr,
+        pivot_strength=1,
+        minimum_impulse_atr=2.0,
+        dominant_lookback_bars=16,
+        dominant_recency_penalty=0.0,
+        dominant_replacement_ratio=1.10,
+    )
+
+    second = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
+    second_selected = next(item for item in second if item["selected"])
+    assert second_selected["signal_held_count"] >= 2
+    assert values["_FIB_SIGNAL_DIRECTION"][8] is None
+
+    duplicate = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][9])
+    duplicate_selected = next(item for item in duplicate if item["selected"])
+    assert duplicate_selected["signal_held_count"] >= 2
+    assert duplicate_selected["entry_valid"] is True
+    assert values["_FIB_SIGNAL_DIRECTION"][9] is None
 
 def test_fib_native_plan_uses_actual_progressive_signal_level():
     class Base:
@@ -773,11 +873,17 @@ def test_fib_reaction_quality_rewards_respected_repeat_tests_without_linear_touc
     low[12] = 14.9
     high[12] = 15.4
     close[12] = 15.3
-    # Candle 13 is a second respected test with a stronger rejection.
-    open_[13] = 15.0
-    low[13] = 14.85
-    high[13] = 15.5
-    close[13] = 15.35
+    # Candle 13 moves clearly away from the level (>0.5 ATR) without touching,
+    # rearming the candidate for a genuinely distinct second reaction.
+    open_[13] = 15.5
+    low[13] = 15.4
+    high[13] = 15.8
+    close[13] = 15.6
+    # Candle 14 then comes back and gives the second respected test.
+    open_[14] = 15.05
+    low[14] = 14.85
+    high[14] = 15.5
+    close[14] = 15.35
 
     values = fibonacci_retracement_arrays(
         open_, high, low, close, atr,
@@ -788,7 +894,7 @@ def test_fib_reaction_quality_rewards_respected_repeat_tests_without_linear_touc
     )
 
     first_inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][12])
-    second_inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][13])
+    second_inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][14])
     first = next(item for item in first_inventory if item["candidate_id"] == "LONG:8:10")
     second = next(item for item in second_inventory if item["candidate_id"] == "LONG:8:10")
 
@@ -808,7 +914,7 @@ def test_fib_reaction_quality_rewards_respected_repeat_tests_without_linear_touc
     assert second["entry_valid"] is True
     assert second["signal_held_ratio"] == 1.0
     assert second["last_signal_rejection_atr"] > first["last_signal_rejection_atr"]
-    # Candle 13 may score candle 12's completed held reaction, but not its own.
+    # Candle 14 may score candle 12's completed held reaction, but not its own.
     assert second["reaction_score"] > 0.0
     assert second["reaction_score"] > first["reaction_score"]
     assert second["final_score"] > second["structural_score"] * (
@@ -1016,7 +1122,8 @@ def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
     assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
     assert FIB_MINIMUM_HOLD_REJECTION_ATR == 0.25
-    assert FIB_RESEARCH_CONTEXT_VERSION == 18
+    assert FIB_HOLD_REARM_DISTANCE_ATR == 0.50
+    assert FIB_RESEARCH_CONTEXT_VERSION == 19
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
