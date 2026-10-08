@@ -14,6 +14,7 @@ from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBa
 from crypto_strategy_lab.prepared_cache import (
     PREPARED_CACHE_LOAD_MEMORY_LIMIT,
     PREPARED_CACHE_STORE_MEMORY_LIMIT,
+    PREPARED_CACHE_STORE_ROW_GROUP_SIZE,
     PreparedRunCache,
 )
 from crypto_strategy_lab.feature_research import feature_context_frame
@@ -356,6 +357,7 @@ def test_prepared_run_cache_uses_larger_budget_for_store_and_load(tmp_path, monk
     assert seen[1] == (PREPARED_CACHE_LOAD_MEMORY_LIMIT, 1)
     assert PREPARED_CACHE_STORE_MEMORY_LIMIT == "3GB"
     assert PREPARED_CACHE_LOAD_MEMORY_LIMIT == "1GB"
+    assert PREPARED_CACHE_STORE_ROW_GROUP_SIZE == 16384
 
 
 def test_prepared_run_cache_duckdb_connection_is_memory_bounded_and_spillable(tmp_path):
