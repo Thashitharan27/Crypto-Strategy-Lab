@@ -905,12 +905,23 @@ def fibonacci_retracement_arrays(
         )
         held = False
         if touched:
+            rejection_atr[i] = (
+                max(0.0, float(close_prices[i]) - level_price) / atr_now
+                if direction == "LONG"
+                else max(0.0, level_price - float(close_prices[i])) / atr_now
+            )
             if direction == "LONG":
-                held = float(close_prices[i]) > level_price and float(close_prices[i]) > float(open_prices[i])
-                rejection_atr[i] = max(0.0, float(close_prices[i]) - float(low_prices[i])) / atr_now
+                held = (
+                    float(close_prices[i]) > level_price
+                    and float(close_prices[i]) > float(open_prices[i])
+                    and rejection_atr[i] >= minimum_hold_rejection_atr
+                )
             else:
-                held = float(close_prices[i]) < level_price and float(close_prices[i]) < float(open_prices[i])
-                rejection_atr[i] = max(0.0, float(high_prices[i]) - float(close_prices[i])) / atr_now
+                held = (
+                    float(close_prices[i]) < level_price
+                    and float(close_prices[i]) < float(open_prices[i])
+                    and rejection_atr[i] >= minimum_hold_rejection_atr
+                )
         if held:
             state = "HELD"
 
@@ -925,15 +936,22 @@ def fibonacci_retracement_arrays(
         )
         signal_held = False
         if signal_touched:
+            signal_rejection_atr = (
+                max(0.0, float(close_prices[i]) - signal_level_price) / atr_now
+                if direction == "LONG"
+                else max(0.0, signal_level_price - float(close_prices[i])) / atr_now
+            )
             if direction == "LONG":
                 signal_held = (
                     float(close_prices[i]) > signal_level_price
                     and float(close_prices[i]) > float(open_prices[i])
+                    and signal_rejection_atr >= minimum_hold_rejection_atr
                 )
             else:
                 signal_held = (
                     float(close_prices[i]) < signal_level_price
                     and float(close_prices[i]) < float(open_prices[i])
+                    and signal_rejection_atr >= minimum_hold_rejection_atr
                 )
 
         if (
