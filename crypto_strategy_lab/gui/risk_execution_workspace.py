@@ -176,6 +176,25 @@ class RiskExecutionWorkspace(QWidget):
         )
         layout.addWidget(self.entry_card)
 
+        # Fibonacci entry modes are execution choices. Reuse the authoritative
+        # feature-form widgets here rather than creating duplicate controls:
+        # build_config/apply_config and existing saved configurations stay intact.
+        self.fib_entry_card = FormCard(
+            "Fibonacci Trade Plan",
+            note="Select Fib Retracement in Strategy Builder. These options are off by default.",
+        )
+        fib_controls = self.window.feature_form.widgets
+        for field, label in (
+            ("fib_half_swing_mode", "0.5 First Hold — Swing Stop / Impulse Target"),
+            ("fib_inherited_first_held", "Inherit First Hold After Impulse Extension"),
+            ("fib_first_0786_held", "Allow First Held at 0.786"),
+        ):
+            widget = fib_controls[field]
+            if isinstance(widget, QCheckBox):
+                widget.setText(label)
+            self.fib_entry_card.add_control(field, widget)
+        layout.addWidget(self.fib_entry_card)
+
         self.account_card = FormCard(
             "2. Account Risk & Position Sizing",
             note=(
@@ -452,6 +471,7 @@ class RiskExecutionWorkspace(QWidget):
         ema_920 = self._ema_920_selected()
         fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
         fib = self._signal_strategy_mode() == "FIB_RETRACEMENT"
+        self.fib_entry_card.setVisible(fib)
         cross_mode = {
             "EMA_20_100_CROSS": "LONG",
             "EMA_20_100_CROSS_SHORT": "SHORT",
