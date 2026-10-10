@@ -93,6 +93,7 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
         ),
         "fib_inherited_first_held": bool(getattr(config, "fib_inherited_first_held", False)),
         "fib_first_0786_held": bool(getattr(config, "fib_first_0786_held", False)),
+        "fib_half_swing_mode": bool(getattr(config, "fib_half_swing_mode", False)),
     }
 
 
