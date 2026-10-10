@@ -1388,3 +1388,17 @@ def test_fib_0786_first_hold_mode_is_explicitly_opt_in():
     )
     for key in default:
         np.testing.assert_array_equal(default[key], disabled[key])
+
+
+def test_prior_deep_fib_test_blocks_later_shallower_entry():
+    from crypto_strategy_lab.fib_retracement import _fib_has_prior_deep_test
+
+    # Earlier impulse ended at 20, hit 0.786 at 25, then extended to 40.
+    assert _fib_has_prior_deep_test(("SHORT", 10, 40), {(25, 20)})
+    assert _fib_has_prior_deep_test(("LONG", 10, 40), {(25, 20)})
+    # The same endpoint, an unformed earlier endpoint, or a later retest
+    # must not count as a prior-to-extension violation.
+    assert not _fib_has_prior_deep_test(("SHORT", 10, 40), {(41, 20)})
+    assert not _fib_has_prior_deep_test(("SHORT", 10, 40), {(25, 40)})
+    assert not _fib_has_prior_deep_test(("SHORT", 10, 40), {(19, 20)})
+    assert not _fib_has_prior_deep_test(("SHORT", 30, 40), {(25, 20)})
