@@ -171,6 +171,7 @@ def fibonacci_retracement_arrays(
     minimum_structural_competition_ratio: float = FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO,
     active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH,
     minimum_hold_rejection_atr: float = FIB_MINIMUM_HOLD_REJECTION_ATR,
+    inherited_first_held: bool = False,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -409,6 +410,25 @@ def fibonacci_retracement_arrays(
     # Each bar contributes at most once even when several extended/nested Fib
     # candidates share that anchor. Current-level held counts remain per-leg.
     anchor_reactions = {}
+    # For inherited entries, only a completed 0.5/0.618 hold belonging to a
+    # *different, earlier* impulse endpoint qualifies as prior confirmation.
+    anchor_held_events = {}
+
+    def _inherited_confirmation(leg, now):
+        if not inherited_first_held:
+            return False
+        direction, anchor_i, endpoint_i = leg
+        for event_bar, old_endpoint_i, level in anchor_held_events.get(
+            (direction, anchor_i), set()
+        ):
+            if (
+                anchor_i < old_endpoint_i < endpoint_i
+                and old_endpoint_i < event_bar < endpoint_i
+                and event_bar < now
+                and level in (0.500, 0.618)
+            ):
+                return True
+        return False
 
     def _anchor_history(leg, now):
         direction, start_i, _ = leg
@@ -585,6 +605,10 @@ def fibonacci_retracement_arrays(
                 state["hold_accepted_now"] = True
                 if not state["invalidated"]:
                     anchor_reactions[(direction, start_i)]["held"].add(now)
+                    if round(float(state["signal_level"]), 3) in (0.500, 0.618):
+                        anchor_held_events.setdefault((direction, start_i), set()).add(
+                            (now, end_i, round(float(state["signal_level"]), 3))
+                        )
             elif not reaction_valid:
                 # Any weak/failed touch breaks the clean sequence, even if the
                 # prior hold has not rearmed yet. A strong touch inside the same
@@ -768,7 +792,10 @@ def fibonacci_retracement_arrays(
         entry_candidates = [
             candidate
             for candidate in quality_candidates
-            if int(_candidate_state(candidate[:3]).get("score_signal_held_count", 0)) >= 1
+            if (
+                int(_candidate_state(candidate[:3]).get("score_signal_held_count", 0)) >= 1
+                or _inherited_confirmation(candidate[:3], i)
+            )
         ]
         entry_candidate_available = bool(entry_candidates)
         selection_pool = (
@@ -873,6 +900,7 @@ def fibonacci_retracement_arrays(
                     "signal_held_count": confluence["signal_held_count"],
                     "anchor_test_count": confluence["anchor_test_count"],
                     "anchor_held_count": confluence["anchor_held_count"],
+                    "inherited_confirmation": _inherited_confirmation(candidate_leg, i),
                     "signal_held_ratio": confluence["signal_held_ratio"],
                     "last_signal_rejection_atr": confluence["last_signal_rejection_atr"],
                     "bars_since_signal_test": confluence["bars_since_signal_test"],
@@ -1025,7 +1053,13 @@ def fibonacci_retracement_arrays(
         if (
             bool(selected_state.get("hold_accepted_now", False))
             and entry_candidate_available
-            and int(selected_state.get("signal_held_count", 0)) >= 2
+            and (
+                int(selected_state.get("signal_held_count", 0)) >= 2
+                or (
+                    _inherited_confirmation(leg, i)
+                    and int(selected_state.get("signal_held_count", 0)) >= 1
+                )
+            )
             and not active_entry_invalidated
             and leg_atr >= minimum_impulse_atr
             and not bool(selected_state["signalled"])
