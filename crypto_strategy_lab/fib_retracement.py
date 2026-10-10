@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 23
+FIB_RESEARCH_CONTEXT_VERSION = 24
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -193,6 +193,7 @@ def fibonacci_retracement_arrays(
     minimum_hold_rejection_atr: float = FIB_MINIMUM_HOLD_REJECTION_ATR,
     inherited_first_held: bool = False,
     first_0786_held: bool = False,
+    half_swing_mode: bool = False,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -832,6 +833,7 @@ def fibonacci_retracement_arrays(
             if (
                 int(_candidate_state(candidate[:3]).get("score_signal_held_count", 0)) >= 1
                 or _inherited_confirmation(candidate[:3], i)
+                or (half_swing_mode and float(_candidate_state(candidate[:3])["signal_level"]) == 0.500)
                 or (first_0786_held and float(_candidate_state(candidate[:3])["signal_level"]) == 0.786)
             )
         ]
@@ -1093,19 +1095,24 @@ def fibonacci_retracement_arrays(
             bool(selected_state.get("hold_accepted_now", False))
             and entry_candidate_available
             and (
-                int(selected_state.get("signal_held_count", 0)) >= 2
+                (half_swing_mode and active_signal_level == 0.500
+                 and int(selected_state.get("signal_held_count", 0)) >= 1)
+                or (not half_swing_mode and int(selected_state.get("signal_held_count", 0)) >= 2)
                 or (
-                    first_0786_held
+                    not half_swing_mode
+                    and first_0786_held
                     and active_signal_level == 0.786
                     and int(selected_state.get("signal_held_count", 0)) >= 1
                 )
                 or (
-                    _inherited_confirmation(leg, i)
+                    not half_swing_mode
+                    and _inherited_confirmation(leg, i)
                     and int(selected_state.get("signal_held_count", 0)) >= 1
                 )
             )
             and not active_entry_invalidated
             and not _candidate_entry_blocked(leg)
+            and (not half_swing_mode or active_signal_level == 0.500)
             and leg_atr >= minimum_impulse_atr
             and not bool(selected_state["signalled"])
         ):
@@ -1192,6 +1199,7 @@ class FibonacciRetracementMixin:
             ),
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
             minimum_hold_rejection_atr=float(self.fib_minimum_hold_rejection_atr),
+            half_swing_mode=bool(getattr(self.config, "fib_half_swing_mode", False)),
         )
 
     def _infer_signal_strategy_mode(self):
@@ -1235,6 +1243,9 @@ class FibonacciRetracementMixin:
         span = abs(end - start)
         if span <= 0:
             return None
+        half_swing = bool(getattr(self.config, "fib_half_swing_mode", False))
+        if half_swing and round(nearest, 3) != 0.500:
+            return None
         deeper = {
             0.382: 0.500,
             0.500: 0.618,
@@ -1243,13 +1254,12 @@ class FibonacciRetracementMixin:
         if deeper is None:
             return None
         stop_boundary = (
-            end - deeper * span
-            if direction == "LONG"
-            else end + deeper * span
+            start if half_swing else
+            (end - deeper * span if direction == "LONG" else end + deeper * span)
         )
         return {
             "nearest_level": nearest,
-            "stop_level": deeper,
+            "stop_level": 1.0 if half_swing else deeper,
             "stop_boundary": stop_boundary,
             "target_boundary": end,
             "impulse_start": start,
@@ -1295,7 +1305,7 @@ class FibonacciRetracementMixin:
         return {
             "passed": True,
             "applied": True,
-            "reason": "FIB_NEXT_LEVEL_STOP",
+            "reason": ("FIB_SWING_ANCHOR_STOP" if getattr(self.config, "fib_half_swing_mode", False) else "FIB_NEXT_LEVEL_STOP"),
             "distance": distance,
             "distance_atr": distance / atr,
             "level_price": boundary,
@@ -1338,7 +1348,9 @@ class FibonacciRetracementMixin:
                 "available_r": available_r,
             }
         minimum_r = float(getattr(self.config, "fib_minimum_target_r", 2.0))
-        if not np.isfinite(available_r) or available_r + 1e-12 < minimum_r:
+        if (not getattr(self.config, "fib_half_swing_mode", False)) and (
+            not np.isfinite(available_r) or available_r + 1e-12 < minimum_r
+        ):
             return {
                 "passed": False,
                 "reason": "FIB_TARGET_INSUFFICIENT_ROOM",
@@ -1348,7 +1360,10 @@ class FibonacciRetracementMixin:
                 "minimum_r": minimum_r,
             }
 
-        target_mode = str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
+        target_mode = (
+            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False)
+            else str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
+        )
         if target_mode == "FIXED_R":
             target_r = float(getattr(self.config, "fib_fixed_target_r", 2.0))
             target = entry + target_r * risk if direction == "LONG" else entry - target_r * risk

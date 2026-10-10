@@ -35,6 +35,7 @@ class DataConfig:
 class FeatureConfig:
     fib_inherited_first_held: bool = False
     fib_first_0786_held: bool = False
+    fib_half_swing_mode: bool = False
     atr_period: int = 14
     adx_period: int = 14
     di_pressure_lookback: int = 3
