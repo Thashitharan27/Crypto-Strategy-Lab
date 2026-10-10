@@ -1402,3 +1402,43 @@ def test_prior_deep_fib_test_blocks_later_shallower_entry():
     assert not _fib_has_prior_deep_test(("SHORT", 10, 40), {(25, 40)})
     assert not _fib_has_prior_deep_test(("SHORT", 10, 40), {(19, 20)})
     assert not _fib_has_prior_deep_test(("SHORT", 30, 40), {(25, 20)})
+
+
+def test_fib_half_swing_mode_uses_anchor_stop_and_impulse_target_for_both_sides():
+    class Base:
+        def _effective_trade_direction(self, _i):
+            return self.trade_direction
+        def _expected_entry_price(self, i, execution_i, direction):
+            return 10.0 if direction == "LONG" else 10.0
+    class Probe(FibonacciRetracementMixin, Base):
+        pass
+
+    for direction, start, end, expected_stop, expected_target in (
+        ("LONG", 8.0, 12.0, 7.9, 11.8),
+        ("SHORT", 12.0, 8.0, 12.1, 8.2),
+    ):
+        p = Probe.__new__(Probe)
+        p.signal_strategy_mode = FIB_RETRACEMENT_MODE
+        p.trade_direction = direction
+        p.config = SimpleNamespace(
+            fib_half_swing_mode=True, fib_stop_buffer_atr=0.1,
+            fib_target_buffer_atr=0.2, fib_target_mode="FIXED_R",
+            fib_minimum_target_r=2.0, strategy_timeframe_minutes=15,
+        )
+        p.open = np.array([10.0, 10.0])
+        p.atr_values = np.ones(2)
+        p.fib_retracement = {
+            "FIB_NEAREST_LEVEL": np.array([0.500, 0.500]),
+            "_FIB_SIGNAL_LEVEL": np.array([0.500, 0.500]),
+            "_FIB_IMPULSE_START_PRICE": np.array([start, start]),
+            "_FIB_IMPULSE_END_PRICE": np.array([end, end]),
+        }
+        stop = p._sr_stop_plan(0, 1)
+        target = p._fib_target_plan(0, 1)
+        assert stop["passed"] is True
+        assert stop["reason"] == "FIB_SWING_ANCHOR_STOP"
+        assert np.isclose(stop["stop_price"], expected_stop)
+        assert target["passed"] is True
+        assert target["target_mode"] == "IMPULSE_EXTREME"
+        assert np.isclose(target["limit_price"], expected_target)
+        assert target["available_r"] < 2.0
