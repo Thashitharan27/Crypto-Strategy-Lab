@@ -51,6 +51,7 @@ class PreparedPolicyConfig:
     fib_dominant_recency_penalty: float = FIB_DOMINANT_RECENCY_PENALTY
     fib_dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO
     fib_active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH
+    fib_inherited_first_held: bool = False
     market_symbol: str = "POLICY"
 
 
