@@ -383,7 +383,6 @@ class ExecutionConfig:
     fvg_context_enabled: bool = False
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
-    fib_half_swing_mode: bool = False
     fib_stop_buffer_atr: float = 0.05
     fib_target_mode: str = "IMPULSE_EXTREME"
     fib_fixed_target_r: float = 2.0
