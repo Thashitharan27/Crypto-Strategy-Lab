@@ -1348,3 +1348,30 @@ def test_fib_candidate_inventory_exposes_all_candidates_and_selected_leg():
         "prior_signal_held_count", "prior_hold_eligible",
         "structural_quality_eligible", "entry_valid", "selected",
     } <= set(selected)
+
+
+
+def test_inherited_fib_first_hold_only_uses_earlier_deep_reactions():
+    from crypto_strategy_lab.fib_retracement import _fib_has_earlier_deep_hold
+
+    # LONG anchor low@10: earlier endpoint@20 held 0.5 at bar 24.
+    assert _fib_has_earlier_deep_hold(("LONG", 10, 40), 45, {(24, 20, 0.500)})
+    # SHORT anchor high@10: symmetrical eligibility.
+    assert _fib_has_earlier_deep_hold(("SHORT", 10, 40), 45, {(24, 20, 0.618)})
+    # No shallow tests, events before the impulse endpoint, or same-endpoint inheritance.
+    assert not _fib_has_earlier_deep_hold(("LONG", 10, 40), 45, {(24, 20, 0.382)})
+    assert not _fib_has_earlier_deep_hold(("LONG", 10, 40), 45, {(19, 20, 0.500)})
+    assert not _fib_has_earlier_deep_hold(("LONG", 10, 40), 45, {(44, 40, 0.500)})
+    assert not _fib_has_earlier_deep_hold(("LONG", 10, 40), 45, {(46, 20, 0.500)})
+    # An entirely different anchor must not receive the old anchor's events.
+    assert not _fib_has_earlier_deep_hold(("LONG", 30, 40), 45, {(24, 20, 0.500)})
+
+
+def test_inherited_fib_setting_is_opt_in_and_preserves_default_output():
+    close = np.array([10, 8, 10, 14, 16, 13, 12, 11, 13, 15, 14, 16, 19, 17, 16], dtype=float)
+    high, low, atr = close + 0.4, close - 0.4, np.ones(len(close))
+    kw = dict(pivot_strength=1, dominant_lookback_bars=32)
+    strict = fibonacci_retracement_arrays(close, high, low, close, atr, **kw)
+    explicit = fibonacci_retracement_arrays(close, high, low, close, atr, inherited_first_held=False, **kw)
+    for key, value in strict.items():
+        np.testing.assert_array_equal(value, explicit[key])
