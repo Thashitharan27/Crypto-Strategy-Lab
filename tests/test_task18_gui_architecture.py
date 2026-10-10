@@ -177,7 +177,7 @@ def test_research_oriented_visible_groups_and_unique_native_fields():
     try:
         from crypto_strategy_lab.gui.v2_main_window import (EXECUTION_GROUPS,
             EXECUTION_PROFILE_GROUPS, FEATURE_GROUPS, STRATEGY_GROUPS, STRATEGY_PROFILE_GROUPS)
-        assert window.feature_form.section_titles == ("Price / Volatility", "DI", "Mean Reversion",
+        assert window.feature_form.section_titles == ("Fibonacci", "Price / Volatility", "DI", "Mean Reversion",
             "Ichimoku", "Regime", "Support / Resistance", "Open Interest", "Funding", "Positioning",
             "Taker Flow", "Trade Flow", "Order Book")
         execution = set(window.execution_form.section_titles) | set(
