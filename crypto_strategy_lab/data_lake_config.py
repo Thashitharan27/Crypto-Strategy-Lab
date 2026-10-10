@@ -35,6 +35,7 @@ class DataConfig:
 class FeatureConfig:
     fib_inherited_first_held: bool = False
     fib_first_0786_held: bool = False
+    fib_half_swing_mode: bool = False
     atr_period: int = 14
     adx_period: int = 14
     di_pressure_lookback: int = 3
@@ -382,6 +383,7 @@ class ExecutionConfig:
     fvg_context_enabled: bool = False
     fvg_context_timeframe_minutes: int = 240
     fvg_structure_swing_strength: int = 2
+    fib_half_swing_mode: bool = False
     fib_stop_buffer_atr: float = 0.05
     fib_target_mode: str = "IMPULSE_EXTREME"
     fib_fixed_target_r: float = 2.0
