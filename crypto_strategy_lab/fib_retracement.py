@@ -150,6 +150,17 @@ def _confirmed_pivot(high, low, j: int, strength: int) -> tuple[bool, bool]:
     return is_high, is_low
 
 
+def _fib_has_earlier_deep_hold(leg, now, events) -> bool:
+    """Only older, completed deep reactions from the same structural anchor."""
+    _direction, anchor_i, endpoint_i = leg
+    return any(
+        anchor_i < old_endpoint_i < event_bar < endpoint_i
+        and event_bar < now
+        and level in (0.500, 0.618)
+        for event_bar, old_endpoint_i, level in events
+    )
+
+
 def fibonacci_retracement_arrays(
     open_prices,
     high_prices,
@@ -417,18 +428,9 @@ def fibonacci_retracement_arrays(
     def _inherited_confirmation(leg, now):
         if not inherited_first_held:
             return False
-        direction, anchor_i, endpoint_i = leg
-        for event_bar, old_endpoint_i, level in anchor_held_events.get(
-            (direction, anchor_i), set()
-        ):
-            if (
-                anchor_i < old_endpoint_i < endpoint_i
-                and old_endpoint_i < event_bar < endpoint_i
-                and event_bar < now
-                and level in (0.500, 0.618)
-            ):
-                return True
-        return False
+        return _fib_has_earlier_deep_hold(
+            leg, now, anchor_held_events.get((leg[0], leg[1]), set())
+        )
 
     def _anchor_history(leg, now):
         direction, start_i, _ = leg
