@@ -76,6 +76,7 @@ def prepared_policy_config(run_config) -> PreparedPolicyConfig:
         ),
         strategy_profiles=profiles,
         fib_features_required=fib_features_needed(run_config.strategy.profiles),
+        fib_inherited_first_held=bool(getattr(run_config.features, "fib_inherited_first_held", False)),
     )
 
 
