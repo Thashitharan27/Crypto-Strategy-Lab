@@ -92,6 +92,7 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
             getattr(config, "fib_active_structure_reset_depth", 0.618)
         ),
         "fib_inherited_first_held": bool(getattr(config, "fib_inherited_first_held", False)),
+        "fib_first_0786_held": bool(getattr(config, "fib_first_0786_held", False)),
     }
 
 
