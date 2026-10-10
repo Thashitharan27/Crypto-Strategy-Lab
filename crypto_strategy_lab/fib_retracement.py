@@ -315,6 +315,12 @@ def fibonacci_retracement_arrays(
         score_signal_test_count = int(state.get("score_signal_test_count", 0))
         score_signal_held_count = int(state.get("score_signal_held_count", 0))
         reaction_score = 0.0
+        anchor_test_count, anchor_held_count = _anchor_history(candidate[:3], now)
+        # Anchor history informs selection quality, never execution eligibility.
+        # Cap its weight so repeated touches cannot overwhelm structural quality.
+        reaction_score += min(anchor_held_count, 3) * 0.02
+        if anchor_test_count >= 4 and anchor_held_count / anchor_test_count < 0.5:
+            reaction_score -= 0.03
         if score_signal_held_count >= 1:
             reaction_score += FIB_REACTION_FIRST_HELD_WEIGHT
         if score_signal_held_count >= 2:
@@ -375,6 +381,8 @@ def fibonacci_retracement_arrays(
             "rsi_divergence_code": divergence_code,
             "signal_test_count": signal_test_count,
             "signal_held_count": signal_held_count,
+            "anchor_test_count": anchor_test_count,
+            "anchor_held_count": anchor_held_count,
             "signal_held_ratio": float(held_ratio),
             "last_signal_rejection_atr": rejection_value,
             "bars_since_signal_test": bars_since_signal_test,
@@ -396,6 +404,19 @@ def fibonacci_retracement_arrays(
         if direction == "LONG":
             return (end_price - float(low_prices[now])) / span
         return (float(high_prices[now]) - end_price) / span
+
+    # Independent reaction history for the underlying confirmed swing anchor.
+    # Each bar contributes at most once even when several extended/nested Fib
+    # candidates share that anchor. Current-level held counts remain per-leg.
+    anchor_reactions = {}
+
+    def _anchor_history(leg, now):
+        direction, start_i, _ = leg
+        history = anchor_reactions.get((direction, start_i), {})
+        tests = history.get("tests", set())
+        held = history.get("held", set())
+        # Exclude reactions from this candle: selection must be causal.
+        return sum(t < now for t in tests), sum(t < now for t in held)
 
     def _candidate_state(leg):
         state = candidate_states.get(leg)
@@ -534,6 +555,12 @@ def fibonacci_retracement_arrays(
                 state["hold_rearmed"] = True
 
         if signal_touched_now:
+            anchor_key = (direction, start_i)
+            anchor_history = anchor_reactions.setdefault(
+                anchor_key, {"tests": set(), "held": set()}
+            )
+            if not state["invalidated"]:
+                anchor_history["tests"].add(now)
             state["last_signal_test"] = now
             state["signal_test_count"] = int(state["signal_test_count"]) + 1
             rejection = float("nan")
@@ -556,6 +583,8 @@ def fibonacci_retracement_arrays(
                 state["last_signal_rejection_atr"] = float(rejection)
                 state["hold_rearmed"] = False
                 state["hold_accepted_now"] = True
+                if not state["invalidated"]:
+                    anchor_reactions[(direction, start_i)]["held"].add(now)
             elif not reaction_valid:
                 # Any weak/failed touch breaks the clean sequence, even if the
                 # prior hold has not rearmed yet. A strong touch inside the same
@@ -842,6 +871,8 @@ def fibonacci_retracement_arrays(
                     "rsi_divergence_code": confluence["rsi_divergence_code"],
                     "signal_test_count": confluence["signal_test_count"],
                     "signal_held_count": confluence["signal_held_count"],
+                    "anchor_test_count": confluence["anchor_test_count"],
+                    "anchor_held_count": confluence["anchor_held_count"],
                     "signal_held_ratio": confluence["signal_held_ratio"],
                     "last_signal_rejection_atr": confluence["last_signal_rejection_atr"],
                     "bars_since_signal_test": confluence["bars_since_signal_test"],
