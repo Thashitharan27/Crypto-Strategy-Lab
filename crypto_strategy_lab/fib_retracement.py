@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 22
+FIB_RESEARCH_CONTEXT_VERSION = 23
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -148,6 +148,15 @@ def _confirmed_pivot(high, low, j: int, strength: int) -> tuple[bool, bool]:
     is_high = bool(h > np.max(left_h) and h > np.max(right_h))
     is_low = bool(l < np.min(left_l) and l < np.min(right_l))
     return is_high, is_low
+
+
+def _fib_has_prior_deep_test(leg, events) -> bool:
+    """Prior completed endpoint tested 0.786 before the newer extreme."""
+    _direction, anchor_i, endpoint_i = leg
+    return any(
+        anchor_i < old_end < test_bar < endpoint_i
+        for test_bar, old_end in events
+    )
 
 
 def _fib_has_earlier_deep_hold(leg, now, events) -> bool:
@@ -427,13 +436,17 @@ def fibonacci_retracement_arrays(
     anchor_held_events = {}
     anchor_deep_tests = {}
 
+    def _prior_deep_test(leg):
+        # An older endpoint from this anchor already tested 0.786 before
+        # this later endpoint existed. All shallower entry modes must respect it.
+        return _fib_has_prior_deep_test(
+            leg, anchor_deep_tests.get((leg[0], leg[1]), set())
+        )
+
     def _inherited_confirmation(leg, now):
         if not inherited_first_held:
             return False
-        if any(
-            old_end < test_bar < leg[2]
-            for test_bar, old_end in anchor_deep_tests.get((leg[0], leg[1]), set())
-        ):
+        if _prior_deep_test(leg):
             return False
         return _fib_has_earlier_deep_hold(
             leg, now, anchor_held_events.get((leg[0], leg[1]), set())
@@ -446,6 +459,10 @@ def fibonacci_retracement_arrays(
         held = history.get("held", set())
         # Exclude reactions from this candle: selection must be causal.
         return sum(t < now for t in tests), sum(t < now for t in held)
+
+    def _candidate_entry_blocked(leg):
+        state = _candidate_state(leg)
+        return _prior_deep_test(leg) and float(state["signal_level"]) < 0.786
 
     def _candidate_state(leg):
         state = candidate_states.get(leg)
@@ -788,6 +805,7 @@ def fibonacci_retracement_arrays(
             candidate
             for candidate in structural_candidates
             if not bool(_candidate_state(candidate[:3])["invalidated"])
+            and not _candidate_entry_blocked(candidate[:3])
         ]
         structurally_viable_candidates = [
             candidate
@@ -921,6 +939,7 @@ def fibonacci_retracement_arrays(
                     "anchor_test_count": confluence["anchor_test_count"],
                     "anchor_held_count": confluence["anchor_held_count"],
                     "inherited_confirmation": _inherited_confirmation(candidate_leg, i),
+                    "prior_deep_test_blocks_shallow": _candidate_entry_blocked(candidate_leg),
                     "signal_held_ratio": confluence["signal_held_ratio"],
                     "last_signal_rejection_atr": confluence["last_signal_rejection_atr"],
                     "bars_since_signal_test": confluence["bars_since_signal_test"],
@@ -1086,6 +1105,7 @@ def fibonacci_retracement_arrays(
                 )
             )
             and not active_entry_invalidated
+            and not _candidate_entry_blocked(leg)
             and leg_atr >= minimum_impulse_atr
             and not bool(selected_state["signalled"])
         ):
