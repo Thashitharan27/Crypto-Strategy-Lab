@@ -39,6 +39,7 @@ from crypto_strategy_lab.strategy_rule_model import (
 
 FRIENDLY_LABELS = {
     "fib_inherited_first_held": "Allow inherited first-held Fib entry",
+    "fib_first_0786_held": "Allow first-held entry at Fib 0.786",
     "atr_period": "ATR period",
     "bb_period": "Bollinger period",
     "bb_stddevs": "Bollinger deviation",

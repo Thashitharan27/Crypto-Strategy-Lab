@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 21
+FIB_RESEARCH_CONTEXT_VERSION = 22
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -183,6 +183,7 @@ def fibonacci_retracement_arrays(
     active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH,
     minimum_hold_rejection_atr: float = FIB_MINIMUM_HOLD_REJECTION_ATR,
     inherited_first_held: bool = False,
+    first_0786_held: bool = False,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -424,9 +425,15 @@ def fibonacci_retracement_arrays(
     # For inherited entries, only a completed 0.5/0.618 hold belonging to a
     # *different, earlier* impulse endpoint qualifies as prior confirmation.
     anchor_held_events = {}
+    anchor_deep_tests = {}
 
     def _inherited_confirmation(leg, now):
         if not inherited_first_held:
+            return False
+        if any(
+            old_end < test_bar < leg[2]
+            for test_bar, old_end in anchor_deep_tests.get((leg[0], leg[1]), set())
+        ):
             return False
         return _fib_has_earlier_deep_hold(
             leg, now, anchor_held_events.get((leg[0], leg[1]), set())
@@ -499,8 +506,13 @@ def fibonacci_retracement_arrays(
         )
         penetration = _leg_wick_penetration(leg, now)
         previous_signal_level = float(state["signal_level"])
-        if penetration >= FIB_LEVELS[-1]:
+        deep_close_broken = retracement > FIB_LEVELS[-1]
+        if penetration >= FIB_LEVELS[-1] and not first_0786_held:
             state["invalidated"] = True
+        elif deep_close_broken:
+            state["invalidated"] = True
+        elif first_0786_held and penetration >= (0.618 + 0.786) / 2.0:
+            state["signal_level"] = 0.786
         elif penetration >= (0.500 + 0.618) / 2.0:
             state["signal_level"] = 0.618
         elif penetration >= (0.382 + 0.500) / 2.0 and previous_signal_level < 0.500:
@@ -518,7 +530,7 @@ def fibonacci_retracement_arrays(
 
         if retracement >= active_structure_reset_depth:
             state["structure_reset"] = True
-        state["broken"] = bool(retracement > FIB_LEVELS[-1])
+        state["broken"] = bool(deep_close_broken)
 
         # Candidate ranking must only use reaction evidence that existed before
         # this candle. Preserve the live counters for audit/output, but snapshot
@@ -544,6 +556,10 @@ def fibonacci_retracement_arrays(
             state["tests"] = int(state["tests"]) + 1
             state["last_test"] = now
 
+        if penetration >= FIB_LEVELS[-1]:
+            anchor_deep_tests.setdefault((direction, start_i), set()).add(
+                (now, end_i)
+            )
         signal_price = levels_price[float(state["signal_level"])]
         state["hold_accepted_now"] = False
         signal_touched_now = float(low_prices[now]) <= signal_price <= float(high_prices[now])
@@ -559,6 +575,7 @@ def fibonacci_retracement_arrays(
             0.382: 0.236,
             0.500: 0.382,
             0.618: 0.500,
+            0.786: 0.618,
         }.get(round(float(state["signal_level"]), 3))
         if (
             shallower_level is not None
@@ -797,6 +814,7 @@ def fibonacci_retracement_arrays(
             if (
                 int(_candidate_state(candidate[:3]).get("score_signal_held_count", 0)) >= 1
                 or _inherited_confirmation(candidate[:3], i)
+                or (first_0786_held and float(_candidate_state(candidate[:3])["signal_level"]) == 0.786)
             )
         ]
         entry_candidate_available = bool(entry_candidates)
@@ -1057,6 +1075,11 @@ def fibonacci_retracement_arrays(
             and entry_candidate_available
             and (
                 int(selected_state.get("signal_held_count", 0)) >= 2
+                or (
+                    first_0786_held
+                    and active_signal_level == 0.786
+                    and int(selected_state.get("signal_held_count", 0)) >= 1
+                )
                 or (
                     _inherited_confirmation(leg, i)
                     and int(selected_state.get("signal_held_count", 0)) >= 1

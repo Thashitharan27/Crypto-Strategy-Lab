@@ -62,7 +62,7 @@ STRATEGY_GROUPS = (
 )
 
 FEATURE_GROUPS = (
-    ("Fibonacci", ("fib_inherited_first_held",), "Optional first-held entry using earlier deep reactions from the same swing anchor"),
+    ("Fibonacci", ("fib_inherited_first_held", "fib_first_0786_held"), "Optional first-held entry using earlier deep reactions from the same swing anchor"),
     ("Price / Volatility", ("atr_period", "bb_period", "bb_stddevs"), None),
     ("DI", ("adx_period", "di_pressure_lookback"), None),
     ("Mean Reversion", (

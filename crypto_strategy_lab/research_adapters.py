@@ -52,6 +52,7 @@ class PreparedPolicyConfig:
     fib_dominant_replacement_ratio: float = FIB_DOMINANT_REPLACEMENT_RATIO
     fib_active_structure_reset_depth: float = FIB_ACTIVE_STRUCTURE_RESET_DEPTH
     fib_inherited_first_held: bool = False
+    fib_first_0786_held: bool = False
     market_symbol: str = "POLICY"
 
 
@@ -77,6 +78,7 @@ def prepared_policy_config(run_config) -> PreparedPolicyConfig:
         strategy_profiles=profiles,
         fib_features_required=fib_features_needed(run_config.strategy.profiles),
         fib_inherited_first_held=bool(getattr(run_config.features, "fib_inherited_first_held", False)),
+        fib_first_0786_held=bool(getattr(run_config.features, "fib_first_0786_held", False)),
     )
 
 

@@ -1375,3 +1375,16 @@ def test_inherited_fib_setting_is_opt_in_and_preserves_default_output():
     explicit = fibonacci_retracement_arrays(close, high, low, close, atr, inherited_first_held=False, **kw)
     for key, value in strict.items():
         np.testing.assert_array_equal(value, explicit[key])
+
+
+def test_fib_0786_first_hold_mode_is_explicitly_opt_in():
+    """The existing strategy remains bit-for-bit unchanged when mode is disabled."""
+    close = np.array([10, 8, 10, 14, 16, 13, 12, 11, 13, 15, 14, 16, 19, 17, 16], dtype=float)
+    high, low, atr = close + 0.4, close - 0.4, np.ones(len(close))
+    kw = dict(pivot_strength=1, dominant_lookback_bars=32)
+    default = fibonacci_retracement_arrays(close, high, low, close, atr, **kw)
+    disabled = fibonacci_retracement_arrays(
+        close, high, low, close, atr, first_0786_held=False, **kw
+    )
+    for key in default:
+        np.testing.assert_array_equal(default[key], disabled[key])
