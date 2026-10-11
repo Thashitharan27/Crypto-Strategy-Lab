@@ -1245,6 +1245,9 @@ class FibonacciRetracementMixin:
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
             minimum_hold_rejection_atr=float(self.fib_minimum_hold_rejection_atr),
             half_swing_mode=bool(getattr(self.config, "fib_half_swing_mode", False)),
+            third_retest_entry=bool(getattr(self.config, "fib_third_retest_entry", False)),
+            inherited_first_held=bool(getattr(self.config, "fib_inherited_first_held", False)),
+            first_0786_held=bool(getattr(self.config, "fib_first_0786_held", False)),
         )
 
     def _infer_signal_strategy_mode(self):
