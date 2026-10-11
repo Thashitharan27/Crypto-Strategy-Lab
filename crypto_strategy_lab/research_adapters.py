@@ -54,6 +54,7 @@ class PreparedPolicyConfig:
     fib_inherited_first_held: bool = False
     fib_first_0786_held: bool = False
     fib_half_swing_mode: bool = False
+    fib_third_retest_entry: bool = False
     market_symbol: str = "POLICY"
 
 
@@ -81,6 +82,7 @@ def prepared_policy_config(run_config) -> PreparedPolicyConfig:
         fib_inherited_first_held=bool(getattr(run_config.features, "fib_inherited_first_held", False)),
         fib_first_0786_held=bool(getattr(run_config.features, "fib_first_0786_held", False)),
         fib_half_swing_mode=bool(getattr(run_config.features, "fib_half_swing_mode", False)),
+        fib_third_retest_entry=bool(getattr(run_config.features, "fib_third_retest_entry", False)),
     )
 
 
