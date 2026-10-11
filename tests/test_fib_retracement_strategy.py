@@ -1442,3 +1442,40 @@ def test_fib_half_swing_mode_uses_anchor_stop_and_impulse_target_for_both_sides(
         assert target["target_mode"] == "IMPULSE_EXTREME"
         assert np.isclose(target["limit_price"], expected_target)
         assert target["available_r"] < 2.0
+
+
+def test_fib_fixed_r_ignores_insufficient_prior_impulse_room():
+    """Fixed R must trade even when the old impulse offers less than 3R room."""
+    class Base:
+        def _effective_trade_direction(self, _i):
+            return "LONG"
+        def _expected_entry_price(self, i, execution_i, direction):
+            return 10.0
+    class Probe(FibonacciRetracementMixin, Base):
+        pass
+
+    p = Probe.__new__(Probe)
+    p.signal_strategy_mode = FIB_RETRACEMENT_MODE
+    p.config = SimpleNamespace(
+        fib_half_swing_mode=False, fib_stop_buffer_atr=0.0,
+        fib_target_buffer_atr=0.2, fib_target_mode="FIXED_R",
+        fib_fixed_target_r=3.0, fib_minimum_target_r=3.0,
+        strategy_timeframe_minutes=15,
+    )
+    p.open = np.array([10.0, 10.0])
+    p.atr_values = np.ones(2)
+    p.fib_retracement = {
+        "FIB_NEAREST_LEVEL": np.array([0.500, 0.500]),
+        "_FIB_SIGNAL_LEVEL": np.array([0.500, 0.500]),
+        "_FIB_IMPULSE_START_PRICE": np.array([8.0, 8.0]),
+        "_FIB_IMPULSE_END_PRICE": np.array([11.0, 11.0]),
+    }
+    fixed = p._fib_target_plan(0, 1)
+    assert fixed["passed"] is True
+    assert fixed["available_r"] < 3.0
+    assert np.isclose(fixed["limit_price"], 12.562)
+
+    p.config.fib_target_mode = "IMPULSE_EXTREME"
+    extreme = p._fib_target_plan(0, 1)
+    assert extreme["passed"] is False
+    assert extreme["reason"] == "FIB_TARGET_INSUFFICIENT_ROOM"

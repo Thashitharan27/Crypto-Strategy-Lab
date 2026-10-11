@@ -642,8 +642,8 @@ class RiskExecutionWorkspace(QWidget):
         fib_target_mode = str(self.account["fib_target_mode"].currentData() or "IMPULSE_EXTREME")
         self.target_card.set_row_visible("fib_target_method", fib)
         self.target_card.set_row_visible("fib_fixed_target_r", fib and fib_target_mode == "FIXED_R")
-        self.target_card.set_row_visible("fib_target_buffer_atr", fib)
-        self.target_card.set_row_visible("fib_minimum_target_r", fib)
+        self.target_card.set_row_visible("fib_target_buffer_atr", fib and fib_target_mode != "FIXED_R")
+        self.target_card.set_row_visible("fib_minimum_target_r", fib and fib_target_mode != "FIXED_R")
         if ema_920:
             self.target_card.set_row_visible("sr_take_profit_mode", False)
             self.target_card.set_row_visible("reward_risk_ratio", False)
@@ -871,7 +871,7 @@ class RiskExecutionWorkspace(QWidget):
             if fib_target_mode == "FIXED_R":
                 target = (
                     f"fixed {execution.fib_fixed_target_r:g}R actual take-profit from the actual Fib stop; "
-                    f"{room_gate}"
+                    "prior impulse room does not veto this target"
                 )
             else:
                 target = (
