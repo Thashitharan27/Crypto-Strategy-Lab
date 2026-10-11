@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 24
+FIB_RESEARCH_CONTEXT_VERSION = 25
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -197,6 +197,7 @@ def fibonacci_retracement_arrays(
     third_retest_entry: bool = False,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
+    half_swing_mode = bool(half_swing_mode) and not third_retest_entry
     open_prices = np.asarray(open_prices, dtype=float)
     high_prices = np.asarray(high_prices, dtype=float)
     low_prices = np.asarray(low_prices, dtype=float)
@@ -1135,9 +1136,8 @@ def fibonacci_retracement_arrays(
             and entry_candidate_available
             and (
                 (third_retest_entry and not half_swing_mode
-                 and int(selected_state.get("signal_held_count", 0)) >= 3
-                 and (float(low_prices[i]) < signal_level_price if direction == "LONG"
-                      else float(high_prices[i]) > signal_level_price))
+                 and active_signal_level in {0.382, 0.500, 0.618}
+                 and int(selected_state.get("signal_held_count", 0)) >= 2)
                 or (not third_retest_entry and half_swing_mode and active_signal_level == 0.500
                  and int(selected_state.get("signal_held_count", 0)) >= 1)
                 or (not third_retest_entry and not half_swing_mode and int(selected_state.get("signal_held_count", 0)) >= 2)
@@ -1244,11 +1244,147 @@ class FibonacciRetracementMixin:
             ),
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
             minimum_hold_rejection_atr=float(self.fib_minimum_hold_rejection_atr),
-            half_swing_mode=bool(getattr(self.config, "fib_half_swing_mode", False)),
+            half_swing_mode=bool(getattr(self.config, "fib_half_swing_mode", False)) and not bool(getattr(self.config, "fib_third_retest_entry", False)),
             third_retest_entry=bool(getattr(self.config, "fib_third_retest_entry", False)),
             inherited_first_held=bool(getattr(self.config, "fib_inherited_first_held", False)),
             first_0786_held=bool(getattr(self.config, "fib_first_0786_held", False)),
         )
+
+    def _fib_deeper_entry_enabled(self):
+        # Keep the persisted key for compatibility with existing saved configs.
+        return (getattr(self, "signal_strategy_mode", "DI") == FIB_RETRACEMENT_MODE
+                and bool(getattr(self.config, "fib_third_retest_entry", False)))
+
+    def _entry_decision(self, i, active_at_candle_start=False):
+        if not self._fib_deeper_entry_enabled():
+            return super()._entry_decision(i, active_at_candle_start)
+        if getattr(self, "pending_next_open_entry", None) or i + 1 >= len(self.times):
+            return None
+        if not self._should_enter(i):
+            return None
+        direction = self._selected_direction(i)
+        plan = self._fib_native_plan_values(i, direction)
+        if plan is None:
+            return None
+        trigger = (plan["impulse_end"] - plan["nearest_level"] * plan["impulse_span"]
+                   if direction == "LONG" else
+                   plan["impulse_end"] + plan["nearest_level"] * plan["impulse_span"])
+        return {
+            "indicator_index": i, "execution_index": i + 1,
+            "scheduled_timestamp": pd.Timestamp(self.times[i + 1]),
+            "actual_entry_timestamp": None, "defer_to_next_open": True,
+            "entry_schedule_status": "FIB_DEEPER_LIMIT_PENDING",
+            "fill_price_source": "FIB_DEEPER_LIMIT",
+            "fib_deeper_limit": True, "fib_direction": direction,
+            "fib_trigger": trigger,
+        }
+
+    def _fib_limit_fill(self, i, trigger, direction):
+        start = pd.Timestamp(self.times[i])
+        end = start + self.entry_delta
+        frame = getattr(self, "intrabar_data", None)
+        if getattr(self.config, "use_intrabar_data", False) and frame is not None:
+            fast_window = getattr(frame, "fast_window", None)
+            if callable(fast_window):
+                rows = ((timestamp, opening, high, low)
+                        for _, timestamp, opening, high, low in fast_window(start, end).rows())
+            else:
+                window = frame[(frame.timestamp >= start) & (frame.timestamp < end)]
+                rows = ((row.timestamp, row.open, row.high, row.low)
+                        for row in window.itertuples())
+        else:
+            rows = [(start, self.open[i], self.high[i], self.low[i])]
+        for timestamp, opening, high, low in rows:
+            if direction == "LONG" and float(low) <= trigger:
+                return min(float(opening), trigger), pd.Timestamp(timestamp)
+            if direction == "SHORT" and float(high) >= trigger:
+                return max(float(opening), trigger), pd.Timestamp(timestamp)
+        return None
+
+    def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
+        decision = getattr(self, "pending_next_open_entry", None)
+        if not decision or not decision.get("fib_deeper_limit"):
+            return super()._execute_pending_next_open_entry(i, active_at_candle_start)
+        if int(decision["execution_index"]) != i:
+            return
+        self.pending_next_open_entry = None
+        signal_i = int(decision["indicator_index"])
+        values = self.fib_retracement
+        # At the open, only the preceding completed bar can cancel the order.
+        same_leg = all(values[key][i - 1] == values[key][signal_i] for key in (
+            "_FIB_IMPULSE_START_INDEX", "_FIB_IMPULSE_END_INDEX"))
+        direction = decision["fib_direction"]
+        end = float(values["_FIB_IMPULSE_END_PRICE"][signal_i])
+        anchor = float(values["_FIB_IMPULSE_START_PRICE"][signal_i])
+        depth = ((end - self.close[i - 1]) if direction == "LONG" else
+                 (self.close[i - 1] - end)) / abs(end - anchor)
+        if not same_leg or depth > 0.786 or not self._in_trading_window(i):
+            self._record_skipped_signal(signal_i, "FIB_DEEPER_LIMIT_INVALIDATED")
+            return
+        if active_at_candle_start or len(self.active_pairs) >= self.config.max_active_pairs:
+            self._record_skipped_signal(signal_i, "FIB_DEEPER_LIMIT_ACTIVE_TRADE")
+            return
+        fill = self._fib_limit_fill(i, float(decision["fib_trigger"]), direction)
+        if fill is None:
+            if i + 1 < len(self.times):
+                decision["execution_index"] = i + 1
+                self.pending_next_open_entry = decision
+            else:
+                self._record_skipped_signal(signal_i, "FIB_DEEPER_LIMIT_NOT_REACHED")
+            return
+        raw, timestamp = fill
+        decision.update(fill_price=raw, actual_entry_timestamp=timestamp,
+                        entry_schedule_status="FIB_DEEPER_LIMIT_FILLED")
+        self._pending_fib_fill_price = raw
+        try:
+            passed, reason = self._entry_filter_result(signal_i, i)
+            if passed:
+                before = len(self.active_pairs)
+                self._open_pair(i, passed, reason, decision)
+                if len(self.active_pairs) > before:
+                    # Existing exit scanners start at the actual entry timestamp.
+                    pair = self.active_pairs[-1]
+                    for pos in pair.positions():
+                        pos.fib_limit_fill_time = timestamp
+                        pos.fib_limit_fill_price = raw
+                    scan_position = getattr(self, "_scan_position_exit", None)
+                    if callable(scan_position):
+                        for pos in pair.positions():
+                            scan_position(pair, pos, i)
+                    else:
+                        self._scan_pair_exit(pair, i)
+            else:
+                self._record_skipped_signal(signal_i, reason)
+        finally:
+            self._pending_fib_fill_price = None
+
+    def _maybe_exit_bar(self, pos, i, high, low, timestamp, source):
+        fill_time = getattr(pos, "fib_limit_fill_time", None)
+        fallback_fill_bar = (
+            str(getattr(source, "value", source)) == "15M_FALLBACK"
+            and getattr(pos, "entry_index", None) == i
+        )
+        if fill_time is not None and (fallback_fill_bar or pd.Timestamp(timestamp) == pd.Timestamp(fill_time)):
+            if fallback_fill_bar:
+                # The larger candle starts before the fill. Its conservative
+                # stop outcome must never be timestamped before the entry.
+                timestamp = fill_time
+            # OHLC cannot establish whether a profitable extreme preceded a
+            # pullback fill. Conservatively allow stops but defer profits and
+            # trailing/BE activation until a subsequent execution bar.
+            raw = float(pos.fib_limit_fill_price)
+            if str(getattr(pos.side, "value", pos.side)).upper() == "LONG":
+                high = min(float(high), raw)
+            else:
+                low = max(float(low), raw)
+        return super()._maybe_exit_bar(pos, i, high, low, timestamp, source)
+
+    def _expected_entry_price(self, indicator_i, execution_i, direction):
+        raw = getattr(self, "_pending_fib_fill_price", None)
+        if raw is not None and self._fib_deeper_entry_enabled():
+            return float(raw) * (1 + self.config.slippage if direction == "LONG"
+                                 else 1 - self.config.slippage)
+        return super()._expected_entry_price(indicator_i, execution_i, direction)
 
     def _infer_signal_strategy_mode(self):
         for profile in self.config.strategy_profiles.values():
@@ -1291,7 +1427,12 @@ class FibonacciRetracementMixin:
         span = abs(end - start)
         if span <= 0:
             return None
-        half_swing = bool(getattr(self.config, "fib_half_swing_mode", False))
+        deeper_entry = self._fib_deeper_entry_enabled()
+        if deeper_entry:
+            nearest = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786}.get(round(nearest, 3))
+            if nearest is None:
+                return None
+        half_swing = bool(getattr(self.config, "fib_half_swing_mode", False)) and not deeper_entry
         if half_swing and round(nearest, 3) != 0.500:
             return None
         deeper = {
@@ -1299,6 +1440,8 @@ class FibonacciRetracementMixin:
             0.500: 0.618,
             0.618: 0.786,
         }.get(round(nearest, 3))
+        if deeper_entry and round(nearest, 3) == 0.786:
+            deeper = 1.0
         if deeper is None:
             return None
         stop_boundary = (
@@ -1353,7 +1496,7 @@ class FibonacciRetracementMixin:
         return {
             "passed": True,
             "applied": True,
-            "reason": ("FIB_SWING_ANCHOR_STOP" if getattr(self.config, "fib_half_swing_mode", False) else "FIB_NEXT_LEVEL_STOP"),
+            "reason": ("FIB_SWING_ANCHOR_STOP" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() else "FIB_NEXT_LEVEL_STOP"),
             "distance": distance,
             "distance_atr": distance / atr,
             "level_price": boundary,
@@ -1400,10 +1543,10 @@ class FibonacciRetracementMixin:
         # vetoed just because the previous impulse extreme offers less room.
         # The impulse-extreme mode retains the minimum-room protection.
         target_mode = (
-            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False)
+            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled()
             else str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
         )
-        if (not getattr(self.config, "fib_half_swing_mode", False)) and target_mode != "FIXED_R" and (
+        if (not getattr(self.config, "fib_half_swing_mode", False) or self._fib_deeper_entry_enabled()) and target_mode != "FIXED_R" and (
             not np.isfinite(available_r) or available_r + 1e-12 < minimum_r
         ):
             return {
@@ -1416,7 +1559,7 @@ class FibonacciRetracementMixin:
             }
 
         target_mode = (
-            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False)
+            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled()
             else str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
         )
         if target_mode == "FIXED_R":
@@ -1443,6 +1586,8 @@ class FibonacciRetracementMixin:
         passed, reason = super()._entry_filter_result(i, execution_i)
         if not passed or getattr(self, "signal_strategy_mode", "DI") != FIB_RETRACEMENT_MODE:
             return passed, reason
+        if self._fib_deeper_entry_enabled() and self._effective_trade_direction(i) != self._selected_direction(i):
+            return False, "FIB_DEEPER_LIMIT_DIRECTION_FLIP_UNSUPPORTED"
         target = self._fib_target_plan(i, execution_i)
         if not target["passed"]:
             return False, str(target["reason"])

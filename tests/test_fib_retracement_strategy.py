@@ -1150,7 +1150,7 @@ def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
     assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
     assert FIB_MINIMUM_HOLD_REJECTION_ATR == 0.25
-    assert FIB_RESEARCH_CONTEXT_VERSION == 21
+    assert FIB_RESEARCH_CONTEXT_VERSION == 25
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
@@ -1522,3 +1522,247 @@ def test_fib_engine_forwards_third_retest_mode(monkeypatch):
     assert recorded["third_retest_entry"] is True
     assert recorded["inherited_first_held"] is False
     assert recorded["first_0786_held"] is False
+
+
+class _FibLimitBase:
+    def _should_enter(self, i):
+        return self._selected_direction(i) is not None
+    def _in_trading_window(self, i):
+        return True
+    def _effective_trade_direction(self, i):
+        return self._selected_direction(i)
+    def _entry_filter_result(self, i, execution_i=None):
+        return True, "passed"
+    def _open_pair(self, i, passed, reason, schedule):
+        self.fills.append(dict(schedule, stop=self._sr_stop_plan(schedule["indicator_index"], i),
+                               target=self._fib_target_plan(schedule["indicator_index"], i)))
+    def _record_skipped_signal(self, i, reason):
+        self.skips.append(reason)
+    def _maybe_exit_bar(self, pos, i, high, low, timestamp, source):
+        self.last_exit_timestamp = timestamp
+        return high, low
+
+
+class _FibLimitProbe(FibonacciRetracementMixin, _FibLimitBase):
+    pass
+
+
+def _limit_probe(direction="LONG", level=0.5):
+    import pandas as pd
+    p = _FibLimitProbe()
+    p.signal_strategy_mode = FIB_RETRACEMENT_MODE
+    p.config = SimpleNamespace(fib_third_retest_entry=True, fib_half_swing_mode=False,
+        slippage=0., max_active_pairs=1, use_intrabar_data=False,
+        fib_target_mode="FIXED_R", fib_fixed_target_r=3., fib_stop_buffer_atr=0.)
+    p.times = pd.date_range("2025-01-01", periods=4, freq="h")
+    p.entry_delta = pd.Timedelta(hours=1)
+    p.open = np.array([151., 145., 140., 135.])
+    p.high = p.open + 2
+    p.low = p.open - 2
+    p.close = p.open.copy()
+    p.atr_values = np.ones(4)
+    start, end = (100., 200.) if direction == "LONG" else (200., 100.)
+    p.fib_retracement = {
+        "FIB_NEAREST_LEVEL": np.full(4, level),
+        "_FIB_SIGNAL_LEVEL": np.array([level, np.nan, np.nan, np.nan]),
+        "_FIB_SIGNAL_DIRECTION": np.array([direction, None, None, None], dtype=object),
+        "_FIB_IMPULSE_START_PRICE": np.full(4, start),
+        "_FIB_IMPULSE_END_PRICE": np.full(4, end),
+        "_FIB_IMPULSE_START_INDEX": np.zeros(4),
+        "_FIB_IMPULSE_END_INDEX": np.ones(4),
+    }
+    p.active_pairs = []
+    p.pending_next_open_entry = None
+    p.fills, p.skips = [], []
+    return p
+
+
+def test_deeper_limit_waits_and_fills_without_confirmation_using_fill_risk():
+    p = _limit_probe()
+    decision = p._entry_decision(0)
+    assert decision["fib_trigger"] == 138.2
+    assert decision["execution_index"] == 1  # Never fill the second-hold candle.
+    assert not p.fills
+    p.pending_next_open_entry = decision
+    p._execute_pending_next_open_entry(1)
+    assert not p.fills
+    assert p.pending_next_open_entry["execution_index"] == 2
+    # Low reaches 0.618 even though the candle closes below it: no reclaim needed.
+    p.close[2] = 137.
+    p._execute_pending_next_open_entry(2)
+    fill = p.fills[0]
+    assert fill["fill_price"] == 138.2
+    assert fill["stop"]["fib_entry_level"] == 0.618
+    assert fill["stop"]["fib_stop_level"] == 0.786
+    assert np.isclose(fill["stop"]["stop_price"], 121.4)
+    assert np.isclose(fill["target"]["limit_price"], 188.6)
+    assert p.pending_next_open_entry is None
+
+
+def test_deeper_limit_never_reached_has_no_trade():
+    p = _limit_probe()
+    p.low[:] = 140.
+    p.pending_next_open_entry = p._entry_decision(0)
+    for i in range(1, 4):
+        p._execute_pending_next_open_entry(i)
+    assert not p.fills
+    assert p.skips == ["FIB_DEEPER_LIMIT_NOT_REACHED"]
+
+
+def test_deeper_limit_cancels_superseded_structure_before_touch():
+    p = _limit_probe()
+    p.pending_next_open_entry = p._entry_decision(0)
+    p._execute_pending_next_open_entry(1)
+    p.fib_retracement["_FIB_IMPULSE_END_INDEX"][1] = 2
+    p._execute_pending_next_open_entry(2)
+    assert not p.fills
+    assert p.skips == ["FIB_DEEPER_LIMIT_INVALIDATED"]
+
+
+def test_deeper_limit_short_gap_fill_and_deepest_stop():
+    p = _limit_probe("SHORT", 0.618)
+    p.open[1] = 180.
+    p.high[1] = 183.
+    p.low[1] = 175.
+    p.close[0] = 165.
+    p.pending_next_open_entry = p._entry_decision(0)
+    assert np.isclose(p.pending_next_open_entry["fib_trigger"], 178.6)
+    p._execute_pending_next_open_entry(1)
+    fill = p.fills[0]
+    assert fill["fill_price"] == 180.
+    assert fill["stop"]["fib_stop_level"] == 1.0
+    assert fill["stop"]["stop_price"] == 200.
+    assert fill["target"]["limit_price"] == 120.
+
+
+def test_limit_fill_bar_does_not_use_profit_extreme_before_entry():
+    p = _limit_probe()
+    pos = SimpleNamespace(side="LONG", fib_limit_fill_time=p.times[1], fib_limit_fill_price=138.2)
+    assert p._maybe_exit_bar(pos, 1, 150., 130., p.times[1], None) == (138.2, 130.)
+    assert p._maybe_exit_bar(pos, 2, 150., 130., p.times[2], None) == (150., 130.)
+
+
+def test_deeper_limit_intrabar_fill_uses_first_touch():
+    import pandas as pd
+    p = _limit_probe()
+    p.config.use_intrabar_data = True
+    p.intrabar_data = pd.DataFrame({
+        "timestamp": [p.times[1], p.times[1] + pd.Timedelta(minutes=1),
+                      p.times[1] + pd.Timedelta(minutes=2)],
+        "open": [145., 141., 130.], "high": [150., 145., 135.], "low": [140., 138., 125.]})
+    raw, timestamp = p._fib_limit_fill(1, 138.2, "LONG")
+    assert raw == 138.2
+    assert timestamp == p.times[1] + pd.Timedelta(minutes=1)
+
+
+def test_deeper_limit_full_engine_sizes_trade_at_fill_price():
+    import pandas as pd
+    from dataclasses import replace
+    from crypto_strategy_lab.config import BacktestConfig
+    from crypto_strategy_lab.sr_dynamic_tp_engine import SRDynamicTPBacktestEngine
+    from crypto_strategy_lab.strategy_profiles import default_profiles
+
+    class Engine(FibonacciRetracementMixin, SRDynamicTPBacktestEngine):
+        def _regime_at(self, i):
+            return "SIDEWAYS"
+
+    p = _limit_probe()
+    profiles = {key: replace(profile, enabled=True) for key, profile in default_profiles().items()}
+    config = replace(BacktestConfig(), strategy_profiles=profiles, use_intrabar_data=False,
+        enable_trade_telemetry=False, fib_third_retest_entry=True, slippage=0.,
+        fib_stop_buffer_atr=0., fib_target_mode="FIXED_R", fib_fixed_target_r=3.,
+        atr_period=1, adx_period=1, bb_period=2, strategy_timeframe_minutes=60,
+        telemetry_interval_minutes=60)
+    frame = pd.DataFrame(dict(timestamp=p.times, open=p.open, high=p.high,
+                              low=p.low, close=p.close, volume=np.ones(4)))
+    engine = Engine(frame, config)
+    engine.signal_strategy_mode = FIB_RETRACEMENT_MODE
+    engine.fib_retracement = p.fib_retracement
+    engine.atr_values[:] = 1.
+    engine.risk[:] = 1.
+    engine.run()
+    assert len(engine.completed_pairs) == 1
+    pos = engine.completed_pairs[0].positions()[0]
+    assert pos.entry_index == 2
+    assert np.isclose(pos.entry_price, 138.2)
+    assert np.isclose(pos.sl, 121.4)
+    assert np.isclose(pos.tp, 188.6)
+    assert np.isclose(pos.quantity * (pos.entry_price - pos.sl), pos.risk_amount)
+
+
+
+def test_deeper_mode_arms_on_second_separate_hold_and_is_causal():
+    o = np.array([10., 8.2, 9., 11.5, 11.2, 10.2, 10.05, 10.30, 10.05, 10.60, 10.05])
+    h = np.array([10.2, 8.4, 9.2, 12., 11.4, 10.7, 10.5, 10.7, 10.45, 10.8, 10.45])
+    l = np.array([9.8, 8., 8.8, 11.3, 10.9, 10.1, 9.95, 10.25, 9.95, 10.55, 9.95])
+    c = np.array([10., 8.2, 9., 11.8, 11.1, 10.5, 10.30, 10.60, 10.35, 10.70, 10.35])
+    kw = dict(pivot_strength=1, dominant_lookback_bars=16,
+              dominant_recency_penalty=0., dominant_replacement_ratio=1.10,
+              third_retest_entry=True)
+    values = fibonacci_retracement_arrays(o, h, l, c, np.ones(len(c)), **kw)
+    assert values["_FIB_SIGNAL_DIRECTION"][6] is None
+    assert values["_FIB_SIGNAL_DIRECTION"][8] is None
+    assert values["_FIB_SIGNAL_DIRECTION"][10] == "LONG"
+    assert values["_FIB_SIGNAL_LEVEL"][10] == .5
+    # This is an arming signal, not a close-price trade. Every earlier prefix
+    # must produce the identical signals without any future prices present.
+    for n in range(3, len(c)):
+        prefix = fibonacci_retracement_arrays(o[:n], h[:n], l[:n], c[:n], np.ones(n), **kw)
+        np.testing.assert_array_equal(prefix["_FIB_SIGNAL_DIRECTION"], values["_FIB_SIGNAL_DIRECTION"][:n])
+
+
+def test_deeper_limit_prepared_engine_uses_fast_intrabar_first_touch():
+    import pandas as pd
+    from dataclasses import replace
+    from test_prepared_backtest import valid_kwargs
+    from crypto_strategy_lab.config import BacktestConfig
+    from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
+    from crypto_strategy_lab.prepared_backtest import PreparedBacktestFrame, IntrabarExecutionData
+    from crypto_strategy_lab.strategy_profiles import default_profiles
+
+    class Engine(FibonacciRetracementMixin, DataLakeProductionBacktestEngine):
+        pass
+
+    p = _limit_probe()
+    kwargs = valid_kwargs(4)
+    kwargs.update(open=p.open, high=p.high, low=p.low, close=p.close, atr=np.ones(4))
+    prepared = PreparedBacktestFrame(**kwargs)
+    profiles = {key: replace(profile, enabled=True) for key, profile in default_profiles().items()}
+    config = replace(BacktestConfig(), strategy_profiles=profiles,
+        enable_trade_telemetry=False, fib_third_retest_entry=True, slippage=0.,
+        fib_stop_buffer_atr=0., fib_target_mode="FIXED_R", fib_fixed_target_r=3.,
+        strategy_timeframe_minutes=240, telemetry_interval_minutes=240)
+    times = pd.date_range("2025-01-01", periods=960, freq="min")
+    opening = np.full(960, 145.)
+    high = np.full(960, 195.)
+    low = np.full(960, 140.)
+    low[481:] = 135.
+    high[482:] = 145.
+    intrabar = IntrabarExecutionData(times, pd.Timedelta(minutes=1), opening, high, low)
+    engine = Engine.from_prepared(prepared, intrabar, config)
+    engine.signal_strategy_mode = FIB_RETRACEMENT_MODE
+    engine.fib_retracement = p.fib_retracement
+    engine.run()
+    assert len(engine.completed_pairs) == 1
+    pos = engine.completed_pairs[0].positions()[0]
+    assert pos.entry_index == 2
+    assert pd.Timestamp(pos.entry_time) == times[481]
+    assert np.isclose(pos.entry_price, 138.2)
+    assert np.isclose(pos.quantity * (pos.entry_price - pos.sl), pos.risk_amount)
+    # The 195 high before/inside the fill minute cannot hit the 188.6 target.
+    assert str(pos.exit_reason.value) != "TP"
+
+
+
+def test_limit_fill_bar_fallback_cannot_credit_earlier_profit_or_exit_before_fill():
+    import pandas as pd
+    from crypto_strategy_lab.trade import ExitSource
+    p = _limit_probe()
+    fill_time = p.times[2] + pd.Timedelta(minutes=5)
+    for side, expected in (("LONG", (138.2, 120.)), ("SHORT", (190., 138.2))):
+        pos = SimpleNamespace(side=side, entry_index=2,
+            fib_limit_fill_time=fill_time, fib_limit_fill_price=138.2)
+        assert p._maybe_exit_bar(pos, 2, 190., 120., p.times[2], ExitSource.FALLBACK_15M) == expected
+        assert p.last_exit_timestamp == fill_time
+        # Future fallback candles use their full range normally.
+        assert p._maybe_exit_bar(pos, 3, 190., 120., p.times[3], ExitSource.FALLBACK_15M) == (190., 120.)
