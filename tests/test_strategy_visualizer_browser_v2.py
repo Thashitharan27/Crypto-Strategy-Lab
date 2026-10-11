@@ -114,5 +114,6 @@ def test_v2_fib_levels_remain_drawable_when_swing_anchor_is_offscreen():
     assert "const axisX=(time, edge) =>" in html
     assert "const x1=axisX(startTime,0);" in html
     assert "const x2=axisX(endTime,plotRight);" in html
+    assert "const entryTime=Number(payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime || fib.entryTime);" in html
     assert "const rawStartX=chart.timeScale().timeToCoordinate(startTime);" in html
     assert "if ([x1,x2].some(v => v == null" not in html
