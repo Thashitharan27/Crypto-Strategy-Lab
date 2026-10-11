@@ -306,7 +306,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     if (fib.status !== 'AVAILABLE') return;
 
     const items=payload.candles || [];
-    const entryTime=Number(fib.entryTime || payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime);
+    const entryTime=Number(payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime || fib.entryTime);
     const anchors=resolveFibAnchorTimes(fib,items,entryTime);
     const startTime=Number(anchors.startTime);
     const endTime=Number.isFinite(entryTime) ? entryTime : Number(anchors.endTime);
