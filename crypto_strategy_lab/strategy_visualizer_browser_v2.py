@@ -310,12 +310,18 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     const anchors=resolveFibAnchorTimes(fib,items,entryTime);
     const startTime=Number(anchors.startTime);
     const endTime=Number.isFinite(entryTime) ? entryTime : Number(anchors.endTime);
-    const x1=chart.timeScale().timeToCoordinate(startTime);
-    const x2=chart.timeScale().timeToCoordinate(endTime);
-    if ([x1,x2].some(v => v == null || !Number.isFinite(Number(v)))) return;
-
-    const left=Math.max(0,Math.min(Number(x1),Number(x2)));
-    const right=Math.min($('chart-wrap').clientWidth-76,Math.max(Number(x1),Number(x2)));
+    const scale=chart.timeScale();
+    const plotRight=Math.max(0,$('chart-wrap').clientWidth-76);
+    // Swing pivots can precede the selected candle window. Lightweight Charts
+    // returns null for an unknown/off-window timestamp; do not hide all levels.
+    const axisX=(time, edge) => {
+      const x=scale.timeToCoordinate(time);
+      return x != null && Number.isFinite(Number(x)) ? Number(x) : edge;
+    };
+    const x1=axisX(startTime,0);
+    const x2=axisX(endTime,plotRight);
+    const left=Math.max(0,Math.min(plotRight,Math.min(x1,x2)));
+    const right=Math.max(0,Math.min(plotRight,Math.max(x1,x2)));
     if (right <= left) return;
 
     const ordered=(fib.levels || [])
@@ -358,11 +364,14 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     const startY=candles.priceToCoordinate(Number(fib.impulseStartPrice));
     const endY=candles.priceToCoordinate(Number(fib.impulseEndPrice));
     const anchorEndX=chart.timeScale().timeToCoordinate(Number(anchors.endTime));
-    if ([x1,anchorEndX,startY,endY].every(v => v != null && Number.isFinite(Number(v)))) {
-      const dx=Number(anchorEndX)-Number(x1), dy=Number(endY)-Number(startY);
+    // Draw the impulse diagonal only when its actual anchors map to the chart;
+    // off-window pivots must not prevent the horizontal Fib bands from drawing.
+    const rawStartX=chart.timeScale().timeToCoordinate(startTime);
+    if ([rawStartX,anchorEndX,startY,endY].every(v => v != null && Number.isFinite(Number(v)))) {
+      const dx=Number(anchorEndX)-Number(rawStartX), dy=Number(endY)-Number(startY);
       const anchor=document.createElement('div');
       anchor.className='fib-anchor';
-      anchor.style.left=Number(x1)+'px';
+      anchor.style.left=Number(rawStartX)+'px';
       anchor.style.top=Number(startY)+'px';
       anchor.style.width=Math.hypot(dx,dy)+'px';
       anchor.style.transform='rotate('+Math.atan2(dy,dx)+'rad)';
