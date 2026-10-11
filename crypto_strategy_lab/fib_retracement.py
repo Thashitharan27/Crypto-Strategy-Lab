@@ -1386,7 +1386,14 @@ class FibonacciRetracementMixin:
                 "available_r": available_r,
             }
         minimum_r = float(getattr(self.config, "fib_minimum_target_r", 2.0))
-        if (not getattr(self.config, "fib_half_swing_mode", False)) and (
+        # A fixed-R target is measured from entry and stop. It must not be
+        # vetoed just because the previous impulse extreme offers less room.
+        # The impulse-extreme mode retains the minimum-room protection.
+        target_mode = (
+            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False)
+            else str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
+        )
+        if (not getattr(self.config, "fib_half_swing_mode", False)) and target_mode != "FIXED_R" and (
             not np.isfinite(available_r) or available_r + 1e-12 < minimum_r
         ):
             return {
