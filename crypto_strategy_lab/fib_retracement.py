@@ -271,10 +271,45 @@ def fibonacci_retracement_arrays(
     )
     active_structure_reset_depth = min(0.786, max(0.236, float(active_structure_reset_depth)))
 
+    impulse_quality_cache = {}
+
+    def _impulse_quality(candidate):
+        """Causal, endpoint-fixed quality: reward sustained directional movement."""
+        direction, start_i, end_i = candidate[:3]
+        key = (direction, start_i, end_i)
+        if key not in impulse_quality_cache:
+            closes = close_prices[start_i:end_i + 1]
+            opens = open_prices[start_i + 1:end_i + 1]
+            moves = np.diff(closes)
+            span = abs(float(
+                (high_prices[end_i] - low_prices[start_i])
+                if direction == "LONG"
+                else (high_prices[start_i] - low_prices[end_i])
+            ))
+            if span <= 0 or not np.all(np.isfinite(moves)) or not np.all(np.isfinite(opens)):
+                impulse_quality_cache[key] = (1.0, 0.0, 0.0)
+            else:
+                gross = float(np.sum(np.abs(moves)))
+                net = abs(float(closes[-1] - closes[0]))
+                efficiency = min(1.0, net / gross) if gross > 0 else 0.0
+                directional_bodies = np.maximum(
+                    (closes[1:] - opens) if direction == "LONG" else (opens - closes[1:]),
+                    0.0,
+                )
+                largest_share = min(1.0, float(np.max(directional_bodies)) / span) if len(directional_bodies) else 1.0
+                # Penalize large one-candle spikes and erratic impulses, without
+                # hard-vetoing them until out-of-sample evidence justifies it.
+                concentration_penalty = 0.25 * max(0.0, (largest_share - 0.60) / 0.40)
+                chop_penalty = 0.20 * (1.0 - efficiency)
+                quality_multiplier = 1.0 - concentration_penalty - chop_penalty
+                impulse_quality_cache[key] = (quality_multiplier, efficiency, largest_share)
+        return impulse_quality_cache[key]
+
     def _candidate_live_score(candidate, now):
         age = max(0, now - candidate[2])
         age_fraction = min(1.0, age / float(dominant_lookback_bars))
-        return candidate[3] * (1.0 - dominant_recency_penalty * age_fraction)
+        quality_multiplier, _, _ = _impulse_quality(candidate)
+        return candidate[3] * quality_multiplier * (1.0 - dominant_recency_penalty * age_fraction)
 
     def _candidate_confluence(candidate, now):
         """Score causal EMA/RSI confluence for one candidate before selection."""
@@ -926,6 +961,9 @@ def fibonacci_retracement_arrays(
                     "start_price": candidate_start_price,
                     "end_price": candidate_end_price,
                     "structural_strength_atr": float(candidate[3]),
+                    "impulse_quality_multiplier": float(_impulse_quality(candidate)[0]),
+                    "impulse_efficiency": float(_impulse_quality(candidate)[1]),
+                    "impulse_largest_candle_share": float(_impulse_quality(candidate)[2]),
                     "live_score": float(_candidate_live_score(candidate, i)),
                     "structural_score": confluence["structural_score"],
                     "confluence_score": confluence["confluence_score"],
