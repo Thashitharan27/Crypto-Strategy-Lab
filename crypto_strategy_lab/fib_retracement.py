@@ -22,6 +22,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import pandas as pd
 
 from crypto_strategy_lab.indicators import rsi
 
@@ -194,7 +195,7 @@ def fibonacci_retracement_arrays(
     inherited_first_held: bool = False,
     first_0786_held: bool = False,
     half_swing_mode: bool = False,
-    third_retest_entry: bool = False,
+    deeper_limit_entry: bool = False,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -1134,22 +1135,21 @@ def fibonacci_retracement_arrays(
             bool(selected_state.get("hold_accepted_now", False))
             and entry_candidate_available
             and (
-                (third_retest_entry and not half_swing_mode
-                 and int(selected_state.get("signal_held_count", 0)) >= 3
-                 and (float(low_prices[i]) < signal_level_price if direction == "LONG"
-                      else float(high_prices[i]) > signal_level_price))
-                or (not third_retest_entry and half_swing_mode and active_signal_level == 0.500
+                (deeper_limit_entry and not half_swing_mode
+                 and int(selected_state.get("signal_held_count", 0)) >= 2
+                 and active_signal_level in (0.382, 0.500, 0.618))
+                or (not deeper_limit_entry and half_swing_mode and active_signal_level == 0.500
                  and int(selected_state.get("signal_held_count", 0)) >= 1)
-                or (not third_retest_entry and not half_swing_mode and int(selected_state.get("signal_held_count", 0)) >= 2)
+                or (not deeper_limit_entry and not half_swing_mode and int(selected_state.get("signal_held_count", 0)) >= 2)
                 or (
-                    not third_retest_entry
+                    not deeper_limit_entry
                     and not half_swing_mode
                     and first_0786_held
                     and active_signal_level == 0.786
                     and int(selected_state.get("signal_held_count", 0)) >= 1
                 )
                 or (
-                    not third_retest_entry
+                    not deeper_limit_entry
                     and not half_swing_mode
                     and _inherited_confirmation(leg, i)
                     and int(selected_state.get("signal_held_count", 0)) >= 1
@@ -1245,10 +1245,138 @@ class FibonacciRetracementMixin:
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
             minimum_hold_rejection_atr=float(self.fib_minimum_hold_rejection_atr),
             half_swing_mode=bool(getattr(self.config, "fib_half_swing_mode", False)),
-            third_retest_entry=bool(getattr(self.config, "fib_third_retest_entry", False)),
+            deeper_limit_entry=bool(getattr(self.config, "fib_deeper_limit_entry", False)),
             inherited_first_held=bool(getattr(self.config, "fib_inherited_first_held", False)),
             first_0786_held=bool(getattr(self.config, "fib_first_0786_held", False)),
         )
+
+
+    def _fib_deeper_limit_enabled(self):
+        return (bool(getattr(self.config, "fib_deeper_limit_entry", False))
+                and getattr(self, "signal_strategy_mode", "DI") == FIB_RETRACEMENT_MODE
+                and not bool(getattr(self.config, "fib_half_swing_mode", False)))
+
+    def _expected_entry_price(self, indicator_i, execution_i, direction):
+        pending_fill = getattr(self, "_fib_limit_fill_price", None)
+        if pending_fill is not None and self._fib_deeper_limit_enabled():
+            return float(pending_fill) * (
+                1.0 + self.config.slippage if direction == "LONG"
+                else 1.0 - self.config.slippage
+            )
+        return super()._expected_entry_price(indicator_i, execution_i, direction)
+
+    def _entry_decision(self, i, active_at_candle_start=False):
+        if not hasattr(self, "_fib_limit_order"):
+            self._fib_limit_order = None
+        if not self._fib_deeper_limit_enabled() or self.config.enable_daily_entry_schedule:
+            return super()._entry_decision(i, active_at_candle_start)
+        # The second hold only arms an order. Never buy at its candle close.
+        if self._fib_limit_order is not None:
+            return None
+        if not self._should_enter(i):
+            return None
+        direction = self._selected_direction(i)
+        if direction not in ("LONG", "SHORT"):
+            return None
+        values = self.fib_retracement
+        level = float(values["_FIB_SIGNAL_LEVEL"][i])
+        deeper = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786}.get(round(level, 3))
+        if deeper is None:
+            return None
+        start = float(values["_FIB_IMPULSE_START_PRICE"][i])
+        end = float(values["_FIB_IMPULSE_END_PRICE"][i])
+        if not (np.isfinite(start) and np.isfinite(end) and np.isfinite(end - start)):
+            return None
+        span = abs(end - start)
+        if span <= 0:
+            return None
+        price = end - deeper * span if direction == "LONG" else end + deeper * span
+        candidate_id = values["_FIB_SELECTED_CANDIDATE_ID"][i]
+        if not candidate_id:
+            return None
+        self._fib_limit_order = {
+            "signal_i": i, "direction": direction, "level": deeper,
+            "price": float(price), "candidate_id": candidate_id,
+            "start": start, "end": end,
+        }
+        return None
+
+    def _fib_limit_hit(self, i, order):
+        """Return earliest observed touch at or after the strategy candle open."""
+        price = float(order["price"])
+        direction = order["direction"]
+        start = pd.Timestamp(self.times[i])
+        data = getattr(self, "intrabar_data", None)
+        if data is not None:
+            end = start + self.entry_delta
+            if isinstance(data, pd.DataFrame):
+                bars = data[(data.timestamp >= start) & (data.timestamp < end)]
+                if bars.empty:
+                    return None
+                for row in bars.itertuples():
+                    hit = float(row.low) <= price if direction == "LONG" else float(row.high) >= price
+                    if hit:
+                        return pd.Timestamp(row.timestamp)
+                return None
+            # Prepared intrabar frames have arrays rather than DataFrame columns.
+            timestamps = pd.to_datetime(data.timestamp)
+            for j, timestamp in enumerate(timestamps):
+                ts = pd.Timestamp(timestamp)
+                if start <= ts < end:
+                    hit = float(data.low[j]) <= price if direction == "LONG" else float(data.high[j]) >= price
+                    if hit:
+                        return ts
+            return None
+        # Without intrabar bars, exact touch time within the candle is unknown.
+        hit = float(self.low[i]) <= price if direction == "LONG" else float(self.high[i]) >= price
+        return start if hit else None
+
+    def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
+        super()._execute_pending_next_open_entry(i, active_at_candle_start)
+        if not self._fib_deeper_limit_enabled():
+            return
+        order = getattr(self, "_fib_limit_order", None)
+        if order is None or i <= order["signal_i"]:
+            return
+        values = self.fib_retracement
+        same = values["_FIB_SELECTED_CANDIDATE_ID"][i] == order["candidate_id"]
+        direction = order["direction"]
+        # Disallow fills against a broken or superseded impulse.
+        extreme = order["end"]
+        span = abs(order["end"] - order["start"])
+        invalid = (float(self.close[i]) < extreme - 0.786 * span if direction == "LONG"
+                   else float(self.close[i]) > extreme + 0.786 * span)
+        if not same or invalid:
+            self._fib_limit_order = None
+            return
+        timestamp = self._fib_limit_hit(i, order)
+        if timestamp is None:
+            return
+        self._fib_limit_order = None
+        if active_at_candle_start or len(self.active_pairs) >= self.config.max_active_pairs:
+            return
+        self._fib_limit_fill_price = float(order["price"])
+        self._fib_limit_fill_level = float(order["level"])
+        try:
+            signal_i = int(order["signal_i"])
+            passed, reason = self._entry_filter_result(signal_i, i)
+            if passed:
+                before = len(self.active_pairs)
+                self._open_pair(i, passed, reason, {
+                    "indicator_index": signal_i, "execution_index": i,
+                    "actual_entry_timestamp": timestamp,
+                    "fill_price_source": "FIB_DEEPER_LIMIT",
+                    "fill_price": float(order["price"]),
+                    "entry_schedule_status": "FIB_DEEPER_LIMIT_FILLED",
+                })
+                # Evaluate the fill candle's exits only AFTER the observed fill.
+                if len(self.active_pairs) > before:
+                    self._scan_pair_exit(self.active_pairs[-1], i)
+            else:
+                self._record_skipped_signal(signal_i, reason)
+        finally:
+            self._fib_limit_fill_price = None
+            self._fib_limit_fill_level = None
 
     def _infer_signal_strategy_mode(self):
         for profile in self.config.strategy_profiles.values():
@@ -1291,6 +1419,8 @@ class FibonacciRetracementMixin:
         span = abs(end - start)
         if span <= 0:
             return None
+        if getattr(self, "_fib_limit_fill_level", None) is not None:
+            nearest = float(self._fib_limit_fill_level)
         half_swing = bool(getattr(self.config, "fib_half_swing_mode", False))
         if half_swing and round(nearest, 3) != 0.500:
             return None
