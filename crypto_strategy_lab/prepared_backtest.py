@@ -489,7 +489,7 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
             inherited_first_held=bool(getattr(config, "fib_inherited_first_held", False)),
             first_0786_held=bool(getattr(config, "fib_first_0786_held", False)),
             half_swing_mode=bool(getattr(config, "fib_half_swing_mode", False)),
-            third_retest_entry=bool(getattr(config, "fib_third_retest_entry", False)),
+            deeper_limit_entry=bool(getattr(config, "fib_deeper_limit_entry", False)),
         )
         research_blocks.append(
             ResearchContext(
