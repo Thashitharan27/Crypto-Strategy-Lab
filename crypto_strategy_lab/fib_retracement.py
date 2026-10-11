@@ -1360,7 +1360,15 @@ class FibonacciRetracementMixin:
 
     def _maybe_exit_bar(self, pos, i, high, low, timestamp, source):
         fill_time = getattr(pos, "fib_limit_fill_time", None)
-        if fill_time is not None and pd.Timestamp(timestamp) == pd.Timestamp(fill_time):
+        fallback_fill_bar = (
+            str(getattr(source, "value", source)) == "15M_FALLBACK"
+            and getattr(pos, "entry_index", None) == i
+        )
+        if fill_time is not None and (fallback_fill_bar or pd.Timestamp(timestamp) == pd.Timestamp(fill_time)):
+            if fallback_fill_bar:
+                # The larger candle starts before the fill. Its conservative
+                # stop outcome must never be timestamped before the entry.
+                timestamp = fill_time
             # OHLC cannot establish whether a profitable extreme preceded a
             # pullback fill. Conservatively allow stops but defer profits and
             # trailing/BE activation until a subsequent execution bar.

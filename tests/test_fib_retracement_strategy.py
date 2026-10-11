@@ -1539,6 +1539,7 @@ class _FibLimitBase:
     def _record_skipped_signal(self, i, reason):
         self.skips.append(reason)
     def _maybe_exit_bar(self, pos, i, high, low, timestamp, source):
+        self.last_exit_timestamp = timestamp
         return high, low
 
 
@@ -1750,3 +1751,18 @@ def test_deeper_limit_prepared_engine_uses_fast_intrabar_first_touch():
     assert np.isclose(pos.quantity * (pos.entry_price - pos.sl), pos.risk_amount)
     # The 195 high before/inside the fill minute cannot hit the 188.6 target.
     assert str(pos.exit_reason.value) != "TP"
+
+
+
+def test_limit_fill_bar_fallback_cannot_credit_earlier_profit_or_exit_before_fill():
+    import pandas as pd
+    from crypto_strategy_lab.trade import ExitSource
+    p = _limit_probe()
+    fill_time = p.times[2] + pd.Timedelta(minutes=5)
+    for side, expected in (("LONG", (138.2, 120.)), ("SHORT", (190., 138.2))):
+        pos = SimpleNamespace(side=side, entry_index=2,
+            fib_limit_fill_time=fill_time, fib_limit_fill_price=138.2)
+        assert p._maybe_exit_bar(pos, 2, 190., 120., p.times[2], ExitSource.FALLBACK_15M) == expected
+        assert p.last_exit_timestamp == fill_time
+        # Future fallback candles use their full range normally.
+        assert p._maybe_exit_bar(pos, 3, 190., 120., p.times[3], ExitSource.FALLBACK_15M) == (190., 120.)
