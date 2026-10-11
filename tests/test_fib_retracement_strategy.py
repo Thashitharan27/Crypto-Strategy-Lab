@@ -1468,12 +1468,12 @@ def test_fib_fixed_r_ignores_insufficient_prior_impulse_room():
         "FIB_NEAREST_LEVEL": np.array([0.500, 0.500]),
         "_FIB_SIGNAL_LEVEL": np.array([0.500, 0.500]),
         "_FIB_IMPULSE_START_PRICE": np.array([8.0, 8.0]),
-        "_FIB_IMPULSE_END_PRICE": np.array([12.0, 12.0]),
+        "_FIB_IMPULSE_END_PRICE": np.array([11.0, 11.0]),
     }
     fixed = p._fib_target_plan(0, 1)
     assert fixed["passed"] is True
     assert fixed["available_r"] < 3.0
-    assert np.isclose(fixed["limit_price"], 15.0)
+    assert np.isclose(fixed["limit_price"], 12.562)
 
     p.config.fib_target_mode = "IMPULSE_EXTREME"
     extreme = p._fib_target_plan(0, 1)
