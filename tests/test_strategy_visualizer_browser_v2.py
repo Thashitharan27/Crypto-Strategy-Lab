@@ -104,3 +104,15 @@ def test_v2_supports_price_zoom_and_vertical_pan():
     assert "chartWrap.addEventListener('pointermove'" in html
     assert "Math.abs(dyTotal) <= Math.abs(dx)*1.15" in html
     assert "axisPressedMouseMove:{time:true,price:true}" in html
+
+
+def test_v2_fib_levels_remain_drawable_when_swing_anchor_is_offscreen():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+
+    # Pivot timestamp lookup can return null if the original impulse lies
+    # outside the selected candle window. Clip horizontal levels to the plot.
+    assert "const axisX=(time, edge) =>" in html
+    assert "const x1=axisX(startTime,0);" in html
+    assert "const x2=axisX(endTime,plotRight);" in html
+    assert "const rawStartX=chart.timeScale().timeToCoordinate(startTime);" in html
+    assert "if ([x1,x2].some(v => v == null" not in html
