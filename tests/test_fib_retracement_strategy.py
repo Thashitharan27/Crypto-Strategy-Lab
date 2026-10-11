@@ -1479,3 +1479,13 @@ def test_fib_fixed_r_ignores_insufficient_prior_impulse_room():
     extreme = p._fib_target_plan(0, 1)
     assert extreme["passed"] is False
     assert extreme["reason"] == "FIB_TARGET_INSUFFICIENT_ROOM"
+
+
+def test_fib_third_retest_entry_mode_is_opt_in_and_keeps_default_results():
+    close = np.array([10, 8, 10, 14, 16, 13, 12, 11, 13, 15, 14, 16, 19, 17, 16], dtype=float)
+    high, low, atr = close + 0.4, close - 0.4, np.ones(len(close))
+    kw = dict(pivot_strength=1, dominant_lookback_bars=32)
+    default = fibonacci_retracement_arrays(close, high, low, close, atr, **kw)
+    disabled = fibonacci_retracement_arrays(close, high, low, close, atr, third_retest_entry=False, **kw)
+    for key in default:
+        np.testing.assert_array_equal(default[key], disabled[key])

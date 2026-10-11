@@ -194,6 +194,7 @@ def fibonacci_retracement_arrays(
     inherited_first_held: bool = False,
     first_0786_held: bool = False,
     half_swing_mode: bool = False,
+    third_retest_entry: bool = False,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     open_prices = np.asarray(open_prices, dtype=float)
@@ -1133,17 +1134,23 @@ def fibonacci_retracement_arrays(
             bool(selected_state.get("hold_accepted_now", False))
             and entry_candidate_available
             and (
-                (half_swing_mode and active_signal_level == 0.500
+                (third_retest_entry and not half_swing_mode
+                 and int(selected_state.get("signal_held_count", 0)) >= 3
+                 and (float(low_prices[i]) < signal_level_price if direction == "LONG"
+                      else float(high_prices[i]) > signal_level_price))
+                or (not third_retest_entry and half_swing_mode and active_signal_level == 0.500
                  and int(selected_state.get("signal_held_count", 0)) >= 1)
-                or (not half_swing_mode and int(selected_state.get("signal_held_count", 0)) >= 2)
+                or (not third_retest_entry and not half_swing_mode and int(selected_state.get("signal_held_count", 0)) >= 2)
                 or (
-                    not half_swing_mode
+                    not third_retest_entry
+                    and not half_swing_mode
                     and first_0786_held
                     and active_signal_level == 0.786
                     and int(selected_state.get("signal_held_count", 0)) >= 1
                 )
                 or (
-                    not half_swing_mode
+                    not third_retest_entry
+                    and not half_swing_mode
                     and _inherited_confirmation(leg, i)
                     and int(selected_state.get("signal_held_count", 0)) >= 1
                 )

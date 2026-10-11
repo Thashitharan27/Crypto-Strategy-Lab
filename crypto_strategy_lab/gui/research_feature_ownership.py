@@ -41,6 +41,7 @@ FRIENDLY_LABELS = {
     "fib_inherited_first_held": "Allow inherited first-held Fib entry",
     "fib_first_0786_held": "Allow first-held entry at Fib 0.786",
     "fib_half_swing_mode": "Fib 0.5 first-held entry, swing stop, extreme target",
+    "fib_third_retest_entry": "Two distinct holds then third wick-through reclaim entry",
     "atr_period": "ATR period",
     "bb_period": "Bollinger period",
     "bb_stddevs": "Bollinger deviation",
