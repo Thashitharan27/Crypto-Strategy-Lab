@@ -1489,3 +1489,36 @@ def test_fib_third_retest_entry_mode_is_opt_in_and_keeps_default_results():
     disabled = fibonacci_retracement_arrays(close, high, low, close, atr, third_retest_entry=False, **kw)
     for key in default:
         np.testing.assert_array_equal(default[key], disabled[key])
+
+
+def test_fib_engine_forwards_third_retest_mode(monkeypatch):
+    """The classic engine must forward the selected entry mode to Fib arrays."""
+    import crypto_strategy_lab.fib_retracement as fib_module
+    recorded = {}
+
+    def fake_arrays(*args, **kwargs):
+        recorded.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(fib_module, "fibonacci_retracement_arrays", fake_arrays)
+
+    class Parent:
+        def _configure_signal_features(self):
+            pass
+
+    class Probe(FibonacciRetracementMixin, Parent):
+        def _fib_features_needed(self):
+            return True
+
+    probe = Probe()
+    probe.config = SimpleNamespace(
+        fib_third_retest_entry=True,
+        fib_inherited_first_held=False,
+        fib_first_0786_held=False,
+        fib_half_swing_mode=False,
+    )
+    probe.open = probe.high = probe.low = probe.close = probe.atr_values = np.ones(5)
+    probe._configure_signal_features()
+    assert recorded["third_retest_entry"] is True
+    assert recorded["inherited_first_held"] is False
+    assert recorded["first_0786_held"] is False
