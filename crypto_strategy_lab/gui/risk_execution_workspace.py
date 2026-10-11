@@ -188,7 +188,7 @@ class RiskExecutionWorkspace(QWidget):
             ("fib_half_swing_mode", "0.5 First Hold — Swing Stop / Impulse Target"),
             ("fib_inherited_first_held", "Inherit First Hold After Impulse Extension"),
             ("fib_first_0786_held", "Allow First Held at 0.786"),
-            ("fib_third_retest_entry", "After Two Holds — Enter on Third Wick Retest"),
+            ("fib_deeper_limit_entry", "After Two Holds — Limit Entry One Fib Deeper"),
         ):
             widget = fib_controls[field]
             if isinstance(widget, QCheckBox):
