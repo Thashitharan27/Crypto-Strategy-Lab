@@ -435,6 +435,7 @@ class RiskExecutionWorkspace(QWidget):
             "fvg_confirmation_enabled": "Require directional FVG confirmation before entry",
             "fvg_context_enabled": "Require the execution-timeframe FVG to overlap an active higher-timeframe FVG",
             "ema_cross_entry_confirmation_enabled": "Wait for confirmation distance before EMA-cross entry",
+            "ema_320_flip_signals": "Flip EMA 320 Signals (Long ↔ Short)",
         }.items():
             widget = self.trade.get(name) or self.account.get(name)
             if isinstance(widget, QCheckBox):
