@@ -139,3 +139,20 @@ def test_v2_trend_ema_overlays_do_not_override_price_zoom_and_pan():
     assert "autoscaleInfoProvider: () => null" in html
     assert "priceZoomFactor=Math.max(.005,Math.min(50" in html
     assert "pricePanOffset=Math.max(-8,Math.min(8" in html
+
+
+def test_v2_rsi_lower_pane_uses_native_payload_and_preserves_viewport():
+    html=build_browser_visualizer_v2_html(_Model(),"abc")
+    assert 'id="show-rsi"' in html
+    assert "o.kind === 'rsi' && Number(o.period) === 14" in html
+    assert "rsiSeries = chart.addSeries(window.LightweightCharts.LineSeries" in html
+    assert "chart.panes()[1].setHeight(155)" in html
+    assert "for (const level of [30,70])" in html
+    assert "if (visibleRange) chart.timeScale().setVisibleRange(visibleRange)" in html
+
+
+def test_rsi_pane_does_not_capture_candle_price_gestures():
+    html=build_browser_visualizer_v2_html(_Model(),"abc")
+    assert "function inCandlePane(event)" in html
+    assert "chart.panes()[0].getHeight()" in html
+    assert "!inCandlePane(event)" in html

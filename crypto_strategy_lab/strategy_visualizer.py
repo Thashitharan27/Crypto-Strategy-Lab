@@ -22,6 +22,7 @@ from crypto_strategy_lab.gui.completed_run_research import research_seed_from_ma
 from crypto_strategy_lab.research_warmup import strategy_warmup_period
 from crypto_strategy_lab.research_warmup import expand_strategy_request
 from crypto_strategy_lab.fib_retracement import _causal_ema
+from crypto_strategy_lab.indicators import rsi as native_rsi
 from crypto_strategy_lab.strategy_rule_model import (
     CATEGORICAL_VALUE_CODES,
     is_context_timeframe_evidence,
@@ -2110,7 +2111,7 @@ class CompletedRunVisualizer:
         # include the native pre-run warmup and calculate before trimming.
         calculation_start = (
             run_start - strategy_warmup_period(self.seed.config)
-            if show_trend_emas else run_start
+            if strategy_timeframe == chart_timeframe else run_start
         )
         market = self._market_frame(
             calculation_start,
@@ -2121,6 +2122,15 @@ class CompletedRunVisualizer:
             raise ValueError("no canonical strategy candles are available for this run")
 
         overlays = []
+        visible = market["period_start"] >= run_start
+        # Native Wilder RSI, calculated from the complete causal history before
+        # removing warmup bars, just as the strategy engine does.
+        rsi_values = native_rsi(market["close"].to_numpy(float), 14)
+        overlays.append({
+            "name": "RSI 14", "kind": "rsi", "period": 14,
+            "data": _line_points(market.loc[visible, "period_start"],
+                                 rsi_values[visible.to_numpy()]),
+        })
         if show_trend_emas:
             visible = market["period_start"] >= run_start
             for period in (320, 1600):
