@@ -84,6 +84,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <button id="center">Center selected</button>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
+    <label><input type="checkbox" id="fib-emas" checked> EMA 320 / 1600</label>
   </div>
   <div id="diag">Loading…</div>
   <div id="chart-wrap">
@@ -105,6 +106,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   let currentTrade = 0;
   let chart = null;
   let candles = null;
+  let trendEmaLines = [];
   let priceZoomFactor = 1.0;
   let pricePanOffset = 0.0;
   let verticalPan = null;
@@ -441,6 +443,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 
   function buildChart() {
     if (chart) chart.remove();
+    trendEmaLines = [];
     chart = window.LightweightCharts.createChart($('chart'),{
       autoSize:true,
       layout:{background:{type:'solid',color:'#0f1720'},textColor:'#b8c2cc'},
@@ -470,6 +473,19 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       },
     });
     candles.setData(payload.candles || []);
+    if ($('fib-emas').checked) {
+      for (const overlay of (payload.overlays || [])) {
+        if (overlay.kind !== 'ema' || ![320,1600].includes(Number(overlay.period))) continue;
+        const series=chart.addSeries(window.LightweightCharts.LineSeries,{
+          color:Number(overlay.period)===320 ? '#facc15' : '#fb7185',
+          lineWidth:2,priceLineVisible:false,lastValueVisible:true,
+          crosshairMarkerVisible:false,
+          title:overlay.name,
+        });
+        series.setData(overlay.data || []);
+        trendEmaLines.push(series);
+      }
+    }
     const redraw=redrawOverlays;
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
     if (window.ResizeObserver) new ResizeObserver(redraw).observe($('chart-wrap'));
@@ -478,6 +494,8 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       setTimeout(redraw, 40);
     });
   }
+
+  $('fib-emas').addEventListener('change', () => { if (payload) buildChart(); });
 
   function centerSelected() {
     if (!payload || !chart) return;
