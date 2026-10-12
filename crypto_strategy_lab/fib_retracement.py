@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 25
+FIB_RESEARCH_CONTEXT_VERSION = 26
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -195,9 +195,11 @@ def fibonacci_retracement_arrays(
     first_0786_held: bool = False,
     half_swing_mode: bool = False,
     third_retest_entry: bool = False,
+    first_zone_hold_entry: bool = False,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
-    half_swing_mode = bool(half_swing_mode) and not third_retest_entry
+    first_zone_hold_entry = bool(first_zone_hold_entry)
+    half_swing_mode = bool(half_swing_mode) and not third_retest_entry and not first_zone_hold_entry
     open_prices = np.asarray(open_prices, dtype=float)
     high_prices = np.asarray(high_prices, dtype=float)
     low_prices = np.asarray(low_prices, dtype=float)
@@ -618,6 +620,18 @@ def fibonacci_retracement_arrays(
         signal_price = levels_price[float(state["signal_level"])]
         state["hold_accepted_now"] = False
         signal_touched_now = float(low_prices[now]) <= signal_price <= float(high_prices[now])
+        zone_midpoint_price = None
+        if first_zone_hold_entry:
+            deeper = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786}.get(round(float(state["signal_level"]), 3))
+            if deeper is not None:
+                zone_midpoint_price = (signal_price + levels_price[deeper]) / 2.0
+                wick = float(low_prices[now] if direction == "LONG" else high_prices[now])
+                signal_touched_now = (
+                    zone_midpoint_price <= wick <= signal_price
+                    if direction == "LONG" else signal_price <= wick <= zone_midpoint_price
+                )
+            else:
+                signal_touched_now = False
         atr_now = float(atr_values[now]) if now < len(atr_values) else np.nan
 
         # After a valid hold, price must first reclaim the immediately
@@ -664,12 +678,13 @@ def fibonacci_retracement_arrays(
                     if direction == "LONG"
                     else max(0.0, signal_price - float(close_prices[now])) / atr_now
                 )
+            reaction_reference = zone_midpoint_price if first_zone_hold_entry else signal_price
             reaction_valid = (
-                float(open_prices[now]) > signal_price
-                and float(close_prices[now]) > signal_price
+                float(open_prices[now]) > reaction_reference
+                and float(close_prices[now]) > reaction_reference
                 if direction == "LONG"
-                else float(open_prices[now]) < signal_price
-                and float(close_prices[now]) < signal_price
+                else float(open_prices[now]) < reaction_reference
+                and float(close_prices[now]) < reaction_reference
             )
             signal_held = bool(state.get("hold_rearmed", True)) and reaction_valid
             if signal_held:
@@ -869,6 +884,7 @@ def fibonacci_retracement_arrays(
             for candidate in quality_candidates
             if (
                 int(_candidate_state(candidate[:3]).get("score_signal_held_count", 0)) >= 1
+                or (first_zone_hold_entry and bool(_candidate_state(candidate[:3]).get("hold_accepted_now", False)))
                 or _inherited_confirmation(candidate[:3], i)
                 or (half_swing_mode and float(_candidate_state(candidate[:3])["signal_level"]) == 0.500)
                 or (first_0786_held and float(_candidate_state(candidate[:3])["signal_level"]) == 0.786)
@@ -1135,7 +1151,8 @@ def fibonacci_retracement_arrays(
             bool(selected_state.get("hold_accepted_now", False))
             and entry_candidate_available
             and (
-                (third_retest_entry and not half_swing_mode
+                (first_zone_hold_entry and int(selected_state.get("signal_held_count", 0)) >= 1)
+                 or (third_retest_entry and not half_swing_mode
                  and active_signal_level in {0.382, 0.500, 0.618}
                  and int(selected_state.get("signal_held_count", 0)) >= 2)
                 or (not third_retest_entry and half_swing_mode and active_signal_level == 0.500
@@ -1245,7 +1262,8 @@ class FibonacciRetracementMixin:
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
             minimum_hold_rejection_atr=float(self.fib_minimum_hold_rejection_atr),
             half_swing_mode=bool(getattr(self.config, "fib_half_swing_mode", False)) and not bool(getattr(self.config, "fib_third_retest_entry", False)),
-            third_retest_entry=bool(getattr(self.config, "fib_third_retest_entry", False)),
+            third_retest_entry=bool(getattr(self.config, "fib_third_retest_entry", False)) and not bool(getattr(self.config, "fib_first_zone_hold_entry", False)),
+            first_zone_hold_entry=bool(getattr(self.config, "fib_first_zone_hold_entry", False)),
             inherited_first_held=bool(getattr(self.config, "fib_inherited_first_held", False)),
             first_0786_held=bool(getattr(self.config, "fib_first_0786_held", False)),
         )
@@ -1253,7 +1271,8 @@ class FibonacciRetracementMixin:
     def _fib_deeper_entry_enabled(self):
         # Keep the persisted key for compatibility with existing saved configs.
         return (getattr(self, "signal_strategy_mode", "DI") == FIB_RETRACEMENT_MODE
-                and bool(getattr(self.config, "fib_third_retest_entry", False)))
+                and bool(getattr(self.config, "fib_third_retest_entry", False))
+                and not bool(getattr(self.config, "fib_first_zone_hold_entry", False)))
 
     def _entry_decision(self, i, active_at_candle_start=False):
         if not self._fib_deeper_entry_enabled():
@@ -1432,7 +1451,7 @@ class FibonacciRetracementMixin:
             nearest = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786}.get(round(nearest, 3))
             if nearest is None:
                 return None
-        half_swing = bool(getattr(self.config, "fib_half_swing_mode", False)) and not deeper_entry
+        half_swing = bool(getattr(self.config, "fib_half_swing_mode", False)) and not deeper_entry and not bool(getattr(self.config, "fib_first_zone_hold_entry", False))
         if half_swing and round(nearest, 3) != 0.500:
             return None
         deeper = {
@@ -1496,7 +1515,7 @@ class FibonacciRetracementMixin:
         return {
             "passed": True,
             "applied": True,
-            "reason": ("FIB_SWING_ANCHOR_STOP" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() else "FIB_NEXT_LEVEL_STOP"),
+            "reason": ("FIB_SWING_ANCHOR_STOP" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() and not getattr(self.config, "fib_first_zone_hold_entry", False) else "FIB_NEXT_LEVEL_STOP"),
             "distance": distance,
             "distance_atr": distance / atr,
             "level_price": boundary,
@@ -1543,7 +1562,7 @@ class FibonacciRetracementMixin:
         # vetoed just because the previous impulse extreme offers less room.
         # The impulse-extreme mode retains the minimum-room protection.
         target_mode = (
-            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled()
+            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() and not getattr(self.config, "fib_first_zone_hold_entry", False)
             else str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
         )
         if (not getattr(self.config, "fib_half_swing_mode", False) or self._fib_deeper_entry_enabled()) and target_mode != "FIXED_R" and (
@@ -1559,7 +1578,7 @@ class FibonacciRetracementMixin:
             }
 
         target_mode = (
-            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled()
+            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() and not getattr(self.config, "fib_first_zone_hold_entry", False)
             else str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
         )
         if target_mode == "FIXED_R":
@@ -1582,12 +1601,50 @@ class FibonacciRetracementMixin:
             "minimum_r": minimum_r,
         }
 
+    def _fib_ema_trend_check(self, i, execution_i=None):
+        """Causal 15m EMA trend / stop gate; only closed signal bar data."""
+        if not bool(getattr(self.config, "fib_ema_trend_gate", False)):
+            return True, "FIB_EMA_TREND_DISABLED"
+        if int(getattr(self.config, "strategy_timeframe_minutes", 15)) != 15:
+            return False, "FIB_EMA_GATE_REQUIRES_15M"
+        if not hasattr(self, "_fib_ema_320_cache"):
+            self._fib_ema_320_cache = _causal_ema(self.close, 320)
+            self._fib_ema_1600_cache = _causal_ema(self.close, 1600)
+        if i < 0 or i >= len(self._fib_ema_320_cache):
+            return False, "FIB_EMA_HISTORY_UNAVAILABLE"
+        fast = float(self._fib_ema_320_cache[i])
+        slow = float(self._fib_ema_1600_cache[i])
+        if not (np.isfinite(fast) and np.isfinite(slow)):
+            return False, "FIB_EMA_HISTORY_UNAVAILABLE"
+        direction = self._effective_trade_direction(i)
+        entry = float(self._expected_entry_price(i, execution_i, direction))
+        if direction == "LONG":
+            if not (fast > slow and entry > slow):
+                return False, "FIB_EMA_LONG_TREND_VETO"
+        elif direction == "SHORT":
+            if not (fast < slow and entry < slow):
+                return False, "FIB_EMA_SHORT_TREND_VETO"
+        else:
+            return False, "FIB_EMA_DIRECTION_UNAVAILABLE"
+        stop_plan = self._sr_stop_plan(i, execution_i)
+        if not stop_plan.get("passed"):
+            return False, str(stop_plan.get("reason", "FIB_EMA_STOP_UNAVAILABLE"))
+        stop = float(stop_plan["stop_price"])
+        if direction == "LONG" and not stop < fast:
+            return False, "FIB_EMA_LONG_STOP_NOT_BELOW_320"
+        if direction == "SHORT" and not stop > fast:
+            return False, "FIB_EMA_SHORT_STOP_NOT_ABOVE_320"
+        return True, "FIB_EMA_TREND_PASSED"
+
     def _entry_filter_result(self, i, execution_i=None):
         passed, reason = super()._entry_filter_result(i, execution_i)
         if not passed or getattr(self, "signal_strategy_mode", "DI") != FIB_RETRACEMENT_MODE:
             return passed, reason
         if self._fib_deeper_entry_enabled() and self._effective_trade_direction(i) != self._selected_direction(i):
             return False, "FIB_DEEPER_LIMIT_DIRECTION_FLIP_UNSUPPORTED"
+        ema_passed, ema_reason = self._fib_ema_trend_check(i, execution_i)
+        if not ema_passed:
+            return False, ema_reason
         target = self._fib_target_plan(i, execution_i)
         if not target["passed"]:
             return False, str(target["reason"])

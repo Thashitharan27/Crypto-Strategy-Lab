@@ -1766,3 +1766,25 @@ def test_limit_fill_bar_fallback_cannot_credit_earlier_profit_or_exit_before_fil
         assert p.last_exit_timestamp == fill_time
         # Future fallback candles use their full range normally.
         assert p._maybe_exit_bar(pos, 3, 190., 120., p.times[3], ExitSource.FALLBACK_15M) == (190., 120.)
+
+
+def test_fib_first_zone_hold_is_causal_and_wider_than_line_touch():
+    # A confirmed 10 -> 20 impulse followed by a first-half-zone probe.
+    # The candle's low is inside the 0.382 -> 0.500 interval, and its
+    # open/close reclaim the zone midpoint, without requiring two holds.
+    open_ = np.array([12, 10, 12, 15, 18, 20, 20, 18.7, 17.2, 17.3], dtype=float)
+    high = np.array([12.5, 10.5, 12.5, 15.5, 18.5, 20.5, 20.1, 19.0, 17.5, 17.6])
+    low = np.array([11.5, 9.5, 11.5, 14.5, 17.5, 19.5, 19.0, 18.1, 15.7, 16.9])
+    close = np.array([12, 10, 12, 15, 18, 20, 19.4, 18.5, 17.25, 17.4])
+    atr = np.ones(len(close))
+
+    baseline = fibonacci_retracement_arrays(
+        open_, high, low, close, atr, pivot_strength=1,
+        minimum_impulse_atr=2.0,
+    )
+    zone = fibonacci_retracement_arrays(
+        open_, high, low, close, atr, pivot_strength=1,
+        minimum_impulse_atr=2.0, first_zone_hold_entry=True,
+    )
+    assert len(zone["FIB_IMPULSE_DIRECTION"]) == len(close)
+    assert set(zone) == set(baseline)
