@@ -22,6 +22,7 @@ import json
 
 import numpy as np
 import pandas as pd
+from crypto_strategy_lab.mean_reversion_v2 import moving_mean, resolve_mean_type
 
 from crypto_strategy_lab.indicators import rsi
 
@@ -196,6 +197,11 @@ def fibonacci_retracement_arrays(
     half_swing_mode: bool = False,
     third_retest_entry: bool = False,
     first_zone_hold_entry: bool = False,
+    candidate_context_selection: bool = False,
+    mean_reversion_period: int = 20,
+    mean_reversion_mean_type: str = "AUTO_TIMEFRAME",
+    strategy_timeframe_minutes: int = 15,
+    stop_buffer_atr: float = 0.05,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     first_zone_hold_entry = bool(first_zone_hold_entry)
@@ -212,6 +218,14 @@ def fibonacci_retracement_arrays(
     minimum_hold_rejection_atr = max(0.0, float(minimum_hold_rejection_atr))
     rsi_values = rsi(close_prices, rsi_period) if rsi_values is None else np.asarray(rsi_values, dtype=float)
     n = len(close_prices)
+    # All context inputs are causal on native strategy candles.
+    context_mean = (
+        moving_mean(close_prices, int(mean_reversion_period),
+                    resolve_mean_type(mean_reversion_mean_type, strategy_timeframe_minutes))
+        if candidate_context_selection else None
+    )
+    context_ema320 = _causal_ema(close_prices, 320) if candidate_context_selection else None
+    context_ema1600 = _causal_ema(close_prices, 1600) if candidate_context_selection else None
     if any(len(values) != n for values in (ema_50_values, ema_100_values, ema_200_values)):
         raise ValueError("Fib EMA arrays must match price length")
     if len(rsi_values) != n:
@@ -452,6 +466,48 @@ def fibonacci_retracement_arrays(
 
     def _candidate_final_score(candidate, now):
         return _candidate_confluence(candidate, now)["final_score"]
+
+    def _candidate_context_check(candidate, now):
+        """Pre-selection eligibility based on this leg's proposed Fib entry/stop.
+
+        The post-selection execution gate remains authoritative for next-bar
+        fills, gaps and final stop calculations.
+        """
+        direction, anchor_i, endpoint_i = candidate[:3]
+        state = _candidate_state((direction, anchor_i, endpoint_i))
+        anchor = float(low_prices[anchor_i] if direction == "LONG" else high_prices[anchor_i])
+        endpoint = float(high_prices[endpoint_i] if direction == "LONG" else low_prices[endpoint_i])
+        span = abs(endpoint - anchor)
+        atr_now = float(atr_values[now])
+        mean = float(context_mean[now])
+        fast = float(context_ema320[now])
+        slow = float(context_ema1600[now])
+        if not all(np.isfinite(v) for v in (span, atr_now, mean, fast, slow)) or span <= 0 or atr_now <= 0:
+            return False, "CONTEXT_HISTORY_UNAVAILABLE", float("nan")
+        level = round(float(state["signal_level"]), 3)
+        next_level = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786, 0.786: 1.0}.get(level)
+        if next_level is None:
+            return False, "FIB_STOP_LEVEL_UNAVAILABLE", float("nan")
+        entry_level = next_level if third_retest_entry else level
+        next_stop_level = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786, 0.786: 1.0}.get(entry_level)
+        if next_stop_level is None and not half_swing_mode:
+            return False, "FIB_STOP_LEVEL_UNAVAILABLE", float("nan")
+        sign = -1.0 if direction == "LONG" else 1.0
+        proposed_entry = endpoint + sign * entry_level * span
+        stop_boundary = anchor if half_swing_mode else endpoint + sign * next_stop_level * span
+        proposed_stop = stop_boundary + sign * float(stop_buffer_atr) * atr_now
+        distance = (proposed_entry - mean) / atr_now
+        if direction == "LONG":
+            if distance <= -1.5:
+                return False, "MR_STRONGLY_BELOW_MEAN", distance
+            if not (fast > slow and proposed_entry > slow and proposed_stop < fast):
+                return False, "EMA_TREND_OR_STOP", distance
+        else:
+            if distance >= 1.5:
+                return False, "MR_STRONGLY_ABOVE_MEAN", distance
+            if not (fast < slow and proposed_entry < slow and proposed_stop > fast):
+                return False, "EMA_TREND_OR_STOP", distance
+        return True, "PASS", distance
 
 
     def _leg_wick_penetration(leg, now):
@@ -890,6 +946,15 @@ def fibonacci_retracement_arrays(
                 or (first_0786_held and float(_candidate_state(candidate[:3])["signal_level"]) == 0.786)
             )
         ]
+        if candidate_context_selection:
+            context_entry_candidates = [
+                candidate for candidate in entry_candidates
+                if _candidate_context_check(candidate, i)[0]
+            ]
+            context_candidate_available = bool(context_entry_candidates)
+            entry_candidates = context_entry_candidates
+        else:
+            context_candidate_available = True
         entry_candidate_available = bool(entry_candidates)
         selection_pool = (
             entry_candidates
@@ -1025,6 +1090,20 @@ def fibonacci_retracement_arrays(
                         and not bool(state["invalidated"])
                         and int(state.get("score_signal_held_count", 0)) >= 1
                     ),
+                    "context_eligible": (
+                        _candidate_context_check(candidate, i)[0]
+                        if candidate_context_selection else None
+                    ),
+                    "context_reason": (
+                        _candidate_context_check(candidate, i)[1]
+                        if candidate_context_selection else "DISABLED"
+                    ),
+                    "context_entry_distance_atr": (
+                        float(_candidate_context_check(candidate, i)[2])
+                        if candidate_context_selection
+                        and np.isfinite(_candidate_context_check(candidate, i)[2])
+                        else None
+                    ),
                     "selected": candidate_leg == leg,
                 }
             )
@@ -1032,6 +1111,10 @@ def fibonacci_retracement_arrays(
             snapshot, separators=(",", ":"), sort_keys=True
         )
         selected_candidate_id[i] = f"{direction}:{start_i}:{end_i}"
+        if candidate_context_selection and not context_candidate_available:
+            # Preserve the full candidate inventory, but never emit a trade
+            # through the fallback selection if all ready legs fail context.
+            continue
         active_tests = int(selected_state["tests"])
         active_last_test = selected_state["last_test"]
         active_broken = bool(selected_state["broken"])
@@ -1266,6 +1349,11 @@ class FibonacciRetracementMixin:
             first_zone_hold_entry=bool(getattr(self.config, "fib_first_zone_hold_entry", False)),
             inherited_first_held=bool(getattr(self.config, "fib_inherited_first_held", False)),
             first_0786_held=bool(getattr(self.config, "fib_first_0786_held", False)),
+            candidate_context_selection=bool(getattr(self.config, "fib_candidate_context_selection", False)),
+            mean_reversion_period=int(getattr(self.config, "mean_reversion_period", 20)),
+            mean_reversion_mean_type=str(getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
+            strategy_timeframe_minutes=int(getattr(self.config, "strategy_timeframe_minutes", 15)),
+            stop_buffer_atr=float(getattr(self.config, "fib_stop_buffer_atr", 0.05)),
         )
 
     def _fib_deeper_entry_enabled(self):
@@ -1603,7 +1691,8 @@ class FibonacciRetracementMixin:
 
     def _fib_ema_trend_check(self, i, execution_i=None):
         """Causal 15m EMA trend / stop gate; only closed signal bar data."""
-        if not bool(getattr(self.config, "fib_ema_trend_gate", False)):
+        candidate_mode = bool(getattr(self.config, "fib_candidate_context_selection", False))
+        if not candidate_mode and not bool(getattr(self.config, "fib_ema_trend_gate", False)):
             return True, "FIB_EMA_TREND_DISABLED"
         if int(getattr(self.config, "strategy_timeframe_minutes", 15)) != 15:
             return False, "FIB_EMA_GATE_REQUIRES_15M"
@@ -1618,6 +1707,27 @@ class FibonacciRetracementMixin:
             return False, "FIB_EMA_HISTORY_UNAVAILABLE"
         direction = self._effective_trade_direction(i)
         entry = float(self._expected_entry_price(i, execution_i, direction))
+        if candidate_mode:
+            mean_values = getattr(self, "_fib_context_mean_cache", None)
+            mean_period = int(getattr(self.config, "mean_reversion_period", 20))
+            mean_key = (mean_period, str(getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")))
+            if mean_values is None or getattr(self, "_fib_context_mean_key", None) != mean_key:
+                mean_type = resolve_mean_type(
+                    str(getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
+                    int(getattr(self.config, "strategy_timeframe_minutes", 15)),
+                )
+                mean_values = moving_mean(self.close, mean_period, mean_type)
+                self._fib_context_mean_cache = mean_values
+                self._fib_context_mean_key = mean_key
+            atr_now = float(self.atr_values[i])
+            mean_now = float(mean_values[i])
+            if not np.isfinite(mean_now) or not np.isfinite(atr_now) or atr_now <= 0:
+                return False, "FIB_MR_HISTORY_UNAVAILABLE"
+            entry_distance = (entry - mean_now) / atr_now
+            if direction == "LONG" and entry_distance <= -1.5:
+                return False, "FIB_MR_LONG_STRONGLY_BELOW_MEAN"
+            if direction == "SHORT" and entry_distance >= 1.5:
+                return False, "FIB_MR_SHORT_STRONGLY_ABOVE_MEAN"
         if direction == "LONG":
             if not (fast > slow and entry > slow):
                 return False, "FIB_EMA_LONG_TREND_VETO"

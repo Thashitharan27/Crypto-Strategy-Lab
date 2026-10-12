@@ -1788,3 +1788,51 @@ def test_fib_first_zone_hold_is_causal_and_wider_than_line_touch():
     )
     assert len(zone["FIB_IMPULSE_DIRECTION"]) == len(close)
     assert set(zone) == set(baseline)
+
+
+def test_candidate_context_mode_keeps_inventory_when_long_ema_history_missing():
+    close = np.array([10, 9, 8, 9, 11, 12, 11, 10.5, 10.0, 10.8], dtype=float)
+    high = close + .2
+    low = close - .2
+    atr = np.ones(len(close))
+    values = fibonacci_retracement_arrays(
+        close, high, low, close, atr,
+        pivot_strength=2, candidate_context_selection=True,
+    )
+    snapshot = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][8])
+    assert snapshot
+    assert all(not candidate["context_eligible"] for candidate in snapshot)
+    assert all(candidate["context_reason"] == "CONTEXT_HISTORY_UNAVAILABLE" for candidate in snapshot)
+    assert values["_FIB_SIGNAL_DIRECTION"][8] is None
+
+
+def test_candidate_context_opt_in_defaults_to_legacy_selection():
+    close = np.array([10, 9, 8, 9, 11, 12, 11, 10.5, 10.0, 10.8], dtype=float)
+    high = close + .2
+    low = close - .2
+    atr = np.ones(len(close))
+    baseline = fibonacci_retracement_arrays(close, high, low, close, atr, pivot_strength=2)
+    disabled = fibonacci_retracement_arrays(
+        close, high, low, close, atr, pivot_strength=2,
+        candidate_context_selection=False,
+    )
+    assert baseline["_FIB_SELECTED_CANDIDATE_ID"].tolist() == disabled["_FIB_SELECTED_CANDIDATE_ID"].tolist()
+
+
+def test_candidate_context_research_policy_and_warmup_are_propagated():
+    import pandas as pd
+    from types import SimpleNamespace
+    from crypto_strategy_lab.research_warmup import strategy_warmup_period
+    features = SimpleNamespace(
+        atr_period=14, adx_period=14, bb_period=20,
+        mean_reversion_period=20, mean_reversion_rsi_period=14,
+        di_pressure_lookback=3, enable_support_resistance_analysis=False,
+        market_regime_method="SIDEWAYS", fib_candidate_context_selection=True,
+    )
+    run_config = SimpleNamespace(
+        data=SimpleNamespace(strategy_timeframe_minutes=15),
+        features=features, strategy=SimpleNamespace(profiles={}),
+    )
+    assert strategy_warmup_period(run_config) >= pd.Timedelta(minutes=15 * 1605)
+    features.fib_candidate_context_selection = False
+    assert strategy_warmup_period(run_config) < pd.Timedelta(minutes=15 * 1605)

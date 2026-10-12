@@ -20,7 +20,7 @@ import pandas as pd
 
 FEATURE_RESEARCH_ARTIFACT_CONTRACT = "feature_research_v1"
 FEATURE_RESEARCH_ARTIFACT_VERSION = 1
-FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 5
+FIB_CANDIDATE_ARTIFACT_SCHEMA_VERSION = 6
 REQUIRED_TRADE_COLUMNS = {
     "pair_id",
     "side",
@@ -151,6 +151,9 @@ FIB_CANDIDATE_ARTIFACT_COLUMNS = (
     "prior_hold_eligible",
     "structural_quality_eligible",
     "entry_valid",
+    "context_eligible",
+    "context_reason",
+    "context_entry_distance_atr",
     "selected",
 )
 
@@ -646,6 +649,9 @@ def _empty_fib_candidate_frame() -> pd.DataFrame:
             "prior_hold_eligible": pd.Series(dtype="bool"),
             "structural_quality_eligible": pd.Series(dtype="bool"),
             "entry_valid": pd.Series(dtype="bool"),
+            "context_eligible": pd.Series(dtype="boolean"),
+            "context_reason": pd.Series(dtype="string"),
+            "context_entry_distance_atr": pd.Series(dtype="float64"),
             "selected": pd.Series(dtype="bool"),
         }
     ).loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS]
@@ -725,6 +731,9 @@ def _fib_candidate_inventory_frame(
                 "prior_hold_eligible": bool(candidate.get("prior_hold_eligible")),
                 "structural_quality_eligible": bool(candidate.get("structural_quality_eligible")),
                 "entry_valid": bool(candidate.get("entry_valid")),
+                "context_eligible": candidate.get("context_eligible"),
+                "context_reason": str(candidate.get("context_reason", "DISABLED")),
+                "context_entry_distance_atr": candidate.get("context_entry_distance_atr"),
                 "selected": selected,
             })
         if selected_count > 1:
@@ -753,12 +762,14 @@ def _fib_candidate_inventory_frame(
         "live_score", "structural_score", "confluence_score", "reaction_score",
         "final_score", "ema_50_distance_atr", "ema_100_distance_atr",
         "ema_200_distance_atr", "rsi_divergence_code", "signal_held_ratio",
-        "last_signal_rejection_atr", "signal_level",
+        "last_signal_rejection_atr", "signal_level", "context_entry_distance_atr",
     ):
         frame[name] = pd.to_numeric(frame[name], errors="raise").astype("float64")
     frame["candidate_id"] = frame["candidate_id"].astype("string")
     frame["direction"] = frame["direction"].astype("string")
     frame["rsi_divergence"] = frame["rsi_divergence"].astype("string")
+    frame["context_eligible"] = frame["context_eligible"].astype("boolean")
+    frame["context_reason"] = frame["context_reason"].astype("string")
     return frame.loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS].copy(), consumed
 
 
