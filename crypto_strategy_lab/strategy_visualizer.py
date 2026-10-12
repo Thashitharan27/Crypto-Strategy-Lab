@@ -2105,14 +2105,36 @@ class CompletedRunVisualizer:
         run_start = _utc(request.period_start)
         run_end = _utc(request.period_end)
 
+        show_trend_emas = strategy_timeframe == chart_timeframe == "15m"
+        # V2 normally loads run candles only. For trading-identical EMA values,
+        # include the native pre-run warmup and calculate before trimming.
+        calculation_start = (
+            run_start - strategy_warmup_period(self.seed.config)
+            if show_trend_emas else run_start
+        )
         market = self._market_frame(
-            run_start,
+            calculation_start,
             run_end,
             chart_timeframe=chart_timeframe,
         )
         if market.empty:
             raise ValueError("no canonical strategy candles are available for this run")
 
+        overlays = []
+        if show_trend_emas:
+            visible = market["period_start"] >= run_start
+            for period in (320, 1600):
+                ema_values = _causal_ema(market["close"].to_numpy(float), period)
+                overlays.append({
+                    "name": f"EMA {period}",
+                    "kind": "ema",
+                    "period": period,
+                    "data": _line_points(
+                        market.loc[visible, "period_start"],
+                        ema_values[visible.to_numpy()],
+                    ),
+                })
+        market = market.loc[market["period_start"] >= run_start].reset_index(drop=True)
         candles = [
             {
                 "time": _unix_seconds(row["period_start"]),
@@ -2225,6 +2247,7 @@ class CompletedRunVisualizer:
                 else None
             ),
             "candles": candles,
+            "overlays": overlays,
             "markers": markers,
             "fullRun": True,
             "chartTimeframe": chart_timeframe,
