@@ -178,8 +178,32 @@ class Ema920PullbackMixin:
             return "SHORT"
         return None
 
-    def _ema_320_trade_direction(self, i):
-        direction = self._ema_320_price_cross(i)
+    def _ema_320_full_body_signal(self, i):
+        """First completed candle with open AND close fully beyond EMA320."""
+        if i <= 0 or i >= len(self.close):
+            return None
+        values = (
+            self.open[i - 1], self.close[i - 1], self.ema_320_values[i - 1],
+            self.open[i], self.close[i], self.ema_320_values[i],
+        )
+        if not all(np.isfinite(float(x)) for x in values):
+            return None
+        previous_open, previous_close, previous_ema, opening, closing, ema = map(float, values)
+        fully_above = min(opening, closing) > ema
+        fully_below = max(opening, closing) < ema
+        was_above = min(previous_open, previous_close) > previous_ema
+        was_below = max(previous_open, previous_close) < previous_ema
+        if fully_above and not was_above:
+            return "LONG"
+        if fully_below and not was_below:
+            return "SHORT"
+        return None
+
+    def _ema_320_trade_direction(self, i, *, for_exit=False):
+        # Exit on an opposite CLOSE crossing, but enter only on the first
+        # fully confirmed candle body (a crossing candle often opens on
+        # the wrong side and cannot satisfy that entry requirement).
+        direction = self._ema_320_price_cross(i) if for_exit else self._ema_320_full_body_signal(i)
         if direction is None:
             return None
         if bool(getattr(self.config, "ema_320_flip_signals", False)):
@@ -329,7 +353,7 @@ class Ema920PullbackMixin:
                 return False
             if i <= 0:
                 return False
-            direction = self._ema_320_trade_direction(i - 1)
+            direction = self._ema_320_trade_direction(i - 1, for_exit=True)
             if direction is None:
                 return False
             opening = float(self.open[i])
