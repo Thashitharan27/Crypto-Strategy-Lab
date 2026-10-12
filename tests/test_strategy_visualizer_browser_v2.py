@@ -38,7 +38,7 @@ def test_v2_html_is_minimal_and_diagnostic():
     assert "setVisibleRange({from:start,to:end})" in html
     assert 'id="fib-layer"' in html
     assert "function drawFibOverlay()" in html
-    assert "EMA 20" not in html
+    assert "EMA 20 / 320 / 1600" in html
     assert "S/R" not in html
 
 
