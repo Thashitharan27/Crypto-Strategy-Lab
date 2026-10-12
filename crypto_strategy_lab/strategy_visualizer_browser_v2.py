@@ -85,7 +85,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
     <label><input type="checkbox" id="fib-emas" checked> EMA 320 / 1600</label>
-    <label><input type="checkbox" id="show-rsi" checked> RSI 14</label>
+    <label><input type="checkbox" id="show-rsi" checked> EMA RSI 224 / 1120</label>
   </div>
   <div id="diag">Loading…</div>
   <div id="chart-wrap">
@@ -492,12 +492,14 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
         trendEmaLines.push(series);
       }
     }
-    const rsiOverlay = (payload.overlays || []).find(o => o.kind === 'rsi' && Number(o.period) === 14);
-    if (rsiOverlay && $('show-rsi').checked && (rsiOverlay.data || []).length) {
+    const rsiOverlays = (payload.overlays || []).filter(o => o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period)));
+    if (rsiOverlays.length && $('show-rsi').checked && rsiOverlays.some(o => (o.data || []).length)) {
       // The built-in second pane shares the price chart's time scale:
       // horizontal panning, zooming, and crosshair remain aligned.
-      rsiSeries = chart.addSeries(window.LightweightCharts.LineSeries,{
-        color:'#a78bfa',lineWidth:2,title:'RSI 14',
+      for (const overlay of rsiOverlays) {
+      const line = chart.addSeries(window.LightweightCharts.LineSeries,{
+        color:Number(overlay.period)===224 ? '#a78bfa' : '#22d3ee',
+        lineWidth:2,title:overlay.name,
         priceFormat:{type:'price',precision:1,minMove:0.1},
         priceLineVisible:false,lastValueVisible:true,
         autoscaleInfoProvider: original => {
@@ -505,7 +507,9 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
           return {...(info || {}),priceRange:{minValue:0,maxValue:100}};
         },
       },1);
-      rsiSeries.setData(rsiOverlay.data);
+      line.setData(overlay.data || []);
+      if (!rsiSeries) rsiSeries=line;
+      }
       for (const level of [30,70]) {
         rsiSeries.createPriceLine({
           price:level,color:'#64748b',lineWidth:1,
