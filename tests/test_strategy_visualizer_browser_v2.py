@@ -117,3 +117,12 @@ def test_v2_fib_levels_remain_drawable_when_swing_anchor_is_offscreen():
     assert "const entryTime=Number(payload.selectedTradeChartCandleTime || payload.selectedTradeCandleTime || fib.entryTime);" in html
     assert "const rawStartX=chart.timeScale().timeToCoordinate(startTime);" in html
     assert "if ([x1,x2].some(v => v == null" not in html
+
+
+def test_v2_renders_trading_ema_overlays_with_toggle():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+    assert 'id="fib-emas"' in html
+    assert "overlay.period" in html
+    assert "[320,1600]" in html
+    assert "series.setData(overlay.data || [])" in html
+    assert "window.LightweightCharts.LineSeries" in html
