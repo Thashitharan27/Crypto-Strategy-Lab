@@ -158,6 +158,11 @@ FIELDS = {
 }
 
 ENUM_LABELS = {
+    "ema_320_exit_mode": {
+        "BOTH": "Fixed TP or Opposite EMA 320 Cross (first hit)",
+        "EMA_ONLY": "Opposite EMA 320 Cross Only (ATR Stop Still Active)",
+        "FIXED_TP_ONLY": "Fixed TP Only (ATR Stop Still Active)",
+    },
     "ema_920_trade_plan": {
         "PULLBACK_1R": "9/20 Pullback + Fixed 1R",
         "EMA_20_100_CROSS": "20/100 Cross — Long Only",
