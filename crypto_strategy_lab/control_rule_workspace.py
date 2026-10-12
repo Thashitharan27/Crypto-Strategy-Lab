@@ -70,6 +70,7 @@ SIGNAL_STRATEGIES = {
     "DMI_TREND": "DMI Trend — Baseline",
     "MACD_PULLBACK": "MACD Pullback — 12/26/9",
     "EMA_9_20_PULLBACK": "EMA 9/20 Pullback — Scalping",
+    "EMA_320_CLOSE_CROSS": "EMA 320 Price Close Cross — ATR SL/TP",
     "FAIR_VALUE_GAP": "Fair Value Gap — First Revisit",
     "FIB_RETRACEMENT": "Fib Retracement — Reaction",
     "MTF_SR_REACTION": "MTF S/R Reaction — Adaptive HTF / Entry TF",

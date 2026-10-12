@@ -67,6 +67,8 @@ class ResearchSamplingFastExitMixin:
         future intrabar horizon would bypass the strategy-open crossover exit and
         can turn canonical source winners into synthetic losses.
         """
+        if str(getattr(self, "signal_strategy_mode", "")).upper() == "EMA_320_CLOSE_CROSS":
+            return False
         ema_cross_plan = getattr(self, "_ema_920_cross_plan", None)
         if (
             str(getattr(self, "signal_strategy_mode", "")).upper()

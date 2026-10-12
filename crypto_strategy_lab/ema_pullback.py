@@ -42,6 +42,7 @@ class Ema920PullbackMixin:
         self.ema_9_values = _signal_ema(self.close, 9)
         self.ema_20_values = _signal_ema(self.close, 20)
         self.ema_100_values = _signal_ema(self.close, 100)
+        self.ema_320_values = _signal_ema(self.close, 320)
 
         if not hasattr(self, "atr_values") or not hasattr(self, "volume"):
             return
@@ -97,7 +98,10 @@ class Ema920PullbackMixin:
     def _infer_signal_strategy_mode(self):
         for profile in self.config.strategy_profiles.values():
             for rule in getattr(profile, "entry_rules", ()):
-                if str(rule.get("_strategy_direction_mode", "")).upper() == EMA_920_MODE:
+                marker = str(rule.get("_strategy_direction_mode", "")).upper()
+                if marker == "EMA_320_CLOSE_CROSS":
+                    return "EMA_320_CLOSE_CROSS"
+                if marker == EMA_920_MODE:
                     return EMA_920_MODE
         return super()._infer_signal_strategy_mode()
 
@@ -160,7 +164,23 @@ class Ema920PullbackMixin:
             return "SHORT"
         return None
 
+    def _ema_320_price_cross(self, i):
+        """Return signal only on the completed candle crossing EMA320."""
+        if i <= 0 or i >= len(self.close):
+            return None
+        before, now = float(self.ema_320_values[i - 1]), float(self.ema_320_values[i])
+        prior, current = float(self.close[i - 1]), float(self.close[i])
+        if not all(np.isfinite(v) for v in (before, now, prior, current)):
+            return None
+        if prior <= before and current > now:
+            return "LONG"
+        if prior >= before and current < now:
+            return "SHORT"
+        return None
+
     def _selected_direction(self, i):
+        if getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS":
+            return self._ema_320_price_cross(i)
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
             cross_mode = self._ema_920_cross_mode()
             if cross_mode is not None:
@@ -296,6 +316,30 @@ class Ema920PullbackMixin:
         return super()._scan_position_exit(pair, position, i)
 
     def _close_on_ema_20_100_cross(self, positions, i):
+        if getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS":
+            if i <= 0:
+                return False
+            direction = self._ema_320_price_cross(i - 1)
+            if direction is None:
+                return False
+            opening = float(self.open[i])
+            closed = False
+            for pos in positions:
+                if not pos.is_open:
+                    continue
+                if (pos.side == Side.LONG and direction != "SHORT") or (
+                    pos.side == Side.SHORT and direction != "LONG"
+                ):
+                    continue
+                stopped = opening <= pos.sl if pos.side == Side.LONG else opening >= pos.sl
+                slip = 1 - self.config.slippage if pos.side == Side.LONG else 1 + self.config.slippage
+                self._close_position(
+                    pos, i, opening * slip,
+                    ExitReason.SL if stopped else ExitReason.EMA_320_CLOSE_CROSS,
+                    ExitSource.STRATEGY_OPEN, self.times[i],
+                )
+                closed = True
+            return closed
         # At the open of candle i, only the completed candle i-1 is known.
         if (getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE
                 or not self._ema_920_cross_plan()
@@ -343,7 +387,8 @@ class Ema920PullbackMixin:
         return (False, "EMA 20/100 crossover uses native direction; direction FLIP disabled") if flipped else (passed, reason)
 
     def _should_enter(self, i):
-        if getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE:
+        signal_mode = getattr(self, "signal_strategy_mode", "DI")
+        if signal_mode not in (EMA_920_MODE, "EMA_320_CLOSE_CROSS"):
             return super()._should_enter(i)
         direction = self._selected_direction(i)
         if direction is None:
@@ -355,7 +400,8 @@ class Ema920PullbackMixin:
         # for the current position and the entry signal for the reverse side.
         # Allow that signal to be queued even though the old trade is still open
         # until the next candle's open.
-        if self._ema_920_cross_mode() != "BOTH" or len(self.active_pairs) != 1:
+        reverse_mode = signal_mode == "EMA_320_CLOSE_CROSS" or self._ema_920_cross_mode() == "BOTH"
+        if not reverse_mode or len(self.active_pairs) != 1:
             return False
         entry_mode = str(getattr(getattr(self.config, "entry_mode", ""), "value",
                                  getattr(self.config, "entry_mode", ""))).upper()
@@ -446,7 +492,10 @@ class Ema920PullbackMixin:
             decision
             and int(decision.get("execution_index", -1)) == i
             and active_at_candle_start
-            and self._ema_920_cross_mode() == "BOTH"
+            and (
+                getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS"
+                or self._ema_920_cross_mode() == "BOTH"
+            )
         ):
             indicator_i = int(decision["indicator_index"])
             direction = self._selected_direction(indicator_i)

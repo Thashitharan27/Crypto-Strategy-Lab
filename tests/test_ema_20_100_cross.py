@@ -487,3 +487,79 @@ class EmaCrossTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_standalone_ema320_signal_uses_only_closed_crosses():
+    from types import SimpleNamespace
+    from crypto_strategy_lab.ema_pullback import Ema920PullbackMixin
+    probe = SimpleNamespace(
+        close=np.array([99., 100., 101., 102., 99., 98., 99.]),
+        ema_320_values=np.full(7, 100.),
+    )
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 2) == "LONG"
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 3) is None
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 4) == "SHORT"
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 5) is None
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 0) is None
+
+
+def test_ema320_is_standalone_signal_strategy():
+    from crypto_strategy_lab.strategy_rule_model import (
+        SIGNAL_STRATEGIES, compile_profiles, MARKET_PERMISSIONS, infer_direction_mode,
+    )
+    from crypto_strategy_lab.gui.rule_strategy_builder import DIRECTION_LABELS
+    assert "EMA_320_CLOSE_CROSS" in SIGNAL_STRATEGIES
+    assert "EMA_320_CLOSE_CROSS" in DIRECTION_LABELS
+    strategy, _ = compile_profiles(
+        direction_mode="EMA_320_CLOSE_CROSS",
+        market_permissions=MARKET_PERMISSIONS,
+    )
+    assert infer_direction_mode(strategy) == "EMA_320_CLOSE_CROSS"
+
+
+def test_ema320_opposite_completed_close_exits_at_next_open():
+    engine = Engine()
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    engine.close = np.array([101., 102., 99., 98.])
+    engine.ema_320_values = np.array([100., 100., 100., 100.])
+    engine.open = np.array([101., 102., 99., 97.])
+    engine.times = np.array([0, 1, 2, 3])
+    engine.config = SimpleNamespace(slippage=0.0)
+    engine.exits = []
+    position = SimpleNamespace(side=Side.LONG, sl=95., is_open=True)
+    assert engine._close_on_ema_20_100_cross([position], 3)
+    assert engine.exits[0][1] == 97.
+    assert engine.exits[0][2] == ExitReason.EMA_320_CLOSE_CROSS
+    assert engine.exits[0][3] == ExitSource.STRATEGY_OPEN
+
+
+def test_ema320_uses_base_atr_stop_not_ema100_override():
+    from unittest.mock import patch
+    engine = Engine()
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    with patch.object(Base, "_sr_stop_plan", return_value={"passed": False}, create=True) as stop:
+        engine._sr_stop_plan(2, 3)
+    stop.assert_called_once_with(2, 3)
+
+
+def test_ema320_requires_next_open_and_disallows_flip_rules():
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
+    config = ResearchRunConfig()
+    strategy_profiles, _ = compile_profiles(
+        direction_mode="EMA_320_CLOSE_CROSS", market_permissions=MARKET_PERMISSIONS,
+    )
+    strategy = replace(config.strategy, profiles=strategy_profiles)
+    with np.testing.assert_raises_regex(ValueError, "next-candle-open"):
+        replace(config, strategy=strategy).validate()
+    valid = replace(config, strategy=strategy, execution=replace(
+        config.execution, entry_timing_mode="NEXT_CANDLE_OPEN",
+    ))
+    valid.validate()
+    profiles = dict(strategy_profiles)
+    key = next(k for k, p in profiles.items() if p.enabled)
+    profiles[key] = replace(profiles[key], entry_rules=(
+        *profiles[key].entry_rules,
+        {"action": "FLIP", "_builder_group_enabled": True},
+    ))
+    with np.testing.assert_raises_regex(ValueError, "disable direction FLIP"):
+        replace(valid, strategy=replace(valid.strategy, profiles=profiles)).validate()
