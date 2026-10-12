@@ -884,6 +884,7 @@ def fibonacci_retracement_arrays(
             for candidate in quality_candidates
             if (
                 int(_candidate_state(candidate[:3]).get("score_signal_held_count", 0)) >= 1
+                or (first_zone_hold_entry and bool(_candidate_state(candidate[:3]).get("hold_accepted_now", False)))
                 or _inherited_confirmation(candidate[:3], i)
                 or (half_swing_mode and float(_candidate_state(candidate[:3])["signal_level"]) == 0.500)
                 or (first_0786_held and float(_candidate_state(candidate[:3])["signal_level"]) == 0.786)
