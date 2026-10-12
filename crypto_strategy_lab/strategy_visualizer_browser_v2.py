@@ -85,6 +85,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
     <label><input type="checkbox" id="fib-emas" checked> EMA 320 / 1600</label>
+    <label><input type="checkbox" id="show-rsi" checked> RSI 14</label>
   </div>
   <div id="diag">Loading…</div>
   <div id="chart-wrap">
@@ -107,6 +108,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   let chart = null;
   let candles = null;
   let trendEmaLines = [];
+  let rsiSeries = null;
   let priceZoomFactor = 1.0;
   let pricePanOffset = 0.0;
   let verticalPan = null;
@@ -444,6 +446,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   function buildChart() {
     if (chart) chart.remove();
     trendEmaLines = [];
+    rsiSeries = null;
     chart = window.LightweightCharts.createChart($('chart'),{
       autoSize:true,
       layout:{background:{type:'solid',color:'#0f1720'},textColor:'#b8c2cc'},
@@ -489,6 +492,29 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
         trendEmaLines.push(series);
       }
     }
+    const rsiOverlay = (payload.overlays || []).find(o => o.kind === 'rsi' && Number(o.period) === 14);
+    if (rsiOverlay && $('show-rsi').checked && (rsiOverlay.data || []).length) {
+      // The built-in second pane shares the price chart's time scale:
+      // horizontal panning, zooming, and crosshair remain aligned.
+      rsiSeries = chart.addSeries(window.LightweightCharts.LineSeries,{
+        color:'#a78bfa',lineWidth:2,title:'RSI 14',
+        priceFormat:{type:'price',precision:1,minMove:0.1},
+        priceLineVisible:false,lastValueVisible:true,
+        autoscaleInfoProvider: original => {
+          const info=original();
+          return {...(info || {}),priceRange:{minValue:0,maxValue:100}};
+        },
+      },1);
+      rsiSeries.setData(rsiOverlay.data);
+      for (const level of [30,70]) {
+        rsiSeries.createPriceLine({
+          price:level,color:'#64748b',lineWidth:1,
+          lineStyle:window.LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible:true,title:String(level),
+        });
+      }
+      chart.panes()[1].setHeight(155);
+    }
     const redraw=redrawOverlays;
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
     if (window.ResizeObserver) new ResizeObserver(redraw).observe($('chart-wrap'));
@@ -497,6 +523,13 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       setTimeout(redraw, 40);
     });
   }
+
+  $('show-rsi').addEventListener('change', () => {
+    if (!payload || !chart) return;
+    const visibleRange=chart.timeScale().getVisibleRange();
+    buildChart();
+    if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
+  });
 
   $('fib-emas').addEventListener('change', () => {
     if (!payload || !chart) return;
