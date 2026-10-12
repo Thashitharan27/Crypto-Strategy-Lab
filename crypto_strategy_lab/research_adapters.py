@@ -58,6 +58,7 @@ class PreparedPolicyConfig:
     fib_first_zone_hold_entry: bool = False
     fib_candidate_context_selection: bool = False
     mean_reversion_period: int = 20
+    mean_reversion_mean_type: str = "AUTO_TIMEFRAME"
     fib_stop_buffer_atr: float = 0.05
     market_symbol: str = "POLICY"
 
@@ -90,6 +91,7 @@ def prepared_policy_config(run_config) -> PreparedPolicyConfig:
         fib_first_zone_hold_entry=bool(getattr(run_config.features, "fib_first_zone_hold_entry", False)),
         fib_candidate_context_selection=bool(getattr(run_config.features, "fib_candidate_context_selection", False)),
         mean_reversion_period=int(getattr(run_config.features, "mean_reversion_period", 20)),
+        mean_reversion_mean_type=str(getattr(run_config.features, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
         fib_stop_buffer_atr=float(getattr(run_config.execution, "fib_stop_buffer_atr", 0.05)),
     )
 
