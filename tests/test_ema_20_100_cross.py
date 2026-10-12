@@ -644,3 +644,24 @@ def test_ema320_ema_only_rejects_advanced_profit_management():
         )
         with np.testing.assert_raises_regex(ValueError, "EMA-only exit requires disabling"):
             replace(config, strategy=strategy, execution=execution).validate()
+
+
+def test_ema320_entry_waits_for_entire_candle_body_above_or_below():
+    engine = Engine()
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    engine.config = SimpleNamespace(ema_320_flip_signals=False)
+    engine.ema_320_values = np.full(6, 100.)
+    engine.open = np.array([98., 99., 100.5, 102., 101., 99.])
+    engine.close = np.array([98., 101., 102., 103., 99., 98.])
+    # Candle 1 closes above but opens below: early crossover, no entry.
+    assert engine._ema_320_price_cross(1) == "LONG"
+    assert engine._selected_direction(1) is None
+    # Candle 2 is first completed body wholly above: long next open.
+    assert engine._selected_direction(2) == "LONG"
+    assert engine._selected_direction(3) is None
+    # Candle 4 crosses below but opens above; candle 5 confirms.
+    assert engine._selected_direction(4) is None
+    assert engine._selected_direction(5) == "SHORT"
+    engine.config.ema_320_flip_signals = True
+    assert engine._selected_direction(2) == "SHORT"
+    assert engine._selected_direction(5) == "LONG"
