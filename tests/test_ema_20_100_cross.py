@@ -584,3 +584,63 @@ def test_ema320_signal_flip_reverses_entries_and_opposite_exits():
     engine.config.ema_320_flip_signals = False
     assert engine._selected_direction(1) == "LONG"
     assert engine._selected_direction(3) == "SHORT"
+
+
+def test_ema320_exit_mode_controls_opposite_cross_exit():
+    engine = Engine()
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    engine.close = np.array([101., 102., 99., 98.])
+    engine.ema_320_values = np.full(4, 100.)
+    engine.open = np.array([101., 102., 99., 97.])
+    engine.times = np.arange(4)
+    engine.config = SimpleNamespace(slippage=0.0, ema_320_exit_mode="FIXED_TP_ONLY")
+    engine.exits = []
+    position = SimpleNamespace(side=Side.LONG, sl=95., is_open=True)
+    assert not engine._close_on_ema_20_100_cross([position], 3)
+    assert not engine.exits
+    for mode in ("BOTH", "EMA_ONLY"):
+        engine.config.ema_320_exit_mode = mode
+        assert engine._close_on_ema_20_100_cross([position], 3)
+        assert engine.exits[-1][2] == ExitReason.EMA_320_CLOSE_CROSS
+
+
+def test_ema320_exit_modes_validate_and_preserve_default():
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
+    config = ResearchRunConfig()
+    profiles, _ = compile_profiles(
+        direction_mode="EMA_320_CLOSE_CROSS", market_permissions=MARKET_PERMISSIONS
+    )
+    strategy = replace(config.strategy, profiles=profiles)
+    execution = replace(config.execution, entry_timing_mode="NEXT_CANDLE_OPEN")
+    assert execution.ema_320_exit_mode == "BOTH"
+    for policy in ("BOTH", "EMA_ONLY", "FIXED_TP_ONLY"):
+        replace(config, strategy=strategy, execution=replace(
+            execution, ema_320_exit_mode=policy
+        )).validate()
+    with np.testing.assert_raises_regex(ValueError, "invalid EMA 320 exit mode"):
+        replace(config, strategy=strategy, execution=replace(
+            execution, ema_320_exit_mode="WRONG"
+        )).validate()
+
+
+def test_ema320_ema_only_rejects_advanced_profit_management():
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
+    config = ResearchRunConfig()
+    strategy_profiles, _ = compile_profiles(
+        direction_mode="EMA_320_CLOSE_CROSS", market_permissions=MARKET_PERMISSIONS
+    )
+    key = next(k for k, p in strategy_profiles.items() if p.enabled)
+    strategy = replace(config.strategy, profiles=strategy_profiles)
+    for option in (
+        "partial_profit_enabled", "r_step_trailing_enabled",
+        "atr_checkpoint_tp_extension_enabled", "trailing_enabled",
+        "break_even_enabled", "partial_stop_enabled",
+    ):
+        profiles = dict(config.execution.profiles)
+        profiles[key] = replace(profiles[key], **{option: True})
+        execution = replace(
+            config.execution, profiles=profiles,
+            entry_timing_mode="NEXT_CANDLE_OPEN", ema_320_exit_mode="EMA_ONLY",
+        )
+        with np.testing.assert_raises_regex(ValueError, "EMA-only exit requires disabling"):
+            replace(config, strategy=strategy, execution=execution).validate()

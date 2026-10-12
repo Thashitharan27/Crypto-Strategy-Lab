@@ -112,7 +112,7 @@ FEATURE_GROUPS = (
 
 EXECUTION_GROUPS = (
     ("Entry Fill", (
-        "entry_timing_mode", "ema_920_trade_plan", "ema_320_flip_signals",
+        "entry_timing_mode", "ema_920_trade_plan", "ema_320_flip_signals", "ema_320_exit_mode",
         "ema_cross_entry_confirmation_enabled", "ema_cross_entry_confirmation_r",
         "fvg_confirmation_enabled", "fvg_confirmation_minutes",
         "fvg_context_enabled", "fvg_context_timeframe_minutes",
@@ -350,6 +350,7 @@ class DataclassForm(QWidget):
         "entry_mode": ("WAIT_UNTIL_CLOSED", "EVERY_N_CANDLES"),
         "entry_timing_mode": ("SIGNAL_CLOSE", "NEXT_CANDLE_OPEN"),
         "di_ladder_mode": ("PRICE_LEVELS", "DI_REVERSAL"),
+        "ema_320_exit_mode": ("BOTH", "EMA_ONLY", "FIXED_TP_ONLY"),
         "ema_920_trade_plan": (
             "PULLBACK_1R", "EMA_20_100_CROSS",
             "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH",

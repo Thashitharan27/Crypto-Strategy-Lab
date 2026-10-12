@@ -325,6 +325,8 @@ class Ema920PullbackMixin:
 
     def _close_on_ema_20_100_cross(self, positions, i):
         if getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS":
+            if getattr(self.config, "ema_320_exit_mode", "BOTH") == "FIXED_TP_ONLY":
+                return False
             if i <= 0:
                 return False
             direction = self._ema_320_trade_direction(i - 1)
@@ -408,7 +410,7 @@ class Ema920PullbackMixin:
         # for the current position and the entry signal for the reverse side.
         # Allow that signal to be queued even though the old trade is still open
         # until the next candle's open.
-        reverse_mode = signal_mode == "EMA_320_CLOSE_CROSS" or self._ema_920_cross_mode() == "BOTH"
+        reverse_mode = (signal_mode == "EMA_320_CLOSE_CROSS" and getattr(self.config, "ema_320_exit_mode", "BOTH") != "FIXED_TP_ONLY") or self._ema_920_cross_mode() == "BOTH"
         if not reverse_mode or len(self.active_pairs) != 1:
             return False
         entry_mode = str(getattr(getattr(self.config, "entry_mode", ""), "value",
@@ -501,7 +503,8 @@ class Ema920PullbackMixin:
             and int(decision.get("execution_index", -1)) == i
             and active_at_candle_start
             and (
-                getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS"
+                (getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS"
+                 and getattr(self.config, "ema_320_exit_mode", "BOTH") != "FIXED_TP_ONLY")
                 or self._ema_920_cross_mode() == "BOTH"
             )
         ):
@@ -748,6 +751,16 @@ class Ema920PullbackMixin:
             result = super()._open_pair(i, entry_filter_passed, entry_filter_reason, schedule)
         finally:
             self._ema_cross_sizing_distance = None
+        if getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS" and len(self.active_pairs) > before:
+            if getattr(self.config, "ema_320_exit_mode", "BOTH") == "EMA_ONLY":
+                for pos in self.active_pairs[-1].positions():
+                    pos.tp = np.nan
+                    if getattr(pos, "partial_tp_enabled", False):
+                        pos.tp1_price = np.nan
+                        pos.tp2_price = np.nan
+                        pos.tp1_quantity = 0.0
+                        pos.tp2_quantity = 0.0
+            return result
         if getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE or len(self.active_pairs) <= before:
             return result
         pair = self.active_pairs[-1]

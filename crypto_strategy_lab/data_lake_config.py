@@ -381,6 +381,7 @@ class ExecutionConfig:
     entry_timing_mode: str = "SIGNAL_CLOSE"
     ema_920_trade_plan: str = "PULLBACK_1R"
     ema_320_flip_signals: bool = False
+    ema_320_exit_mode: str = "BOTH"
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
@@ -661,6 +662,8 @@ class ResearchRunConfig:
                 for rule in profile.entry_rules
             )
         )
+        if execution.ema_320_exit_mode not in {"BOTH", "EMA_ONLY", "FIXED_TP_ONLY"}:
+            raise ValueError("invalid EMA 320 exit mode")
         ema320_selected = any(
             rule.get("_strategy_direction_mode") == "EMA_320_CLOSE_CROSS"
             for profile in strategy.profiles.values()
@@ -669,6 +672,24 @@ class ResearchRunConfig:
         if ema320_selected and execution.entry_timing_mode != "NEXT_CANDLE_OPEN":
             raise ValueError("EMA 320 price close crossover requires next-candle-open entry fills")
         if ema320_selected:
+            if execution.ema_320_exit_mode == "EMA_ONLY":
+                for key, profile in execution.profiles.items():
+                    if not strategy.profiles[key].enabled:
+                        continue
+                    disallowed = [
+                        label for label, enabled in (
+                            ("partial profit-taking", profile.partial_profit_enabled),
+                            ("R-step trailing", profile.r_step_trailing_enabled),
+                            ("ATR-checkpoint TP extension", profile.atr_checkpoint_tp_extension_enabled),
+                            ("trailing stop", profile.trailing_enabled),
+                            ("break-even", profile.break_even_enabled),
+                            ("partial stop", profile.partial_stop_enabled),
+                        ) if enabled
+                    ]
+                    if disallowed:
+                        raise ValueError(
+                            f"{key}: EMA-only exit requires disabling " + ", ".join(disallowed)
+                        )
             for key, profile in strategy.profiles.items():
                 if profile.enabled and (
                     profile.flip_direction or any(
