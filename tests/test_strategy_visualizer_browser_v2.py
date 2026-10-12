@@ -216,7 +216,7 @@ def test_v2_includes_price_ema20_with_existing_trend_emas():
     assert "[20,320,1600].includes(Number(overlay.period))" in html
     assert "Number(overlay.period)===20 ? '#4ade80'" in html
     source = inspect.getsource(CompletedRunVisualizer.build_v2_diagnostic_payload)
-    assert "for period in (20, 320, 1600):" in source
+    assert "for period in ((20, 320, 1600) if strategy_timeframe == \"15m\" else (320,)):" in source
 
 
 def test_standard_visualizer_ema320_layer_and_payload_support():
