@@ -515,3 +515,28 @@ def test_ema320_is_standalone_signal_strategy():
         market_permissions=MARKET_PERMISSIONS,
     )
     assert infer_direction_mode(strategy) == "EMA_320_CLOSE_CROSS"
+
+
+def test_ema320_opposite_completed_close_exits_at_next_open():
+    engine = Engine()
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    engine.close = np.array([101., 102., 99., 98.])
+    engine.ema_320_values = np.array([100., 100., 100., 100.])
+    engine.open = np.array([101., 102., 99., 97.])
+    engine.times = np.array([0, 1, 2, 3])
+    engine.config = SimpleNamespace(slippage=0.0)
+    engine.exits = []
+    position = SimpleNamespace(side=Side.LONG, sl=95., is_open=True)
+    assert engine._close_on_ema_20_100_cross([position], 3)
+    assert engine.exits[0][1] == 97.
+    assert engine.exits[0][2] == ExitReason.EMA_320_CLOSE_CROSS
+    assert engine.exits[0][3] == ExitSource.STRATEGY_OPEN
+
+
+def test_ema320_uses_base_atr_stop_not_ema100_override():
+    from unittest.mock import patch
+    engine = Engine()
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    with patch.object(Base, "_sr_stop_plan", return_value={"passed": False}, create=True) as stop:
+        engine._sr_stop_plan(2, 3)
+    stop.assert_called_once_with(2, 3)
