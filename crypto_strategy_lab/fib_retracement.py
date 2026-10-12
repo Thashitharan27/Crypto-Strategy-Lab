@@ -1677,7 +1677,8 @@ class FibonacciRetracementMixin:
 
     def _fib_ema_trend_check(self, i, execution_i=None):
         """Causal 15m EMA trend / stop gate; only closed signal bar data."""
-        if not bool(getattr(self.config, "fib_ema_trend_gate", False)):
+        candidate_mode = bool(getattr(self.config, "fib_candidate_context_selection", False))
+        if not candidate_mode and not bool(getattr(self.config, "fib_ema_trend_gate", False)):
             return True, "FIB_EMA_TREND_DISABLED"
         if int(getattr(self.config, "strategy_timeframe_minutes", 15)) != 15:
             return False, "FIB_EMA_GATE_REQUIRES_15M"
@@ -1692,6 +1693,22 @@ class FibonacciRetracementMixin:
             return False, "FIB_EMA_HISTORY_UNAVAILABLE"
         direction = self._effective_trade_direction(i)
         entry = float(self._expected_entry_price(i, execution_i, direction))
+        if candidate_mode:
+            mean_values = getattr(self, "_fib_context_mean_cache", None)
+            mean_period = int(getattr(self.config, "mean_reversion_period", 20))
+            if mean_values is None or getattr(self, "_fib_context_mean_period", None) != mean_period:
+                mean_values = _causal_ema(self.close, mean_period)
+                self._fib_context_mean_cache = mean_values
+                self._fib_context_mean_period = mean_period
+            atr_now = float(self.atr_values[i])
+            mean_now = float(mean_values[i])
+            if not np.isfinite(mean_now) or not np.isfinite(atr_now) or atr_now <= 0:
+                return False, "FIB_MR_HISTORY_UNAVAILABLE"
+            entry_distance = (entry - mean_now) / atr_now
+            if direction == "LONG" and entry_distance <= -1.5:
+                return False, "FIB_MR_LONG_STRONGLY_BELOW_MEAN"
+            if direction == "SHORT" and entry_distance >= 1.5:
+                return False, "FIB_MR_SHORT_STRONGLY_ABOVE_MEAN"
         if direction == "LONG":
             if not (fast > slow and entry > slow):
                 return False, "FIB_EMA_LONG_TREND_VETO"
