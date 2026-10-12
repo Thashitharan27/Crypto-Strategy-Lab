@@ -41,6 +41,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "fib_half_swing_mode": False,
     "fib_third_retest_entry": False,
     "fib_ema_trend_gate": False,
+    "fib_candidate_context_selection": False,
     "fib_first_zone_hold_entry": False,
     "fib_stop_buffer_atr": 0.05,
     "fib_target_mode": "IMPULSE_EXTREME",
