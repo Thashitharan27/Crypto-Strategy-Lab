@@ -42,6 +42,7 @@ FRIENDLY_LABELS = {
     "fib_first_0786_held": "Allow first-held entry at Fib 0.786",
     "fib_half_swing_mode": "Fib 0.5 first-held entry, swing stop, extreme target",
     "fib_third_retest_entry": "Two distinct holds then pending limit entry one Fib deeper",
+    "fib_ema_trend_gate": "Require EMA 320/1600 trend and Fib stop beyond EMA 320",
     "atr_period": "ATR period",
     "bb_period": "Bollinger period",
     "bb_stddevs": "Bollinger deviation",
