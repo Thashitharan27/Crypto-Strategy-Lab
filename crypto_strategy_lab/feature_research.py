@@ -649,6 +649,9 @@ def _empty_fib_candidate_frame() -> pd.DataFrame:
             "prior_hold_eligible": pd.Series(dtype="bool"),
             "structural_quality_eligible": pd.Series(dtype="bool"),
             "entry_valid": pd.Series(dtype="bool"),
+            "context_eligible": pd.Series(dtype="boolean"),
+            "context_reason": pd.Series(dtype="string"),
+            "context_entry_distance_atr": pd.Series(dtype="float64"),
             "selected": pd.Series(dtype="bool"),
         }
     ).loc[:, FIB_CANDIDATE_ARTIFACT_COLUMNS]
