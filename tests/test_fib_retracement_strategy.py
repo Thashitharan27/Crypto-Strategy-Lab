@@ -1817,3 +1817,22 @@ def test_candidate_context_opt_in_defaults_to_legacy_selection():
         candidate_context_selection=False,
     )
     assert baseline["_FIB_SELECTED_CANDIDATE_ID"].tolist() == disabled["_FIB_SELECTED_CANDIDATE_ID"].tolist()
+
+
+def test_candidate_context_research_policy_and_warmup_are_propagated():
+    import pandas as pd
+    from types import SimpleNamespace
+    from crypto_strategy_lab.research_warmup import strategy_warmup_period
+    features = SimpleNamespace(
+        atr_period=14, adx_period=14, bb_period=20,
+        mean_reversion_period=20, mean_reversion_rsi_period=14,
+        di_pressure_lookback=3, enable_support_resistance_analysis=False,
+        market_regime_method="SIDEWAYS", fib_candidate_context_selection=True,
+    )
+    run_config = SimpleNamespace(
+        data=SimpleNamespace(strategy_timeframe_minutes=15),
+        features=features, strategy=SimpleNamespace(profiles={}),
+    )
+    assert strategy_warmup_period(run_config) >= pd.Timedelta(minutes=15 * 1605)
+    features.fib_candidate_context_selection = False
+    assert strategy_warmup_period(run_config) < pd.Timedelta(minutes=15 * 1605)
