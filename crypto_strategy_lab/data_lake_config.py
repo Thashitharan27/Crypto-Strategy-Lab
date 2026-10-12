@@ -674,8 +674,22 @@ class ResearchRunConfig:
         if ema320_selected:
             if execution.ema_320_exit_mode == "EMA_ONLY":
                 for key, profile in execution.profiles.items():
-                    if strategy.profiles[key].enabled and profile.partial_profit_enabled:
-                        raise ValueError(f"{key}: EMA-only exit requires disabling partial profit-taking")
+                    if not strategy.profiles[key].enabled:
+                        continue
+                    disallowed = [
+                        label for label, enabled in (
+                            ("partial profit-taking", profile.partial_profit_enabled),
+                            ("R-step trailing", profile.r_step_trailing_enabled),
+                            ("ATR-checkpoint TP extension", profile.atr_checkpoint_tp_extension_enabled),
+                            ("trailing stop", profile.trailing_enabled),
+                            ("break-even", profile.break_even_enabled),
+                            ("partial stop", profile.partial_stop_enabled),
+                        ) if enabled
+                    ]
+                    if disallowed:
+                        raise ValueError(
+                            f"{key}: EMA-only exit requires disabling " + ", ".join(disallowed)
+                        )
             for key, profile in strategy.profiles.items():
                 if profile.enabled and (
                     profile.flip_direction or any(
