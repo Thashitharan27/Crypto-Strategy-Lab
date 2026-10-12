@@ -146,7 +146,7 @@ def test_v2_rsi_lower_pane_uses_native_payload_and_preserves_viewport():
     assert 'id="show-rsi"' in html
     assert "o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period))" in html
     assert "const line = chart.addSeries(window.LightweightCharts.LineSeries" in html
-    assert "chart.panes()[1].setHeight(155)" in html
+    assert "chart?.panes()[1]?.setHeight(Number($(\'rsi-height\').value))" in html
     assert "for (const level of [30,70])" in html
     assert "if (visibleRange) chart.timeScale().setVisibleRange(visibleRange)" in html
 
