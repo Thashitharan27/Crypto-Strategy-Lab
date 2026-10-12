@@ -195,9 +195,11 @@ def fibonacci_retracement_arrays(
     first_0786_held: bool = False,
     half_swing_mode: bool = False,
     third_retest_entry: bool = False,
+    first_zone_hold_entry: bool = False,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
-    half_swing_mode = bool(half_swing_mode) and not third_retest_entry
+    first_zone_hold_entry = bool(first_zone_hold_entry)
+    half_swing_mode = bool(half_swing_mode) and not third_retest_entry and not first_zone_hold_entry
     open_prices = np.asarray(open_prices, dtype=float)
     high_prices = np.asarray(high_prices, dtype=float)
     low_prices = np.asarray(low_prices, dtype=float)
@@ -618,6 +620,18 @@ def fibonacci_retracement_arrays(
         signal_price = levels_price[float(state["signal_level"])]
         state["hold_accepted_now"] = False
         signal_touched_now = float(low_prices[now]) <= signal_price <= float(high_prices[now])
+        zone_midpoint_price = None
+        if first_zone_hold_entry:
+            deeper = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786}.get(round(float(state["signal_level"]), 3))
+            if deeper is not None:
+                zone_midpoint_price = (signal_price + levels_price[deeper]) / 2.0
+                wick = float(low_prices[now] if direction == "LONG" else high_prices[now])
+                signal_touched_now = (
+                    zone_midpoint_price <= wick <= signal_price
+                    if direction == "LONG" else signal_price <= wick <= zone_midpoint_price
+                )
+            else:
+                signal_touched_now = False
         atr_now = float(atr_values[now]) if now < len(atr_values) else np.nan
 
         # After a valid hold, price must first reclaim the immediately
@@ -664,12 +678,13 @@ def fibonacci_retracement_arrays(
                     if direction == "LONG"
                     else max(0.0, signal_price - float(close_prices[now])) / atr_now
                 )
+            reaction_reference = zone_midpoint_price if first_zone_hold_entry else signal_price
             reaction_valid = (
-                float(open_prices[now]) > signal_price
-                and float(close_prices[now]) > signal_price
+                float(open_prices[now]) > reaction_reference
+                and float(close_prices[now]) > reaction_reference
                 if direction == "LONG"
-                else float(open_prices[now]) < signal_price
-                and float(close_prices[now]) < signal_price
+                else float(open_prices[now]) < reaction_reference
+                and float(close_prices[now]) < reaction_reference
             )
             signal_held = bool(state.get("hold_rearmed", True)) and reaction_valid
             if signal_held:
@@ -1135,7 +1150,8 @@ def fibonacci_retracement_arrays(
             bool(selected_state.get("hold_accepted_now", False))
             and entry_candidate_available
             and (
-                (third_retest_entry and not half_swing_mode
+                (first_zone_hold_entry and int(selected_state.get("signal_held_count", 0)) >= 1)
+                 or (third_retest_entry and not half_swing_mode
                  and active_signal_level in {0.382, 0.500, 0.618}
                  and int(selected_state.get("signal_held_count", 0)) >= 2)
                 or (not third_retest_entry and half_swing_mode and active_signal_level == 0.500
@@ -1245,7 +1261,8 @@ class FibonacciRetracementMixin:
             active_structure_reset_depth=float(self.fib_active_structure_reset_depth),
             minimum_hold_rejection_atr=float(self.fib_minimum_hold_rejection_atr),
             half_swing_mode=bool(getattr(self.config, "fib_half_swing_mode", False)) and not bool(getattr(self.config, "fib_third_retest_entry", False)),
-            third_retest_entry=bool(getattr(self.config, "fib_third_retest_entry", False)),
+            third_retest_entry=bool(getattr(self.config, "fib_third_retest_entry", False)) and not bool(getattr(self.config, "fib_first_zone_hold_entry", False)),
+            first_zone_hold_entry=bool(getattr(self.config, "fib_first_zone_hold_entry", False)),
             inherited_first_held=bool(getattr(self.config, "fib_inherited_first_held", False)),
             first_0786_held=bool(getattr(self.config, "fib_first_0786_held", False)),
         )
@@ -1253,7 +1270,8 @@ class FibonacciRetracementMixin:
     def _fib_deeper_entry_enabled(self):
         # Keep the persisted key for compatibility with existing saved configs.
         return (getattr(self, "signal_strategy_mode", "DI") == FIB_RETRACEMENT_MODE
-                and bool(getattr(self.config, "fib_third_retest_entry", False)))
+                and bool(getattr(self.config, "fib_third_retest_entry", False))
+                and not bool(getattr(self.config, "fib_first_zone_hold_entry", False)))
 
     def _entry_decision(self, i, active_at_candle_start=False):
         if not self._fib_deeper_entry_enabled():
