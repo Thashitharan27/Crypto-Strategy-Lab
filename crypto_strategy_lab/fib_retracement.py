@@ -1342,6 +1342,9 @@ class FibonacciRetracementMixin:
             first_zone_hold_entry=bool(getattr(self.config, "fib_first_zone_hold_entry", False)),
             inherited_first_held=bool(getattr(self.config, "fib_inherited_first_held", False)),
             first_0786_held=bool(getattr(self.config, "fib_first_0786_held", False)),
+            candidate_context_selection=bool(getattr(self.config, "fib_candidate_context_selection", False)),
+            mean_reversion_period=int(getattr(self.config, "mean_reversion_period", 20)),
+            stop_buffer_atr=float(getattr(self.config, "fib_stop_buffer_atr", 0.05)),
         )
 
     def _fib_deeper_entry_enabled(self):
