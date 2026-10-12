@@ -22,7 +22,6 @@ from crypto_strategy_lab.gui.completed_run_research import research_seed_from_ma
 from crypto_strategy_lab.research_warmup import strategy_warmup_period
 from crypto_strategy_lab.research_warmup import expand_strategy_request
 from crypto_strategy_lab.fib_retracement import _causal_ema
-from crypto_strategy_lab.indicators import rsi as native_rsi
 from crypto_strategy_lab.strategy_rule_model import (
     CATEGORICAL_VALUE_CODES,
     is_context_timeframe_evidence,
@@ -134,6 +133,22 @@ def _ema(values: pd.Series, period: int) -> np.ndarray:
         .mean()
         .to_numpy(float)
     )
+
+
+def _ema_rsi(close: np.ndarray, period: int) -> np.ndarray:
+    """EMA-smoothed RSI using alpha=2/(period+1), rather than Wilder's alpha."""
+    if period < 2:
+        raise ValueError("EMA RSI period must be at least 2")
+    prices = pd.Series(np.asarray(close, dtype=float))
+    delta = prices.diff()
+    gains = delta.clip(lower=0).ewm(span=period, adjust=False, min_periods=period).mean()
+    losses = (-delta).clip(lower=0).ewm(span=period, adjust=False, min_periods=period).mean()
+    rs = gains / losses.replace(0.0, np.nan)
+    result = 100.0 - 100.0 / (1.0 + rs)
+    result = result.mask((losses == 0) & (gains > 0), 100.0)
+    result = result.mask((gains == 0) & (losses > 0), 0.0)
+    result = result.mask((gains == 0) & (losses == 0), 50.0)
+    return result.to_numpy(float)
 
 
 def _line_points(times: pd.Series, values: Any) -> list[dict[str, Any]]:
@@ -2109,9 +2124,16 @@ class CompletedRunVisualizer:
         show_trend_emas = strategy_timeframe == chart_timeframe == "15m"
         # V2 normally loads run candles only. For trading-identical EMA values,
         # include the native pre-run warmup and calculate before trimming.
-        calculation_start = (
-            run_start - strategy_warmup_period(self.seed.config)
-            if strategy_timeframe == chart_timeframe else run_start
+        # 2240 native bars provide ample EMA-RSI 1120 initialization on any
+        # supported timeframe, not just 15m.
+        timeframe_minutes = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+        rsi_warmup = pd.Timedelta(
+            minutes=timeframe_minutes[chart_timeframe] * 2240
+        ) if chart_timeframe in timeframe_minutes else pd.Timedelta(0)
+        calculation_start = run_start - max(
+            strategy_warmup_period(self.seed.config)
+            if strategy_timeframe == chart_timeframe else pd.Timedelta(0),
+            rsi_warmup,
         )
         market = self._market_frame(
             calculation_start,
@@ -2123,14 +2145,14 @@ class CompletedRunVisualizer:
 
         overlays = []
         visible = market["period_start"] >= run_start
-        # Native Wilder RSI, calculated from the complete causal history before
-        # removing warmup bars, just as the strategy engine does.
-        rsi_values = native_rsi(market["close"].to_numpy(float), 14)
-        overlays.append({
-            "name": "RSI 14", "kind": "rsi", "period": 14,
-            "data": _line_points(market.loc[visible, "period_start"],
-                                 rsi_values[visible.to_numpy()]),
-        })
+        # Research-only pair: EMA smoothing of gains and losses, not Wilder RSI.
+        for period in (224, 1120):
+            values = _ema_rsi(market["close"].to_numpy(float), period)
+            overlays.append({
+                "name": f"EMA RSI {period}", "kind": "ema_rsi", "period": period,
+                "data": _line_points(market.loc[visible, "period_start"],
+                                     values[visible.to_numpy()]),
+            })
         if show_trend_emas:
             visible = market["period_start"] >= run_start
             for period in (320, 1600):

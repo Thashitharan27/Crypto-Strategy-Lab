@@ -144,8 +144,8 @@ def test_v2_trend_ema_overlays_do_not_override_price_zoom_and_pan():
 def test_v2_rsi_lower_pane_uses_native_payload_and_preserves_viewport():
     html=build_browser_visualizer_v2_html(_Model(),"abc")
     assert 'id="show-rsi"' in html
-    assert "o.kind === 'rsi' && Number(o.period) === 14" in html
-    assert "rsiSeries = chart.addSeries(window.LightweightCharts.LineSeries" in html
+    assert "o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period))" in html
+    assert "const line = chart.addSeries(window.LightweightCharts.LineSeries" in html
     assert "chart.panes()[1].setHeight(155)" in html
     assert "for (const level of [30,70])" in html
     assert "if (visibleRange) chart.timeScale().setVisibleRange(visibleRange)" in html
@@ -156,3 +156,35 @@ def test_rsi_pane_does_not_capture_candle_price_gestures():
     assert "function inCandlePane(event)" in html
     assert "chart.panes()[0].getHeight()" in html
     assert "!inCandlePane(event)" in html
+
+
+def test_v2_ema_rsi_pair_is_selectable_in_one_pane():
+    html=build_browser_visualizer_v2_html(_Model(),"abc")
+    assert "EMA RSI 224 / 1120" in html
+    assert "for (const overlay of rsiOverlays)" in html
+    assert "Number(overlay.period)===224" in html
+    assert "if (!rsiSeries) rsiSeries=line" in html
+
+
+def test_ema_rsi_custom_smoothing_differs_from_wilder_and_waits_for_history():
+    import numpy as np
+    from crypto_strategy_lab.strategy_visualizer import _ema_rsi
+    from crypto_strategy_lab.indicators import rsi as wilder_rsi
+    close = np.array([100.0 + i * 0.015 + 3.0 * np.sin(i / 9.0) for i in range(1800)])
+    fast = _ema_rsi(close, 224)
+    slow = _ema_rsi(close, 1120)
+    assert np.isnan(fast[:224]).all()
+    assert np.isnan(slow[:1120]).all()
+    assert np.isfinite(fast[224:]).all()
+    assert np.isfinite(slow[1120:]).all()
+    assert np.all((fast[224:] >= 0) & (fast[224:] <= 100))
+    assert np.all((slow[1120:] >= 0) & (slow[1120:] <= 100))
+    assert not np.isclose(fast[-1], wilder_rsi(close, 224)[-1])
+
+
+def test_ema_rsi_warmup_covers_supported_chart_timeframes():
+    import inspect
+    from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
+    source=inspect.getsource(CompletedRunVisualizer.build_v2_diagnostic_payload)
+    assert '"15m": 15, "1h": 60, "4h": 240, "1d": 1440' in source
+    assert "timeframe_minutes[chart_timeframe] * 2240" in source
