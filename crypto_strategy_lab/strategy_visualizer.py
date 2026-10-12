@@ -21,6 +21,7 @@ from crypto_strategy_lab.data.source_identity import SourceSignature
 from crypto_strategy_lab.gui.completed_run_research import research_seed_from_manifest
 from crypto_strategy_lab.research_warmup import strategy_warmup_period
 from crypto_strategy_lab.research_warmup import expand_strategy_request
+from crypto_strategy_lab.fib_retracement import _causal_ema
 from crypto_strategy_lab.strategy_rule_model import (
     CATEGORICAL_VALUE_CODES,
     is_context_timeframe_evidence,
@@ -977,6 +978,9 @@ class CompletedRunVisualizer:
         run_start = _utc(self.seed.request.period_start)
         run_end = _utc(self.seed.request.period_end)
         if full_run:
+            if str(chart_timeframe or self.seed.request.strategy_timeframe) == str(self.seed.request.strategy_timeframe):
+                native_start = run_start - strategy_warmup_period(self.seed.config)
+                return native_start, run_start, run_end
             return run_start, run_start, run_end
 
         visible = max(
@@ -1640,8 +1644,14 @@ class CompletedRunVisualizer:
         visible_mask = market_times >= visible_start
         visible_times = market_times[visible_mask]
 
-        for period in (20, 50, 100, 200):
-            values = _ema(market["close"], period)
+        strategy_timeframe = str(self.seed.request.strategy_timeframe)
+        selected_chart_timeframe = str(chart_timeframe or strategy_timeframe)
+        periods = (20, 50, 100, 200)
+        if selected_chart_timeframe == strategy_timeframe == "15m":
+            periods += (320, 1600)
+        for period in periods:
+            values = (_causal_ema(market["close"].to_numpy(float), period)
+                      if period in (320, 1600) else _ema(market["close"], period))
             data = _line_points(visible_times, values[visible_mask.to_numpy()])
             if data:
                 overlays.append(
