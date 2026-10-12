@@ -1605,6 +1605,8 @@ class FibonacciRetracementMixin:
         """Causal 15m EMA trend / stop gate; only closed signal bar data."""
         if not bool(getattr(self.config, "fib_ema_trend_gate", False)):
             return True, "FIB_EMA_TREND_DISABLED"
+        if int(getattr(self.config, "strategy_timeframe_minutes", 15)) != 15:
+            return False, "FIB_EMA_GATE_REQUIRES_15M"
         if not hasattr(self, "_fib_ema_320_cache"):
             self._fib_ema_320_cache = _causal_ema(self.close, 320)
             self._fib_ema_1600_cache = _causal_ema(self.close, 1600)
