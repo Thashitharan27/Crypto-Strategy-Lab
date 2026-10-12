@@ -621,3 +621,26 @@ def test_ema320_exit_modes_validate_and_preserve_default():
         replace(config, strategy=strategy, execution=replace(
             execution, ema_320_exit_mode="WRONG"
         )).validate()
+
+
+def test_ema320_ema_only_rejects_advanced_profit_management():
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
+    config = ResearchRunConfig()
+    strategy_profiles, _ = compile_profiles(
+        direction_mode="EMA_320_CLOSE_CROSS", market_permissions=MARKET_PERMISSIONS
+    )
+    key = next(k for k, p in strategy_profiles.items() if p.enabled)
+    strategy = replace(config.strategy, profiles=strategy_profiles)
+    for option in (
+        "partial_profit_enabled", "r_step_trailing_enabled",
+        "atr_checkpoint_tp_extension_enabled", "trailing_enabled",
+        "break_even_enabled", "partial_stop_enabled",
+    ):
+        profiles = dict(config.execution.profiles)
+        profiles[key] = replace(profiles[key], **{option: True})
+        execution = replace(
+            config.execution, profiles=profiles,
+            entry_timing_mode="NEXT_CANDLE_OPEN", ema_320_exit_mode="EMA_ONLY",
+        )
+        with np.testing.assert_raises_regex(ValueError, "EMA-only exit requires disabling"):
+            replace(config, strategy=strategy, execution=execution).validate()
