@@ -1092,8 +1092,10 @@ def fibonacci_retracement_arrays(
                         if candidate_context_selection else "DISABLED"
                     ),
                     "context_entry_distance_atr": (
-                        _candidate_context_check(candidate, i)[2]
-                        if candidate_context_selection else None
+                        float(_candidate_context_check(candidate, i)[2])
+                        if candidate_context_selection
+                        and np.isfinite(_candidate_context_check(candidate, i)[2])
+                        else None
                     ),
                     "selected": candidate_leg == leg,
                 }
