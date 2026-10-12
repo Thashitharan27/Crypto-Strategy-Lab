@@ -563,3 +563,24 @@ def test_ema320_requires_next_open_and_disallows_flip_rules():
     ))
     with np.testing.assert_raises_regex(ValueError, "disable direction FLIP"):
         replace(valid, strategy=replace(valid.strategy, profiles=profiles)).validate()
+
+
+def test_ema320_signal_flip_reverses_entries_and_opposite_exits():
+    from crypto_strategy_lab.ema_pullback import Ema920PullbackMixin
+    engine = Engine()
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    engine.close = np.array([99., 101., 102., 99., 98.])
+    engine.ema_320_values = np.full(5, 100.)
+    engine.open = np.array([99., 101., 102., 99., 98.])
+    engine.times = np.arange(5)
+    engine.config = SimpleNamespace(slippage=0.0, ema_320_flip_signals=True)
+    engine.exits = []
+    assert engine._selected_direction(1) == "SHORT"
+    assert engine._selected_direction(3) == "LONG"
+    assert engine._selected_direction(4) is None
+    pos = SimpleNamespace(side=Side.SHORT, sl=105., is_open=True)
+    assert engine._close_on_ema_20_100_cross([pos], 4)
+    assert engine.exits[0][2] == ExitReason.EMA_320_CLOSE_CROSS
+    engine.config.ema_320_flip_signals = False
+    assert engine._selected_direction(1) == "LONG"
+    assert engine._selected_direction(3) == "SHORT"

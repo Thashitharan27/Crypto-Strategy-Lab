@@ -31,6 +31,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "entry_mode": "WAIT_UNTIL_CLOSED",
     "entry_timing_mode": "SIGNAL_CLOSE",
     "ema_920_trade_plan": "PULLBACK_1R",
+    "ema_320_flip_signals": False,
     "ema_cross_entry_confirmation_enabled": False,
     "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
@@ -354,6 +355,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         entry_mode=EntryMode(merged["entry_mode"]),
         entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]),
         ema_920_trade_plan=str(merged["ema_920_trade_plan"]),
+        ema_320_flip_signals=bool(merged["ema_320_flip_signals"]),
         ema_cross_entry_confirmation_enabled=bool(
             merged["ema_cross_entry_confirmation_enabled"]
         ),

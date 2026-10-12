@@ -148,6 +148,7 @@ class RiskExecutionWorkspace(QWidget):
         self.entry_card.add_field(
             "ema_920_trade_plan", "EMA 9/20 Trade Plan", self.account["ema_920_trade_plan"]
         )
+        self.entry_card.add_control("ema_320_flip_signals", self.account["ema_320_flip_signals"])
         self.entry_card.add_control(
             "ema_cross_entry_confirmation_enabled",
             self.account["ema_cross_entry_confirmation_enabled"],
@@ -434,6 +435,7 @@ class RiskExecutionWorkspace(QWidget):
             "fvg_confirmation_enabled": "Require directional FVG confirmation before entry",
             "fvg_context_enabled": "Require the execution-timeframe FVG to overlap an active higher-timeframe FVG",
             "ema_cross_entry_confirmation_enabled": "Wait for confirmation distance before EMA-cross entry",
+            "ema_320_flip_signals": "Flip EMA 320 Signals (Long ↔ Short)",
         }.items():
             widget = self.trade.get(name) or self.account.get(name)
             if isinstance(widget, QCheckBox):
@@ -483,6 +485,7 @@ class RiskExecutionWorkspace(QWidget):
         }.get(self.account["ema_920_trade_plan"].currentData())
         cross_plan = ema_920 and cross_mode is not None
         self.entry_card.set_row_visible("ema_920_trade_plan", ema_920)
+        self.entry_card.set_row_visible("ema_320_flip_signals", self._signal_strategy_mode() == "EMA_320_CLOSE_CROSS")
         self.entry_card.set_row_visible("ema_cross_entry_confirmation_enabled", cross_plan)
         self.entry_card.set_row_visible(
             "ema_cross_entry_confirmation_r",

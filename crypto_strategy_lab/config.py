@@ -64,6 +64,7 @@ class BacktestConfig:
     entry_mode: EntryMode = EntryMode.WAIT_UNTIL_CLOSED
     entry_timing_mode: EntryTimingMode = EntryTimingMode.SIGNAL_CLOSE
     ema_920_trade_plan: str = "PULLBACK_1R"
+    ema_320_flip_signals: bool = False
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
