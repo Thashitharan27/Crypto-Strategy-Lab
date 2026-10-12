@@ -196,6 +196,9 @@ def fibonacci_retracement_arrays(
     half_swing_mode: bool = False,
     third_retest_entry: bool = False,
     first_zone_hold_entry: bool = False,
+    candidate_context_selection: bool = False,
+    mean_reversion_period: int = 20,
+    stop_buffer_atr: float = 0.05,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
     first_zone_hold_entry = bool(first_zone_hold_entry)
@@ -212,6 +215,10 @@ def fibonacci_retracement_arrays(
     minimum_hold_rejection_atr = max(0.0, float(minimum_hold_rejection_atr))
     rsi_values = rsi(close_prices, rsi_period) if rsi_values is None else np.asarray(rsi_values, dtype=float)
     n = len(close_prices)
+    # All context inputs are causal on native strategy candles.
+    context_mean = _causal_ema(close_prices, int(mean_reversion_period)) if candidate_context_selection else None
+    context_ema320 = _causal_ema(close_prices, 320) if candidate_context_selection else None
+    context_ema1600 = _causal_ema(close_prices, 1600) if candidate_context_selection else None
     if any(len(values) != n for values in (ema_50_values, ema_100_values, ema_200_values)):
         raise ValueError("Fib EMA arrays must match price length")
     if len(rsi_values) != n:
@@ -452,6 +459,48 @@ def fibonacci_retracement_arrays(
 
     def _candidate_final_score(candidate, now):
         return _candidate_confluence(candidate, now)["final_score"]
+
+    def _candidate_context_check(candidate, now):
+        """Pre-selection eligibility based on this leg's proposed Fib entry/stop.
+
+        The post-selection execution gate remains authoritative for next-bar
+        fills, gaps and final stop calculations.
+        """
+        direction, anchor_i, endpoint_i = candidate[:3]
+        state = _candidate_state((direction, anchor_i, endpoint_i))
+        anchor = float(low_prices[anchor_i] if direction == "LONG" else high_prices[anchor_i])
+        endpoint = float(high_prices[endpoint_i] if direction == "LONG" else low_prices[endpoint_i])
+        span = abs(endpoint - anchor)
+        atr_now = float(atr_values[now])
+        mean = float(context_mean[now])
+        fast = float(context_ema320[now])
+        slow = float(context_ema1600[now])
+        if not all(np.isfinite(v) for v in (span, atr_now, mean, fast, slow)) or span <= 0 or atr_now <= 0:
+            return False, "CONTEXT_HISTORY_UNAVAILABLE", float("nan")
+        level = round(float(state["signal_level"]), 3)
+        next_level = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786, 0.786: 1.0}.get(level)
+        if next_level is None:
+            return False, "FIB_STOP_LEVEL_UNAVAILABLE", float("nan")
+        entry_level = next_level if third_retest_entry else level
+        next_stop_level = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786, 0.786: 1.0}.get(entry_level)
+        if next_stop_level is None and not half_swing_mode:
+            return False, "FIB_STOP_LEVEL_UNAVAILABLE", float("nan")
+        sign = -1.0 if direction == "LONG" else 1.0
+        proposed_entry = endpoint + sign * entry_level * span
+        stop_boundary = anchor if half_swing_mode else endpoint + sign * next_stop_level * span
+        proposed_stop = stop_boundary + sign * float(stop_buffer_atr) * atr_now
+        distance = (proposed_entry - mean) / atr_now
+        if direction == "LONG":
+            if distance <= -1.5:
+                return False, "MR_STRONGLY_BELOW_MEAN", distance
+            if not (fast > slow and proposed_entry > slow and proposed_stop < fast):
+                return False, "EMA_TREND_OR_STOP", distance
+        else:
+            if distance >= 1.5:
+                return False, "MR_STRONGLY_ABOVE_MEAN", distance
+            if not (fast < slow and proposed_entry < slow and proposed_stop > fast):
+                return False, "EMA_TREND_OR_STOP", distance
+        return True, "PASS", distance
 
 
     def _leg_wick_penetration(leg, now):
@@ -890,6 +939,15 @@ def fibonacci_retracement_arrays(
                 or (first_0786_held and float(_candidate_state(candidate[:3])["signal_level"]) == 0.786)
             )
         ]
+        if candidate_context_selection:
+            context_entry_candidates = [
+                candidate for candidate in entry_candidates
+                if _candidate_context_check(candidate, i)[0]
+            ]
+            context_candidate_available = bool(context_entry_candidates)
+            entry_candidates = context_entry_candidates
+        else:
+            context_candidate_available = True
         entry_candidate_available = bool(entry_candidates)
         selection_pool = (
             entry_candidates
@@ -1025,6 +1083,18 @@ def fibonacci_retracement_arrays(
                         and not bool(state["invalidated"])
                         and int(state.get("score_signal_held_count", 0)) >= 1
                     ),
+                    "context_eligible": (
+                        _candidate_context_check(candidate, i)[0]
+                        if candidate_context_selection else None
+                    ),
+                    "context_reason": (
+                        _candidate_context_check(candidate, i)[1]
+                        if candidate_context_selection else "DISABLED"
+                    ),
+                    "context_entry_distance_atr": (
+                        _candidate_context_check(candidate, i)[2]
+                        if candidate_context_selection else None
+                    ),
                     "selected": candidate_leg == leg,
                 }
             )
@@ -1032,6 +1102,10 @@ def fibonacci_retracement_arrays(
             snapshot, separators=(",", ":"), sort_keys=True
         )
         selected_candidate_id[i] = f"{direction}:{start_i}:{end_i}"
+        if candidate_context_selection and not context_candidate_available:
+            # Preserve the full candidate inventory, but never emit a trade
+            # through the fallback selection if all ready legs fail context.
+            continue
         active_tests = int(selected_state["tests"])
         active_last_test = selected_state["last_test"]
         active_broken = bool(selected_state["broken"])
