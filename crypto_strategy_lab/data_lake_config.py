@@ -660,6 +660,23 @@ class ResearchRunConfig:
                 for rule in profile.entry_rules
             )
         )
+        ema320_selected = any(
+            rule.get("_strategy_direction_mode") == "EMA_320_CLOSE_CROSS"
+            for profile in strategy.profiles.values()
+            for rule in profile.entry_rules
+        )
+        if ema320_selected and execution.entry_timing_mode != "NEXT_CANDLE_OPEN":
+            raise ValueError("EMA 320 price close crossover requires next-candle-open entry fills")
+        if ema320_selected:
+            for key, profile in strategy.profiles.items():
+                if profile.enabled and (
+                    profile.flip_direction or any(
+                        rule.get("action") == "FLIP"
+                        and rule.get("_builder_group_enabled", True)
+                        for rule in profile.entry_rules
+                    )
+                ):
+                    raise ValueError(f"{key}: EMA 320 crossover uses native direction; disable direction FLIP rules")
         if (ema_cross_selected
                 and execution.entry_timing_mode != "NEXT_CANDLE_OPEN"):
             raise ValueError("EMA 20/100 crossover requires next-candle-open entry fills")
