@@ -32,6 +32,7 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "entry_timing_mode": "SIGNAL_CLOSE",
     "ema_920_trade_plan": "PULLBACK_1R",
     "ema_320_flip_signals": False,
+    "ema_320_exit_mode": "BOTH",
     "ema_cross_entry_confirmation_enabled": False,
     "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
@@ -281,6 +282,8 @@ def validate_config_values(values: dict[str, Any], require_paths: bool = True) -
         "PULLBACK_1R", "EMA_20_100_CROSS", "EMA_20_100_CROSS_SHORT", "EMA_20_100_CROSS_BOTH"
     ):
         errors.append("Invalid EMA 9/20 trade plan.")
+    if values.get("ema_320_exit_mode", "BOTH") not in ("BOTH", "EMA_ONLY", "FIXED_TP_ONLY"):
+        errors.append("Invalid EMA 320 exit mode.")
     if str(values.get("fib_target_mode", "")).upper() not in ("IMPULSE_EXTREME", "FIXED_R"):
         errors.append("Invalid Fib target mode.")
     try:
@@ -356,6 +359,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         entry_timing_mode=EntryTimingMode(merged["entry_timing_mode"]),
         ema_920_trade_plan=str(merged["ema_920_trade_plan"]),
         ema_320_flip_signals=bool(merged["ema_320_flip_signals"]),
+        ema_320_exit_mode=str(merged["ema_320_exit_mode"]),
         ema_cross_entry_confirmation_enabled=bool(
             merged["ema_cross_entry_confirmation_enabled"]
         ),
