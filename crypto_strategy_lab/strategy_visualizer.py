@@ -2124,7 +2124,12 @@ class CompletedRunVisualizer:
         show_trend_emas = strategy_timeframe == chart_timeframe == "15m"
         # V2 normally loads run candles only. For trading-identical EMA values,
         # include the native pre-run warmup and calculate before trimming.
-        rsi_warmup = pd.Timedelta(minutes=15 * 2240) if chart_timeframe == "15m" else pd.Timedelta(0)
+        # 2240 native bars provide ample EMA-RSI 1120 initialization on any
+        # supported timeframe, not just 15m.
+        timeframe_minutes = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+        rsi_warmup = pd.Timedelta(
+            minutes=timeframe_minutes[chart_timeframe] * 2240
+        ) if chart_timeframe in timeframe_minutes else pd.Timedelta(0)
         calculation_start = run_start - max(
             strategy_warmup_period(self.seed.config)
             if strategy_timeframe == chart_timeframe else pd.Timedelta(0),
