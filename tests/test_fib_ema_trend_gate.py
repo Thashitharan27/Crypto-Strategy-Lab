@@ -54,3 +54,10 @@ def test_fib_ema_missing_warmup_rejected():
 def test_fib_ema_gate_disabled_preserves_existing_behavior():
     fib = _FakeFib(np.full(5, 10.0), "LONG", 11.0, 9.0, enabled=False)
     assert fib._fib_ema_trend_check(4)[0] is True
+
+
+def test_fib_ema_gate_rejects_non_15m_timeframes():
+    prices = np.full(1800, 10.0)
+    fib = _FakeFib(prices, "LONG", 11.0, 9.0)
+    fib.config.strategy_timeframe_minutes = 240
+    assert fib._fib_ema_trend_check(1799)[1] == "FIB_EMA_GATE_REQUIRES_15M"
