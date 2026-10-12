@@ -493,6 +493,8 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
             first_zone_hold_entry=bool(getattr(config, "fib_first_zone_hold_entry", False)),
             candidate_context_selection=bool(getattr(config, "fib_candidate_context_selection", False)),
             mean_reversion_period=int(getattr(config, "mean_reversion_period", 20)),
+            mean_reversion_mean_type=str(getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
+            strategy_timeframe_minutes=int(getattr(config, "strategy_timeframe_minutes", 15)),
             stop_buffer_atr=float(getattr(config, "fib_stop_buffer_atr", 0.05)),
         )
         research_blocks.append(
