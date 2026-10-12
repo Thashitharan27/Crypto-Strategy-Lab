@@ -487,3 +487,31 @@ class EmaCrossTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_standalone_ema320_signal_uses_only_closed_crosses():
+    from types import SimpleNamespace
+    from crypto_strategy_lab.ema_pullback import Ema920PullbackMixin
+    probe = SimpleNamespace(
+        close=np.array([99., 100., 101., 102., 99., 98., 99.]),
+        ema_320_values=np.full(7, 100.),
+    )
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 2) == "LONG"
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 3) is None
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 4) == "SHORT"
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 5) is None
+    assert Ema920PullbackMixin._ema_320_price_cross(probe, 0) is None
+
+
+def test_ema320_is_standalone_signal_strategy():
+    from crypto_strategy_lab.strategy_rule_model import (
+        SIGNAL_STRATEGIES, compile_profiles, MARKET_PERMISSIONS, infer_direction_mode,
+    )
+    from crypto_strategy_lab.gui.rule_strategy_builder import DIRECTION_LABELS
+    assert "EMA_320_CLOSE_CROSS" in SIGNAL_STRATEGIES
+    assert "EMA_320_CLOSE_CROSS" in DIRECTION_LABELS
+    strategy, _ = compile_profiles(
+        direction_mode="EMA_320_CLOSE_CROSS",
+        market_permissions=MARKET_PERMISSIONS,
+    )
+    assert infer_direction_mode(strategy) == "EMA_320_CLOSE_CROSS"
