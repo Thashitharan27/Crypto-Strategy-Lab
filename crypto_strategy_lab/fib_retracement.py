@@ -1582,12 +1582,48 @@ class FibonacciRetracementMixin:
             "minimum_r": minimum_r,
         }
 
+    def _fib_ema_trend_check(self, i, execution_i=None):
+        """Causal 15m EMA trend / stop gate; only closed signal bar data."""
+        if not bool(getattr(self.config, "fib_ema_trend_gate", False)):
+            return True, "FIB_EMA_TREND_DISABLED"
+        if not hasattr(self, "_fib_ema_320_cache"):
+            self._fib_ema_320_cache = _causal_ema(self.close, 320)
+            self._fib_ema_1600_cache = _causal_ema(self.close, 1600)
+        if i < 0 or i >= len(self._fib_ema_320_cache):
+            return False, "FIB_EMA_HISTORY_UNAVAILABLE"
+        fast = float(self._fib_ema_320_cache[i])
+        slow = float(self._fib_ema_1600_cache[i])
+        if not (np.isfinite(fast) and np.isfinite(slow)):
+            return False, "FIB_EMA_HISTORY_UNAVAILABLE"
+        direction = self._effective_trade_direction(i)
+        entry = float(self._expected_entry_price(i, execution_i, direction))
+        if direction == "LONG":
+            if not (fast > slow and entry > slow):
+                return False, "FIB_EMA_LONG_TREND_VETO"
+        elif direction == "SHORT":
+            if not (fast < slow and entry < slow):
+                return False, "FIB_EMA_SHORT_TREND_VETO"
+        else:
+            return False, "FIB_EMA_DIRECTION_UNAVAILABLE"
+        stop_plan = self._sr_stop_plan(i, execution_i)
+        if not stop_plan.get("passed"):
+            return False, str(stop_plan.get("reason", "FIB_EMA_STOP_UNAVAILABLE"))
+        stop = float(stop_plan["stop_price"])
+        if direction == "LONG" and not stop < fast:
+            return False, "FIB_EMA_LONG_STOP_NOT_BELOW_320"
+        if direction == "SHORT" and not stop > fast:
+            return False, "FIB_EMA_SHORT_STOP_NOT_ABOVE_320"
+        return True, "FIB_EMA_TREND_PASSED"
+
     def _entry_filter_result(self, i, execution_i=None):
         passed, reason = super()._entry_filter_result(i, execution_i)
         if not passed or getattr(self, "signal_strategy_mode", "DI") != FIB_RETRACEMENT_MODE:
             return passed, reason
         if self._fib_deeper_entry_enabled() and self._effective_trade_direction(i) != self._selected_direction(i):
             return False, "FIB_DEEPER_LIMIT_DIRECTION_FLIP_UNSUPPORTED"
+        ema_passed, ema_reason = self._fib_ema_trend_check(i, execution_i)
+        if not ema_passed:
+            return False, ema_reason
         target = self._fib_target_plan(i, execution_i)
         if not target["passed"]:
             return False, str(target["reason"])
