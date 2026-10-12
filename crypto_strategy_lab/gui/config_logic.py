@@ -368,6 +368,7 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         fib_half_swing_mode=bool(merged["fib_half_swing_mode"]),
         fib_third_retest_entry=bool(merged["fib_third_retest_entry"]),
         fib_ema_trend_gate=bool(merged["fib_ema_trend_gate"]),
+        fib_candidate_context_selection=bool(merged["fib_candidate_context_selection"]),
         fib_first_zone_hold_entry=bool(merged["fib_first_zone_hold_entry"]),
         fib_stop_buffer_atr=float(merged["fib_stop_buffer_atr"]),
         fib_target_mode=str(merged["fib_target_mode"]).upper(),
