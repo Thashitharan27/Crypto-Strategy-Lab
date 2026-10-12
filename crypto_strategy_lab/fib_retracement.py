@@ -1451,7 +1451,7 @@ class FibonacciRetracementMixin:
             nearest = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786}.get(round(nearest, 3))
             if nearest is None:
                 return None
-        half_swing = bool(getattr(self.config, "fib_half_swing_mode", False)) and not deeper_entry
+        half_swing = bool(getattr(self.config, "fib_half_swing_mode", False)) and not deeper_entry and not bool(getattr(self.config, "fib_first_zone_hold_entry", False))
         if half_swing and round(nearest, 3) != 0.500:
             return None
         deeper = {
@@ -1515,7 +1515,7 @@ class FibonacciRetracementMixin:
         return {
             "passed": True,
             "applied": True,
-            "reason": ("FIB_SWING_ANCHOR_STOP" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() else "FIB_NEXT_LEVEL_STOP"),
+            "reason": ("FIB_SWING_ANCHOR_STOP" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() and not getattr(self.config, "fib_first_zone_hold_entry", False) else "FIB_NEXT_LEVEL_STOP"),
             "distance": distance,
             "distance_atr": distance / atr,
             "level_price": boundary,
@@ -1562,7 +1562,7 @@ class FibonacciRetracementMixin:
         # vetoed just because the previous impulse extreme offers less room.
         # The impulse-extreme mode retains the minimum-room protection.
         target_mode = (
-            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled()
+            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() and not getattr(self.config, "fib_first_zone_hold_entry", False)
             else str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
         )
         if (not getattr(self.config, "fib_half_swing_mode", False) or self._fib_deeper_entry_enabled()) and target_mode != "FIXED_R" and (
@@ -1578,7 +1578,7 @@ class FibonacciRetracementMixin:
             }
 
         target_mode = (
-            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled()
+            "IMPULSE_EXTREME" if getattr(self.config, "fib_half_swing_mode", False) and not self._fib_deeper_entry_enabled() and not getattr(self.config, "fib_first_zone_hold_entry", False)
             else str(getattr(self.config, "fib_target_mode", "IMPULSE_EXTREME")).upper()
         )
         if target_mode == "FIXED_R":
