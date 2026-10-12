@@ -164,3 +164,19 @@ def test_v2_ema_rsi_pair_is_selectable_in_one_pane():
     assert "for (const overlay of rsiOverlays)" in html
     assert "Number(overlay.period)===224" in html
     assert "if (!rsiSeries) rsiSeries=line" in html
+
+
+def test_ema_rsi_custom_smoothing_differs_from_wilder_and_waits_for_history():
+    import numpy as np
+    from crypto_strategy_lab.strategy_visualizer import _ema_rsi
+    from crypto_strategy_lab.indicators import rsi as wilder_rsi
+    close = np.array([100.0 + i * 0.015 + 3.0 * np.sin(i / 9.0) for i in range(1800)])
+    fast = _ema_rsi(close, 224)
+    slow = _ema_rsi(close, 1120)
+    assert np.isnan(fast[:224]).all()
+    assert np.isnan(slow[:1120]).all()
+    assert np.isfinite(fast[224:]).all()
+    assert np.isfinite(slow[1120:]).all()
+    assert np.all((fast[224:] >= 0) & (fast[224:] <= 100))
+    assert np.all((slow[1120:] >= 0) & (slow[1120:] <= 100))
+    assert not np.isclose(fast[-1], wilder_rsi(close, 224)[-1])
