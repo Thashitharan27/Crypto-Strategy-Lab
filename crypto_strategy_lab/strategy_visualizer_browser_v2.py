@@ -87,7 +87,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <button id="center">Center selected</button>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
-    <label><input type="checkbox" id="fib-emas" checked> EMA 320 / 1600</label>
+    <label><input type="checkbox" id="fib-emas" checked> EMA 20 / 320 / 1600</label>
     <label><input type="checkbox" id="show-rsi" checked> RSI 14 + EMA RSI 224 / 1120</label>
     <label for="rsi-height">RSI size</label><input id="rsi-height" type="range" min="120" max="420" value="260" step="10" title="Adjust RSI panel height">
     <button id="reset-rsi">Reset RSI zoom</button>
@@ -485,9 +485,9 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     candles.setData(payload.candles || []);
     if ($('fib-emas').checked) {
       for (const overlay of (payload.overlays || [])) {
-        if (overlay.kind !== 'ema' || ![320,1600].includes(Number(overlay.period))) continue;
+        if (overlay.kind !== 'ema' || ![20,320,1600].includes(Number(overlay.period))) continue;
         const series=chart.addSeries(window.LightweightCharts.LineSeries,{
-          color:Number(overlay.period)===320 ? '#facc15' : '#fb7185',
+          color:Number(overlay.period)===20 ? '#4ade80' : (Number(overlay.period)===320 ? '#facc15' : '#fb7185'),
           lineWidth:2,priceLineVisible:false,lastValueVisible:true,
           crosshairMarkerVisible:false,
           // Share candle coordinates, but do not let trend EMA lines enlarge
