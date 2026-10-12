@@ -149,3 +149,10 @@ def test_v2_rsi_lower_pane_uses_native_payload_and_preserves_viewport():
     assert "chart.panes()[1].setHeight(155)" in html
     assert "for (const level of [30,70])" in html
     assert "if (visibleRange) chart.timeScale().setVisibleRange(visibleRange)" in html
+
+
+def test_rsi_pane_does_not_capture_candle_price_gestures():
+    html=build_browser_visualizer_v2_html(_Model(),"abc")
+    assert "function inCandlePane(event)" in html
+    assert "chart.panes()[0].getHeight()" in html
+    assert "!inCandlePane(event)" in html
