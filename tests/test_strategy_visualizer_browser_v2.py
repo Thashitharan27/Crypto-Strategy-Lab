@@ -144,8 +144,8 @@ def test_v2_trend_ema_overlays_do_not_override_price_zoom_and_pan():
 def test_v2_rsi_lower_pane_uses_native_payload_and_preserves_viewport():
     html=build_browser_visualizer_v2_html(_Model(),"abc")
     assert 'id="show-rsi"' in html
-    assert "o.kind === 'rsi' && Number(o.period) === 14" in html
-    assert "rsiSeries = chart.addSeries(window.LightweightCharts.LineSeries" in html
+    assert "o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period))" in html
+    assert "const line = chart.addSeries(window.LightweightCharts.LineSeries" in html
     assert "chart.panes()[1].setHeight(155)" in html
     assert "for (const level of [30,70])" in html
     assert "if (visibleRange) chart.timeScale().setVisibleRange(visibleRange)" in html
@@ -156,3 +156,11 @@ def test_rsi_pane_does_not_capture_candle_price_gestures():
     assert "function inCandlePane(event)" in html
     assert "chart.panes()[0].getHeight()" in html
     assert "!inCandlePane(event)" in html
+
+
+def test_v2_ema_rsi_pair_is_selectable_in_one_pane():
+    html=build_browser_visualizer_v2_html(_Model(),"abc")
+    assert "EMA RSI 224 / 1120" in html
+    assert "for (const overlay of rsiOverlays)" in html
+    assert "Number(overlay.period)===224" in html
+    assert "if (!rsiSeries) rsiSeries=line" in html
