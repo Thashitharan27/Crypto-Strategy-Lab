@@ -556,11 +556,19 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     });
   }
 
+  function inCandlePane(event) {
+    const rect=chartWrap.getBoundingClientRect();
+    if (!chart || !candles || event.clientY < rect.top || event.clientY >= rect.bottom) return false;
+    if (!rsiSeries) return true;
+    const paneHeight=chart.panes()[0].getHeight();
+    return event.clientY - rect.top < paneHeight;
+  }
+
   // Wheel over the right price scale changes vertical zoom only.
   chartWrap.addEventListener('wheel',event => {
     const rect=chartWrap.getBoundingClientRect();
     const overPriceScale=event.clientX-rect.left >= rect.width-86;
-    if (!overPriceScale || !candles) return;
+    if (!overPriceScale || !candles || !inCandlePane(event)) return;
     event.preventDefault();
     event.stopPropagation();
     const direction=event.deltaY > 0 ? 1.12 : 0.89;
@@ -573,7 +581,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   // Primarily vertical left-drag moves the chart price range up/down.
   // Horizontal drags remain normal time-axis panning.
   chartWrap.addEventListener('pointerdown',event => {
-    if (event.button !== 0 || !candles) return;
+    if (event.button !== 0 || !candles || !inCandlePane(event)) return;
     const rect=chartWrap.getBoundingClientRect();
     if (event.clientX-rect.left >= rect.width-86) return;
     verticalPan={
