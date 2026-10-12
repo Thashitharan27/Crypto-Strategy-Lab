@@ -206,3 +206,14 @@ def test_rsi14_returns_alongside_ema_rsi_pair():
     assert "RSI 14 + EMA RSI 224 / 1120" in html
     assert "o.kind === 'rsi' && Number(o.period) === 14" in html
     assert "overlay.kind === 'rsi' ? '#f59e0b'" in html
+
+
+def test_v2_includes_price_ema20_with_existing_trend_emas():
+    import inspect
+    from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+    assert "EMA 20 / 320 / 1600" in html
+    assert "[20,320,1600].includes(Number(overlay.period))" in html
+    assert "Number(overlay.period)===20 ? '#4ade80'" in html
+    source = inspect.getsource(CompletedRunVisualizer.build_v2_diagnostic_payload)
+    assert "for period in (20, 320, 1600):" in source
