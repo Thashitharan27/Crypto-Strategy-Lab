@@ -1836,3 +1836,18 @@ def test_candidate_context_research_policy_and_warmup_are_propagated():
     assert strategy_warmup_period(run_config) >= pd.Timedelta(minutes=15 * 1605)
     features.fib_candidate_context_selection = False
     assert strategy_warmup_period(run_config) < pd.Timedelta(minutes=15 * 1605)
+
+
+def test_candidate_selection_ema_only_does_not_apply_mr_veto():
+    import inspect
+    from crypto_strategy_lab.fib_retracement import (
+        fibonacci_retracement_arrays, FibonacciRetracementMixin,
+    )
+    selection_source = inspect.getsource(fibonacci_retracement_arrays)
+    gate_source = inspect.getsource(FibonacciRetracementMixin._fib_ema_trend_check)
+    assert '"MR_STRONGLY_BELOW_MEAN"' not in selection_source
+    assert '"MR_STRONGLY_ABOVE_MEAN"' not in selection_source
+    assert '"FIB_MR_LONG_STRONGLY_BELOW_MEAN"' not in gate_source
+    assert '"FIB_MR_SHORT_STRONGLY_ABOVE_MEAN"' not in gate_source
+    assert "fast > slow and proposed_entry > slow and proposed_stop < fast" in selection_source
+    assert "fast < slow and proposed_entry < slow and proposed_stop > fast" in selection_source
