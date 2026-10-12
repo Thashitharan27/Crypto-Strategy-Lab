@@ -43,6 +43,7 @@ FRIENDLY_LABELS = {
     "fib_half_swing_mode": "Fib 0.5 first-held entry, swing stop, extreme target",
     "fib_third_retest_entry": "Two distinct holds then pending limit entry one Fib deeper",
     "fib_ema_trend_gate": "Require EMA 320/1600 trend and Fib stop beyond EMA 320",
+    "fib_candidate_context_selection": "Select among Fib structures using candidate-specific EMA trend/stop and MR 1.5 ATR",
     "fib_first_zone_hold_entry": "Enter on first midpoint-zone hold (no Fib line touch required)",
     "atr_period": "ATR period",
     "bb_period": "Bollinger period",
