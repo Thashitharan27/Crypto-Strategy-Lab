@@ -190,6 +190,7 @@ class RiskExecutionWorkspace(QWidget):
             ("fib_first_0786_held", "Allow First Held at 0.786"),
             ("fib_third_retest_entry", "After Two Holds — Enter One Fib Deeper"),
             ("fib_ema_trend_gate", "Require EMA 320/1600 Trend + Stop Beyond EMA 320"),
+            ("fib_candidate_context_selection", "Select Fib Using EMA 320/1600 + MR 1.5 ATR"),
             ("fib_first_zone_hold_entry", "First Hold in Halfway Fib Zone — No Line Touch"),
         ):
             widget = fib_controls[field]
