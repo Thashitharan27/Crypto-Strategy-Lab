@@ -180,3 +180,11 @@ def test_ema_rsi_custom_smoothing_differs_from_wilder_and_waits_for_history():
     assert np.all((fast[224:] >= 0) & (fast[224:] <= 100))
     assert np.all((slow[1120:] >= 0) & (slow[1120:] <= 100))
     assert not np.isclose(fast[-1], wilder_rsi(close, 224)[-1])
+
+
+def test_ema_rsi_warmup_covers_supported_chart_timeframes():
+    import inspect
+    from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
+    source=inspect.getsource(CompletedRunVisualizer.build_v2_diagnostic_payload)
+    assert '"15m": 15, "1h": 60, "4h": 240, "1d": 1440' in source
+    assert "timeframe_minutes[chart_timeframe] * 2240" in source
