@@ -998,7 +998,8 @@ class CompletedRunVisualizer:
             if str(chart_timeframe or self.seed.request.strategy_timeframe) == str(self.seed.request.strategy_timeframe):
                 native_start = run_start - strategy_warmup_period(self.seed.config)
                 return native_start, run_start, run_end
-            return run_start, run_start, run_end
+            # Alternate timeframe overlays need pre-run EMA initialization too.
+            return run_start - EMA_WARMUP_BARS * interval, run_start, run_end
 
         visible = max(
             MIN_VISIBLE_CANDLES,
