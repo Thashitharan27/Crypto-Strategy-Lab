@@ -126,3 +126,9 @@ def test_v2_renders_trading_ema_overlays_with_toggle():
     assert "[320,1600]" in html
     assert "series.setData(overlay.data || [])" in html
     assert "window.LightweightCharts.LineSeries" in html
+
+
+def test_v2_ema_toggle_preserves_chart_viewport():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+    assert "const visibleRange = chart.timeScale().getVisibleRange();" in html
+    assert "if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);" in html
