@@ -540,3 +540,26 @@ def test_ema320_uses_base_atr_stop_not_ema100_override():
     with patch.object(Base, "_sr_stop_plan", return_value={"passed": False}, create=True) as stop:
         engine._sr_stop_plan(2, 3)
     stop.assert_called_once_with(2, 3)
+
+
+def test_ema320_requires_next_open_and_disallows_flip_rules():
+    from crypto_strategy_lab.strategy_rule_model import compile_profiles, MARKET_PERMISSIONS
+    config = ResearchRunConfig()
+    strategy_profiles, _ = compile_profiles(
+        direction_mode="EMA_320_CLOSE_CROSS", market_permissions=MARKET_PERMISSIONS,
+    )
+    strategy = replace(config.strategy, profiles=strategy_profiles)
+    with np.testing.assert_raises_regex(ValueError, "next-candle-open"):
+        replace(config, strategy=strategy).validate()
+    valid = replace(config, strategy=strategy, execution=replace(
+        config.execution, entry_timing_mode="NEXT_CANDLE_OPEN",
+    ))
+    valid.validate()
+    profiles = dict(strategy_profiles)
+    key = next(k for k, p in profiles.items() if p.enabled)
+    profiles[key] = replace(profiles[key], entry_rules=(
+        *profiles[key].entry_rules,
+        {"action": "FLIP", "_builder_group_enabled": True},
+    ))
+    with np.testing.assert_raises_regex(ValueError, "disable direction FLIP"):
+        replace(valid, strategy=replace(valid.strategy, profiles=profiles)).validate()
