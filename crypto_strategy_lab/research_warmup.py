@@ -81,6 +81,10 @@ def strategy_warmup_period(run_config) -> pd.Timedelta:
         int(features.di_pressure_lookback) + 5,
         _SIGNAL_EMA_PERIOD + _SIGNAL_EMA_SAFETY_BARS,
     )
+    if bool(getattr(features, "fib_candidate_context_selection", False)):
+        # Candidate eligibility requires a valid causal EMA1600 at the first
+        # user-visible signal; otherwise early candidates are falsely vetoed.
+        bars = max(bars, 1605)
     duration = strategy_interval * bars
 
     momentum_hours = max(
