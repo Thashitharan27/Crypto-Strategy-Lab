@@ -188,15 +188,29 @@ class Ema920PullbackMixin:
         )
         if not all(np.isfinite(float(x)) for x in values):
             return None
-        previous_open, previous_close, previous_ema, opening, closing, ema = map(float, values)
+        _previous_open, _previous_close, _previous_ema, opening, closing, ema = map(float, values)
         fully_above = min(opening, closing) > ema
         fully_below = max(opening, closing) < ema
-        was_above = min(previous_open, previous_close) > previous_ema
-        was_below = max(previous_open, previous_close) < previous_ema
-        if fully_above and not was_above:
-            return "LONG"
-        if fully_below and not was_below:
-            return "SHORT"
+        if not (fully_above or fully_below):
+            return None
+        # Arm a side only after its most recent close crossover; a straddling
+        # candle must not rearm entries when price stayed on that side.
+        wanted = "LONG" if fully_above else "SHORT"
+        for j in range(i, 0, -1):
+            cross = self._ema_320_price_cross(j)
+            if cross is not None:
+                if cross != wanted:
+                    return None
+                # The first whole-body candle after this crossing is eligible.
+                for k in range(j, i):
+                    prior_ema = float(self.ema_320_values[k])
+                    if not np.isfinite(prior_ema):
+                        continue
+                    if wanted == "LONG" and min(float(self.open[k]), float(self.close[k])) > prior_ema:
+                        return None
+                    if wanted == "SHORT" and max(float(self.open[k]), float(self.close[k])) < prior_ema:
+                        return None
+                return wanted
         return None
 
     def _ema_320_trade_direction(self, i, *, for_exit=False):
