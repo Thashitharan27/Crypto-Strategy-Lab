@@ -387,7 +387,8 @@ class Ema920PullbackMixin:
         return (False, "EMA 20/100 crossover uses native direction; direction FLIP disabled") if flipped else (passed, reason)
 
     def _should_enter(self, i):
-        if getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE:
+        signal_mode = getattr(self, "signal_strategy_mode", "DI")
+        if signal_mode not in (EMA_920_MODE, "EMA_320_CLOSE_CROSS"):
             return super()._should_enter(i)
         direction = self._selected_direction(i)
         if direction is None:
@@ -399,7 +400,8 @@ class Ema920PullbackMixin:
         # for the current position and the entry signal for the reverse side.
         # Allow that signal to be queued even though the old trade is still open
         # until the next candle's open.
-        if self._ema_920_cross_mode() != "BOTH" or len(self.active_pairs) != 1:
+        reverse_mode = signal_mode == "EMA_320_CLOSE_CROSS" or self._ema_920_cross_mode() == "BOTH"
+        if not reverse_mode or len(self.active_pairs) != 1:
             return False
         entry_mode = str(getattr(getattr(self.config, "entry_mode", ""), "value",
                                  getattr(self.config, "entry_mode", ""))).upper()
@@ -490,7 +492,10 @@ class Ema920PullbackMixin:
             decision
             and int(decision.get("execution_index", -1)) == i
             and active_at_candle_start
-            and self._ema_920_cross_mode() == "BOTH"
+            and (
+                getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS"
+                or self._ema_920_cross_mode() == "BOTH"
+            )
         ):
             indicator_i = int(decision["indicator_index"])
             direction = self._selected_direction(indicator_i)
