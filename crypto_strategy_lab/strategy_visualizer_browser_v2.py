@@ -88,7 +88,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
     <label><input type="checkbox" id="fib-emas" checked> EMA 320 / 1600</label>
-    <label><input type="checkbox" id="show-rsi" checked> EMA RSI 224 / 1120</label>
+    <label><input type="checkbox" id="show-rsi" checked> RSI 14 + EMA RSI 224 / 1120</label>
     <label for="rsi-height">RSI size</label><input id="rsi-height" type="range" min="120" max="420" value="260" step="10" title="Adjust RSI panel height">
     <button id="reset-rsi">Reset RSI zoom</button>
   </div>
@@ -499,13 +499,13 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
         trendEmaLines.push(series);
       }
     }
-    const rsiOverlays = (payload.overlays || []).filter(o => o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period)));
+    const rsiOverlays = (payload.overlays || []).filter(o => (o.kind === 'ema_rsi' && [224,1120].includes(Number(o.period))) || (o.kind === 'rsi' && Number(o.period) === 14));
     if (rsiOverlays.length && $('show-rsi').checked && rsiOverlays.some(o => (o.data || []).length)) {
       // The built-in second pane shares the price chart's time scale:
       // horizontal panning, zooming, and crosshair remain aligned.
       for (const overlay of rsiOverlays) {
       const line = chart.addSeries(window.LightweightCharts.LineSeries,{
-        color:Number(overlay.period)===224 ? '#a78bfa' : '#22d3ee',
+        color:overlay.kind === 'rsi' ? '#f59e0b' : (Number(overlay.period)===224 ? '#a78bfa' : '#22d3ee'),
         lineWidth:2,title:overlay.name,
         priceFormat:{type:'price',precision:1,minMove:0.1},
         priceLineVisible:false,lastValueVisible:true,

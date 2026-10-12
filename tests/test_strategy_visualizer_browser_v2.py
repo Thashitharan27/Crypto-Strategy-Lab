@@ -199,3 +199,10 @@ def test_v2_collapsible_diagnostics_and_adjustable_rsi_scale():
     assert "rsiZoomFactor=Math.max(.04,Math.min(1" in html
     assert "chart?.panes()[1]?.setHeight" in html
     assert "if (!inCandlePane(event))" in html
+
+
+def test_rsi14_returns_alongside_ema_rsi_pair():
+    html=build_browser_visualizer_v2_html(_Model(),"abc")
+    assert "RSI 14 + EMA RSI 224 / 1120" in html
+    assert "o.kind === 'rsi' && Number(o.period) === 14" in html
+    assert "overlay.kind === 'rsi' ? '#f59e0b'" in html
