@@ -480,6 +480,9 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
           color:Number(overlay.period)===320 ? '#facc15' : '#fb7185',
           lineWidth:2,priceLineVisible:false,lastValueVisible:true,
           crosshairMarkerVisible:false,
+          // Share candle coordinates, but do not let trend EMA lines enlarge
+          // the auto price range and override custom vertical zoom/pan.
+          autoscaleInfoProvider: () => null,
           title:overlay.name,
         });
         series.setData(overlay.data || []);

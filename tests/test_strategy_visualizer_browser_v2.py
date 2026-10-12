@@ -132,3 +132,10 @@ def test_v2_ema_toggle_preserves_chart_viewport():
     html = build_browser_visualizer_v2_html(_Model(), "abc")
     assert "const visibleRange = chart.timeScale().getVisibleRange();" in html
     assert "if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);" in html
+
+
+def test_v2_trend_ema_overlays_do_not_override_price_zoom_and_pan():
+    html = build_browser_visualizer_v2_html(_Model(), "abc")
+    assert "autoscaleInfoProvider: () => null" in html
+    assert "priceZoomFactor=Math.max(.005,Math.min(50" in html
+    assert "pricePanOffset=Math.max(-8,Math.min(8" in html
