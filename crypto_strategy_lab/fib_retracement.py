@@ -22,6 +22,7 @@ import json
 
 import numpy as np
 import pandas as pd
+from crypto_strategy_lab.mean_reversion_v2 import moving_mean, resolve_mean_type
 
 from crypto_strategy_lab.indicators import rsi
 
@@ -198,6 +199,8 @@ def fibonacci_retracement_arrays(
     first_zone_hold_entry: bool = False,
     candidate_context_selection: bool = False,
     mean_reversion_period: int = 20,
+    mean_reversion_mean_type: str = "AUTO_TIMEFRAME",
+    strategy_timeframe_minutes: int = 15,
     stop_buffer_atr: float = 0.05,
 ) -> dict[str, np.ndarray]:
     """Build causal Fibonacci impulse/retracement evidence arrays."""
@@ -216,7 +219,11 @@ def fibonacci_retracement_arrays(
     rsi_values = rsi(close_prices, rsi_period) if rsi_values is None else np.asarray(rsi_values, dtype=float)
     n = len(close_prices)
     # All context inputs are causal on native strategy candles.
-    context_mean = _causal_ema(close_prices, int(mean_reversion_period)) if candidate_context_selection else None
+    context_mean = (
+        moving_mean(close_prices, int(mean_reversion_period),
+                    resolve_mean_type(mean_reversion_mean_type, strategy_timeframe_minutes))
+        if candidate_context_selection else None
+    )
     context_ema320 = _causal_ema(close_prices, 320) if candidate_context_selection else None
     context_ema1600 = _causal_ema(close_prices, 1600) if candidate_context_selection else None
     if any(len(values) != n for values in (ema_50_values, ema_100_values, ema_200_values)):
@@ -1344,6 +1351,8 @@ class FibonacciRetracementMixin:
             first_0786_held=bool(getattr(self.config, "fib_first_0786_held", False)),
             candidate_context_selection=bool(getattr(self.config, "fib_candidate_context_selection", False)),
             mean_reversion_period=int(getattr(self.config, "mean_reversion_period", 20)),
+            mean_reversion_mean_type=str(getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
+            strategy_timeframe_minutes=int(getattr(self.config, "strategy_timeframe_minutes", 15)),
             stop_buffer_atr=float(getattr(self.config, "fib_stop_buffer_atr", 0.05)),
         )
 
@@ -1701,10 +1710,15 @@ class FibonacciRetracementMixin:
         if candidate_mode:
             mean_values = getattr(self, "_fib_context_mean_cache", None)
             mean_period = int(getattr(self.config, "mean_reversion_period", 20))
-            if mean_values is None or getattr(self, "_fib_context_mean_period", None) != mean_period:
-                mean_values = _causal_ema(self.close, mean_period)
+            mean_key = (mean_period, str(getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")))
+            if mean_values is None or getattr(self, "_fib_context_mean_key", None) != mean_key:
+                mean_type = resolve_mean_type(
+                    str(getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
+                    int(getattr(self.config, "strategy_timeframe_minutes", 15)),
+                )
+                mean_values = moving_mean(self.close, mean_period, mean_type)
                 self._fib_context_mean_cache = mean_values
-                self._fib_context_mean_period = mean_period
+                self._fib_context_mean_key = mean_key
             atr_now = float(self.atr_values[i])
             mean_now = float(mean_values[i])
             if not np.isfinite(mean_now) or not np.isfinite(atr_now) or atr_now <= 0:
