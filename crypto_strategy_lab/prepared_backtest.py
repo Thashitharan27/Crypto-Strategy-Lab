@@ -491,6 +491,9 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
             half_swing_mode=bool(getattr(config, "fib_half_swing_mode", False)) and not bool(getattr(config, "fib_third_retest_entry", False)),
             third_retest_entry=bool(getattr(config, "fib_third_retest_entry", False)) and not bool(getattr(config, "fib_first_zone_hold_entry", False)),
             first_zone_hold_entry=bool(getattr(config, "fib_first_zone_hold_entry", False)),
+            candidate_context_selection=bool(getattr(config, "fib_candidate_context_selection", False)),
+            mean_reversion_period=int(getattr(config, "mean_reversion_period", 20)),
+            stop_buffer_atr=float(getattr(config, "fib_stop_buffer_atr", 0.05)),
         )
         research_blocks.append(
             ResearchContext(
