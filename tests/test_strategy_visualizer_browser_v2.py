@@ -188,3 +188,14 @@ def test_ema_rsi_warmup_covers_supported_chart_timeframes():
     source=inspect.getsource(CompletedRunVisualizer.build_v2_diagnostic_payload)
     assert '"15m": 15, "1h": 60, "4h": 240, "1d": 1440' in source
     assert "timeframe_minutes[chart_timeframe] * 2240" in source
+
+
+def test_v2_collapsible_diagnostics_and_adjustable_rsi_scale():
+    html=build_browser_visualizer_v2_html(_Model(),"abc")
+    assert '<details id="diagnostics">' in html
+    assert '<summary>Trade diagnostics (expand)</summary>' in html
+    assert 'id="rsi-height"' in html
+    assert 'id="reset-rsi"' in html
+    assert "rsiZoomFactor=Math.max(.04,Math.min(1" in html
+    assert "chart?.panes()[1]?.setHeight" in html
+    assert "if (!inCandlePane(event))" in html
