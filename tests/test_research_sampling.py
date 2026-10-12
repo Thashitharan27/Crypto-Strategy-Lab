@@ -490,3 +490,19 @@ def test_cluster_aware_summary_reports_entries_and_episodes_separately():
     assert summary["episodes_by_regime"] == {"BEAR": 1, "SIDEWAYS": 2}
     assert summary["bayesian_effective_cluster_units"] == 3
     assert {"research_di_bucket", "research_adx_bucket", "market_regime"} <= set(context["dimension"])
+
+
+def test_ema320_cross_research_exit_is_never_shortcut_as_stateless():
+    from types import SimpleNamespace
+    from crypto_strategy_lab.research_sampling_fast import ResearchSamplingFastExitMixin
+    engine = ResearchSamplingFastExitMixin.__new__(ResearchSamplingFastExitMixin)
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    position = SimpleNamespace(
+        is_open=True, partial_sl_enabled=False, partial_tp_enabled=False,
+        r_step_trailing_enabled=False, atr_checkpoint_extension_enabled=False,
+        trailing_enabled=False, be_enabled=False,
+        profile_break_even_activation_r=None, be_active_after=None,
+    )
+    assert not engine._research_simple_exit_eligible(position)
+    engine.signal_strategy_mode = "DI"
+    assert engine._research_simple_exit_eligible(position)
