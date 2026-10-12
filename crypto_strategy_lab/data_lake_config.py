@@ -672,6 +672,10 @@ class ResearchRunConfig:
         if ema320_selected and execution.entry_timing_mode != "NEXT_CANDLE_OPEN":
             raise ValueError("EMA 320 price close crossover requires next-candle-open entry fills")
         if ema320_selected:
+            if execution.ema_320_exit_mode == "EMA_ONLY":
+                for key, profile in execution.profiles.items():
+                    if strategy.profiles[key].enabled and profile.partial_profit_enabled:
+                        raise ValueError(f"{key}: EMA-only exit requires disabling partial profit-taking")
             for key, profile in strategy.profiles.items():
                 if profile.enabled and (
                     profile.flip_direction or any(
