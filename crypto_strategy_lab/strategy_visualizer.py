@@ -22,6 +22,7 @@ from crypto_strategy_lab.gui.completed_run_research import research_seed_from_ma
 from crypto_strategy_lab.research_warmup import strategy_warmup_period
 from crypto_strategy_lab.research_warmup import expand_strategy_request
 from crypto_strategy_lab.fib_retracement import _causal_ema
+from crypto_strategy_lab.indicators import rsi as native_rsi
 from crypto_strategy_lab.strategy_rule_model import (
     CATEGORICAL_VALUE_CODES,
     is_context_timeframe_evidence,
@@ -2145,6 +2146,13 @@ class CompletedRunVisualizer:
 
         overlays = []
         visible = market["period_start"] >= run_start
+        # Standard Wilder RSI 14, alongside the two custom EMA RSI lines.
+        wilder_values = native_rsi(market["close"].to_numpy(float), 14)
+        overlays.append({
+            "name": "RSI 14", "kind": "rsi", "period": 14,
+            "data": _line_points(market.loc[visible, "period_start"],
+                                 wilder_values[visible.to_numpy()]),
+        })
         # Research-only pair: EMA smoothing of gains and losses, not Wilder RSI.
         for period in (224, 1120):
             values = _ema_rsi(market["close"].to_numpy(float), period)
