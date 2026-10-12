@@ -178,9 +178,17 @@ class Ema920PullbackMixin:
             return "SHORT"
         return None
 
+    def _ema_320_trade_direction(self, i):
+        direction = self._ema_320_price_cross(i)
+        if direction is None:
+            return None
+        if bool(getattr(self.config, "ema_320_flip_signals", False)):
+            return "SHORT" if direction == "LONG" else "LONG"
+        return direction
+
     def _selected_direction(self, i):
         if getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS":
-            return self._ema_320_price_cross(i)
+            return self._ema_320_trade_direction(i)
         if getattr(self, "signal_strategy_mode", "DI") == EMA_920_MODE:
             cross_mode = self._ema_920_cross_mode()
             if cross_mode is not None:
@@ -319,7 +327,7 @@ class Ema920PullbackMixin:
         if getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS":
             if i <= 0:
                 return False
-            direction = self._ema_320_price_cross(i - 1)
+            direction = self._ema_320_trade_direction(i - 1)
             if direction is None:
                 return False
             opening = float(self.open[i])
