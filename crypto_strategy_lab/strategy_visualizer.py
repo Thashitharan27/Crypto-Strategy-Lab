@@ -2163,7 +2163,7 @@ class CompletedRunVisualizer:
             })
         if show_trend_emas:
             visible = market["period_start"] >= run_start
-            for period in (320, 1600):
+            for period in (20, 320, 1600):
                 ema_values = _causal_ema(market["close"].to_numpy(float), period)
                 overlays.append({
                     "name": f"EMA {period}",
