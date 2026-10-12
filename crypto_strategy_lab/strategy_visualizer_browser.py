@@ -220,6 +220,7 @@ kbd{border:1px solid #475569;border-bottom-width:2px;border-radius:3px;padding:0
       <label><input type="checkbox" data-overlay="ema50" checked>EMA 50</label>
       <label><input type="checkbox" data-overlay="ema100" checked>EMA 100</label>
       <label><input type="checkbox" data-overlay="ema200" checked>EMA 200</label>
+      <label><input type="checkbox" data-overlay="ema320" checked>EMA 320</label>
       <label><input type="checkbox" data-overlay="vwap" checked>VWAP</label>
       <label><input type="checkbox" data-overlay="bb">BB</label>
       <label><input type="checkbox" id="show-rejections">Rejected</label>

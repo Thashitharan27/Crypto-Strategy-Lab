@@ -998,7 +998,8 @@ class CompletedRunVisualizer:
             if str(chart_timeframe or self.seed.request.strategy_timeframe) == str(self.seed.request.strategy_timeframe):
                 native_start = run_start - strategy_warmup_period(self.seed.config)
                 return native_start, run_start, run_end
-            return run_start, run_start, run_end
+            # Alternate timeframe overlays need pre-run EMA initialization too.
+            return run_start - EMA_WARMUP_BARS * interval, run_start, run_end
 
         visible = max(
             MIN_VISIBLE_CANDLES,
@@ -1663,9 +1664,9 @@ class CompletedRunVisualizer:
 
         strategy_timeframe = str(self.seed.request.strategy_timeframe)
         selected_chart_timeframe = str(chart_timeframe or strategy_timeframe)
-        periods = (20, 50, 100, 200)
+        periods = (20, 50, 100, 200, 320)
         if selected_chart_timeframe == strategy_timeframe == "15m":
-            periods += (320, 1600)
+            periods += (1600,)
         for period in periods:
             values = (_causal_ema(market["close"].to_numpy(float), period)
                       if period in (320, 1600) else _ema(market["close"], period))
@@ -2122,7 +2123,7 @@ class CompletedRunVisualizer:
         run_start = _utc(request.period_start)
         run_end = _utc(request.period_end)
 
-        show_trend_emas = strategy_timeframe == chart_timeframe == "15m"
+        show_trend_emas = strategy_timeframe == chart_timeframe
         # V2 normally loads run candles only. For trading-identical EMA values,
         # include the native pre-run warmup and calculate before trimming.
         # 2240 native bars provide ample EMA-RSI 1120 initialization on any
@@ -2163,7 +2164,7 @@ class CompletedRunVisualizer:
             })
         if show_trend_emas:
             visible = market["period_start"] >= run_start
-            for period in (20, 320, 1600):
+            for period in ((20, 320, 1600) if strategy_timeframe == "15m" else (320,)):
                 ema_values = _causal_ema(market["close"].to_numpy(float), period)
                 overlays.append({
                     "name": f"EMA {period}",
