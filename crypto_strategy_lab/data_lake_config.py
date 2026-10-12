@@ -381,6 +381,7 @@ class ExecutionConfig:
     entry_timing_mode: str = "SIGNAL_CLOSE"
     ema_920_trade_plan: str = "PULLBACK_1R"
     ema_320_flip_signals: bool = False
+    ema_320_exit_mode: str = "BOTH"
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
@@ -661,6 +662,8 @@ class ResearchRunConfig:
                 for rule in profile.entry_rules
             )
         )
+        if execution.ema_320_exit_mode not in {"BOTH", "EMA_ONLY", "FIXED_TP_ONLY"}:
+            raise ValueError("invalid EMA 320 exit mode")
         ema320_selected = any(
             rule.get("_strategy_direction_mode") == "EMA_320_CLOSE_CROSS"
             for profile in strategy.profiles.values()
