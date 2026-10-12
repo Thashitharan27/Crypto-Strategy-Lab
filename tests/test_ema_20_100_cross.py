@@ -665,3 +665,18 @@ def test_ema320_entry_waits_for_entire_candle_body_above_or_below():
     engine.config.ema_320_flip_signals = True
     assert engine._selected_direction(2) == "SHORT"
     assert engine._selected_direction(5) == "LONG"
+
+
+def test_ema320_straddling_body_does_not_rearm_same_side():
+    engine = Engine()
+    engine.signal_strategy_mode = "EMA_320_CLOSE_CROSS"
+    engine.config = SimpleNamespace(ema_320_flip_signals=False)
+    engine.ema_320_values = np.full(7, 100.)
+    engine.open = np.array([99., 99., 101., 99., 101., 101., 99.])
+    engine.close = np.array([99., 101., 102., 102., 102., 99., 99.])
+    assert engine._selected_direction(2) == "LONG"
+    # Candle 3 straddles EMA but close remains above; candle 4 must not re-enter.
+    assert engine._selected_direction(3) is None
+    assert engine._selected_direction(4) is None
+    # New opposite close crossover (5), then full body below (6).
+    assert engine._selected_direction(6) == "SHORT"
