@@ -495,7 +495,12 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     });
   }
 
-  $('fib-emas').addEventListener('change', () => { if (payload) buildChart(); });
+  $('fib-emas').addEventListener('change', () => {
+    if (!payload || !chart) return;
+    const visibleRange = chart.timeScale().getVisibleRange();
+    buildChart();
+    if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
+  });
 
   function centerSelected() {
     if (!payload || !chart) return;
