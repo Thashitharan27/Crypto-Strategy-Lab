@@ -74,6 +74,7 @@ class BacktestConfig:
     fib_half_swing_mode: bool = False
     fib_third_retest_entry: bool = False
     fib_ema_trend_gate: bool = False
+    fib_first_zone_hold_entry: bool = False
     fib_stop_buffer_atr: float = 0.05
     fib_target_mode: str = "IMPULSE_EXTREME"
     fib_fixed_target_r: float = 2.0
