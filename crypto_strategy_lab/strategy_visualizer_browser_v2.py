@@ -53,6 +53,9 @@ def build_browser_visualizer_v2_html(
 <style>
 html,body{height:100%;margin:0;background:#0b121a;color:#e6edf3;font-family:Segoe UI,Arial,sans-serif}
 #app{height:100%;display:grid;grid-template-rows:auto auto minmax(0,1fr)}
+#diagnostics{background:#0f1720;border-bottom:1px solid #2b3948}
+#diagnostics summary{cursor:pointer;padding:5px 10px;font:12px Segoe UI,Arial,sans-serif;color:#b8c2cc}
+#diagnostics:not([open]) #diag{display:none}
 #toolbar{display:flex;gap:8px;align-items:center;padding:8px;background:#101923;border-bottom:1px solid #2b3948}
 button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-radius:5px;padding:5px 8px}
 #trade{min-width:460px;max-width:62vw}
@@ -86,8 +89,10 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <button id="reset-price">Reset price</button>
     <label><input type="checkbox" id="fib-emas" checked> EMA 320 / 1600</label>
     <label><input type="checkbox" id="show-rsi" checked> EMA RSI 224 / 1120</label>
+    <label for="rsi-height">RSI size</label><input id="rsi-height" type="range" min="120" max="420" value="260" step="10" title="Adjust RSI panel height">
+    <button id="reset-rsi">Reset RSI zoom</button>
   </div>
-  <div id="diag">Loading…</div>
+  <details id="diagnostics"><summary>Trade diagnostics (expand)</summary><div id="diag">Loading…</div></details>
   <div id="chart-wrap">
     <div id="chart"></div>
     <div id="fib-layer"></div>
@@ -109,6 +114,8 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   let candles = null;
   let trendEmaLines = [];
   let rsiSeries = null;
+  let rsiZoomFactor = 1.0;
+  let rsiCenter = 50;
   let priceZoomFactor = 1.0;
   let pricePanOffset = 0.0;
   let verticalPan = null;
@@ -504,7 +511,8 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
         priceLineVisible:false,lastValueVisible:true,
         autoscaleInfoProvider: original => {
           const info=original();
-          return {...(info || {}),priceRange:{minValue:0,maxValue:100}};
+          const half=50*rsiZoomFactor;
+          return {...(info || {}),priceRange:{minValue:rsiCenter-half,maxValue:rsiCenter+half}};
         },
       },1);
       line.setData(overlay.data || []);
@@ -517,7 +525,7 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
           axisLabelVisible:true,title:String(level),
         });
       }
-      chart.panes()[1].setHeight(155);
+      requestAnimationFrame(() => chart?.panes()[1]?.setHeight(Number($('rsi-height').value)));
     }
     const redraw=redrawOverlays;
     chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
@@ -527,6 +535,18 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       setTimeout(redraw, 40);
     });
   }
+
+  $('rsi-height').addEventListener('input', () => {
+    if (rsiSeries && chart?.panes()[1]) {
+      chart.panes()[1].setHeight(Number($('rsi-height').value));
+      requestAnimationFrame(redrawOverlays);
+    }
+  });
+  $('reset-rsi').addEventListener('click', () => {
+    rsiZoomFactor=1.0;
+    rsiCenter=50;
+    rsiSeries?.applyOptions({});
+  });
 
   $('show-rsi').addEventListener('change', () => {
     if (!payload || !chart) return;
@@ -572,7 +592,16 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
   chartWrap.addEventListener('wheel',event => {
     const rect=chartWrap.getBoundingClientRect();
     const overPriceScale=event.clientX-rect.left >= rect.width-86;
-    if (!overPriceScale || !candles || !inCandlePane(event)) return;
+    if (!overPriceScale || !candles) return;
+    if (!inCandlePane(event)) {
+      if (!rsiSeries) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const direction=event.deltaY>0 ? 1.12 : 0.89;
+      rsiZoomFactor=Math.max(.04,Math.min(1,rsiZoomFactor*direction));
+      rsiSeries.applyOptions({});
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const direction=event.deltaY > 0 ? 1.12 : 0.89;
