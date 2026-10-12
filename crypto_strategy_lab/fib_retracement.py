@@ -22,7 +22,6 @@ import json
 
 import numpy as np
 import pandas as pd
-from crypto_strategy_lab.mean_reversion_v2 import moving_mean, resolve_mean_type
 
 from crypto_strategy_lab.indicators import rsi
 
@@ -219,11 +218,6 @@ def fibonacci_retracement_arrays(
     rsi_values = rsi(close_prices, rsi_period) if rsi_values is None else np.asarray(rsi_values, dtype=float)
     n = len(close_prices)
     # All context inputs are causal on native strategy candles.
-    context_mean = (
-        moving_mean(close_prices, int(mean_reversion_period),
-                    resolve_mean_type(mean_reversion_mean_type, strategy_timeframe_minutes))
-        if candidate_context_selection else None
-    )
     context_ema320 = _causal_ema(close_prices, 320) if candidate_context_selection else None
     context_ema1600 = _causal_ema(close_prices, 1600) if candidate_context_selection else None
     if any(len(values) != n for values in (ema_50_values, ema_100_values, ema_200_values)):
@@ -479,10 +473,9 @@ def fibonacci_retracement_arrays(
         endpoint = float(high_prices[endpoint_i] if direction == "LONG" else low_prices[endpoint_i])
         span = abs(endpoint - anchor)
         atr_now = float(atr_values[now])
-        mean = float(context_mean[now])
         fast = float(context_ema320[now])
         slow = float(context_ema1600[now])
-        if not all(np.isfinite(v) for v in (span, atr_now, mean, fast, slow)) or span <= 0 or atr_now <= 0:
+        if not all(np.isfinite(v) for v in (span, atr_now, fast, slow)) or span <= 0 or atr_now <= 0:
             return False, "CONTEXT_HISTORY_UNAVAILABLE", float("nan")
         level = round(float(state["signal_level"]), 3)
         next_level = {0.382: 0.500, 0.500: 0.618, 0.618: 0.786, 0.786: 1.0}.get(level)
@@ -496,18 +489,13 @@ def fibonacci_retracement_arrays(
         proposed_entry = endpoint + sign * entry_level * span
         stop_boundary = anchor if half_swing_mode else endpoint + sign * next_stop_level * span
         proposed_stop = stop_boundary + sign * float(stop_buffer_atr) * atr_now
-        distance = (proposed_entry - mean) / atr_now
         if direction == "LONG":
-            if distance <= -1.5:
-                return False, "MR_STRONGLY_BELOW_MEAN", distance
             if not (fast > slow and proposed_entry > slow and proposed_stop < fast):
-                return False, "EMA_TREND_OR_STOP", distance
+                return False, "EMA_TREND_OR_STOP", float("nan")
         else:
-            if distance >= 1.5:
-                return False, "MR_STRONGLY_ABOVE_MEAN", distance
             if not (fast < slow and proposed_entry < slow and proposed_stop > fast):
-                return False, "EMA_TREND_OR_STOP", distance
-        return True, "PASS", distance
+                return False, "EMA_TREND_OR_STOP", float("nan")
+        return True, "PASS", float("nan")
 
 
     def _leg_wick_penetration(leg, now):
@@ -1707,27 +1695,6 @@ class FibonacciRetracementMixin:
             return False, "FIB_EMA_HISTORY_UNAVAILABLE"
         direction = self._effective_trade_direction(i)
         entry = float(self._expected_entry_price(i, execution_i, direction))
-        if candidate_mode:
-            mean_values = getattr(self, "_fib_context_mean_cache", None)
-            mean_period = int(getattr(self.config, "mean_reversion_period", 20))
-            mean_key = (mean_period, str(getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")))
-            if mean_values is None or getattr(self, "_fib_context_mean_key", None) != mean_key:
-                mean_type = resolve_mean_type(
-                    str(getattr(self.config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
-                    int(getattr(self.config, "strategy_timeframe_minutes", 15)),
-                )
-                mean_values = moving_mean(self.close, mean_period, mean_type)
-                self._fib_context_mean_cache = mean_values
-                self._fib_context_mean_key = mean_key
-            atr_now = float(self.atr_values[i])
-            mean_now = float(mean_values[i])
-            if not np.isfinite(mean_now) or not np.isfinite(atr_now) or atr_now <= 0:
-                return False, "FIB_MR_HISTORY_UNAVAILABLE"
-            entry_distance = (entry - mean_now) / atr_now
-            if direction == "LONG" and entry_distance <= -1.5:
-                return False, "FIB_MR_LONG_STRONGLY_BELOW_MEAN"
-            if direction == "SHORT" and entry_distance >= 1.5:
-                return False, "FIB_MR_SHORT_STRONGLY_ABOVE_MEAN"
         if direction == "LONG":
             if not (fast > slow and entry > slow):
                 return False, "FIB_EMA_LONG_TREND_VETO"
