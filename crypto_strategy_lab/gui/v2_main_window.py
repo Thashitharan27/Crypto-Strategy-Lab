@@ -370,6 +370,7 @@ class DataclassForm(QWidget):
         "sr_take_profit_timeframe_minutes": (-1, 0, 60, 240, 1440),
         "sr_take_profit_mode": ("FIXED_R", "SR_CAPPED_R", "SR_LEVEL"),
         "fib_target_mode": ("IMPULSE_EXTREME", "FIXED_R"),
+        "fib_structure_quality_mode": ("BASELINE", "CLEAN_ONLY", "WEIGHTED"),
         "sr_take_profit_no_level_policy": ("USE_FIXED_TP", "REJECT_TRADE"),
         "flip_rule_match_mode": ("ANY", "ALL"),
         "reject_rule_match_mode": ("ANY", "ALL"),
