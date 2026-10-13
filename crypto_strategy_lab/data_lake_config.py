@@ -35,6 +35,7 @@ class DataConfig:
 class FeatureConfig:
     fib_inherited_first_held: bool = False
     fib_first_0786_held: bool = False
+    fib_structure_quality_mode: str = "BASELINE"
     fib_half_swing_mode: bool = False
     fib_third_retest_entry: bool = False
     fib_ema_trend_gate: bool = False

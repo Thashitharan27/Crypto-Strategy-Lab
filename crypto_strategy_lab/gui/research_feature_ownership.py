@@ -38,6 +38,7 @@ from crypto_strategy_lab.strategy_rule_model import (
 
 
 FRIENDLY_LABELS = {
+    "fib_structure_quality_mode": "Fibonacci impulse structure selection mode",
     "ema_320_candle_confirmation_enabled": "EMA320 confirmation enabled",
     "ema_320_candle_strong_close": "EMA320 strong close",
     "ema_320_candle_engulfing": "EMA320 engulfing",

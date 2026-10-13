@@ -26,6 +26,7 @@ class FieldPresentation:
 
 PERCENT_FIELDS = {"risk_per_leg", "maker_fee", "taker_fee", "slippage", "percent_r"}
 FIELDS = {
+    "fib_structure_quality_mode": FieldPresentation("Fibonacci Impulse Quality Mode", "BASELINE preserves existing selection; CLEAN_ONLY only permits uninterrupted impulses; WEIGHTED penalizes extended and fragmented swings."),
     "initial_equity": FieldPresentation("Starting Equity", unit="$", decimals=2),
     "risk_per_leg": FieldPresentation(
         "Base Sizing Budget Per Trade",

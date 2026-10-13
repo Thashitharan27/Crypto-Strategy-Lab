@@ -28,7 +28,7 @@ from crypto_strategy_lab.indicators import rsi
 
 FIB_RETRACEMENT_MODE = "FIB_RETRACEMENT"
 FIB_RESEARCH_CONTEXT_NAME = "fibonacci_retracement"
-FIB_RESEARCH_CONTEXT_VERSION = 27
+FIB_RESEARCH_CONTEXT_VERSION = 28
 FIB_PIVOT_STRENGTH = 2
 FIB_MINIMUM_IMPULSE_ATR = 2.0
 FIB_LEVEL_TOLERANCE_ATR = 0.25
@@ -197,6 +197,7 @@ def fibonacci_retracement_arrays(
     third_retest_entry: bool = False,
     first_zone_hold_entry: bool = False,
     candidate_context_selection: bool = False,
+    structure_quality_mode: str = "BASELINE",
     mean_reversion_period: int = 20,
     mean_reversion_mean_type: str = "AUTO_TIMEFRAME",
     strategy_timeframe_minutes: int = 15,
@@ -283,7 +284,48 @@ def fibonacci_retracement_arrays(
     )
     active_structure_reset_depth = min(0.786, max(0.236, float(active_structure_reset_depth)))
 
+    structure_quality_mode = str(structure_quality_mode).upper()
+    if structure_quality_mode not in {"BASELINE", "CLEAN_ONLY", "WEIGHTED"}:
+        raise ValueError("Invalid Fibonacci structure quality mode")
     impulse_quality_cache = {}
+    structure_quality_cache = {}
+
+    def _structure_quality(candidate):
+        """Endpoint-fixed, causal maximum internal reversal of the impulse.
+
+        The maximum adverse swing is divided by the total impulse range,
+        so deep internal retracements indicate disconnected swing cycles.
+        This never looks past the confirmed endpoint.
+        """
+        direction, start_i, end_i = candidate[:3]
+        key = (direction, start_i, end_i)
+        if key not in structure_quality_cache:
+            start = float(low_prices[start_i] if direction == "LONG" else high_prices[start_i])
+            end = float(high_prices[end_i] if direction == "LONG" else low_prices[end_i])
+            span = abs(end - start)
+            highest_reversal = 0.0
+            peak = start
+            for t in range(start_i + 1, end_i + 1):
+                if direction == "LONG":
+                    highest_reversal = max(highest_reversal, max(0.0, peak - float(low_prices[t])))
+                    peak = max(peak, float(high_prices[t]))
+                else:
+                    highest_reversal = max(highest_reversal, max(0.0, float(high_prices[t]) - peak))
+                    peak = min(peak, float(low_prices[t]))
+            ratio = highest_reversal / span if span > 0 else 1.0
+            kind = "CLEAN" if ratio < 0.25 else ("EXTENDED" if ratio < 0.50 else "FRAGMENTED")
+            structure_quality_cache[key] = (kind, ratio)
+        return structure_quality_cache[key]
+
+    def _structure_quality_weight(candidate):
+        if structure_quality_mode != "WEIGHTED":
+            return 1.0
+        kind, _ = _structure_quality(candidate)
+        return {"CLEAN": 1.0, "EXTENDED": 0.85, "FRAGMENTED": 0.60}[kind]
+
+    def _structure_allowed(candidate):
+        return structure_quality_mode != "CLEAN_ONLY" or _structure_quality(candidate)[0] == "CLEAN"
+
 
     def _impulse_quality(candidate):
         """Causal, endpoint-fixed quality: reward sustained directional movement."""
@@ -321,7 +363,7 @@ def fibonacci_retracement_arrays(
         age = max(0, now - candidate[2])
         age_fraction = min(1.0, age / float(dominant_lookback_bars))
         quality_multiplier, _, _ = _impulse_quality(candidate)
-        return candidate[3] * quality_multiplier * (1.0 - dominant_recency_penalty * age_fraction)
+        return candidate[3] * quality_multiplier * _structure_quality_weight(candidate) * (1.0 - dominant_recency_penalty * age_fraction)
 
     def _candidate_confluence(candidate, now):
         """Score causal EMA/RSI confluence for one candidate before selection."""
@@ -459,7 +501,7 @@ def fibonacci_retracement_arrays(
         }
 
     def _candidate_final_score(candidate, now):
-        return _candidate_confluence(candidate, now)["final_score"]
+        return _candidate_confluence(candidate, now)["final_score"] * _structure_quality_weight(candidate)
 
     def _candidate_context_check(candidate, now):
         """Pre-selection eligibility based on this leg's proposed Fib entry/stop.
@@ -901,7 +943,8 @@ def fibonacci_retracement_arrays(
         valid_candidates = [
             candidate
             for candidate in structural_candidates
-            if not bool(_candidate_state(candidate[:3])["invalidated"])
+            if _structure_allowed(candidate)
+            and not bool(_candidate_state(candidate[:3])["invalidated"])
             and not _candidate_entry_blocked(candidate[:3])
         ]
         structurally_viable_candidates = [
@@ -1032,6 +1075,10 @@ def fibonacci_retracement_arrays(
                     "start_price": candidate_start_price,
                     "end_price": candidate_end_price,
                     "structural_strength_atr": float(candidate[3]),
+                    "structure_class": _structure_quality(candidate)[0],
+                    "max_internal_retracement_ratio": float(_structure_quality(candidate)[1]),
+                    "structure_quality_mode": structure_quality_mode,
+                    "structure_quality_eligible": _structure_allowed(candidate),
                     "impulse_quality_multiplier": float(_impulse_quality(candidate)[0]),
                     "impulse_efficiency": float(_impulse_quality(candidate)[1]),
                     "impulse_largest_candle_share": float(_impulse_quality(candidate)[2]),
@@ -1039,7 +1086,8 @@ def fibonacci_retracement_arrays(
                     "structural_score": confluence["structural_score"],
                     "confluence_score": confluence["confluence_score"],
                     "reaction_score": confluence["reaction_score"],
-                    "final_score": confluence["final_score"],
+                    "final_score": float(_candidate_final_score(candidate, i)),
+                    "unadjusted_final_score": confluence["final_score"],
                     "ema_50_distance_atr": confluence["ema_50_distance_atr"],
                     "ema_100_distance_atr": confluence["ema_100_distance_atr"],
                     "ema_200_distance_atr": confluence["ema_200_distance_atr"],
