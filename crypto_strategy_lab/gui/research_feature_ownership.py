@@ -44,6 +44,7 @@ FRIENDLY_LABELS = {
     "fib_third_retest_entry": "Two distinct holds then pending limit entry one Fib deeper",
     "fib_ema_trend_gate": "Require EMA 320/1600 trend and Fib stop beyond EMA 320",
     "fib_candidate_context_selection": "Select among Fib structures using candidate-specific EMA 320/1600 trend and stop requirements",
+    "fib_candle_confirmation_enabled": "Require a bullish/bearish completed confirmation candle for Fibonacci entries",
     "fib_first_zone_hold_entry": "Enter on first midpoint-zone hold (no Fib line touch required)",
     "atr_period": "ATR period",
     "bb_period": "Bollinger period",
