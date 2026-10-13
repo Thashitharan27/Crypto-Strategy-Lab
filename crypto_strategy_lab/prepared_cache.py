@@ -91,6 +91,7 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
         "fib_active_structure_reset_depth": float(
             getattr(config, "fib_active_structure_reset_depth", 0.618)
         ),
+        "fib_structure_quality_mode": str(getattr(config, "fib_structure_quality_mode", "BASELINE")),
         "fib_inherited_first_held": bool(getattr(config, "fib_inherited_first_held", False)),
         "fib_first_0786_held": bool(getattr(config, "fib_first_0786_held", False)),
         "fib_half_swing_mode": bool(getattr(config, "fib_half_swing_mode", False)),
