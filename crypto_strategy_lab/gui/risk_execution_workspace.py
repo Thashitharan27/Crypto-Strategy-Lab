@@ -178,6 +178,20 @@ class RiskExecutionWorkspace(QWidget):
         )
         layout.addWidget(self.entry_card)
 
+        self.ema320_candle_card = FormCard("EMA 320 Candle Confirmation", note="Optional: ANY selected bullish or bearish pattern on the completed full-body entry signal.")
+        for field, label in (
+            ("ema_320_candle_confirmation_enabled", "Require Candle Confirmation — ANY Selected Pattern"),
+            ("ema_320_candle_strong_close", "Pattern: Strong Bullish / Bearish Close"),
+            ("ema_320_candle_engulfing", "Pattern: Bullish / Bearish Engulfing"),
+            ("ema_320_candle_wick_rejection", "Pattern: Hammer / Shooting Star"),
+            ("ema_320_candle_star", "Pattern: Morning Star / Evening Star"),
+        ):
+            widget = self.window.feature_form.widgets[field]
+            if isinstance(widget, QCheckBox):
+                widget.setText(label)
+            self.ema320_candle_card.add_control(field, widget)
+        layout.addWidget(self.ema320_candle_card)
+
         # Fibonacci entry modes are execution choices. Reuse the authoritative
         # feature-form widgets here rather than creating duplicate controls:
         # build_config/apply_config and existing saved configurations stay intact.
@@ -484,6 +498,7 @@ class RiskExecutionWorkspace(QWidget):
         fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
         fib = self._signal_strategy_mode() == "FIB_RETRACEMENT"
         self.fib_entry_card.setVisible(fib)
+        self.ema320_candle_card.setVisible(self._signal_strategy_mode() == "EMA_320_CLOSE_CROSS")
         cross_mode = {
             "EMA_20_100_CROSS": "LONG",
             "EMA_20_100_CROSS_SHORT": "SHORT",
