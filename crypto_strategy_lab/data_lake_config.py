@@ -39,6 +39,11 @@ class FeatureConfig:
     fib_third_retest_entry: bool = False
     fib_ema_trend_gate: bool = False
     fib_candidate_context_selection: bool = False
+    ema_320_candle_confirmation_enabled: bool = False
+    ema_320_candle_strong_close: bool = True
+    ema_320_candle_engulfing: bool = True
+    ema_320_candle_wick_rejection: bool = True
+    ema_320_candle_star: bool = True
     fib_candle_confirmation_enabled: bool = False
     fib_candle_strong_close: bool = True
     fib_candle_engulfing: bool = True

@@ -66,6 +66,11 @@ class BacktestConfig:
     ema_920_trade_plan: str = "PULLBACK_1R"
     ema_320_flip_signals: bool = False
     ema_320_exit_mode: str = "BOTH"
+    ema_320_candle_confirmation_enabled: bool = False
+    ema_320_candle_strong_close: bool = True
+    ema_320_candle_engulfing: bool = True
+    ema_320_candle_wick_rejection: bool = True
+    ema_320_candle_star: bool = True
     ema_cross_entry_confirmation_enabled: bool = False
     ema_cross_entry_confirmation_r: float = 1.0
     fvg_confirmation_enabled: bool = False
