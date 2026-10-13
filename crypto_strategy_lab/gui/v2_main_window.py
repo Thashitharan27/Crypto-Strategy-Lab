@@ -62,7 +62,7 @@ STRATEGY_GROUPS = (
 )
 
 FEATURE_GROUPS = (
-    ("Fibonacci", ("fib_inherited_first_held", "fib_first_0786_held", "fib_half_swing_mode", "fib_third_retest_entry", "fib_ema_trend_gate", "fib_candidate_context_selection", "fib_candle_confirmation_enabled", "fib_first_zone_hold_entry"), "Optional first-held entry using earlier deep reactions from the same swing anchor"),
+    ("Fibonacci", ("fib_inherited_first_held", "fib_first_0786_held", "fib_half_swing_mode", "fib_third_retest_entry", "fib_ema_trend_gate", "fib_candidate_context_selection", "fib_candle_confirmation_enabled", "fib_candle_strong_close", "fib_candle_engulfing", "fib_candle_wick_rejection", "fib_candle_star", "fib_first_zone_hold_entry"), "Optional first-held entry using earlier deep reactions from the same swing anchor"),
     ("Price / Volatility", ("atr_period", "bb_period", "bb_stddevs"), None),
     ("DI", ("adx_period", "di_pressure_lookback"), None),
     ("Mean Reversion", (
