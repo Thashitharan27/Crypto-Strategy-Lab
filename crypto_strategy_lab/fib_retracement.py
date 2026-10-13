@@ -1713,12 +1713,35 @@ class FibonacciRetracementMixin:
             return False, "FIB_EMA_SHORT_STOP_NOT_ABOVE_320"
         return True, "FIB_EMA_TREND_PASSED"
 
+    def _fib_candle_confirmation_check(self, i):
+        """Use only the completed signal candle; do not inspect execution bars."""
+        if not bool(getattr(self.config, "fib_candle_confirmation_enabled", False)):
+            return True, "FIB_CANDLE_CONFIRMATION_DISABLED"
+        if i < 0 or i >= len(self.close):
+            return False, "FIB_CANDLE_CONFIRMATION_UNAVAILABLE"
+        direction = self._effective_trade_direction(i)
+        opening, closing = float(self.open[i]), float(self.close[i])
+        high, low = float(self.high[i]), float(self.low[i])
+        if not all(np.isfinite(x) for x in (opening, closing, high, low)) or high <= low:
+            return False, "FIB_CANDLE_CONFIRMATION_UNAVAILABLE"
+        # Require a directional real body and a close in the directional third
+        # of the completed candle range. A doji alone is not confirmation.
+        candle_range = high - low
+        if direction == "LONG" and closing > opening and closing >= high - candle_range / 3.0:
+            return True, "FIB_BULLISH_CANDLE_CONFIRMED"
+        if direction == "SHORT" and closing < opening and closing <= low + candle_range / 3.0:
+            return True, "FIB_BEARISH_CANDLE_CONFIRMED"
+        return False, "FIB_DIRECTIONAL_CANDLE_NOT_CONFIRMED"
+
     def _entry_filter_result(self, i, execution_i=None):
         passed, reason = super()._entry_filter_result(i, execution_i)
         if not passed or getattr(self, "signal_strategy_mode", "DI") != FIB_RETRACEMENT_MODE:
             return passed, reason
         if self._fib_deeper_entry_enabled() and self._effective_trade_direction(i) != self._selected_direction(i):
             return False, "FIB_DEEPER_LIMIT_DIRECTION_FLIP_UNSUPPORTED"
+        candle_passed, candle_reason = self._fib_candle_confirmation_check(i)
+        if not candle_passed:
+            return False, candle_reason
         ema_passed, ema_reason = self._fib_ema_trend_check(i, execution_i)
         if not ema_passed:
             return False, ema_reason
