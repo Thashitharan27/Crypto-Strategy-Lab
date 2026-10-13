@@ -1851,3 +1851,26 @@ def test_candidate_selection_ema_only_does_not_apply_mr_veto():
     assert '"FIB_MR_SHORT_STRONGLY_ABOVE_MEAN"' not in gate_source
     assert "fast > slow and proposed_entry > slow and proposed_stop < fast" in selection_source
     assert "fast < slow and proposed_entry < slow and proposed_stop > fast" in selection_source
+
+
+def test_fib_directional_candle_confirmation_is_optional_and_causal():
+    """The entry gate uses the completed signal candle, never the next bar."""
+    import numpy as np
+
+    def check(direction, enabled, opening, closing, high, low):
+        instance = object.__new__(FibonacciRetracementMixin)
+        instance.config = SimpleNamespace(fib_candle_confirmation_enabled=enabled)
+        instance.open = np.array([opening, 100.0])
+        instance.close = np.array([closing, 1.0])  # Next bar must not matter.
+        instance.high = np.array([high, 120.0])
+        instance.low = np.array([low, 0.0])
+        instance._effective_trade_direction = lambda index: direction
+        return instance._fib_candle_confirmation_check(0)
+
+    assert check("LONG", True, 10, 11, 11.2, 9.9)[0]
+    assert not check("LONG", True, 11, 10, 11.2, 9.9)[0]
+    assert check("SHORT", True, 11, 10, 11.2, 9.9)[0]
+    assert not check("SHORT", True, 10, 11, 11.2, 9.9)[0]
+    assert check("LONG", False, 11, 10, 11.2, 9.9)[0]
+    # Weak bullish close in lower third is not confirmation.
+    assert not check("LONG", True, 10, 10.1, 12.0, 9.9)[0]
