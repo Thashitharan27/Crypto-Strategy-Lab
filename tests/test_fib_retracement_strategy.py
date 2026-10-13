@@ -1874,3 +1874,45 @@ def test_fib_directional_candle_confirmation_is_optional_and_causal():
     assert check("LONG", False, 11, 10, 11.2, 9.9)[0]
     # Weak bullish close in lower third is not confirmation.
     assert not check("LONG", True, 10, 10.1, 12.0, 9.9)[0]
+
+
+def test_fib_four_candle_patterns_any_match_and_causal():
+    """Each selected pattern works alone; future bars cannot change the result."""
+    samples = [
+        ("fib_candle_strong_close", "LONG", [(10, 11.2, 9.9, 11)], "STRONG_CLOSE"),
+        ("fib_candle_strong_close", "SHORT", [(11, 11.2, 9.9, 10)], "STRONG_CLOSE"),
+        ("fib_candle_engulfing", "LONG", [(11, 11.2, 9.7, 10), (9.9, 11.5, 9.8, 11.3)], "ENGULFING"),
+        ("fib_candle_engulfing", "SHORT", [(10, 11.3, 9.7, 11), (11.1, 11.2, 9.5, 9.7)], "ENGULFING"),
+        ("fib_candle_wick_rejection", "LONG", [(10, 10.5, 8.5, 10.4)], "WICK_REJECTION"),
+        ("fib_candle_wick_rejection", "SHORT", [(10.4, 12.2, 10.0, 10.1)], "WICK_REJECTION"),
+        ("fib_candle_star", "LONG", [(11, 11.2, 9.8, 10), (10, 10.2, 9.7, 9.9), (10, 10.9, 9.9, 10.8)], "STAR"),
+        ("fib_candle_star", "SHORT", [(10, 11.2, 9.8, 11), (11, 11.2, 10.8, 11.1), (11, 11.1, 10.1, 10.2)], "STAR"),
+    ]
+    keys = ("fib_candle_strong_close", "fib_candle_engulfing", "fib_candle_wick_rejection", "fib_candle_star")
+    for selected, direction, bars, expected in samples:
+        cfg = {key: key == selected for key in keys}
+        instance = object.__new__(FibonacciRetracementMixin)
+        instance.config = SimpleNamespace(fib_candle_confirmation_enabled=True, **cfg)
+        future = [(100, 120, 90, 110)]
+        instance.open = np.array([b[0] for b in bars + future])
+        instance.high = np.array([b[1] for b in bars + future])
+        instance.low = np.array([b[2] for b in bars + future])
+        instance.close = np.array([b[3] for b in bars + future])
+        instance._effective_trade_direction = lambda index, d=direction: d
+        assert expected in instance._fib_candle_confirmation_check(len(bars) - 1)[1], (selected, direction)
+
+        instance.config = SimpleNamespace(
+            fib_candle_confirmation_enabled=True,
+            **{key: False for key in keys},
+        )
+        assert not instance._fib_candle_confirmation_check(len(bars) - 1)[0]
+
+    # With insufficient completed history, multi-candle patterns must not fire.
+    instance.config = SimpleNamespace(
+        fib_candle_confirmation_enabled=True,
+        fib_candle_strong_close=False,
+        fib_candle_engulfing=False,
+        fib_candle_wick_rejection=False,
+        fib_candle_star=True,
+    )
+    assert not instance._fib_candle_confirmation_check(1)[0]
