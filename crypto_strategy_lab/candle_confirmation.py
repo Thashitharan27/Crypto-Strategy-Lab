@@ -4,11 +4,11 @@ import numpy as np
 def candle_confirmation_check(self, i, direction, prefix):
     """ANY selected reversal pattern, using closed bars ending at i."""
     if not bool(getattr(self.config, f"{prefix}_candle_confirmation_enabled", False)):
-        return True, "{prefix.upper()}_CANDLE_CONFIRMATION_DISABLED"
+        return True, f"{prefix.upper()}_CANDLE_CONFIRMATION_DISABLED"
     if not 0 <= i < len(self.close):
-        return False, "{prefix.upper()}_CANDLE_CONFIRMATION_UNAVAILABLE"
+        return False, f"{prefix.upper()}_CANDLE_CONFIRMATION_UNAVAILABLE"
     if direction not in {"LONG", "SHORT"}:
-        return False, "{prefix.upper()}_CANDLE_CONFIRMATION_DIRECTION_UNAVAILABLE"
+        return False, f"{prefix.upper()}_CANDLE_CONFIRMATION_DIRECTION_UNAVAILABLE"
 
     def bar(j):
         if j < 0:
@@ -20,7 +20,7 @@ def candle_confirmation_check(self, i, direction, prefix):
 
     current = bar(i)
     if current is None:
-        return False, "{prefix.upper()}_CANDLE_CONFIRMATION_UNAVAILABLE"
+        return False, f"{prefix.upper()}_CANDLE_CONFIRMATION_UNAVAILABLE"
     o, h, l, c = current
     span = h - l
     body = abs(c - o)
@@ -72,5 +72,5 @@ def candle_confirmation_check(self, i, direction, prefix):
 
     if matches:
         return True, f"{prefix.upper()}_CANDLE_{matches[0]}_CONFIRMED"
-    return False, "{prefix.upper()}_CANDLE_NO_SELECTED_PATTERN"
+    return False, f"{prefix.upper()}_CANDLE_NO_SELECTED_PATTERN"
 
