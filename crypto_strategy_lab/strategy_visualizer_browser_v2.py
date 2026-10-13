@@ -75,6 +75,11 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
 .trade-label.exit{background:rgba(184,132,50,.96);color:#fff}
 .trade-label.tp{background:rgba(32,139,85,.96);color:#fff}
 .trade-label.sl{background:rgba(184,58,58,.96);color:#fff}
+.ema-menu{position:relative;font:12px Segoe UI,Arial,sans-serif}
+.ema-menu>summary{cursor:pointer;list-style:none;border:1px solid #475569;border-radius:4px;padding:4px 9px;white-space:nowrap}
+.ema-menu>summary::-webkit-details-marker{display:none}
+.ema-options{position:absolute;z-index:30;top:calc(100% + 5px);left:0;display:flex;flex-direction:column;gap:7px;min-width:110px;padding:11px;background:#17232f;border:1px solid #475569;border-radius:6px;box-shadow:0 6px 18px #0009}
+.ema-options label{display:block;white-space:nowrap;cursor:pointer}
 .bad{color:#f08a8a}.good{color:#6fd3a4}.muted{color:#91a0b2}
 </style>
 <script src="__LIGHTWEIGHT_CHARTS_URL__"></script>
@@ -87,7 +92,15 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     <button id="center">Center selected</button>
     <button id="fit">Fit full run</button>
     <button id="reset-price">Reset price</button>
-    <label><input type="checkbox" id="fib-emas" checked> EMA 20 / 320 / 1600</label>
+    <details id="ema-menu" class="ema-menu"><summary>EMA ▾</summary>
+      <div class="ema-options" role="group" aria-label="Visible EMA periods">
+        <label><input type="checkbox" class="ema-period" value="9"> EMA 9</label>
+        <label><input type="checkbox" class="ema-period" value="20" checked> EMA 20</label>
+        <label><input type="checkbox" class="ema-period" value="100"> EMA 100</label>
+        <label><input type="checkbox" class="ema-period" value="320" checked> EMA 320</label>
+        <label><input type="checkbox" class="ema-period" value="1600" checked> EMA 1600</label>
+      </div>
+    </details>
     <label><input type="checkbox" id="show-rsi" checked> RSI 14 + EMA RSI 224 / 1120</label>
     <label for="rsi-height">RSI size</label><input id="rsi-height" type="range" min="120" max="420" value="260" step="10" title="Adjust RSI panel height">
     <button id="reset-rsi">Reset RSI zoom</button>
@@ -483,11 +496,13 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
       },
     });
     candles.setData(payload.candles || []);
-    if ($('fib-emas').checked) {
+    const selectedEmas = new Set([...document.querySelectorAll('.ema-period:checked')].map(input => Number(input.value)));
+    if (selectedEmas.size) {
       for (const overlay of (payload.overlays || [])) {
-        if (overlay.kind !== 'ema' || ![20,320,1600].includes(Number(overlay.period))) continue;
+        if (overlay.kind !== 'ema' || !selectedEmas.has(Number(overlay.period))) continue;
+        const emaColors = {9:'#60a5fa',20:'#4ade80',100:'#a78bfa',320:'#facc15',1600:'#fb7185'};
         const series=chart.addSeries(window.LightweightCharts.LineSeries,{
-          color:Number(overlay.period)===20 ? '#4ade80' : (Number(overlay.period)===320 ? '#facc15' : '#fb7185'),
+          color:emaColors[Number(overlay.period)] || '#e2e8f0',
           lineWidth:2,priceLineVisible:false,lastValueVisible:true,
           crosshairMarkerVisible:false,
           // Share candle coordinates, but do not let trend EMA lines enlarge
@@ -555,12 +570,12 @@ button,select{background:#172330;color:#e6edf3;border:1px solid #3a4a5c;border-r
     if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
   });
 
-  $('fib-emas').addEventListener('change', () => {
+  document.querySelectorAll('.ema-period').forEach(input => input.addEventListener('change', () => {
     if (!payload || !chart) return;
     const visibleRange = chart.timeScale().getVisibleRange();
     buildChart();
     if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
-  });
+  }));
 
   function centerSelected() {
     if (!payload || !chart) return;
