@@ -193,6 +193,11 @@ class RiskExecutionWorkspace(QWidget):
             ("fib_third_retest_entry", "After Two Holds — Enter One Fib Deeper"),
             ("fib_ema_trend_gate", "Require EMA 320/1600 Trend + Stop Beyond EMA 320"),
             ("fib_candidate_context_selection", "Select Fib Using EMA 320/1600 Trend + Stop"),
+            ("fib_candle_confirmation_enabled", "Require Candle Confirmation — ANY Selected Pattern"),
+            ("fib_candle_strong_close", "Pattern: Strong Bullish / Bearish Close"),
+            ("fib_candle_engulfing", "Pattern: Bullish / Bearish Engulfing"),
+            ("fib_candle_wick_rejection", "Pattern: Hammer / Shooting Star"),
+            ("fib_candle_star", "Pattern: Morning Star / Evening Star"),
             ("fib_first_zone_hold_entry", "First Hold in Halfway Fib Zone — No Line Touch"),
         ):
             widget = fib_controls[field]
