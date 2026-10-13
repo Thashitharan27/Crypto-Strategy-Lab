@@ -38,7 +38,11 @@ def test_v2_html_is_minimal_and_diagnostic():
     assert "setVisibleRange({from:start,to:end})" in html
     assert 'id="fib-layer"' in html
     assert "function drawFibOverlay()" in html
-    assert "EMA 20 / 320 / 1600" in html
+    assert 'id="ema-menu"' in html
+    assert 'class="ema-period"' in html
+    assert "selectedEmas.has(Number(overlay.period))" in html
+    assert 'value="9"' in html
+    assert 'value="100"' in html
     assert "S/R" not in html
 
 
