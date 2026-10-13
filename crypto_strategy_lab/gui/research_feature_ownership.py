@@ -38,6 +38,11 @@ from crypto_strategy_lab.strategy_rule_model import (
 
 
 FRIENDLY_LABELS = {
+    "ema_320_candle_confirmation_enabled": "EMA320 confirmation enabled",
+    "ema_320_candle_strong_close": "EMA320 strong close",
+    "ema_320_candle_engulfing": "EMA320 engulfing",
+    "ema_320_candle_wick_rejection": "EMA320 wick rejection",
+    "ema_320_candle_star": "EMA320 star",
     "fib_inherited_first_held": "Allow inherited first-held Fib entry",
     "fib_first_0786_held": "Allow first-held entry at Fib 0.786",
     "fib_half_swing_mode": "Fib 0.5 first-held entry, swing stop, extreme target",
