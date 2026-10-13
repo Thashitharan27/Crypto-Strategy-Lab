@@ -421,6 +421,10 @@ class Ema920PullbackMixin:
 
     def _entry_filter_result(self, i, execution_i=None):
         passed, reason = super()._entry_filter_result(i, execution_i)
+        if getattr(self, "signal_strategy_mode", "DI") == "EMA_320_CLOSE_CROSS" and passed:
+            from .candle_confirmation import candle_confirmation_check
+            direction = self._selected_direction(i)
+            return candle_confirmation_check(self, i, direction, "ema_320") if direction in {"LONG", "SHORT"} else (passed, reason)
         if not passed or getattr(self, "signal_strategy_mode", "DI") != EMA_920_MODE or not self._ema_920_cross_plan():
             return passed, reason
         context = self._profile_context(i)
