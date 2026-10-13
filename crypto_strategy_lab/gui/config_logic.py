@@ -33,6 +33,11 @@ DEFAULT_GUI_CONFIG: dict[str, Any] = {
     "ema_920_trade_plan": "PULLBACK_1R",
     "ema_320_flip_signals": False,
     "ema_320_exit_mode": "BOTH",
+    "ema_320_candle_confirmation_enabled": False,
+    "ema_320_candle_strong_close": True,
+    "ema_320_candle_engulfing": True,
+    "ema_320_candle_wick_rejection": True,
+    "ema_320_candle_star": True,
     "ema_cross_entry_confirmation_enabled": False,
     "ema_cross_entry_confirmation_r": 1.0,
     "fvg_confirmation_enabled": False,
@@ -365,6 +370,11 @@ def build_backtest_config(values: dict[str, Any], require_paths: bool = True) ->
         ema_920_trade_plan=str(merged["ema_920_trade_plan"]),
         ema_320_flip_signals=bool(merged["ema_320_flip_signals"]),
         ema_320_exit_mode=str(merged["ema_320_exit_mode"]),
+        ema_320_candle_confirmation_enabled=bool(merged["ema_320_candle_confirmation_enabled"]),
+        ema_320_candle_strong_close=bool(merged["ema_320_candle_strong_close"]),
+        ema_320_candle_engulfing=bool(merged["ema_320_candle_engulfing"]),
+        ema_320_candle_wick_rejection=bool(merged["ema_320_candle_wick_rejection"]),
+        ema_320_candle_star=bool(merged["ema_320_candle_star"]),
         ema_cross_entry_confirmation_enabled=bool(
             merged["ema_cross_entry_confirmation_enabled"]
         ),
