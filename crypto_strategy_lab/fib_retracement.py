@@ -1714,24 +1714,78 @@ class FibonacciRetracementMixin:
         return True, "FIB_EMA_TREND_PASSED"
 
     def _fib_candle_confirmation_check(self, i):
-        """Use only the completed signal candle; do not inspect execution bars."""
+        """ANY selected reversal pattern, using closed bars ending at i."""
         if not bool(getattr(self.config, "fib_candle_confirmation_enabled", False)):
             return True, "FIB_CANDLE_CONFIRMATION_DISABLED"
-        if i < 0 or i >= len(self.close):
+        if not 0 <= i < len(self.close):
             return False, "FIB_CANDLE_CONFIRMATION_UNAVAILABLE"
         direction = self._effective_trade_direction(i)
-        opening, closing = float(self.open[i]), float(self.close[i])
-        high, low = float(self.high[i]), float(self.low[i])
-        if not all(np.isfinite(x) for x in (opening, closing, high, low)) or high <= low:
+        if direction not in {"LONG", "SHORT"}:
+            return False, "FIB_CANDLE_CONFIRMATION_DIRECTION_UNAVAILABLE"
+
+        def bar(j):
+            if j < 0:
+                return None
+            o, h, l, c = (float(a[j]) for a in (self.open, self.high, self.low, self.close))
+            if not all(np.isfinite(v) for v in (o, h, l, c)) or h <= l or h < max(o, c) or l > min(o, c):
+                return None
+            return o, h, l, c
+
+        current = bar(i)
+        if current is None:
             return False, "FIB_CANDLE_CONFIRMATION_UNAVAILABLE"
-        # Require a directional real body and a close in the directional third
-        # of the completed candle range. A doji alone is not confirmation.
-        candle_range = high - low
-        if direction == "LONG" and closing > opening and closing >= high - candle_range / 3.0:
-            return True, "FIB_BULLISH_CANDLE_CONFIRMED"
-        if direction == "SHORT" and closing < opening and closing <= low + candle_range / 3.0:
-            return True, "FIB_BEARISH_CANDLE_CONFIRMED"
-        return False, "FIB_DIRECTIONAL_CANDLE_NOT_CONFIRMED"
+        o, h, l, c = current
+        span = h - l
+        body = abs(c - o)
+        bullish = direction == "LONG"
+        matches = []
+
+        if getattr(self.config, "fib_candle_strong_close", True):
+            if (c > o and c >= h - span / 3 if bullish else c < o and c <= l + span / 3):
+                matches.append("STRONG_CLOSE")
+
+        previous = bar(i - 1) if i >= 1 else None
+        if previous is not None:
+            po, ph, pl, pc = previous
+            if getattr(self.config, "fib_candle_engulfing", True):
+                if (pc < po and c > o and o <= pc and c >= po if bullish
+                    else pc > po and c < o and o >= pc and c <= po):
+                    matches.append("ENGULFING")
+
+            if getattr(self.config, "fib_candle_wick_rejection", True):
+                lower_wick = min(o, c) - l
+                upper_wick = h - max(o, c)
+                # Require directional close and a rejection wick >= 2x body.
+                if (c > o and lower_wick >= 2 * body and upper_wick <= body
+                    if bullish else c < o and upper_wick >= 2 * body and lower_wick <= body):
+                    matches.append("WICK_REJECTION")
+
+        # A wick-rejection candle can be the first bar in the series.
+        elif getattr(self.config, "fib_candle_wick_rejection", True):
+            lower_wick = min(o, c) - l
+            upper_wick = h - max(o, c)
+            if (c > o and lower_wick >= 2 * body and upper_wick <= body
+                if bullish else c < o and upper_wick >= 2 * body and lower_wick <= body):
+                matches.append("WICK_REJECTION")
+
+        older = bar(i - 2) if i >= 2 else None
+        if getattr(self.config, "fib_candle_star", True) and older and previous:
+            ao, ah, al, ac = older
+            bo, bh, bl, bc = previous
+            first_body = abs(ac - ao)
+            middle_body = abs(bc - bo)
+            midpoint = (ao + ac) / 2
+            # Crypto trades 24/7: don't require gaps between candle bodies.
+            # Require initial directional displacement, small middle body,
+            # and a third candle recovering past the first body's midpoint.
+            if first_body > 0 and middle_body <= 0.5 * first_body:
+                if (ac < ao and c > o and c > midpoint and c > max(bo, bc)
+                    if bullish else ac > ao and c < o and c < midpoint and c < min(bo, bc)):
+                    matches.append("STAR")
+
+        if matches:
+            return True, "FIB_CANDLE_" + matches[0] + "_CONFIRMED"
+        return False, "FIB_CANDLE_NO_SELECTED_PATTERN"
 
     def _entry_filter_result(self, i, execution_i=None):
         passed, reason = super()._entry_filter_result(i, execution_i)
