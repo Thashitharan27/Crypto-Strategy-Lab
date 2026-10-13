@@ -201,6 +201,7 @@ class RiskExecutionWorkspace(QWidget):
         )
         fib_controls = self.window.feature_form.widgets
         for field, label in (
+            ("fib_structure_quality_mode", "Impulse Quality Selection: Baseline / Clean Only / Weighted"),
             ("fib_half_swing_mode", "0.5 First Hold — Swing Stop / Impulse Target"),
             ("fib_inherited_first_held", "Inherit First Hold After Impulse Extension"),
             ("fib_first_0786_held", "Allow First Held at 0.786"),
