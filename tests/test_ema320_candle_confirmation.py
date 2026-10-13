@@ -73,6 +73,7 @@ def test_ema320_full_body_signal_is_first_only():
         ema_320_values=np.full(4, 100.),
     )
     probe._ema_320_price_cross = lambda i: Ema920PullbackMixin._ema_320_price_cross(probe, i)
+    probe._ema_320_full_body_signal = lambda i: Ema920PullbackMixin._ema_320_full_body_signal(probe, i)
     assert Ema920PullbackMixin._ema_320_full_body_signal(probe, 2) == "LONG"
     assert Ema920PullbackMixin._ema_320_full_body_signal(probe, 3) is None
     assert Ema920PullbackMixin._ema_320_trade_direction(probe, 2) == "LONG"
