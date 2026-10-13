@@ -486,6 +486,7 @@ def from_data_lake_bundle(bundle, config=None) -> tuple[PreparedBacktestFrame, I
             active_structure_reset_depth=float(
                 getattr(config, "fib_active_structure_reset_depth", 0.618)
             ),
+            structure_quality_mode=str(getattr(config, "fib_structure_quality_mode", "BASELINE")),
             inherited_first_held=bool(getattr(config, "fib_inherited_first_held", False)),
             first_0786_held=bool(getattr(config, "fib_first_0786_held", False)),
             half_swing_mode=bool(getattr(config, "fib_half_swing_mode", False)) and not bool(getattr(config, "fib_third_retest_entry", False)),
