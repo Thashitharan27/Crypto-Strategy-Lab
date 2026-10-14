@@ -50,7 +50,9 @@ function App() {
       const value = await getReadOnly<{manifest: {run_id?: string; run_status?: string}; summary: Record<string, unknown>}>(`/api/v1/runs/${runId}`, token);
       setRunInfo({run_id: value.manifest.run_id, status: value.manifest.run_status});
       const {total_trades, win_rate, net_pnl} = value.summary;
-      if ([total_trades, win_rate, net_pnl].every(v => typeof v === "number" && Number.isFinite(v))) {
+      if ([total_trades, win_rate, net_pnl].every(v => typeof v === "number" && Number.isFinite(v)) &&
+          (total_trades as number) >= 0 && Number.isInteger(total_trades as number) &&
+          (win_rate as number) >= 0 && (win_rate as number) <= 1) {
         setRunMetrics({trades: total_trades as number, winRate: win_rate as number, netPnl: net_pnl as number});
       }
     } catch { setRunError("Saved run unavailable or not accessible"); }
