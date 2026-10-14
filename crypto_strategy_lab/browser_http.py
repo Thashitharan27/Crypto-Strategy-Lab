@@ -9,7 +9,7 @@ import secrets
 from urllib.parse import urlsplit
 
 
-def create_browser_app(*, token: str, read_service=None):
+def create_browser_app(*, token: str, read_service=None, completed_run_root=None):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
@@ -92,5 +92,24 @@ def create_browser_app(*, token: str, read_service=None):
             except (ValueError, TypeError):
                 raise HTTPException(status_code=422, detail="Invalid research time window")
             return {"coverage": read_service.coverage(request)}
+
+    if read_service is not None and completed_run_root is not None:
+        @app.get("/api/v1/runs/{run_id}")
+        def completed_run(run_id: str, authorization: str | None = Header(default=None)):
+            from pathlib import Path
+            supplied = authorization.removeprefix("Bearer ") if authorization else ""
+            if not secrets.compare_digest(supplied, token):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            if not (1 <= len(run_id) <= 100 and run_id.isascii() and
+                    all(c.isalnum() or c in "_-" for c in run_id)):
+                raise HTTPException(status_code=404, detail="Run not found")
+            root = Path(completed_run_root).resolve()
+            target = (root / run_id).resolve()
+            if not target.is_relative_to(root) or not target.is_dir():
+                raise HTTPException(status_code=404, detail="Run not found")
+            try:
+                return read_service.completed_run(target)
+            except (OSError, ValueError, KeyError, TypeError):
+                raise HTTPException(status_code=404, detail="Run not found")
 
     return app
