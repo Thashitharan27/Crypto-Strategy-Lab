@@ -2,7 +2,7 @@
 import pytest
 
 from crypto_strategy_lab.entry_plan import (
-    EntryIntent, EntryPlan, EntryTiming, schedule_entry, is_scheduled_entry_eligible, limit_order_touched,
+    EntryIntent, EntryPlan, EntryTiming, schedule_entry, is_scheduled_entry_eligible, limit_order_touched, limit_fill_price_candidate,
 )
 
 
@@ -98,3 +98,21 @@ def test_limit_touch_rejects_invalid_bars_and_other_entry_modes():
     assert not limit_order_touched(order, 2, 0, 106)
     immediate = schedule_entry(EntryIntent("LONG", 1), EntryPlan(EntryTiming.SIGNAL_CLOSE))
     assert not limit_order_touched(immediate, 1, 90, 110)
+
+
+def test_limit_candidate_long_open_gap_and_intrabar_touch():
+    order = schedule_entry(EntryIntent("LONG", 2, limit_price=100), EntryPlan(EntryTiming.LIMIT_LEVEL, limit_timeout_bars=2))
+    assert limit_fill_price_candidate(order, 2, 102, 98, 103) is None
+    assert limit_fill_price_candidate(order, 3, 102, 98, 103) == 100
+    assert limit_fill_price_candidate(order, 3, 97, 96, 99) == 97
+    assert limit_fill_price_candidate(order, 3, 103, 101, 105) is None
+    assert limit_fill_price_candidate(order, 5, 102, 98, 103) is None
+
+
+def test_limit_candidate_short_open_gap_and_invalid_candles():
+    order = schedule_entry(EntryIntent("SHORT", 2, limit_price=100), EntryPlan(EntryTiming.LIMIT_LEVEL))
+    assert limit_fill_price_candidate(order, 3, 105, 103, 106) == 105
+    assert limit_fill_price_candidate(order, 3, 98, 97, 102) == 100
+    assert limit_fill_price_candidate(order, 3, 95, 94, 97) is None
+    assert limit_fill_price_candidate(order, 3, 95, 96, 102) is None
+    assert limit_fill_price_candidate(order, 3, float("nan"), 97, 102) is None
