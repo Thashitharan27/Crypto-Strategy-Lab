@@ -16,6 +16,7 @@ def test_coverage_requires_auth_and_reuses_catalog_boundary():
         assert client.get("/api/v1/catalog/coverage", params=params).status_code == 401
         assert client.get("/api/v1/catalog/coverage", params={**params, "symbol": "../bad"},
                           headers={"Authorization": "Bearer " + token}).status_code == 422
+        assert client.get("/api/v1/catalog/coverage", params={**params, "strategy_timeframe": "garbage"}, headers={"Authorization": "Bearer " + token}).status_code == 422
         response = client.get("/api/v1/catalog/coverage", params=params, headers={"Authorization": "Bearer " + token})
         assert response.status_code == 200
         assert response.json()["coverage"][0]["state"] == "AVAILABLE"
