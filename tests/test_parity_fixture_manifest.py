@@ -1,7 +1,7 @@
 import hashlib
 import pytest
 
-from crypto_strategy_lab.parity_fixture_manifest import file_fingerprint, frozen_fixture_manifest
+from crypto_strategy_lab.parity_fixture_manifest import file_fingerprint, frozen_fixture_manifest, verify_frozen_fixture_files
 
 SHA = "a" * 40
 
@@ -47,3 +47,27 @@ def test_invalid_fixture_is_rejected(tmp_path, kwargs):
 def test_missing_files_are_rejected(tmp_path):
     with pytest.raises(ValueError, match="not a file"):
         file_fingerprint(tmp_path / "absent")
+
+
+def test_frozen_files_verify_and_reject_mutated_bytes(tmp_path):
+    p = tmp_path / "market_data.csv"
+    p.write_bytes(b"2020-06-01,1")
+    frozen = {"candles": file_fingerprint(p)}
+    verify_frozen_fixture_files(frozen, {"candles": p})
+    p.write_bytes(b"2020-06-01,2")
+    with pytest.raises(ValueError, match="mismatch"):
+        verify_frozen_fixture_files(frozen, {"candles": p})
+
+
+def test_frozen_files_reject_missing_extra_and_invalid_digest(tmp_path):
+    p = tmp_path / "market_data.csv"
+    p.write_bytes(b"candles")
+    frozen = {"candles": file_fingerprint(p)}
+    with pytest.raises(ValueError, match="labels"):
+        verify_frozen_fixture_files(frozen, {})
+    with pytest.raises(ValueError, match="labels"):
+        verify_frozen_fixture_files(frozen, {"candles": p, "unexpected": p})
+    with pytest.raises(ValueError, match="invalid"):
+        verify_frozen_fixture_files({"candles": {"sha256": "bad", "bytes": 7}}, {"candles": p})
+    with pytest.raises(ValueError, match="invalid"):
+        verify_frozen_fixture_files({"candles": {"sha256": frozen["candles"]["sha256"], "bytes": True}}, {"candles": p})
