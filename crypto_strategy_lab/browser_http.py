@@ -9,7 +9,7 @@ import secrets
 from urllib.parse import urlsplit
 
 
-def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None):
+def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
@@ -130,5 +130,21 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 return {"config": read_service.research_config(target)}
             except (OSError, ValueError, KeyError, TypeError):
                 raise HTTPException(status_code=404, detail="Configuration not found")
+
+    if static_root is not None:
+        from pathlib import Path
+        from fastapi.responses import FileResponse
+        from fastapi.staticfiles import StaticFiles
+        root = Path(static_root).resolve()
+        if not root.is_dir() or not (root / "index.html").is_file():
+            raise ValueError("Browser distribution is missing index.html")
+        assets = root / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(assets)), name="browser-assets")
+
+        @app.get("/", include_in_schema=False)
+        def browser_index():
+            return FileResponse(root / "index.html", media_type="text/html",
+                headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
     return app

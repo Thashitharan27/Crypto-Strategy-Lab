@@ -107,6 +107,7 @@ jobs:
           tests/test_browser_http_coverage.py
           tests/test_browser_http_completed_run.py
           tests/test_browser_http_config.py
+          tests/test_browser_http_static.py
           tests/test_browser_readonly_service.py
           tests/test_browser_config.py
           tests/test_browser_catalog.py
