@@ -12,6 +12,19 @@ function App() {
   const [connected, setConnected] = React.useState(false);
   const [symbols, setSymbols] = React.useState<string[]>([]);
   const [message, setMessage] = React.useState("Not connected");
+  const [runId, setRunId] = React.useState("");
+  const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
+  const [runError, setRunError] = React.useState("");
+
+  async function loadRun() {
+    setRunInfo(null);
+    setRunError("");
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(runId)) { setRunError("Enter a valid saved run folder ID"); return; }
+    try {
+      const value = await getReadOnly<{manifest: {run_id?: string; run_status?: string}; summary: unknown}>(`/api/v1/runs/${runId}`, token);
+      setRunInfo({run_id: value.manifest.run_id, status: value.manifest.run_status});
+    } catch { setRunError("Saved run unavailable or not accessible"); }
+  }
 
   async function connect() {
     setConnected(false);
@@ -41,6 +54,13 @@ function App() {
         <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
         <p role="status">{message}</p>
       </div>
+      {section === "Runs & Results" && connected && <div className="connection">
+        <label htmlFor="run-id">Completed run folder ID</label>
+        <input id="run-id" value={runId} onChange={e => setRunId(e.target.value)} placeholder="BTCUSDT_4h_…" />
+        <button type="button" onClick={() => void loadRun()}>Read completed run</button>
+        {runError && <p role="alert">{runError}</p>}
+        {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p></div>}
+      </div>}
       {section === "Data Library" && connected ? <div><h3>Available symbols</h3><ul>{symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul></div> :
         <p>This section is being migrated. The existing Python engine and desktop application remain authoritative.</p>}
       <p>No strategy execution or configuration editing is enabled.</p>
