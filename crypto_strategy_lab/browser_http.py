@@ -9,7 +9,7 @@ import secrets
 from urllib.parse import urlsplit
 
 
-def create_browser_app(*, token: str, read_service=None, completed_run_root=None):
+def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
@@ -111,5 +111,24 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 return read_service.completed_run(target)
             except (OSError, ValueError, KeyError, TypeError):
                 raise HTTPException(status_code=404, detail="Run not found")
+
+    if read_service is not None and config_root is not None:
+        @app.get("/api/v1/configs/{config_id}")
+        def research_config(config_id: str, authorization: str | None = Header(default=None)):
+            from pathlib import Path
+            supplied = authorization.removeprefix("Bearer ") if authorization else ""
+            if not secrets.compare_digest(supplied, token):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            if not (1 <= len(config_id) <= 100 and config_id.isascii() and
+                    all(c.isalnum() or c in "_-" for c in config_id)):
+                raise HTTPException(status_code=404, detail="Configuration not found")
+            root = Path(config_root).resolve()
+            target = (root / (config_id + ".json")).resolve()
+            if not target.is_relative_to(root) or not target.is_file():
+                raise HTTPException(status_code=404, detail="Configuration not found")
+            try:
+                return {"config": read_service.research_config(target)}
+            except (OSError, ValueError, KeyError, TypeError):
+                raise HTTPException(status_code=404, detail="Configuration not found")
 
     return app
