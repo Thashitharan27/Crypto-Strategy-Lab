@@ -154,3 +154,30 @@ def limit_fill_price_candidate(
     if candle_open >= limit:
         return candle_open
     return limit if candle_high >= limit else None
+
+
+@dataclass(frozen=True)
+class LimitOrderCandidate:
+    """A proposed fill for review by the event-driven simulator."""
+    price: float
+    execution_index: int
+
+
+def resolve_limit_order_candidate(
+    entry: ScheduledEntry,
+    execution_index: int,
+    candle_open: float,
+    candle_low: float,
+    candle_high: float,
+) -> LimitOrderCandidate | None:
+    """Resolve a candidate only for an eligible LIMIT_LEVEL bar.
+
+    No trade is opened here: intrabar sequence, slippage and risk constraints
+    must still be applied by the simulator.
+    """
+    price = limit_fill_price_candidate(
+        entry, execution_index, candle_open, candle_low, candle_high
+    )
+    if price is None:
+        return None
+    return LimitOrderCandidate(price=price, execution_index=execution_index)

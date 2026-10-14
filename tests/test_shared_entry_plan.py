@@ -2,7 +2,7 @@
 import pytest
 
 from crypto_strategy_lab.entry_plan import (
-    EntryIntent, EntryPlan, EntryTiming, schedule_entry, is_scheduled_entry_eligible, limit_order_touched, limit_fill_price_candidate,
+    EntryIntent, EntryPlan, EntryTiming, schedule_entry, is_scheduled_entry_eligible, limit_order_touched, limit_fill_price_candidate, resolve_limit_order_candidate,
 )
 
 
@@ -116,3 +116,16 @@ def test_limit_candidate_short_open_gap_and_invalid_candles():
     assert limit_fill_price_candidate(order, 3, 95, 94, 97) is None
     assert limit_fill_price_candidate(order, 3, 95, 96, 102) is None
     assert limit_fill_price_candidate(order, 3, float("nan"), 97, 102) is None
+
+
+def test_limit_order_candidate_contains_fill_price_and_bar_index():
+    order = schedule_entry(
+        EntryIntent("LONG", 7, limit_price=100),
+        EntryPlan(EntryTiming.LIMIT_LEVEL, limit_timeout_bars=2),
+    )
+    assert resolve_limit_order_candidate(order, 7, 102, 99, 103) is None
+    candidate = resolve_limit_order_candidate(order, 8, 102, 99, 103)
+    assert candidate is not None
+    assert candidate.price == 100
+    assert candidate.execution_index == 8
+    assert resolve_limit_order_candidate(order, 10, 102, 99, 103) is None
