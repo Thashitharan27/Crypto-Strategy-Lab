@@ -2,7 +2,7 @@
 import pytest
 
 from crypto_strategy_lab.entry_plan import (
-    EntryIntent, EntryPlan, EntryTiming, schedule_entry, is_scheduled_entry_eligible,
+    EntryIntent, EntryPlan, EntryTiming, schedule_entry, is_scheduled_entry_eligible, limit_order_touched,
 )
 
 
@@ -77,3 +77,24 @@ def test_unbounded_limit_order_eligible_only_after_confirmation():
 def test_non_limit_entry_intent_is_eligible_at_only_one_index(timing, expected_index):
     order = schedule_entry(EntryIntent("LONG", 6), EntryPlan(timing))
     assert [i for i in range(5, 10) if is_scheduled_entry_eligible(order, i)] == [expected_index]
+
+
+def test_limit_price_touch_only_after_confirmation_and_before_expiry():
+    order = schedule_entry(
+        EntryIntent("LONG", 10, limit_price=99),
+        EntryPlan(EntryTiming.LIMIT_LEVEL, limit_timeout_bars=2),
+    )
+    assert not limit_order_touched(order, 10, 98, 100)
+    assert limit_order_touched(order, 11, 98, 100)
+    assert limit_order_touched(order, 12, 99, 100)
+    assert not limit_order_touched(order, 13, 98, 100)
+    assert not limit_order_touched(order, 11, 100, 102)
+
+
+def test_limit_touch_rejects_invalid_bars_and_other_entry_modes():
+    order = schedule_entry(EntryIntent("SHORT", 1, limit_price=105), EntryPlan(EntryTiming.LIMIT_LEVEL))
+    assert not limit_order_touched(order, 2, float("nan"), 106)
+    assert not limit_order_touched(order, 2, 107, 106)
+    assert not limit_order_touched(order, 2, 0, 106)
+    immediate = schedule_entry(EntryIntent("LONG", 1), EntryPlan(EntryTiming.SIGNAL_CLOSE))
+    assert not limit_order_touched(immediate, 1, 90, 110)
