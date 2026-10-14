@@ -2,7 +2,7 @@
 import pytest
 
 from crypto_strategy_lab.entry_plan import (
-    EntryIntent, EntryPlan, EntryTiming, schedule_entry,
+    EntryIntent, EntryPlan, EntryTiming, schedule_entry, is_scheduled_entry_eligible,
 )
 
 
@@ -50,3 +50,30 @@ def test_invalid_timeout_and_direction_are_rejected():
         EntryPlan(EntryTiming.NEXT_OPEN, limit_timeout_bars=5)
     with pytest.raises(ValueError):
         EntryIntent("SIDEWAYS", 3)
+
+
+def test_limit_order_is_never_eligible_on_signal_candle_or_after_expiry():
+    order = schedule_entry(
+        EntryIntent("LONG", 10, limit_price=99),
+        EntryPlan(EntryTiming.LIMIT_LEVEL, limit_timeout_bars=3),
+    )
+    assert [i for i in range(9, 16) if is_scheduled_entry_eligible(order, i)] == [11, 12, 13]
+
+
+def test_unbounded_limit_order_eligible_only_after_confirmation():
+    order = schedule_entry(
+        EntryIntent("SHORT", 4, limit_price=105),
+        EntryPlan(EntryTiming.LIMIT_LEVEL),
+    )
+    assert not is_scheduled_entry_eligible(order, 4)
+    assert is_scheduled_entry_eligible(order, 5)
+    assert is_scheduled_entry_eligible(order, 100)
+
+
+@pytest.mark.parametrize("timing,expected_index", [
+    (EntryTiming.SIGNAL_CLOSE, 6),
+    (EntryTiming.NEXT_OPEN, 7),
+])
+def test_non_limit_entry_intent_is_eligible_at_only_one_index(timing, expected_index):
+    order = schedule_entry(EntryIntent("LONG", 6), EntryPlan(timing))
+    assert [i for i in range(5, 10) if is_scheduled_entry_eligible(order, i)] == [expected_index]

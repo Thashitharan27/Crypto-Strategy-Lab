@@ -82,3 +82,22 @@ def schedule_entry(intent: EntryIntent, plan: EntryPlan) -> ScheduledEntry:
             else None
         ),
     )
+
+
+def is_scheduled_entry_eligible(entry: ScheduledEntry, execution_index: int) -> bool:
+    """Whether an order may be considered for filling on this candle.
+
+    Eligibility does not imply a fill: the simulator must still validate price
+    interaction, order side, and intrabar ordering.
+    """
+    if execution_index < 0:
+        return False
+    if execution_index < entry.earliest_index:
+        return False
+    if entry.expires_after_index is not None and execution_index > entry.expires_after_index:
+        return False
+    # Signal-close/next-open orders are single-event intents; limit orders
+    # can remain working over their configured eligible interval.
+    if entry.timing != EntryTiming.LIMIT_LEVEL:
+        return execution_index == entry.earliest_index
+    return True
