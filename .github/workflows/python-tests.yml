@@ -100,6 +100,9 @@ jobs:
           tests/test_gui_config_logic.py
           tests/test_data_lake_gui.py
           tests/test_single_trade_telemetry.py
+          tests/test_engine_limit_entry_candidate.py
+          tests/test_engine_limit_fill_schedule.py
+          tests/test_engine_pending_limit_lifecycle.py
           tests/test_parity_fixture_manifest.py
           tests/test_inspect_parity_trade_report.py
           tests/test_native_trade_schema_probe.py
