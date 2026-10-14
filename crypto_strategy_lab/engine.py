@@ -507,6 +507,23 @@ class BacktestEngine(DILadderExecutionMixin):
             float(self.high[execution_index]),
         )
 
+    def _resolve_pending_limit_candidate(self, scheduled_entry, execution_index):
+        """Return (state, candidate) for a pending limit order; never open a trade.
+
+        State is WAITING, CANDIDATE, or EXPIRED. This is intentionally separate
+        from the engine's live trading path until intrabar ordering is verified.
+        """
+        from .entry_plan import EntryTiming
+        if scheduled_entry.timing != EntryTiming.LIMIT_LEVEL:
+            raise ValueError("pending limit resolver requires LIMIT_LEVEL")
+        if (scheduled_entry.expires_after_index is not None
+                and execution_index > scheduled_entry.expires_after_index):
+            return "EXPIRED", None
+        if execution_index < scheduled_entry.earliest_index:
+            return "WAITING", None
+        candidate = self._limit_entry_candidate(scheduled_entry, execution_index)
+        return ("CANDIDATE", candidate) if candidate is not None else ("WAITING", None)
+
     def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
         decision = self.pending_next_open_entry
         if not decision or int(decision.get("execution_index", -1)) != i:
