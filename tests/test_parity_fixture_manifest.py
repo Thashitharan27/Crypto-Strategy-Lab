@@ -1,0 +1,49 @@
+import hashlib
+import pytest
+
+from crypto_strategy_lab.parity_fixture_manifest import file_fingerprint, frozen_fixture_manifest
+
+SHA = "a" * 40
+
+
+def test_hashes_exact_bytes_and_portable_names(tmp_path):
+    path = tmp_path / "trade_list.csv"
+    content = b"id,pnl\\r\\n1,2\\r\\n"
+    path.write_bytes(content)
+    manifest = frozen_fixture_manifest(
+        commit_sha=SHA, files={"trade_csv": path},
+        strategy_timeframe_minutes=240, intrabar_timeframe_minutes=1,
+    )
+    assert manifest["files"]["trade_csv"] == {
+        "sha256": hashlib.sha256(content).hexdigest(), "bytes": len(content)}
+    assert str(tmp_path) not in str(manifest)
+    assert manifest["contract_version"] == 1
+
+
+def test_changed_file_changes_fingerprint(tmp_path):
+    p = tmp_path / "file"
+    p.write_bytes(b"before")
+    first = file_fingerprint(p)
+    p.write_bytes(b"after")
+    assert file_fingerprint(p) != first
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"commit_sha": "invalid"},
+    {"strategy_timeframe_minutes": 0},
+    {"intrabar_timeframe_minutes": 241},
+    {"files": {}},
+])
+def test_invalid_fixture_is_rejected(tmp_path, kwargs):
+    p = tmp_path / "source"
+    p.write_bytes(b"data")
+    params = dict(commit_sha=SHA, files={"market_data": p},
+                  strategy_timeframe_minutes=240, intrabar_timeframe_minutes=1)
+    params.update(kwargs)
+    with pytest.raises(ValueError):
+        frozen_fixture_manifest(**params)
+
+
+def test_missing_files_are_rejected(tmp_path):
+    with pytest.raises(ValueError, match="not a file"):
+        file_fingerprint(tmp_path / "absent")
