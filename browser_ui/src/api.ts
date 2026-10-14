@@ -6,6 +6,7 @@ export async function getReadOnly<T>(path: string, token: string): Promise<T> {
   if (!/^\/api\/v1\/(?:health|catalog\/symbols|catalog\/coverage|runs\/[A-Za-z0-9_-]{1,100}|configs\/[A-Za-z0-9_-]{1,100})(?:\?[A-Za-z0-9_=&%.-]*)?$/.test(path)) {
     throw new Error("Unsupported API path");
   }
+  if (!token || /[\r\n]/.test(token)) throw new Error("Invalid local session token");
   const response = await fetch(path, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
