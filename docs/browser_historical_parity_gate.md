@@ -33,3 +33,35 @@ These values identify existing evidence; they **do not** demonstrate reproductio
 ## Execution gating
 
 Until the above is complete, the browser stays strictly read-only. No run creation, trading or configuration writes. PR #501 remains on hold due to its limit-execution overlap. Never deploy changes to the live DMI bot as part of this milestone.
+
+
+## Native BTCUSDT report-schema audit (read-only)
+
+The archived `trade_list.csv` exposed by the completed-run report reader has **877 columns**. The following are confirmed native column names, not normalized parity mappings:
+
+| Evidence category | Existing native columns |
+| --- | --- |
+| Identity and side | `pair_id`, `trade_id`, `side`, `result_type` |
+| Signal chronology | `signal_candle_time`, `signal_available_at` |
+| Entry/exit chronology | `entry_time`, `actual_entry_timestamp`, `exit_time` |
+| Entry price | `entry_price`, `actual_entry_price` |
+| Pair-level accounting | `pair_total_fees`, `pair_net_pnl`, `pair_net_r` |
+| Leg-level accounting | `long_quantity`, `long_total_fees`, `long_net_pnl`, `long_final_exit_reason` (with corresponding side-specific fields only where verified) |
+| Partial fills | `long_tp1_exit_time`, `long_tp1_fees`, `long_tp2_exit_time`, `long_stop_exit_time` |
+
+**Blocking mapping distinction:** The strict normalized contract in
+`crypto_strategy_lab/trade_parity.py` requires `trade_id`, `side`,
+`signal_time`, `entry_time`, `exit_time`, `entry_price`, `exit_price`,
+`quantity`, `stop_price`, `target_price`, `exit_reason`, `fees`,
+`slippage`, `realized_r`, and `pnl`. Do not silently map pair-level
+accounting to leg-level quantities, or use signal candle open time as a
+substitute for the actual signal timestamp. A dedicated per-trade
+`slippage` column was **not identified** in the sampled report header;
+do not construct one from global fee/slippage configuration. Until each
+semantic mapping is independently established, the canonical 15-field
+trade comparison must fail closed. Pair/leg and partial-exit comparisons
+must use the existing native schema probe and trade adapters, not a
+parallel parser.
+
+This audit identifies schema evidence only, **not** actual data-file
+digest verification, engine replay, or trade parity.
