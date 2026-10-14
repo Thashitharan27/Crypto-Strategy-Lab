@@ -28,7 +28,7 @@ class CandleConfirmationPlan:
 def evaluate_candle_confirmation(candles, i, direction, plan: CandleConfirmationPlan, *, reason_prefix="SHARED"):
     """Evaluate a reusable plan against closed bars, independently of the signal."""
 
-    prefix = reason_prefix
+    prefix = reason_prefix.upper()
     if not plan.enabled:
         return True, f"{prefix}_CANDLE_CONFIRMATION_DISABLED"
     if not 0 <= i < len(candles.close):
