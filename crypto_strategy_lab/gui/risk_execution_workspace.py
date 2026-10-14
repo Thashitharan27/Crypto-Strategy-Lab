@@ -178,13 +178,18 @@ class RiskExecutionWorkspace(QWidget):
         )
         layout.addWidget(self.entry_card)
 
-        self.ema320_candle_card = FormCard("EMA 320 Candle Confirmation", note="Optional: ANY selected bullish or bearish pattern on the completed full-body entry signal.")
+        # Strategy-specific signal controls are grouped by pipeline stage.
+        # The underlying widgets stay authoritative; no duplicate state is introduced.
+        self.ema320_candle_card = DisclosureCard(
+            "Confirmation • EMA 320", note="ANY enabled pattern on a completed entry candle.",
+            expanded=False,
+        )
         for field, label in (
-            ("ema_320_candle_confirmation_enabled", "Require Candle Confirmation — ANY Selected Pattern"),
-            ("ema_320_candle_strong_close", "Pattern: Strong Bullish / Bearish Close"),
-            ("ema_320_candle_engulfing", "Pattern: Bullish / Bearish Engulfing"),
-            ("ema_320_candle_wick_rejection", "Pattern: Hammer / Shooting Star"),
-            ("ema_320_candle_star", "Pattern: Morning Star / Evening Star"),
+            ("ema_320_candle_confirmation_enabled", "Require Candle Confirmation"),
+            ("ema_320_candle_strong_close", "Strong Bullish / Bearish Close"),
+            ("ema_320_candle_engulfing", "Bullish / Bearish Engulfing"),
+            ("ema_320_candle_wick_rejection", "Hammer / Shooting Star"),
+            ("ema_320_candle_star", "Morning / Evening Star"),
         ):
             widget = self.window.feature_form.widgets[field]
             if isinstance(widget, QCheckBox):
@@ -192,34 +197,39 @@ class RiskExecutionWorkspace(QWidget):
             self.ema320_candle_card.add_control(field, widget)
         layout.addWidget(self.ema320_candle_card)
 
-        # Fibonacci entry modes are execution choices. Reuse the authoritative
-        # feature-form widgets here rather than creating duplicate controls:
-        # build_config/apply_config and existing saved configurations stay intact.
-        self.fib_entry_card = FormCard(
-            "Fibonacci Trade Plan",
-            note="Select Fib Retracement in Strategy Builder. These options are off by default.",
-        )
         fib_controls = self.window.feature_form.widgets
-        for field, label in (
-            ("fib_structure_quality_mode", "Impulse Quality Selection: Baseline / Clean Only / Weighted"),
-            ("fib_half_swing_mode", "0.5 First Hold — Swing Stop / Impulse Target"),
-            ("fib_inherited_first_held", "Inherit First Hold After Impulse Extension"),
-            ("fib_first_0786_held", "Allow First Held at 0.786"),
-            ("fib_third_retest_entry", "After Two Holds — Enter One Fib Deeper"),
-            ("fib_ema_trend_gate", "Require EMA 320/1600 Trend + Stop Beyond EMA 320"),
-            ("fib_candidate_context_selection", "Select Fib Using EMA 320/1600 Trend + Stop"),
-            ("fib_candle_confirmation_enabled", "Require Candle Confirmation — ANY Selected Pattern"),
-            ("fib_candle_strong_close", "Pattern: Strong Bullish / Bearish Close"),
-            ("fib_candle_engulfing", "Pattern: Bullish / Bearish Engulfing"),
-            ("fib_candle_wick_rejection", "Pattern: Hammer / Shooting Star"),
-            ("fib_candle_star", "Pattern: Morning Star / Evening Star"),
-            ("fib_first_zone_hold_entry", "First Hold in Halfway Fib Zone — No Line Touch"),
-        ):
-            widget = fib_controls[field]
-            if isinstance(widget, QCheckBox):
-                widget.setText(label)
-            self.fib_entry_card.add_control(field, widget)
-        layout.addWidget(self.fib_entry_card)
+        self.fib_stage_cards = []
+        fib_stages = (
+            ("Signal • Fibonacci Structure", "Choose which impulse structures qualify.",
+             (("fib_structure_quality_mode", "Impulse Quality"),)),
+            ("Entry • Fibonacci Holds", "Choose how a confirmed Fib setup triggers an entry.",
+             (("fib_half_swing_mode", "0.5 First Hold — Swing Stop / Impulse Target"),
+              ("fib_inherited_first_held", "Inherit First Hold After Impulse Extension"),
+              ("fib_first_0786_held", "Allow First Held at 0.786"),
+              ("fib_third_retest_entry", "After Two Holds — Enter One Fib Deeper"),
+              ("fib_first_zone_hold_entry", "First Hold in Halfway Fib Zone — No Line Touch"))),
+            ("Context • Fibonacci EMA", "EMA filters may select Fib candidates or veto their entries.",
+             (("fib_ema_trend_gate", "Require EMA 320/1600 Trend + Stop Beyond EMA 320"),
+              ("fib_candidate_context_selection", "Select Fib Using EMA 320/1600 Trend + Stop"))),
+            ("Confirmation • Fibonacci Candles", "Entry requires ANY selected directional candle pattern when enabled.",
+             (("fib_candle_confirmation_enabled", "Require Candle Confirmation"),
+              ("fib_candle_strong_close", "Strong Bullish / Bearish Close"),
+              ("fib_candle_engulfing", "Bullish / Bearish Engulfing"),
+              ("fib_candle_wick_rejection", "Hammer / Shooting Star"),
+              ("fib_candle_star", "Morning / Evening Star"))),
+        )
+        for title, note, controls in fib_stages:
+            card = DisclosureCard(title, note=note, expanded=False)
+            for field, label in controls:
+                widget = fib_controls[field]
+                if isinstance(widget, QCheckBox):
+                    widget.setText(label)
+                if field == "fib_structure_quality_mode":
+                    card.add_field(field, label, widget)
+                else:
+                    card.add_control(field, widget)
+            layout.addWidget(card)
+            self.fib_stage_cards.append(card)
 
         self.account_card = FormCard(
             "2. Account Risk & Position Sizing",
@@ -498,7 +508,8 @@ class RiskExecutionWorkspace(QWidget):
         ema_920 = self._ema_920_selected()
         fvg = self._signal_strategy_mode() == "FAIR_VALUE_GAP"
         fib = self._signal_strategy_mode() == "FIB_RETRACEMENT"
-        self.fib_entry_card.setVisible(fib)
+        for card in self.fib_stage_cards:
+            card.setVisible(fib)
         self.ema320_candle_card.setVisible(self._signal_strategy_mode() == "EMA_320_CLOSE_CROSS")
         cross_mode = {
             "EMA_20_100_CROSS": "LONG",
