@@ -8,10 +8,15 @@
 - Market/timeframe: BTCUSDT 4h strategy, 1m intrabar
 - Historical window: 2020-06-01 through 2026-09-01
 - Existing saved report: 79 trades; net P&L 495.7499228872264; ending equity 1495.7499228872264
-- Pinned source revision from run manifest: `1ad8a216…` (full revision must be recovered and checked before reproduction)
+- Pinned source revision from run manifest: `1ad8a2161877260d9f1d790f583a82e065f8730e` (manifest reports CLEAN_COMMIT, code_dirty=false)
 - Saved trade CSV SHA-256: `14d0577968a9ee50916aa9b4d2431cec238812f5bc290f9b315531ff541eacbe`
 - Saved trade Parquet SHA-256: `736c1673a468501ae42b25e4afdf036dfa8eb8b9c2449406341d3511258202f2`
 - Saved summary SHA-256: `42d6a72dd14ebc7f07cb4a19bcc1a600c3f897019d9d5a8abcadc371d32948a9`
+
+- Manifest catalog snapshot digest: `7b4858b0bc87b5abcfd433b4a3fd71b0b68e25384901ea3f228bb3bbcb699dac` (2,956 selected archives)
+- 1m kline source signature: `466d8df2c10428df799fe90086f1ba3b3ae281265366703a7048ea82241bbbcd` (97 partitions)
+- 4h kline source signature: `d1f459840ec70ad205e61af6c3a4cbf4d5414d8ebbf7bc9f7149bfa4b056d146` (102 partitions)
+- Saved configuration schema: v3, including 1m intrabar ERROR-on-missing policy
 
 These values identify existing evidence; they **do not** demonstrate reproduction on the migrated browser stack.
 
