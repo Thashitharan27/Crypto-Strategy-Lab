@@ -146,7 +146,8 @@ function App() {
           {coverageError && <p role="alert">{coverageError}</p>}
           {coverage && <p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>}
         </div>
-      </div> :
+      </div> : null}
+      {(section === "Strategy Designer" || section === "Trade Visualizer") &&
         <p>This section is being migrated. The existing Python engine and desktop application remain authoritative.</p>}
       <p>No strategy execution or configuration editing is enabled.</p>
     </section>
