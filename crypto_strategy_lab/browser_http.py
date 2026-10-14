@@ -79,6 +79,8 @@ def create_browser_app(*, token: str, read_service=None):
                 raise HTTPException(status_code=401, detail="Unauthorized")
             if market not in {"futures_um", "spot"} or not symbol.isascii() or not symbol.isalnum() or len(symbol) > 32:
                 raise HTTPException(status_code=422, detail="Invalid market or symbol")
+            if strategy_timeframe not in {"15m", "1h", "4h", "1d"} or intrabar_timeframe not in {"1m", "5m", "15m"}:
+                raise HTTPException(status_code=422, detail="Unsupported timeframes")
             try:
                 start_date = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
                 end_date = datetime.datetime.fromisoformat(end.replace("Z", "+00:00"))
