@@ -53,6 +53,7 @@ function App() {
   async function loadCoverage() {
     setCoverage(null);
     setCoverageError("");
+    if (!connected) { setCoverageError("Connect to the local read-only API first"); return; }
     if (!/^[A-Za-z0-9]{1,32}$/.test(coverageSymbol)) {
       setCoverageError("Select a valid symbol");
       return;
