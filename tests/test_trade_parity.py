@@ -62,3 +62,26 @@ def test_reject_nonfinite_and_invalid_tolerance():
 def test_strict_numeric_mode():
     assert compare_trades([trade()], [trade(pnl=1.88000000001)],
                           abs_tol=0, rel_tol=0)[0].field == "pnl"
+
+
+def test_79_trade_frozen_shape_requires_every_field_and_order():
+    """79-row parity rehearsal; synthetic rows are NOT the archived BTC run."""
+    baseline = [trade(trade_id=f"T{i:03d}", pnl=float(i), slippage=0.02)
+                for i in range(79)]
+    replay = [dict(row) for row in baseline]
+    assert compare_trades(baseline, replay, abs_tol=0, rel_tol=0) == []
+    replay[47]["slippage"] = 0.03
+    differences = compare_trades(baseline, replay, abs_tol=0, rel_tol=0)
+    assert [(d.trade_index, d.field) for d in differences] == [(47, "slippage")]
+    replay[47] = dict(baseline[47])
+    del replay[62]["target_price"]
+    assert [(d.trade_index, d.field) for d in compare_trades(baseline, replay)] == [
+        (62, "target_price")
+    ]
+
+
+def test_79_trade_rehearsal_rejects_missing_last_trade():
+    baseline = [trade(trade_id=f"T{i:03d}") for i in range(79)]
+    differences = compare_trades(baseline, baseline[:-1])
+    assert differences[0].field == "trade_count"
+    assert (differences[0].expected, differences[0].actual) == (79, 78)
