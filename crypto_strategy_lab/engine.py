@@ -471,14 +471,23 @@ class BacktestEngine(DILadderExecutionMixin):
                 "fill_price_source": "NEXT_CANDLE_OPEN",
                 "defer_to_next_open": True,
             }
+        if not self._should_enter(i):
+            return None
+        # The shared scheduler identifies eligibility, not the intrabar fill.
+        from .entry_plan import EntryIntent, EntryPlan, EntryTiming, schedule_entry
+        direction = self._selected_direction(i)
+        scheduled = schedule_entry(
+            EntryIntent(direction=direction if direction in {"LONG", "SHORT"} else "LONG", signal_index=i),
+            EntryPlan(timing=EntryTiming.SIGNAL_CLOSE),
+        )
         return {
-            "execution_index": i,
+            "execution_index": scheduled.earliest_index,
             "indicator_index": i,
             "scheduled_timestamp": None,
             "actual_entry_timestamp": self._entry_time(i),
             "entry_schedule_status": None,
             "fill_price_source": "SIGNAL_CLOSE",
-        } if self._should_enter(i) else None
+        }
 
     def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
         decision = self.pending_next_open_entry
