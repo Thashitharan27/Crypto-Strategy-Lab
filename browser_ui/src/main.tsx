@@ -11,6 +11,9 @@ function App() {
   const [token, setToken] = React.useState("");
   const [connected, setConnected] = React.useState(false);
   const [symbols, setSymbols] = React.useState<string[]>([]);
+  const [coverage, setCoverage] = React.useState<unknown[] | null>(null);
+  const [coverageSymbol, setCoverageSymbol] = React.useState("BTCUSDT");
+  const [coverageError, setCoverageError] = React.useState("");
   const [message, setMessage] = React.useState("Not connected");
   const [configId, setConfigId] = React.useState("");
   const [configSummary, setConfigSummary] = React.useState<{ sections: string[]; configVersion: string } | null>(null);
@@ -45,6 +48,27 @@ function App() {
       const value = await getReadOnly<{manifest: {run_id?: string; run_status?: string}; summary: unknown}>(`/api/v1/runs/${runId}`, token);
       setRunInfo({run_id: value.manifest.run_id, status: value.manifest.run_status});
     } catch { setRunError("Saved run unavailable or not accessible"); }
+  }
+
+  async function loadCoverage() {
+    setCoverage(null);
+    setCoverageError("");
+    if (!connected) { setCoverageError("Connect to the local read-only API first"); return; }
+    if (!/^[A-Za-z0-9]{1,32}$/.test(coverageSymbol)) {
+      setCoverageError("Select a valid symbol");
+      return;
+    }
+    const end = new Date();
+    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const query = new URLSearchParams({symbol: coverageSymbol, market: "futures_um",
+      start: start.toISOString(), end: end.toISOString(), strategy_timeframe: "4h", intrabar_timeframe: "1m"});
+    try {
+      const result = await getReadOnly<{coverage: unknown[]}>(`/api/v1/catalog/coverage?${query.toString()}`, token);
+      if (!Array.isArray(result.coverage)) throw new Error("Invalid coverage response");
+      setCoverage(result.coverage);
+    } catch {
+      setCoverageError("Coverage unavailable for this symbol or time window");
+    }
   }
 
   async function connect() {
@@ -89,7 +113,14 @@ function App() {
         {runError && <p role="alert">{runError}</p>}
         {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p></div>}
       </div>}
-      {section === "Data Library" && connected ? <div><h3>Available symbols</h3><ul>{symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul></div> :
+      {section === "Data Library" && connected ? <div><h3>Available symbols</h3><ul>{symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>
+        <div className="connection"><label htmlFor="coverage-symbol">Data coverage symbol</label>
+          <input id="coverage-symbol" value={coverageSymbol} onChange={e => setCoverageSymbol(e.target.value)} />
+          <button type="button" onClick={() => void loadCoverage()}>Check last 30 days coverage (4h / 1m)</button>
+          {coverageError && <p role="alert">{coverageError}</p>}
+          {coverage && <p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>}
+        </div>
+      </div> :
         <p>This section is being migrated. The existing Python engine and desktop application remain authoritative.</p>}
       <p>No strategy execution or configuration editing is enabled.</p>
     </section>
