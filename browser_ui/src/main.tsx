@@ -21,6 +21,7 @@ function App() {
   const [runId, setRunId] = React.useState("");
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
+  const [runMetrics, setRunMetrics] = React.useState<{ trades: number; winRate: number; netPnl: number } | null>(null);
 
   async function loadConfig() {
     setConfigSummary(null);
@@ -42,11 +43,18 @@ function App() {
 
   async function loadRun() {
     setRunInfo(null);
+    setRunMetrics(null);
     setRunError("");
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(runId)) { setRunError("Enter a valid saved run folder ID"); return; }
     try {
-      const value = await getReadOnly<{manifest: {run_id?: string; run_status?: string}; summary: unknown}>(`/api/v1/runs/${runId}`, token);
+      const value = await getReadOnly<{manifest: {run_id?: string; run_status?: string}; summary: Record<string, unknown>}>(`/api/v1/runs/${runId}`, token);
       setRunInfo({run_id: value.manifest.run_id, status: value.manifest.run_status});
+      const {total_trades, win_rate, net_pnl} = value.summary;
+      if ([total_trades, win_rate, net_pnl].every(v => typeof v === "number" && Number.isFinite(v)) &&
+          (total_trades as number) >= 0 && Number.isInteger(total_trades as number) &&
+          (win_rate as number) >= 0 && (win_rate as number) <= 1) {
+        setRunMetrics({trades: total_trades as number, winRate: win_rate as number, netPnl: net_pnl as number});
+      }
     } catch { setRunError("Saved run unavailable or not accessible"); }
   }
 
@@ -111,7 +119,9 @@ function App() {
         <input id="run-id" value={runId} onChange={e => setRunId(e.target.value)} placeholder="BTCUSDT_4h_…" />
         <button type="button" onClick={() => void loadRun()}>Read completed run</button>
         {runError && <p role="alert">{runError}</p>}
-        {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p></div>}
+        {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p>
+          {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p><p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p><p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p></div>}
+        </div>}
       </div>}
       {section === "Data Library" && connected ? <div><h3>Available symbols</h3><ul>{symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>
         <div className="connection"><label htmlFor="coverage-symbol">Data coverage symbol</label>
