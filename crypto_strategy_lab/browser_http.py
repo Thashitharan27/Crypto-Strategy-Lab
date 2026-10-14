@@ -68,4 +68,27 @@ def create_browser_app(*, token: str, read_service=None):
                 raise HTTPException(status_code=422, detail="Unsupported market")
             return {"symbols": read_service.symbols(market)}
 
+    if read_service is not None:
+        @app.get("/api/v1/catalog/coverage")
+        def coverage(authorization: str | None = Header(default=None), symbol: str = "", market: str = "futures_um",
+                     start: str = "", end: str = "", strategy_timeframe: str = "4h", intrabar_timeframe: str = "1m"):
+            import datetime
+            from crypto_strategy_lab.gui.v2_controller import GuiResearchRequest
+            supplied = authorization.removeprefix("Bearer ") if authorization else ""
+            if not secrets.compare_digest(supplied, token):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            if market not in {"futures_um", "spot"} or not symbol.isascii() or not symbol.isalnum() or len(symbol) > 32:
+                raise HTTPException(status_code=422, detail="Invalid market or symbol")
+            try:
+                start_date = datetime.datetime.fromisoformat(start.replace("Z", "+00:00"))
+                end_date = datetime.datetime.fromisoformat(end.replace("Z", "+00:00"))
+                if not (start_date.tzinfo and end_date.tzinfo and start_date < end_date):
+                    raise ValueError()
+                request = GuiResearchRequest(exchange="binance", market=market, symbol=symbol.upper(),
+                    period_start=start_date, period_end=end_date, strategy_timeframe=strategy_timeframe,
+                    intrabar_timeframe=intrabar_timeframe)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=422, detail="Invalid research time window")
+            return {"coverage": read_service.coverage(request)}
+
     return app
