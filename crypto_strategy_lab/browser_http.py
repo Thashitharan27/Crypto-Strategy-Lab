@@ -6,6 +6,7 @@ optional; application construction exposes no trading or filesystem endpoints.
 from __future__ import annotations
 
 import secrets
+from urllib.parse import urlsplit
 
 
 def create_browser_app(*, token: str):
@@ -13,19 +14,41 @@ def create_browser_app(*, token: str):
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
     from fastapi import FastAPI, Header, HTTPException, Request
+    from starlette.responses import JSONResponse
 
     app = FastAPI(title="Crypto Strategy Lab (read-only)", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
     async def local_guard(request: Request, call_next):
-        host = request.headers.get("host", "").split(":")[0].lower()
+        host = request.headers.get("host", "")
         origin = request.headers.get("origin")
-        if host not in {"127.0.0.1", "localhost"}:
-            raise HTTPException(status_code=403, detail="Invalid Host")
-        if origin is not None and origin.rstrip("/") not in {"http://127.0.0.1", "http://localhost"} and not (
-            origin.startswith("http://127.0.0.1:") or origin.startswith("http://localhost:")
-        ):
-            raise HTTPException(status_code=403, detail="Invalid Origin")
+        try:
+            parsed_host = urlsplit("http://" + host)
+            valid_host = (
+                parsed_host.hostname in {"127.0.0.1", "localhost"}
+                and parsed_host.username is None
+                and parsed_host.password is None
+                and parsed_host.path == ""
+                and parsed_host.query == ""
+            )
+            if origin is None:
+                valid_origin = True
+            else:
+                parsed_origin = urlsplit(origin)
+                valid_origin = (
+                    parsed_origin.scheme == "http"
+                    and parsed_origin.hostname in {"127.0.0.1", "localhost"}
+                    and parsed_origin.username is None
+                    and parsed_origin.password is None
+                    and parsed_origin.path in {"", "/"}
+                    and parsed_origin.query == ""
+                    and parsed_origin.fragment == ""
+                    and parsed_origin.port is not None
+                )
+        except ValueError:
+            valid_host, valid_origin = False, False
+        if not valid_host or not valid_origin:
+            return JSONResponse({"detail": "Forbidden"}, status_code=403)
         return await call_next(request)
 
     @app.get("/api/v1/health")
