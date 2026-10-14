@@ -1081,6 +1081,10 @@ class BacktestEngine(DILadderExecutionMixin):
             else self.open[i] if open_fill else self.close[i]
         )
         entry_timestamp = (schedule or {}).get("actual_entry_timestamp")
+        if fill_source == "LIMIT_LEVEL_CANDIDATE" and entry_timestamp is None:
+            raise ValueError(
+                "Limit-order candidates need a verified intrabar fill timestamp before execution"
+            )
         if entry_timestamp is None:
             entry_timestamp = pd.Timestamp(self.times[i]) if open_fill else self._execution_time(i)
         entry_timestamp = pd.Timestamp(entry_timestamp)
