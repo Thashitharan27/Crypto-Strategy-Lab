@@ -524,6 +524,33 @@ class BacktestEngine(DILadderExecutionMixin):
         candidate = self._limit_entry_candidate(scheduled_entry, execution_index)
         return ("CANDIDATE", candidate) if candidate is not None else ("WAITING", None)
 
+    def _limit_candidate_fill_schedule(self, scheduled_entry, candidate, signal_index):
+        """Adapt a confirmed limit candidate to existing _open_pair metadata.
+
+        This builds metadata only, without executing a fill. Do not assume a
+        strategy-bar open timestamp for intrabar touches: those require 1m
+        event-order reconstruction before orders are enabled.
+        """
+        from .entry_plan import EntryTiming
+        if scheduled_entry.timing != EntryTiming.LIMIT_LEVEL:
+            raise ValueError("limit fill schedule requires LIMIT_LEVEL")
+        if candidate is None or candidate.execution_index < scheduled_entry.earliest_index:
+            raise ValueError("candidate must be eligible and resolved")
+        if (scheduled_entry.expires_after_index is not None
+                and candidate.execution_index > scheduled_entry.expires_after_index):
+            raise ValueError("expired limit candidate")
+        if signal_index != scheduled_entry.earliest_index - 1:
+            raise ValueError("signal index does not match scheduled entry")
+        return {
+            "execution_index": candidate.execution_index,
+            "indicator_index": signal_index,
+            "fill_price": candidate.price,
+            "fill_price_source": "LIMIT_LEVEL_CANDIDATE",
+            "entry_schedule_status": "LIMIT_LEVEL_CANDIDATE",
+            "scheduled_timestamp": None,
+            "actual_entry_timestamp": None,
+        }
+
     def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
         decision = self.pending_next_open_entry
         if not decision or int(decision.get("execution_index", -1)) != i:
