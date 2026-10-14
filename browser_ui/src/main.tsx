@@ -12,9 +12,30 @@ function App() {
   const [connected, setConnected] = React.useState(false);
   const [symbols, setSymbols] = React.useState<string[]>([]);
   const [message, setMessage] = React.useState("Not connected");
+  const [configId, setConfigId] = React.useState("");
+  const [configSummary, setConfigSummary] = React.useState<{ sections: string[]; configVersion: string } | null>(null);
+  const [configError, setConfigError] = React.useState("");
   const [runId, setRunId] = React.useState("");
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
+
+  async function loadConfig() {
+    setConfigSummary(null);
+    setConfigError("");
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(configId)) {
+      setConfigError("Enter a valid saved configuration ID");
+      return;
+    }
+    try {
+      const result = await getReadOnly<{config: Record<string, unknown>}>(`/api/v1/configs/${configId}`, token);
+      const value = result.config;
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid config");
+      const version = value.config_version ?? value.version ?? "Not specified";
+      setConfigSummary({sections: Object.keys(value), configVersion: String(version)});
+    } catch {
+      setConfigError("Saved configuration unavailable or not accessible");
+    }
+  }
 
   async function loadRun() {
     setRunInfo(null);
@@ -54,6 +75,13 @@ function App() {
         <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
         <p role="status">{message}</p>
       </div>
+      {section === "Configurations" && connected && <div className="connection">
+        <label htmlFor="config-id">Saved configuration ID</label>
+        <input id="config-id" value={configId} onChange={e => setConfigId(e.target.value)} placeholder="Configuration filename without .json" />
+        <button type="button" onClick={() => void loadConfig()}>Inspect configuration</button>
+        {configError && <p role="alert">{configError}</p>}
+        {configSummary && <div><h3>Validated configuration</h3><p>Version: {configSummary.configVersion}</p><p>Sections: {configSummary.sections.join(", ")}</p></div>}
+      </div>}
       {section === "Runs & Results" && connected && <div className="connection">
         <label htmlFor="run-id">Completed run folder ID</label>
         <input id="run-id" value={runId} onChange={e => setRunId(e.target.value)} placeholder="BTCUSDT_4h_…" />
