@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+import warnings
 from tempfile import TemporaryDirectory
 from typing import Callable, Mapping
 
@@ -24,9 +25,9 @@ from .prepared_backtest import (
 
 PREPARED_CACHE_FORMAT_VERSION = 1
 PREPARED_CONTRACT_VERSION = 1
-PREPARED_CACHE_STORE_MEMORY_LIMIT = "3GB"
+PREPARED_CACHE_STORE_MEMORY_LIMIT = "1GB"
 PREPARED_CACHE_LOAD_MEMORY_LIMIT = "1GB"
-PREPARED_CACHE_STORE_ROW_GROUP_SIZE = 16384
+PREPARED_CACHE_STORE_ROW_GROUP_SIZE = 2048
 
 
 def _digest(payload: object) -> str:
@@ -201,7 +202,6 @@ class PreparedRunCache:
                 f"ROW_GROUP_SIZE {PREPARED_CACHE_STORE_ROW_GROUP_SIZE})",
                 [str(temp_parquet)],
             )
-            con.unregister("prepared_frame")
         finally:
             con.close()
             temporary.cleanup()
@@ -285,7 +285,19 @@ class PreparedRunCache:
         frame = builder()  # constructor validation remains authoritative
         if not isinstance(frame, PreparedBacktestFrame):
             raise TypeError("builder must return PreparedBacktestFrame")
-        self.store(key, frame, provenance=provenance)
+        try:
+            self.store(key, frame, provenance=provenance)
+        except duckdb.OutOfMemoryException as exc:
+            # L3 is an optional accelerator. A cache write must not prevent
+            # an already prepared and validated simulation from running.
+            parquet, manifest = self.paths(key)
+            parquet.with_suffix(".tmp.parquet").unlink(missing_ok=True)
+            manifest.with_suffix(".tmp.json").unlink(missing_ok=True)
+            warnings.warn(
+                f"Prepared-frame cache write skipped after DuckDB memory exhaustion: {exc}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         return frame, False
 
 
