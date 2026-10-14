@@ -9,7 +9,7 @@ import secrets
 from urllib.parse import urlsplit
 
 
-def create_browser_app(*, token: str):
+def create_browser_app(*, token: str, read_service=None):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
@@ -57,5 +57,15 @@ def create_browser_app(*, token: str):
         if not secrets.compare_digest(supplied, token):
             raise HTTPException(status_code=401, detail="Unauthorized")
         return {"status": "ok", "mode": "read-only"}
+
+    if read_service is not None:
+        @app.get("/api/v1/catalog/symbols")
+        def symbols(authorization: str | None = Header(default=None), market: str = "futures_um"):
+            supplied = authorization.removeprefix("Bearer ") if authorization else ""
+            if not secrets.compare_digest(supplied, token):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            if market not in {"futures_um", "spot"}:
+                raise HTTPException(status_code=422, detail="Unsupported market")
+            return {"symbols": read_service.symbols(market)}
 
     return app
