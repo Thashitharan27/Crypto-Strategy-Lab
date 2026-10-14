@@ -11,7 +11,7 @@ def test_browser_config_reuses_existing_canonical_v3_loader(tmp_path):
     expected = ResearchRunConfig().to_dict()
     path.write_text(json.dumps(expected), encoding="utf-8")
     assert read_research_config(path) == expected
-    assert json.loads(path.read_text(encoding="utf-8")) == expected
+    assert path.read_text(encoding="utf-8") == json.dumps(expected)
 
 
 def test_browser_config_rejects_invalid_config_without_rewriting(tmp_path):
