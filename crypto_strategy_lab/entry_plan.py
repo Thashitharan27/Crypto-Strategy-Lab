@@ -123,3 +123,34 @@ def limit_order_touched(
     if candle_low <= 0 or candle_high < candle_low:
         return False
     return candle_low <= entry.limit_price <= candle_high
+
+
+def limit_fill_price_candidate(
+    entry: ScheduledEntry,
+    execution_index: int,
+    candle_open: float,
+    candle_low: float,
+    candle_high: float,
+) -> float | None:
+    """Return a conservative candidate fill price, not an executed order.
+
+    An already-marketable limit at candle open receives the open price, while
+    an intrabar touch receives the limit price. The simulator must separately
+    handle spread, liquidity, timestamp ordering, and position constraints.
+    """
+    if entry.timing != EntryTiming.LIMIT_LEVEL or entry.limit_price is None:
+        return None
+    if not is_scheduled_entry_eligible(entry, execution_index):
+        return None
+    if not all(isfinite(v) and v > 0 for v in (candle_open, candle_low, candle_high)):
+        return None
+    if candle_low > candle_high or not candle_low <= candle_open <= candle_high:
+        return None
+    limit = entry.limit_price
+    if entry.direction == "LONG":
+        if candle_open <= limit:
+            return candle_open
+        return limit if candle_low <= limit else None
+    if candle_open >= limit:
+        return candle_open
+    return limit if candle_high >= limit else None
