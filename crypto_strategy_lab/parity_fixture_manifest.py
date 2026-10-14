@@ -52,3 +52,30 @@ def frozen_fixture_manifest(
         "intrabar_timeframe_minutes": intrabar_timeframe_minutes,
         "files": {name: file_fingerprint(files[name]) for name in sorted(files)},
     }
+
+
+def verify_frozen_fixture_files(
+    expected_files: Mapping[str, Mapping[str, object]],
+    files: Mapping[str, str | Path],
+) -> None:
+    """Fail closed unless supplied offline files match all frozen hashes and sizes.
+
+    This checks fixture integrity only, not market-data completeness, execution
+    reproducibility or trade-level parity.
+    """
+    if not expected_files or set(expected_files) != set(files):
+        raise ValueError("fixture file labels do not match the frozen manifest")
+    for name in sorted(expected_files):
+        metadata = expected_files[name]
+        if not isinstance(metadata, Mapping):
+            raise ValueError(f"invalid frozen fixture metadata for {name}")
+        expected_hash = metadata.get("sha256")
+        expected_bytes = metadata.get("bytes")
+        if (not isinstance(expected_hash, str) or len(expected_hash) != 64
+            or any(c not in "0123456789abcdef" for c in expected_hash)
+            or not isinstance(expected_bytes, int) or isinstance(expected_bytes, bool)
+            or expected_bytes < 0):
+            raise ValueError(f"invalid frozen fixture digest for {name}")
+        actual = file_fingerprint(files[name])
+        if actual != {"sha256": expected_hash, "bytes": expected_bytes}:
+            raise ValueError(f"frozen fixture mismatch: {name}")
