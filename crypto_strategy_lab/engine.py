@@ -459,7 +459,7 @@ class BacktestEngine(DILadderExecutionMixin):
             # simulator remains authoritative for eligibility and actual fills.
             from .entry_plan import EntryIntent, EntryPlan, EntryTiming, schedule_entry
             scheduled = schedule_entry(
-                EntryIntent(direction="LONG", signal_index=i),
+                EntryIntent(direction=(self._selected_direction(i) if self._selected_direction(i) in {"LONG", "SHORT"} else "LONG"), signal_index=i),
                 EntryPlan(timing=EntryTiming.NEXT_OPEN),
             )
             return {
