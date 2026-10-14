@@ -101,6 +101,7 @@ jobs:
           tests/test_data_lake_gui.py
           tests/test_single_trade_telemetry.py
           tests/test_trade_parity.py
+          tests/test_trade_parity_artifacts.py
 
   data-lake-v2-safety:
     runs-on: ubuntu-latest
