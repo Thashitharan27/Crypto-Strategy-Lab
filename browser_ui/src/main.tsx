@@ -22,6 +22,7 @@ function App() {
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
   const [runMetrics, setRunMetrics] = React.useState<{ trades: number; winRate: number; netPnl: number } | null>(null);
+  const [runRisk, setRunRisk] = React.useState<{profitFactor?: number; drawdown?: number; fees?: number} | null>(null);
 
   async function loadConfig() {
     setConfigSummary(null);
@@ -44,12 +45,22 @@ function App() {
   async function loadRun() {
     setRunInfo(null);
     setRunMetrics(null);
+    setRunRisk(null);
     setRunError("");
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(runId)) { setRunError("Enter a valid saved run folder ID"); return; }
     try {
       const value = await getReadOnly<{manifest: {run_id?: string; run_status?: string}; summary: Record<string, unknown>}>(`/api/v1/runs/${runId}`, token);
       setRunInfo({run_id: value.manifest.run_id, status: value.manifest.run_status});
-      const {total_trades, win_rate, net_pnl} = value.summary;
+      const {total_trades, win_rate, net_pnl, profit_factor, maximum_drawdown_percentage, total_fees} = value.summary;
+      const safeMetric = (n: unknown) => typeof n === "number" && Number.isFinite(n) ? n : undefined;
+      const profitFactor = safeMetric(profit_factor);
+      const drawdown = safeMetric(maximum_drawdown_percentage);
+      const fees = safeMetric(total_fees);
+      setRunRisk({
+        profitFactor: profitFactor !== undefined && profitFactor >= 0 ? profitFactor : undefined,
+        drawdown: drawdown !== undefined && drawdown <= 0 ? drawdown : undefined,
+        fees: fees !== undefined && fees >= 0 ? fees : undefined,
+      });
       if ([total_trades, win_rate, net_pnl].every(v => typeof v === "number" && Number.isFinite(v)) &&
           (total_trades as number) >= 0 && Number.isInteger(total_trades as number) &&
           (win_rate as number) >= 0 && (win_rate as number) <= 1) {
@@ -121,6 +132,11 @@ function App() {
         {runError && <p role="alert">{runError}</p>}
         {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p>
           {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p><p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p><p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p></div>}
+          {runRisk && <div aria-label="Saved run risk metrics">
+            {runRisk.profitFactor !== undefined && <p>Profit factor: {runRisk.profitFactor.toFixed(2)}</p>}
+            {runRisk.drawdown !== undefined && <p>Maximum drawdown: {runRisk.drawdown.toFixed(2)}%</p>}
+            {runRisk.fees !== undefined && <p>Total fees: {runRisk.fees.toFixed(2)} (report currency)</p>}
+          </div>}
         </div>}
       </div>}
       {section === "Data Library" && connected ? <div><h3>Available symbols</h3><ul>{symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>
