@@ -1,0 +1,61 @@
+"""Optional local read-only HTTP adapter.
+
+Never imported by the backtest engine or live bot. Installation of FastAPI is
+optional; application construction exposes no trading or filesystem endpoints.
+"""
+from __future__ import annotations
+
+import secrets
+from urllib.parse import urlsplit
+
+
+def create_browser_app(*, token: str):
+    """Construct an authenticated app; caller must bind server to 127.0.0.1."""
+    if not isinstance(token, str) or len(token) < 32:
+        raise ValueError("A fresh, high-entropy browser token is required")
+    from fastapi import FastAPI, Header, HTTPException, Request
+    from starlette.responses import JSONResponse
+
+    app = FastAPI(title="Crypto Strategy Lab (read-only)", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def local_guard(request: Request, call_next):
+        host = request.headers.get("host", "")
+        origin = request.headers.get("origin")
+        try:
+            parsed_host = urlsplit("http://" + host)
+            valid_host = (
+                parsed_host.hostname in {"127.0.0.1", "localhost"}
+                and parsed_host.username is None
+                and parsed_host.password is None
+                and parsed_host.path == ""
+                and parsed_host.query == ""
+            )
+            if origin is None:
+                valid_origin = True
+            else:
+                parsed_origin = urlsplit(origin)
+                valid_origin = (
+                    parsed_origin.scheme == "http"
+                    and parsed_origin.hostname in {"127.0.0.1", "localhost"}
+                    and parsed_origin.username is None
+                    and parsed_origin.password is None
+                    and parsed_origin.path in {"", "/"}
+                    and parsed_origin.query == ""
+                    and parsed_origin.fragment == ""
+                    and parsed_origin.port is not None
+                )
+        except ValueError:
+            valid_host, valid_origin = False, False
+        if not valid_host or not valid_origin:
+            return JSONResponse({"detail": "Forbidden"}, status_code=403)
+        return await call_next(request)
+
+    @app.get("/api/v1/health")
+    def health(authorization: str | None = Header(default=None)):
+        supplied = authorization.removeprefix("Bearer ") if authorization else ""
+        if not secrets.compare_digest(supplied, token):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return {"status": "ok", "mode": "read-only"}
+
+    return app
