@@ -68,3 +68,27 @@ def test_empty_report_with_header_is_supported(tmp_path):
     path = tmp_path / "trades.csv"
     path.write_text(",".join(TRADE_FIELDS) + "\n", encoding="utf-8")
     assert read_mapped_trade_csv(path, {key: key for key in TRADE_FIELDS}) == []
+
+
+def test_native_pair_columns_cannot_fake_missing_leg_slippage(tmp_path):
+    """Native pair summaries are not a substitute for all 15 trade semantics."""
+    path = tmp_path / "native_trade_list.csv"
+    native = {
+        "trade_id": "T1", "side": "LONG", "signal_available_at": "2020-06-01T00:00:00Z",
+        "entry_time": "2020-06-01T04:00:00Z", "exit_time": "2020-06-01T08:00:00Z",
+        "entry_price": "100", "long_exit_price": "101", "long_quantity": "2",
+        "long_original_sl": "99", "long_tp": "103", "long_final_exit_reason": "TP",
+        "long_total_fees": "0.1", "long_net_r": "1", "long_net_pnl": "1.9",
+    }
+    _write(path, [native])
+    mapping = {
+        "trade_id": "trade_id", "side": "side", "signal_time": "signal_available_at",
+        "entry_time": "entry_time", "exit_time": "exit_time",
+        "entry_price": "entry_price", "exit_price": "long_exit_price",
+        "quantity": "long_quantity", "stop_price": "long_original_sl",
+        "target_price": "long_tp", "exit_reason": "long_final_exit_reason",
+        "fees": "long_total_fees", "slippage": "slippage",
+        "realized_r": "long_net_r", "pnl": "long_net_pnl",
+    }
+    with pytest.raises(ValueError, match="missing trade columns"):
+        read_mapped_trade_csv(path, mapping)
