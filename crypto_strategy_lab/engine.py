@@ -455,8 +455,15 @@ class BacktestEngine(DILadderExecutionMixin):
         if self._entry_timing_mode() == "NEXT_CANDLE_OPEN":
             if i + 1 >= len(self.times) or not self._should_enter(i):
                 return None
+            # Schedule through the shared causal entry contract; the existing
+            # simulator remains authoritative for eligibility and actual fills.
+            from .entry_plan import EntryIntent, EntryPlan, EntryTiming, schedule_entry
+            scheduled = schedule_entry(
+                EntryIntent(direction="LONG", signal_index=i),
+                EntryPlan(timing=EntryTiming.NEXT_OPEN),
+            )
             return {
-                "execution_index": i + 1,
+                "execution_index": scheduled.earliest_index,
                 "indicator_index": i,
                 "scheduled_timestamp": pd.Timestamp(self.times[i + 1]),
                 "actual_entry_timestamp": None,
