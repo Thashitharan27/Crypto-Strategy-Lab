@@ -1,45 +1,71 @@
-"""Directional candle patterns shared by Fibonacci and EMA320 entries."""
+"""Reusable, causal directional-candle confirmation across signal strategies."""
+from dataclasses import dataclass
+
 import numpy as np
 
-def candle_confirmation_check(self, i, direction, prefix):
-    """ANY selected reversal pattern, using closed bars ending at i."""
-    if not bool(getattr(self.config, f"{prefix}_candle_confirmation_enabled", False)):
-        return True, f"{prefix.upper()}_CANDLE_CONFIRMATION_DISABLED"
-    if not 0 <= i < len(self.close):
-        return False, f"{prefix.upper()}_CANDLE_CONFIRMATION_UNAVAILABLE"
+
+@dataclass(frozen=True)
+class CandleConfirmationPlan:
+    """Signal-independent candle confirmation configuration (ANY selected pattern)."""
+
+    enabled: bool = False
+    strong_close: bool = True
+    engulfing: bool = True
+    wick_rejection: bool = True
+    star: bool = True
+
+    @classmethod
+    def from_config(cls, config, prefix: str):
+        return cls(
+            enabled=bool(getattr(config, f"{prefix}_candle_confirmation_enabled", False)),
+            strong_close=bool(getattr(config, f"{prefix}_candle_strong_close", True)),
+            engulfing=bool(getattr(config, f"{prefix}_candle_engulfing", True)),
+            wick_rejection=bool(getattr(config, f"{prefix}_candle_wick_rejection", True)),
+            star=bool(getattr(config, f"{prefix}_candle_star", True)),
+        )
+
+
+def evaluate_candle_confirmation(candles, i, direction, plan: CandleConfirmationPlan, *, reason_prefix="SHARED"):
+    """Evaluate a reusable plan against closed bars, independently of the signal."""
+
+    prefix = reason_prefix.upper()
+    if not plan.enabled:
+        return True, f"{prefix}_CANDLE_CONFIRMATION_DISABLED"
+    if not 0 <= i < len(candles.close):
+        return False, f"{prefix}_CANDLE_CONFIRMATION_UNAVAILABLE"
     if direction not in {"LONG", "SHORT"}:
-        return False, f"{prefix.upper()}_CANDLE_CONFIRMATION_DIRECTION_UNAVAILABLE"
+        return False, f"{prefix}_CANDLE_CONFIRMATION_DIRECTION_UNAVAILABLE"
 
     def bar(j):
         if j < 0:
             return None
-        o, h, l, c = (float(a[j]) for a in (self.open, self.high, self.low, self.close))
+        o, h, l, c = (float(a[j]) for a in (candles.open, candles.high, candles.low, candles.close))
         if not all(np.isfinite(v) for v in (o, h, l, c)) or h <= l or h < max(o, c) or l > min(o, c):
             return None
         return o, h, l, c
 
     current = bar(i)
     if current is None:
-        return False, f"{prefix.upper()}_CANDLE_CONFIRMATION_UNAVAILABLE"
+        return False, f"{prefix}_CANDLE_CONFIRMATION_UNAVAILABLE"
     o, h, l, c = current
     span = h - l
     body = abs(c - o)
     bullish = direction == "LONG"
     matches = []
 
-    if getattr(self.config, f"{prefix}_candle_strong_close", True):
+    if plan.strong_close:
         if (c > o and c >= h - span / 3 if bullish else c < o and c <= l + span / 3):
             matches.append("STRONG_CLOSE")
 
     previous = bar(i - 1) if i >= 1 else None
     if previous is not None:
         po, ph, pl, pc = previous
-        if getattr(self.config, f"{prefix}_candle_engulfing", True):
+        if plan.engulfing:
             if (pc < po and c > o and o <= pc and c >= po if bullish
                 else pc > po and c < o and o >= pc and c <= po):
                 matches.append("ENGULFING")
 
-        if getattr(self.config, f"{prefix}_candle_wick_rejection", True):
+        if plan.wick_rejection:
             lower_wick = min(o, c) - l
             upper_wick = h - max(o, c)
             # Require directional close and a rejection wick >= 2x body.
@@ -48,7 +74,7 @@ def candle_confirmation_check(self, i, direction, prefix):
                 matches.append("WICK_REJECTION")
 
     # A wick-rejection candle can be the first bar in the series.
-    elif getattr(self.config, f"{prefix}_candle_wick_rejection", True):
+    elif plan.wick_rejection:
         lower_wick = min(o, c) - l
         upper_wick = h - max(o, c)
         if (c > o and lower_wick >= 2 * body and upper_wick <= body
@@ -56,7 +82,7 @@ def candle_confirmation_check(self, i, direction, prefix):
             matches.append("WICK_REJECTION")
 
     older = bar(i - 2) if i >= 2 else None
-    if getattr(self.config, f"{prefix}_candle_star", True) and older and previous:
+    if plan.star and older and previous:
         ao, ah, al, ac = older
         bo, bh, bl, bc = previous
         first_body = abs(ac - ao)
@@ -71,6 +97,13 @@ def candle_confirmation_check(self, i, direction, prefix):
                 matches.append("STAR")
 
     if matches:
-        return True, f"{prefix.upper()}_CANDLE_{matches[0]}_CONFIRMED"
-    return False, f"{prefix.upper()}_CANDLE_NO_SELECTED_PATTERN"
+        return True, f"{prefix}_CANDLE_{matches[0]}_CONFIRMED"
+    return False, f"{prefix}_CANDLE_NO_SELECTED_PATTERN"
 
+
+def candle_confirmation_check(self, i, direction, prefix):
+    """Legacy strategy adapter backed by the shared, signal-independent plan."""
+    plan = CandleConfirmationPlan.from_config(self.config, prefix)
+    return evaluate_candle_confirmation(
+        self, i, direction, plan, reason_prefix=prefix,
+    )
