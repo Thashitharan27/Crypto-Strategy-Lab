@@ -489,6 +489,24 @@ class BacktestEngine(DILadderExecutionMixin):
             "fill_price_source": "SIGNAL_CLOSE",
         }
 
+    def _limit_entry_candidate(self, scheduled_entry, execution_index):
+        """Evaluate a pending limit intent against this engine candle.
+
+        Returns a proposed price/index only. Actual trade opening, 1m ordering,
+        fee/slippage handling and order lifecycle remain engine responsibilities.
+        """
+        from .entry_plan import resolve_limit_order_candidate
+
+        if execution_index < 0 or execution_index >= len(self.times):
+            return None
+        return resolve_limit_order_candidate(
+            scheduled_entry,
+            execution_index,
+            float(self.open[execution_index]),
+            float(self.low[execution_index]),
+            float(self.high[execution_index]),
+        )
+
     def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
         decision = self.pending_next_open_entry
         if not decision or int(decision.get("execution_index", -1)) != i:
