@@ -101,3 +101,25 @@ def is_scheduled_entry_eligible(entry: ScheduledEntry, execution_index: int) -> 
     if entry.timing != EntryTiming.LIMIT_LEVEL:
         return execution_index == entry.earliest_index
     return True
+
+
+def limit_order_touched(
+    entry: ScheduledEntry,
+    execution_index: int,
+    candle_low: float,
+    candle_high: float,
+) -> bool:
+    """Check price-range contact only after a limit order is eligible.
+
+    This is a candidate touch, not a simulated fill. Gap pricing, bid/ask,
+    queue priority and intrabar stop/target ordering belong to the simulator.
+    """
+    if entry.timing != EntryTiming.LIMIT_LEVEL or entry.limit_price is None:
+        return False
+    if not is_scheduled_entry_eligible(entry, execution_index):
+        return False
+    if not (isfinite(candle_low) and isfinite(candle_high)):
+        return False
+    if candle_low <= 0 or candle_high < candle_low:
+        return False
+    return candle_low <= entry.limit_price <= candle_high
