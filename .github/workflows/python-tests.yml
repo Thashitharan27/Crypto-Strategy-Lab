@@ -67,6 +67,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
+      - name: Install optional browser API test dependencies
+        run: pip install fastapi httpx
       - name: Compile source
         run: python -m compileall -q crypto_strategy_core crypto_strategy_lab mcp_server tools app.py
       - name: Run Fibonacci pending-limit execution regressions
@@ -100,6 +102,7 @@ jobs:
           tests/test_gui_config_logic.py
           tests/test_data_lake_gui.py
           tests/test_single_trade_telemetry.py
+          tests/test_browser_http.py
           tests/test_browser_readonly_service.py
           tests/test_browser_config.py
           tests/test_browser_catalog.py
