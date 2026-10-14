@@ -37,7 +37,10 @@ def test_existing_di_long_single_trade_baseline():
     engine.minus_di_values[:] = 10
     engine.di_spread[:] = 40
     rows = engine.run()
-    # WAIT_UNTIL_CLOSED permits another signal after a closed trade; the\n    # second candle also opens a position that exits at end of data.\n    assert len(rows) == 2\n    assert rows.iloc[1].long_exit_reason == "END_OF_DATA"\n    row = rows.iloc[0]
+    # WAIT_UNTIL_CLOSED may open a second position on the final candle.
+    assert len(rows) == 2
+    assert rows.iloc[1].long_exit_reason == "END_OF_DATA"
+    row = rows.iloc[0]
     assert row.side == "LONG"
     assert row.entry_price == pytest.approx(100)
     assert row.long_quantity == pytest.approx(1)
