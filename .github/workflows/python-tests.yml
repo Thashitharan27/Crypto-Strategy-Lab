@@ -103,12 +103,14 @@ jobs:
           tests/test_data_lake_gui.py
           tests/test_single_trade_telemetry.py
           tests/test_browser_http.py
+          tests/test_browser_http_capabilities.py
           tests/test_browser_http_symbols.py
           tests/test_browser_http_coverage.py
           tests/test_browser_http_completed_run.py
           tests/test_browser_http_config.py
           tests/test_browser_http_static.py
           tests/test_browser_readonly_service.py
+          tests/test_browser_capabilities.py
           tests/test_browser_config.py
           tests/test_browser_catalog.py
           tests/test_browser_completed_runs.py
