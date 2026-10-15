@@ -8,7 +8,12 @@ from pathlib import Path
 from crypto_strategy_lab.browser_catalog import catalog_coverage, catalog_symbols
 from crypto_strategy_lab.browser_completed_runs import read_completed_run
 from crypto_strategy_lab.browser_config import read_research_config
-from crypto_strategy_lab.gui.v2_controller import CatalogStatusService, GuiResearchRequest
+from crypto_strategy_lab.gui.v2_controller import (
+    CatalogStatusService,
+    GuiApplicationService,
+    GuiResearchRequest,
+)
+from crypto_strategy_lab.paths import resolve_data_lake_runtime_paths
 
 
 class BrowserReadOnlyService:
@@ -26,3 +31,24 @@ class BrowserReadOnlyService:
 
     def research_config(self, path: str | Path) -> dict:
         return read_research_config(path)
+
+
+def build_browser_readonly_service(
+    *,
+    raw_root: str | Path | None = None,
+    cache_root: str | Path | None = None,
+) -> BrowserReadOnlyService:
+    """Compose the browser facade from the existing desktop application service.
+
+    Browser migration must not construct a second catalog, loader or cache
+    implementation. This helper resolves the same Data Lake roots as the desktop
+    process, instantiates the existing GuiApplicationService, and exposes only
+    its read-only catalog facade.
+    """
+
+    paths = resolve_data_lake_runtime_paths()
+    application = GuiApplicationService(
+        Path(raw_root) if raw_root is not None else paths.raw_root,
+        Path(cache_root) if cache_root is not None else paths.cache_root,
+    )
+    return BrowserReadOnlyService(application.catalog)
