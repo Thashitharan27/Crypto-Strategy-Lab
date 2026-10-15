@@ -73,7 +73,7 @@ def test_browser_api_inventory_guard_rejects_root_and_mounted_routes(tmp_path):
         completed_run_root=tmp_path, config_root=tmp_path,
     )
     expected = {
-        "/api/v1/health", "/api/v1/catalog/symbols",
+        "/api/v1/health", "/api/v1/capabilities", "/api/v1/catalog/symbols",
         "/api/v1/catalog/coverage", "/api/v1/runs/{run_id}",
         "/api/v1/configs/{config_id}",
     }
