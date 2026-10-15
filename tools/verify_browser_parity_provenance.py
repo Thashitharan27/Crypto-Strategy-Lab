@@ -31,8 +31,9 @@ def _identity(interval, frequency, period_start, period_end, fingerprint):
         raise ValueError("invalid or timezone-naive source period")
     if end <= start:
         raise ValueError("invalid source period bounds")
-    return (str(interval), str(frequency), start.isoformat(),
-            end.isoformat(), str(fingerprint))
+    # Compare equal instants across the Windows local timezone and saved UTC metadata.
+    return (str(interval), str(frequency), start.tz_convert("UTC").isoformat(),
+            end.tz_convert("UTC").isoformat(), str(fingerprint))
 
 
 def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[str, int]:
