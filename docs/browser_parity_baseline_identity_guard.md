@@ -1,0 +1,5 @@
+# Exact 79-trade baseline identity guard
+
+This operator-only source provenance checker is intentionally specific to completed run `BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f`. Before comparing the existing catalog selection with the saved-run Parquet inventory, it fails closed unless the frozen manifest identifies pinned source revision `1ad8a2161877260d9f1d790f583a82e065f8730e`, a 4h/1m timeframe pair, and the exact requested execution window 2020-06-01 through 2026-09-01. It additionally requires 4h archive source coverage to start no later than 2020-01-01, reflecting the original warmup evidence.
+
+This ensures the provenance comparison cannot silently approve a different run window, code revision or an incomplete strategy warmup. The original catalog provenance multiset check still handles individual source record identities; actual archive content hashes, candle chronology and 79-trade replay are still **separate, incomplete certification gates**. No browser execution or Data Lake writes are introduced.
