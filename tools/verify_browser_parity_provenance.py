@@ -107,7 +107,9 @@ def main(argv=None) -> int:
         ).df()
     counts = verify_source_provenance(freeze, provenance)
     print(f"Saved-run source metadata matches frozen catalog: 4h={counts['4h']}, 1m={counts['1m']}")
-    print("This is metadata matching only; byte integrity and trade parity remain separate gates.")
+    print("PARTIAL SOURCE SCOPE ONLY: validates BTCUSDT 4h/1m klines, not the full 2,956-archive saved-run inventory.")
+    print("The saved-run feature manifest also references mark/index price, funding, metrics, and context candles.")
+    print("Archive content, all required feature inputs and 79-trade execution parity remain unverified.")
     return 0
 
 
