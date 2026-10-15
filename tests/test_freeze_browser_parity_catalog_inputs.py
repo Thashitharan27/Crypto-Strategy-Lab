@@ -263,3 +263,32 @@ def test_sparse_metrics_catalog_freeze_preserves_gaps(tmp_path):
     )
     assert len(files) == len(metadata) == 2
     assert {record["dataset"] for record in metadata.values()} == {"metrics"}
+
+
+def test_full_scope_rejects_wrong_individual_group_count_before_hashing(tmp_path, monkeypatch):
+    from tools import freeze_browser_parity_catalog_inputs as freeze
+    from dataclasses import replace
+    raw, cache = tmp_path / "raw", tmp_path / "cache"
+    raw.mkdir()
+    start, end = datetime(2020, 6, 1, tzinfo=UTC), datetime(2020, 7, 1, tzinfo=UTC)
+    records = []
+    for interval in ("4h", "1m", "1h", "5m"):
+        source = raw / f"{interval}.zip"
+        source.write_bytes(interval.encode())
+        records.append(_record(raw, source, interval, start, end))
+    MarketDataStore(raw, cache).catalog.sync_root(raw, records)
+    original = freeze._catalog_files
+
+    def selected(store, request, interval, dataset=DatasetKind.KLINES, **kwargs):
+        if dataset == DatasetKind.KLINES and interval in ("4h", "1m"):
+            return original(store, request, interval, dataset, **kwargs)
+        return {"synthetic": raw / "1h.zip"}, {"synthetic": {}}
+
+    monkeypatch.setattr(freeze, "_catalog_files", selected)
+    output = tmp_path / "full.json"
+    with pytest.raises(ValueError, match="saved source group count mismatch: klines/1h expected 98, found 1"):
+        main(["--raw-root", str(raw), "--cache-root", str(cache),
+              "--manifest-json", str(output), "--commit-sha", "a" * 40,
+              "--start", "2020-06-01T00:00:00Z", "--end", "2020-07-01T00:00:00Z",
+              "--include-all-saved-datasets"])
+    assert not output.exists()
