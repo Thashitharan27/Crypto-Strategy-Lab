@@ -1739,7 +1739,11 @@ class StrategyVisualizerBrowserServer:
         try:
             self._thread.start()
         except BaseException:
-            # No serve_forever worker exists, so shutdown() would deadlock.
+            # Thread.start() can raise after the worker actually starts.
+            # Only use shutdown() when serve_forever has a live worker.
+            if self._thread.is_alive():
+                self._server.shutdown()
+                self._thread.join(timeout=2.0)
             self._server.server_close()
             self._server = None
             self._thread = None
