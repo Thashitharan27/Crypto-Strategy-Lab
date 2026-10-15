@@ -69,6 +69,10 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
     expected = Counter(_identity(row.interval, row.frequency, row.period_start,
                                  row.period_end, row.raw_archive_fingerprint)
                        for row in subset.itertuples(index=False))
+    if actual != expected:
+        missing = sum((expected - actual).values())
+        unexpected = sum((actual - expected).values())
+        raise ValueError(f"saved-run source provenance mismatch: {missing} missing, {unexpected} unexpected")
     # Compare exact file stat records in addition to the existing identity multiset.
     expected_stats = Counter((str(row.interval), str(row.raw_archive_fingerprint), int(row.size_bytes), int(row.mtime_ns))
                              for row in subset.itertuples(index=False))
@@ -84,10 +88,6 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
         actual_stats[(interval, str(record["catalog_fingerprint"]), record["size_bytes"], record["mtime_ns"])] += 1
     if actual_stats != expected_stats:
         raise ValueError("saved-run source stat metadata mismatch")
-    if actual != expected:
-        missing = sum((expected - actual).values())
-        unexpected = sum((actual - expected).values())
-        raise ValueError(f"saved-run source provenance mismatch: {missing} missing, {unexpected} unexpected")
     counts = {interval: sum(n for key, n in actual.items() if key[0] == interval)
               for interval in ("4h", "1m")}
     if counts["4h"] != selection["strategy_record_count"] or counts["1m"] != selection["intrabar_record_count"]:
