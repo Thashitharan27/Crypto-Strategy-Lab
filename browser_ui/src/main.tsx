@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getReadOnly, openVerifiedVisualizer, type Health, type Symbols } from "./api";
 import "./style.css";
 
-const sections = ["Setup", "Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Trade Visualizer"] as const;
+const sections = ["Setup", "Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Portfolio", "Trade Visualizer"] as const;
 type Section = (typeof sections)[number];
 type CoverageRecord = {symbol?: string; dataset?: string; interval?: string | null; state?: string; archive_count?: number; first_period?: string | null; last_period?: string | null};
 type StrategyCapability = {
@@ -42,6 +42,10 @@ function App() {
   const [configError, setConfigError] = React.useState("");
   const [configDetails, setConfigDetails] = React.useState<Record<string, unknown> | null>(null);
   const configRequest = React.useRef(0);
+  type PortfolioCandidate = {run_id: string; symbol: string; strategy_timeframe?: string | null; candidate_rows: number; completed_at?: string | null; sampling_mode: string};
+  const [portfolioCandidates, setPortfolioCandidates] = React.useState<PortfolioCandidate[] | null>(null);
+  const [portfolioError, setPortfolioError] = React.useState("");
+  const portfolioRequest = React.useRef(0);
   const [runId, setRunId] = React.useState("");
   const [visualizerRunId, setVisualizerRunId] = React.useState("");
   const [visualizerUrl, setVisualizerUrl] = React.useState("");
@@ -147,11 +151,28 @@ function App() {
     }
   }
 
+  async function loadPortfolioCandidates() {
+    const requestId = ++portfolioRequest.current;
+    setPortfolioError("");
+    setPortfolioCandidates(null);
+    try {
+      const response = await getReadOnly<{candidates: PortfolioCandidate[]}>("/api/v1/portfolio/candidates", token);
+      if (requestId !== portfolioRequest.current) return;
+      if (!Array.isArray(response.candidates)) throw new Error("Invalid portfolio response");
+      setPortfolioCandidates(response.candidates);
+    } catch {
+      if (requestId === portfolioRequest.current) setPortfolioError("Could not load verified completed portfolio candidates");
+    }
+  }
+
   async function connect() {
     // Invalidate in-flight catalog reads before switching local API sessions.
     ++coverageRequest.current;
     ++configRequest.current;
     ++visualizerRequest.current;
+    ++portfolioRequest.current;
+    setPortfolioCandidates(null);
+    setPortfolioError("");
     setVisualizerUrl("");
     setVisualizerError("");
     setConfigSummary(null);
@@ -233,6 +254,21 @@ function App() {
         {configDetails && !Object.prototype.hasOwnProperty.call(configDetails, "execution") &&
           <p>No execution section is present in this validated configuration snapshot.</p>}
         <p>No execution settings can be edited or applied from the browser.</p>
+      </div>}
+      {section === "Portfolio" && connected && <div className="connection">
+        <h3>Eligible finalized portfolio runs (read-only)</h3>
+        <p>Uses verified Every Viable Entry resilience outputs from the configured completed-run folder. Discovery does not replay portfolios, rerun strategies, or modify results.</p>
+        <button type="button" onClick={() => void loadPortfolioCandidates()}>Refresh eligible runs</button>
+        {portfolioError && <p role="alert">{portfolioError}</p>}
+        {portfolioCandidates && portfolioCandidates.length === 0 && <p>No eligible verified completed runs found.</p>}
+        {portfolioCandidates && portfolioCandidates.length > 0 && <table>
+          <thead><tr><th>Run ID</th><th>Symbol</th><th>Timeframe</th><th>Candidates</th><th>Completed</th></tr></thead>
+          <tbody>{portfolioCandidates.map((item, i) => <tr key={item.run_id + "-" + i}>
+            <td>{item.run_id}</td><td>{item.symbol}</td><td>{item.strategy_timeframe || "—"}</td>
+            <td>{item.candidate_rows}</td><td>{item.completed_at || "—"}</td>
+          </tr>)}</tbody>
+        </table>}
+        <p>Portfolio replay and risk settings remain in the existing desktop workspace.</p>
       </div>}
       {section === "Runs & Results" && connected && <div className="connection">
         <label htmlFor="run-id">Completed run folder ID</label>
