@@ -80,7 +80,7 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
         unexpected = sum((actual - expected).values())
         raise ValueError(f"saved-run source provenance mismatch: {missing} missing, {unexpected} unexpected")
     # Compare exact file stat records in addition to the existing identity multiset.
-    expected_stats = Counter(((str(row.dataset),) if full_scope else ()) + (str(row.interval or "none"), str(row.raw_archive_fingerprint), int(row.size_bytes), int(row.mtime_ns))
+    expected_stats = Counter(((str(row.dataset),) if full_scope else ()) + (_interval(row.interval), str(row.raw_archive_fingerprint), int(row.size_bytes), int(row.mtime_ns))
                              for row in subset.itertuples(index=False))
     actual_stats = Counter()
     for label, record in metadata.items():
