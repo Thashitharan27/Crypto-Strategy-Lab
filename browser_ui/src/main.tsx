@@ -5,13 +5,14 @@ import "./style.css";
 
 const sections = ["Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Trade Visualizer"] as const;
 type Section = (typeof sections)[number];
+type CoverageRecord = {symbol?: string; dataset?: string; interval?: string | null; state?: string; archive_count?: number; first_period?: string | null; last_period?: string | null};
 
 function App() {
   const [section, setSection] = React.useState<Section>("Runs & Results");
   const [token, setToken] = React.useState("");
   const [connected, setConnected] = React.useState(false);
   const [symbols, setSymbols] = React.useState<string[]>([]);
-  const [coverage, setCoverage] = React.useState<unknown[] | null>(null);
+  const [coverage, setCoverage] = React.useState<CoverageRecord[] | null>(null);
   const [coverageSymbol, setCoverageSymbol] = React.useState("BTCUSDT");
   const [coverageStart, setCoverageStart] = React.useState("2020-06-01");
   const [coverageEnd, setCoverageEnd] = React.useState("2026-09-01");
@@ -89,8 +90,8 @@ function App() {
     const query = new URLSearchParams({symbol: coverageSymbol, market: "futures_um",
       start: start.toISOString(), end: end.toISOString(), strategy_timeframe: "4h", intrabar_timeframe: "1m"});
     try {
-      const result = await getReadOnly<{coverage: unknown[]}>(`/api/v1/catalog/coverage?${query.toString()}`, token);
-      if (!Array.isArray(result.coverage)) throw new Error("Invalid coverage response");
+      const result = await getReadOnly<{coverage: CoverageRecord[]}>(`/api/v1/catalog/coverage?${query.toString()}`, token);
+      if (!Array.isArray(result.coverage) || result.coverage.some(item => !item || typeof item !== "object" || Array.isArray(item))) throw new Error("Invalid coverage response");
       setCoverage(result.coverage);
     } catch {
       setCoverageError("Coverage unavailable for this symbol or time window");
@@ -155,7 +156,14 @@ function App() {
           <input id="coverage-end" type="date" value={coverageEnd} onChange={e => setCoverageEnd(e.target.value)} />
           <button type="button" onClick={() => void loadCoverage()}>Check coverage (4h / 1m)</button>
           {coverageError && <p role="alert">{coverageError}</p>}
-          {coverage && <p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>}
+          {coverage && <div><p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>
+            <table><caption>Saved catalog coverage (metadata only; not candle integrity)</caption><thead><tr><th>Dataset</th><th>Interval</th><th>Status</th><th>Archives</th><th>First period</th><th>Last period</th></tr></thead>
+              <tbody>{coverage.map((record, index) => <tr key={`${record.dataset ?? "dataset"}-${record.interval ?? "none"}-${index}`}>
+                <td>{record.dataset ?? "Unknown"}</td><td>{record.interval ?? "—"}</td><td>{record.state ?? "Unknown"}</td>
+                <td>{typeof record.archive_count === "number" ? record.archive_count : "—"}</td>
+                <td>{record.first_period ?? "—"}</td><td>{record.last_period ?? "—"}</td>
+              </tr>)}</tbody></table>
+          </div>}
         </div>
       </div> : null}
       {(section === "Strategy Designer" || section === "Trade Visualizer") &&
