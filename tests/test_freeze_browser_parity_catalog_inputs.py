@@ -204,3 +204,26 @@ def test_strategy_source_start_must_not_exclude_requested_history(tmp_path):
             "--start", "2020-06-01T00:00:00Z",
             "--strategy-source-start", "2020-06-02T00:00:00Z",
         ])
+
+
+def test_full_scope_freeze_fails_closed_if_context_archives_missing(tmp_path):
+    raw, cache = tmp_path / "raw", tmp_path / "cache"
+    raw.mkdir()
+    start = datetime(2020, 6, 1, tzinfo=UTC)
+    end = datetime(2020, 7, 1, tzinfo=UTC)
+    records = []
+    for interval in ("4h", "1m"):
+        archive = raw / f"{interval}.zip"
+        archive.write_bytes(interval.encode())
+        records.append(_record(raw, archive, interval, start, end))
+    MarketDataStore(raw, cache).catalog.sync_root(raw, records)
+    dest = tmp_path / "full-source-freeze.json"
+    with pytest.raises(ValueError, match="no existing catalog records"):
+        main([
+            "--raw-root", str(raw), "--cache-root", str(cache),
+            "--manifest-json", str(dest), "--commit-sha", "a" * 40,
+            "--start", "2020-06-01T00:00:00Z",
+            "--end", "2020-07-01T00:00:00Z",
+            "--include-all-saved-datasets",
+        ])
+    assert not dest.exists()
