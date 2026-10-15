@@ -20,7 +20,7 @@ def _interval(value):
 
 
 def _identity(interval, frequency, period_start, period_end, fingerprint):
-    if not all((interval, frequency, period_start, period_end, fingerprint)):
+    if not all((interval, frequency, fingerprint)):
         raise ValueError("missing source identity field")
     try:
         start, end = pd.Timestamp(period_start), pd.Timestamp(period_end)
