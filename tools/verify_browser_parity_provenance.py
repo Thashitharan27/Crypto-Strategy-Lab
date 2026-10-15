@@ -49,7 +49,10 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
     if warmup_start > pd.Timestamp("2020-01-01T00:00:00Z"):
         raise ValueError("frozen manifest omits original strategy warmup sources")
     metadata = selection["catalog_records"]
-    full_scope = selection.get("source_scope") == "all_saved_datasets"
+    scope = selection.get("source_scope", "execution_klines_only")
+    if scope not in ("execution_klines_only", "all_saved_datasets"):
+        raise ValueError(f"unsupported source scope: {scope}")
+    full_scope = scope == "all_saved_datasets"
     if len(metadata) != len(freeze["files"]):
         raise ValueError("catalog metadata and hashed file counts disagree")
     actual = Counter()
