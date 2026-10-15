@@ -241,6 +241,16 @@ function App() {
         </div>
       </div> : null}
       {section === "Strategy Designer" && connected && capabilities && <div>
+        <h3>Strategy lifecycle (read-only)</h3>
+        <p>The following stages are intentionally separate. Existing Python engines own evaluation order and trading behavior; this view is guidance, not a new strategy editor.</p>
+        <ol aria-label="Strategy evaluation stages">
+          <li><strong>Setup detection</strong> — choose the existing signal strategy and direction. No trade is entered merely because a setup exists.</li>
+          <li><strong>Candidate selection</strong> — assess structure quality and candidate eligibility, including Fibonacci-specific selection. Selection is distinct from filtering a trade after a signal.</li>
+          <li><strong>Entry trigger and confirmation</strong> — apply the configured confirmation and entry scheduling. Actual intrabar fills remain owned by the Python execution engine.</li>
+          <li><strong>Entry / Veto / Flip policy</strong> — evaluate existing rule groups after the candidate stage; these do not redefine structural quality.</li>
+          <li><strong>Risk &amp; execution</strong> — retain existing stops, targets, position sizing, cost and exit behavior. Editing remains in the desktop application.</li>
+        </ol>
+        <p role="note">This browser preview does not edit, save or execute a strategy. Rule IDs below come from the existing CSL registry.</p>
         <h3>Authoritative strategy capabilities</h3>
         <p>Read from the existing CSL rule workspace. This browser view does not define or edit strategy semantics.</p>
         <p>Rule grouping: conditions inside a group = {capabilities.strategy.rule_group_model.conditions_inside_group}; groups inside a family = {capabilities.strategy.rule_group_model.groups_inside_family}.</p>
