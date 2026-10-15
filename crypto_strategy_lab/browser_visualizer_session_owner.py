@@ -7,13 +7,11 @@ from __future__ import annotations
 
 from threading import RLock
 
-from crypto_strategy_lab.strategy_visualizer_browser import StrategyVisualizerBrowserServer
-
 
 class BrowserVisualizerSessionOwner:
     """Own at most one browser chart session and stop it on replacement."""
 
-    def __init__(self, server_factory=StrategyVisualizerBrowserServer):
+    def __init__(self, server_factory=None):
         self._factory = server_factory
         self._lock = RLock()
         self._server = None
@@ -22,7 +20,11 @@ class BrowserVisualizerSessionOwner:
         """Explicit caller-only session replacement; failure leaves none active."""
         with self._lock:
             self._stop_locked()
-            server = self._factory(model)
+            if self._factory is None:
+                from crypto_strategy_lab.strategy_visualizer_browser import StrategyVisualizerBrowserServer
+                server = StrategyVisualizerBrowserServer(model)
+            else:
+                server = self._factory(model)
             try:
                 url = server.start()
             except BaseException:

@@ -6,14 +6,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
-
 
 def load_browser_visualizer(
     application_service,
     completed_run_root: str | Path,
     run_id: str,
-) -> CompletedRunVisualizer:
+) -> object:
     """Load one verified run through the canonical desktop visualizer path.
 
     Input is a run *identifier*, never an arbitrary client filesystem path.
@@ -38,4 +36,5 @@ def load_browser_visualizer(
 
     # Preserve the same authority used by the desktop launcher.
     manifest, _summary = application_service.completed_runs.read(resolved)
+    from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
     return CompletedRunVisualizer.load(application_service, resolved, manifest)

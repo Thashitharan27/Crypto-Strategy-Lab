@@ -15,7 +15,7 @@ def test_browser_visualizer_reuses_verified_completed_run_and_model(tmp_path):
     model = Mock()
 
     with patch(
-        "crypto_strategy_lab.browser_visualizer_adapter.CompletedRunVisualizer.load",
+        "crypto_strategy_lab.strategy_visualizer.CompletedRunVisualizer.load",
         return_value=model,
     ) as load:
         result = load_browser_visualizer(service, tmp_path, run_id)
@@ -63,7 +63,7 @@ def test_browser_visualizer_rejects_invalid_manifest_without_loading_model(tmp_p
     service = Mock()
     service.completed_runs.read.side_effect = ValueError("Unverified artifact")
     with patch(
-        "crypto_strategy_lab.browser_visualizer_adapter.CompletedRunVisualizer.load"
+        "crypto_strategy_lab.strategy_visualizer.CompletedRunVisualizer.load"
     ) as load:
         with pytest.raises(ValueError, match="Unverified artifact"):
             load_browser_visualizer(service, tmp_path, "BTCUSDT_4h")

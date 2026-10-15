@@ -1,6 +1,6 @@
 from pathlib import Path
 import sys
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import pytest
 
@@ -59,6 +59,7 @@ def test_launcher_composes_existing_read_service_and_http_app(tmp_path):
         completed_run_root=output_root,
         config_root=config_root,
         static_root=static_root,
+        visualizer_coordinator=ANY,
     )
     assert runtime.app is app
     assert runtime.host == "127.0.0.1"
