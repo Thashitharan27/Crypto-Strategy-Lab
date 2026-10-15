@@ -188,3 +188,14 @@ def test_launcher_real_app_serves_static_and_authorized_read_only_api(tmp_path):
         ).status_code == 403
 
     service.symbols.assert_called_once_with("futures_um")
+
+
+def test_default_completed_run_root_matches_canonical_desktop_reporting(tmp_path):
+    from crypto_strategy_lab.paths import OUTPUT_DIR
+    with (
+        patch("crypto_strategy_lab.browser_launcher.build_browser_readonly_service", return_value=Mock()),
+        patch("crypto_strategy_lab.browser_launcher.create_browser_app", return_value=Mock()) as factory,
+    ):
+        runtime = build_browser_readonly_runtime(environ={}, token="d" * 48, static_root=tmp_path)
+    assert runtime.output_root == (OUTPUT_DIR / "data_lake_v2").resolve()
+    assert factory.call_args.kwargs["completed_run_root"] == OUTPUT_DIR / "data_lake_v2"
