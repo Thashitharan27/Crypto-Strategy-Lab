@@ -1,6 +1,6 @@
 # Browser migration: historical trade-parity evidence gate
 
-**Status:** incomplete. This is a verification checklist, not a parity certificate or authorization to turn on browser-controlled execution.
+**Status:** historical engine replay certified PASS on 2026-10-15. See `docs/browser_historical_replay_certification_2026-10-15.md`. This still does **not** authorize browser-controlled execution.
 
 ## Candidate frozen run
 
@@ -18,21 +18,17 @@
 - 4h kline source signature: `d1f459840ec70ad205e61af6c3a4cbf4d5414d8ebbf7bc9f7149bfa4b056d146` (102 partitions)
 - Saved configuration schema: v3, including 1m intrabar ERROR-on-missing policy
 
-These values identify existing evidence; they **do not** demonstrate reproduction on the migrated browser stack.
+These values identify the frozen baseline. The existing CSL engine replay has now reproduced the source inventory, prepared frame, provider identities and native trades as recorded in `docs/browser_historical_replay_certification_2026-10-15.md`. No browser execution path was used or enabled.
 
-## Required checks before parity can be certified
+## Completed certification checks
 
-1. Recover the complete frozen manifest, original strategy configuration and referenced market-data inputs, including all 1m intrabar history and their integrity digests. Record missing inputs explicitly; no synthetic replacements.
-2. Verify the archived outputs against the manifest's exact SHA-256 values using an existing completed-run reader / parity adapter; do not add a second trade parser.
-3. Replay on a separate output root under the pinned source/data/config/fee/slippage assumptions. The React frontend must not alter engine settings, indicator semantics or execution order.
-4. Compare **trade by trade** with the existing native comparison tooling: entries, exits, timestamps, side, quantity, fees, P&L, stops, take profits, exit reason and 1m fill source. Compare aggregate totals only after all rows match.
-5. Record every discrepancy by trade ID, identify whether the source is missing data, configuration drift, nondeterminism or an execution change, and fail closed rather than approving tolerances by eye.
-6. Check saved configuration schema backward compatibility and ensure current desktop/app output remains usable. Include Windows smoke, Python safety and isolated React build.
-7. Attach machine-readable diff, exact revisions and input/output hashes to the certification report; require an explicit **PASS** from the existing parity tooling.
+The seven checks previously listed here were completed on 2026-10-15. The exact replay run/revision, source-freeze path, configuration hashes, trade fingerprint, prepared-cache identities, exact comparison dimensions and retained comparator paths are recorded in `docs/browser_historical_replay_certification_2026-10-15.md` and `docs/certification/browser_historical_replay_2026-10-15.json`.
+
+The prepared dataframe was verified by exact row/column/cell comparison rather than by a separately computed dataframe content hash; the certificate records that fact explicitly instead of inventing a hash. Persisted original report artifacts retain their SHA-256 values, and the exact native trade comparison has a deterministic original/replay trade fingerprint. Any future renewal must fail closed on a discrepancy.
 
 ## Execution gating
 
-Until the above is complete, the browser stays strictly read-only. No run creation, trading or configuration writes. PR #501 remains on hold due to its limit-execution overlap. Never deploy changes to the live DMI bot as part of this milestone.
+The historical engine replay gate is complete, but the browser stays strictly read-only until the later guarded-write/browser-execution phases are separately certified. No run creation, trading or configuration writes are authorized by this certificate. PR #501 remains on hold due to its limit-execution overlap. Never deploy changes to the live DMI bot as part of this milestone.
 
 
 ## Native BTCUSDT report-schema audit (read-only)
@@ -63,11 +59,10 @@ trade comparison must fail closed. Pair/leg and partial-exit comparisons
 must use the existing native schema probe and trade adapters, not a
 parallel parser.
 
-This audit identifies schema evidence only, **not** actual data-file
-digest verification, engine replay, or trade parity.
+This schema audit was an intermediate pre-certification step. By itself it did **not** establish data-file integrity, engine replay or trade parity; those later checks are recorded in the 2026-10-15 replay certificate.
 
 
-## Full saved source-provenance scan (metadata only)
+## Pre-certification saved source-provenance scan (historical record)
 
 An exhaustive read of `provenance/source_archives.parquet` in run
 `BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f` returned all **2,956**
@@ -84,19 +79,12 @@ partition structure, not necessarily duplicate candles; the raw records
 must be independently de-duplicated and validated before replay.
 IMPORTANT: `raw_archive_fingerprint` comes from the existing
 `data.cache.stat_fingerprint`: SHA-256 of the resolved **local path, size,
-and mtime_ns** string, not a digest of archive contents. Therefore even
-a matching source fingerprint is only metadata equivalence and cannot
-prove byte-identical market data. No raw source file was accessed here. No local archive file was opened or hashed in this scan.
+and mtime_ns** string, not a digest of archive contents. Therefore this metadata scan alone could not prove byte-identical market data.
 
-**Next blocking check:** identify and open the 97 actual local source
-archives under a server-owned data root, verify each file against the recorded stat fingerprint and expected
-size where the original path is known; additionally compute and freeze
-real content hashes (using existing `parity_fixture_manifest.file_fingerprint`)
-from the actual archive bytes. Confirm timestamp/candle coverage and
-overlap handling, then freeze the complete 1m/4h inputs before replay. Do not substitute newly downloaded candles for missing archives.
+**Completion record (2026-10-15):** the later operator-local freeze used `--include-all-saved-datasets`, selected all **2,956** saved source records (including **2,757** context records), hashed the actual local archive bytes under the existing freeze contract, and retained the manifest as `parity_verification/btc79-source-freeze.json`. The subsequent provenance comparison matched all 2,956 source records. No replacement candles were substituted.
 
 
-## Offline file-content freeze procedure (operator-owned local data)
+## Offline file-content freeze procedure used for certification
 
 The completed-run connector exposes `provenance/source_archives.parquet`,
 but **does not expose the raw Binance ZIP inputs**. Do not infer local
@@ -125,17 +113,10 @@ manifest = frozen_fixture_manifest(
 verify_frozen_fixture_files(manifest["files"], files)
 ```
 
-This is an API usage example, **not** an executed verification. An
-operator must include the complete, provenance-matched source set, use
-the true paths, persist the manifest to a separate immutable artifact,
-and confirm 1m coverage, duplicate handling and configured policies.
-Any missing archive, mismatched content, unexpected partition, or
-unknown mapping blocks replay certification. The pinned Git SHA
-describes the archived run; it must not be mistaken for a check that
-the source code checkout is currently at that revision.
+The snippet above remains an illustrative API example. The actual certification used the catalog-backed freeze/verification tools rather than hand-maintained path labels. Its retained operator-local manifest is `parity_verification/btc79-source-freeze.json`, covering all 2,956 saved inputs. Any future missing archive, mismatched content, unexpected partition, or unknown mapping still blocks renewal. The pinned Git SHA describes the archived run and is distinct from the replay revision recorded in the certificate.
 
 
-## Complete saved-run source inventory: outstanding dataset-scope check
+## Complete saved-run source inventory: dataset-scope check completed
 
 A fresh full read of the original `run_manifest.json` catalog and all 2,956 rows of `provenance/source_archives.parquet` confirms the following saved-run inputs, **not just** the 4h/1m strategy/execution candle archives:
 
@@ -152,11 +133,9 @@ A fresh full read of the original `run_manifest.json` catalog and all 2,956 rows
 | metrics / n/a | 2,191 |
 | **Total** | **2,956** |
 
-By default, `freeze_browser_parity_catalog_inputs.py` and `verify_browser_parity_provenance.py` verify **only the 199 4h/1m kline archive records**. Default-mode success must **never be interpreted as verification of the full 2,956-record original source set**. With the explicit `--include-all-saved-datasets` freeze option and the subsequent saved-provenance cross-check, the tools can verify **all 2,956 original source metadata identities** and hash their actual local archive bytes. This does **not** by itself certify prepared features, candle data, or 79-trade replay parity. Before replay certification, inspect the original run configuration and prepared feature dependencies to classify the other 2,757 source records as required, unused, or conditionally used, and freeze all **required** inputs using the existing catalog and file-hash contracts; do not automatically exclude higher-timeframe/context/funding/metrics datasets. Keep the source-inventory coverage certificate distinct from the trade-parity certificate. If any required source remains unidentified, local or browser replay certification is blocked.
+By default, `freeze_browser_parity_catalog_inputs.py` and `verify_browser_parity_provenance.py` verify **only the 199 4h/1m kline archive records**. Default-mode success must **never be interpreted as verification of the full 2,956-record original source set**. For this certification the explicit `--include-all-saved-datasets` path was used: all **2,956** original saved source identities were selected and their actual local archive bytes were covered by the freeze contract. The later prepared-frame comparison then matched all **14,610 × 464** values exactly, which independently verifies the effective prepared feature result for the replay. Source-inventory coverage and trade parity remain separate evidence classes in the certificate.
 
 
 ### Confirmed original feature dependencies (from saved run manifest)
 
-The original `run_manifest.json` feature-provider provenance explicitly lists `basis_context` using `klines`, `mark_price_klines` and `index_price_klines`; `funding_context` using `klines` and `funding_rate`; `futures_positioning` using `klines` and `metrics`; and `taker_flow_context` using `klines` (its provider parameter specifies `5m`). Other saved feature providers include core directional, 1D Ichimoku, support/resistance, and daily state transitions. This is evidence that the baseline **prepared feature set** referenced several non-4h/1m datasets; it is not yet proof that every provider changed one of the 79 trade outcomes.
-
-Classify dependency relevance using the pinned configuration and original feature-provider graph before reducing the freeze scope. Preserve existing feature caches and canonical loader behavior. If verifying the exact original prepared frame, include every archive required to reproduce it, even if a particular execution rule would not directly use every feature.
+The original `run_manifest.json` feature-provider provenance explicitly lists `basis_context` using `klines`, `mark_price_klines` and `index_price_klines`; `funding_context` using `klines` and `funding_rate`; `futures_positioning` using `klines` and `metrics`; and `taker_flow_context` using `klines` (its provider parameter specifies `5m`). Other saved feature providers include core directional, 1D Ichimoku, support/resistance, and daily state transitions. This established that the baseline **prepared feature set** referenced several non-4h/1m datasets. The certification therefore did not reduce the freeze scope: it used the full saved source inventory. The replay subsequently matched all 12 feature-provider identities, all 14,610 × 464 prepared values and all 79 × 877 native trade values exactly.

@@ -1,0 +1,88 @@
+{
+  "certification_version": 1,
+  "certification_date": "2026-10-15",
+  "status": "PASS",
+  "scope": "existing CSL engine historical replay; does not authorize browser execution",
+  "original": {
+    "run_id": "BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f",
+    "code_revision": "1ad8a2161877260d9f1d790f583a82e065f8730e",
+    "trade_csv_sha256": "14d0577968a9ee50916aa9b4d2431cec238812f5bc290f9b315531ff541eacbe",
+    "trade_parquet_sha256": "736c1673a468501ae42b25e4afdf036dfa8eb8b9c2449406341d3511258202f2",
+    "summary_sha256": "42d6a72dd14ebc7f07cb4a19bcc1a600c3f897019d9d5a8abcadc371d32948a9",
+    "prepared_cache_identity": "d4d7338ecf880e9e47385cd8eac01265aa3b69235eb9100ebb73523f454337d5",
+    "config_hashes": {
+      "strategy": "90ab9c0e19b0be2e5b16bf25750a44b10a5e39d633af02ea0bcf444b1c3d9187",
+      "data": "142277ae839bee3413470fda14a24eb565b2e9cfc65784159d255d09b327629d",
+      "execution": "c6a2434728ee6be91dc2c70308e4451c7875f86b18784c8a770ef9562c139a59",
+      "feature": "cd903c010da0694003100010e6c2dc18891ef74d4d88019ef1939fb728c65c2f"
+    }
+  },
+  "replay": {
+    "run_id": "BTCUSDT_4h_11564c0a851e446fa2afeb3aa628a612",
+    "output_path": "parity_verification/replay_outputs/btc79_current_main/BTCUSDT_4h_11564c0a851e446fa2afeb3aa628a612",
+    "engine_revision": "3a4b3cf489a0d0ccf5b2416c928a5f580df78153",
+    "later_provenance_verifier_revision": "62bf3157f92ed64d0b2e430be2ddbc23c63b745d",
+    "result_json": "parity_verification/btc79-replay-result.json",
+    "prepared_cache_identity": "7b2c962a3b8ba5d636363a62a7b3fd7644ad1c988b5f6f457dac289b1e648c88",
+    "config_hashes": {
+      "strategy": "90ab9c0e19b0be2e5b16bf25750a44b10a5e39d633af02ea0bcf444b1c3d9187",
+      "data": "142277ae839bee3413470fda14a24eb565b2e9cfc65784159d255d09b327629d",
+      "execution": "c6a2434728ee6be91dc2c70308e4451c7875f86b18784c8a770ef9562c139a59",
+      "feature": "49aa0e4fc94670169e3fac82b4fb14e2ef6a7da5950c53a0c77b3f61ed992872"
+    }
+  },
+  "source_provenance": {
+    "freeze_manifest": "parity_verification/btc79-source-freeze.json",
+    "selected_records": 2956,
+    "context_records": 2757,
+    "identity_matches": 2956,
+    "verification": "full saved-dataset scope; archive content hashes retained in operator-local freeze manifest"
+  },
+  "comparisons": {
+    "prepared_frame": {
+      "script": "parity_verification/compare_prepared_frames.py",
+      "rows_original": 14610,
+      "rows_replay": 14610,
+      "columns_original": 464,
+      "columns_replay": 464,
+      "columns_only_original": [],
+      "columns_only_replay": [],
+      "result": "EXACT PREPARED-FRAME MATCH",
+      "content_hash": null,
+      "note": "A separate dataframe content-hash command was not run; certification used exact row/column/cell equality."
+    },
+    "native_trades": {
+      "script": "parity_verification/compare_native_trades.py",
+      "rows_original": 79,
+      "rows_replay": 79,
+      "columns_original": 877,
+      "columns_replay": 877,
+      "result": "EXACT NATIVE-TRADE MATCH",
+      "trade_fingerprint_original": "b02ff222d0337b3ddf950fd23372a92d81320704ea032805a121c47b71ddf94c",
+      "trade_fingerprint_replay": "b02ff222d0337b3ddf950fd23372a92d81320704ea032805a121c47b71ddf94c"
+    },
+    "feature_providers": {
+      "count_original": 12,
+      "count_replay": 12,
+      "identities_matched": 12
+    },
+    "config_hash_classification": {
+      "strategy": "MATCH",
+      "data": "MATCH",
+      "execution": "MATCH",
+      "feature": "EXPECTED_DIFFERENCE_ONLY",
+      "feature_difference": "current config adds fib_structure_quality_mode=\"BASELINE\" default"
+    }
+  },
+  "helper_scripts": [
+    "parity_verification/compare_prepared_frames.py",
+    "parity_verification/compare_native_trades.py",
+    "parity_verification/diagnose_trade_schema.py",
+    "parity_verification/inspect_replay_config.py",
+    "parity_verification/diagnose_provenance.py",
+    "parity_verification/diagnose_context.py",
+    "parity_verification/diagnose_1h.py"
+  ],
+  "browser_execution_authorized": false,
+  "pr_501_hold": true
+}
