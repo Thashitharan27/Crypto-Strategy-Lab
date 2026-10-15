@@ -206,3 +206,18 @@ def test_saved_archive_source_rejects_invalid_periods(field, value, error):
     saved.at[0, field] = value
     with pytest.raises(ValueError, match=error):
         verify_source_provenance(frozen, saved)
+
+
+@pytest.mark.parametrize("invalid", [None, "", "not-a-hash", "A" * 64, "c" * 63, 42, {}])
+def test_provenance_rejects_missing_or_malformed_frozen_sha256(invalid):
+    frozen, saved = _inputs()
+    frozen["files"]["BTCUSDT_4h_0001_monthly"]["sha256"] = invalid
+    with pytest.raises(ValueError, match="invalid frozen source SHA-256 metadata"):
+        verify_source_provenance(frozen, saved)
+
+
+def test_provenance_rejects_frozen_file_entry_without_hash():
+    frozen, saved = _inputs()
+    frozen["files"]["BTCUSDT_4h_0001_monthly"] = {"bytes": 12}
+    with pytest.raises(ValueError, match="invalid frozen source SHA-256 metadata"):
+        verify_source_provenance(frozen, saved)
