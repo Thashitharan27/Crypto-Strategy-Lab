@@ -20,3 +20,6 @@ config/data_lake/*.json
 
 # Atomic Binance downloads can leave a temporary file if the desktop process is terminated.
 data/.*.tmp
+
+# Operator-local browser/data parity evidence; may contain run payloads and local provenance.
+parity_verification/
