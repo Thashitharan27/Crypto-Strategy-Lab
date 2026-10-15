@@ -79,7 +79,7 @@ function App() {
       setCoverageError("Select a valid symbol");
       return;
     }
-    const validDate = (value: string) => /^\\d{4}-\\d{2}-\\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
+    const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
     if (!validDate(coverageStart) || !validDate(coverageEnd) || coverageStart >= coverageEnd) {
       setCoverageError("Select valid dates with the start before the end");
       return;
