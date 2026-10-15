@@ -223,12 +223,13 @@ function App() {
       </div>}
       {section === "Research Features" && connected && capabilities && <div>
         <h3>Production feature registry</h3>
-        <p>{capabilities.features.length} registered feature providers. Metadata is projected from the existing production registry; calculations remain in Python.</p>
-        <table><caption>Authoritative feature providers</caption><thead><tr><th>Feature</th><th>Version</th><th>Required data</th><th>Dependencies</th><th>Warmup</th></tr></thead>
+        <p>{capabilities.features.length} registered feature providers. Metadata is projected from the existing production registry; calculations remain in Python. Declared datasets below are not exhaustive: some providers also require auxiliary resources resolved by the existing data layer.</p>
+        <table><caption>Authoritative feature providers</caption><thead><tr><th>Feature</th><th>Version</th><th>Declared datasets*</th><th>Dependencies</th><th>Warmup</th></tr></thead>
           <tbody>{capabilities.features.map(item => <tr key={item.name}>
-            <td><code>{item.name}</code></td><td>{item.version}</td><td>{item.required_datasets.join(", ") || "None"}{item.optional_datasets.length ? ` · optional: ${item.optional_datasets.join(", ")}` : ""}</td><td>{item.required_features.join(", ") || "None"}</td><td>{item.warmup_bars} bars</td>
+            <td><code>{item.name}</code></td><td>{item.version}</td><td>{item.required_datasets.join(", ") || "None declared"}{item.optional_datasets.length ? ` · optional: ${item.optional_datasets.join(", ")}` : ""}</td><td>{item.required_features.join(", ") || "None"}</td><td>{item.warmup_bars} bars</td>
           </tr>)}</tbody>
         </table>
+        <p>* DatasetKind declarations only. Auxiliary data resources such as taker-flow and trade-flow inputs are not enumerated here; consult the existing provider and data-layer requirements before executing research.</p>
       </div>}
       {section === "Trade Visualizer" &&
         <p>This section is being migrated. The existing Python visualizer and completed-run data remain authoritative.</p>}
