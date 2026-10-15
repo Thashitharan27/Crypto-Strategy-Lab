@@ -6,6 +6,7 @@ Status: design proposal, **not** an HTTP server or authorization to enable tradi
 Build the future HTTP adapter against `BrowserReadOnlyService` (PR #514) and its existing catalog, verified completed-run reader and validated configuration loader. Do not create parallel manifest, strategy, or configuration parsers. Existing run and GUI formats remain authoritative.
 
 ## Proposed read-only endpoints
+- `GET /api/v1/capabilities`: read-only authoritative strategy/rule and production feature-registry metadata.
 - `GET /api/v1/health`: application version and status only, no filesystem paths or secrets.
 - `GET /api/v1/catalog/symbols?market=futures_um`: existing catalog symbols.
 - `GET /api/v1/catalog/coverage`: validated request routed to existing catalog coverage logic.
