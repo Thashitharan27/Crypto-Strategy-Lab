@@ -99,3 +99,63 @@ def test_catalog_backed_freeze_fails_when_source_changed_since_catalog(tmp_path)
             "--start", "2020-06-01T00:00:00Z",
             "--end", "2020-07-01T00:00:00Z",
         ])
+
+
+@pytest.mark.parametrize("first_start, first_end, second_start, second_end", [
+    ("2020-06-02", "2020-06-15", "2020-06-15", "2020-07-01"),
+    ("2020-06-01", "2020-06-10", "2020-06-11", "2020-07-01"),
+    ("2020-06-01", "2020-06-15", "2020-06-14", "2020-06-30"),
+])
+def test_catalog_freeze_rejects_boundary_and_internal_gaps(
+    tmp_path, first_start, first_end, second_start, second_end,
+):
+    raw, cache = tmp_path / "raw", tmp_path / "cache"
+    raw.mkdir()
+    records = []
+    for interval in ("1m", "4h"):
+        for index, (start, end) in enumerate((
+            (first_start, first_end), (second_start, second_end)
+        )):
+            archive = raw / f"{interval}-{index}.zip"
+            archive.write_bytes(f"{interval}-{index}".encode())
+            records.append(_record(
+                raw, archive, interval,
+                datetime.fromisoformat(start).replace(tzinfo=UTC),
+                datetime.fromisoformat(end).replace(tzinfo=UTC),
+            ))
+    MarketDataStore(raw, cache).catalog.sync_root(raw, records)
+    dest = tmp_path / "freeze.json"
+    with pytest.raises(ValueError, match="catalog coverage gap"):
+        main([
+            "--raw-root", str(raw), "--cache-root", str(cache),
+            "--manifest-json", str(dest), "--commit-sha", "a" * 40,
+            "--start", "2020-06-01T00:00:00Z",
+            "--end", "2020-07-01T00:00:00Z",
+        ])
+    assert not dest.exists()
+
+
+def test_catalog_freeze_allows_overlapping_source_periods(tmp_path):
+    raw, cache = tmp_path / "raw", tmp_path / "cache"
+    raw.mkdir()
+    records = []
+    for interval in ("1m", "4h"):
+        for index, (start, end) in enumerate((
+            ("2020-06-01", "2020-06-20"), ("2020-06-15", "2020-07-01")
+        )):
+            archive = raw / f"{interval}-{index}.zip"
+            archive.write_bytes(f"{interval}-{index}".encode())
+            records.append(_record(
+                raw, archive, interval,
+                datetime.fromisoformat(start).replace(tzinfo=UTC),
+                datetime.fromisoformat(end).replace(tzinfo=UTC),
+            ))
+    MarketDataStore(raw, cache).catalog.sync_root(raw, records)
+    dest = tmp_path / "freeze.json"
+    assert main([
+        "--raw-root", str(raw), "--cache-root", str(cache),
+        "--manifest-json", str(dest), "--commit-sha", "a" * 40,
+        "--start", "2020-06-01T00:00:00Z",
+        "--end", "2020-07-01T00:00:00Z",
+    ]) == 0
+    assert len(json.loads(dest.read_text())["files"]) == 4
