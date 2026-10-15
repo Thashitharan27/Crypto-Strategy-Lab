@@ -1,1 +1,54 @@
-"""Composition-only read service for the future localhost browser API.\n\nAll operations delegate to pre-existing validated, read-only boundaries.\nNo research execution, filesystem writes, or catalog refresh are exposed.\n"""\nfrom pathlib import Path\n\nfrom crypto_strategy_lab.browser_catalog import catalog_coverage, catalog_symbols\nfrom crypto_strategy_lab.browser_completed_runs import read_completed_run\nfrom crypto_strategy_lab.browser_config import read_research_config\nfrom crypto_strategy_lab.gui.v2_controller import (\n    CatalogStatusService,\n    GuiApplicationService,\n    GuiResearchRequest,\n)\nfrom crypto_strategy_lab.paths import resolve_data_lake_runtime_paths\n\n\nclass BrowserReadOnlyService:\n    def __init__(self, catalog: CatalogStatusService):\n        self._catalog = catalog\n\n    def symbols(self, market="futures_um") -> list[str]:\n        return catalog_symbols(self._catalog, market)\n\n    def coverage(self, request: GuiResearchRequest) -> list[dict]:\n        return catalog_coverage(self._catalog, request)\n\n    def completed_run(self, run_dir: str | Path) -> dict:\n        return read_completed_run(run_dir)\n\n    def research_config(self, path: str | Path) -> dict:\n        return read_research_config(path)\n\n\ndef build_browser_readonly_service(\n    *,\n    raw_root: str | Path | None = None,\n    cache_root: str | Path | None = None,\n) -> BrowserReadOnlyService:\n    """Compose the browser facade from the existing desktop application service.\n\n    Browser migration must not construct a second catalog, loader or cache\n    implementation. This helper resolves the same Data Lake roots as the desktop\n    process, instantiates the existing GuiApplicationService, and exposes only\n    its read-only catalog facade.\n    """\n\n    paths = resolve_data_lake_runtime_paths()\n    application = GuiApplicationService(\n        Path(raw_root) if raw_root is not None else paths.raw_root,\n        Path(cache_root) if cache_root is not None else paths.cache_root,\n    )\n    return BrowserReadOnlyService(application.catalog)\n
+"""Composition-only read service for the future localhost browser API.
+
+All operations delegate to pre-existing validated, read-only boundaries.
+No research execution, filesystem writes, or catalog refresh are exposed.
+"""
+from pathlib import Path
+
+from crypto_strategy_lab.browser_catalog import catalog_coverage, catalog_symbols
+from crypto_strategy_lab.browser_completed_runs import read_completed_run
+from crypto_strategy_lab.browser_config import read_research_config
+from crypto_strategy_lab.gui.v2_controller import (
+    CatalogStatusService,
+    GuiApplicationService,
+    GuiResearchRequest,
+)
+from crypto_strategy_lab.paths import resolve_data_lake_runtime_paths
+
+
+class BrowserReadOnlyService:
+    def __init__(self, catalog: CatalogStatusService):
+        self._catalog = catalog
+
+    def symbols(self, market="futures_um") -> list[str]:
+        return catalog_symbols(self._catalog, market)
+
+    def coverage(self, request: GuiResearchRequest) -> list[dict]:
+        return catalog_coverage(self._catalog, request)
+
+    def completed_run(self, run_dir: str | Path) -> dict:
+        return read_completed_run(run_dir)
+
+    def research_config(self, path: str | Path) -> dict:
+        return read_research_config(path)
+
+
+def build_browser_readonly_service(
+    *,
+    raw_root: str | Path | None = None,
+    cache_root: str | Path | None = None,
+) -> BrowserReadOnlyService:
+    """Compose the browser facade from the existing desktop application service.
+
+    Browser migration must not construct a second catalog, loader or cache
+    implementation. This helper resolves the same Data Lake roots as the desktop
+    process, instantiates the existing GuiApplicationService, and exposes only
+    its read-only catalog facade.
+    """
+
+    paths = resolve_data_lake_runtime_paths()
+    application = GuiApplicationService(
+        Path(raw_root) if raw_root is not None else paths.raw_root,
+        Path(cache_root) if cache_root is not None else paths.cache_root,
+    )
+    return BrowserReadOnlyService(application.catalog)
