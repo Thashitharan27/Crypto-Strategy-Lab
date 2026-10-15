@@ -91,7 +91,7 @@ def main(argv=None) -> int:
     parser.add_argument("--start", default="2020-06-01T00:00:00Z")
     parser.add_argument("--end", default="2026-09-01T00:00:00Z")
     parser.add_argument("--strategy-source-start", help="Optional earlier 4h warmup source start (UTC); defaults to requested start")
-    parser.add_argument("--context-source-start", help="Earlier source start for 1h/5m and 4h price-context archives (UTC); defaults to trading start")
+    parser.add_argument("--context-source-start", help="Earlier source start for 1h/5m, 4h price-context and funding archives (UTC); defaults to trading start")
     parser.add_argument("--strategy-interval", default="4h")
     parser.add_argument("--intrabar-interval", default="1m")
     parser.add_argument("--include-all-saved-datasets", action="store_true", help="Also freeze every dataset/interval in the original 2,956-source inventory")
@@ -169,7 +169,7 @@ def main(argv=None) -> int:
         }
         for dataset, interval in groups:
             matched_files, matched_meta = _catalog_files(
-                store, (request if dataset in (DatasetKind.FUNDING_RATE, DatasetKind.FUTURES_METRICS) else context_request), interval, dataset,
+                store, (request if dataset == DatasetKind.FUTURES_METRICS else context_request), interval, dataset,
                 require_continuous_coverage=(dataset != DatasetKind.FUTURES_METRICS),
             )
             expected_count = expected_group_counts[(dataset, interval)]
