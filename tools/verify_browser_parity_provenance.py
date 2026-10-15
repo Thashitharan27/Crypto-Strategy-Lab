@@ -15,6 +15,10 @@ import pandas as pd
 import duckdb
 
 
+def _interval(value):
+    return "none" if pd.isna(value) else str(value)
+
+
 def _identity(interval, frequency, period_start, period_end, fingerprint):
     if not all((interval, frequency, period_start, period_end, fingerprint)):
         raise ValueError("missing source identity field")
@@ -53,7 +57,7 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
         if label not in freeze["files"]:
             raise ValueError(f"unhashed catalog record: {label}")
         interval = record.get("interval") if full_scope else ("4h" if label.startswith("BTCUSDT_4h_") else "1m" if label.startswith("BTCUSDT_1m_") else None)
-        key = _identity(interval or "none", record["frequency"], record["period_start"], record["period_end"], record["catalog_fingerprint"])
+        key = _identity(_interval(interval), record["frequency"], record["period_start"], record["period_end"], record["catalog_fingerprint"])
         actual[((record.get("dataset", "klines"),) + key) if full_scope else key] += 1
 
     required = {"exchange", "market", "dataset", "symbol", "interval", "frequency",
@@ -68,7 +72,7 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
         & (source_rows["symbol"] == "BTCUSDT")
         & ((source_rows["interval"].isin(["4h", "1m"])) if not full_scope else True)
     ]
-    expected = Counter(((row.dataset,) if full_scope else ()) + _identity(row.interval or "none", row.frequency, row.period_start,
+    expected = Counter(((row.dataset,) if full_scope else ()) + _identity(_interval(row.interval), row.frequency, row.period_start,
                                  row.period_end, row.raw_archive_fingerprint)
                        for row in subset.itertuples(index=False))
     if actual != expected:
@@ -80,7 +84,7 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
                              for row in subset.itertuples(index=False))
     actual_stats = Counter()
     for label, record in metadata.items():
-        interval = (record.get("interval") or "none") if full_scope else ("4h" if label.startswith("BTCUSDT_4h_") else "1m")
+        interval = (_interval(record.get("interval"))) if full_scope else ("4h" if label.startswith("BTCUSDT_4h_") else "1m")
         if "size_bytes" not in record or "mtime_ns" not in record:
             raise ValueError(f"frozen catalog stat metadata missing: {label}")
         if not isinstance(record["size_bytes"], int) or not isinstance(record["mtime_ns"], int):
@@ -92,11 +96,16 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
         raise ValueError("saved-run source stat metadata mismatch")
     counts = {interval: sum(n for key, n in actual.items() if key[1 if full_scope else 0] == interval)
               for interval in ("4h", "1m")}
+    if full_scope:
+        counts["4h"] = sum(n for key, n in actual.items() if key[0] == "klines" and key[1] == "4h")
+        counts["1m"] = sum(n for key, n in actual.items() if key[0] == "klines" and key[1] == "1m")
     if counts["4h"] != selection["strategy_record_count"] or counts["1m"] != selection["intrabar_record_count"]:
         raise ValueError("frozen source count mismatch")
     if full_scope:
         if len(subset) != 2956 or len(metadata) != 2956:
             raise ValueError("full saved-run source inventory count mismatch")
+        counts["4h"] = sum(n for key, n in actual.items() if key[0] == "klines" and key[1] == "4h")
+        counts["1m"] = sum(n for key, n in actual.items() if key[0] == "klines" and key[1] == "1m")
         counts["all_saved_sources"] = 2956
     return counts
 
