@@ -10,7 +10,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import secrets
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -730,6 +730,7 @@ class StrategyVisualizerV2BrowserServer:
         self._lock = Lock()
         self._server: _LoopbackHTTPServer | None = None
         self._thread: Thread | None = None
+        self._stop_requested: Event | None = None
 
     @property
     def url(self) -> str:
@@ -762,6 +763,37 @@ class StrategyVisualizerV2BrowserServer:
                 self._send(int(status), _json_bytes(value), "application/json; charset=utf-8")
 
             def do_GET(self):
+                host = self.headers.get("Host", "")
+                origin = self.headers.get("Origin")
+                try:
+                    parsed_host = urlsplit("http://" + host)
+                    port = int(self.server.server_address[1])
+                    safe_host = (
+                        parsed_host.hostname in {"127.0.0.1", "localhost"}
+                        and parsed_host.port == port
+                        and parsed_host.username is None
+                        and parsed_host.password is None
+                        and parsed_host.path == ""
+                        and parsed_host.query == ""
+                        and parsed_host.fragment == ""
+                    )
+                    safe_origin = origin is None or origin in {
+                        f"http://127.0.0.1:{port}", f"http://localhost:{port}"
+                    }
+                    request_path = urlsplit(self.path).path
+                    root = f"/session/{owner.token}"
+                    document = request_path in {root, root + "/", root + "/index.html"}
+                    site = self.headers.get("Sec-Fetch-Site", "same-origin")
+                    safe_fetch = site in {"same-origin", "none"} or (
+                        site == "same-site" and document
+                        and self.headers.get("Sec-Fetch-Mode") == "navigate"
+                        and self.headers.get("Sec-Fetch-Dest") == "document"
+                    )
+                except ValueError:
+                    safe_host = safe_origin = safe_fetch = False
+                if not (safe_host and safe_origin and safe_fetch):
+                    self._json({"error": "forbidden"}, HTTPStatus.FORBIDDEN)
+                    return
                 try:
                     parsed = urlsplit(self.path)
                     prefix = f"/session/{owner.token}"
@@ -790,23 +822,50 @@ class StrategyVisualizerV2BrowserServer:
                 except Exception as exc:  # pragma: no cover
                     self._json({"error":str(exc)}, HTTPStatus.INTERNAL_SERVER_ERROR)
 
-        self._server = _LoopbackHTTPServer(("127.0.0.1",0),Handler)
-        self._thread = Thread(target=self._server.serve_forever,name="strategy-visualizer-v2-browser",daemon=True)
-        self._thread.start()
+        server = _LoopbackHTTPServer(("127.0.0.1", 0), Handler)
+        server.timeout = 0.1
+        self._server = server
+        stopped = Event()
+        self._stop_requested = stopped
+
+        def serve_until_stopped():
+            while not stopped.is_set():
+                server.handle_request()
+
+        try:
+            thread = Thread(target=serve_until_stopped,
+                            name="strategy-visualizer-v2-browser", daemon=True)
+            self._thread = thread
+            thread.start()
+        except BaseException:
+            stopped.set()
+            thread = self._thread
+            if thread is not None:
+                try:
+                    thread.join(timeout=2.0)
+                except RuntimeError:
+                    pass
+            server.server_close()
+            self._server = None
+            self._thread = None
+            raise
         return self.url
 
     def stop(self) -> None:
-        server=self._server
-        thread=self._thread
-        self._server=None
-        self._thread=None
+        server, thread = self._server, self._thread
+        if self._stop_requested is not None:
+            self._stop_requested.set()
+        self._server = None
+        self._thread = None
+        self._stop_requested = None
         if server is None:
             return
-        server.shutdown()
+        if thread is not None:
+            try:
+                thread.join(timeout=2.0)
+            except RuntimeError:
+                pass
         server.server_close()
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=2.0)
-
 
 __all__=[
     "StrategyVisualizerV2BrowserServer",
