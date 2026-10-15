@@ -29,6 +29,9 @@ def _mismatches(left: Any, right: Any, path: str = "$"):
             yield f"{path}: list length {len(left)} != {len(right)}"
         for index, (a, b) in enumerate(zip(left, right)):
             yield from _mismatches(a, b, f"{path}[{index}]")
+    elif (isinstance(left, float) and left == 0.0 and right == 0.0
+          and (str(left).startswith("-") != str(right).startswith("-"))):
+        yield f"{path}: signed zero {left!r} != {right!r}"
     elif left != right:
         yield f"{path}: {left!r} != {right!r}"
 
