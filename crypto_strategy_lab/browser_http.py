@@ -3,8 +3,6 @@
 Never imported by the backtest engine or live bot. Installation of FastAPI is
 optional; application construction exposes no trading or filesystem endpoints.
 """
-from __future__ import annotations
-
 import secrets
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
