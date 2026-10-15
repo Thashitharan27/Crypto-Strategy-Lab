@@ -82,13 +82,15 @@ positive calendar gap between consecutive listed ranges, but it has
 **two overlapping ranges**. Such overlap can represent selected archive
 partition structure, not necessarily duplicate candles; the raw records
 must be independently de-duplicated and validated before replay.
-Neither archive fingerprints in a saved report nor period-range
-metadata demonstrates that the original data files are still available
-or byte-identical. No local archive file was opened or hashed in this scan.
+IMPORTANT: `raw_archive_fingerprint` comes from the existing
+`data.cache.stat_fingerprint`: SHA-256 of the resolved **local path, size,
+and mtime_ns** string, not a digest of archive contents. Therefore even
+a matching source fingerprint is only metadata equivalence and cannot
+prove byte-identical market data. No raw source file was accessed here. No local archive file was opened or hashed in this scan.
 
 **Next blocking check:** identify and open the 97 actual local source
-archives under a server-owned data root, verify each file against the
-recorded raw fingerprint and expected size (after determining the exact
-fingerprint contract), confirm timestamp/candle coverage and overlap
-handling, then freeze the complete 1m/4h input set before a native
-replay. Do not substitute newly downloaded candles for missing archives.
+archives under a server-owned data root, verify each file against the recorded stat fingerprint and expected
+size where the original path is known; additionally compute and freeze
+real content hashes (using existing `parity_fixture_manifest.file_fingerprint`)
+from the actual archive bytes. Confirm timestamp/candle coverage and
+overlap handling, then freeze the complete 1m/4h inputs before replay. Do not substitute newly downloaded candles for missing archives.
