@@ -133,3 +133,23 @@ Any missing archive, mismatched content, unexpected partition, or
 unknown mapping blocks replay certification. The pinned Git SHA
 describes the archived run; it must not be mistaken for a check that
 the source code checkout is currently at that revision.
+
+
+## Complete saved-run source inventory: outstanding dataset-scope check
+
+A fresh full read of the original `run_manifest.json` catalog and all 2,956 rows of `provenance/source_archives.parquet` confirms the following saved-run inputs, **not just** the 4h/1m strategy/execution candle archives:
+
+| Dataset / interval | Original source records |
+| --- | ---: |
+| klines / 4h | 102 |
+| klines / 1m | 97 |
+| klines / 1h | 98 |
+| klines / 5m | 98 |
+| index_price_klines / 4h | 98 |
+| mark_price_klines / 4h | 98 |
+| premium_index_klines / 4h | 98 |
+| funding_rate / n/a | 76 |
+| metrics / n/a | 2,191 |
+| **Total** | **2,956** |
+
+The existing `freeze_browser_parity_catalog_inputs.py` and `verify_browser_parity_provenance.py` intentionally verify **only 199 4h/1m kline archive records**. Their success must **never be interpreted as verification of the full 2,956-record original source set**. Before replay certification, inspect the original run configuration and prepared feature dependencies to classify the other 2,757 source records as required, unused, or conditionally used, and freeze all **required** inputs using the existing catalog and file-hash contracts; do not automatically exclude higher-timeframe/context/funding/metrics datasets. Keep the source-inventory coverage certificate distinct from the trade-parity certificate. If any required source remains unidentified, local or browser replay certification is blocked.
