@@ -40,6 +40,21 @@ def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str):
     )
     if not records:
         raise ValueError(f"no existing catalog records for {request.symbol} {interval}")
+    # Archive-level period metadata must cover the complete requested range.
+    # Overlap is allowed (the canonical loader handles overlapping partitions),
+    # but a gap or unknown bound cannot establish an offline parity fixture.
+    cursor = request.start
+    for record in sorted(records, key=lambda r: (r.period_start or request.end, str(r.path))):
+        if record.period_start is None or record.period_end is None:
+            raise ValueError(f"unknown catalog period for {request.symbol} {interval}")
+        if record.period_end <= record.period_start:
+            raise ValueError(f"invalid catalog period for {request.symbol} {interval}")
+        if record.period_start > cursor:
+            raise ValueError(f"catalog coverage gap for {request.symbol} {interval} at {cursor.isoformat()}")
+        if record.period_end > cursor:
+            cursor = record.period_end
+    if cursor < request.end:
+        raise ValueError(f"catalog coverage gap for {request.symbol} {interval} at {cursor.isoformat()}")
     files: dict[str, Path] = {}
     metadata: dict[str, dict[str, object]] = {}
     for index, record in enumerate(records, start=1):
