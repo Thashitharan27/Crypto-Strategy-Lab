@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getReadOnly, openVerifiedVisualizer, type Health, type Symbols } from "./api";
 import "./style.css";
 
-const sections = ["Setup", "Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Portfolio", "Trade Visualizer"] as const;
+const sections = ["Setup", "Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Portfolio", "Integrations", "Trade Visualizer"] as const;
 type Section = (typeof sections)[number];
 type CoverageRecord = {symbol?: string; dataset?: string; interval?: string | null; state?: string; archive_count?: number; first_period?: string | null; last_period?: string | null};
 type StrategyCapability = {
@@ -254,6 +254,19 @@ function App() {
         {configDetails && !Object.prototype.hasOwnProperty.call(configDetails, "execution") &&
           <p>No execution section is present in this validated configuration snapshot.</p>}
         <p>No execution settings can be edited or applied from the browser.</p>
+      </div>}
+      {section === "Integrations" && connected && <div className="connection">
+        <h3>Integration boundaries (read-only)</h3>
+        <p>This section describes which existing Python services own integration functionality. It does not check whether external accounts are connected or expose credentials.</p>
+        <table><thead><tr><th>Integration</th><th>Existing owner</th><th>Browser boundary</th></tr></thead>
+          <tbody>
+            <tr><td>Market data and Data Lake</td><td>Existing application catalog and cache</td><td>Read-only symbols and coverage</td></tr>
+            <tr><td>Completed runs and Portfolio</td><td>Existing completed-run readers and portfolio discovery</td><td>Verified metadata only; no replay</td></tr>
+            <tr><td>ChatGPT connection</td><td>Desktop credential and connection services</td><td>Managed outside browser; no secret access</td></tr>
+            <tr><td>MCP and automation</td><td>Existing control plane</td><td>No execution or write actions in browser</td></tr>
+          </tbody>
+        </table>
+        <p>Connection health, account authorization and installation status are not inferred here. Setup and credentials remain in their existing services.</p>
       </div>}
       {section === "Portfolio" && connected && <div className="connection">
         <h3>Eligible finalized portfolio runs (read-only)</h3>
