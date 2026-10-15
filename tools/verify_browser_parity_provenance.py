@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import duckdb
 
 
 def _identity(interval, frequency, period_start, period_end, fingerprint):
@@ -66,7 +67,10 @@ def main(argv=None) -> int:
     parser.add_argument("--saved-provenance-parquet", type=Path, required=True)
     args = parser.parse_args(argv)
     freeze = json.loads(args.freeze_json.read_text(encoding="utf-8"))
-    provenance = pd.read_parquet(args.saved_provenance_parquet)
+    with duckdb.connect(":memory:") as connection:
+        provenance = connection.execute(
+            "SELECT * FROM read_parquet(?)", [str(args.saved_provenance_parquet)]
+        ).df()
     counts = verify_source_provenance(freeze, provenance)
     print(f"Saved-run source metadata matches frozen catalog: 4h={counts['4h']}, 1m={counts['1m']}")
     print("This is metadata matching only; byte integrity and trade parity remain separate gates.")
