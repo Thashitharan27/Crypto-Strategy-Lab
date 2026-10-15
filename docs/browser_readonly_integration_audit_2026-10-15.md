@@ -23,7 +23,7 @@ Completed-run and configuration reads delegate to the existing readers:
 
 The audited components do not implement a second market-data store, archive discoverer, prepared-feature builder, strategy evaluator, execution engine, configuration schema, or report parser.
 
-At this revision there is **no verified production entry point** that composes the static React assets, runtime token, localhost server, `create_browser_app`, and `build_browser_readonly_service` into one launched browser application. Therefore this document must not be read as end-to-end runtime certification. Production composition is the next browser-integration gate.
+**Current-state correction (2026-10-15):** `crypto_strategy_lab/browser_launcher.py` now provides `build_browser_readonly_runtime` and `run_browser_readonly`, composing the existing read service, authenticated HTTP adapter, visualizer coordinator, static browser assets and runtime token. `tests/test_browser_launcher.py` covers service composition, configured paths, loopback-only binding and an authorized read-only API/static test. This supersedes the earlier statement that the repository lacks an entry point. **It does not certify end-to-end execution on the user's Windows installation**, representative local saved-run/portfolio behavior, or visual/browser parity; those remain separate operator gates.
 
 ## Data Lake ownership
 
