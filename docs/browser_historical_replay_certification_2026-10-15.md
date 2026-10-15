@@ -5,6 +5,11 @@
 **Original code revision:** `1ad8a2161877260d9f1d790f583a82e065f8730e`  
 **Certification scope:** existing CSL engine/data/output reproducibility only. This does **not** authorize browser-controlled execution.
 
+**Replay run:** `BTCUSDT_4h_11564c0a851e446fa2afeb3aa628a612`  
+**Replay engine revision:** `3a4b3cf489a0d0ccf5b2416c928a5f580df78153`  
+**Provenance verifier revision after hardening:** `62bf3157f92ed64d0b2e430be2ddbc23c63b745d`  
+**Machine-readable certificate:** `docs/certification/browser_historical_replay_2026-10-15.json`
+
 ## Result
 
 **PASS — historical replay reproduced the original baseline exactly at the prepared-feature and native-trade levels.**
@@ -30,6 +35,9 @@ The replay used the existing CSL engine and existing canonical Data Lake/cache p
 | Execution configuration identity | exact match |
 | Feature configuration identity | differs only by current default `fib_structure_quality_mode="BASELINE"` |
 | Effective feature/trade behavior | exact prepared-frame and native-trade match |
+| Original prepared-cache identity | `d4d7338ecf880e9e47385cd8eac01265aa3b69235eb9100ebb73523f454337d5` |
+| Replay prepared-cache identity | `7b2c962a3b8ba5d636363a62a7b3fd7644ad1c988b5f6f457dac289b1e648c88` |
+| Original/replay trade fingerprint | `b02ff222d0337b3ddf950fd23372a92d81320704ea032805a121c47b71ddf94c` |
 
 The feature-config hash difference is an explicitly classified backward-compatible default addition. It is not accepted by tolerance or visual inspection: the replay still produced an exact prepared frame and exact native trade frame, which proves the added default did not change this baseline's effective feature values or executions.
 
@@ -46,7 +54,7 @@ The source identity verifier compares dataset, interval, frequency, UTC period b
 
 ## Prepared-frame reproduction
 
-The replay prepared frame must be exported from the existing prepared-backtest path and compared column-for-column and row-for-row with the original prepared frame.
+The replay prepared frame was exported from the existing prepared-backtest path and compared column-for-column, row-for-row and cell-for-cell with the original prepared frame using `parity_verification/compare_prepared_frames.py`. The original/replay prepared-cache identities are recorded above. A separate dataframe content-hash command was not run, so this certificate does not invent one; the evidence is the exact value comparison plus the retained operator-local cache artifacts.
 
 Certified expectation:
 
@@ -64,7 +72,7 @@ Any missing/extra column, dtype/semantic substitution, row-order change, or valu
 
 ## Native trade reproduction
 
-Compare the existing native trade outputs directly, without mapping them into a reduced browser-specific schema.
+The existing native trade outputs were compared directly with `parity_verification/compare_native_trades.py`, without mapping them into a reduced browser-specific schema. The deterministic content fingerprint for both native trade frames is `b02ff222d0337b3ddf950fd23372a92d81320704ea032805a121c47b71ddf94c`.
 
 Certified expectation:
 
@@ -83,11 +91,13 @@ The replay must compare the persisted configuration identities and feature-provi
 
 Certified result:
 
-- Strategy hash: match.
-- Data hash: match.
-- Execution hash: match.
+- Strategy hash, original/replay: `90ab9c0e19b0be2e5b16bf25750a44b10a5e39d633af02ea0bcf444b1c3d9187`.
+- Data hash, original/replay: `142277ae839bee3413470fda14a24eb565b2e9cfc65784159d255d09b327629d`.
+- Execution hash, original/replay: `c6a2434728ee6be91dc2c70308e4451c7875f86b18784c8a770ef9562c139a59`.
 - All 12 feature-provider identities: match.
-- Feature hash: one known structural difference only — the current serializer includes `fib_structure_quality_mode="BASELINE"`, which did not exist in the historical snapshot.
+- Original feature hash: `cd903c010da0694003100010e6c2dc18891ef74d4d88019ef1939fb728c65c2f`.
+- Replay feature hash: `49aa0e4fc94670169e3fac82b4fb14e2ef6a7da5950c53a0c77b3f61ed992872`.
+- Feature hash has one known structural difference only — the current serializer includes `fib_structure_quality_mode="BASELINE"`, which did not exist in the historical snapshot.
 - No other configuration difference is accepted.
 
 If any future default addition changes prepared values, provider identity, trade rows, or execution fingerprints, this certification no longer passes.
@@ -120,3 +130,15 @@ Re-run this certification after any change that can affect:
 - report/native trade serialization.
 
 A renewed certificate is **PASS** only when the full source inventory, prepared frame, native trade frame, provider identities, and allowed configuration classification all reproduce the expectations above.
+
+## Retained reproducibility artifacts
+
+The local replay working set used during certification is identified by these paths:
+
+- `parity_verification/btc79-source-freeze.json` — full 2,956-record catalog freeze with archive content hashes.
+- `parity_verification/btc79-replay-result.json` — replay result metadata.
+- `parity_verification/replay_outputs/btc79_current_main/BTCUSDT_4h_11564c0a851e446fa2afeb3aa628a612` — replay output directory.
+- `parity_verification/compare_prepared_frames.py` — exact prepared-frame comparator.
+- `parity_verification/compare_native_trades.py` — exact native trade comparator.
+
+Those workstation artifacts are not duplicated into Git because they include local cache/output material. The repository-level machine-readable evidence summary is `docs/certification/browser_historical_replay_2026-10-15.json`; it records the exact run/revision identifiers, hashes/fingerprints, comparison dimensions, and the explicit absence of a separately computed prepared-dataframe content hash.
