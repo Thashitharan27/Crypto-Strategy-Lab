@@ -59,6 +59,14 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
         return {"status": "ok", "mode": "read-only"}
 
     if read_service is not None:
+        @app.get("/api/v1/capabilities")
+        def capabilities(authorization: str | None = Header(default=None)):
+            supplied = authorization.removeprefix("Bearer ") if authorization else ""
+            if not secrets.compare_digest(supplied, token):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            return read_service.capabilities()
+
+    if read_service is not None:
         @app.get("/api/v1/catalog/symbols")
         def symbols(authorization: str | None = Header(default=None), market: str = "futures_um"):
             supplied = authorization.removeprefix("Bearer ") if authorization else ""

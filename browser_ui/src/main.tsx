@@ -3,15 +3,27 @@ import { createRoot } from "react-dom/client";
 import { getReadOnly, type Health, type Symbols } from "./api";
 import "./style.css";
 
-const sections = ["Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Trade Visualizer"] as const;
+const sections = ["Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Trade Visualizer"] as const;
 type Section = (typeof sections)[number];
 type CoverageRecord = {symbol?: string; dataset?: string; interval?: string | null; state?: string; archive_count?: number; first_period?: string | null; last_period?: string | null};
+type StrategyCapability = {
+  rule_group_model: {families: string[]; conditions_inside_group: string; groups_inside_family: string};
+  signal_strategies: {id: string; display_name: string}[];
+  market_permissions: string[];
+  indicators: Record<string, {display_name: string; type: string; conditions: string[]; values?: string[] | null; supports_sr_timeframe?: boolean}>;
+};
+type FeatureCapability = {
+  name: string; version: string; required_datasets: string[]; optional_datasets: string[];
+  required_features: string[]; warmup_bars: number; availability_rule: string;
+};
+type Capabilities = {mode: string; strategy: StrategyCapability; features: FeatureCapability[]};
 
 function App() {
   const [section, setSection] = React.useState<Section>("Runs & Results");
   const [token, setToken] = React.useState("");
   const [connected, setConnected] = React.useState(false);
   const [symbols, setSymbols] = React.useState<string[]>([]);
+  const [capabilities, setCapabilities] = React.useState<Capabilities | null>(null);
   const [coverage, setCoverage] = React.useState<CoverageRecord[] | null>(null);
   const [coverageSymbol, setCoverageSymbol] = React.useState("BTCUSDT");
   const [coverageStart, setCoverageStart] = React.useState("2020-06-01");
@@ -115,11 +127,17 @@ function App() {
     setCoverageError("");
     setConnected(false);
     setSymbols([]);
+    setCapabilities(null);
     try {
       const health = await getReadOnly<Health>("/api/v1/health", token);
       if (health.mode !== "read-only" || health.status !== "ok") throw new Error("Unexpected API mode");
-      const catalog = await getReadOnly<Symbols>("/api/v1/catalog/symbols", token);
+      const [catalog, capabilityData] = await Promise.all([
+        getReadOnly<Symbols>("/api/v1/catalog/symbols", token),
+        getReadOnly<Capabilities>("/api/v1/capabilities", token),
+      ]);
+      if (capabilityData.mode !== "read-only" || !Array.isArray(capabilityData.features) || !capabilityData.strategy?.indicators) throw new Error("Invalid capability metadata");
       setSymbols(catalog.symbols);
+      setCapabilities(capabilityData);
       setConnected(true);
       setMessage("Connected to local read-only API");
     } catch {
@@ -189,8 +207,32 @@ function App() {
           </div>}
         </div>
       </div> : null}
-      {(section === "Strategy Designer" || section === "Trade Visualizer") &&
-        <p>This section is being migrated. The existing Python engine and desktop application remain authoritative.</p>}
+      {section === "Strategy Designer" && connected && capabilities && <div>
+        <h3>Authoritative strategy capabilities</h3>
+        <p>Read from the existing CSL rule workspace. This browser view does not define or edit strategy semantics.</p>
+        <p>Rule grouping: conditions inside a group = {capabilities.strategy.rule_group_model.conditions_inside_group}; groups inside a family = {capabilities.strategy.rule_group_model.groups_inside_family}.</p>
+        <h4>Signal strategies</h4>
+        <ul>{capabilities.strategy.signal_strategies.map(item => <li key={item.id}><strong>{item.display_name}</strong> <code>{item.id}</code></li>)}</ul>
+        <p>Market permissions: {capabilities.strategy.market_permissions.join(", ")}</p>
+        <h4>Entry / Veto / Flip evidence</h4>
+        <table><caption>Authoritative rule evidence registry</caption><thead><tr><th>Evidence</th><th>Type</th><th>Conditions</th><th>Values</th></tr></thead>
+          <tbody>{Object.entries(capabilities.strategy.indicators).map(([id, item]) => <tr key={id}>
+            <td>{item.display_name}<br /><code>{id}</code></td><td>{item.type}</td><td>{item.conditions.join(", ")}</td><td>{item.values?.join(", ") ?? "Numeric"}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+      {section === "Research Features" && connected && capabilities && <div>
+        <h3>Production feature registry</h3>
+        <p>{capabilities.features.length} registered feature providers. Metadata is projected from the existing production registry; calculations remain in Python. Declared datasets below are not exhaustive: some providers also require auxiliary resources resolved by the existing data layer.</p>
+        <table><caption>Authoritative feature providers</caption><thead><tr><th>Feature</th><th>Version</th><th>Declared datasets*</th><th>Dependencies</th><th>Warmup</th></tr></thead>
+          <tbody>{capabilities.features.map(item => <tr key={item.name}>
+            <td><code>{item.name}</code></td><td>{item.version}</td><td>{item.required_datasets.join(", ") || "None declared"}{item.optional_datasets.length ? ` · optional: ${item.optional_datasets.join(", ")}` : ""}</td><td>{item.required_features.join(", ") || "None"}</td><td>{item.warmup_bars} bars</td>
+          </tr>)}</tbody>
+        </table>
+        <p>* DatasetKind declarations only. Auxiliary data resources such as taker-flow and trade-flow inputs are not enumerated here; consult the existing provider and data-layer requirements before executing research.</p>
+      </div>}
+      {section === "Trade Visualizer" &&
+        <p>This section is being migrated. The existing Python visualizer and completed-run data remain authoritative.</p>}
       <p>No strategy execution or configuration editing is enabled.</p>
     </section>
   </main>;

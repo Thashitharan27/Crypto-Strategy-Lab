@@ -5,6 +5,7 @@ No research execution, filesystem writes, or catalog refresh are exposed.
 """
 from pathlib import Path
 
+from crypto_strategy_lab.browser_capabilities import browser_capabilities
 from crypto_strategy_lab.browser_catalog import catalog_coverage, catalog_symbols
 from crypto_strategy_lab.browser_completed_runs import read_completed_run
 from crypto_strategy_lab.browser_config import read_research_config
@@ -31,6 +32,9 @@ class BrowserReadOnlyService:
 
     def research_config(self, path: str | Path) -> dict:
         return read_research_config(path)
+
+    def capabilities(self) -> dict:
+        return browser_capabilities()
 
 
 def build_browser_readonly_service(
