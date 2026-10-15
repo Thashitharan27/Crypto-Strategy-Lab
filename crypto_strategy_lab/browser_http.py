@@ -109,6 +109,22 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             return {"coverage": read_service.coverage(request)}
 
     if read_service is not None and completed_run_root is not None:
+        @app.get("/api/v1/portfolio/candidates")
+        def portfolio_candidates(authorization: str | None = Header(default=None)):
+            from pathlib import Path
+            supplied = authorization.removeprefix("Bearer ") if authorization else ""
+            if not secrets.compare_digest(supplied, token):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            root = Path(completed_run_root).resolve()
+            if not root.is_dir():
+                return {"candidates": []}
+            try:
+                rows = read_service.portfolio_candidates(root)
+            except (OSError, ValueError, KeyError, TypeError):
+                raise HTTPException(status_code=503, detail="Portfolio discovery unavailable")
+            return {"candidates": rows[:100]}
+
+    if read_service is not None and completed_run_root is not None:
         @app.get("/api/v1/runs/{run_id}")
         def completed_run(run_id: str, authorization: str | None = Header(default=None)):
             from pathlib import Path
