@@ -55,6 +55,7 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
         actual[_identity(interval, record["frequency"], record["period_start"], record["period_end"], record["catalog_fingerprint"])] += 1
 
     required = {"exchange", "market", "dataset", "symbol", "interval", "frequency",
+                "size_bytes", "mtime_ns",
                 "period_start", "period_end", "raw_archive_fingerprint"}
     if not required.issubset(source_rows.columns):
         raise ValueError(f"saved provenance missing fields: {sorted(required - set(source_rows.columns))}")
@@ -72,6 +73,21 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
         missing = sum((expected - actual).values())
         unexpected = sum((actual - expected).values())
         raise ValueError(f"saved-run source provenance mismatch: {missing} missing, {unexpected} unexpected")
+    # Compare exact file stat records in addition to the existing identity multiset.
+    expected_stats = Counter((str(row.interval), str(row.raw_archive_fingerprint), int(row.size_bytes), int(row.mtime_ns))
+                             for row in subset.itertuples(index=False))
+    actual_stats = Counter()
+    for label, record in metadata.items():
+        interval = "4h" if label.startswith("BTCUSDT_4h_") else "1m"
+        if "size_bytes" not in record or "mtime_ns" not in record:
+            raise ValueError(f"frozen catalog stat metadata missing: {label}")
+        if not isinstance(record["size_bytes"], int) or not isinstance(record["mtime_ns"], int):
+            raise ValueError(f"invalid frozen catalog stat metadata: {label}")
+        if record["size_bytes"] != freeze["files"][label]["bytes"]:
+            raise ValueError(f"frozen catalog size disagrees with hashed bytes: {label}")
+        actual_stats[(interval, str(record["catalog_fingerprint"]), record["size_bytes"], record["mtime_ns"])] += 1
+    if actual_stats != expected_stats:
+        raise ValueError("saved-run source stat metadata mismatch")
     counts = {interval: sum(n for key, n in actual.items() if key[0] == interval)
               for interval in ("4h", "1m")}
     if counts["4h"] != selection["strategy_record_count"] or counts["1m"] != selection["intrabar_record_count"]:

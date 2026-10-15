@@ -20,6 +20,8 @@ def _inputs():
             "period_start": "2020-06-01T00:00:00+00:00",
             "period_end": "2020-07-01T00:00:00+00:00",
             "catalog_fingerprint": fingerprint,
+            "size_bytes": 12,
+            "mtime_ns": 1234567890,
         }
         rows.append({
             "exchange": "binance", "market": "futures_um", "dataset": "klines",
@@ -27,6 +29,8 @@ def _inputs():
             "period_start": "2020-06-01T00:00:00+00:00",
             "period_end": "2020-07-01T00:00:00+00:00",
             "raw_archive_fingerprint": fingerprint,
+            "size_bytes": 12,
+            "mtime_ns": 1234567890,
         })
     frozen = {
         "commit_sha": "1ad8a2161877260d9f1d790f583a82e065f8730e",
@@ -127,4 +131,19 @@ def test_provenance_rejects_invalid_or_naive_warmup(invalid):
     frozen, saved = _inputs()
     frozen["selection"]["strategy_source_start"] = invalid
     with pytest.raises(ValueError, match="warmup start"):
+        verify_source_provenance(frozen, saved)
+
+
+@pytest.mark.parametrize("field,value", [("size_bytes", 13), ("mtime_ns", 999)])
+def test_provenance_rejects_saved_source_stat_drift(field, value):
+    frozen, saved = _inputs()
+    saved.loc[0, field] = value
+    with pytest.raises(ValueError, match="stat metadata mismatch"):
+        verify_source_provenance(frozen, saved)
+
+
+def test_provenance_rejects_frozen_stat_inconsistent_with_hashed_bytes():
+    frozen, saved = _inputs()
+    frozen["selection"]["catalog_records"]["BTCUSDT_4h_0001_monthly"]["size_bytes"] = 17
+    with pytest.raises(ValueError, match="size disagrees"):
         verify_source_provenance(frozen, saved)

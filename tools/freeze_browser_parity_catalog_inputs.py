@@ -70,6 +70,8 @@ def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str):
         files[label] = path
         metadata[label] = {
             "catalog_fingerprint": record.fingerprint,
+            "size_bytes": int(record.size_bytes),
+            "mtime_ns": int(record.mtime_ns),
             "period_start": record.period_start.isoformat() if record.period_start else None,
             "period_end": record.period_end.isoformat() if record.period_end else None,
             "frequency": record.frequency,
