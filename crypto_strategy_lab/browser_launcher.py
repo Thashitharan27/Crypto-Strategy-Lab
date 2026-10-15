@@ -76,7 +76,7 @@ def build_browser_readonly_runtime(
         else _path_from_env(
             source,
             "CRYPTO_STRATEGY_LAB_OUTPUT_DIR",
-            OUTPUT_DIR,
+            OUTPUT_DIR / "data_lake_v2",
         )
     )
     effective_config_root = (
