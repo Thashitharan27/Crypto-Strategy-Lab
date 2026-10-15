@@ -159,3 +159,48 @@ def test_catalog_freeze_allows_overlapping_source_periods(tmp_path):
         "--end", "2020-07-01T00:00:00Z",
     ]) == 0
     assert len(json.loads(dest.read_text())["files"]) == 4
+
+
+def test_strategy_warmup_sources_are_frozen_without_extending_intrabar_window(tmp_path):
+    raw, cache = tmp_path / "raw", tmp_path / "cache"
+    raw.mkdir()
+    dates = [
+        ("4h", "2020-01-01", "2020-06-01"),
+        ("4h", "2020-06-01", "2020-07-01"),
+        ("1m", "2020-06-01", "2020-07-01"),
+    ]
+    rows = []
+    for index, (interval, start, end) in enumerate(dates):
+        path = raw / f"archive-{index}.zip"
+        path.write_bytes(str(index).encode())
+        rows.append(_record(
+            raw, path, interval,
+            datetime.fromisoformat(start).replace(tzinfo=UTC),
+            datetime.fromisoformat(end).replace(tzinfo=UTC),
+        ))
+    MarketDataStore(raw, cache).catalog.sync_root(raw, rows)
+    freeze_path = tmp_path / "freeze.json"
+    assert main([
+        "--raw-root", str(raw), "--cache-root", str(cache),
+        "--manifest-json", str(freeze_path), "--commit-sha", "a" * 40,
+        "--start", "2020-06-01T00:00:00Z", "--end", "2020-07-01T00:00:00Z",
+        "--strategy-source-start", "2020-01-01T00:00:00Z",
+        "--expected-strategy-records", "2", "--expected-intrabar-records", "1",
+    ]) == 0
+    result = json.loads(freeze_path.read_text())
+    assert result["selection"]["strategy_source_start"] == "2020-01-01T00:00:00+00:00"
+    assert result["selection"]["start"] == "2020-06-01T00:00:00+00:00"
+    assert result["selection"]["strategy_record_count"] == 2
+    assert result["selection"]["intrabar_record_count"] == 1
+
+
+def test_strategy_source_start_must_not_exclude_requested_history(tmp_path):
+    with pytest.raises(ValueError, match="must not be later"):
+        main([
+            "--raw-root", str(tmp_path / "raw"),
+            "--cache-root", str(tmp_path / "cache"),
+            "--manifest-json", str(tmp_path / "freeze.json"),
+            "--commit-sha", "a" * 40,
+            "--start", "2020-06-01T00:00:00Z",
+            "--strategy-source-start", "2020-06-02T00:00:00Z",
+        ])
