@@ -65,3 +65,32 @@ parallel parser.
 
 This audit identifies schema evidence only, **not** actual data-file
 digest verification, engine replay, or trade parity.
+
+
+## Full saved source-provenance scan (metadata only)
+
+An exhaustive read of `provenance/source_archives.parquet` in run
+`BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f` returned all **2,956**
+records (not truncated). The `klines` / `1m` subset contains **97** rows
+with **97 distinct** `canonical_partition_identity` values. All 97 rows
+have a nonempty `raw_archive_fingerprint`, `period_start`, and
+`period_end`. The minimum period start is `2020-06-01T00:00:00Z`;
+the maximum period end is `2026-09-01T00:00:00Z`.
+
+When ordered by start time, the 1m source-period metadata has no
+positive calendar gap between consecutive listed ranges, but it has
+**two overlapping ranges**. Such overlap can represent selected archive
+partition structure, not necessarily duplicate candles; the raw records
+must be independently de-duplicated and validated before replay.
+IMPORTANT: `raw_archive_fingerprint` comes from the existing
+`data.cache.stat_fingerprint`: SHA-256 of the resolved **local path, size,
+and mtime_ns** string, not a digest of archive contents. Therefore even
+a matching source fingerprint is only metadata equivalence and cannot
+prove byte-identical market data. No raw source file was accessed here. No local archive file was opened or hashed in this scan.
+
+**Next blocking check:** identify and open the 97 actual local source
+archives under a server-owned data root, verify each file against the recorded stat fingerprint and expected
+size where the original path is known; additionally compute and freeze
+real content hashes (using existing `parity_fixture_manifest.file_fingerprint`)
+from the actual archive bytes. Confirm timestamp/candle coverage and
+overlap handling, then freeze the complete 1m/4h inputs before replay. Do not substitute newly downloaded candles for missing archives.
