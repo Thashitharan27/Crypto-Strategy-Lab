@@ -52,9 +52,9 @@ def main(argv=None) -> int:
         )
         # Freeze only after a successful full verification of the computed contents.
         verify_frozen_fixture_files(frozen["files"], files)
-        args.manifest_json.write_text(
-            json.dumps(frozen, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-        )
+        # Exclusive creation closes the check/write race and cannot replace a freeze.
+        with args.manifest_json.open("x", encoding="utf-8") as handle:
+            handle.write(json.dumps(frozen, sort_keys=True, indent=2) + "\n")
         print(f"Frozen {len(files)} source files to {args.manifest_json}")
     return 0
 
