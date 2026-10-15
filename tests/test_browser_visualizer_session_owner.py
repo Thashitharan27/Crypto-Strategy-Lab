@@ -42,3 +42,26 @@ def test_session_owner_context_manager_releases_session():
     with BrowserVisualizerSessionOwner(server_factory=Mock(return_value=server)) as owner:
         owner.replace("model")
     server.stop.assert_called_once()
+
+
+def test_replacement_stops_previous_server_before_starting_next():
+    events = []
+
+    class FakeServer:
+        def __init__(self, name):
+            self.name = name
+        def start(self):
+            events.append(("start", self.name))
+            return f"http://127.0.0.1:1234/session/{self.name}/"
+        def stop(self):
+            events.append(("stop", self.name))
+
+    names = iter(("one", "two"))
+    owner = BrowserVisualizerSessionOwner(server_factory=lambda _model: FakeServer(next(names)))
+    owner.replace(object())
+    owner.replace(object())
+    owner.stop()
+    assert events == [
+        ("start", "one"), ("stop", "one"),
+        ("start", "two"), ("stop", "two"),
+    ]
