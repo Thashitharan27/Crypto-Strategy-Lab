@@ -1646,6 +1646,42 @@ class StrategyVisualizerBrowserServer:
                 )
 
             def do_GET(self):
+                # Enforce the actual loopback listener identity even for a
+                # guessed session URL; reject DNS rebinding and cross-site reads.
+                host = self.headers.get("Host", "")
+                origin = self.headers.get("Origin")
+                try:
+                    parsed_host = urlsplit("http://" + host)
+                    listener_port = int(self.server.server_address[1])
+                    safe_host = (
+                        parsed_host.hostname in {"127.0.0.1", "localhost"}
+                        and parsed_host.port == listener_port
+                        and parsed_host.username is None
+                        and parsed_host.password is None
+                        and parsed_host.path == ""
+                        and parsed_host.query == ""
+                        and parsed_host.fragment == ""
+                    )
+                    safe_origin = origin is None or origin in {
+                        f"http://127.0.0.1:{listener_port}",
+                        f"http://localhost:{listener_port}",
+                    }
+                    site = self.headers.get("Sec-Fetch-Site", "same-origin")
+                    requested = urlsplit(self.path).path
+                    session_root = f"/session/{owner.token}"
+                    is_document = requested in {
+                        session_root, session_root + "/", session_root + "/index.html",
+                    }
+                    safe_fetch = site in {"same-origin", "none"} or (
+                        site == "same-site" and is_document
+                        and self.headers.get("Sec-Fetch-Mode") == "navigate"
+                        and self.headers.get("Sec-Fetch-Dest") == "document"
+                    )
+                except ValueError:
+                    safe_host, safe_origin, safe_fetch = False, False, False
+                if not (safe_host and safe_origin and safe_fetch):
+                    self._json({"error": "forbidden"}, HTTPStatus.FORBIDDEN)
+                    return
                 try:
                     parsed = urlsplit(self.path)
                     prefix = f"/session/{owner.token}"
