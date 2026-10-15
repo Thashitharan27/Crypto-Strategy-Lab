@@ -298,6 +298,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-qt
+          pip install -r browser_ui/requirements.txt
       - name: Compile source
         run: python -m compileall -q crypto_strategy_lab mcp_server tools app.py
       - name: Run Windows smoke tests
@@ -310,3 +311,4 @@ jobs:
           tests/test_stage16_hidden_pair_management_gui_removed.py
           tests/test_freeze_browser_parity_catalog_inputs.py
           tests/test_verify_browser_parity_provenance.py
+          tests/test_browser_launcher.py
