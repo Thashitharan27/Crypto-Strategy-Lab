@@ -290,9 +290,9 @@ function App() {
         {portfolioError && <p role="alert">{portfolioError}</p>}
         {portfolioCandidates && portfolioCandidates.length === 0 && <p>No eligible verified completed runs found.</p>}
         {portfolioCandidates && portfolioCandidates.length > 0 && <table>
-          <thead><tr><th>Run ID</th><th>Symbol</th><th>Timeframe</th><th>Candidates</th><th>Completed</th></tr></thead>
+          <thead><tr><th>Run ID</th><th>Symbol</th><th>Timeframe</th><th>Sampling mode</th><th>Candidates</th><th>Completed</th></tr></thead>
           <tbody>{portfolioCandidates.map((item, i) => <tr key={item.run_id + "-" + i}>
-            <td>{item.run_id}</td><td>{item.symbol}</td><td>{item.strategy_timeframe || "—"}</td>
+            <td>{item.run_id}</td><td>{item.symbol}</td><td>{item.strategy_timeframe || "—"}</td><td>{item.sampling_mode}</td>
             <td>{item.candidate_rows}</td><td>{item.completed_at || "—"}</td>
           </tr>)}</tbody>
         </table>}
