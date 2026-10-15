@@ -327,3 +327,27 @@ def test_visualizer_session_rejects_rebound_host_and_cross_site_requests():
             assert response.status == 200
     finally:
         server.stop()
+
+
+def test_visualizer_allows_same_site_document_navigation_but_not_api():
+    model = _FakeVisualizer()
+    server = StrategyVisualizerBrowserServer(model)
+    try:
+        url = server.start()
+        navigate = {
+            "Sec-Fetch-Site": "same-site",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Dest": "document",
+        }
+        with urlopen(Request(url, headers=navigate), timeout=5) as response:
+            assert response.status == 200
+        for path in ("api/payload?trade_index=0", "api/inspect?timestamp=1700000000"):
+            try:
+                urlopen(Request(url + path, headers=navigate), timeout=5)
+                assert False, "Unexpected cross-port API read"
+            except HTTPError as exc:
+                assert exc.code == 403
+        assert model.payload_calls == []
+        assert model.inspect_calls == []
+    finally:
+        server.stop()
