@@ -86,6 +86,7 @@ def main(argv=None) -> int:
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--start", default="2020-06-01T00:00:00Z")
     parser.add_argument("--end", default="2026-09-01T00:00:00Z")
+    parser.add_argument("--strategy-source-start", help="Optional earlier 4h warmup source start (UTC); defaults to requested start")
     parser.add_argument("--strategy-interval", default="4h")
     parser.add_argument("--intrabar-interval", default="1m")
     parser.add_argument("--expected-strategy-records", type=int)
@@ -102,10 +103,18 @@ def main(argv=None) -> int:
         strategy_interval=args.strategy_interval,
         intrabar_interval=args.intrabar_interval,
     )
+    strategy_source_start = _utc(args.strategy_source_start) if args.strategy_source_start else request.start
+    if strategy_source_start > request.start:
+        raise ValueError('strategy source start must not be later than requested start')
+    strategy_request = DataRequest(
+        symbol=request.symbol, start=strategy_source_start, end=request.end,
+        strategy_interval=request.strategy_interval, intrabar_interval=request.intrabar_interval,
+        exchange=request.exchange, market=request.market,
+    )
     store = MarketDataStore(args.raw_root, args.cache_root)
 
     strategy_files, strategy_meta = _catalog_files(
-        store, request, request.strategy_interval
+        store, strategy_request, request.strategy_interval
     )
     intrabar_files, intrabar_meta = _catalog_files(
         store, request, request.intrabar_interval
@@ -146,6 +155,7 @@ def main(argv=None) -> int:
         "start": request.start.isoformat(),
         "end": request.end.isoformat(),
         "strategy_interval": request.strategy_interval,
+        "strategy_source_start": strategy_source_start.isoformat(),
         "intrabar_interval": request.intrabar_interval,
         "strategy_record_count": len(strategy_files),
         "intrabar_record_count": len(intrabar_files),
