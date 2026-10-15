@@ -1,6 +1,6 @@
 # Phase 3: localhost read-only API contract
 
-Status: design proposal, **not** an HTTP server or authorization to enable trading.
+Status: read-only HTTP adapter and local composition launcher implemented. This is **not** authorization to enable browser-controlled execution or trading.
 
 ## Reuse
 Build the future HTTP adapter against `BrowserReadOnlyService` (PR #514) and its existing catalog, verified completed-run reader and validated configuration loader. Do not create parallel manifest, strategy, or configuration parsers. Existing run and GUI formats remain authoritative.
@@ -24,3 +24,12 @@ Build the future HTTP adapter against `BrowserReadOnlyService` (PR #514) and its
 
 ## Verification plan
 Use FastAPI's in-process test client for health, positive results, missing resources, and traversal/symlink/host/origin rejection. Prove no writes or engine/run calls using mocks. Include Windows smoke and Linux CI before merge.
+
+
+## Production read-only composition
+
+`crypto_strategy_lab.browser_launcher` is the optional production entrypoint for the read-only browser workspace. It composes the existing `BrowserReadOnlyService` and `create_browser_app`, serves the built `browser_ui/dist` assets, reuses the established raw/cache/output/config environment contracts, and hard-codes the server host to `127.0.0.1`.
+
+The launcher creates a fresh bearer token for each launch and prints it to the local terminal. The token is not embedded in the URL. Browser runtime dependencies remain isolated in `browser_ui/requirements.txt`; importing the engine or live bot does not import FastAPI/Uvicorn.
+
+This closes the production read-only composition gap only. POST/PUT/PATCH/DELETE, run creation, research execution, configuration writes, order placement, and live-bot operations remain absent.
