@@ -85,7 +85,8 @@ def test_cli_reads_real_parquet_with_existing_duckdb_dependency(tmp_path):
     manifest_path.write_text(json.dumps(frozen), encoding="utf-8")
     with duckdb.connect(":memory:") as connection:
         connection.register("saved_source_rows", saved)
-        connection.execute("COPY saved_source_rows TO ? (FORMAT PARQUET)", [str(source_path)])
+        quoted_path = str(source_path).replace(chr(39), chr(39) * 2)
+        connection.execute(f"COPY saved_source_rows TO '{quoted_path}' (FORMAT PARQUET)")
     assert main([
         "--freeze-json", str(manifest_path),
         "--saved-provenance-parquet", str(source_path),
