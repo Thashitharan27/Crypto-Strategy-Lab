@@ -44,5 +44,17 @@ def test_browser_feature_capabilities_project_production_registry_without_duplic
 
 
 def test_browser_capabilities_are_json_serializable():
-    encoded = json.dumps(browser_capabilities(), sort_keys=True)
+    encoded = json.dumps(browser_capabilities(), sort_keys=True, allow_nan=False)
     assert '"mode": "read-only"' in encoded
+
+
+def test_nonfinite_registry_defaults_are_projected_without_mutating_source():
+    from crypto_strategy_lab.browser_capabilities import _json_safe
+    from math import inf, isnan, nan
+
+    source = {"edges": (0.0, inf, -inf, nan)}
+    projected = _json_safe(source)
+    assert projected == {"edges": [0.0, "Infinity", "-Infinity", "NaN"]}
+    assert source["edges"][1] == inf
+    assert isnan(source["edges"][-1])
+    json.dumps(projected, allow_nan=False)
