@@ -87,7 +87,7 @@ def test_source_provenance_rejects_missing_saved_schema():
         verify_source_provenance(freeze, saved.drop(columns=["raw_archive_fingerprint"]))
 
 
-def test_cli_reads_real_parquet_with_existing_duckdb_dependency(tmp_path):
+def test_cli_reads_real_parquet_with_existing_duckdb_dependency(tmp_path, capsys):
     frozen, saved = _inputs()
     manifest_path = tmp_path / "freeze.json"
     source_path = tmp_path / "source_archives.parquet"
@@ -100,6 +100,10 @@ def test_cli_reads_real_parquet_with_existing_duckdb_dependency(tmp_path):
         "--freeze-json", str(manifest_path),
         "--saved-provenance-parquet", str(source_path),
     ]) == 0
+    output = capsys.readouterr().out
+    assert "PARTIAL SOURCE SCOPE ONLY" in output
+    assert "full 2,956-archive" in output
+    assert "79-trade execution parity remain unverified" in output
 
 
 @pytest.mark.parametrize("key,value,error", [
