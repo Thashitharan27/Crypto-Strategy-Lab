@@ -24,6 +24,7 @@ function App() {
   const [featureQuery, setFeatureQuery] = React.useState("");
   const [token, setToken] = React.useState("");
   const [connected, setConnected] = React.useState(false);
+  const connectRequest = React.useRef(0);
   const [symbols, setSymbols] = React.useState<string[]>([]);
   const [capabilities, setCapabilities] = React.useState<Capabilities | null>(null);
   const [coverage, setCoverage] = React.useState<CoverageRecord[] | null>(null);
@@ -169,6 +170,7 @@ function App() {
   }
 
   async function connect() {
+    const requestId = ++connectRequest.current;
     // Invalidate in-flight catalog reads before switching local API sessions.
     ++coverageRequest.current;
     ++configRequest.current;
@@ -200,11 +202,13 @@ function App() {
         getReadOnly<Capabilities>("/api/v1/capabilities", token),
       ]);
       if (capabilityData.mode !== "read-only" || !Array.isArray(capabilityData.features) || !capabilityData.strategy?.indicators) throw new Error("Invalid capability metadata");
+      if (requestId !== connectRequest.current) return;
       setSymbols(catalog.symbols);
       setCapabilities(capabilityData);
       setConnected(true);
       setMessage("Connected to local read-only API");
     } catch {
+      if (requestId !== connectRequest.current) return;
       setMessage("Local API unavailable or authorization rejected");
     }
   }
@@ -218,7 +222,7 @@ function App() {
     <section aria-live="polite"><header><small>RESEARCH WORKSPACE</small><h2>{section}</h2></header>
       <div className="connection">
         <label htmlFor="local-token">Local session token</label>
-        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++configRequest.current; ++coverageRequest.current; ++runRequest.current; ++portfolioRequest.current; ++visualizerRequest.current; setVisualizerUrl(""); setVisualizerError(""); setToken(event.target.value); setConnected(false); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigSection(""); setConfigError(""); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError(""); setPortfolioCandidates(null); setPortfolioError(""); setCoverage(null); setCoverageError(""); setCoverageQueryLabel(""); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
+        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++connectRequest.current; ++configRequest.current; ++coverageRequest.current; ++runRequest.current; ++portfolioRequest.current; ++visualizerRequest.current; setVisualizerUrl(""); setVisualizerError(""); setToken(event.target.value); setConnected(false); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigSection(""); setConfigError(""); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError(""); setPortfolioCandidates(null); setPortfolioError(""); setCoverage(null); setCoverageError(""); setCoverageQueryLabel(""); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
         <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
         <p role="status">{message}</p>
       </div>
