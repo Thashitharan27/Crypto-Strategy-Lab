@@ -221,3 +221,23 @@ def test_provenance_rejects_frozen_file_entry_without_hash():
     frozen["files"]["BTCUSDT_4h_0001_monthly"] = {"bytes": 12}
     with pytest.raises(ValueError, match="invalid frozen source SHA-256 metadata"):
         verify_source_provenance(frozen, saved)
+
+
+def test_original_source_identity_accepts_equivalent_timezone_instants():
+    frozen, saved = _inputs()
+    for record in frozen["selection"]["catalog_records"].values():
+        record["period_start"] = pd.Timestamp(record["period_start"]).tz_convert(
+            "Asia/Colombo"
+        ).isoformat()
+        record["period_end"] = pd.Timestamp(record["period_end"]).tz_convert(
+            "Asia/Colombo"
+        ).isoformat()
+    assert verify_source_provenance(frozen, saved) == {"4h": 1, "1m": 1}
+
+
+def test_original_source_identity_still_rejects_different_instant_with_offset():
+    frozen, saved = _inputs()
+    record = frozen["selection"]["catalog_records"]["BTCUSDT_4h_0001_monthly"]
+    record["period_start"] = "2020-06-01T05:31:00+05:30"
+    with pytest.raises(ValueError, match="provenance mismatch"):
+        verify_source_provenance(frozen, saved)
