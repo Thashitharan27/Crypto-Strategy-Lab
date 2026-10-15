@@ -55,7 +55,7 @@ function App() {
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
   const runRequest = React.useRef(0);
-  const [runMetrics, setRunMetrics] = React.useState<{ trades: number; winRate: number; netPnl: number } | null>(null);
+  const [runMetrics, setRunMetrics] = React.useState<{ trades: number; winRate?: number; netPnl?: number } | null>(null);
   const [runRisk, setRunRisk] = React.useState<{profitFactor?: number; drawdown?: number; fees?: number} | null>(null);
 
   async function loadConfig() {
@@ -103,10 +103,13 @@ function App() {
         drawdown: drawdown !== undefined && drawdown <= 0 ? drawdown : undefined,
         fees: fees !== undefined && fees >= 0 ? fees : undefined,
       });
-      if ([total_trades, win_rate, net_pnl].every(v => typeof v === "number" && Number.isFinite(v)) &&
-          (total_trades as number) >= 0 && Number.isInteger(total_trades as number) &&
-          (win_rate as number) >= 0 && (win_rate as number) <= 1) {
-        setRunMetrics({trades: total_trades as number, winRate: win_rate as number, netPnl: net_pnl as number});
+      if (typeof total_trades === "number" && Number.isInteger(total_trades) && total_trades >= 0) {
+        const rate = safeMetric(win_rate);
+        setRunMetrics({
+          trades: total_trades,
+          winRate: rate !== undefined && rate >= 0 && rate <= 1 ? rate : undefined,
+          netPnl: safeMetric(net_pnl),
+        });
       }
     } catch { if (requestId === runRequest.current) setRunError("Saved run unavailable or not accessible"); }
   }
@@ -301,7 +304,7 @@ function App() {
         <button type="button" disabled={!connected} onClick={() => void loadRun()}>Read completed run</button>
         {runError && <p role="alert">{runError}</p>}
         {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p>
-          {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p><p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p><p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p></div>}
+          {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p>{runMetrics.winRate !== undefined && <p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p>}{runMetrics.netPnl !== undefined && <p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p>}</div>}
           {runRisk && <div aria-label="Saved run risk metrics">
             {runRisk.profitFactor !== undefined && <p>Profit factor: {Number.isFinite(runRisk.profitFactor) ? runRisk.profitFactor.toFixed(2) : "∞"}</p>}
             {runRisk.drawdown !== undefined && <p>Maximum drawdown: {runRisk.drawdown.toFixed(2)}%</p>}
