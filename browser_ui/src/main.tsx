@@ -239,7 +239,7 @@ function App() {
       {section === "Configurations" && connected && <div className="connection">
         <label htmlFor="config-id">Saved configuration ID</label>
         <input id="config-id" value={configId} onChange={e => { ++configRequest.current; setConfigId(e.target.value); setConfigSummary(null); setConfigDetails(null); setConfigSection(""); setConfigError(""); }} placeholder="Configuration filename without .json" />
-        <button type="button" onClick={() => void loadConfig()}>Inspect configuration</button>
+        <button type="button" disabled={!connected} onClick={() => void loadConfig()}>Inspect configuration</button>
         {configError && <p role="alert">{configError}</p>}
         {configSummary && <div><h3>Validated configuration</h3><p>Version: {configSummary.configVersion}</p><p>Sections: {configSummary.sections.join(", ")}</p><p>Read-only snapshot from the existing CSL configuration reader. No save, normalization, or execution is performed by the browser.</p>{configDetails && <><label htmlFor="config-section">Inspect one saved configuration section</label><select id="config-section" value={configSection} onChange={event => setConfigSection(event.target.value)}><option value="">Choose a section</option>{configSummary.sections.map(name => <option key={name} value={name}>{name}</option>)}</select>{configSection && Object.prototype.hasOwnProperty.call(configDetails, configSection) && configDetails[configSection] !== null && typeof configDetails[configSection] === "object" && !Array.isArray(configDetails[configSection]) && <table aria-label="Selected configuration fields"><caption>Saved fields from {configSection} (read-only)</caption><thead><tr><th>Original field</th><th>Saved value</th></tr></thead><tbody>{Object.entries(configDetails[configSection] as Record<string, unknown>).map(([key, value]) => <tr key={key}><td><code>{key}</code></td><td><code>{JSON.stringify(value) ?? "undefined"}</code></td></tr>)}</tbody></table>}{configSection && Object.prototype.hasOwnProperty.call(configDetails, configSection) && <pre aria-label="Selected configuration section" style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails[configSection], null, 2)}</pre>}</>}{configDetails && <details><summary>Inspect saved configuration values</summary><pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails, null, 2)}</pre></details>}</div>}
       </div>}
@@ -298,7 +298,7 @@ function App() {
       {section === "Runs & Results" && connected && <div className="connection">
         <label htmlFor="run-id">Completed run folder ID</label>
         <input id="run-id" value={runId} onChange={e => {++runRequest.current; setRunId(e.target.value); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError("");}} placeholder="BTCUSDT_4h_…" />
-        <button type="button" onClick={() => void loadRun()}>Read completed run</button>
+        <button type="button" disabled={!connected} onClick={() => void loadRun()}>Read completed run</button>
         {runError && <p role="alert">{runError}</p>}
         {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p>
           {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p><p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p><p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p></div>}
@@ -316,7 +316,7 @@ function App() {
           <input id="coverage-start" type="date" value={coverageStart} onChange={e => {++coverageRequest.current; setCoverageStart(e.target.value); setCoverage(null); setCoverageQueryLabel(""); setCoverageError("");}} />
           <label htmlFor="coverage-end">End date (UTC, exclusive)</label>
           <input id="coverage-end" type="date" value={coverageEnd} onChange={e => {++coverageRequest.current; setCoverageEnd(e.target.value); setCoverage(null); setCoverageQueryLabel(""); setCoverageError("");}} />
-          <button type="button" onClick={() => void loadCoverage()}>Check coverage (4h / 1m)</button>
+          <button type="button" disabled={!connected} onClick={() => void loadCoverage()}>Check coverage (4h / 1m)</button>
           {coverageError && <p role="alert">{coverageError}</p>}
           {coverage && <div><p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>
             <p aria-label="Coverage request scope">Requested: {coverageQueryLabel}</p>
