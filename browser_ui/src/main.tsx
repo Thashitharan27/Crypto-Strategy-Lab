@@ -311,11 +311,11 @@ function App() {
       </div>}
       {section === "Data Library" && connected ? <div><h3>Available symbols</h3><ul>{symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>
         <div className="connection"><label htmlFor="coverage-symbol">Data coverage symbol</label>
-          <input id="coverage-symbol" value={coverageSymbol} onChange={e => setCoverageSymbol(e.target.value)} />
+          <input id="coverage-symbol" value={coverageSymbol} onChange={e => {++coverageRequest.current; setCoverageSymbol(e.target.value); setCoverage(null); setCoverageQueryLabel(""); setCoverageError("");}} />
           <label htmlFor="coverage-start">Start date (UTC)</label>
-          <input id="coverage-start" type="date" value={coverageStart} onChange={e => setCoverageStart(e.target.value)} />
+          <input id="coverage-start" type="date" value={coverageStart} onChange={e => {++coverageRequest.current; setCoverageStart(e.target.value); setCoverage(null); setCoverageQueryLabel(""); setCoverageError("");}} />
           <label htmlFor="coverage-end">End date (UTC, exclusive)</label>
-          <input id="coverage-end" type="date" value={coverageEnd} onChange={e => setCoverageEnd(e.target.value)} />
+          <input id="coverage-end" type="date" value={coverageEnd} onChange={e => {++coverageRequest.current; setCoverageEnd(e.target.value); setCoverage(null); setCoverageQueryLabel(""); setCoverageError("");}} />
           <button type="button" onClick={() => void loadCoverage()}>Check coverage (4h / 1m)</button>
           {coverageError && <p role="alert">{coverageError}</p>}
           {coverage && <div><p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>
