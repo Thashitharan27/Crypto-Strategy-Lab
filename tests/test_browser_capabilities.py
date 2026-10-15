@@ -1,3 +1,5 @@
+import json
+
 from crypto_strategy_lab.browser_capabilities import (
     browser_capabilities,
     feature_capabilities,
@@ -39,3 +41,8 @@ def test_browser_feature_capabilities_project_production_registry_without_duplic
         assert item["availability_rule"] == definition.availability_rule
         assert set(item["parameters"]) == set(definition.parameters)
         assert set(item["output_schema"]) == set(definition.output_schema)
+
+
+def test_browser_capabilities_are_json_serializable():
+    encoded = json.dumps(browser_capabilities(), sort_keys=True)
+    assert '"mode": "read-only"' in encoded
