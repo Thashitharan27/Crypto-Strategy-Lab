@@ -94,3 +94,42 @@ size where the original path is known; additionally compute and freeze
 real content hashes (using existing `parity_fixture_manifest.file_fingerprint`)
 from the actual archive bytes. Confirm timestamp/candle coverage and
 overlap handling, then freeze the complete 1m/4h inputs before replay. Do not substitute newly downloaded candles for missing archives.
+
+
+## Offline file-content freeze procedure (operator-owned local data)
+
+The completed-run connector exposes `provenance/source_archives.parquet`,
+but **does not expose the raw Binance ZIP inputs**. Do not infer local
+paths from the report, fetch replacement candles, or certify integrity
+from `raw_archive_fingerprint`.
+
+On a machine with the original 1m and 4h archive files, construct an
+explicit mapping of stable logical labels to local archive paths. Use
+existing utilities without a new archive reader:
+
+```python
+from crypto_strategy_lab.parity_fixture_manifest import (
+    frozen_fixture_manifest, verify_frozen_fixture_files,
+)
+# Substitute the actual original paths; these are illustrative labels only.
+files = {
+    "BTCUSDT_1m_partition_0001": "/original/data/partition-0001.zip",
+    "BTCUSDT_4h_partition_0001": "/original/data/4h-partition-0001.zip",
+}
+manifest = frozen_fixture_manifest(
+    commit_sha="1ad8a2161877260d9f1d790f583a82e065f8730e",
+    files=files,
+    strategy_timeframe_minutes=240,
+    intrabar_timeframe_minutes=1,
+)
+verify_frozen_fixture_files(manifest["files"], files)
+```
+
+This is an API usage example, **not** an executed verification. An
+operator must include the complete, provenance-matched source set, use
+the true paths, persist the manifest to a separate immutable artifact,
+and confirm 1m coverage, duplicate handling and configured policies.
+Any missing archive, mismatched content, unexpected partition, or
+unknown mapping blocks replay certification. The pinned Git SHA
+describes the archived run; it must not be mistaken for a check that
+the source code checkout is currently at that revision.
