@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from crypto_strategy_lab.strategy_visualizer_browser import (
     BROWSER_DEFAULT_VISIBLE_CANDLES,
@@ -299,5 +300,30 @@ def test_browser_visualizer_server_is_loopback_read_only_and_serves_model():
         assert inspection["rule"]["status"] == "AVAILABLE"
         assert inspection["sr"]["status"] == "AVAILABLE"
         assert model.inspect_calls
+    finally:
+        server.stop()
+
+
+def test_visualizer_session_rejects_rebound_host_and_cross_site_requests():
+    model = _FakeVisualizer()
+    server = StrategyVisualizerBrowserServer(model)
+    try:
+        url = server.start()
+        for headers in (
+            {"Host": "evil.invalid"},
+            {"Host": "127.0.0.1:9000"},
+            {"Origin": "http://evil.invalid"},
+            {"Origin": "http://localhost:9000"},
+            {"Sec-Fetch-Site": "cross-site"},
+        ):
+            for path in ("", "api/payload?trade_index=0"):
+                try:
+                    urlopen(Request(url + path, headers=headers), timeout=5)
+                    assert False, f"Unexpected success for {headers}"
+                except HTTPError as exc:
+                    assert exc.code == 403
+        assert model.payload_calls == []
+        with urlopen(url, timeout=5) as response:
+            assert response.status == 200
     finally:
         server.stop()
