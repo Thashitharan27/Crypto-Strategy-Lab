@@ -55,3 +55,18 @@ def test_visualizer_post_only_when_coordinator_explicitly_wired():
     app = create_browser_app(token="t" * 48)
     with TestClient(app, base_url="http://127.0.0.1:8767") as client:
         assert client.post("/api/v1/visualizer/sessions/BTCUSDT_4h").status_code == 404
+
+
+def test_visualizer_route_is_the_only_explicit_non_get_api_operation():
+    from unittest.mock import Mock
+    app = create_browser_app(token="t" * 48, read_service=Mock(),
+                             visualizer_coordinator=Mock())
+    operations = {}
+    for route in app.routes:
+        if route.path == "/api/v1" or route.path.startswith("/api/v1/"):
+            assert route.__class__.__name__ != "Mount"
+            assert route.methods is not None
+            operations[route.path] = set(route.methods)
+    assert operations.pop("/api/v1/visualizer/sessions/{run_id}") == {"POST"}
+    assert all(methods == {"GET"} for methods in operations.values())
+    assert not any("execute" in path or "save" in path for path in operations)
