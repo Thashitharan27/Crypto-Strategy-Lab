@@ -149,11 +149,26 @@ def main(argv=None) -> int:
                   (DatasetKind.MARK_PRICE_KLINES, "4h"),
                   (DatasetKind.PREMIUM_INDEX_KLINES, "4h"),
                   (DatasetKind.FUNDING_RATE, None), (DatasetKind.FUTURES_METRICS, None))
+        expected_group_counts = {
+            (DatasetKind.KLINES, "1h"): 98,
+            (DatasetKind.KLINES, "5m"): 98,
+            (DatasetKind.INDEX_PRICE_KLINES, "4h"): 98,
+            (DatasetKind.MARK_PRICE_KLINES, "4h"): 98,
+            (DatasetKind.PREMIUM_INDEX_KLINES, "4h"): 98,
+            (DatasetKind.FUNDING_RATE, None): 76,
+            (DatasetKind.FUTURES_METRICS, None): 2191,
+        }
         for dataset, interval in groups:
             matched_files, matched_meta = _catalog_files(
                 store, request, interval, dataset,
                 require_continuous_coverage=(dataset != DatasetKind.FUTURES_METRICS),
             )
+            expected_count = expected_group_counts[(dataset, interval)]
+            if len(matched_files) != expected_count:
+                raise ValueError(
+                    f"saved source group count mismatch: {dataset.value}/{interval or 'none'} "
+                    f"expected {expected_count}, found {len(matched_files)}"
+                )
             extra_files.update(matched_files)
             extra_meta.update(matched_meta)
         if len(extra_files) != 2757:
