@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getReadOnly, openVerifiedVisualizer, type Health, type Symbols } from "./api";
 import "./style.css";
 
-const sections = ["Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Trade Visualizer"] as const;
+const sections = ["Setup", "Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Trade Visualizer"] as const;
 type Section = (typeof sections)[number];
 type CoverageRecord = {symbol?: string; dataset?: string; interval?: string | null; state?: string; archive_count?: number; first_period?: string | null; last_period?: string | null};
 type StrategyCapability = {
@@ -193,6 +193,16 @@ function App() {
         <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
         <p role="status">{message}</p>
       </div>
+      {section === "Setup" && connected && <div className="connection">
+        <h3>Saved run setup (read-only)</h3>
+        <p>Setup is owned by the validated Python configuration. Inspect a saved configuration in Configurations to review its existing data settings here; no independent browser defaults are applied.</p>
+        {!configDetails && <p>No configuration selected. Open Configurations and inspect a saved configuration first.</p>}
+        {configDetails && Object.prototype.hasOwnProperty.call(configDetails, "data") &&
+          <pre aria-label="Saved run data configuration" style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails.data, null, 2)}</pre>}
+        {configDetails && !Object.prototype.hasOwnProperty.call(configDetails, "data") &&
+          <p>No data section is present in this validated configuration snapshot.</p>}
+        <p>Setup cannot be edited or applied from the browser.</p>
+      </div>}
       {section === "Configurations" && connected && <div className="connection">
         <label htmlFor="config-id">Saved configuration ID</label>
         <input id="config-id" value={configId} onChange={e => { ++configRequest.current; setConfigId(e.target.value); setConfigSummary(null); setConfigDetails(null); setConfigSection(""); setConfigError(""); }} placeholder="Configuration filename without .json" />
