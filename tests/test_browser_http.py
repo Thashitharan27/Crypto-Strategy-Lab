@@ -51,6 +51,7 @@ def test_browser_api_route_inventory_is_read_only(tmp_path):
         "/api/v1/capabilities": {"GET"},
         "/api/v1/catalog/symbols": {"GET"},
         "/api/v1/catalog/coverage": {"GET"},
+        "/api/v1/portfolio/candidates": {"GET"},
         "/api/v1/runs/{run_id}": {"GET"},
         "/api/v1/configs/{config_id}": {"GET"},
     }
@@ -74,7 +75,7 @@ def test_browser_api_inventory_guard_rejects_root_and_mounted_routes(tmp_path):
     )
     expected = {
         "/api/v1/health", "/api/v1/capabilities", "/api/v1/catalog/symbols",
-        "/api/v1/catalog/coverage", "/api/v1/runs/{run_id}",
+        "/api/v1/catalog/coverage", "/api/v1/portfolio/candidates", "/api/v1/runs/{run_id}",
         "/api/v1/configs/{config_id}",
     }
     def assert_safe_routes():
