@@ -142,3 +142,49 @@ def test_run_browser_binds_uvicorn_to_loopback_only(capsys):
     assert "http://127.0.0.1:8767/" in output
     assert runtime.token in output
     assert runtime.token not in runtime.url
+
+
+def test_launcher_real_app_serves_static_and_authorized_read_only_api(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    static_root = _static_dist(tmp_path / "dist")
+    output_root = tmp_path / "output"
+    config_root = tmp_path / "configs"
+    output_root.mkdir()
+    config_root.mkdir()
+    service = Mock()
+    service.symbols.return_value = ["BTCUSDT"]
+    token = "a" * 48
+
+    with patch(
+        "crypto_strategy_lab.browser_launcher.build_browser_readonly_service",
+        return_value=service,
+    ):
+        runtime = build_browser_readonly_runtime(
+            environ={},
+            token=token,
+            static_root=static_root,
+            output_root=output_root,
+            config_root=config_root,
+        )
+
+    with TestClient(runtime.app, base_url="http://127.0.0.1:8767") as client:
+        shell = client.get("/")
+        assert shell.status_code == 200
+        assert "CSL" in shell.text
+        assert client.get("/api/v1/health").status_code == 401
+        auth = {"Authorization": "Bearer " + token}
+        assert client.get("/api/v1/health", headers=auth).json() == {
+            "status": "ok", "mode": "read-only"
+        }
+        assert client.get("/api/v1/catalog/symbols", headers=auth).json() == {
+            "symbols": ["BTCUSDT"]
+        }
+        assert client.post("/api/v1/catalog/symbols", headers=auth).status_code == 405
+        assert client.get(
+            "/api/v1/health",
+            headers={**auth, "Host": "outside.example"},
+        ).status_code == 403
+
+    service.symbols.assert_called_once_with("futures_um")
