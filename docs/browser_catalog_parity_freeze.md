@@ -39,6 +39,9 @@ The baseline run lists 2,956 selected source archives spanning nine dataset/inte
 
 ## Context-source warmup selection for the original 79-trade inventory
 
-A local catalog check on the original Windows workstation selected 97 BTCUSDT 1h and 5m archives from the trading start 2020-06-01, but 98 from 2020-05-01. The saved run lists 98 for each. For full-scope freezing only, use `--context-source-start 2020-05-01T00:00:00Z` to include the additional May archive for the 1h/5m and 4h price-context groups. Funding and sparse daily metrics still use the trading start; 4h strategy sources retain their separately selected 2020-01-01 warmup, and 1m execution sources retain the trading start.
+A local catalog check on the original Windows workstation selected 97 BTCUSDT 1h and 5m archives from the trading start 2020-06-01, but 98 from 2020-05-01. The saved run lists 98 for each. For full-scope freezing only, use `--context-source-start 2020-05-01T00:00:00Z` to include the additional May archive for the 1h/5m and 4h price-context groups. Sparse daily metrics still use the trading start; funding now uses the context warmup; 4h strategy sources retain their separately selected 2020-01-01 warmup, and 1m execution sources retain the trading start.
 
 The May start is a catalog-selection hypothesis, **not** a proven exact match: the saved source-provenance multiset cross-check must establish archive identities, and the original byte hashes must be frozen. Do not change raw files, the canonical cache or the execution window merely to satisfy an expected count.
+
+
+A subsequent original-Windows catalog diagnostic found that BTCUSDT funding archives also select 76 records from 2020-05-01 but only 75 from 2020-06-01; the saved baseline contains 76. The same optional context warmup is now applied to funding archives. This is only a source-count hypothesis until the exact saved-run provenance comparison succeeds. Sparse futures metrics retain the trading start.
