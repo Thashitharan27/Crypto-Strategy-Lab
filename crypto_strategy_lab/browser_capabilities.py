@@ -5,8 +5,26 @@ existing control-rule workspace and production feature registry for the browser.
 """
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
+
 from crypto_strategy_lab.control_rule_workspace import strategy_capabilities
 from crypto_strategy_lab.features import production_feature_registry
+
+
+def _json_safe(value):
+    """Serialize registry metadata without mutating authoritative defaults."""
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "NaN"
+        if math.isinf(value):
+            return "Infinity" if value > 0 else "-Infinity"
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return value
 
 
 def feature_capabilities() -> list[dict]:
@@ -19,7 +37,7 @@ def feature_capabilities() -> list[dict]:
         for parameter_name, spec in sorted(definition.parameters.items()):
             item = {"required": bool(spec.required)}
             if not spec.required:
-                item["default"] = spec.default
+                item["default"] = _json_safe(spec.default)
             parameters[parameter_name] = item
         result.append(
             {
