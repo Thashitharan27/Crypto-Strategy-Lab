@@ -341,27 +341,32 @@ def test_funding_and_metrics_use_distinct_source_windows(tmp_path, monkeypatch):
     observed = {}
     original = freeze._catalog_files
     trading_start = datetime(2020, 6, 1, tzinfo=UTC)
+    context_start = datetime(2020, 5, 1, tzinfo=UTC)
     for interval in ("4h", "1m"):
         source = raw / f"{interval}.zip"
         source.write_bytes(interval.encode())
     rows = [_record(raw, raw / f"{interval}.zip", interval,
-                    trading_start, datetime(2020, 7, 1, tzinfo=UTC)) for interval in ("4h", "1m")]
+                    trading_start, datetime(2020, 7, 1, tzinfo=UTC))
+            for interval in ("4h", "1m")]
     MarketDataStore(raw, cache).catalog.sync_root(raw, rows)
 
     def observe(store, request, interval, dataset=DatasetKind.KLINES, **kwargs):
         observed[(dataset.value, interval)] = request.start
         if dataset == DatasetKind.KLINES and interval in ("4h", "1m"):
             return original(store, request, interval, dataset, **kwargs)
-        return {}, {}
+        if dataset == DatasetKind.FUTURES_METRICS:
+            raise ValueError("observed metrics selection")
+        count = 76 if dataset == DatasetKind.FUNDING_RATE else 98
+        return {f"synthetic_{i}": raw / "4h.zip" for i in range(count)}, {}
 
     monkeypatch.setattr(freeze, "_catalog_files", observe)
-    with pytest.raises(ValueError, match="saved source group count mismatch"):
+    with pytest.raises(ValueError, match="observed metrics selection"):
         main(["--raw-root", str(raw), "--cache-root", str(cache),
               "--manifest-json", str(tmp_path / "x.json"), "--commit-sha", "a" * 40,
               "--start", "2020-06-01T00:00:00Z", "--end", "2020-07-01T00:00:00Z",
               "--context-source-start", "2020-05-01T00:00:00Z",
               "--include-all-saved-datasets"])
-    # Test the choice independently for the later groups by examining the source loop.
-    import inspect
-    source = inspect.getsource(freeze.main)
-    assert "dataset == DatasetKind.FUTURES_METRICS else context_request" in source
+    assert observed[("funding_rate", None)] == context_start
+    assert observed[("metrics", None)] == trading_start
+    assert observed[("klines", "1m")] == trading_start
+    assert observed[("klines", "1h")] == context_start
