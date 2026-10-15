@@ -37,6 +37,7 @@ function App() {
   const [incompleteFirst, setIncompleteFirst] = React.useState(false);
   const [message, setMessage] = React.useState("Not connected");
   const [configId, setConfigId] = React.useState("");
+  const [configSection, setConfigSection] = React.useState("");
   const [configSummary, setConfigSummary] = React.useState<{ sections: string[]; configVersion: string } | null>(null);
   const [configError, setConfigError] = React.useState("");
   const [configDetails, setConfigDetails] = React.useState<Record<string, unknown> | null>(null);
@@ -55,6 +56,7 @@ function App() {
     const requestId = ++configRequest.current;
     setConfigSummary(null);
     setConfigDetails(null);
+    setConfigSection("");
     setConfigError("");
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(configId)) {
       setConfigError("Enter a valid saved configuration ID");
@@ -196,7 +198,7 @@ function App() {
         <input id="config-id" value={configId} onChange={e => { ++configRequest.current; setConfigId(e.target.value); setConfigSummary(null); setConfigDetails(null); setConfigError(""); }} placeholder="Configuration filename without .json" />
         <button type="button" onClick={() => void loadConfig()}>Inspect configuration</button>
         {configError && <p role="alert">{configError}</p>}
-        {configSummary && <div><h3>Validated configuration</h3><p>Version: {configSummary.configVersion}</p><p>Sections: {configSummary.sections.join(", ")}</p><p>Read-only snapshot from the existing CSL configuration reader. No save, normalization, or execution is performed by the browser.</p>{configDetails && <details><summary>Inspect saved configuration values</summary><pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails, null, 2)}</pre></details>}</div>}
+        {configSummary && <div><h3>Validated configuration</h3><p>Version: {configSummary.configVersion}</p><p>Sections: {configSummary.sections.join(", ")}</p><p>Read-only snapshot from the existing CSL configuration reader. No save, normalization, or execution is performed by the browser.</p>{configDetails && <><label htmlFor="config-section">Inspect one saved configuration section</label><select id="config-section" value={configSection} onChange={event => setConfigSection(event.target.value)}><option value="">Choose a section</option>{configSummary.sections.map(name => <option key={name} value={name}>{name}</option>)}</select>{configSection && Object.prototype.hasOwnProperty.call(configDetails, configSection) && <pre aria-label="Selected configuration section" style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails[configSection], null, 2)}</pre>}</>}{configDetails && <details><summary>Inspect saved configuration values</summary><pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails, null, 2)}</pre></details>}</div>}
       </div>}
       {section === "Runs & Results" && connected && <div className="connection">
         <label htmlFor="run-id">Completed run folder ID</label>
