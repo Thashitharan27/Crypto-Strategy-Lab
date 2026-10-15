@@ -1666,9 +1666,17 @@ class StrategyVisualizerBrowserServer:
                         f"http://127.0.0.1:{listener_port}",
                         f"http://localhost:{listener_port}",
                     }
-                    safe_fetch = self.headers.get("Sec-Fetch-Site", "same-origin") in {
-                        "same-origin", "none",
+                    site = self.headers.get("Sec-Fetch-Site", "same-origin")
+                    requested = urlsplit(self.path).path
+                    session_root = f"/session/{owner.token}"
+                    is_document = requested in {
+                        session_root, session_root + "/", session_root + "/index.html",
                     }
+                    safe_fetch = site in {"same-origin", "none"} or (
+                        site == "same-site" and is_document
+                        and self.headers.get("Sec-Fetch-Mode") == "navigate"
+                        and self.headers.get("Sec-Fetch-Dest") == "document"
+                    )
                 except ValueError:
                     safe_host, safe_origin, safe_fetch = False, False, False
                 if not (safe_host and safe_origin and safe_fetch):
