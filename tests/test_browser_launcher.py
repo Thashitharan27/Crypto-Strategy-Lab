@@ -1,0 +1,201 @@
+from pathlib import Path
+import sys
+from unittest.mock import Mock, patch
+
+import pytest
+
+from crypto_strategy_lab.browser_launcher import (
+    BrowserReadOnlyRuntime,
+    build_browser_readonly_runtime,
+    run_browser_readonly,
+)
+
+
+def _static_dist(root: Path) -> Path:
+    root.mkdir()
+    (root / "index.html").write_text("<!doctype html><title>CSL</title>", encoding="utf-8")
+    return root
+
+
+def test_launcher_composes_existing_read_service_and_http_app(tmp_path):
+    static_root = _static_dist(tmp_path / "dist")
+    output_root = tmp_path / "output"
+    config_root = tmp_path / "configs"
+    output_root.mkdir()
+    config_root.mkdir()
+    token = "t" * 48
+    service = Mock()
+    app = Mock()
+
+    with (
+        patch(
+            "crypto_strategy_lab.browser_launcher.build_browser_readonly_service",
+            return_value=service,
+        ) as build_service,
+        patch(
+            "crypto_strategy_lab.browser_launcher.create_browser_app",
+            return_value=app,
+        ) as create_app,
+    ):
+        runtime = build_browser_readonly_runtime(
+            environ={
+                "CRYPTO_STRATEGY_LAB_RAW_ROOT": str(tmp_path / "raw"),
+                "CRYPTO_STRATEGY_LAB_CACHE_DIR": str(tmp_path / "cache"),
+            },
+            token=token,
+            port=9123,
+            static_root=static_root,
+            output_root=output_root,
+            config_root=config_root,
+        )
+
+    build_service.assert_called_once_with(
+        raw_root=tmp_path / "raw",
+        cache_root=tmp_path / "cache",
+    )
+    create_app.assert_called_once_with(
+        token=token,
+        read_service=service,
+        completed_run_root=output_root,
+        config_root=config_root,
+        static_root=static_root,
+    )
+    assert runtime.app is app
+    assert runtime.host == "127.0.0.1"
+    assert runtime.port == 9123
+    assert runtime.url == "http://127.0.0.1:9123/"
+    assert runtime.token == token
+
+
+def test_launcher_reuses_existing_output_and_config_environment_contract(tmp_path):
+    static_root = _static_dist(tmp_path / "dist")
+    output_root = tmp_path / "shared-output"
+    config_root = tmp_path / "shared-configs"
+    output_root.mkdir()
+    config_root.mkdir()
+
+    with (
+        patch(
+            "crypto_strategy_lab.browser_launcher.build_browser_readonly_service",
+            return_value=Mock(),
+        ),
+        patch(
+            "crypto_strategy_lab.browser_launcher.create_browser_app",
+            return_value=Mock(),
+        ),
+    ):
+        runtime = build_browser_readonly_runtime(
+            environ={
+                "CRYPTO_STRATEGY_LAB_RAW_ROOT": str(tmp_path / "raw"),
+                "CRYPTO_STRATEGY_LAB_CACHE_DIR": str(tmp_path / "cache"),
+                "CRYPTO_STRATEGY_LAB_OUTPUT_DIR": str(output_root),
+                "CRYPTO_STRATEGY_LAB_CONFIG_DIR": str(config_root),
+            },
+            token="e" * 48,
+            static_root=static_root,
+        )
+
+    assert runtime.output_root == output_root.resolve()
+    assert runtime.config_root == config_root.resolve()
+
+
+@pytest.mark.parametrize("port", [0, 65536, True, 1.5])
+def test_launcher_rejects_invalid_ports(port, tmp_path):
+    with pytest.raises(ValueError):
+        build_browser_readonly_runtime(
+            port=port,
+            token="p" * 48,
+            static_root=tmp_path,
+        )
+
+
+
+def test_run_browser_binds_uvicorn_to_loopback_only(capsys):
+    app = Mock()
+    runtime = BrowserReadOnlyRuntime(
+        app=app,
+        token="s" * 48,
+        host="127.0.0.1",
+        port=8767,
+        static_root=Path("/static"),
+        output_root=Path("/output"),
+        config_root=Path("/config"),
+    )
+    uvicorn = Mock()
+
+    with (
+        patch(
+            "crypto_strategy_lab.browser_launcher.build_browser_readonly_runtime",
+            return_value=runtime,
+        ),
+        patch.dict(sys.modules, {"uvicorn": uvicorn}),
+    ):
+        run_browser_readonly(port=8767)
+
+    uvicorn.run.assert_called_once_with(
+        app,
+        host="127.0.0.1",
+        port=8767,
+        log_level="info",
+    )
+    output = capsys.readouterr().out
+    assert "http://127.0.0.1:8767/" in output
+    assert runtime.token in output
+    assert runtime.token not in runtime.url
+
+
+def test_launcher_real_app_serves_static_and_authorized_read_only_api(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    static_root = _static_dist(tmp_path / "dist")
+    output_root = tmp_path / "output"
+    config_root = tmp_path / "configs"
+    output_root.mkdir()
+    config_root.mkdir()
+    service = Mock()
+    service.symbols.return_value = ["BTCUSDT"]
+    token = "a" * 48
+
+    with patch(
+        "crypto_strategy_lab.browser_launcher.build_browser_readonly_service",
+        return_value=service,
+    ):
+        runtime = build_browser_readonly_runtime(
+            environ={},
+            token=token,
+            static_root=static_root,
+            output_root=output_root,
+            config_root=config_root,
+        )
+
+    with TestClient(runtime.app, base_url="http://127.0.0.1:8767") as client:
+        shell = client.get("/")
+        assert shell.status_code == 200
+        assert "CSL" in shell.text
+        assert client.get("/api/v1/health").status_code == 401
+        auth = {"Authorization": "Bearer " + token}
+        assert client.get("/api/v1/health", headers=auth).json() == {
+            "status": "ok", "mode": "read-only"
+        }
+        assert client.get("/api/v1/catalog/symbols", headers=auth).json() == {
+            "symbols": ["BTCUSDT"]
+        }
+        assert client.post("/api/v1/catalog/symbols", headers=auth).status_code == 405
+        assert client.get(
+            "/api/v1/health",
+            headers={**auth, "Host": "outside.example"},
+        ).status_code == 403
+
+    service.symbols.assert_called_once_with("futures_um")
+
+
+def test_default_completed_run_root_matches_canonical_desktop_reporting(tmp_path):
+    from crypto_strategy_lab.paths import OUTPUT_DIR
+    with (
+        patch("crypto_strategy_lab.browser_launcher.build_browser_readonly_service", return_value=Mock()),
+        patch("crypto_strategy_lab.browser_launcher.create_browser_app", return_value=Mock()) as factory,
+    ):
+        runtime = build_browser_readonly_runtime(environ={}, token="d" * 48, static_root=tmp_path)
+    assert runtime.output_root == (OUTPUT_DIR / "data_lake_v2").resolve()
+    assert factory.call_args.kwargs["completed_run_root"] == OUTPUT_DIR / "data_lake_v2"
