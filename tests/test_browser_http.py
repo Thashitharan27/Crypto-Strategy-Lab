@@ -39,8 +39,12 @@ def test_browser_api_route_inventory_is_read_only(tmp_path):
 
     api_routes = {}
     for route in app.routes:
-        if route.path.startswith("/api/v1/"):
-            api_routes.setdefault(route.path, set()).update(route.methods or ())
+        if route.path == "/api/v1" or route.path.startswith("/api/v1/"):
+            # Mounted sub-apps can hide arbitrary methods behind a path, so
+            # fail closed rather than treating a Mount as a harmless GET.
+            assert route.__class__.__name__ != "Mount"
+            assert route.methods is not None, "Uninspectable API route"
+            api_routes.setdefault(route.path, set()).update(route.methods)
 
     assert api_routes == {
         "/api/v1/health": {"GET"},
