@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -67,6 +68,10 @@ def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[st
     for label, record in metadata.items():
         if label not in freeze["files"]:
             raise ValueError(f"unhashed catalog record: {label}")
+        hashed = freeze["files"][label]
+        if (not isinstance(hashed, dict) or not isinstance(hashed.get("sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", hashed["sha256"]) is None):
+            raise ValueError(f"invalid frozen source SHA-256 metadata: {label}")
         interval = record.get("interval") if full_scope else ("4h" if label.startswith("BTCUSDT_4h_") else "1m" if label.startswith("BTCUSDT_1m_") else None)
         key = _identity(_interval(interval), record["frequency"], record["period_start"], record["period_end"], record["catalog_fingerprint"])
         actual[((record.get("dataset", "klines"),) + key) if full_scope else key] += 1
