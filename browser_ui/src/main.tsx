@@ -17,6 +17,7 @@ function App() {
   const [coverageStart, setCoverageStart] = React.useState("2020-06-01");
   const [coverageEnd, setCoverageEnd] = React.useState("2026-09-01");
   const [coverageError, setCoverageError] = React.useState("");
+  const [coverageStatusFilter, setCoverageStatusFilter] = React.useState("ALL");
   const [message, setMessage] = React.useState("Not connected");
   const [configId, setConfigId] = React.useState("");
   const [configSummary, setConfigSummary] = React.useState<{ sections: string[]; configVersion: string } | null>(null);
@@ -158,8 +159,12 @@ function App() {
           {coverageError && <p role="alert">{coverageError}</p>}
           {coverage && <div><p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>
             <p aria-label="Coverage availability summary">Available: {coverage.filter(row => row.state === "AVAILABLE").length} · Partial: {coverage.filter(row => row.state === "PARTIAL").length} · Unavailable: {coverage.filter(row => row.state === "UNAVAILABLE").length} · Unknown: {coverage.filter(row => !["AVAILABLE", "PARTIAL", "UNAVAILABLE"].includes(row.state ?? "")).length}</p>
+            <label htmlFor="coverage-status-filter">Coverage status filter</label>
+            <select id="coverage-status-filter" value={coverageStatusFilter} onChange={e => setCoverageStatusFilter(e.target.value)}>
+              <option value="ALL">All records</option><option value="AVAILABLE">Available</option><option value="PARTIAL">Partial</option><option value="UNAVAILABLE">Unavailable</option><option value="UNKNOWN">Unknown</option>
+            </select>
             <table><caption>Saved catalog coverage (metadata only; not candle integrity)</caption><thead><tr><th>Dataset</th><th>Interval</th><th>Status</th><th>Archives</th><th>First period</th><th>Last period</th></tr></thead>
-              <tbody>{coverage.map((record, index) => <tr key={`${record.dataset ?? "dataset"}-${record.interval ?? "none"}-${index}`}>
+              <tbody>{coverage.filter(record => coverageStatusFilter === "ALL" || (coverageStatusFilter === "UNKNOWN" ? !["AVAILABLE", "PARTIAL", "UNAVAILABLE"].includes(record.state ?? "") : record.state === coverageStatusFilter)).map((record, index) => <tr key={`${record.dataset ?? "dataset"}-${record.interval ?? "none"}-${index}`}>
                 <td>{record.dataset ?? "Unknown"}</td><td>{record.interval ?? "—"}</td><td>{record.state ?? "Unknown"}</td>
                 <td>{typeof record.archive_count === "number" ? record.archive_count : "—"}</td>
                 <td>{record.first_period ?? "—"}</td><td>{record.last_period ?? "—"}</td>
