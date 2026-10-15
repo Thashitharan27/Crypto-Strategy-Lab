@@ -151,9 +151,6 @@ def main(argv=None) -> int:
                   (DatasetKind.FUNDING_RATE, None), (DatasetKind.FUTURES_METRICS, None))
         for dataset, interval in groups:
             matched_files, matched_meta = _catalog_files(store, request, interval, dataset)
-            if dataset == DatasetKind.KLINES:
-                # The extra kline intervals use the same deterministic labels.
-                pass
             extra_files.update(matched_files)
             extra_meta.update(matched_meta)
         if len(extra_files) != 2757:
