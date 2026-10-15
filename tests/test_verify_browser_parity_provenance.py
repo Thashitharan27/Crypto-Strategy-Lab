@@ -1,9 +1,12 @@
 import copy
+import json
+
+import duckdb
 
 import pandas as pd
 import pytest
 
-from tools.verify_browser_parity_provenance import verify_source_provenance
+from tools.verify_browser_parity_provenance import verify_source_provenance, main
 
 
 def _inputs():
@@ -73,3 +76,17 @@ def test_source_provenance_rejects_missing_saved_schema():
     freeze, saved = _inputs()
     with pytest.raises(ValueError, match="missing fields"):
         verify_source_provenance(freeze, saved.drop(columns=["raw_archive_fingerprint"]))
+
+
+def test_cli_reads_real_parquet_with_existing_duckdb_dependency(tmp_path):
+    frozen, saved = _inputs()
+    manifest_path = tmp_path / "freeze.json"
+    source_path = tmp_path / "source_archives.parquet"
+    manifest_path.write_text(json.dumps(frozen), encoding="utf-8")
+    with duckdb.connect(":memory:") as connection:
+        connection.register("saved_source_rows", saved)
+        connection.execute("COPY saved_source_rows TO ? (FORMAT PARQUET)", [str(source_path)])
+    assert main([
+        "--freeze-json", str(manifest_path),
+        "--saved-provenance-parquet", str(source_path),
+    ]) == 0
