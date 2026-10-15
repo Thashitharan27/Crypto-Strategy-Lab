@@ -44,6 +44,7 @@ The current API route inventory is locked by regression test to:
 | Route | Method | Owner |
 | --- | --- | --- |
 | `/api/v1/health` | GET | local adapter |
+| `/api/v1/capabilities` | GET | authoritative strategy/feature registry projection |
 | `/api/v1/catalog/symbols` | GET | existing catalog service |
 | `/api/v1/catalog/coverage` | GET | existing catalog service |
 | `/api/v1/runs/{run_id}` | GET | existing completed-run reader |
