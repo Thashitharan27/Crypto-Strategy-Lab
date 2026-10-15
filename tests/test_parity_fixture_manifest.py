@@ -71,3 +71,18 @@ def test_frozen_files_reject_missing_extra_and_invalid_digest(tmp_path):
         verify_frozen_fixture_files({"candles": {"sha256": "bad", "bytes": 7}}, {"candles": p})
     with pytest.raises(ValueError, match="invalid"):
         verify_frozen_fixture_files({"candles": {"sha256": frozen["candles"]["sha256"], "bytes": True}}, {"candles": p})
+
+
+def test_stat_fingerprint_cannot_certify_identical_file_bytes(tmp_path):
+    """Two same-size, same-mtime files can have different contents."""
+    from crypto_strategy_lab.data.cache import stat_fingerprint
+    p = tmp_path / "candles.zip"
+    p.write_bytes(b"AAAA")
+    before_stat = p.stat()
+    before_metadata = stat_fingerprint(p)
+    before_content = file_fingerprint(p)
+    p.write_bytes(b"BBBB")
+    import os
+    os.utime(p, ns=(before_stat.st_atime_ns, before_stat.st_mtime_ns))
+    assert stat_fingerprint(p) == before_metadata
+    assert file_fingerprint(p)["sha256"] != before_content["sha256"]
