@@ -18,6 +18,7 @@ function App() {
   const [coverageEnd, setCoverageEnd] = React.useState("2026-09-01");
   const [coverageError, setCoverageError] = React.useState("");
   const [coverageQueryLabel, setCoverageQueryLabel] = React.useState("");
+  const coverageRequest = React.useRef(0);
   const [coverageStatusFilter, setCoverageStatusFilter] = React.useState("ALL");
   const [incompleteFirst, setIncompleteFirst] = React.useState(false);
   const [message, setMessage] = React.useState("Not connected");
@@ -76,6 +77,7 @@ function App() {
   }
 
   async function loadCoverage() {
+    const requestId = ++coverageRequest.current;
     setCoverage(null);
     setCoverageQueryLabel("");
     setCoverageError("");
@@ -96,9 +98,11 @@ function App() {
     try {
       const result = await getReadOnly<{coverage: CoverageRecord[]}>(`/api/v1/catalog/coverage?${query.toString()}`, token);
       if (!Array.isArray(result.coverage) || result.coverage.some(item => !item || typeof item !== "object" || Array.isArray(item))) throw new Error("Invalid coverage response");
+      if (requestId !== coverageRequest.current) return;
       setCoverage(result.coverage);
       setCoverageQueryLabel(`${coverageSymbol.toUpperCase()} · ${coverageStart} to ${coverageEnd} UTC (end exclusive) · 4h / 1m`);
     } catch {
+      if (requestId !== coverageRequest.current) return;
       setCoverageError("Coverage unavailable for this symbol or time window");
     }
   }
