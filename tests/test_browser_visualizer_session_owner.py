@@ -99,3 +99,18 @@ def test_visualizer_server_interrupt_after_worker_started_stops_worker():
     assert server._server is None
     assert server._thread is None
     server.stop()
+
+
+def test_visualizer_server_releases_socket_if_thread_construction_interrupts():
+    from unittest.mock import patch
+    from crypto_strategy_lab.strategy_visualizer_browser import StrategyVisualizerBrowserServer
+    server = StrategyVisualizerBrowserServer(Mock())
+    with patch(
+        "crypto_strategy_lab.strategy_visualizer_browser.Thread",
+        side_effect=KeyboardInterrupt("construction interrupted"),
+    ):
+        with pytest.raises(KeyboardInterrupt, match="construction interrupted"):
+            server.start()
+    assert server._server is None
+    assert server._thread is None
+    server.stop()
