@@ -1,6 +1,6 @@
 # Browser migration — existing Strategy Visualizer integration gate
 
-**Status:** design and acceptance gate; browser-managed visualizer launch is not yet implemented or authorized.
+**Status:** read-only browser-managed visualizer launch was implemented via #584 and local Host/Origin guards via #585. Automated real-loopback launch and shutdown checks are being added; **historical market-data chart/overlay parity on the user's frozen BTC run is not yet certified.**
 
 ## Reuse decision
 
@@ -66,8 +66,21 @@ statistics should be introduced.
 
 ## Current scope boundary
 
-The browser currently supports authenticated read-only completed-run summaries,
-configuration inspection and capability metadata. This milestone does **not**
+The browser supports authenticated read-only completed-run summaries,
+configuration inspection, capability metadata and an explicit verified-run
+visualizer launch. The chart remains the existing Python visualizer. This milestone does **not**
 enable run creation, research execution, strategy evaluation, trading, or
 configuration writes. PR #501 remains on hold until its pending-limit
 execution overlap is resolved.
+
+## Remaining operator-local parity evidence
+
+The in-process and loopback tests confirm delegation and protocol/lifecycle behavior,
+not numerical parity on a real BTCUSDT historical run. Before calling the browser
+visualizer certified, run the same completed run and trade selection through the
+existing desktop-launched visualizer and the new browser action against the
+frozen canonical Data Lake source. Compare selected trade, displayed candle
+open timestamps, timeframe switching, full-run/selected view, EMA/Fibonacci/SR
+layers, markers, entry/stop/target geometry, and inspector payloads. Record
+immutable source and prepared-data identities and any differences. Do not
+change the backtest engine to make a chart match.
