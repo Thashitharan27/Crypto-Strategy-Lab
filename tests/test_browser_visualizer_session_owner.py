@@ -65,3 +65,17 @@ def test_replacement_stops_previous_server_before_starting_next():
         ("start", "one"), ("stop", "one"),
         ("start", "two"), ("stop", "two"),
     ]
+
+
+def test_real_visualizer_server_closes_socket_if_thread_cannot_start():
+    from unittest.mock import patch
+    from crypto_strategy_lab.strategy_visualizer_browser import StrategyVisualizerBrowserServer
+    from threading import Thread
+    model = Mock()
+    owner = StrategyVisualizerBrowserServer(model)
+    with patch.object(Thread, "start", side_effect=RuntimeError("thread creation failed")):
+        with pytest.raises(RuntimeError, match="thread creation failed"):
+            owner.start()
+    assert owner._server is None
+    assert owner._thread is None
+    owner.stop()  # harmless following partial startup failure
