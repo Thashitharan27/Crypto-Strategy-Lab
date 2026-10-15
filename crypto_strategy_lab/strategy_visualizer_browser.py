@@ -12,7 +12,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import secrets
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -1608,6 +1608,7 @@ class StrategyVisualizerBrowserServer:
         self._lock = Lock()
         self._server: _LoopbackHTTPServer | None = None
         self._thread: Thread | None = None
+        self._stop_requested = Event()
 
     @property
     def url(self) -> str:
@@ -1730,26 +1731,55 @@ class StrategyVisualizerBrowserServer:
                         HTTPStatus.INTERNAL_SERVER_ERROR,
                     )
 
-        self._server = _LoopbackHTTPServer(("127.0.0.1", 0), Handler)
-        self._thread = Thread(
-            target=self._server.serve_forever,
-            name="strategy-visualizer-browser",
-            daemon=True,
-        )
-        self._thread.start()
+        server = _LoopbackHTTPServer(("127.0.0.1", 0), Handler)
+        server.timeout = 0.1
+        self._server = server
+        self._stop_requested = Event()
+        stop_requested = self._stop_requested
+
+        def serve_until_stopped():
+            # Bounded polling avoids BaseServer.shutdown() deadlocks when
+            # thread construction/startup is interrupted at any point.
+            while not stop_requested.is_set():
+                server.handle_request()
+
+        try:
+            thread = Thread(
+                target=serve_until_stopped,
+                name="strategy-visualizer-browser",
+                daemon=True,
+            )
+            self._thread = thread
+            thread.start()
+        except BaseException:
+            self._stop_requested.set()
+            # A worker created just before Thread.start was interrupted
+            # will observe the stop flag even if it starts later.
+            thread = self._thread
+            if thread is not None:
+                try:
+                    thread.join(timeout=2.0)
+                except RuntimeError:
+                    pass  # The worker never reached a started state.
+            server.server_close()
+            self._server = None
+            self._thread = None
+            raise
         return self.url
 
     def stop(self) -> None:
-        server = self._server
-        thread = self._thread
+        server, thread = self._server, self._thread
+        self._stop_requested.set()
         self._server = None
         self._thread = None
         if server is None:
             return
-        server.shutdown()
+        if thread is not None:
+            try:
+                thread.join(timeout=2.0)
+            except RuntimeError:
+                pass  # Partially constructed worker.
         server.server_close()
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=2.0)
 
 
 __all__ = [
