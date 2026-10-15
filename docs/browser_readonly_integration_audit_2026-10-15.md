@@ -1,12 +1,12 @@
 # Browser read-only integration audit
 
 **Audit date:** 2026-10-15  
-**Scope:** browser shell → localhost HTTP adapter → existing CSL application/read services and completed outputs.  
-**Result:** **PASS for read-only integration. Browser-controlled execution remains disabled.**
+**Scope:** read-only browser components and their service boundaries: React client contract, localhost HTTP adapter, BrowserReadOnlyService, existing CSL application/read services, and completed-output readers.  
+**Result:** **PASS for component-level read-only boundary reuse. Production browser composition/wiring is not yet certified, and browser-controlled execution remains disabled.**
 
 ## Architecture verified
 
-The browser migration currently follows one composition chain:
+The intended read-only composition chain is:
 
 ```text
 React/TypeScript browser shell
@@ -21,7 +21,9 @@ Completed-run and configuration reads delegate to the existing readers:
 - `read_completed_run`
 - `read_research_config`
 
-The browser facade does not implement a second market-data store, archive discoverer, prepared-feature builder, strategy evaluator, execution engine, configuration schema, or report parser.
+The audited components do not implement a second market-data store, archive discoverer, prepared-feature builder, strategy evaluator, execution engine, configuration schema, or report parser.
+
+At this revision there is **no verified production entry point** that composes the static React assets, runtime token, localhost server, `create_browser_app`, and `build_browser_readonly_service` into one launched browser application. Therefore this document must not be read as end-to-end runtime certification. Production composition is the next browser-integration gate.
 
 ## Data Lake ownership
 
@@ -72,10 +74,12 @@ These controls protect the read-only local interface; they are not a substitute 
 
 The browser completed-run path delegates to `read_completed_run` and does not reinterpret the native 877-column trade schema. Configuration reads delegate to the current ResearchRunConfig-compatible reader. The historical replay certificate separately proves that the current engine/data path can reproduce the original 79-trade BTCUSDT baseline.
 
-## Execution gate
+## Remaining integration and execution gates
 
-This audit certifies only **read-only composition**. It does not authorize adding POST/PUT/PATCH/DELETE routes or invoking the research/backtest engine from the browser.
+This audit certifies only the **read-only component boundaries and reuse contracts** listed above. It does not certify that those components are wired into a production launcher, and it does not authorize adding POST/PUT/PATCH/DELETE routes or invoking the research/backtest engine from the browser.
 
-Before browser-controlled execution can be enabled, Phase 5 must add guarded writes/job lifecycle and demonstrate frozen-fixture browser-vs-desktop configuration and trade parity through the existing engine.
+The next integration step is to add and test one production composition/launcher path that wires the existing read-only service, HTTP app, static browser assets, runtime token and localhost binding without introducing a second engine or data owner.
+
+Only after that read-only runtime is certified should Phase 5 add guarded writes/job lifecycle and demonstrate frozen-fixture browser-vs-desktop configuration and trade parity through the existing engine.
 
 PR #501 remains on hold until its pending-limit execution overlap is resolved.
