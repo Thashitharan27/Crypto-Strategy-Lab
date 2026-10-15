@@ -18,8 +18,9 @@ from crypto_strategy_lab.paths import resolve_data_lake_runtime_paths
 
 
 class BrowserReadOnlyService:
-    def __init__(self, catalog: CatalogStatusService):
+    def __init__(self, catalog: CatalogStatusService, application_service=None):
         self._catalog = catalog
+        self.application_service = application_service
 
     def symbols(self, market="futures_um") -> list[str]:
         return catalog_symbols(self._catalog, market)
@@ -55,4 +56,4 @@ def build_browser_readonly_service(
         Path(raw_root) if raw_root is not None else paths.raw_root,
         Path(cache_root) if cache_root is not None else paths.cache_root,
     )
-    return BrowserReadOnlyService(application.catalog)
+    return BrowserReadOnlyService(application.catalog, application_service=application)
