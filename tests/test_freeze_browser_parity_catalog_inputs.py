@@ -31,7 +31,7 @@ def _record(raw_root, path, interval, start, end):
     )
 
 
-def test_catalog_backed_freeze_hashes_existing_sources_without_refresh(tmp_path, monkeypatch):
+def test_catalog_backed_freeze_hashes_existing_sources_without_refresh(tmp_path, monkeypatch, capsys):
     raw = tmp_path / "raw"
     cache = tmp_path / "cache"
     raw.mkdir()
@@ -68,6 +68,7 @@ def test_catalog_backed_freeze_hashes_existing_sources_without_refresh(tmp_path,
         "--expected-intrabar-records", "1",
     ]) == 0
 
+    assert "PARTIAL SOURCE SCOPE ONLY" in capsys.readouterr().out
     frozen = json.loads(manifest.read_text(encoding="utf-8"))
     assert frozen["selection"]["strategy_record_count"] == 1
     assert frozen["selection"]["intrabar_record_count"] == 1
