@@ -23,9 +23,27 @@ def _identity(interval, frequency, period_start, period_end, fingerprint):
 
 
 def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[str, int]:
+    if freeze.get("commit_sha") != "1ad8a2161877260d9f1d790f583a82e065f8730e":
+        raise ValueError("frozen manifest commit does not match original 79-trade baseline")
+    if freeze.get("strategy_timeframe_minutes") != 240 or freeze.get("intrabar_timeframe_minutes") != 1:
+        raise ValueError("frozen baseline timeframes do not match 4h/1m")
     selection = freeze["selection"]
     if selection["symbol"] != "BTCUSDT" or selection["strategy_interval"] != "4h" or selection["intrabar_interval"] != "1m":
         raise ValueError("unexpected baseline selection")
+    if (pd.Timestamp(selection["start"]) != pd.Timestamp("2020-06-01T00:00:00Z")
+        or pd.Timestamp(selection["end"]) != pd.Timestamp("2026-09-01T00:00:00Z")):
+        raise ValueError("frozen manifest trading window does not match original baseline")
+    warmup_value = selection.get("strategy_source_start", selection["start"])
+    try:
+        warmup_start = pd.Timestamp(warmup_value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("frozen manifest has invalid strategy warmup start") from error
+    if pd.isna(warmup_start):
+        raise ValueError("frozen manifest has invalid strategy warmup start")
+    if warmup_start.tzinfo is None:
+        raise ValueError("frozen manifest has timezone-naive strategy warmup start")
+    if warmup_start > pd.Timestamp("2020-01-01T00:00:00Z"):
+        raise ValueError("frozen manifest omits original strategy warmup sources")
     metadata = selection["catalog_records"]
     if len(metadata) != len(freeze["files"]):
         raise ValueError("catalog metadata and hashed file counts disagree")

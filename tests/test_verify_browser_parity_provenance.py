@@ -29,9 +29,14 @@ def _inputs():
             "raw_archive_fingerprint": fingerprint,
         })
     frozen = {
+        "commit_sha": "1ad8a2161877260d9f1d790f583a82e065f8730e",
+        "strategy_timeframe_minutes": 240,
+        "intrabar_timeframe_minutes": 1,
         "files": {label: {"sha256": "c" * 64, "bytes": 12} for label in fields},
         "selection": {
             "symbol": "BTCUSDT", "strategy_interval": "4h", "intrabar_interval": "1m",
+            "start": "2020-06-01T00:00:00+00:00", "end": "2026-09-01T00:00:00+00:00",
+            "strategy_source_start": "2020-01-01T00:00:00+00:00",
             "strategy_record_count": 1, "intrabar_record_count": 1,
             "catalog_records": fields,
         },
@@ -91,3 +96,35 @@ def test_cli_reads_real_parquet_with_existing_duckdb_dependency(tmp_path):
         "--freeze-json", str(manifest_path),
         "--saved-provenance-parquet", str(source_path),
     ]) == 0
+
+
+@pytest.mark.parametrize("key,value,error", [
+    ("commit_sha", "a" * 40, "commit"),
+    ("strategy_timeframe_minutes", 60, "timeframes"),
+    ("intrabar_timeframe_minutes", 15, "timeframes"),
+])
+def test_provenance_rejects_wrong_baseline_identity(key, value, error):
+    frozen, saved = _inputs()
+    frozen[key] = value
+    with pytest.raises(ValueError, match=error):
+        verify_source_provenance(frozen, saved)
+
+
+@pytest.mark.parametrize("field,value,error", [
+    ("start", "2020-06-02T00:00:00Z", "trading window"),
+    ("end", "2026-08-31T00:00:00Z", "trading window"),
+    ("strategy_source_start", "2020-06-01T00:00:00Z", "warmup"),
+])
+def test_provenance_rejects_wrong_baseline_window(field, value, error):
+    frozen, saved = _inputs()
+    frozen["selection"][field] = value
+    with pytest.raises(ValueError, match=error):
+        verify_source_provenance(frozen, saved)
+
+
+@pytest.mark.parametrize("invalid", ["NaT", None, "", "2020-01-01T00:00:00"])
+def test_provenance_rejects_invalid_or_naive_warmup(invalid):
+    frozen, saved = _inputs()
+    frozen["selection"]["strategy_source_start"] = invalid
+    with pytest.raises(ValueError, match="warmup start"):
+        verify_source_provenance(frozen, saved)
