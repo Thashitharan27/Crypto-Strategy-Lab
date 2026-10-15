@@ -31,7 +31,7 @@ def _utc(text: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str | None, dataset: DatasetKind = DatasetKind.KLINES):
+def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str | None, dataset: DatasetKind = DatasetKind.KLINES, *, require_continuous_coverage: bool = True):
     records = store.catalog.records_for(
         store.raw_root,
         request,
@@ -49,11 +49,11 @@ def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str |
             raise ValueError(f"unknown catalog period for {request.symbol} {interval}")
         if record.period_end <= record.period_start:
             raise ValueError(f"invalid catalog period for {request.symbol} {interval}")
-        if record.period_start > cursor:
+        if require_continuous_coverage and record.period_start > cursor:
             raise ValueError(f"catalog coverage gap for {request.symbol} {interval} at {cursor.isoformat()}")
         if record.period_end > cursor:
             cursor = record.period_end
-    if cursor < request.end:
+    if require_continuous_coverage and cursor < request.end:
         raise ValueError(f"catalog coverage gap for {request.symbol} {interval} at {cursor.isoformat()}")
     files: dict[str, Path] = {}
     metadata: dict[str, dict[str, object]] = {}
@@ -150,7 +150,10 @@ def main(argv=None) -> int:
                   (DatasetKind.PREMIUM_INDEX_KLINES, "4h"),
                   (DatasetKind.FUNDING_RATE, None), (DatasetKind.FUTURES_METRICS, None))
         for dataset, interval in groups:
-            matched_files, matched_meta = _catalog_files(store, request, interval, dataset)
+            matched_files, matched_meta = _catalog_files(
+                store, request, interval, dataset,
+                require_continuous_coverage=(dataset != DatasetKind.FUTURES_METRICS),
+            )
             extra_files.update(matched_files)
             extra_meta.update(matched_meta)
         if len(extra_files) != 2757:
