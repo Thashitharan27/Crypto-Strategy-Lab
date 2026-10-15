@@ -157,6 +157,7 @@ function App() {
           <button type="button" onClick={() => void loadCoverage()}>Check coverage (4h / 1m)</button>
           {coverageError && <p role="alert">{coverageError}</p>}
           {coverage && <div><p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>
+            <p aria-label="Coverage availability summary">Available: {coverage.filter(row => row.state === "AVAILABLE").length} · Partial: {coverage.filter(row => row.state === "PARTIAL").length} · Unavailable: {coverage.filter(row => row.state === "UNAVAILABLE").length} · Unknown: {coverage.filter(row => !["AVAILABLE", "PARTIAL", "UNAVAILABLE"].includes(row.state ?? "")).length}</p>
             <table><caption>Saved catalog coverage (metadata only; not candle integrity)</caption><thead><tr><th>Dataset</th><th>Interval</th><th>Status</th><th>Archives</th><th>First period</th><th>Last period</th></tr></thead>
               <tbody>{coverage.map((record, index) => <tr key={`${record.dataset ?? "dataset"}-${record.interval ?? "none"}-${index}`}>
                 <td>{record.dataset ?? "Unknown"}</td><td>{record.interval ?? "—"}</td><td>{record.state ?? "Unknown"}</td>
