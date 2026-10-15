@@ -14,6 +14,7 @@ import secrets
 from typing import Any
 
 from crypto_strategy_lab.browser_http import create_browser_app
+from crypto_strategy_lab.browser_visualizer_coordinator import BrowserVisualizerCoordinator
 from crypto_strategy_lab.browser_readonly_service import build_browser_readonly_service
 from crypto_strategy_lab.paths import (
     CONFIG_DIR,
@@ -96,12 +97,16 @@ def build_browser_readonly_runtime(
         raw_root=data_paths.raw_root,
         cache_root=data_paths.cache_root,
     )
+    coordinator = BrowserVisualizerCoordinator(
+        read_service.application_service, effective_output_root,
+    )
     app = create_browser_app(
         token=runtime_token,
         read_service=read_service,
         completed_run_root=effective_output_root,
         config_root=effective_config_root,
         static_root=effective_static_root,
+        visualizer_coordinator=coordinator,
     )
     return BrowserReadOnlyRuntime(
         app=app,
