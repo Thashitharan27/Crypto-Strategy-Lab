@@ -99,7 +99,7 @@ function App() {
       const drawdown = safeMetric(maximum_drawdown_percentage);
       const fees = safeMetric(total_fees);
       setRunRisk({
-        profitFactor: profitFactor !== undefined && profitFactor >= 0 ? profitFactor : undefined,
+        profitFactor: profitFactor !== undefined && profitFactor >= 0 ? profitFactor : profit_factor === "Infinity" ? Number.POSITIVE_INFINITY : undefined,
         drawdown: drawdown !== undefined && drawdown <= 0 ? drawdown : undefined,
         fees: fees !== undefined && fees >= 0 ? fees : undefined,
       });
@@ -303,7 +303,7 @@ function App() {
         {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p>
           {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p><p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p><p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p></div>}
           {runRisk && <div aria-label="Saved run risk metrics">
-            {runRisk.profitFactor !== undefined && <p>Profit factor: {runRisk.profitFactor.toFixed(2)}</p>}
+            {runRisk.profitFactor !== undefined && <p>Profit factor: {Number.isFinite(runRisk.profitFactor) ? runRisk.profitFactor.toFixed(2) : "∞"}</p>}
             {runRisk.drawdown !== undefined && <p>Maximum drawdown: {runRisk.drawdown.toFixed(2)}%</p>}
             {runRisk.fees !== undefined && <p>Total fees: {runRisk.fees.toFixed(2)} (report currency)</p>}
           </div>}
