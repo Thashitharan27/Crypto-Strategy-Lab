@@ -167,7 +167,7 @@ function App() {
       </div>
       {section === "Configurations" && connected && <div className="connection">
         <label htmlFor="config-id">Saved configuration ID</label>
-        <input id="config-id" value={configId} onChange={e => setConfigId(e.target.value)} placeholder="Configuration filename without .json" />
+        <input id="config-id" value={configId} onChange={e => { ++configRequest.current; setConfigId(e.target.value); setConfigSummary(null); setConfigDetails(null); setConfigError(""); }} placeholder="Configuration filename without .json" />
         <button type="button" onClick={() => void loadConfig()}>Inspect configuration</button>
         {configError && <p role="alert">{configError}</p>}
         {configSummary && <div><h3>Validated configuration</h3><p>Version: {configSummary.configVersion}</p><p>Sections: {configSummary.sections.join(", ")}</p><p>Read-only snapshot from the existing CSL configuration reader. No save, normalization, or execution is performed by the browser.</p>{configDetails && <details><summary>Inspect saved configuration values</summary><pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails, null, 2)}</pre></details>}</div>}
