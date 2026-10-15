@@ -303,7 +303,7 @@ function App() {
         <input id="run-id" value={runId} onChange={e => {++runRequest.current; setRunId(e.target.value); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError("");}} placeholder="BTCUSDT_4h_…" />
         <button type="button" disabled={!connected} onClick={() => void loadRun()}>Read completed run</button>
         {runError && <p role="alert">{runError}</p>}
-        {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p>
+        {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p><button type="button" onClick={() => {++visualizerRequest.current; setVisualizerRunId(runId); setVisualizerUrl(""); setVisualizerError(""); setSection("Trade Visualizer");}}>View in Trade Visualizer</button>
           {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p>{runMetrics.winRate !== undefined && <p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p>}{runMetrics.netPnl !== undefined && <p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p>}</div>}
           {runRisk && <div aria-label="Saved run risk metrics">
             {runRisk.profitFactor !== undefined && <p>Profit factor: {Number.isFinite(runRisk.profitFactor) ? runRisk.profitFactor.toFixed(2) : "∞"}</p>}
