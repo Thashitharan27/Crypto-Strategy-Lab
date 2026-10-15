@@ -13,6 +13,8 @@ function App() {
   const [symbols, setSymbols] = React.useState<string[]>([]);
   const [coverage, setCoverage] = React.useState<unknown[] | null>(null);
   const [coverageSymbol, setCoverageSymbol] = React.useState("BTCUSDT");
+  const [coverageStart, setCoverageStart] = React.useState("2020-06-01");
+  const [coverageEnd, setCoverageEnd] = React.useState("2026-09-01");
   const [coverageError, setCoverageError] = React.useState("");
   const [message, setMessage] = React.useState("Not connected");
   const [configId, setConfigId] = React.useState("");
@@ -77,8 +79,13 @@ function App() {
       setCoverageError("Select a valid symbol");
       return;
     }
-    const end = new Date();
-    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
+    if (!validDate(coverageStart) || !validDate(coverageEnd) || coverageStart >= coverageEnd) {
+      setCoverageError("Select valid dates with the start before the end");
+      return;
+    }
+    const start = new Date(coverageStart + "T00:00:00Z");
+    const end = new Date(coverageEnd + "T00:00:00Z");
     const query = new URLSearchParams({symbol: coverageSymbol, market: "futures_um",
       start: start.toISOString(), end: end.toISOString(), strategy_timeframe: "4h", intrabar_timeframe: "1m"});
     try {
@@ -142,7 +149,11 @@ function App() {
       {section === "Data Library" && connected ? <div><h3>Available symbols</h3><ul>{symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>
         <div className="connection"><label htmlFor="coverage-symbol">Data coverage symbol</label>
           <input id="coverage-symbol" value={coverageSymbol} onChange={e => setCoverageSymbol(e.target.value)} />
-          <button type="button" onClick={() => void loadCoverage()}>Check last 30 days coverage (4h / 1m)</button>
+          <label htmlFor="coverage-start">Start date (UTC)</label>
+          <input id="coverage-start" type="date" value={coverageStart} onChange={e => setCoverageStart(e.target.value)} />
+          <label htmlFor="coverage-end">End date (UTC, exclusive)</label>
+          <input id="coverage-end" type="date" value={coverageEnd} onChange={e => setCoverageEnd(e.target.value)} />
+          <button type="button" onClick={() => void loadCoverage()}>Check coverage (4h / 1m)</button>
           {coverageError && <p role="alert">{coverageError}</p>}
           {coverage && <p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>}
         </div>
