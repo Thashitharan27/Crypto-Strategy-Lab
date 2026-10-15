@@ -19,3 +19,8 @@ The utility asks the existing DuckDB catalog for the BTCUSDT 4h and 1m records c
 The output manifest contains no local paths. It records portable content hashes and the catalog selection metadata needed to diagnose a mismatch. Any missing file, changed source, unexpected record count or catalog mismatch fails closed.
 
 This freeze is evidence preparation only. It does **not** certify the 79-trade replay, enable browser-controlled backtesting, resolve PR #501, or modify the live DMI bot.
+
+
+## Original 4h warmup selection
+
+The original 79-trade run's data-quality report shows that its 4h input includes earlier warmup history (from 2020-01-01) even though trading starts on 2020-06-01. When the corresponding original catalog archives are present, add `--strategy-source-start 2020-01-01T00:00:00Z` to freeze those 4h sources without extending the requested 1m intrabar execution window. This selection changes only source inventory, not the requested trading start or the engine configuration. Retain the exact 4h and 1m expected archive counts from the saved provenance; fail closed if counts differ, and run the separate saved-run provenance cross-check afterward. The warmup date must be confirmed from saved-run evidence and is not a backtest replay certificate.
