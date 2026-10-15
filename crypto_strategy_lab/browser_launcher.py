@@ -1,0 +1,146 @@
+"""Optional production composition for the local read-only browser workspace.
+
+This is the only browser runtime entrypoint. It composes existing CSL read
+services and the existing authenticated FastAPI adapter; it does not expose
+research execution, configuration writes, trading, or live-bot operations.
+"""
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+import os
+from pathlib import Path
+import secrets
+from typing import Any
+
+from crypto_strategy_lab.browser_http import create_browser_app
+from crypto_strategy_lab.browser_readonly_service import build_browser_readonly_service
+from crypto_strategy_lab.paths import (
+    CONFIG_DIR,
+    OUTPUT_DIR,
+    PROJECT_ROOT,
+    resolve_data_lake_runtime_paths,
+)
+
+
+@dataclass(frozen=True)
+class BrowserReadOnlyRuntime:
+    """Composed local browser runtime and its per-launch credentials."""
+
+    app: Any
+    token: str
+    host: str
+    port: int
+    static_root: Path
+    output_root: Path
+    config_root: Path
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}/"
+
+
+def _path_from_env(
+    environ: Mapping[str, str],
+    name: str,
+    default: Path,
+) -> Path:
+    value = str(environ.get(name, "")).strip()
+    return Path(value).expanduser() if value else Path(default)
+
+
+def build_browser_readonly_runtime(
+    *,
+    environ: Mapping[str, str] | None = None,
+    token: str | None = None,
+    port: int = 8767,
+    static_root: str | Path | None = None,
+    output_root: str | Path | None = None,
+    config_root: str | Path | None = None,
+) -> BrowserReadOnlyRuntime:
+    """Compose the existing read-only browser pieces without starting a server."""
+
+    if isinstance(port, bool) or not isinstance(port, int) or not (1 <= port <= 65535):
+        raise ValueError("Browser port must be an integer from 1 to 65535")
+
+    source = os.environ if environ is None else environ
+    data_paths = resolve_data_lake_runtime_paths(source)
+    effective_static_root = (
+        Path(static_root)
+        if static_root is not None
+        else PROJECT_ROOT / "browser_ui" / "dist"
+    )
+    effective_output_root = (
+        Path(output_root)
+        if output_root is not None
+        else _path_from_env(
+            source,
+            "CRYPTO_STRATEGY_LAB_OUTPUT_DIR",
+            OUTPUT_DIR,
+        )
+    )
+    effective_config_root = (
+        Path(config_root)
+        if config_root is not None
+        else _path_from_env(
+            source,
+            "CRYPTO_STRATEGY_LAB_CONFIG_DIR",
+            CONFIG_DIR / "data_lake",
+        )
+    )
+    runtime_token = token if token is not None else secrets.token_urlsafe(48)
+    if not isinstance(runtime_token, str) or len(runtime_token) < 32:
+        raise ValueError("A fresh, high-entropy browser token is required")
+
+    read_service = build_browser_readonly_service(
+        raw_root=data_paths.raw_root,
+        cache_root=data_paths.cache_root,
+    )
+    app = create_browser_app(
+        token=runtime_token,
+        read_service=read_service,
+        completed_run_root=effective_output_root,
+        config_root=effective_config_root,
+        static_root=effective_static_root,
+    )
+    return BrowserReadOnlyRuntime(
+        app=app,
+        token=runtime_token,
+        host="127.0.0.1",
+        port=port,
+        static_root=effective_static_root.resolve(),
+        output_root=effective_output_root.resolve(),
+        config_root=effective_config_root.resolve(),
+    )
+
+
+def run_browser_readonly(*, port: int = 8767) -> None:
+    """Start the optional local read-only browser server on loopback only."""
+
+    runtime = build_browser_readonly_runtime(port=port)
+    try:
+        import uvicorn
+    except ImportError as exc:  # pragma: no cover - depends on optional install
+        raise RuntimeError(
+            "Browser runtime requires the optional 'uvicorn' package."
+        ) from exc
+
+    # Never put the token in a URL. The current shell accepts it through the
+    # password field after launch.
+    print(f"Crypto Strategy Lab read-only browser: {runtime.url}")
+    print(f"Local session token: {runtime.token}")
+    print("No browser execution or configuration writes are enabled.")
+    uvicorn.run(
+        runtime.app,
+        host=runtime.host,
+        port=runtime.port,
+        log_level="info",
+    )
+
+
+def main() -> None:
+    run_browser_readonly()
+
+
+if __name__ == "__main__":
+    main()
