@@ -1,1 +1,20 @@
-from pathlib import Path\n\nfrom crypto_strategy_lab.paths import resolve_data_lake_runtime_paths\n\n\ndef test_shared_data_lake_runtime_paths_use_existing_defaults():\n    paths = resolve_data_lake_runtime_paths({})\n    assert paths.raw_root == Path(r"C:\\CryptoBots\\Binance Market Data")\n    assert paths.cache_root.name == "cache"\n\n\ndef test_shared_data_lake_runtime_paths_honor_existing_control_env_names(tmp_path):\n    raw = tmp_path / "existing-binance-lake"\n    cache = tmp_path / "existing-csl-cache"\n    paths = resolve_data_lake_runtime_paths({\n        "CRYPTO_STRATEGY_LAB_RAW_ROOT": str(raw),\n        "CRYPTO_STRATEGY_LAB_CACHE_DIR": str(cache),\n    })\n    assert paths.raw_root == raw\n    assert paths.cache_root == cache\n
+from pathlib import Path
+
+from crypto_strategy_lab.paths import resolve_data_lake_runtime_paths
+
+
+def test_shared_data_lake_runtime_paths_use_existing_defaults():
+    paths = resolve_data_lake_runtime_paths({})
+    assert paths.raw_root == Path(r"C:\CryptoBots\Binance Market Data")
+    assert paths.cache_root.name == "cache"
+
+
+def test_shared_data_lake_runtime_paths_honor_existing_control_env_names(tmp_path):
+    raw = tmp_path / "existing-binance-lake"
+    cache = tmp_path / "existing-csl-cache"
+    paths = resolve_data_lake_runtime_paths({
+        "CRYPTO_STRATEGY_LAB_RAW_ROOT": str(raw),
+        "CRYPTO_STRATEGY_LAB_CACHE_DIR": str(cache),
+    })
+    assert paths.raw_root == raw
+    assert paths.cache_root == cache
