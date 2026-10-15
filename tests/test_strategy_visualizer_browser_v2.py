@@ -232,3 +232,55 @@ def test_standard_visualizer_ema320_layer_and_payload_support():
     assert 'periods += (1600,)' in source
     assert 'data-overlay="ema320" checked' in browser_source
     assert 'show_trend_emas = strategy_timeframe == chart_timeframe' in source
+
+
+def test_v2_rejects_untrusted_host_origin_and_api_cross_site():
+    from urllib.error import HTTPError
+    from urllib.request import Request, urlopen
+    from crypto_strategy_lab.strategy_visualizer_browser_v2 import StrategyVisualizerV2BrowserServer
+
+    server = StrategyVisualizerV2BrowserServer(_Model())
+    try:
+        url = server.start()
+        with urlopen(url, timeout=5) as response:
+            assert response.status == 200
+        for headers in (
+            {"Host": "bad.invalid"},
+            {"Origin": "http://bad.invalid"},
+            {"Sec-Fetch-Site": "cross-site"},
+        ):
+            try:
+                urlopen(Request(url, headers=headers), timeout=5)
+                assert False, f"Unexpected request accepted: {headers}"
+            except HTTPError as exc:
+                assert exc.code == 403
+        same_site = {
+            "Sec-Fetch-Site": "same-site",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Dest": "document",
+        }
+        with urlopen(Request(url, headers=same_site), timeout=5) as response:
+            assert response.status == 200
+        try:
+            urlopen(Request(url + "api/payload?trade_index=0", headers=same_site), timeout=5)
+            assert False, "Cross-port API read should be rejected"
+        except HTTPError as exc:
+            assert exc.code == 403
+    finally:
+        server.stop()
+
+
+def test_v2_partial_thread_start_cleanup():
+    from threading import Thread
+    from unittest.mock import patch
+    from crypto_strategy_lab.strategy_visualizer_browser_v2 import StrategyVisualizerV2BrowserServer
+
+    server = StrategyVisualizerV2BrowserServer(_Model())
+    with patch.object(Thread, "start", side_effect=RuntimeError("thread start blocked")):
+        try:
+            server.start()
+            assert False, "Expected thread failure"
+        except RuntimeError as exc:
+            assert str(exc) == "thread start blocked"
+    assert server._server is None
+    server.stop()
