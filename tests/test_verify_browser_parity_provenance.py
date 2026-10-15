@@ -192,3 +192,17 @@ def test_unknown_full_scope_is_not_an_implicit_partial_verification():
     frozen["selection"]["source_scope"] = "unexpected"
     with pytest.raises(ValueError, match="unsupported source scope"):
         verify_source_provenance(frozen, saved)
+
+
+@pytest.mark.parametrize("field,value,error", [
+    ("period_start", None, "invalid or timezone-naive source period"),
+    ("period_start", "NaT", "invalid or timezone-naive source period"),
+    ("period_end", "2020-05-31T00:00:00+00:00", "invalid source period bounds"),
+    ("period_start", "2020-06-01T00:00:00", "timezone-naive"),
+])
+def test_saved_archive_source_rejects_invalid_periods(field, value, error):
+    frozen, saved = _inputs()
+    saved[field] = saved[field].astype(object)
+    saved.at[0, field] = value
+    with pytest.raises(ValueError, match=error):
+        verify_source_provenance(frozen, saved)

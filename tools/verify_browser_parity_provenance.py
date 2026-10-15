@@ -20,10 +20,18 @@ def _interval(value):
 
 
 def _identity(interval, frequency, period_start, period_end, fingerprint):
-    if not all((interval, frequency, period_start, period_end, fingerprint)):
+    if not all((interval, frequency, fingerprint)):
         raise ValueError("missing source identity field")
-    return (str(interval), str(frequency), pd.Timestamp(period_start).isoformat(),
-            pd.Timestamp(period_end).isoformat(), str(fingerprint))
+    try:
+        start, end = pd.Timestamp(period_start), pd.Timestamp(period_end)
+    except (TypeError, ValueError) as error:
+        raise ValueError("invalid source period timestamp") from error
+    if pd.isna(start) or pd.isna(end) or start.tzinfo is None or end.tzinfo is None:
+        raise ValueError("invalid or timezone-naive source period")
+    if end <= start:
+        raise ValueError("invalid source period bounds")
+    return (str(interval), str(frequency), start.isoformat(),
+            end.isoformat(), str(fingerprint))
 
 
 def verify_source_provenance(freeze: dict, source_rows: pd.DataFrame) -> dict[str, int]:
