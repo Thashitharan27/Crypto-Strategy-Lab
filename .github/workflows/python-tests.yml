@@ -112,6 +112,7 @@ jobs:
           tests/test_browser_http_visualizer.py
           tests/test_browser_visualizer_integration_e2e.py
           tests/test_browser_chart_parity.py
+          tests/test_browser_v2_historical_parity.py
           tests/test_browser_http_symbols.py
           tests/test_browser_http_coverage.py
           tests/test_browser_http_completed_run.py
@@ -325,4 +326,5 @@ jobs:
           tests/test_browser_http_visualizer.py
           tests/test_browser_visualizer_integration_e2e.py
           tests/test_browser_chart_parity.py
+          tests/test_browser_v2_historical_parity.py
           tests/test_browser_launcher.py
