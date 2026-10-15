@@ -21,8 +21,8 @@ class BrowserVisualizerSessionOwner:
         with self._lock:
             self._stop_locked()
             if self._factory is None:
-                from crypto_strategy_lab.strategy_visualizer_browser import StrategyVisualizerBrowserServer
-                server = StrategyVisualizerBrowserServer(model)
+                from crypto_strategy_lab.strategy_visualizer_browser_v2 import StrategyVisualizerV2BrowserServer
+                server = StrategyVisualizerV2BrowserServer(model)
             else:
                 server = self._factory(model)
             try:

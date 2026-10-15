@@ -84,3 +84,7 @@ open timestamps, timeframe switching, full-run/selected view, EMA/Fibonacci/SR
 layers, markers, entry/stop/target geometry, and inspector payloads. Record
 immutable source and prepared-data identities and any differences. Do not
 change the backtest engine to make a chart match.
+
+## V2 primary decision (2026-10-15)
+
+The operator selected the existing **V2 diagnostic visualizer** as sufficient for current use. The browser session owner now launches `StrategyVisualizerV2BrowserServer`, and the desktop sidebar exposes one visualizer entry that also launches V2. The fuller original browser visualizer remains in source temporarily for compatibility and possible feature reference, but is no longer the active UI. Do not migrate its S/R, VWAP, or inspector features automatically; implement individual capabilities only when requested. V2 parity certification must use `build_v2_diagnostic_payload` and its `/api/payload` endpoint; the original `/api/inspect` parity requirement is no longer a launch gate for the selected V2 scope. Historical V2 chart parity remains unverified until frozen-run captures are compared.

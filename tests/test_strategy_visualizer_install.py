@@ -33,10 +33,11 @@ def test_strategy_visualizer_launcher_reuses_current_run_server_until_run_change
     assert "StrategyVisualizerBrowserServer(model)" in source
 
 
-def test_strategy_visualizer_v2_launcher_is_installed_alongside_legacy():
-    source = inspect.getsource(strategy_visualizer_install)
+def test_strategy_visualizer_sidebar_has_only_v2_active():
+    source = inspect.getsource(strategy_visualizer_install.apply_strategy_visualizer_workspace)
 
-    assert "StrategyVisualizerV2BrowserServer" in source
-    assert 'QPushButton("Strategy Visualizer V2")' in source
-    assert "strategy_visualizer_v2_launcher" in source
-    assert "strategy_visualizer_v2_button" in source
+    assert "launcher = StrategyVisualizerV2BrowserLauncher(window)" in source
+    assert 'QPushButton("Strategy Visualizer")' in source
+    assert 'QPushButton("Strategy Visualizer V2")' not in source
+    assert "strategy_visualizer_v2_launcher" not in source
+    assert "strategy_visualizer_v2_button" not in source

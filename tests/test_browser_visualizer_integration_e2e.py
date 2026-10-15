@@ -21,7 +21,7 @@ def test_user_launch_reuses_chart_server_and_releases_it_at_shutdown(tmp_path):
     model.run_dir = tmp_path / "BTCUSDT_4h_test"
     model.trade_count = 0
     model.available_chart_timeframes.return_value = []
-    model.build_payload.return_value = {
+    model.build_v2_diagnostic_payload.return_value = {
         "run": {"runId": "BTCUSDT_4h_test", "symbol": "BTCUSDT"},
         "candles": [], "markers": [], "positionBox": {},
     }
@@ -41,7 +41,7 @@ def test_user_launch_reuses_chart_server_and_releases_it_at_shutdown(tmp_path):
                 assert b"BTCUSDT_4h_test" in html.read()
             with urlopen(chart_url + "api/payload?full_run=1", timeout=5) as payload:
                 assert json.loads(payload.read())["run"]["runId"] == "BTCUSDT_4h_test"
-            model.build_payload.assert_called_once()
+            model.build_v2_diagnostic_payload.assert_called_once()
         # Lifespan shutdown closes the temporary visualizer listener.
         with pytest.raises((URLError, OSError)):
             urlopen(chart_url, timeout=2)

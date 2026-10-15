@@ -118,17 +118,11 @@ def apply_strategy_visualizer_workspace(window) -> None:
     if nav is None:
         return
 
-    launcher = StrategyVisualizerBrowserLauncher(window)
+    launcher = StrategyVisualizerV2BrowserLauncher(window)
     button = QPushButton("Strategy Visualizer")
     button.setFlat(True)
     button.setToolTip("Open the completed-run Strategy Visualizer in your browser")
     button.clicked.connect(launcher.open_browser)
-
-    v2_launcher = StrategyVisualizerV2BrowserLauncher(window)
-    v2_button = QPushButton("Strategy Visualizer V2")
-    v2_button.setFlat(True)
-    v2_button.setToolTip("Open the isolated candles/trade-alignment diagnostic visualizer")
-    v2_button.clicked.connect(v2_launcher.open_browser)
 
     insert_at = None
     for index in range(nav.count()):
@@ -145,15 +139,11 @@ def apply_strategy_visualizer_workspace(window) -> None:
     if insert_at is None:
         insert_at = max(0, nav.count() - 3)
     nav.insertWidget(insert_at, button)
-    nav.insertWidget(insert_at + 1, v2_button)
 
     try:
         window.destroyed.connect(lambda *_args: launcher.stop())
-        window.destroyed.connect(lambda *_args: v2_launcher.stop())
     except (AttributeError, RuntimeError):
         pass
 
     window.strategy_visualizer_launcher = launcher
     window.strategy_visualizer_button = button
-    window.strategy_visualizer_v2_launcher = v2_launcher
-    window.strategy_visualizer_v2_button = v2_button
