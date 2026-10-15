@@ -1,29 +1,63 @@
-# Historical Strategy Visualizer chart payload parity (operator-local gate)
+# Historical Strategy Visualizer V2 chart payload parity (operator-local gate)
 
-The **engine** replay for frozen BTCUSDT 4h/1m has already passed. That does not establish chart parity between the desktop-initiated and browser-initiated visualizer sessions. No frozen operator-local Data Lake artifacts are committed or downloaded by CI.
+The **engine** replay for frozen BTCUSDT 4h/1m has already passed. That does not by itself establish that the active V2 browser path returns the exact same historical chart payload as the canonical completed-run visualizer model. No frozen operator-local Data Lake artifacts are committed or downloaded by CI.
 
 ## Frozen run
 
-Use the completed run `BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f` and the original output/source hashes recorded in `docs/browser_historical_parity_gate.md` and `docs/certification/browser_historical_replay_2026-10-15.json`. Verify the manifest, source partition identities, saved trade fingerprints, and Data Lake cache provenance before collecting chart evidence.
+Use completed run `BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f` and the output/source identities recorded in `docs/browser_historical_parity_gate.md` and `docs/certification/browser_historical_replay_2026-10-15.json`.
 
-## Capture
+The capture command below uses the existing completed-run reader and `CompletedRunVisualizer.load` on the canonical Data Lake. Those loaders fail closed if the run, manifest, source provenance, cache coverage, or required chart data cannot be verified. Do not substitute downloaded replacement candles or a second chart-data implementation.
 
-Both desktop and browser already invoke **the same** `CompletedRunVisualizer` model and `StrategyVisualizerBrowserServer`. Do not create new EMA/Fibonacci/inspector calculations for the comparison.
+## Active V2 scope
 
-Open the run in the existing desktop Strategy Visualizer and collect the JSON from its loopback session `/session/<token>/api/payload` for an explicit, recorded query: trade index, chart timeframe, visible candles, full-run mode and rejection display. Use the new browser workspace's **Prepare visualizer session** button for the *same run*, and collect the corresponding JSON from that loopback session using the identical query.
+The V2 decision in PR #588 makes `StrategyVisualizerV2BrowserServer` the sole active visualizer. Parity therefore covers `CompletedRunVisualizer.build_v2_diagnostic_payload` and V2 `/api/payload` only.
 
-The captured JSON must represent the **whole** chart payload, not cropped screenshots or selected indicators. **Inspectors are separate from /api/payload**: for each recorded inspection timestamp, also capture the complete JSON from the desktop and browser `/session/<token>/api/inspect?timestamp=<UTC_SECONDS>` endpoints. Save matched timestamp pairs, for example `desktop_inspect_1700000000.json` and `browser_inspect_1700000000.json`. Save both to local files outside the repository (for example `parity_verification/desktop_chart.json` and `parity_verification/browser_chart.json`). Do not commit session tokens, links, caches, trades, user paths or other credentials.
+The retired full visualizer's `/api/inspect`, S/R, VWAP and other inactive extras are **not** part of this gate. Add individual capabilities to V2 only when requested and certify each addition separately.
 
-Run:
+## Automated local capture
+
+From the repository root on the workstation that holds the original saved run and canonical Data Lake:
 
 ```powershell
-python -m crypto_strategy_lab.browser_chart_parity parity_verification/desktop_chart.json parity_verification/browser_chart.json
+python -m crypto_strategy_lab.browser_v2_historical_parity
 ```
 
-Repeat the same comparator command on **each matched inspector JSON pair**; do not certify inspector parity from chart payload equality alone. Record the inspected UTC timestamp, the requested trade and timeframe, and both output SHA-256 values. A combined PASS requires all chart and inspector comparisons to pass.\n\nThe comparator exits 0 only on **exact structural and value equality** and prints two canonical SHA-256 hashes. Mismatches identify JSON paths (candle timestamps, overlays, Fibonacci geometry, EMA values, trade markers, risk/target boxes and all inspector fields). No numeric tolerance or omitted keys is silently permitted. Signed zero (-0.0 versus 0.0) is deliberately considered different because the canonical JSON hashes also differ. If the payload includes non-finite JSON values, first fix the source serialization rather than hiding them in the comparator.
+The command defaults to the frozen 79-trade BTCUSDT run and the established completed-run root (`CRYPTO_STRATEGY_LAB_OUTPUT_DIR` when set, otherwise `output/data_lake_v2`). An explicit root may be supplied only for the established local completed-run store:
 
-Repeat across: selected and all-trade views; 1h/4h/1D where available; first, middle and last trade; long and short where present; EMA and Fibonacci examples; SR and inspector timestamps. Chart UI/DOM rendering, zoom/pan behavior and on-screen geometry still require separate browser-level verification—equal JSON alone cannot certify pixel-level rendering or interaction.
+```powershell
+python -m crypto_strategy_lab.browser_v2_historical_parity `
+  --run-id BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f `
+  --output-root ".\\output\\data_lake_v2" `
+  --evidence-dir ".\\parity_verification\\v2_historical_chart"
+```
+
+The capture compares two independently loaded views of the same verified run:
+
+1. the canonical desktop-side `CompletedRunVisualizer.load(...)` payload, and
+2. the browser adapter + active V2 loopback HTTP `/api/payload` response.
+
+It uses the existing strict comparator from `browser_chart_parity.py`; there is no numeric tolerance, field omission, or indicator reimplementation.
+
+The representative matrix includes:
+- first, middle and last trade;
+- the first LONG and first SHORT as additional representatives when either side is not already covered;
+- 1h, 4h and 1d where available, always including the strategy timeframe.
+
+V2 always returns full-run candles together with the selected-trade view bounds, so a separate obsolete `full_run` query is not required.
+
+## Evidence and PASS rule
+
+Local evidence is written beneath `parity_verification/v2_historical_chart` by default:
+- `desktop_trade_<index>_<tf>.json`;
+- `browser_trade_<index>_<tf>.json`;
+- `summary.json`.
+
+Do **not** commit captured payloads, session URLs/tokens, local paths, caches, trades or other operator-local evidence.
+
+Each case records canonical SHA-256 values for the desktop and browser payload. A PASS requires exact structural and value equality for every case. Any mismatch, unavailable required source, non-finite JSON value, malformed run, or provenance verification failure blocks certification.
+
+Payload equality certifies the historical V2 data/geometry contract. Visual browser interaction (zoom, pan, resize and visible overlay behavior) still needs the already performed operator smoke checks and any future feature-specific UI checks.
 
 ## Certification decision
 
-Until the frozen real-run captures and view-level comparisons are attached as **locally retained, verifiable evidence**, historical browser chart parity stays **UNVERIFIED**. This tool introduces no run creation, backtest execution, config write, canonical data/cache modification or permission to merge PR #501.
+Historical browser chart parity remains **UNVERIFIED** until the frozen workstation command above returns PASS and the local `summary.json` evidence has been reviewed. This gate introduces no run creation, backtest execution, config write, canonical data/cache modification or permission to merge PR #501.
