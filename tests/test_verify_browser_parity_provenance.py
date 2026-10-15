@@ -151,3 +151,44 @@ def test_provenance_rejects_frozen_stat_inconsistent_with_hashed_bytes():
     frozen["selection"]["catalog_records"]["BTCUSDT_4h_0001_monthly"]["size_bytes"] = 17
     with pytest.raises(ValueError, match="size disagrees"):
         verify_source_provenance(frozen, saved)
+
+
+def test_full_scope_provenance_checks_2956_records_and_null_intervals():
+    frozen, saved = _inputs()
+    frozen["selection"]["source_scope"] = "all_saved_datasets"
+    original_metadata = frozen["selection"]["catalog_records"]
+    for record in original_metadata.values():
+        record["dataset"] = "klines"
+        record["interval"] = "4h" if record["catalog_fingerprint"].startswith("a") else "1m"
+    additional = []
+    for index in range(2954):
+        label = f"BTCUSDT_metrics_none_{index:04d}_daily"
+        fingerprint = f"{index:064x}"
+        original_metadata[label] = {
+            "dataset": "metrics", "interval": None, "frequency": "daily",
+            "period_start": "2020-06-01T00:00:00+00:00",
+            "period_end": "2020-06-02T00:00:00+00:00",
+            "catalog_fingerprint": fingerprint, "size_bytes": 12, "mtime_ns": 1234567890,
+        }
+        frozen["files"][label] = {"sha256": "c" * 64, "bytes": 12}
+        additional.append({
+            "exchange": "binance", "market": "futures_um", "dataset": "metrics",
+            "symbol": "BTCUSDT", "interval": None, "frequency": "daily",
+            "period_start": "2020-06-01T00:00:00+00:00",
+            "period_end": "2020-06-02T00:00:00+00:00",
+            "raw_archive_fingerprint": fingerprint, "size_bytes": 12, "mtime_ns": 1234567890,
+        })
+    saved = pd.concat([saved, pd.DataFrame(additional)], ignore_index=True)
+    assert verify_source_provenance(frozen, saved) == {
+        "4h": 1, "1m": 1, "all_saved_sources": 2956,
+    }
+    saved.loc[saved["dataset"] == "metrics", "mtime_ns"] = 999
+    with pytest.raises(ValueError, match="stat metadata mismatch"):
+        verify_source_provenance(frozen, saved)
+
+
+def test_unknown_full_scope_is_not_an_implicit_partial_verification():
+    frozen, saved = _inputs()
+    frozen["selection"]["source_scope"] = "unexpected"
+    with pytest.raises(ValueError, match="unsupported source scope"):
+        verify_source_provenance(frozen, saved)

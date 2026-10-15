@@ -31,11 +31,11 @@ def _utc(text: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str):
+def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str | None, dataset: DatasetKind = DatasetKind.KLINES, *, require_continuous_coverage: bool = True):
     records = store.catalog.records_for(
         store.raw_root,
         request,
-        DatasetKind.KLINES,
+        dataset,
         interval,
     )
     if not records:
@@ -49,11 +49,11 @@ def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str):
             raise ValueError(f"unknown catalog period for {request.symbol} {interval}")
         if record.period_end <= record.period_start:
             raise ValueError(f"invalid catalog period for {request.symbol} {interval}")
-        if record.period_start > cursor:
+        if require_continuous_coverage and record.period_start > cursor:
             raise ValueError(f"catalog coverage gap for {request.symbol} {interval} at {cursor.isoformat()}")
         if record.period_end > cursor:
             cursor = record.period_end
-    if cursor < request.end:
+    if require_continuous_coverage and cursor < request.end:
         raise ValueError(f"catalog coverage gap for {request.symbol} {interval} at {cursor.isoformat()}")
     files: dict[str, Path] = {}
     metadata: dict[str, dict[str, object]] = {}
@@ -66,7 +66,7 @@ def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str):
             raise ValueError(f"catalog source metadata changed: {path}")
         if stat_fingerprint(path, stat) != record.fingerprint:
             raise ValueError(f"catalog source fingerprint changed: {path}")
-        label = f"{request.symbol}_{interval}_{index:04d}_{record.frequency}"
+        label = f"{request.symbol}_{interval}_{index:04d}_{record.frequency}" if dataset == DatasetKind.KLINES else f"{request.symbol}_{dataset.value}_{interval or 'none'}_{index:04d}_{record.frequency}"
         files[label] = path
         metadata[label] = {
             "catalog_fingerprint": record.fingerprint,
@@ -75,6 +75,8 @@ def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str):
             "period_start": record.period_start.isoformat() if record.period_start else None,
             "period_end": record.period_end.isoformat() if record.period_end else None,
             "frequency": record.frequency,
+            "dataset": dataset.value,
+            "interval": interval,
         }
     return files, metadata
 
@@ -91,6 +93,7 @@ def main(argv=None) -> int:
     parser.add_argument("--strategy-source-start", help="Optional earlier 4h warmup source start (UTC); defaults to requested start")
     parser.add_argument("--strategy-interval", default="4h")
     parser.add_argument("--intrabar-interval", default="1m")
+    parser.add_argument("--include-all-saved-datasets", action="store_true", help="Also freeze every dataset/interval in the original 2,956-source inventory")
     parser.add_argument("--expected-strategy-records", type=int)
     parser.add_argument("--expected-intrabar-records", type=int)
     args = parser.parse_args(argv)
@@ -138,7 +141,24 @@ def main(argv=None) -> int:
             f"found {len(intrabar_files)}"
         )
 
-    files = {**strategy_files, **intrabar_files}
+    extra_files: dict[str, Path] = {}
+    extra_meta: dict[str, dict[str, object]] = {}
+    if args.include_all_saved_datasets:
+        groups = ((DatasetKind.KLINES, "1h"), (DatasetKind.KLINES, "5m"),
+                  (DatasetKind.INDEX_PRICE_KLINES, "4h"),
+                  (DatasetKind.MARK_PRICE_KLINES, "4h"),
+                  (DatasetKind.PREMIUM_INDEX_KLINES, "4h"),
+                  (DatasetKind.FUNDING_RATE, None), (DatasetKind.FUTURES_METRICS, None))
+        for dataset, interval in groups:
+            matched_files, matched_meta = _catalog_files(
+                store, request, interval, dataset,
+                require_continuous_coverage=(dataset != DatasetKind.FUTURES_METRICS),
+            )
+            extra_files.update(matched_files)
+            extra_meta.update(matched_meta)
+        if len(extra_files) != 2757:
+            raise ValueError(f"additional saved source count mismatch: expected 2757, found {len(extra_files)}")
+    files = {**strategy_files, **intrabar_files, **extra_files}
     strategy_minutes = int(
         interval_to_timedelta(request.strategy_interval).total_seconds() // 60
     )
@@ -161,7 +181,9 @@ def main(argv=None) -> int:
         "intrabar_interval": request.intrabar_interval,
         "strategy_record_count": len(strategy_files),
         "intrabar_record_count": len(intrabar_files),
-        "catalog_records": {**strategy_meta, **intrabar_meta},
+        "catalog_records": {**strategy_meta, **intrabar_meta, **extra_meta},
+        "additional_record_count": len(extra_files),
+        "source_scope": "all_saved_datasets" if args.include_all_saved_datasets else "execution_klines_only",
     }
     with args.manifest_json.open("x", encoding="utf-8") as handle:
         handle.write(json.dumps(frozen, sort_keys=True, indent=2) + "\n")

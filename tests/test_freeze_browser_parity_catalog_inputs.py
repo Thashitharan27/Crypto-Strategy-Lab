@@ -204,3 +204,61 @@ def test_strategy_source_start_must_not_exclude_requested_history(tmp_path):
             "--start", "2020-06-01T00:00:00Z",
             "--strategy-source-start", "2020-06-02T00:00:00Z",
         ])
+
+
+def test_full_scope_freeze_fails_closed_if_context_archives_missing(tmp_path):
+    raw, cache = tmp_path / "raw", tmp_path / "cache"
+    raw.mkdir()
+    start = datetime(2020, 6, 1, tzinfo=UTC)
+    end = datetime(2020, 7, 1, tzinfo=UTC)
+    records = []
+    for interval in ("4h", "1m"):
+        archive = raw / f"{interval}.zip"
+        archive.write_bytes(interval.encode())
+        records.append(_record(raw, archive, interval, start, end))
+    MarketDataStore(raw, cache).catalog.sync_root(raw, records)
+    dest = tmp_path / "full-source-freeze.json"
+    with pytest.raises(ValueError, match="no existing catalog records"):
+        main([
+            "--raw-root", str(raw), "--cache-root", str(cache),
+            "--manifest-json", str(dest), "--commit-sha", "a" * 40,
+            "--start", "2020-06-01T00:00:00Z",
+            "--end", "2020-07-01T00:00:00Z",
+            "--include-all-saved-datasets",
+        ])
+    assert not dest.exists()
+
+
+def test_sparse_metrics_catalog_freeze_preserves_gaps(tmp_path):
+    from tools.freeze_browser_parity_catalog_inputs import _catalog_files
+    raw, cache = tmp_path / "raw", tmp_path / "cache"
+    raw.mkdir()
+    a, b = raw / "metrics-01.zip", raw / "metrics-03.zip"
+    a.write_bytes(b"original day one")
+    b.write_bytes(b"original day three")
+    start = datetime(2020, 6, 1, tzinfo=UTC)
+    day2 = datetime(2020, 6, 2, tzinfo=UTC)
+    day3 = datetime(2020, 6, 3, tzinfo=UTC)
+    day4 = datetime(2020, 6, 4, tzinfo=UTC)
+    from dataclasses import replace
+    records = [
+        replace(_record(raw, a, None, start, day2),
+                dataset=DatasetKind.FUTURES_METRICS, frequency="daily"),
+        replace(_record(raw, b, None, day3, day4),
+                dataset=DatasetKind.FUTURES_METRICS, frequency="daily"),
+    ]
+    store = MarketDataStore(raw, cache)
+    store.catalog.sync_root(raw, records)
+    from crypto_strategy_lab.data import DataRequest
+    request = DataRequest(
+        symbol="BTCUSDT", start=start, end=day4,
+        strategy_interval="4h", intrabar_interval="1m",
+    )
+    with pytest.raises(ValueError, match="coverage gap"):
+        _catalog_files(store, request, None, DatasetKind.FUTURES_METRICS)
+    files, metadata = _catalog_files(
+        store, request, None, DatasetKind.FUTURES_METRICS,
+        require_continuous_coverage=False,
+    )
+    assert len(files) == len(metadata) == 2
+    assert {record["dataset"] for record in metadata.values()} == {"metrics"}
