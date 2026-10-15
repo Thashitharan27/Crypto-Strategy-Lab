@@ -25,6 +25,7 @@ from crypto_strategy_lab.strategy_visualizer_browser_v2 import StrategyVisualize
 
 DEFAULT_RUN_ID = "BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f"
 DEFAULT_TIMEFRAMES = ("1h", "4h", "1d")
+FROZEN_TRADE_COUNT = 79
 
 
 def _available_timeframes(model: Any) -> list[str]:
@@ -88,6 +89,10 @@ def capture_parity(
     browser_payload: Callable[[int, str], Any] | None = None,
 ) -> dict[str, Any]:
     evidence_dir.mkdir(parents=True, exist_ok=True)
+    if int(desktop_model.trade_count) != int(browser_model.trade_count):
+        raise ValueError("Desktop and browser trade counts differ")
+    if str(desktop_model.manifest.get("run_id") or desktop_model.run_dir.name) != str(browser_model.manifest.get("run_id") or browser_model.run_dir.name):
+        raise ValueError("Desktop and browser run identities differ")
     cases = parity_cases(desktop_model, requested_timeframes)
     results: list[dict[str, Any]] = []
 
@@ -178,6 +183,12 @@ def main(argv=None) -> int:
 
     output_root = _output_root(args.output_root)
     desktop_model, browser_model = load_models(args.run_id, output_root)
+    if args.run_id == DEFAULT_RUN_ID:
+        if int(desktop_model.trade_count) != FROZEN_TRADE_COUNT or int(browser_model.trade_count) != FROZEN_TRADE_COUNT:
+            raise ValueError("Frozen BTCUSDT baseline must contain exactly 79 trades")
+        for model in (desktop_model, browser_model):
+            if str(model.manifest.get("run_id") or model.run_dir.name) != DEFAULT_RUN_ID:
+                raise ValueError("Frozen BTCUSDT run identity mismatch")
     summary = capture_parity(desktop_model, browser_model, Path(args.evidence_dir))
 
     print(f"Run: {summary['run_id']}")
