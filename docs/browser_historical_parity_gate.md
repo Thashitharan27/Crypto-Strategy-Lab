@@ -153,3 +153,10 @@ A fresh full read of the original `run_manifest.json` catalog and all 2,956 rows
 | **Total** | **2,956** |
 
 The existing `freeze_browser_parity_catalog_inputs.py` and `verify_browser_parity_provenance.py` intentionally verify **only 199 4h/1m kline archive records**. Their success must **never be interpreted as verification of the full 2,956-record original source set**. Before replay certification, inspect the original run configuration and prepared feature dependencies to classify the other 2,757 source records as required, unused, or conditionally used, and freeze all **required** inputs using the existing catalog and file-hash contracts; do not automatically exclude higher-timeframe/context/funding/metrics datasets. Keep the source-inventory coverage certificate distinct from the trade-parity certificate. If any required source remains unidentified, local or browser replay certification is blocked.
+
+
+### Confirmed original feature dependencies (from saved run manifest)
+
+The original `run_manifest.json` feature-provider provenance explicitly lists `basis_context` using `klines`, `mark_price_klines` and `index_price_klines`; `funding_context` using `klines` and `funding_rate`; `futures_positioning` using `klines` and `metrics`; and `taker_flow_context` using `klines` (its provider parameter specifies `5m`). Other saved feature providers include core directional, 1D Ichimoku, support/resistance, and daily state transitions. This is evidence that the baseline **prepared feature set** referenced several non-4h/1m datasets; it is not yet proof that every provider changed one of the 79 trade outcomes.
+
+Classify dependency relevance using the pinned configuration and original feature-provider graph before reducing the freeze scope. Preserve existing feature caches and canonical loader behavior. If verifying the exact original prepared frame, include every archive required to reproduce it, even if a particular execution rule would not directly use every feature.
