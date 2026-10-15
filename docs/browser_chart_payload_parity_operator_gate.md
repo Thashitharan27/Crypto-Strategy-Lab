@@ -12,7 +12,7 @@ Both desktop and browser already invoke **the same** `CompletedRunVisualizer` mo
 
 Open the run in the existing desktop Strategy Visualizer and collect the JSON from its loopback session `/session/<token>/api/payload` for an explicit, recorded query: trade index, chart timeframe, visible candles, full-run mode and rejection display. Use the new browser workspace's **Prepare visualizer session** button for the *same run*, and collect the corresponding JSON from that loopback session using the identical query.
 
-The captured JSON must represent the **whole** payload, not cropped screenshots or selected indicators. Save both to local files outside the repository (for example `parity_verification/desktop_chart.json` and `parity_verification/browser_chart.json`). Do not commit session tokens, links, caches, trades, user paths or other credentials.
+The captured JSON must represent the **whole** chart payload, not cropped screenshots or selected indicators. **Inspectors are separate from /api/payload**: for each recorded inspection timestamp, also capture the complete JSON from the desktop and browser `/session/<token>/api/inspect?timestamp=<UTC_SECONDS>` endpoints. Save matched timestamp pairs, for example `desktop_inspect_1700000000.json` and `browser_inspect_1700000000.json`. Save both to local files outside the repository (for example `parity_verification/desktop_chart.json` and `parity_verification/browser_chart.json`). Do not commit session tokens, links, caches, trades, user paths or other credentials.
 
 Run:
 
@@ -20,7 +20,7 @@ Run:
 python -m crypto_strategy_lab.browser_chart_parity parity_verification/desktop_chart.json parity_verification/browser_chart.json
 ```
 
-The comparator exits 0 only on **exact structural and value equality** and prints two canonical SHA-256 hashes. Mismatches identify JSON paths (candle timestamps, overlays, Fibonacci geometry, EMA values, trade markers, risk/target boxes and all inspector fields). No numeric tolerance or omitted keys is silently permitted. If the payload includes non-finite JSON values, first fix the source serialization rather than hiding them in the comparator.
+Repeat the same comparator command on **each matched inspector JSON pair**; do not certify inspector parity from chart payload equality alone. Record the inspected UTC timestamp, the requested trade and timeframe, and both output SHA-256 values. A combined PASS requires all chart and inspector comparisons to pass.\n\nThe comparator exits 0 only on **exact structural and value equality** and prints two canonical SHA-256 hashes. Mismatches identify JSON paths (candle timestamps, overlays, Fibonacci geometry, EMA values, trade markers, risk/target boxes and all inspector fields). No numeric tolerance or omitted keys is silently permitted. Signed zero (-0.0 versus 0.0) is deliberately considered different because the canonical JSON hashes also differ. If the payload includes non-finite JSON values, first fix the source serialization rather than hiding them in the comparator.
 
 Repeat across: selected and all-trade views; 1h/4h/1D where available; first, middle and last trade; long and short where present; EMA and Fibonacci examples; SR and inspector timestamps. Chart UI/DOM rendering, zoom/pan behavior and on-screen geometry still require separate browser-level verification—equal JSON alone cannot certify pixel-level rendering or interaction.
 
