@@ -20,6 +20,8 @@ type Capabilities = {mode: string; strategy: StrategyCapability; features: Featu
 
 function App() {
   const [section, setSection] = React.useState<Section>("Runs & Results");
+  const [evidenceQuery, setEvidenceQuery] = React.useState("");
+  const [featureQuery, setFeatureQuery] = React.useState("");
   const [token, setToken] = React.useState("");
   const [connected, setConnected] = React.useState(false);
   const [symbols, setSymbols] = React.useState<string[]>([]);
@@ -246,8 +248,11 @@ function App() {
         <ul>{capabilities.strategy.signal_strategies.map(item => <li key={item.id}><strong>{item.display_name}</strong> <code>{item.id}</code></li>)}</ul>
         <p>Market permissions: {capabilities.strategy.market_permissions.join(", ")}</p>
         <h4>Entry / Veto / Flip evidence</h4>
+        <label htmlFor="evidence-filter">Find evidence by name, ID, type or condition</label>
+        <input id="evidence-filter" type="search" value={evidenceQuery} onChange={event => setEvidenceQuery(event.target.value)} />
+        <p role="status">{Object.entries(capabilities.strategy.indicators).filter(([id, item]) => [id, item.display_name, item.type, ...item.conditions, ...(item.values ?? [])].join(" ").toLowerCase().includes(evidenceQuery.trim().toLowerCase())).length} matching evidence entries</p>
         <table><caption>Authoritative rule evidence registry</caption><thead><tr><th>Evidence</th><th>Type</th><th>Conditions</th><th>Values</th></tr></thead>
-          <tbody>{Object.entries(capabilities.strategy.indicators).map(([id, item]) => <tr key={id}>
+          <tbody>{Object.entries(capabilities.strategy.indicators).filter(([id, item]) => [id, item.display_name, item.type, ...item.conditions, ...(item.values ?? [])].join(" ").toLowerCase().includes(evidenceQuery.trim().toLowerCase())).map(([id, item]) => <tr key={id}>
             <td>{item.display_name}<br /><code>{id}</code></td><td>{item.type}</td><td>{item.conditions.join(", ")}</td><td>{item.values?.join(", ") ?? "Numeric"}</td>
           </tr>)}</tbody>
         </table>
@@ -255,8 +260,11 @@ function App() {
       {section === "Research Features" && connected && capabilities && <div>
         <h3>Production feature registry</h3>
         <p>{capabilities.features.length} registered feature providers. Metadata is projected from the existing production registry; calculations remain in Python. Declared datasets below are not exhaustive: some providers also require auxiliary resources resolved by the existing data layer.</p>
+        <label htmlFor="feature-filter">Find feature by name, dataset or dependency</label>
+        <input id="feature-filter" type="search" value={featureQuery} onChange={event => setFeatureQuery(event.target.value)} />
+        <p role="status">{capabilities.features.filter(item => [item.name, ...item.required_datasets, ...item.optional_datasets, ...item.required_features].join(" ").toLowerCase().includes(featureQuery.trim().toLowerCase())).length} matching feature providers</p>
         <table><caption>Authoritative feature providers</caption><thead><tr><th>Feature</th><th>Version</th><th>Declared datasets*</th><th>Dependencies</th><th>Warmup</th></tr></thead>
-          <tbody>{capabilities.features.map(item => <tr key={item.name}>
+          <tbody>{capabilities.features.filter(item => [item.name, ...item.required_datasets, ...item.optional_datasets, ...item.required_features].join(" ").toLowerCase().includes(featureQuery.trim().toLowerCase())).map(item => <tr key={item.name}>
             <td><code>{item.name}</code></td><td>{item.version}</td><td>{item.required_datasets.join(", ") || "None declared"}{item.optional_datasets.length ? ` · optional: ${item.optional_datasets.join(", ")}` : ""}</td><td>{item.required_features.join(", ") || "None"}</td><td>{item.warmup_bars} bars</td>
           </tr>)}</tbody>
         </table>
