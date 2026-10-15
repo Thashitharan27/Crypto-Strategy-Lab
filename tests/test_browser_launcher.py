@@ -200,3 +200,45 @@ def test_default_completed_run_root_matches_canonical_desktop_reporting(tmp_path
         runtime = build_browser_readonly_runtime(environ={}, token="d" * 48, static_root=tmp_path)
     assert runtime.output_root == (OUTPUT_DIR / "data_lake_v2").resolve()
     assert factory.call_args.kwargs["completed_run_root"] == OUTPUT_DIR / "data_lake_v2"
+
+
+def test_launcher_portfolio_endpoint_uses_configured_root_and_auth(tmp_path):
+    """The composed browser launcher must preserve Portfolio's fixed read boundary."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    static_root = _static_dist(tmp_path / "dist")
+    output_root = tmp_path / "completed"
+    config_root = tmp_path / "configs"
+    output_root.mkdir()
+    config_root.mkdir()
+    service = Mock()
+    service.portfolio_candidates.return_value = [{
+        "run_id": "BTCUSDT_4h_frozen",
+        "symbol": "BTCUSDT",
+        "candidate_rows": 3,
+        "sampling_mode": "EVERY_VIABLE_ENTRY",
+    }]
+    token = "p" * 48
+    with patch(
+        "crypto_strategy_lab.browser_launcher.build_browser_readonly_service",
+        return_value=service,
+    ):
+        runtime = build_browser_readonly_runtime(
+            environ={}, token=token, static_root=static_root,
+            output_root=output_root, config_root=config_root,
+        )
+
+    with TestClient(runtime.app, base_url="http://127.0.0.1:8767") as client:
+        assert client.get("/api/v1/portfolio/candidates").status_code == 401
+        authorized = client.get(
+            "/api/v1/portfolio/candidates",
+            headers={"Authorization": "Bearer " + token},
+        )
+        assert authorized.status_code == 200
+        assert authorized.json() == {"candidates": service.portfolio_candidates.return_value}
+        assert client.post(
+            "/api/v1/portfolio/candidates",
+            headers={"Authorization": "Bearer " + token},
+        ).status_code == 405
+    service.portfolio_candidates.assert_called_once_with(output_root.resolve())
