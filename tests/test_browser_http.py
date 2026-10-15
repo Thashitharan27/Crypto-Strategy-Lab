@@ -37,11 +37,10 @@ def test_browser_api_route_inventory_is_read_only(tmp_path):
         config_root=tmp_path,
     )
 
-    api_routes = {
-        route.path: set(route.methods or ())
-        for route in app.routes
-        if route.path.startswith("/api/v1/")
-    }
+    api_routes = {}
+    for route in app.routes:
+        if route.path.startswith("/api/v1/"):
+            api_routes.setdefault(route.path, set()).update(route.methods or ())
 
     assert api_routes == {
         "/api/v1/health": {"GET"},
