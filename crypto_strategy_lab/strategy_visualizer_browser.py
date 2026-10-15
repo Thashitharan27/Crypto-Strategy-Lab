@@ -1734,12 +1734,13 @@ class StrategyVisualizerBrowserServer:
         server = _LoopbackHTTPServer(("127.0.0.1", 0), Handler)
         server.timeout = 0.1
         self._server = server
-        self._stop_requested.clear()
+        self._stop_requested = Event()
+        stop_requested = self._stop_requested
 
         def serve_until_stopped():
             # Bounded polling avoids BaseServer.shutdown() deadlocks when
             # thread construction/startup is interrupted at any point.
-            while not self._stop_requested.is_set():
+            while not stop_requested.is_set():
                 server.handle_request()
 
         try:
