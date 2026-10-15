@@ -18,6 +18,7 @@ function App() {
   const [coverageEnd, setCoverageEnd] = React.useState("2026-09-01");
   const [coverageError, setCoverageError] = React.useState("");
   const [coverageStatusFilter, setCoverageStatusFilter] = React.useState("ALL");
+  const [incompleteFirst, setIncompleteFirst] = React.useState(false);
   const [message, setMessage] = React.useState("Not connected");
   const [configId, setConfigId] = React.useState("");
   const [configSummary, setConfigSummary] = React.useState<{ sections: string[]; configVersion: string } | null>(null);
@@ -163,8 +164,9 @@ function App() {
             <select id="coverage-status-filter" value={coverageStatusFilter} onChange={e => setCoverageStatusFilter(e.target.value)}>
               <option value="ALL">All records</option><option value="AVAILABLE">Available</option><option value="PARTIAL">Partial</option><option value="UNAVAILABLE">Unavailable</option><option value="UNKNOWN">Unknown</option>
             </select>
+            <label htmlFor="coverage-incomplete-first"><input id="coverage-incomplete-first" type="checkbox" checked={incompleteFirst} onChange={e => setIncompleteFirst(e.target.checked)} /> Show incomplete coverage first</label>
             <table><caption>Saved catalog coverage (metadata only; not candle integrity)</caption><thead><tr><th>Dataset</th><th>Interval</th><th>Status</th><th>Archives</th><th>First period</th><th>Last period</th></tr></thead>
-              <tbody>{coverage.filter(record => coverageStatusFilter === "ALL" || (coverageStatusFilter === "UNKNOWN" ? !["AVAILABLE", "PARTIAL", "UNAVAILABLE"].includes(record.state ?? "") : record.state === coverageStatusFilter)).map((record, index) => <tr key={`${record.dataset ?? "dataset"}-${record.interval ?? "none"}-${index}`}>
+              <tbody>{coverage.filter(record => coverageStatusFilter === "ALL" || (coverageStatusFilter === "UNKNOWN" ? !["AVAILABLE", "PARTIAL", "UNAVAILABLE"].includes(record.state ?? "") : record.state === coverageStatusFilter)).map((record, index) => ({record, index})).sort((a, b) => incompleteFirst ? Number(b.record.state !== "AVAILABLE") - Number(a.record.state !== "AVAILABLE") : 0).map(({record, index}) => <tr key={`${record.dataset ?? "dataset"}-${record.interval ?? "none"}-${index}`}>
                 <td>{record.dataset ?? "Unknown"}</td><td>{record.interval ?? "—"}</td><td>{record.state ?? "Unknown"}</td>
                 <td>{typeof record.archive_count === "number" ? record.archive_count : "—"}</td>
                 <td>{record.first_period ?? "—"}</td><td>{record.last_period ?? "—"}</td>
