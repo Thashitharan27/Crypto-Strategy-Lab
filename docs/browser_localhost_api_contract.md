@@ -5,20 +5,21 @@ Status: read-only HTTP adapter and local composition launcher implemented. This 
 ## Reuse
 Build the future HTTP adapter against `BrowserReadOnlyService` (PR #514) and its existing catalog, verified completed-run reader and validated configuration loader. Do not create parallel manifest, strategy, or configuration parsers. Existing run and GUI formats remain authoritative.
 
-## Proposed read-only endpoints
+## Certified read-only endpoints and explicit local visualizer action
 - `GET /api/v1/capabilities`: read-only authoritative strategy/rule and production feature-registry metadata.
 - `GET /api/v1/health`: application version and status only, no filesystem paths or secrets.
 - `GET /api/v1/catalog/symbols?market=futures_um`: existing catalog symbols.
 - `GET /api/v1/catalog/coverage`: validated request routed to existing catalog coverage logic.
 - `GET /api/v1/runs/{run_id}`: verified completed manifest and summary from a *server-resolved* run directory under an explicitly configured output root; never accept a client filesystem path.
 - `GET /api/v1/configs/{config_id}`: validated canonical v3 config from a *server-resolved* allowlisted configuration directory; never accept a client filesystem path.
+- `POST /api/v1/visualizer/sessions/{run_id}`: **explicit user-triggered, in-memory local chart session only**. Requires bearer token plus a same-origin browser request. Delegates to the canonical run loader and the existing browser visualizer server. Does not run backtests, persist results, or modify configurations. Returns an ephemeral loopback session link; session stops on replacement or server shutdown.
 
 ## Safety requirements before enabling HTTP
 - Listen only on `127.0.0.1`, with no `0.0.0.0`, remote tunnel or permissive CORS defaults.
 - Require a per-launch non-static authorization token or equivalent origin/CSRF defense for reads of user files; reject untrusted Origin/Host and prevent DNS rebinding. Do not place secrets in URL parameters.
 - Resolve run/config identifiers to server-owned paths; reject separators, traversal, symlinks escaping allowed roots, and missing/unfinished manifests. Validate resolved paths against allowed roots.
 - Return bounded sanitized errors, strict typed responses, pagination and size limits. Do not leak absolute local filesystem paths, API keys, credentials or raw exception messages.
-- Keep `POST`, `PUT`, `PATCH`, `DELETE`, catalog refresh, research runs, order placement and all live-bot operations inaccessible.
+- Keep every mutation or execution operation inaccessible. The single certified `POST` exception opens an in-memory, read-only visualizer session after explicit authentication and same-origin checks. `PUT`, `PATCH`, `DELETE`, catalog refresh, research runs, order placement and all live-bot operations remain inaccessible.
 - Preserve `ResearchRunConfig` v3 and legacy load adapters; browser must not rewrite inputs when reading.
 - A future FastAPI dependency must be isolated to the optional browser entrypoint, not pulled into the shared core or live bot.
 - Before allowing any new execution capability, require real, frozen historical candle and 1-minute data plus full multi-leg trade parity evidence (timestamps, fees, stops, targets and account P&L).
