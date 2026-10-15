@@ -38,6 +38,7 @@ function App() {
   const [configSummary, setConfigSummary] = React.useState<{ sections: string[]; configVersion: string } | null>(null);
   const [configError, setConfigError] = React.useState("");
   const [configDetails, setConfigDetails] = React.useState<Record<string, unknown> | null>(null);
+  const configRequest = React.useRef(0);
   const [runId, setRunId] = React.useState("");
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
@@ -45,6 +46,7 @@ function App() {
   const [runRisk, setRunRisk] = React.useState<{profitFactor?: number; drawdown?: number; fees?: number} | null>(null);
 
   async function loadConfig() {
+    const requestId = ++configRequest.current;
     setConfigSummary(null);
     setConfigDetails(null);
     setConfigError("");
@@ -57,9 +59,11 @@ function App() {
       const value = result.config;
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid config");
       const version = value.config_version ?? value.version ?? "Not specified";
+      if (requestId !== configRequest.current) return;
       setConfigSummary({sections: Object.keys(value), configVersion: String(version)});
       setConfigDetails(value);
     } catch {
+      if (requestId !== configRequest.current) return;
       setConfigError("Saved configuration unavailable or not accessible");
     }
   }
