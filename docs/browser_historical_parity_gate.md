@@ -1,6 +1,6 @@
 # Browser migration: historical trade-parity evidence gate
 
-**Status:** incomplete. This is a verification checklist, not a parity certificate or authorization to turn on browser-controlled execution.
+**Status:** historical engine replay certified PASS on 2026-10-15. See `docs/browser_historical_replay_certification_2026-10-15.md`. This still does **not** authorize browser-controlled execution.
 
 ## Candidate frozen run
 
@@ -18,7 +18,7 @@
 - 4h kline source signature: `d1f459840ec70ad205e61af6c3a4cbf4d5414d8ebbf7bc9f7149bfa4b056d146` (102 partitions)
 - Saved configuration schema: v3, including 1m intrabar ERROR-on-missing policy
 
-These values identify existing evidence; they **do not** demonstrate reproduction on the migrated browser stack.
+These values identify the frozen baseline. The existing CSL engine replay has now reproduced the source inventory, prepared frame, provider identities and native trades as recorded in `docs/browser_historical_replay_certification_2026-10-15.md`. No browser execution path was used or enabled.
 
 ## Required checks before parity can be certified
 
@@ -32,7 +32,7 @@ These values identify existing evidence; they **do not** demonstrate reproductio
 
 ## Execution gating
 
-Until the above is complete, the browser stays strictly read-only. No run creation, trading or configuration writes. PR #501 remains on hold due to its limit-execution overlap. Never deploy changes to the live DMI bot as part of this milestone.
+The historical engine replay gate is complete, but the browser stays strictly read-only until the later guarded-write/browser-execution phases are separately certified. No run creation, trading or configuration writes are authorized by this certificate. PR #501 remains on hold due to its limit-execution overlap. Never deploy changes to the live DMI bot as part of this milestone.
 
 
 ## Native BTCUSDT report-schema audit (read-only)
