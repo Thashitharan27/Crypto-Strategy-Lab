@@ -4,6 +4,7 @@ Never imported by the backtest engine or live bot. Installation of FastAPI is
 optional; application construction exposes no trading or filesystem endpoints.
 """
 import secrets
+import math
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
@@ -139,7 +140,13 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             if not target.is_relative_to(root) or not target.is_dir():
                 raise HTTPException(status_code=404, detail="Run not found")
             try:
-                return read_service.completed_run(target)
+                result = read_service.completed_run(target)
+                summary = result.get("summary", {})
+                factor = summary.get("profit_factor") if isinstance(summary, dict) else None
+                if isinstance(factor, (float, int)) and not isinstance(factor, bool) and math.isinf(factor):
+                    # JSON cannot represent infinity; preserve the desktop meaning for read-only display.
+                    result = {**result, "summary": {**summary, "profit_factor": "Infinity" if factor > 0 else "-Infinity"}}
+                return result
             except (OSError, ValueError, KeyError, TypeError):
                 raise HTTPException(status_code=404, detail="Run not found")
 
