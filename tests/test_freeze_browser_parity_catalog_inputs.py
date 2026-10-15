@@ -72,6 +72,9 @@ def test_catalog_backed_freeze_hashes_existing_sources_without_refresh(tmp_path,
     assert frozen["selection"]["strategy_record_count"] == 1
     assert frozen["selection"]["intrabar_record_count"] == 1
     assert len(frozen["files"]) == 2
+    assert frozen["strategy_timeframe_minutes"] == 240
+    assert frozen["intrabar_timeframe_minutes"] == 1
+    assert set(frozen["files"]) == {"BTCUSDT_4h_0001_monthly", "BTCUSDT_1m_0001_monthly"}
     assert all("sha256" in item for item in frozen["files"].values())
 
 
