@@ -103,3 +103,25 @@ def test_browser_api_inventory_guard_rejects_root_and_mounted_routes(tmp_path):
     app.mount("/api/v1", mounted)
     with pytest.raises(AssertionError, match="Mounted API routes"):
         assert_safe_routes()
+
+
+def test_completed_run_infinite_profit_factor_json_safe(tmp_path):
+    pytest.importorskip("fastapi")
+    from unittest.mock import Mock
+    from fastapi.testclient import TestClient
+
+    token = "z" * 48
+    run_dir = tmp_path / "run_sample"
+    run_dir.mkdir()
+    service = Mock()
+    service.completed_run.return_value = {
+        "manifest": {"run_id": "run_sample", "run_status": "COMPLETED"},
+        "summary": {"total_trades": 3, "win_rate": 1.0, "net_pnl": 10.0, "profit_factor": float("inf")},
+    }
+    app = create_browser_app(token=token, read_service=service, completed_run_root=tmp_path)
+    with TestClient(app, base_url="http://localhost") as client:
+        response = client.get("/api/v1/runs/run_sample", headers={"Authorization": "Bearer " + token})
+        assert response.status_code == 200
+        assert response.json()["summary"]["profit_factor"] == "Infinity"
+        assert response.json()["summary"]["total_trades"] == 3
+    assert service.completed_run.return_value["summary"]["profit_factor"] == float("inf")
