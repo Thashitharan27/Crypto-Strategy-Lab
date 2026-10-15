@@ -35,3 +35,10 @@ After generating this frozen manifest, run `tools/verify_browser_parity_provenan
 ## Optional full saved-run inventory freeze
 
 The baseline run lists 2,956 selected source archives spanning nine dataset/interval groups. To hash and verify all of them against the original saved-run provenance, add `--include-all-saved-datasets` to the existing freeze command. This opt-in reuses the same catalog, original raw files and content-hash contract. It fails closed if the additional 2,757 source records are unavailable; no replacement data is downloaded. Run `verify_browser_parity_provenance.py` afterward with the same original saved Parquet file to verify all 2,956 metadata identities and size/mtime attributes. This does not establish candle-level or 79-trade replay parity. Leave the flag off for the prior 199-source-only workflow.
+
+
+## Context-source warmup selection for the original 79-trade inventory
+
+A local catalog check on the original Windows workstation selected 97 BTCUSDT 1h and 5m archives from the trading start 2020-06-01, but 98 from 2020-05-01. The saved run lists 98 for each. For full-scope freezing only, use `--context-source-start 2020-05-01T00:00:00Z` to include the additional May archive for the 1h/5m and 4h price-context groups. Funding and sparse daily metrics still use the trading start; 4h strategy sources retain their separately selected 2020-01-01 warmup, and 1m execution sources retain the trading start.
+
+The May start is a catalog-selection hypothesis, **not** a proven exact match: the saved source-provenance multiset cross-check must establish archive identities, and the original byte hashes must be frozen. Do not change raw files, the canonical cache or the execution window merely to satisfy an expected count.

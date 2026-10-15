@@ -91,6 +91,7 @@ def main(argv=None) -> int:
     parser.add_argument("--start", default="2020-06-01T00:00:00Z")
     parser.add_argument("--end", default="2026-09-01T00:00:00Z")
     parser.add_argument("--strategy-source-start", help="Optional earlier 4h warmup source start (UTC); defaults to requested start")
+    parser.add_argument("--context-source-start", help="Earlier source start for 1h/5m and 4h price-context archives (UTC); defaults to trading start")
     parser.add_argument("--strategy-interval", default="4h")
     parser.add_argument("--intrabar-interval", default="1m")
     parser.add_argument("--include-all-saved-datasets", action="store_true", help="Also freeze every dataset/interval in the original 2,956-source inventory")
@@ -113,6 +114,14 @@ def main(argv=None) -> int:
         raise ValueError('strategy source start must not be later than requested start')
     strategy_request = DataRequest(
         symbol=request.symbol, start=strategy_source_start, end=request.end,
+        strategy_interval=request.strategy_interval, intrabar_interval=request.intrabar_interval,
+        exchange=request.exchange, market=request.market,
+    )
+    context_source_start = _utc(args.context_source_start) if args.context_source_start else request.start
+    if context_source_start > request.start:
+        raise ValueError("context source start must not be later than requested start")
+    context_request = DataRequest(
+        symbol=request.symbol, start=context_source_start, end=request.end,
         strategy_interval=request.strategy_interval, intrabar_interval=request.intrabar_interval,
         exchange=request.exchange, market=request.market,
     )
@@ -160,7 +169,7 @@ def main(argv=None) -> int:
         }
         for dataset, interval in groups:
             matched_files, matched_meta = _catalog_files(
-                store, request, interval, dataset,
+                store, (request if dataset in (DatasetKind.FUNDING_RATE, DatasetKind.FUTURES_METRICS) else context_request), interval, dataset,
                 require_continuous_coverage=(dataset != DatasetKind.FUTURES_METRICS),
             )
             expected_count = expected_group_counts[(dataset, interval)]
@@ -193,6 +202,7 @@ def main(argv=None) -> int:
         "end": request.end.isoformat(),
         "strategy_interval": request.strategy_interval,
         "strategy_source_start": strategy_source_start.isoformat(),
+        "context_source_start": context_source_start.isoformat(),
         "intrabar_interval": request.intrabar_interval,
         "strategy_record_count": len(strategy_files),
         "intrabar_record_count": len(intrabar_files),
