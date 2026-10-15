@@ -6,6 +6,7 @@ optional; application construction exposes no trading or filesystem endpoints.
 from __future__ import annotations
 
 import secrets
+from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 
@@ -16,7 +17,15 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
     from fastapi import FastAPI, Header, HTTPException, Request
     from starlette.responses import JSONResponse
 
-    app = FastAPI(title="Crypto Strategy Lab (read-only)", docs_url=None, redoc_url=None, openapi_url=None)
+    @asynccontextmanager
+    async def lifespan(_app):
+        try:
+            yield
+        finally:
+            if visualizer_coordinator is not None:
+                visualizer_coordinator.stop()
+
+    app = FastAPI(title="Crypto Strategy Lab (read-only)", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
     @app.middleware("http")
     async def local_guard(request: Request, call_next):
@@ -158,7 +167,6 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 raise HTTPException(status_code=404, detail="Completed run unavailable")
             return {"url": url}
 
-        app.add_event_handler("shutdown", visualizer_coordinator.stop)
 
     if static_root is not None:
         from pathlib import Path
