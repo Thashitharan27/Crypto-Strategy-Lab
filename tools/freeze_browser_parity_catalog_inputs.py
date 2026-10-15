@@ -14,6 +14,7 @@ from pathlib import Path
 
 from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore
 from crypto_strategy_lab.data.cache import stat_fingerprint
+from crypto_strategy_lab.data.timing import interval_to_timedelta
 from crypto_strategy_lab.parity_fixture_manifest import (
     frozen_fixture_manifest,
     verify_frozen_fixture_files,
@@ -50,7 +51,7 @@ def _catalog_files(store: MarketDataStore, request: DataRequest, interval: str):
             raise ValueError(f"catalog source metadata changed: {path}")
         if stat_fingerprint(path, stat) != record.fingerprint:
             raise ValueError(f"catalog source fingerprint changed: {path}")
-        label = f"BTCUSDT_{interval}_{index:04d}_{record.frequency}"
+        label = f"{request.symbol}_{interval}_{index:04d}_{record.frequency}"
         files[label] = path
         metadata[label] = {
             "catalog_fingerprint": record.fingerprint,
@@ -112,11 +113,17 @@ def main(argv=None) -> int:
         )
 
     files = {**strategy_files, **intrabar_files}
+    strategy_minutes = int(
+        interval_to_timedelta(request.strategy_interval).total_seconds() // 60
+    )
+    intrabar_minutes = int(
+        interval_to_timedelta(request.intrabar_interval).total_seconds() // 60
+    )
     frozen = frozen_fixture_manifest(
         commit_sha=args.commit_sha,
         files=files,
-        strategy_timeframe_minutes=240,
-        intrabar_timeframe_minutes=1,
+        strategy_timeframe_minutes=strategy_minutes,
+        intrabar_timeframe_minutes=intrabar_minutes,
     )
     verify_frozen_fixture_files(frozen["files"], files)
     frozen["selection"] = {
