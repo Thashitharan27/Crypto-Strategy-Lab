@@ -53,6 +53,7 @@ function App() {
   const visualizerRequest = React.useRef(0);
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
+  const runRequest = React.useRef(0);
   const [runMetrics, setRunMetrics] = React.useState<{ trades: number; winRate: number; netPnl: number } | null>(null);
   const [runRisk, setRunRisk] = React.useState<{profitFactor?: number; drawdown?: number; fees?: number} | null>(null);
 
@@ -81,6 +82,7 @@ function App() {
   }
 
   async function loadRun() {
+    const requestId = ++runRequest.current;
     setRunInfo(null);
     setRunMetrics(null);
     setRunRisk(null);
@@ -88,6 +90,7 @@ function App() {
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(runId)) { setRunError("Enter a valid saved run folder ID"); return; }
     try {
       const value = await getReadOnly<{manifest: {run_id?: string; run_status?: string}; summary: Record<string, unknown>}>(`/api/v1/runs/${runId}`, token);
+      if (requestId !== runRequest.current) return;
       setRunInfo({run_id: value.manifest.run_id, status: value.manifest.run_status});
       const {total_trades, win_rate, net_pnl, profit_factor, maximum_drawdown_percentage, total_fees} = value.summary;
       const safeMetric = (n: unknown) => typeof n === "number" && Number.isFinite(n) ? n : undefined;
@@ -104,7 +107,7 @@ function App() {
           (win_rate as number) >= 0 && (win_rate as number) <= 1) {
         setRunMetrics({trades: total_trades as number, winRate: win_rate as number, netPnl: net_pnl as number});
       }
-    } catch { setRunError("Saved run unavailable or not accessible"); }
+    } catch { if (requestId === runRequest.current) setRunError("Saved run unavailable or not accessible"); }
   }
 
   async function loadCoverage() {
@@ -169,6 +172,7 @@ function App() {
     // Invalidate in-flight catalog reads before switching local API sessions.
     ++coverageRequest.current;
     ++configRequest.current;
+    ++runRequest.current;
     ++visualizerRequest.current;
     ++portfolioRequest.current;
     setPortfolioCandidates(null);
@@ -178,6 +182,10 @@ function App() {
     setConfigSummary(null);
     setConfigDetails(null);
     setConfigError("");
+    setRunInfo(null);
+    setRunMetrics(null);
+    setRunRisk(null);
+    setRunError("");
     setCoverage(null);
     setCoverageQueryLabel("");
     setCoverageError("");
@@ -285,7 +293,7 @@ function App() {
       </div>}
       {section === "Runs & Results" && connected && <div className="connection">
         <label htmlFor="run-id">Completed run folder ID</label>
-        <input id="run-id" value={runId} onChange={e => setRunId(e.target.value)} placeholder="BTCUSDT_4h_…" />
+        <input id="run-id" value={runId} onChange={e => {++runRequest.current; setRunId(e.target.value); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError("");}} placeholder="BTCUSDT_4h_…" />
         <button type="button" onClick={() => void loadRun()}>Read completed run</button>
         {runError && <p role="alert">{runError}</p>}
         {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p>
