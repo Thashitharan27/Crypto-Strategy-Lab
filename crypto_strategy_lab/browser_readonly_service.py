@@ -34,6 +34,23 @@ class BrowserReadOnlyService:
     def research_config(self, path: str | Path) -> dict:
         return read_research_config(path)
 
+    def portfolio_candidates(self, output_root: str | Path) -> list[dict]:
+        """Discover verified completed resilience runs; never replay or expose paths."""
+        from crypto_strategy_lab.portfolio_replay import discover_resilience_runs
+
+        rows = discover_resilience_runs(output_root)
+        return [
+            {
+                "run_id": row["run_id"],
+                "symbol": row["symbol"],
+                "strategy_timeframe": row.get("strategy_timeframe"),
+                "candidate_rows": row["candidate_rows"],
+                "completed_at": row.get("completed_at"),
+                "sampling_mode": row["sampling_mode"],
+            }
+            for row in rows
+        ]
+
     def capabilities(self) -> dict:
         return browser_capabilities()
 
