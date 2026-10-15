@@ -37,6 +37,8 @@ function App() {
   const [configId, setConfigId] = React.useState("");
   const [configSummary, setConfigSummary] = React.useState<{ sections: string[]; configVersion: string } | null>(null);
   const [configError, setConfigError] = React.useState("");
+  const [configDetails, setConfigDetails] = React.useState<Record<string, unknown> | null>(null);
+  const configRequest = React.useRef(0);
   const [runId, setRunId] = React.useState("");
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
@@ -44,7 +46,9 @@ function App() {
   const [runRisk, setRunRisk] = React.useState<{profitFactor?: number; drawdown?: number; fees?: number} | null>(null);
 
   async function loadConfig() {
+    const requestId = ++configRequest.current;
     setConfigSummary(null);
+    setConfigDetails(null);
     setConfigError("");
     if (!/^[A-Za-z0-9_-]{1,100}$/.test(configId)) {
       setConfigError("Enter a valid saved configuration ID");
@@ -55,8 +59,11 @@ function App() {
       const value = result.config;
       if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid config");
       const version = value.config_version ?? value.version ?? "Not specified";
+      if (requestId !== configRequest.current) return;
       setConfigSummary({sections: Object.keys(value), configVersion: String(version)});
+      setConfigDetails(value);
     } catch {
+      if (requestId !== configRequest.current) return;
       setConfigError("Saved configuration unavailable or not accessible");
     }
   }
@@ -122,6 +129,10 @@ function App() {
   async function connect() {
     // Invalidate in-flight catalog reads before switching local API sessions.
     ++coverageRequest.current;
+    ++configRequest.current;
+    setConfigSummary(null);
+    setConfigDetails(null);
+    setConfigError("");
     setCoverage(null);
     setCoverageQueryLabel("");
     setCoverageError("");
@@ -154,16 +165,16 @@ function App() {
     <section aria-live="polite"><header><small>RESEARCH WORKSPACE</small><h2>{section}</h2></header>
       <div className="connection">
         <label htmlFor="local-token">Local session token</label>
-        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => setToken(event.target.value)} placeholder="Provided by your local API session" />
+        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++configRequest.current; ++coverageRequest.current; setToken(event.target.value); setConnected(false); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigError(""); setCoverage(null); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
         <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
         <p role="status">{message}</p>
       </div>
       {section === "Configurations" && connected && <div className="connection">
         <label htmlFor="config-id">Saved configuration ID</label>
-        <input id="config-id" value={configId} onChange={e => setConfigId(e.target.value)} placeholder="Configuration filename without .json" />
+        <input id="config-id" value={configId} onChange={e => { ++configRequest.current; setConfigId(e.target.value); setConfigSummary(null); setConfigDetails(null); setConfigError(""); }} placeholder="Configuration filename without .json" />
         <button type="button" onClick={() => void loadConfig()}>Inspect configuration</button>
         {configError && <p role="alert">{configError}</p>}
-        {configSummary && <div><h3>Validated configuration</h3><p>Version: {configSummary.configVersion}</p><p>Sections: {configSummary.sections.join(", ")}</p></div>}
+        {configSummary && <div><h3>Validated configuration</h3><p>Version: {configSummary.configVersion}</p><p>Sections: {configSummary.sections.join(", ")}</p><p>Read-only snapshot from the existing CSL configuration reader. No save, normalization, or execution is performed by the browser.</p>{configDetails && <details><summary>Inspect saved configuration values</summary><pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails, null, 2)}</pre></details>}</div>}
       </div>}
       {section === "Runs & Results" && connected && <div className="connection">
         <label htmlFor="run-id">Completed run folder ID</label>
