@@ -77,10 +77,10 @@ The browser completed-run path delegates to `read_completed_run` and does not re
 
 ## Remaining integration and execution gates
 
-This audit certifies only the **read-only component boundaries and reuse contracts** listed above. It does not certify that those components are wired into a production launcher, and it does not authorize adding POST/PUT/PATCH/DELETE routes or invoking the research/backtest engine from the browser.
+This audit certifies only the **read-only component boundaries and reuse contracts** listed above. The repository now includes `browser_launcher.py` and `tests/test_browser_launcher.py`, which cover runtime composition, static assets, token-authenticated read-only API operations and loopback binding. These tests **do not** establish operator-local historical browser certification or authorize POST/PUT/PATCH/DELETE operations or research/backtest execution.
 
-The next integration step is to add and test one production composition/launcher path that wires the existing read-only service, HTTP app, static browser assets, runtime token and localhost binding without introducing a second engine or data owner.
+The next gate is to run the **existing** V2 historical chart parity command described in `docs/browser_chart_payload_parity_operator_gate.md` against the canonical saved workstation run and inspect its evidence, alongside a practical browser session check for saved configurations and finalized-run Portfolio discovery. Do not duplicate the existing launcher, historical parity comparator, or Data Lake readers.
 
-Only after that read-only runtime is certified should Phase 5 add guarded writes/job lifecycle and demonstrate frozen-fixture browser-vs-desktop configuration and trade parity through the existing engine.
+Phase 5 guarded writes/job lifecycle remains blocked pending explicit authorization and complete browser-versus-desktop parity certification through the existing engine.
 
 PR #501 remains on hold until its pending-limit execution overlap is resolved.
