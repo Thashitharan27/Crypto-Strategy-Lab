@@ -200,6 +200,20 @@ function App() {
         {configError && <p role="alert">{configError}</p>}
         {configSummary && <div><h3>Validated configuration</h3><p>Version: {configSummary.configVersion}</p><p>Sections: {configSummary.sections.join(", ")}</p><p>Read-only snapshot from the existing CSL configuration reader. No save, normalization, or execution is performed by the browser.</p>{configDetails && <><label htmlFor="config-section">Inspect one saved configuration section</label><select id="config-section" value={configSection} onChange={event => setConfigSection(event.target.value)}><option value="">Choose a section</option>{configSummary.sections.map(name => <option key={name} value={name}>{name}</option>)}</select>{configSection && Object.prototype.hasOwnProperty.call(configDetails, configSection) && configDetails[configSection] !== null && typeof configDetails[configSection] === "object" && !Array.isArray(configDetails[configSection]) && <table aria-label="Selected configuration fields"><caption>Saved fields from {configSection} (read-only)</caption><thead><tr><th>Original field</th><th>Saved value</th></tr></thead><tbody>{Object.entries(configDetails[configSection] as Record<string, unknown>).map(([key, value]) => <tr key={key}><td><code>{key}</code></td><td><code>{JSON.stringify(value) ?? "undefined"}</code></td></tr>)}</tbody></table>}{configSection && Object.prototype.hasOwnProperty.call(configDetails, configSection) && <pre aria-label="Selected configuration section" style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails[configSection], null, 2)}</pre>}</>}{configDetails && <details><summary>Inspect saved configuration values</summary><pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails, null, 2)}</pre></details>}</div>}
       </div>}
+      {section === "Strategy Designer" && connected && configDetails && <div className="connection">
+        <h3>Saved strategy settings (read-only)</h3>
+        <p>Projection of the currently inspected configuration. Original field names and nested values remain unchanged.</p>
+        {["strategy", "features"].filter(name => Object.prototype.hasOwnProperty.call(configDetails, name)).map(name =>
+          <details key={name}><summary>{name === "strategy" ? "Strategy and policy configuration" : "Feature-owned selection and confirmation settings"}</summary>
+            <pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails[name], null, 2)}</pre>
+          </details>
+        )}
+        <p>Feature-owned switches are displayed for context only; they are not a second copy of editable settings.</p>
+      </div>}
+      {section === "Research Features" && connected && configDetails && Object.prototype.hasOwnProperty.call(configDetails, "features") && <div className="connection">
+        <h3>Saved research feature settings (read-only)</h3>
+        <pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails.features, null, 2)}</pre>
+      </div>}
       {section === "Risk & Execution" && connected && <div className="connection">
         <h3>Saved risk and execution settings (read-only)</h3>
         <p>This view reads the original validated configuration snapshot. Risk sizing, stops, targets, costs, fills and exits remain owned by the existing Python engine and desktop controls.</p>
