@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getReadOnly, openVerifiedVisualizer, type Health, type Symbols } from "./api";
 import "./style.css";
 
-const sections = ["Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Trade Visualizer"] as const;
+const sections = ["Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Risk & Execution", "Trade Visualizer"] as const;
 type Section = (typeof sections)[number];
 type CoverageRecord = {symbol?: string; dataset?: string; interval?: string | null; state?: string; archive_count?: number; first_period?: string | null; last_period?: string | null};
 type StrategyCapability = {
@@ -213,6 +213,16 @@ function App() {
       {section === "Research Features" && connected && configDetails && Object.prototype.hasOwnProperty.call(configDetails, "features") && <div className="connection">
         <h3>Saved research feature settings (read-only)</h3>
         <pre style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails.features, null, 2)}</pre>
+      </div>}
+      {section === "Risk & Execution" && connected && <div className="connection">
+        <h3>Saved risk and execution settings (read-only)</h3>
+        <p>This view reads the original validated configuration snapshot. Risk sizing, stops, targets, costs, fills and exits remain owned by the existing Python engine and desktop controls.</p>
+        {!configDetails && <p>Inspect a saved configuration in Configurations to view its original execution settings here.</p>}
+        {configDetails && Object.prototype.hasOwnProperty.call(configDetails, "execution") &&
+          <pre aria-label="Saved execution configuration" style={{whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "24rem", overflowY: "auto"}}>{JSON.stringify(configDetails.execution, null, 2)}</pre>}
+        {configDetails && !Object.prototype.hasOwnProperty.call(configDetails, "execution") &&
+          <p>No execution section is present in this validated configuration snapshot.</p>}
+        <p>No execution settings can be edited or applied from the browser.</p>
       </div>}
       {section === "Runs & Results" && connected && <div className="connection">
         <label htmlFor="run-id">Completed run folder ID</label>
