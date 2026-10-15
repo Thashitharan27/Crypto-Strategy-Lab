@@ -9,6 +9,7 @@ cd browser_ui
 npm install
 npm run build
 cd ..
+python -m pip install -r requirements.txt
 python -m pip install -r browser_ui/requirements.txt
 python -m crypto_strategy_lab.browser_launcher
 ```
