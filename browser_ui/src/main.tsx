@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { getReadOnly, type Health, type Symbols } from "./api";
+import { getReadOnly, openVerifiedVisualizer, type Health, type Symbols } from "./api";
 import "./style.css";
 
 const sections = ["Data Library", "Runs & Results", "Configurations", "Strategy Designer", "Research Features", "Trade Visualizer"] as const;
@@ -40,6 +40,10 @@ function App() {
   const [configDetails, setConfigDetails] = React.useState<Record<string, unknown> | null>(null);
   const configRequest = React.useRef(0);
   const [runId, setRunId] = React.useState("");
+  const [visualizerRunId, setVisualizerRunId] = React.useState("");
+  const [visualizerUrl, setVisualizerUrl] = React.useState("");
+  const [visualizerError, setVisualizerError] = React.useState("");
+  const visualizerRequest = React.useRef(0);
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
   const [runMetrics, setRunMetrics] = React.useState<{ trades: number; winRate: number; netPnl: number } | null>(null);
@@ -126,10 +130,26 @@ function App() {
     }
   }
 
+  async function openVisualizer() {
+    const requestId = ++visualizerRequest.current;
+    setVisualizerUrl("");
+    setVisualizerError("");
+    if (!connected) { setVisualizerError("Connect read-only first"); return; }
+    try {
+      const url = await openVerifiedVisualizer(visualizerRunId, token);
+      if (requestId === visualizerRequest.current) setVisualizerUrl(url);
+    } catch {
+      if (requestId === visualizerRequest.current) setVisualizerError("Verified visualizer session unavailable");
+    }
+  }
+
   async function connect() {
     // Invalidate in-flight catalog reads before switching local API sessions.
     ++coverageRequest.current;
     ++configRequest.current;
+    ++visualizerRequest.current;
+    setVisualizerUrl("");
+    setVisualizerError("");
     setConfigSummary(null);
     setConfigDetails(null);
     setConfigError("");
@@ -165,7 +185,7 @@ function App() {
     <section aria-live="polite"><header><small>RESEARCH WORKSPACE</small><h2>{section}</h2></header>
       <div className="connection">
         <label htmlFor="local-token">Local session token</label>
-        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++configRequest.current; ++coverageRequest.current; setToken(event.target.value); setConnected(false); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigError(""); setCoverage(null); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
+        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++configRequest.current; ++coverageRequest.current; ++visualizerRequest.current; setVisualizerUrl(""); setVisualizerError(""); setToken(event.target.value); setConnected(false); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigError(""); setCoverage(null); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
         <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
         <p role="status">{message}</p>
       </div>
@@ -242,8 +262,14 @@ function App() {
         </table>
         <p>* DatasetKind declarations only. Auxiliary data resources such as taker-flow and trade-flow inputs are not enumerated here; consult the existing provider and data-layer requirements before executing research.</p>
       </div>}
-      {section === "Trade Visualizer" &&
-        <p>This section is being migrated. The existing Python visualizer and completed-run data remain authoritative.</p>}
+      {section === "Trade Visualizer" && <div className="connection">
+        <p>Open an existing verified run using the existing Python Strategy Visualizer. No backtest or research execution is enabled.</p>
+        <label htmlFor="visualizer-run-id">Completed run ID</label>
+        <input id="visualizer-run-id" value={visualizerRunId} onChange={e => {++visualizerRequest.current; setVisualizerRunId(e.target.value); setVisualizerUrl(""); setVisualizerError("");}} placeholder="BTCUSDT_4h_…" />
+        <button type="button" disabled={!connected} onClick={() => void openVisualizer()}>Prepare visualizer session</button>
+        {visualizerError && <p role="alert">{visualizerError}</p>}
+        {visualizerUrl && <p><a href={visualizerUrl} target="_blank" rel="noopener noreferrer">Open verified visualizer in a new tab</a>. This link is local and expires when its session is replaced or the server stops.</p>}
+      </div>}
       <p>No strategy execution or configuration editing is enabled.</p>
     </section>
   </main>;
