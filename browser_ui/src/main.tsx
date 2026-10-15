@@ -129,6 +129,10 @@ function App() {
   async function connect() {
     // Invalidate in-flight catalog reads before switching local API sessions.
     ++coverageRequest.current;
+    ++configRequest.current;
+    setConfigSummary(null);
+    setConfigDetails(null);
+    setConfigError("");
     setCoverage(null);
     setCoverageQueryLabel("");
     setCoverageError("");
@@ -161,7 +165,7 @@ function App() {
     <section aria-live="polite"><header><small>RESEARCH WORKSPACE</small><h2>{section}</h2></header>
       <div className="connection">
         <label htmlFor="local-token">Local session token</label>
-        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => setToken(event.target.value)} placeholder="Provided by your local API session" />
+        <input id="local-token" type="password" autoComplete="off" value={token} onChange={event => { ++configRequest.current; ++coverageRequest.current; setToken(event.target.value); setConnected(false); setSymbols([]); setCapabilities(null); setConfigSummary(null); setConfigDetails(null); setConfigError(""); setCoverage(null); setMessage("Not connected"); }} placeholder="Provided by your local API session" />
         <button type="button" onClick={() => void connect()} disabled={!token}>Connect read-only</button>
         <p role="status">{message}</p>
       </div>
