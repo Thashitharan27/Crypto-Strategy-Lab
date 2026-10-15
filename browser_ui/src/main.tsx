@@ -17,6 +17,7 @@ function App() {
   const [coverageStart, setCoverageStart] = React.useState("2020-06-01");
   const [coverageEnd, setCoverageEnd] = React.useState("2026-09-01");
   const [coverageError, setCoverageError] = React.useState("");
+  const [coverageQueryLabel, setCoverageQueryLabel] = React.useState("");
   const [coverageStatusFilter, setCoverageStatusFilter] = React.useState("ALL");
   const [incompleteFirst, setIncompleteFirst] = React.useState(false);
   const [message, setMessage] = React.useState("Not connected");
@@ -76,6 +77,7 @@ function App() {
 
   async function loadCoverage() {
     setCoverage(null);
+    setCoverageQueryLabel("");
     setCoverageError("");
     if (!connected) { setCoverageError("Connect to the local read-only API first"); return; }
     if (!/^[A-Za-z0-9]{1,32}$/.test(coverageSymbol)) {
@@ -95,6 +97,7 @@ function App() {
       const result = await getReadOnly<{coverage: CoverageRecord[]}>(`/api/v1/catalog/coverage?${query.toString()}`, token);
       if (!Array.isArray(result.coverage) || result.coverage.some(item => !item || typeof item !== "object" || Array.isArray(item))) throw new Error("Invalid coverage response");
       setCoverage(result.coverage);
+      setCoverageQueryLabel(`${coverageSymbol.toUpperCase()} · ${coverageStart} to ${coverageEnd} UTC (end exclusive) · 4h / 1m`);
     } catch {
       setCoverageError("Coverage unavailable for this symbol or time window");
     }
@@ -159,6 +162,7 @@ function App() {
           <button type="button" onClick={() => void loadCoverage()}>Check coverage (4h / 1m)</button>
           {coverageError && <p role="alert">{coverageError}</p>}
           {coverage && <div><p role="status">Coverage records returned: {coverage.length}. Data Library stays read-only.</p>
+            <p aria-label="Coverage request scope">Requested: {coverageQueryLabel}</p>
             <p aria-label="Coverage availability summary">Available: {coverage.filter(row => row.state === "AVAILABLE").length} · Partial: {coverage.filter(row => row.state === "PARTIAL").length} · Unavailable: {coverage.filter(row => row.state === "UNAVAILABLE").length} · Unknown: {coverage.filter(row => !["AVAILABLE", "PARTIAL", "UNAVAILABLE"].includes(row.state ?? "")).length}</p>
             <label htmlFor="coverage-status-filter">Coverage status filter</label>
             <select id="coverage-status-filter" value={coverageStatusFilter} onChange={e => setCoverageStatusFilter(e.target.value)}>
