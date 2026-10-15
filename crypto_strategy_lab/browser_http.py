@@ -9,7 +9,7 @@ import secrets
 from urllib.parse import urlsplit
 
 
-def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None):
+def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None, visualizer_coordinator=None):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
@@ -138,6 +138,27 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 return {"config": read_service.research_config(target)}
             except (OSError, ValueError, KeyError, TypeError):
                 raise HTTPException(status_code=404, detail="Configuration not found")
+
+    if visualizer_coordinator is not None:
+        @app.post("/api/v1/visualizer/sessions/{run_id}", status_code=201)
+        def open_visualizer_session(run_id: str, request: Request, authorization: str | None = Header(default=None)):
+            # A session launch is an explicit in-memory user action, never a
+            # GET or a background page load. Enforce same-origin beyond bearer.
+            supplied = authorization.removeprefix("Bearer ") if authorization else ""
+            if not secrets.compare_digest(supplied, token):
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            origin = request.headers.get("origin")
+            if not origin or origin != f"http://{request.headers.get('host', '')}":
+                raise HTTPException(status_code=403, detail="Same-origin launch required")
+            if request.headers.get("sec-fetch-site", "same-origin") != "same-origin":
+                raise HTTPException(status_code=403, detail="Cross-site launch forbidden")
+            try:
+                url = visualizer_coordinator.open_completed_run(run_id)
+            except (OSError, ValueError, KeyError, TypeError):
+                raise HTTPException(status_code=404, detail="Completed run unavailable")
+            return {"url": url}
+
+        app.add_event_handler("shutdown", visualizer_coordinator.stop)
 
     if static_root is not None:
         from pathlib import Path
