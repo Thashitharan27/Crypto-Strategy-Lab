@@ -42,3 +42,12 @@ def test_cli_exits_nonzero_on_mismatch(tmp_path):
     assert main([str(a), str(b)]) == 1
     b.write_text(a.read_text(encoding="utf-8"), encoding="utf-8")
     assert main([str(a), str(b)]) == 0
+
+
+def test_signed_zero_mismatch_is_not_a_false_pass():
+    desktop = {"positionBox": {"realizedR": -0.0}}
+    browser = {"positionBox": {"realizedR": 0.0}}
+    mismatches = compare_payloads(desktop, browser)
+    assert len(mismatches) == 1
+    assert "signed zero" in mismatches[0]
+    assert canonical_sha256(desktop) != canonical_sha256(browser)
