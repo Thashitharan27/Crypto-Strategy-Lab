@@ -79,3 +79,23 @@ def test_real_visualizer_server_closes_socket_if_thread_cannot_start():
     assert owner._server is None
     assert owner._thread is None
     owner.stop()  # harmless following partial startup failure
+
+
+def test_visualizer_server_interrupt_after_worker_started_stops_worker():
+    from threading import Thread
+    from unittest.mock import patch
+    from crypto_strategy_lab.strategy_visualizer_browser import StrategyVisualizerBrowserServer
+
+    original_start = Thread.start
+
+    def start_then_interrupt(thread):
+        original_start(thread)
+        raise KeyboardInterrupt("interrupted after start")
+
+    server = StrategyVisualizerBrowserServer(Mock())
+    with patch.object(Thread, "start", start_then_interrupt):
+        with pytest.raises(KeyboardInterrupt, match="interrupted after start"):
+            server.start()
+    assert server._server is None
+    assert server._thread is None
+    server.stop()
