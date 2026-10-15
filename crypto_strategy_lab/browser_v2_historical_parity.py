@@ -1,0 +1,199 @@
+"""Operator-local V2 historical chart parity capture.
+
+Compares the canonical desktop CompletedRunVisualizer model with the active
+browser V2 HTTP payload for one verified completed run. Evidence is written
+only to the operator-selected local directory; no run, cache, or config is
+modified.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
+from crypto_strategy_lab.browser_chart_parity import canonical_sha256, compare_payloads
+from crypto_strategy_lab.browser_readonly_service import build_browser_readonly_service
+from crypto_strategy_lab.browser_visualizer_adapter import load_browser_visualizer
+from crypto_strategy_lab.paths import OUTPUT_DIR
+from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
+from crypto_strategy_lab.strategy_visualizer_browser_v2 import StrategyVisualizerV2BrowserServer
+
+
+DEFAULT_RUN_ID = "BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f"
+DEFAULT_TIMEFRAMES = ("1h", "4h", "1d")
+
+
+def _available_timeframes(model: Any) -> list[str]:
+    values: list[str] = []
+    for item in model.available_chart_timeframes():
+        interval = str(item.get("interval") or "").strip().lower()
+        if interval and interval not in values:
+            values.append(interval)
+    strategy = str(model.seed.request.strategy_timeframe or "").strip().lower()
+    if strategy and strategy not in values:
+        values.append(strategy)
+    return values
+
+
+def representative_trade_indices(model: Any) -> list[int]:
+    count = int(model.trade_count)
+    if count <= 0:
+        raise ValueError("Completed run contains no trades")
+    indices = {0, count // 2, count - 1}
+    trades = getattr(model, "trades", None)
+    if trades is not None:
+        try:
+            for side in ("LONG", "SHORT"):
+                for index, (_, row) in enumerate(trades.iterrows()):
+                    if str(row.get("side") or "").upper() == side:
+                        indices.add(index)
+                        break
+        except (AttributeError, TypeError):
+            pass
+    return sorted(index for index in indices if 0 <= index < count)
+
+
+def parity_cases(model: Any, requested_timeframes: tuple[str, ...] = DEFAULT_TIMEFRAMES) -> list[tuple[int, str]]:
+    available = _available_timeframes(model)
+    chosen = [tf for tf in requested_timeframes if tf in available]
+    strategy = str(model.seed.request.strategy_timeframe or "").strip().lower()
+    if strategy and strategy in available and strategy not in chosen:
+        chosen.append(strategy)
+    if not chosen:
+        chosen = available[:1]
+    if not chosen:
+        raise ValueError("No chart timeframe is available for the completed run")
+    return [(index, timeframe) for index in representative_trade_indices(model) for timeframe in chosen]
+
+
+def _http_payload(base_url: str, trade_index: int, chart_timeframe: str) -> Any:
+    query = urlencode({"trade_index": trade_index, "chart_timeframe": chart_timeframe})
+    with urlopen(base_url + "api/payload?" + query, timeout=30) as response:
+        return json.loads(
+            response.read().decode("utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+        )
+
+
+def capture_parity(
+    desktop_model: Any,
+    browser_model: Any,
+    evidence_dir: Path,
+    *,
+    requested_timeframes: tuple[str, ...] = DEFAULT_TIMEFRAMES,
+    browser_payload: Callable[[int, str], Any] | None = None,
+) -> dict[str, Any]:
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    cases = parity_cases(desktop_model, requested_timeframes)
+    results: list[dict[str, Any]] = []
+
+    server = None
+    if browser_payload is None:
+        server = StrategyVisualizerV2BrowserServer(browser_model)
+        base_url = server.start()
+        browser_payload = lambda index, timeframe: _http_payload(base_url, index, timeframe)
+
+    try:
+        for trade_index, timeframe in cases:
+            desktop = desktop_model.build_v2_diagnostic_payload(
+                trade_index=trade_index,
+                chart_timeframe=timeframe,
+            )
+            browser = browser_payload(trade_index, timeframe)
+            differences = compare_payloads(desktop, browser)
+            stem = f"trade_{trade_index:03d}_{timeframe}"
+            desktop_path = evidence_dir / f"desktop_{stem}.json"
+            browser_path = evidence_dir / f"browser_{stem}.json"
+            desktop_path.write_text(
+                json.dumps(desktop, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False),
+                encoding="utf-8",
+            )
+            browser_path.write_text(
+                json.dumps(browser, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False),
+                encoding="utf-8",
+            )
+            results.append(
+                {
+                    "trade_index": trade_index,
+                    "timeframe": timeframe,
+                    "desktop_sha256": canonical_sha256(desktop),
+                    "browser_sha256": canonical_sha256(browser),
+                    "exact_match": not differences,
+                    "mismatches": differences[:20],
+                }
+            )
+    finally:
+        if server is not None:
+            server.stop()
+
+    summary = {
+        "run_id": str(desktop_model.manifest.get("run_id") or desktop_model.run_dir.name),
+        "trade_count": int(desktop_model.trade_count),
+        "available_timeframes": _available_timeframes(desktop_model),
+        "cases": results,
+        "pass": all(item["exact_match"] for item in results),
+    }
+    (evidence_dir / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
+    return summary
+
+
+def _output_root(value: str | None) -> Path:
+    if value:
+        return Path(value).expanduser().resolve()
+    env = os.environ.get("CRYPTO_STRATEGY_LAB_OUTPUT_DIR", "").strip()
+    if env:
+        return Path(env).expanduser().resolve()
+    return (OUTPUT_DIR / "data_lake_v2").resolve()
+
+
+def load_models(run_id: str, output_root: Path):
+    service = build_browser_readonly_service()
+    application = service.application_service
+    if application is None:
+        raise RuntimeError("Browser application service is unavailable")
+    run_dir = output_root / run_id
+    manifest, _summary = application.completed_runs.read(run_dir)
+    desktop_model = CompletedRunVisualizer.load(application, run_dir, manifest)
+    browser_model = load_browser_visualizer(application, output_root, run_id)
+    return desktop_model, browser_model
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-id", default=DEFAULT_RUN_ID)
+    parser.add_argument("--output-root")
+    parser.add_argument(
+        "--evidence-dir",
+        default="parity_verification/v2_historical_chart",
+        help="Local-only evidence directory; do not commit captured payloads.",
+    )
+    args = parser.parse_args(argv)
+
+    output_root = _output_root(args.output_root)
+    desktop_model, browser_model = load_models(args.run_id, output_root)
+    summary = capture_parity(desktop_model, browser_model, Path(args.evidence_dir))
+
+    print(f"Run: {summary['run_id']}")
+    print(f"Trades: {summary['trade_count']}")
+    print(f"Cases: {len(summary['cases'])}")
+    for item in summary["cases"]:
+        status = "PASS" if item["exact_match"] else "FAIL"
+        print(
+            f"{status} trade={item['trade_index']} tf={item['timeframe']} "
+            f"desktop={item['desktop_sha256']} browser={item['browser_sha256']}"
+        )
+        for mismatch in item["mismatches"]:
+            print("  " + mismatch)
+    print("Historical V2 chart payload parity: " + ("PASS" if summary["pass"] else "FAIL"))
+    return 0 if summary["pass"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
