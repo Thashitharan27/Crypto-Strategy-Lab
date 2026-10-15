@@ -120,3 +120,11 @@ def test_provenance_rejects_wrong_baseline_window(field, value, error):
     frozen["selection"][field] = value
     with pytest.raises(ValueError, match=error):
         verify_source_provenance(frozen, saved)
+
+
+@pytest.mark.parametrize("invalid", ["NaT", None, "", "2020-01-01T00:00:00"])
+def test_provenance_rejects_invalid_or_naive_warmup(invalid):
+    frozen, saved = _inputs()
+    frozen["selection"]["strategy_source_start"] = invalid
+    with pytest.raises(ValueError, match="warmup start"):
+        verify_source_provenance(frozen, saved)
