@@ -48,6 +48,7 @@ def test_browser_api_route_inventory_is_read_only(tmp_path):
 
     assert api_routes == {
         "/api/v1/health": {"GET"},
+        "/api/v1/capabilities": {"GET"},
         "/api/v1/catalog/symbols": {"GET"},
         "/api/v1/catalog/coverage": {"GET"},
         "/api/v1/runs/{run_id}": {"GET"},
