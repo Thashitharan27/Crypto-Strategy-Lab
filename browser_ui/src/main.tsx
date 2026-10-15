@@ -108,6 +108,11 @@ function App() {
   }
 
   async function connect() {
+    // Invalidate in-flight catalog reads before switching local API sessions.
+    ++coverageRequest.current;
+    setCoverage(null);
+    setCoverageQueryLabel("");
+    setCoverageError("");
     setConnected(false);
     setSymbols([]);
     try {
