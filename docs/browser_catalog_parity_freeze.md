@@ -30,3 +30,8 @@ The original 79-trade run's data-quality report shows that its 4h input includes
 ## Follow-up identity verification
 
 After generating this frozen manifest, run `tools/verify_browser_parity_provenance.py` with the original saved `provenance/source_archives.parquet` as described in `docs/browser_parity_provenance_crosscheck.md`. The verifier now checks each selected archive's saved size and mtime against the catalog metadata and hashed byte count; regenerate any pre-#558 freeze manifests lacking those fields. This remains source-evidence collection, not certification of any trade replay.
+
+
+## Optional full saved-run inventory freeze
+
+The baseline run lists 2,956 selected source archives spanning nine dataset/interval groups. To hash and verify all of them against the original saved-run provenance, add `--include-all-saved-datasets` to the existing freeze command. This opt-in reuses the same catalog, original raw files and content-hash contract. It fails closed if the additional 2,757 source records are unavailable; no replacement data is downloaded. Run `verify_browser_parity_provenance.py` afterward with the same original saved Parquet file to verify all 2,956 metadata identities and size/mtime attributes. This does not establish candle-level or 79-trade replay parity. Leave the flag off for the prior 199-source-only workflow.
