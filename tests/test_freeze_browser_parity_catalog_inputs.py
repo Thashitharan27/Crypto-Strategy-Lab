@@ -292,3 +292,42 @@ def test_full_scope_rejects_wrong_individual_group_count_before_hashing(tmp_path
               "--start", "2020-06-01T00:00:00Z", "--end", "2020-07-01T00:00:00Z",
               "--include-all-saved-datasets"])
     assert not output.exists()
+
+
+def test_context_warmup_is_selected_without_extending_intrabar_or_funding(tmp_path, monkeypatch):
+    from tools import freeze_browser_parity_catalog_inputs as freeze
+    raw, cache = tmp_path / "raw", tmp_path / "cache"
+    raw.mkdir()
+    selected_starts = {}
+    original = freeze._catalog_files
+
+    def selected(store, request, interval, dataset=DatasetKind.KLINES, **kwargs):
+        selected_starts[(dataset.value, interval)] = request.start
+        if dataset == DatasetKind.KLINES and interval in ("4h", "1m"):
+            return original(store, request, interval, dataset, **kwargs)
+        return {"single": raw / "4h.zip"}, {"single": {}}
+
+    start, end = datetime(2020, 6, 1, tzinfo=UTC), datetime(2020, 7, 1, tzinfo=UTC)
+    records = []
+    for interval in ("4h", "1m"):
+        path = raw / f"{interval}.zip"
+        path.write_bytes(interval.encode())
+        records.append(_record(raw, path, interval, start, end))
+    MarketDataStore(raw, cache).catalog.sync_root(raw, records)
+    monkeypatch.setattr(freeze, "_catalog_files", selected)
+    with pytest.raises(ValueError, match="saved source group count mismatch"):
+        main(["--raw-root", str(raw), "--cache-root", str(cache),
+              "--manifest-json", str(tmp_path / "out.json"), "--commit-sha", "a" * 40,
+              "--start", "2020-06-01T00:00:00Z", "--end", "2020-07-01T00:00:00Z",
+              "--context-source-start", "2020-05-01T00:00:00Z",
+              "--include-all-saved-datasets"])
+    assert selected_starts[("klines", "1h")] == datetime(2020, 5, 1, tzinfo=UTC)
+    assert selected_starts[("klines", "1m")] == start
+
+
+def test_context_source_start_must_not_be_after_trading_start(tmp_path):
+    with pytest.raises(ValueError, match="context source start must not be later"):
+        main(["--raw-root", str(tmp_path / "raw"),
+              "--cache-root", str(tmp_path / "cache"),
+              "--manifest-json", str(tmp_path / "out.json"), "--commit-sha", "a" * 40,
+              "--context-source-start", "2020-06-02T00:00:00Z"])
