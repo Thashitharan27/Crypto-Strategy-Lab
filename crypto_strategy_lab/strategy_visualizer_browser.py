@@ -1736,7 +1736,14 @@ class StrategyVisualizerBrowserServer:
             name="strategy-visualizer-browser",
             daemon=True,
         )
-        self._thread.start()
+        try:
+            self._thread.start()
+        except BaseException:
+            # No serve_forever worker exists, so shutdown() would deadlock.
+            self._server.server_close()
+            self._server = None
+            self._thread = None
+            raise
         return self.url
 
     def stop(self) -> None:
