@@ -1,9 +1,14 @@
 from pathlib import Path
+import sys
 from unittest.mock import Mock, patch
 
 import pytest
 
-from crypto_strategy_lab.browser_launcher import build_browser_readonly_runtime
+from crypto_strategy_lab.browser_launcher import (
+    BrowserReadOnlyRuntime,
+    build_browser_readonly_runtime,
+    run_browser_readonly,
+)
 
 
 def _static_dist(root: Path) -> Path:
@@ -102,3 +107,38 @@ def test_launcher_rejects_invalid_ports(port, tmp_path):
             token="p" * 48,
             static_root=tmp_path,
         )
+
+
+
+def test_run_browser_binds_uvicorn_to_loopback_only(capsys):
+    app = Mock()
+    runtime = BrowserReadOnlyRuntime(
+        app=app,
+        token="s" * 48,
+        host="127.0.0.1",
+        port=8767,
+        static_root=Path("/static"),
+        output_root=Path("/output"),
+        config_root=Path("/config"),
+    )
+    uvicorn = Mock()
+
+    with (
+        patch(
+            "crypto_strategy_lab.browser_launcher.build_browser_readonly_runtime",
+            return_value=runtime,
+        ),
+        patch.dict(sys.modules, {"uvicorn": uvicorn}),
+    ):
+        run_browser_readonly(port=8767)
+
+    uvicorn.run.assert_called_once_with(
+        app,
+        host="127.0.0.1",
+        port=8767,
+        log_level="info",
+    )
+    output = capsys.readouterr().out
+    assert "http://127.0.0.1:8767/" in output
+    assert runtime.token in output
+    assert runtime.token not in runtime.url
