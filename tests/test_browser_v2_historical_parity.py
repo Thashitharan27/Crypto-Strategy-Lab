@@ -103,3 +103,22 @@ def test_capture_parity_fails_closed_on_payload_difference(tmp_path):
     assert failed[0]["trade_index"] == 2
     assert failed[0]["timeframe"] == "4h"
     assert any('["candles"][0]["close"]' in item for item in failed[0]["mismatches"])
+
+
+def test_capture_parity_rejects_mismatched_trade_counts(tmp_path):
+    import pytest
+    desktop = _Model()
+    browser = _Model(sides=("LONG", "SHORT"))
+    with pytest.raises(ValueError, match="trade counts differ"):
+        capture_parity(desktop, browser, tmp_path, browser_payload=lambda i, tf: {})
+    assert not (tmp_path / "summary.json").exists()
+
+
+def test_capture_parity_rejects_mismatched_run_identity(tmp_path):
+    import pytest
+    desktop = _Model()
+    browser = _Model()
+    browser.manifest = {"run_id": "different_run"}
+    with pytest.raises(ValueError, match="run identities differ"):
+        capture_parity(desktop, browser, tmp_path, browser_payload=lambda i, tf: {})
+    assert not (tmp_path / "summary.json").exists()
