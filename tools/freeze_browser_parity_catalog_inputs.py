@@ -187,10 +187,14 @@ def main(argv=None) -> int:
     }
     with args.manifest_json.open("x", encoding="utf-8") as handle:
         handle.write(json.dumps(frozen, sort_keys=True, indent=2) + "\n")
-    print(
-        f"Frozen {len(strategy_files)} {request.strategy_interval} and "
-        f"{len(intrabar_files)} {request.intrabar_interval} catalog sources"
-    )
+    if args.include_all_saved_datasets:
+        print(f"Frozen {len(files)} total catalog sources (including {len(extra_files)} context sources)")
+        print("SOURCE INVENTORY ONLY: historical feature and 79-trade execution parity remain unverified.")
+    else:
+        print(
+            f"PARTIAL SOURCE SCOPE ONLY: frozen {len(strategy_files)} {request.strategy_interval} "
+            f"and {len(intrabar_files)} {request.intrabar_interval} catalog sources"
+        )
     return 0
 
 
