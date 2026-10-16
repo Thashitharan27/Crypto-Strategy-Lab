@@ -493,7 +493,7 @@ class TestSupportResistanceDetector:
         opens = np.array([9.0, 12.0, 11.0, 11.5], dtype=np.float64)
         highs = np.array([10.0, 15.0, 10.0, 12.0], dtype=np.float64)
         lows = np.array([8.0, 9.0, 8.5, 9.5], dtype=np.float64)
-        closes = np.array([9.0, 12.0, 9.5, 12.0], dtype=np.float64)
+        closes = np.array([9.0, 12.0, 9.5, 11.0], dtype=np.float64)
         # Pivot at index 1 becomes confirmed at index 2, where ATR is 7.
         atr_low_now = np.array([1.0, 2.0, 7.0, 20.0], dtype=np.float64)
         atr_high_now = np.array([1.0, 2.0, 7.0, 200.0], dtype=np.float64)
@@ -524,8 +524,8 @@ class TestSupportResistanceDetector:
         assert low_now.resistance_zone_high == pytest.approx(15.0)
         assert high_now.resistance_zone_low == pytest.approx(12.0)
         assert high_now.resistance_zone_high == pytest.approx(15.0)
-        assert low_now.nearest_resistance_distance_price == pytest.approx(0.0)
-        assert high_now.nearest_resistance_distance_price == pytest.approx(0.0)
+        assert low_now.nearest_resistance_distance_price == pytest.approx(1.0)
+        assert high_now.nearest_resistance_distance_price == pytest.approx(1.0)
         assert low_now.nearest_resistance_distance_atr != pytest.approx(
             high_now.nearest_resistance_distance_atr
         )
