@@ -200,7 +200,8 @@ def review_captured_parity(evidence_dir: Path) -> dict[str, Any]:
             if (not isinstance(payload, dict)
                     or not isinstance(payload.get("run"), dict)
                     or payload["run"].get("runId") != DEFAULT_RUN_ID
-                    or payload.get("selectedTradeIndex") != index
+                    or type(payload.get("selectedTradeIndex")) is not int
+                    or payload["selectedTradeIndex"] != index
                     or payload.get("chartTimeframe") != timeframe
                     or payload["run"].get("chartTimeframe") != timeframe):
                 raise ValueError(
