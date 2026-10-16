@@ -50,7 +50,8 @@ def test_risk_page_is_reorganized_around_one_execution_plan():
         assert "2. Account Risk & Position Sizing" in titles
         assert "3. Stop & Position Sizing" in titles
         assert "4. Profit Target" in titles
-        assert "5. Trade Management" in titles
+        assert "5. DI Ladder / Reversal Filters" in titles
+        assert "6. Trade Management" in titles
         assert "Advanced Trade Management" in titles
         assert "Exposure & Costs" in titles
         assert "Base Trade Management" not in titles
@@ -345,19 +346,24 @@ def test_ema_920_execution_plan_is_explicit_and_generic_stop_target_controls_are
         assert workspace.ema_stop_confirmation.isHidden()
         assert workspace.ema_stop_lookback.isHidden()
         assert workspace.ema_stop_maximum.isHidden()
-        assert "below EMA 100" in workspace.ema_stop_buffer.text()
-        assert "signal-candle EMA 100" in workspace.summary_label.text()
-        assert "EMA 100 stop remains active" in workspace.ema_target_value.text()
+        assert workspace.ema_stop_buffer.isHidden()
+        assert not window.base_execution_form.widgets["ema_cross_stop_buffer_atr"].isHidden()
+        assert "signal-candle EMA 100 minus" in workspace.summary_label.text()
+        buffer = window.base_execution_form.widgets["ema_cross_stop_buffer_atr"]
+        buffer.setValue(0.12)
+        app.processEvents()
+        assert "EMA 100 minus 0.12× signal ATR" in workspace.summary_label.text()
+        assert "protective EMA 100 stop stays active" in workspace.summary_label.text()
 
         plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS_SHORT"))
         app.processEvents()
-        assert "above EMA 100" in workspace.ema_stop_buffer.text()
+        assert "signal-candle EMA 100 plus" in workspace.summary_label.text()
         assert "Bullish Cross" in workspace.ema_target_method.text()
         assert "short on EMA 20 crossing below EMA 100" in workspace.summary_label.text()
 
         plan.setCurrentIndex(plan.findData("EMA_20_100_CROSS_BOTH"))
         app.processEvents()
-        assert "below long / above short" in workspace.ema_stop_buffer.text()
+        assert "signal-candle EMA 100 with a" in workspace.summary_label.text()
         assert "Opposite EMA 20/100 Cross" in workspace.ema_target_method.text()
         assert "trade both directions" in workspace.summary_label.text()
 
@@ -492,12 +498,19 @@ def test_fib_execution_plan_hides_generic_atr_fixed_r_and_shows_native_levels():
         summary = workspace.summary_label.text()
         assert "next deeper Fib level" in summary
         assert "fixed 4R actual take-profit" in summary
-        assert "prior impulse extreme room" in summary
+        assert "prior impulse room does not veto this target" in summary
         assert "Next Candle Open — Causal" in summary
         assert "0.1× signal ATR buffer" in summary
+        assert not fib_fixed_target.isHidden()
+        assert "at least 2.5R" not in summary
+        fib_target_mode.setCurrentIndex(fib_target_mode.findData("IMPULSE_EXTREME"))
+        app.processEvents()
+        workspace.refresh_visibility()
+        summary = workspace.summary_label.text()
+        assert "prior impulse extreme room" in summary
         assert "0.15× signal ATR buffer" in summary
         assert "at least 2.5R" in summary
-        assert not fib_fixed_target.isHidden()
+        assert fib_fixed_target.isHidden()
     finally:
         window.close()
         app.processEvents()
