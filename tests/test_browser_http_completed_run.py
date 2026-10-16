@@ -24,6 +24,7 @@ def test_completed_run_checks_auth_missing_ids_and_reuses_reader(tmp_path):
 
 
 def test_portfolio_discovery_requires_auth_and_bounds_existing_readonly_results(tmp_path):
+    pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
     service = Mock()
@@ -45,6 +46,7 @@ def test_portfolio_discovery_requires_auth_and_bounds_existing_readonly_results(
 
 
 def test_portfolio_missing_root_returns_empty_without_discovery(tmp_path):
+    pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
     service = Mock()
@@ -63,6 +65,7 @@ def test_portfolio_missing_root_returns_empty_without_discovery(tmp_path):
 
 
 def test_portfolio_discovery_errors_fail_closed_without_paths(tmp_path):
+    pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
     service = Mock()
