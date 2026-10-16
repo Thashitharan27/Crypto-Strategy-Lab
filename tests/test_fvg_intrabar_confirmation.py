@@ -19,6 +19,9 @@ class _Base:
     def _entry_filter_result(self, indicator_i, execution_i=None):
         return True, "passed"
 
+    def _effective_trade_direction(self, i):
+        return self._selected_direction(i)
+
     def _open_pair(self, i, entry_filter_passed=True, entry_filter_reason="passed", schedule=None):
         self.opened.append((i, dict(schedule or {})))
 
