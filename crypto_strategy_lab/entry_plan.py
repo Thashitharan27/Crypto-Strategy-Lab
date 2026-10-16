@@ -156,6 +156,33 @@ def limit_fill_price_candidate(
     return limit if candle_high >= limit else None
 
 
+def has_complete_intrabar_window(timestamps, start, end, step) -> bool:
+    """Non-executing full-grid validation for an eligible intrabar interval.
+
+    Requires exactly one timestamp for every expected slot in [start, end).
+    Existing engine gap detection is not modified; this separate prefill gate
+    catches missing leading/trailing minutes and duplicate/off-grid bars.
+    """
+    import pandas as pd
+
+    try:
+        start_ts = pd.Timestamp(start)
+        end_ts = pd.Timestamp(end)
+        step_td = pd.Timedelta(step)
+        if pd.isna(start_ts) or pd.isna(end_ts) or pd.isna(step_td):
+            return False
+        if step_td <= pd.Timedelta(0) or end_ts <= start_ts:
+            return False
+        if (end_ts - start_ts).value % step_td.value != 0:
+            return False
+        expected = pd.date_range(start_ts, end_ts, freq=step_td, inclusive="left")
+        observed = pd.DatetimeIndex(pd.to_datetime(timestamps, utc=True))
+        canonical = pd.DatetimeIndex(pd.to_datetime(expected, utc=True))
+        return len(observed) == len(canonical) and observed.equals(canonical)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 @dataclass(frozen=True)
 class LimitOrderCandidate:
     """A proposed fill for review by the event-driven simulator."""
