@@ -1720,6 +1720,26 @@ def test_deeper_limit_intrabar_fill_rejects_incomplete_minute_grid():
             p._fib_limit_fill(1, 138.2, "LONG")
 
 
+def test_deeper_limit_fast_intrabar_window_enforces_same_complete_grid():
+    import pandas as pd
+    import pytest
+    from crypto_strategy_lab.data.intrabar_index import as_searchsorted_intrabar
+
+    p = _limit_probe()
+    p.config.use_intrabar_data = True
+    p.config.intrabar_timeframe_minutes = 1
+    complete = _complete_limit_intrabar_frame(p)
+    p.intrabar_data = as_searchsorted_intrabar(complete)
+    raw, timestamp = p._fib_limit_fill(1, 138.2, "LONG")
+    assert raw == 138.2
+    assert timestamp == p.times[1] + pd.Timedelta(minutes=1)
+
+    incomplete = complete.iloc[:-1].reset_index(drop=True)
+    p.intrabar_data = as_searchsorted_intrabar(incomplete)
+    with pytest.raises(ValueError, match="complete intrabar coverage"):
+        p._fib_limit_fill(1, 138.2, "LONG")
+
+
 def test_deeper_limit_full_engine_sizes_trade_at_fill_price():
     import pandas as pd
     from dataclasses import replace
