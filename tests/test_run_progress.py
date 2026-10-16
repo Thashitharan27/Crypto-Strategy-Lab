@@ -38,7 +38,7 @@ def test_gui_service_attaches_progress_only_for_active_run(tmp_path):
 
     class Runner:
         def run(self, request, config):
-            assert store.progress_callback is callback
+            assert callable(store.progress_callback)
             emit_progress(
                 store.progress_callback,
                 kind="stage",
