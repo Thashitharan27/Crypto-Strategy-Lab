@@ -173,3 +173,27 @@ def test_browser_api_rejects_malformed_local_host_ports():
             response = client.get("/api/v1/health", headers={**headers, "Host": host})
             assert response.status_code == 403, host
         assert client.get("/api/v1/health", headers={**headers, "Host": "localhost:8767"}).status_code == 200
+
+
+def test_completed_run_api_rejects_symlinked_run_folder(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from unittest.mock import Mock
+
+    root = tmp_path / "runs"
+    root.mkdir()
+    (root / "canonical_run").mkdir()
+    link = root / "alias_run"
+    try:
+        link.symlink_to(root / "canonical_run", target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"Filesystem symlinks are unavailable: {type(exc).__name__}")
+
+    service = Mock()
+    service.completed_run.return_value = {"manifest": {"run_id": "canonical_run"}, "summary": {}}
+    token = "s" * 48
+    app = create_browser_app(token=token, read_service=service, completed_run_root=root)
+    with TestClient(app, base_url="http://localhost") as client:
+        response = client.get("/api/v1/runs/alias_run", headers={"Authorization": "Bearer " + token})
+        assert response.status_code == 404
+    service.completed_run.assert_not_called()
