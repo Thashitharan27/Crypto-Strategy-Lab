@@ -54,3 +54,16 @@ OHLC ambiguity policy; it does **not** prove the ordering of stops, profit
 partials, trailing activations, fees, and position accounting. End-to-end
 minute-collision equivalence and original-file execution replay remain blocked.
 
+## Original Windows executor evidence (2026-10-17)
+
+Genuine saved pending-limit outputs were located and replayed at main
+`2f51ca1d37f92fba4a7fc343ac22a7fb424c72f9` using their original frozen prepared
+inputs and canonical minute partitions: eight original references, 35 saved
+trade rows, zero native-value discrepancies. See
+`docs/browser_fib_historical_execution_2026-10-17.md` for the exact scope and
+preservation evidence. This closes the available **frozen-prepared native
+executor comparison** increment, not full historical migration certification.
+Original executed partial exits, complete event histories, an explicit
+per-trade slippage representation and current feature regeneration remain
+uncertified. PR #501 remains held and browser writes/execution remain disabled.
+
