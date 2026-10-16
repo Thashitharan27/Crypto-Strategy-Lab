@@ -1,16 +1,15 @@
 # Browser migration — existing Strategy Visualizer integration gate
 
-**Status:** read-only browser-managed visualizer launch was implemented via #584 and local Host/Origin guards via #585. Automated real-loopback launch and shutdown checks are being added; **historical market-data chart/overlay parity on the user's frozen BTC run is not yet certified.**
+**Status (2026-10-16):** read-only browser-managed visualizer launch and localhost guards are implemented. The active visualizer is V2 (operator selection in #588), and the frozen BTCUSDT 4h chart-payload comparison is **operator-reported PASS (9/9)**. Independent inspection of the retained local `summary.json` and raw payloads remains **PENDING**; browser-controlled execution and configuration writes remain disabled.
 
 ## Reuse decision
 
 The browser migration must **reuse** the existing `CompletedRunVisualizer` model in
-`crypto_strategy_lab/strategy_visualizer.py` and the existing full browser visualizer in
-`crypto_strategy_lab/strategy_visualizer_browser.py`. The desktop's
-`StrategyVisualizerBrowserLauncher` already loads that model using a verified
-completed run and serves read-only chart payload/inspector APIs from a short-lived
-loopback-only session. The minimal V2 visualizer is a diagnostic, **not** a
-replacement for the production chart.
+`crypto_strategy_lab/strategy_visualizer.py`. The active browser surface is
+`StrategyVisualizerV2BrowserServer` and its `build_v2_diagnostic_payload` / `/api/payload`
+contract, as selected in #588. The fuller original visualizer remains source-only
+for compatibility and reference, not an active parity target. Retain the verified
+completed-run loading, local session lifecycle and read-only service delegation.
 
 No React implementation of candle aggregation, entry/SL/TP geometry, Fibonacci
 overlays, strategy indicators, rule inspection, provenance checking or trading
@@ -28,11 +27,10 @@ statistics should be introduced.
    run_dir, validated_manifest)`, preserving the canonical market-data store,
    partition verification, provider identities, trade annotations and existing
    chart loading rules. Do not create an independent Data Lake store/reader.
-4. Reuse the existing `StrategyVisualizerBrowserServer` or its
-   rendering/payload contract. If integrating it into the shared localhost
-   server, use an explicit adapter over the existing model methods; do not
-   fork the JavaScript chart implementation or relocate visualizer state into
-   React.
+4. Reuse the active `StrategyVisualizerV2BrowserServer` / `build_v2_diagnostic_payload`
+   implementation. If adapting the shared localhost server, delegate to the
+   existing model methods; do not fork chart computation or relocate visualizer
+   state into React.
 5. Browser session creation must be an explicit, authenticated user action.
    It must not occur on GET requests, React render, page refresh or speculative
    prefetch. Any session-start operation is **not** trading execution or a
@@ -87,4 +85,9 @@ change the backtest engine to make a chart match.
 
 ## V2 primary decision (2026-10-15)
 
-The operator selected the existing **V2 diagnostic visualizer** as sufficient for current use. The browser session owner now launches `StrategyVisualizerV2BrowserServer`, and the desktop sidebar exposes one visualizer entry that also launches V2. The fuller original browser visualizer remains in source temporarily for compatibility and possible feature reference, but is no longer the active UI. Do not migrate its S/R, VWAP, or inspector features automatically; implement individual capabilities only when requested. V2 parity certification must use `build_v2_diagnostic_payload` and its `/api/payload` endpoint; the original `/api/inspect` parity requirement is no longer a launch gate for the selected V2 scope. Historical V2 chart parity remains unverified until frozen-run captures are compared.
+The operator selected the existing **V2 diagnostic visualizer** as sufficient for current use. The browser session owner now launches `StrategyVisualizerV2BrowserServer`, and the desktop sidebar exposes one visualizer entry that also launches V2. The fuller original browser visualizer remains in source temporarily for compatibility and possible feature reference, but is no longer the active UI. Do not migrate its S/R, VWAP, or inspector features automatically; implement individual capabilities only when requested. V2 parity certification must use `build_v2_diagnostic_payload` and its `/api/payload` endpoint; the original `/api/inspect` parity requirement is no longer a launch gate for the selected V2 scope. The 2026-10-16 frozen-run command is operator-reported **PASS (9/9)** for trades
+0, 39 and 78 at 1h, 4h and 1d, as documented in
+`docs/browser_chart_payload_parity_operator_gate.md`. Independent review of the
+retained workstation `parity_verification/v2_historical_chart/summary.json` and
+raw captures remains pending. Neither the operator-reported result nor this
+status correction authorizes write/execution endpoints.
