@@ -41,3 +41,15 @@ This closes the **minute-grid completeness** defect for the native Fibonacci
 pending-fill owner. It does not by itself establish within-minute event-order
 equivalence for every exit mode or historical trade-level parity. Those remain
 release gates before browser-controlled execution or configuration writes.
+
+
+## Fill-minute ordering regression (CI-only)
+
+The native Fibonacci pending-limit executor clamps the favorable extreme to the
+actual fill price on the fill minute, for both LONG and SHORT directions, while
+retaining the adverse extreme for stop handling. A regression now checks that
+behavior at a non-opening-minute touch, its timestamp, and the restoration of
+ordinary ranges from the next minute onward. This protects a conservative
+OHLC ambiguity policy; it does **not** prove the ordering of stops, profit
+partials, trailing activations, fees, and position accounting. End-to-end
+minute-collision equivalence and original-file execution replay remain blocked.
