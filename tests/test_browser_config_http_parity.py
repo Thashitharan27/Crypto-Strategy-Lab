@@ -34,3 +34,43 @@ def test_authenticated_http_config_matches_native_reader_byte_safe(tmp_path):
         assert response.status_code == 200
         assert response.json()["config"] == expected
     assert path.read_bytes() == before
+
+
+def test_http_preserves_fibonacci_flags_and_all_six_profiles(tmp_path):
+    """Exercise historical feature fields and all regime profiles with no browser defaults."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from crypto_strategy_lab.data_lake_config import PROFILE_KEYS
+
+    root = tmp_path / "configs"
+    root.mkdir()
+    path = root / "fib_snapshot.json"
+    snapshot = ResearchRunConfig().to_dict()
+    snapshot["features"]["fib_candle_confirmation_enabled"] = True
+    snapshot["features"]["fib_first_zone_hold_entry"] = True
+    snapshot["features"]["fib_candle_engulfing"] = False
+    path.write_text(json.dumps(snapshot, allow_nan=False), encoding="utf-8")
+    before = path.read_bytes()
+    expected = read_research_config(path)
+
+    class Reader:
+        def research_config(self, selected):
+            assert selected == path.resolve()
+            return read_research_config(selected)
+
+    token = "a" * 48
+    with TestClient(create_browser_app(token=token, read_service=Reader(), config_root=root), base_url="http://localhost") as client:
+        response = client.get("/api/v1/configs/fib_snapshot", headers={"Authorization": "Bearer " + token})
+        assert response.status_code == 200
+        actual = response.json()["config"]
+        assert actual == expected
+        for section in ("data", "features", "strategy", "execution"):
+            assert actual[section] == expected[section]
+        assert set(actual["strategy"]["profiles"]) == set(PROFILE_KEYS)
+        assert set(actual["execution"]["profiles"]) == set(PROFILE_KEYS)
+        assert actual["features"]["fib_candle_confirmation_enabled"] is True
+        assert actual["features"]["fib_first_zone_hold_entry"] is True
+        assert actual["features"]["fib_candle_engulfing"] is False
+        serialized = json.dumps(actual, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        assert json.loads(serialized) == expected
+    assert path.read_bytes() == before
