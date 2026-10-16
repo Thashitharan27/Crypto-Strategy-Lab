@@ -57,16 +57,35 @@ def test_visualizer_post_only_when_coordinator_explicitly_wired():
         assert client.post("/api/v1/visualizer/sessions/BTCUSDT_4h").status_code == 404
 
 
-def test_visualizer_route_is_the_only_explicit_non_get_api_operation():
+def test_visualizer_route_is_the_only_explicit_non_get_api_operation(tmp_path):
     from unittest.mock import Mock
-    app = create_browser_app(token="t" * 48, read_service=Mock(),
-                             visualizer_coordinator=Mock())
-    operations = {}
-    for route in app.routes:
-        if route.path == "/api/v1" or route.path.startswith("/api/v1/"):
-            assert route.__class__.__name__ != "Mount"
-            assert route.methods is not None
-            operations[route.path] = set(route.methods)
-    assert operations.pop("/api/v1/visualizer/sessions/{run_id}") == {"POST"}
-    assert all(methods == {"GET"} for methods in operations.values())
-    assert not any("execute" in path or "save" in path for path in operations)
+    app = create_browser_app(
+        token="t" * 48, read_service=Mock(), visualizer_coordinator=Mock(),
+        completed_run_root=tmp_path, config_root=tmp_path,
+    )
+
+    def assert_exact_inventory():
+        operations = {}
+        for route in app.routes:
+            if route.path == "/api/v1" or route.path.startswith("/api/v1/"):
+                assert route.__class__.__name__ != "Mount"
+                assert route.methods is not None
+                operations.setdefault(route.path, set()).update(route.methods)
+        assert operations == {
+            "/api/v1/health": {"GET"},
+            "/api/v1/capabilities": {"GET"},
+            "/api/v1/catalog/symbols": {"GET"},
+            "/api/v1/catalog/coverage": {"GET"},
+            "/api/v1/portfolio/candidates": {"GET"},
+            "/api/v1/runs/{run_id}": {"GET"},
+            "/api/v1/configs/{config_id}": {"GET"},
+            "/api/v1/visualizer/sessions/{run_id}": {"POST"},
+        }
+
+    assert_exact_inventory()
+    # An added coordinator-only GET must not silently pass the safety gate.
+    @app.get("/api/v1/coordinator-unreviewed")
+    def unexpected_route():
+        return {}
+    with pytest.raises(AssertionError):
+        assert_exact_inventory()

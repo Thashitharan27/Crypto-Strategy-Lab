@@ -39,7 +39,7 @@ Therefore:
 
 ## HTTP surface
 
-The current API is composed with optional dependencies. The read-service GET route inventory is asserted exactly by `tests/test_browser_http.py::test_browser_api_route_inventory_is_read_only` (without a visualizer coordinator). When a coordinator is wired, `tests/test_browser_http_visualizer.py::test_visualizer_route_is_the_only_explicit_non_get_api_operation` asserts the one expected POST and that other routes remain GET; this latter test does **not** enforce an exact coordinator-inclusive GET route inventory:
+The current API is composed with optional dependencies. The read-service GET route inventory is asserted exactly by `tests/test_browser_http.py::test_browser_api_route_inventory_is_read_only` (without a visualizer coordinator). When a coordinator is wired, `tests/test_browser_http_visualizer.py::test_visualizer_route_is_the_only_explicit_non_get_api_operation` now asserts the complete authorized inventory, including the one permitted visualizer-session POST, and rejects unreviewed coordinator-only GET additions:
 
 | Route | Method | Owner |
 | --- | --- | --- |
@@ -54,7 +54,7 @@ The current API is composed with optional dependencies. The read-service GET rou
 
 There are no browser API routes for research/backtest run creation, engine execution, configuration writes, stored-run mutation, trading, promotion, or live-bot actions. The optional POST starts a *read-only visualizer HTTP session* for an already verified completed run; it is not a research job or write endpoint. It additionally requires a runtime bearer token and exact same-origin `Origin`. A supplied `Sec-Fetch-Site` header must equal `same-origin`, but clients omitting that optional header are accepted; the header is not a mandatory authorization condition. Its session is stopped on replacement or application shutdown.
 
-The tests guard the exact read-service route list and prevent additional non-GET operations in coordinator mode, but do not fully lock the set of coordinator-only GET routes. Any new route still requires explicit code review and certification.
+Both route inventories are exact: the read-service-only app and the coordinator-enabled app. Any new route requires explicit test review and certification.
 
 ## Local security boundary
 
