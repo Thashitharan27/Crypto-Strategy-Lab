@@ -243,7 +243,7 @@ def test_review_rejects_matching_hashes_for_wrong_selected_payload_identity(tmp_
     case_path = tmp_path / "desktop_trade_000_4h.json"
     browser_path = tmp_path / "browser_trade_000_4h.json"
     pristine_payload = case_path.read_text(encoding="utf-8")
-    for field, invalid in (("selectedTradeIndex", 39), ("chartTimeframe", "1d")):
+    for field, invalid in (("selectedTradeIndex", 39), ("selectedTradeIndex", False), ("selectedTradeIndex", 0.0), ("chartTimeframe", "1d")):
         payload = json.loads(pristine_payload)
         payload[field] = invalid
         for target in (case_path, browser_path):
