@@ -1,5 +1,6 @@
 import numpy as np
 
+from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.rule_native_engine import (
     RuleAwareDataLakeProductionBacktestEngine,
 )
@@ -168,8 +169,8 @@ def test_macd_and_ema_rule_evidence_is_reusable_outside_macd_signal_strategy():
 
 
 def test_macd_signal_features_are_causal_and_have_explicit_warmup():
-    first = object.__new__(RuleAwareDataLakeProductionBacktestEngine)
-    second = object.__new__(RuleAwareDataLakeProductionBacktestEngine)
+    first = object.__new__(BacktestEngine)
+    second = object.__new__(BacktestEngine)
     close = np.linspace(100.0, 160.0, 260, dtype=float)
     first.close = close.copy()
     second.close = close.copy()

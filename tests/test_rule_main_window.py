@@ -45,19 +45,20 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
             check.text() for check in page.findChildren(QCheckBox)
         )
 
-        assert "Strategy Summary" in group_titles
-        assert "1. Signal Strategy & Market Eligibility" in group_titles
-        assert "2. Entry Groups — ALL conditions inside; ANY group may qualify" in group_titles
-        assert "3. Avoid / Veto Groups — ALL conditions inside; ANY group vetoes" in group_titles
+        assert "2. Rule Workspace" in group_titles
+        assert "3. Research-only Evidence" in group_titles
+        assert "4. Advanced" in group_titles
+        assert window.rule_builder.direction_toggle.text() == "1. Strategy & Markets"
+        assert window.rule_builder.summary.text()
         assert "DI Pressure State" not in group_titles
         assert "Support / Resistance Veto Presets" not in group_titles
         assert "Profile Overrides" not in group_titles
         assert "Copy Overrides" not in buttons
         assert "Paste Overrides" not in buttons
         assert "Show Support / Resistance veto presets" not in checks
-        assert "Evidence is grouped and searchable" in labels
-        assert "MR Trade-Direction Stretch is positive" in labels
-        assert "Any MR or S/R rule automatically enables its causal calculation" in labels
+        assert "Entry groups qualify candidates" in labels
+        assert "Any complete Veto group rejects the candidate" in labels
+        assert "S/R · Multi-TF Price Action" in labels
     finally:
         window.close()
 
@@ -65,8 +66,11 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
 def test_direction_selector_contains_di_control_and_dmi_trend_strategy():
     _app, window = _window()
     try:
+        from crypto_strategy_lab.strategy_rule_model import DIRECTION_MODES
+
         selector = window.rule_builder.direction_mode
-        assert selector.count() == 4
+        assert selector.count() == len(DIRECTION_MODES)
+        assert all(selector.findData(mode) >= 0 for mode in DIRECTION_MODES)
         assert selector.currentData() == "DI"
         assert selector.currentText() == "DI Direction"
         assert selector.findData("DMI_TREND") >= 0
@@ -90,11 +94,14 @@ def test_evidence_picker_groups_every_current_indicator_once_and_preserves_ids()
             EvidenceComboBox,
         )
 
-        grouped = [
-            evidence
-            for _group, evidence_ids in EVIDENCE_GROUPS
-            for evidence in evidence_ids
-        ]
+        grouped = []
+        for _group, evidence_ids in EVIDENCE_GROUPS:
+            for evidence in evidence_ids:
+                if isinstance(evidence, tuple):
+                    _subgroup, subgroup_ids = evidence
+                    grouped.extend(subgroup_ids)
+                else:
+                    grouped.append(evidence)
         assert len(grouped) == len(set(grouped))
         assert set(grouped) == set(AUTHORABLE_RULE_INDICATORS)
 

@@ -1618,10 +1618,15 @@ class BacktestEngine(DILadderExecutionMixin):
 
     def _checkpoint_indicator_index(self, timestamp):
         """Latest fully closed strategy candle at an intrabar checkpoint."""
-        needle=np.datetime64(pd.Timestamp(timestamp).tz_localize(None), "ns")
-        strategy_i=int(np.searchsorted(self.times, needle, side="right")-1)
-        strategy_i=max(0,min(strategy_i,len(self.times)-1))
-        return max(0,strategy_i-1)
+        needle = pd.Timestamp(timestamp)
+        if needle.tzinfo is None:
+            needle = needle.tz_localize("UTC")
+        else:
+            needle = needle.tz_convert("UTC")
+        strategy_times = pd.to_datetime(self.times, utc=True)
+        strategy_i = int(np.searchsorted(strategy_times.asi8, needle.value, side="right") - 1)
+        strategy_i = max(0, min(strategy_i, len(self.times) - 1))
+        return max(0, strategy_i - 1)
 
     def _apply_atr_checkpoint_extensions(self, pos, high, low, timestamp):
         """Extend the biased leg one ATR at a time when DI and BB checks pass."""

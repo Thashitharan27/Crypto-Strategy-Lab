@@ -110,7 +110,7 @@ def test_premium_index_allows_signed_and_zero_ohlc_values():
         interval="1h",
     )
 
-    assert VALIDATION_CONTRACT_VERSION == "4"
+    assert VALIDATION_CONTRACT_VERSION == "6"
     assert report.status is DataQualityStatus.OK
     assert not any(issue.code == "INVALID_DOMAIN_VALUE" for issue in report.issues)
 

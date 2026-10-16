@@ -920,7 +920,7 @@ class CausalExperimentStore:
         if ledger_name not in LEDGERS:
             raise ValueError(f"ledger must be one of: {', '.join(sorted(LEDGERS))}")
 
-        month_pattern = re.compile(r"^\\d{4}-(0[1-9]|1[0-2])$")
+        month_pattern = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
         def validate_month(value: str | None, name: str) -> str | None:
             if value is None:

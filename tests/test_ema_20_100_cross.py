@@ -350,8 +350,13 @@ class EmaCrossTests(unittest.TestCase):
         e.open[102] = 102.0
         pos = SimpleNamespace(is_open=True, side=Side.SHORT, sl=105.0)
         e._scan_position_exit(SimpleNamespace(position=pos), pos, 102)
-        self.assertEqual(e.exits, [(102, 102.102, ExitReason.EMA_20_100_CROSS,
-                                    ExitSource.STRATEGY_OPEN, e.times[102])])
+        self.assertEqual(len(e.exits), 1)
+        index, price, reason, source, exit_time = e.exits[0]
+        self.assertEqual(index, 102)
+        self.assertAlmostEqual(price, 102.102)
+        self.assertEqual(reason, ExitReason.EMA_20_100_CROSS)
+        self.assertEqual(source, ExitSource.STRATEGY_OPEN)
+        self.assertEqual(exit_time, e.times[102])
         self.assertEqual(e.fallback_scans, [])
 
     def test_runtime_filter_rejects_a_flipped_long(self):
