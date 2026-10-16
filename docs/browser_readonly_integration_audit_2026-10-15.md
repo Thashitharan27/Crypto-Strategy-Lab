@@ -39,7 +39,7 @@ Therefore:
 
 ## HTTP surface
 
-The current API is composed with optional dependencies. The read service routes are locked by `tests/test_browser_http.py::test_browser_api_route_inventory_is_read_only`; the separately wired visualizer session route is locked by `tests/test_browser_http_visualizer.py::test_visualizer_route_is_the_only_explicit_non_get_api_operation`:
+The current API is composed with optional dependencies. The read-service GET route inventory is asserted exactly by `tests/test_browser_http.py::test_browser_api_route_inventory_is_read_only` (without a visualizer coordinator). When a coordinator is wired, `tests/test_browser_http_visualizer.py::test_visualizer_route_is_the_only_explicit_non_get_api_operation` asserts the one expected POST and that other routes remain GET; this latter test does **not** enforce an exact coordinator-inclusive GET route inventory:
 
 | Route | Method | Owner |
 | --- | --- | --- |
@@ -52,9 +52,9 @@ The current API is composed with optional dependencies. The read service routes 
 | `/api/v1/configs/{config_id}` | GET | existing config reader |
 | `/api/v1/visualizer/sessions/{run_id}` | POST (optional) | explicitly authorized, same-origin in-memory V2 session launch via existing coordinator; **not research execution** |
 
-There are no browser API routes for research/backtest run creation, engine execution, configuration writes, stored-run mutation, trading, promotion, or live-bot actions. The optional POST starts a *read-only visualizer HTTP session* for an already verified completed run; it is not a research job or write endpoint. It additionally requires a runtime bearer token, exact same-origin `Origin`, and `Sec-Fetch-Site` same-origin checks. Its session is stopped on replacement or application shutdown.
+There are no browser API routes for research/backtest run creation, engine execution, configuration writes, stored-run mutation, trading, promotion, or live-bot actions. The optional POST starts a *read-only visualizer HTTP session* for an already verified completed run; it is not a research job or write endpoint. It additionally requires a runtime bearer token and exact same-origin `Origin`. A supplied `Sec-Fetch-Site` header must equal `same-origin`, but clients omitting that optional header are accepted; the header is not a mandatory authorization condition. Its session is stopped on replacement or application shutdown.
 
-Both route-inventory tests fail if the respective API method/path contracts change without an explicit test update.
+The tests guard the exact read-service route list and prevent additional non-GET operations in coordinator mode, but do not fully lock the set of coordinator-only GET routes. Any new route still requires explicit code review and certification.
 
 ## Local security boundary
 
