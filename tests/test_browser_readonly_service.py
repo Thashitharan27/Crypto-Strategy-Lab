@@ -35,3 +35,41 @@ def test_browser_composition_reuses_gui_application_service(tmp_path):
     app_cls.assert_called_once_with(raw, cache)
     assert service._catalog is catalog
     catalog.refresh_catalog.assert_not_called()
+
+
+def test_portfolio_candidates_project_existing_discovery_without_leaking_local_paths(tmp_path):
+    """The browser receives only approved metadata, never internal artifact paths."""
+    source = [{
+        "run_id": "BTCUSDT_4h_verified",
+        "symbol": "BTCUSDT",
+        "strategy_timeframe": "4h",
+        "candidate_rows": 79,
+        "completed_at": "2026-10-15T00:00:00Z",
+        "sampling_mode": "EVERY_VIABLE_ENTRY",
+        "run_dir": str(tmp_path / "private-run"),
+        "samples_path": str(tmp_path / "private-run" / "samples.parquet"),
+        "manifest_sha256": "internal",
+    }]
+    expected = [{
+        "run_id": "BTCUSDT_4h_verified",
+        "symbol": "BTCUSDT",
+        "strategy_timeframe": "4h",
+        "candidate_rows": 79,
+        "completed_at": "2026-10-15T00:00:00Z",
+        "sampling_mode": "EVERY_VIABLE_ENTRY",
+    }]
+    from crypto_strategy_lab import portfolio_replay
+    with patch.object(portfolio_replay, "discover_resilience_runs", return_value=source) as discover:
+        result = BrowserReadOnlyService(catalog=None).portfolio_candidates(tmp_path)
+    discover.assert_called_once_with(tmp_path)
+    assert result == expected
+    assert result is not source
+    assert source[0]["samples_path"].endswith("samples.parquet")
+
+
+def test_portfolio_candidates_preserve_empty_discovery_without_side_effects(tmp_path):
+    from crypto_strategy_lab import portfolio_replay
+    with patch.object(portfolio_replay, "discover_resilience_runs", return_value=[]) as discover:
+        result = BrowserReadOnlyService(catalog=None).portfolio_candidates(tmp_path)
+    assert result == []
+    discover.assert_called_once_with(tmp_path)
