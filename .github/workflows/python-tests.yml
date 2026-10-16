@@ -215,6 +215,7 @@ jobs:
           tests/test_feature_registry.py
           tests/test_feature_registry_authority.py
           tests/test_cache_hierarchy.py
+          tests/test_prepared_backtest.py
           tests/test_core_directional_features.py
           tests/test_market_context_features.py
           tests/test_production_context_features.py
