@@ -1,6 +1,6 @@
 # Browser Phase 4 — read-only configuration ownership gate
 
-Status: migration guidance only. Browser settings are projections of the existing validated Python configuration, not an alternative persistence format.
+Status (2026-10-16): the read-only browser already projects a single validated configuration snapshot into Setup (`data`), Configurations (complete JSON and selected sections), Strategy Designer (`strategy` and `features`), Research Features (`features`), and Risk & Execution (`execution`). This is a component-level implementation status, **not** operator-local saved-configuration parity certification. The browser does not own a writable configuration format.
 
 ## Canonical source and serialization
 
@@ -31,6 +31,8 @@ Some settings live in `FeatureConfig` but affect candidate/entry decisions; thei
 4. Maintain localhost/token/path controls, read-only API and PySide6 fallback. Do not expose config writes or launch runs until Phase 5 certification.
 5. Require complete browser build, Python, Windows and regression gates for every implementation PR. Keep overlapping intrabar PR #501 on hold until execution ownership is resolved.
 
-## Next implementation increment
+## Outstanding certification increment
 
-Project existing validated `strategy`, `features`, `execution` and `data` sections into labeled **read-only** views using actual serialized keys and no new schema; retain full raw section and full snapshot inspection as parity evidence. Validate against saved configurations on the operator's workstation before claiming config parity.
+The section projections already exist in `browser_ui/src/main.tsx` and read from one `configDetails` snapshot returned by authenticated `GET /api/v1/configs/{id}`. Repository-level parity tests cover default native v3 fixtures, historical Fibonacci flags, all six profiles, and the committed BTCUSDT 4h configuration (`tests/test_browser_config_http_parity.py`, `tests/test_browser_committed_http_config_parity.py`, `tests/test_browser_repository_config_parity.py`). These tests do not substitute for the operator-local saved-config matrix.
+
+In the CryptoBots Desktop project, compare the complete existing saved configuration to the authorized GET response, inspect the same snapshot across all projections, and retain evidence without uploading original files or tokens. Follow `docs/browser_configuration_parity_operator_gate.md`; no browser edits, saves or execution are authorized. Keep PR #501 held.
