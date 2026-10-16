@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
+import sys
+from decimal import Decimal
 from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from crypto_strategy_lab.run_manifest import file_sha256
 from crypto_strategy_lab.trade_parity_artifacts import compare_mapped_trade_csv
-from crypto_strategy_lab.trade_parity import TRADE_FIELDS
+from crypto_strategy_lab.trade_parity import TRADE_FIELDS, NUMERIC_FIELDS, ParityDifference
 
 
 def compare_reports(expected: Path, actual: Path, mapping_path: Path, *, abs_tol: float = 0, rel_tol: float = 0) -> dict:
@@ -15,6 +22,21 @@ def compare_reports(expected: Path, actual: Path, mapping_path: Path, *, abs_tol
     if not isinstance(mapping, dict) or set(mapping) != set(TRADE_FIELDS):
         raise ValueError("mapping must contain exactly all normalized trade fields")
     differences = compare_mapped_trade_csv(expected, actual, mapping, abs_tol=abs_tol, rel_tol=rel_tol)
+    if abs_tol == 0 and rel_tol == 0:
+        # Floats can erase differences between distinct decimal CSV prices.
+        # Recheck source numeric values using exact decimal arithmetic.
+        def raw_rows(path: Path):
+            with path.open(newline="", encoding="utf-8-sig") as stream:
+                return list(csv.DictReader(stream))
+
+        seen = {(d.trade_index, d.field) for d in differences}
+        for index, (left, right) in enumerate(zip(raw_rows(expected), raw_rows(actual))):
+            for field in NUMERIC_FIELDS:
+                if (index, field) in seen:
+                    continue
+                left_value, right_value = left[mapping[field]], right[mapping[field]]
+                if Decimal(left_value) != Decimal(right_value):
+                    differences.append(ParityDifference(index, field, left_value, right_value))
     return {
         "status": "PASS" if not differences else "MISMATCH",
         "expected_sha256": file_sha256(expected),
