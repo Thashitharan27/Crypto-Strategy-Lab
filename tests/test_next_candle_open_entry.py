@@ -21,7 +21,7 @@ def test_entry_timing_defaults_preserve_historical_signal_close():
 
 def test_next_open_decision_defers_one_strategy_candle_without_reading_price():
     engine = object.__new__(BacktestEngine)
-    engine.config = SimpleNamespace(enable_daily_entry_schedule=False, entry_timing_mode="NEXT_CANDLE_OPEN")
+    engine.config = SimpleNamespace(\n        enable_daily_entry_schedule=False,\n        enable_di_direction_selection=False,\n        entry_timing_mode="NEXT_CANDLE_OPEN",\n    )
     engine.times = np.array([
         np.datetime64("2026-01-01T00:00"),
         np.datetime64("2026-01-01T00:05"),
