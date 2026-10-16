@@ -180,7 +180,10 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                     all(c.isalnum() or c in "_-" for c in config_id)):
                 raise HTTPException(status_code=404, detail="Configuration not found")
             root = Path(config_root).resolve()
-            target = (root / (config_id + ".json")).resolve()
+            candidate = root / (config_id + ".json")
+            if candidate.is_symlink():
+                raise HTTPException(status_code=404, detail="Configuration not found")
+            target = candidate.resolve()
             if not target.is_relative_to(root) or not target.is_file():
                 raise HTTPException(status_code=404, detail="Configuration not found")
             try:
