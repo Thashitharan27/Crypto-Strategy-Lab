@@ -67,7 +67,9 @@ def test_funding_carry_does_not_credit_triggering_settlement(tmp_path: Path):
 
 
 def test_funding_carry_revalues_fixed_quantity_at_settlement(tmp_path: Path):
-    store = DummyStore(_funding_frame([0.001, 0.001]), _price_frame([100, 110]))
+    # Observe the still-open position at the second settlement; the final
+    # ledger row intentionally records mandatory end-of-data liquidation.
+    store = DummyStore(_funding_frame([0.001, 0.001, 0.0]), _price_frame([100, 110, 110]))
     summary, ledger, _ = backtest_funding_carry(
         store,
         symbol="BTCUSDT",
