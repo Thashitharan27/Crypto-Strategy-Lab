@@ -1655,17 +1655,91 @@ def test_limit_fill_bar_does_not_use_profit_extreme_before_entry():
     assert p._maybe_exit_bar(pos, 2, 150., 130., p.times[2], None) == (150., 130.)
 
 
+def _complete_limit_intrabar_frame(p):
+    import pandas as pd
+
+    timestamps = pd.date_range(
+        p.times[1],
+        p.times[1] + p.entry_delta,
+        freq="1min",
+        inclusive="left",
+    )
+    size = len(timestamps)
+    frame = pd.DataFrame({
+        "timestamp": timestamps,
+        "open": np.full(size, 145.0),
+        "high": np.full(size, 150.0),
+        "low": np.full(size, 140.0),
+    })
+    frame.loc[1, ["open", "high", "low"]] = [141.0, 145.0, 138.0]
+    frame.loc[2, ["open", "high", "low"]] = [130.0, 135.0, 125.0]
+    return frame
+
+
 def test_deeper_limit_intrabar_fill_uses_first_touch():
     import pandas as pd
+
     p = _limit_probe()
     p.config.use_intrabar_data = True
-    p.intrabar_data = pd.DataFrame({
-        "timestamp": [p.times[1], p.times[1] + pd.Timedelta(minutes=1),
-                      p.times[1] + pd.Timedelta(minutes=2)],
-        "open": [145., 141., 130.], "high": [150., 145., 135.], "low": [140., 138., 125.]})
+    p.config.intrabar_timeframe_minutes = 1
+    p.intrabar_data = _complete_limit_intrabar_frame(p)
     raw, timestamp = p._fib_limit_fill(1, 138.2, "LONG")
     assert raw == 138.2
     assert timestamp == p.times[1] + pd.Timedelta(minutes=1)
+
+
+def test_deeper_limit_intrabar_fill_rejects_incomplete_minute_grid():
+    import pandas as pd
+    import pytest
+
+    mutations = ["leading", "trailing", "interior", "duplicate", "off_grid"]
+    for mutation in mutations:
+        p = _limit_probe()
+        p.config.use_intrabar_data = True
+        p.config.intrabar_timeframe_minutes = 1
+        frame = _complete_limit_intrabar_frame(p)
+        if mutation == "leading":
+            frame = frame.iloc[1:].reset_index(drop=True)
+        elif mutation == "trailing":
+            frame = frame.iloc[:-1].reset_index(drop=True)
+        elif mutation == "interior":
+            frame = frame.drop(index=20).reset_index(drop=True)
+        elif mutation == "duplicate":
+            frame = pd.concat(
+                [frame.iloc[:21], frame.iloc[[20]], frame.iloc[21:]],
+                ignore_index=True,
+            )
+        else:
+            frame.loc[20, "timestamp"] = (
+                frame.loc[20, "timestamp"] + pd.Timedelta(seconds=1)
+            )
+            frame = frame.sort_values("timestamp").reset_index(drop=True)
+
+        p.intrabar_data = frame
+        with pytest.raises(ValueError, match="complete intrabar coverage"):
+            p._fib_limit_fill(1, 138.2, "LONG")
+
+
+def test_deeper_limit_fast_intrabar_window_enforces_same_complete_grid():
+    import pandas as pd
+    import pytest
+    from crypto_strategy_lab.data.intrabar_index import as_searchsorted_intrabar
+
+    p = _limit_probe()
+    p.config.use_intrabar_data = True
+    p.config.intrabar_timeframe_minutes = 1
+    complete = _complete_limit_intrabar_frame(p)
+    p.intrabar_data = as_searchsorted_intrabar(complete)
+    raw, timestamp = p._fib_limit_fill(1, 138.2, "LONG")
+    assert raw == 138.2
+    assert timestamp == (
+        pd.Timestamp(p.times[1]).tz_localize("UTC") + pd.Timedelta(minutes=1)
+    )
+
+    incomplete = complete.iloc[:-1].reset_index(drop=True)
+    p.intrabar_data = as_searchsorted_intrabar(incomplete)
+    with pytest.raises(ValueError, match="complete intrabar coverage"):
+        p._fib_limit_fill(1, 138.2, "LONG")
 
 
 def test_deeper_limit_full_engine_sizes_trade_at_fill_price():

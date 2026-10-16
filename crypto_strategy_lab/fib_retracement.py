@@ -1427,14 +1427,44 @@ class FibonacciRetracementMixin:
         end = start + self.entry_delta
         frame = getattr(self, "intrabar_data", None)
         if getattr(self.config, "use_intrabar_data", False) and frame is not None:
+            from .entry_plan import has_complete_intrabar_window
+
+            step = pd.Timedelta(
+                minutes=int(getattr(self.config, "intrabar_timeframe_minutes", 1))
+            )
             fast_window = getattr(frame, "fast_window", None)
             if callable(fast_window):
-                rows = ((timestamp, opening, high, low)
-                        for _, timestamp, opening, high, low in fast_window(start, end).rows())
+                window = fast_window(start, end)
+                if window is None or window.empty:
+                    timestamps = []
+                elif hasattr(window, "timestamps"):
+                    timestamps = window.timestamps[window.left : window.right]
+                else:
+                    timestamps = window.data.timestamp[window.start : window.stop]
+                if not has_complete_intrabar_window(timestamps, start, end, step):
+                    raise ValueError(
+                        "Fibonacci pending-limit fill requires complete intrabar "
+                        "coverage for the eligible strategy candle"
+                    )
+                rows = (
+                    (timestamp, opening, high, low)
+                    for _, timestamp, opening, high, low in window.rows()
+                )
             else:
-                window = frame[(frame.timestamp >= start) & (frame.timestamp < end)]
-                rows = ((row.timestamp, row.open, row.high, row.low)
-                        for row in window.itertuples())
+                window = frame[
+                    (frame.timestamp >= start) & (frame.timestamp < end)
+                ]
+                if not has_complete_intrabar_window(
+                    window.timestamp, start, end, step
+                ):
+                    raise ValueError(
+                        "Fibonacci pending-limit fill requires complete intrabar "
+                        "coverage for the eligible strategy candle"
+                    )
+                rows = (
+                    (row.timestamp, row.open, row.high, row.low)
+                    for row in window.itertuples()
+                )
         else:
             rows = [(start, self.open[i], self.high[i], self.low[i])]
         for timestamp, opening, high, low in rows:
