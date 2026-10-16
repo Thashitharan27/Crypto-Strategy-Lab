@@ -39,6 +39,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_gui_ux_phase1.py
+          tests/test_risk_execution_workspace.py
           tests/test_strategy_builder_profile_ownership.py
           tests/test_research_feature_ownership.py
           tests/test_task18_gui_architecture.py
@@ -72,13 +73,15 @@ jobs:
         run: pip install fastapi httpx
       - name: Compile source
         run: python -m compileall -q crypto_strategy_core crypto_strategy_lab mcp_server tools app.py
-      - name: Run Fibonacci pending-limit execution regressions
+      - name: Run full Fibonacci strategy and quality regressions
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: ${{ github.workspace }}
         run: >-
-          python -m pytest -q tests/test_fib_retracement_strategy.py
-          -k "deeper or limit_fill_bar or third_retest"
+          python -m pytest -q
+          tests/test_fib_retracement_strategy.py
+          tests/test_fib_impulse_quality.py
+          tests/test_fib_structure_quality_modes.py
       - name: Run strategy-profile safety tests
         env:
           QT_QPA_PLATFORM: offscreen
