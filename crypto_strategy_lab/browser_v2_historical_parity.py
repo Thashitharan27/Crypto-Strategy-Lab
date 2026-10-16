@@ -96,6 +96,14 @@ def capture_parity(
     if str(desktop_model.manifest.get("run_id") or desktop_model.run_dir.name) != str(browser_model.manifest.get("run_id") or browser_model.run_dir.name):
         raise ValueError("Desktop and browser run identities differ")
     cases = parity_cases(desktop_model, requested_timeframes)
+    # A frozen baseline capture is not certified with a silently reduced
+    # timeframe matrix; reject missing columns before any browser server starts.
+    run_id = str(desktop_model.manifest.get("run_id") or desktop_model.run_dir.name)
+    if run_id == DEFAULT_RUN_ID:
+        required = {(index, tf) for index in (0, FROZEN_TRADE_COUNT // 2, FROZEN_TRADE_COUNT - 1)
+                    for tf in DEFAULT_TIMEFRAMES}
+        if not required.issubset(set(cases)):
+            raise ValueError("Frozen V2 chart parity requires first/middle/last trades on 1h, 4h and 1d")
     results: list[dict[str, Any]] = []
 
     server = None

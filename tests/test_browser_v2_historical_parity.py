@@ -266,3 +266,36 @@ def test_review_rejects_matching_hashes_for_wrong_selected_payload_identity(tmp_
     summary_path.write_text(json.dumps(summary), encoding="utf-8")
     with pytest.raises(ValueError, match="payload identity mismatch"):
         review_captured_parity(tmp_path)
+
+
+def test_frozen_capture_requires_complete_timeframe_matrix_before_evidence(tmp_path):
+    import pytest
+    from crypto_strategy_lab.browser_v2_historical_parity import DEFAULT_RUN_ID
+
+    desktop = _Model(sides=("LONG",) * 79)
+    browser = _Model(sides=("LONG",) * 79)
+    desktop.manifest["run_id"] = browser.manifest["run_id"] = DEFAULT_RUN_ID
+    desktop.available_chart_timeframes = lambda: [{"interval": "4h"}, {"interval": "1h"}]
+    with pytest.raises(ValueError, match="requires first/middle/last trades"):
+        capture_parity(
+            desktop, browser, tmp_path,
+            browser_payload=lambda i, tf: browser.build_v2_diagnostic_payload(
+                trade_index=i, chart_timeframe=tf,
+            ),
+        )
+    assert not (tmp_path / "summary.json").exists()
+    assert not list(tmp_path.glob("desktop_trade_*.json"))
+
+
+def test_nonfrozen_capture_preserves_existing_available_timeframe_fallback(tmp_path):
+    desktop = _Model()
+    browser = _Model()
+    desktop.available_chart_timeframes = lambda: [{"interval": "4h"}, {"interval": "1h"}]
+    summary = capture_parity(
+        desktop, browser, tmp_path,
+        browser_payload=lambda i, tf: browser.build_v2_diagnostic_payload(
+            trade_index=i, chart_timeframe=tf,
+        ),
+    )
+    assert summary["pass"] is True
+    assert {case["timeframe"] for case in summary["cases"]} == {"1h", "4h"}
