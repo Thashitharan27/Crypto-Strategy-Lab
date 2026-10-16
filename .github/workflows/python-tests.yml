@@ -296,7 +296,7 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONPATH: ${{ github.workspace }}
-        run: python -m pytest -q
+        run: python -m pytest -vv --durations=25 -o faulthandler_timeout=60
       - name: Report non-blocking full-suite failures
         if: steps.full_suite.outcome == 'failure'
         run: echo "::warning::Full-suite observation has known failures; blocking safety jobs remain authoritative."
