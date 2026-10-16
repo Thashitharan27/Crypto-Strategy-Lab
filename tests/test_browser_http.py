@@ -125,3 +125,37 @@ def test_completed_run_infinite_profit_factor_json_safe(tmp_path):
         assert response.json()["summary"]["profit_factor"] == "Infinity"
         assert response.json()["summary"]["total_trades"] == 3
     assert service.completed_run.return_value["summary"]["profit_factor"] == float("inf")
+
+
+def test_completed_run_undefined_summary_metrics_json_safe(tmp_path):
+    pytest.importorskip("fastapi")
+    from unittest.mock import Mock
+    from fastapi.testclient import TestClient
+    import math
+
+    token = "n" * 48
+    run_dir = tmp_path / "run_nan"
+    run_dir.mkdir()
+    summary = {
+        "total_trades": 2,
+        "average_adx_of_losing_trades": float("nan"),
+        "average_combined_effective_leverage": float("nan"),
+        "profit_factor": float("inf"),
+        "outcomes": {"TP": {"average_net_r": float("-inf"), "count": 2}},
+        "win_rate": 1.0,
+    }
+    service = Mock()
+    service.completed_run.return_value = {"summary": summary}
+    app = create_browser_app(token=token, read_service=service, completed_run_root=tmp_path)
+    with TestClient(app, base_url="http://localhost") as client:
+        response = client.get("/api/v1/runs/run_nan", headers={"Authorization": "Bearer " + token})
+        assert response.status_code == 200
+        encoded = response.json()["summary"]
+        assert encoded["average_adx_of_losing_trades"] is None
+        assert encoded["average_combined_effective_leverage"] is None
+        assert encoded["profit_factor"] == "Infinity"
+        assert encoded["outcomes"]["TP"]["average_net_r"] == "-Infinity"
+        assert encoded["outcomes"]["TP"]["count"] == 2
+        assert encoded["win_rate"] == 1.0
+    assert math.isnan(summary["average_adx_of_losing_trades"])
+    assert math.isinf(summary["profit_factor"])
