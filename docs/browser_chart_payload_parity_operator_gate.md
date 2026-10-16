@@ -58,6 +58,24 @@ Each case records canonical SHA-256 values for the desktop and browser payload. 
 
 Payload equality certifies the historical V2 data/geometry contract. Visual browser interaction (zoom, pan, resize and visible overlay behavior) still needs the already performed operator smoke checks and any future feature-specific UI checks.
 
+## Independent local evidence review
+
+After the original capture, run the repository's same V2 parity module in **review-only**
+mode from the Windows CryptoBots Desktop project:
+
+```powershell
+python -m crypto_strategy_lab.browser_v2_historical_parity --review-only --evidence-dir ".\\parity_verification\\v2_historical_chart"
+```
+
+This mode does not load the Data Lake or create new captures. It reopens local
+`summary.json` and each referenced desktop/browser JSON pair, recomputes both
+canonical SHA-256 hashes, verifies exact payload equality, and checks the
+frozen run identity, 79-trade count, first/middle/last trade matrix and 1h/4h/1d
+coverage. Missing, tampered, duplicate or non-finite evidence fails closed.
+Keep captured payload files and local paths private; report only the result.
+A PASS authenticates consistency of retained capture files, not the provenance
+of the original capture or interactive chart behavior.
+
 ## Operator-reported result (2026-10-16)
 
 The workstation operator ran `python -m crypto_strategy_lab.browser_v2_historical_parity` against the original local completed-run store and supplied the command output in the project conversation. It reported **PASS (9/9)** for frozen BTCUSDT 4h baseline, **79 trades**, with identical desktop/browser SHA-256 hashes for trades **0, 39, 78** across **1h, 4h, 1d**. No mismatches were reported.
