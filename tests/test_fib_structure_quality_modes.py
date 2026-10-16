@@ -13,7 +13,9 @@ def _run(mode):
                       84, 81, 85, 89, 92, 88, 85, 82, 87, 91], dtype=float)
     # Wide sample enough to expose multiple confirmed pivots.
     close = np.tile(close, 4)
-    opening = np.r_[close[0], close[:-1]]
+    # Distinct extrema avoid equal-high/low plateaus, which strict pivots
+    # intentionally do not confirm.
+    opening = close.copy()
     high = np.maximum(opening, close) + 0.4
     low = np.minimum(opening, close) - 0.4
     return fibonacci_retracement_arrays(
@@ -28,7 +30,7 @@ def test_modes_generate_same_shapes_and_causal_candidate_inventory():
     clean = _run("CLEAN_ONLY")
     weighted = _run("WEIGHTED")
     assert set(baseline) == set(clean) == set(weighted)
-    inventory_key = "candidate_inventory_json"
+    inventory_key = "_FIB_CANDIDATE_INVENTORY_JSON"
     for output in (baseline, clean, weighted):
         inventory = output[inventory_key]
         assert len(inventory) == 160

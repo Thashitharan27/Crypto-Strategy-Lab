@@ -71,10 +71,17 @@ def test_fib_prefers_dominant_confirmed_swing_over_new_local_wiggles():
 
     # The future high at 12 is not usable until candle 13 confirms it.
     assert values["_FIB_IMPULSE_END_INDEX"][12] == 4
-    # Once confirmed, it is materially stronger (>10%) and may replace the
-    # prior structural leg while preserving the same dominant swing low.
+    # Confirmation makes the stronger extension discoverable, but the old
+    # leg has prior held evidence and keeps selection priority (#445).
+    inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][13])
+    extension = next(c for c in inventory if c["candidate_id"] == "LONG:1:12")
+    held = next(c for c in inventory if c["selected"])
+    assert extension["structural_score"] > held["structural_score"] * 1.10
+    assert extension["prior_hold_eligible"] is False
+    assert held["candidate_id"] == "LONG:1:4"
+    assert held["prior_hold_eligible"] is True
     assert values["_FIB_IMPULSE_START_INDEX"][13] == 1
-    assert values["_FIB_IMPULSE_END_INDEX"][13] == 12
+    assert values["_FIB_IMPULSE_END_INDEX"][13] == 4
 
 
 def test_fib_ema_confluence_measures_level_to_ema_not_price_to_ema():
@@ -93,7 +100,7 @@ def test_fib_ema_confluence_measures_level_to_ema_not_price_to_ema():
     open_[202:206] = [105, 104, 103, 103]
     high[202:206] = [106, 105, 104, 104]
     low[202:206] = [104, 103, 102, 102]
-    close[202:206] = [105, 104, 103, 103]
+    close[202:206] = [105, 104, 103, 103.2]
 
     ema50 = np.full(n, np.nan)
     ema100 = np.full(n, np.nan)
@@ -248,7 +255,7 @@ def test_fib_target_room_gate_uses_actual_stop_and_entry_geometry():
     assert allowed["available_r"] >= 0.5
 
 
-def test_fib_fixed_r_target_uses_actual_stop_r_while_room_gate_stays_independent():
+def test_fib_fixed_r_target_uses_actual_stop_r_without_impulse_room_veto():
     class Base:
         def _sr_stop_plan(self, i, execution_i=None):
             return {"passed": True, "applied": False, "reason": "BASE", "distance": 1.0}
@@ -291,9 +298,13 @@ def test_fib_fixed_r_target_uses_actual_stop_r_while_room_gate_stays_independent
     assert np.isclose(target["room_limit_price"], 11.95)
     assert target["available_r"] < 1.0
 
-    # Raising only the room gate rejects the same 4R target setup; the two
-    # controls deliberately have separate meanings.
+    # Fixed-R retains its actual-stop geometry regardless of impulse room.
     p.config.fib_minimum_target_r = 4.0
+    fixed = p._fib_target_plan(0, 1)
+    assert fixed["passed"] is True
+    assert fixed["limit_price"] == target["limit_price"]
+    # The room gate remains authoritative for the impulse-extreme mode.
+    p.config.fib_target_mode = "IMPULSE_EXTREME"
     rejected = p._fib_target_plan(0, 1)
     assert rejected["passed"] is False
     assert rejected["reason"] == "FIB_TARGET_INSUFFICIENT_ROOM"
@@ -424,7 +435,7 @@ def test_deep_short_retracement_resets_old_anchor_before_future_extension():
 def test_fib_progressive_zone_cancels_shallow_signal_after_midpoint_penetration():
     # Confirmed LONG impulse: low@1=8.0 -> high@3=12.0.
     # 0.382=10.472, midpoint to 0.500=10.236, 0.500=10.0.
-    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.0, 10.6, 10.1], dtype=float)
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.3, 10.04, 10.6, 10.1], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.8, 10.4, 10.9, 10.5], dtype=float)
     low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.9, 10.55, 9.95], dtype=float)
     close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.6, 10.3, 10.7, 10.35], dtype=float)
@@ -637,9 +648,9 @@ def test_fib_rearm_requires_open_and_close_beyond_shallower_level():
 
 
 def test_fib_failed_unrearmed_retest_breaks_sequence():
-    # Hold #1, then a weak retest before reclaiming the shallower Fib. The weak
-    # retest must reset the sequence immediately rather than preserving hold #1.
-    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 10.02, 10.6, 10.05], dtype=float)
+    # Hold #1, then a weak retest before reclaiming the shallower Fib. The body crossing below the held level
+    # on this retest must reset the sequence immediately rather than preserving hold #1.
+    open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 10.2, 10.05, 9.98, 10.6, 10.05], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 10.7, 10.5, 10.25, 10.8, 10.45], dtype=float)
     low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 10.1, 9.95, 9.95, 10.55, 9.95], dtype=float)
     close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 10.5, 10.30, 10.10, 10.65, 10.35], dtype=float)
@@ -903,10 +914,10 @@ def test_fib_reaction_quality_rewards_respected_repeat_tests_without_linear_touc
     close[12] = 15.3
     # Candle 13 moves clearly away from the level (>0.5 ATR) without touching,
     # rearming the candidate for a genuinely distinct second reaction.
-    open_[13] = 15.5
+    open_[13] = 15.9
     low[13] = 15.4
-    high[13] = 15.8
-    close[13] = 15.6
+    high[13] = 16.1
+    close[13] = 16.0
     # Candle 14 then comes back and gives the second respected test.
     open_[14] = 15.05
     low[14] = 14.85
@@ -919,6 +930,9 @@ def test_fib_reaction_quality_rewards_respected_repeat_tests_without_linear_touc
         dominant_lookback_bars=16,
         dominant_recency_penalty=0.0,
         dominant_replacement_ratio=1.10,
+        # Isolate reaction scoring from the default 70% structural veto:
+        # this local leg is about half the strongest competing impulse.
+        minimum_structural_competition_ratio=0.50,
     )
 
     first_inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][12])
@@ -994,7 +1008,7 @@ def test_invalidated_fib_still_populates_generic_rule_evidence():
     # but generic Fib evidence must continue to be populated on later bars.
     open_ = np.array([10.0, 8.2, 9.0, 11.5, 11.2, 9.2, 9.4, 9.8], dtype=float)
     high = np.array([10.2, 8.4, 9.2, 12.0, 11.4, 9.8, 10.0, 10.1], dtype=float)
-    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 8.7, 9.3, 9.6], dtype=float)
+    low = np.array([9.8, 8.0, 8.8, 11.3, 10.9, 8.7, 8.6, 8.5], dtype=float)
     close = np.array([10.0, 8.2, 9.0, 11.8, 11.1, 9.5, 9.8, 9.9], dtype=float)
     atr = np.ones(len(close))
 
@@ -1106,9 +1120,9 @@ def test_new_fib_replays_confirmation_window_invalidation():
 
 
 def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate():
-    # Build a dominant LONG, then a stronger/recent local LONG. A later higher
-    # high creates an extension from the active local anchor, but the extension
-    # is deliberately weaker because ATR is much larger on confirmation.
+    # Build competing dominant/local LONG legs. Quality-adjusted selection
+    # keeps low@1 -> high@8 active. A later higher high extends that actual
+    # anchor, but higher ATR makes the extension weaker than the active leg.
     close = np.array(
         [12, 8, 10, 16, 20, 18, 16, 14, 19, 18, 17, 16, 17, 18, 22, 19, 18, 18],
         dtype=float,
@@ -1133,24 +1147,24 @@ def test_fib_extension_competes_instead_of_overriding_stronger_active_candidate(
 
     inventory = json.loads(values["_FIB_CANDIDATE_INVENTORY_JSON"][15])
     extension = next(
-        item for item in inventory if item["candidate_id"] == "LONG:7:14"
+        item for item in inventory if item["candidate_id"] == "LONG:1:14"
     )
     selected = next(item for item in inventory if item["selected"])
 
     assert extension["entry_valid"] is False
     assert extension["prior_hold_eligible"] is False
     assert extension["structural_quality_eligible"] is False
-    assert selected["candidate_id"] == "LONG:7:8"
+    assert selected["candidate_id"] == "LONG:1:8"
     assert selected["structural_quality_eligible"] is True
     assert selected["live_score"] > extension["live_score"]
-    assert values["_FIB_SELECTED_CANDIDATE_ID"][15] == "LONG:7:8"
+    assert values["_FIB_SELECTED_CANDIDATE_ID"][15] == "LONG:1:8"
 
 
 def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache():
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
     assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
     assert FIB_MINIMUM_HOLD_REJECTION_ATR == 0.25
-    assert FIB_RESEARCH_CONTEXT_VERSION == 25
+    assert FIB_RESEARCH_CONTEXT_VERSION == 28
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
@@ -1194,10 +1208,10 @@ def test_fib_rsi_confluence_resets_when_armed_level_advances():
     # Candidate first tests 0.382 with bullish RSI divergence, then a deeper
     # wick advances the armed level to 0.500 without touching that new level.
     # The old 0.382 RSI test must not continue to boost the candidate.
-    open_ = np.array([10.0, 8.0, 9.0, 10.0, 12.0, 11.0, 10.5, 9.6, 10.0], dtype=float)
-    high = np.array([10.2, 8.2, 9.2, 10.2, 12.2, 11.2, 10.8, 10.1, 10.2], dtype=float)
-    low = np.array([9.8, 7.8, 8.8, 9.8, 11.8, 10.8, 10.0, 9.5, 9.8], dtype=float)
-    close = np.array([10.0, 8.0, 9.0, 10.0, 12.0, 11.0, 10.6, 9.8, 10.0], dtype=float)
+    open_ = np.array([10.0, 8.0, 9.0, 10.0, 12.0, 11.0, 10.5, 10.2, 10.0], dtype=float)
+    high = np.array([10.2, 8.2, 9.2, 10.2, 12.2, 11.2, 10.8, 10.5, 10.2], dtype=float)
+    low = np.array([9.8, 7.8, 8.8, 9.8, 11.8, 10.8, 10.0, 10.1, 9.8], dtype=float)
+    close = np.array([10.0, 8.0, 9.0, 10.0, 12.0, 11.0, 10.6, 10.3, 10.0], dtype=float)
     atr = np.ones(len(close))
     ema50 = np.full(len(close), np.nan)
     ema100 = np.full(len(close), np.nan)
@@ -1234,17 +1248,16 @@ def test_fib_candidate_confluence_can_promote_close_structural_competitor():
     open_ = close.copy()
     high = close + 0.1
     low = close - 0.1
-    low[1] = 8.0
+    low[1] = 7.5
     low[7] = 8.1
     high[10] = 12.0
     atr = np.ones(len(close))
     atr[11] = 0.1
 
-    # At candle 11 the local Fib's 0.382 level is:
-    # 12 - .382 * (12 - 8.1) = 10.5102. The dominant candidate's same
-    # level is 10.472, which is 0.382 ATR away at ATR=0.1 and therefore
-    # outside the 0.25 ATR confluence window. This leaves the local Fib only
-    # 2.5% weaker structurally, so its 3% EMA100 bonus can legitimately win.
+    # Local 0.382 is 10.5102; dominant 0.382 is 10.281. At ATR=0.1
+    # only the local level is within the EMA confluence window. The deeper
+    # dominant anchor offsets its impulse-efficiency penalty, leaving it
+    # slightly stronger before the local candidate's 3% EMA100 bonus.
     ema50 = np.full(len(close), np.nan)
     ema100 = np.full(len(close), np.nan)
     ema200 = np.full(len(close), np.nan)
@@ -1829,13 +1842,15 @@ def test_candidate_context_research_policy_and_warmup_are_propagated():
         di_pressure_lookback=3, enable_support_resistance_analysis=False,
         market_regime_method="SIDEWAYS", fib_candidate_context_selection=True,
     )
+    # At 1h, EMA1600 history exceeds the independent 22-day state floor.
+    # At 15m the floor masks this flag, so it cannot test propagation.
     run_config = SimpleNamespace(
-        data=SimpleNamespace(strategy_timeframe_minutes=15),
+        data=SimpleNamespace(strategy_timeframe_minutes=60),
         features=features, strategy=SimpleNamespace(profiles={}),
     )
-    assert strategy_warmup_period(run_config) >= pd.Timedelta(minutes=15 * 1605)
+    assert strategy_warmup_period(run_config) >= pd.Timedelta(minutes=60 * 1605)
     features.fib_candidate_context_selection = False
-    assert strategy_warmup_period(run_config) < pd.Timedelta(minutes=15 * 1605)
+    assert strategy_warmup_period(run_config) < pd.Timedelta(minutes=60 * 1605)
 
 
 def test_candidate_selection_ema_only_does_not_apply_mr_veto():
