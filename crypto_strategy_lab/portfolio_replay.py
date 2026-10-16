@@ -95,7 +95,9 @@ def discover_resilience_runs(output_root: Path | str) -> list[dict]:
         return []
     rows = []
     for child in root.iterdir():
-        if not child.is_dir() or not (child / "run_manifest.json").is_file():
+        # Do not follow a linked child outside the configured output root.
+        # A completed run must be a direct, real directory entry.
+        if child.is_symlink() or not child.is_dir() or not (child / "run_manifest.json").is_file():
             continue
         try:
             rows.append(inspect_resilience_run(child))
