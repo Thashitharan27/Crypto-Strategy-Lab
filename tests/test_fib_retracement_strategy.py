@@ -1897,6 +1897,7 @@ def _prepared_fib_limit_collision_engine(*, fill_low, fill_high, next_high=145.0
 
 
 def test_deeper_limit_fill_minute_allows_protective_stop_and_accounts_fees():
+    import pandas as pd
     from crypto_strategy_lab.trade import ExitReason
 
     engine, times = _prepared_fib_limit_collision_engine(
@@ -1921,6 +1922,7 @@ def test_deeper_limit_fill_minute_allows_protective_stop_and_accounts_fees():
 
 
 def test_deeper_limit_fill_minute_defers_profit_target_until_next_minute():
+    import pandas as pd
     from crypto_strategy_lab.trade import ExitReason
 
     engine, times = _prepared_fib_limit_collision_engine(
