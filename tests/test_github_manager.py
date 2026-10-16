@@ -253,3 +253,19 @@ def test_commands_never_construct_force_push(repo, monkeypatch):
     manager.push("main")
     assert seen == [("push", "origin", "main")]
     assert all("--force" not in command for command in seen)
+
+
+def test_git_subprocess_timeout_is_bounded_and_reported(monkeypatch, tmp_path):
+    from crypto_strategy_lab.gui import github_manager
+    calls = []
+
+    def stalled(command, **kwargs):
+        calls.append((command, kwargs))
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(github_manager.subprocess, "run", stalled)
+    with pytest.raises(GitError, match="timed out after 120 seconds") as failure:
+        GitManager(tmp_path)._run("fetch", "--prune", "origin")
+    assert isinstance(failure.value.__cause__, subprocess.TimeoutExpired)
+    assert calls[0][1]["timeout"] == github_manager.GIT_COMMAND_TIMEOUT_SECONDS
+    assert calls[0][1]["shell"] is False

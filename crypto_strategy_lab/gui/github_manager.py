@@ -167,6 +167,9 @@ def is_sensitive(path: str) -> bool:
     return any(fnmatch.fnmatch(name, pattern) for pattern in SENSITIVE_PATTERNS)
 
 
+GIT_COMMAND_TIMEOUT_SECONDS = 120
+
+
 class GitManager:
     def __init__(self, root: Path | None = None, git: str = "git"):
         self.root = Path(root or project_root()).resolve()
@@ -183,7 +186,13 @@ class GitManager:
                 stderr=subprocess.PIPE,
                 shell=False,
                 creationflags=creationflags,
+                timeout=GIT_COMMAND_TIMEOUT_SECONDS,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise GitError(
+                f"Git command timed out after {GIT_COMMAND_TIMEOUT_SECONDS} seconds. "
+                "Check the remote connection and retry."
+            ) from exc
         except FileNotFoundError as exc:
             raise GitError("Git is not installed or not available in PATH.") from exc
         if check and result.returncode:
