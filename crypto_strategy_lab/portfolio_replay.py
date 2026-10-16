@@ -96,13 +96,15 @@ def discover_resilience_runs(output_root: Path | str) -> list[dict]:
     rows = []
     resolved_root = root.resolve()
     for child in root.iterdir():
-        # Both POSIX symlinks and Windows junction/reparse directories must be
-        # confined to the selected output root. Preserve normal direct runs.
-        if child.is_symlink() or child.resolve().parent != resolved_root:
-            continue
-        if not child.is_dir() or not (child / "run_manifest.json").is_file():
-            continue
         try:
+            # Resolution may fail for inaccessible or malformed directory entries.
+            # Skip that entry without hiding other valid completed runs.
+            # Symlinks and Windows junction/reparse directories must stay confined
+            # to the direct output root.
+            if child.is_symlink() or child.resolve().parent != resolved_root:
+                continue
+            if not child.is_dir() or not (child / "run_manifest.json").is_file():
+                continue
             rows.append(inspect_resilience_run(child))
         except (RunArtifactError, OSError, ValueError, TypeError):
             continue
