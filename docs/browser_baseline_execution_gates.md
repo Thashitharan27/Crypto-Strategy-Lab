@@ -26,3 +26,18 @@ Before resolving the overlap, independently test and establish:
 4. Historical 1m source coverage, full native-trade output and entry/exit timestamp parity against frozen workstation artifacts in the separate CryptoBots Desktop project. CI unit tests are insufficient for release certification.
 
 No browser-controlled execution or configuration writes are authorized; PR #501 remains on hold. This audit is not a decision to merge the draft or change live fill behavior.
+
+## Native pending-limit ownership hardening
+
+The active Fibonacci two-hold/deeper-limit path remains the execution owner for
+that strategy. Its first-touch scan now requires an exact intrabar timestamp grid
+for the whole eligible strategy candle whenever intrabar execution is enabled.
+Missing leading, trailing or interior minutes, duplicate timestamps and off-grid
+timestamps fail closed before any candidate touch is accepted. This reuses
+`entry_plan.has_complete_intrabar_window`; it does not adopt PR #501's separate
+first-touch helper and does not expose a browser execution API.
+
+This closes the **minute-grid completeness** defect for the native Fibonacci
+pending-fill owner. It does not by itself establish within-minute event-order
+equivalence for every exit mode or historical trade-level parity. Those remain
+release gates before browser-controlled execution or configuration writes.
