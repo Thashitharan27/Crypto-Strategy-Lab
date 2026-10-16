@@ -159,3 +159,17 @@ def test_completed_run_undefined_summary_metrics_json_safe(tmp_path):
         assert encoded["win_rate"] == 1.0
     assert math.isnan(summary["average_adx_of_losing_trades"])
     assert math.isinf(summary["profit_factor"])
+
+
+def test_browser_api_rejects_malformed_local_host_ports():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    token = "h" * 48
+    app = create_browser_app(token=token)
+    with TestClient(app, base_url="http://localhost") as client:
+        headers = {"Authorization": "Bearer " + token}
+        for host in ("localhost:invalid", "127.0.0.1:99999", "localhost:-1", "localhost:"):
+            response = client.get("/api/v1/health", headers={**headers, "Host": host})
+            assert response.status_code == 403, host
+        assert client.get("/api/v1/health", headers={**headers, "Host": "localhost:8767"}).status_code == 200
