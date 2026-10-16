@@ -103,3 +103,16 @@ def test_portfolio_discovery_skips_linked_directories_outside_root(tmp_path, mon
     result = portfolio_replay.discover_resilience_runs(root)
     assert [row["run_id"] for row in result] == ["ordinary_run"]
     assert inspected == [ordinary]
+
+    # Simulate Windows junction semantics: the link may not report is_symlink.
+    # The resolved-parent containment check must still exclude its target.
+    from pathlib import Path
+    real_is_symlink = Path.is_symlink
+    monkeypatch.setattr(
+        Path, "is_symlink",
+        lambda path: False if path.name == "linked_private" else real_is_symlink(path),
+    )
+    inspected.clear()
+    rows = portfolio_replay.discover_resilience_runs(root)
+    assert [row["run_id"] for row in rows] == ["ordinary_run"]
+    assert inspected == [ordinary]
