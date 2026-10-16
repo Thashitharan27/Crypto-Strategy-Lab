@@ -58,7 +58,9 @@ def test_active_strategy_page_is_rule_based_and_has_no_profile_or_sr_preset_surf
         assert "Show Support / Resistance veto presets" not in checks
         assert "Entry groups qualify candidates" in labels
         assert "Any complete Veto group rejects the candidate" in labels
-        assert "S/R · Multi-TF Price Action" in labels
+        # The guidance lives on the current builder's research-status label,
+        # not necessarily under the active page's child QLabel traversal.
+        assert "S/R · Multi-TF Price Action" in window.rule_builder.research_status.text()
     finally:
         window.close()
 
