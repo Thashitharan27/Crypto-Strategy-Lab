@@ -93,7 +93,7 @@ def test_fib_ema_confluence_measures_level_to_ema_not_price_to_ema():
     open_[202:206] = [105, 104, 103, 103]
     high[202:206] = [106, 105, 104, 104]
     low[202:206] = [104, 103, 102, 102]
-    close[202:206] = [105, 104, 103, 103]
+    close[202:206] = [105, 104, 103, 103.2]
 
     ema50 = np.full(n, np.nan)
     ema100 = np.full(n, np.nan)
@@ -248,7 +248,7 @@ def test_fib_target_room_gate_uses_actual_stop_and_entry_geometry():
     assert allowed["available_r"] >= 0.5
 
 
-def test_fib_fixed_r_target_uses_actual_stop_r_while_room_gate_stays_independent():
+def test_fib_fixed_r_target_uses_actual_stop_r_without_impulse_room_veto():
     class Base:
         def _sr_stop_plan(self, i, execution_i=None):
             return {"passed": True, "applied": False, "reason": "BASE", "distance": 1.0}
@@ -291,9 +291,13 @@ def test_fib_fixed_r_target_uses_actual_stop_r_while_room_gate_stays_independent
     assert np.isclose(target["room_limit_price"], 11.95)
     assert target["available_r"] < 1.0
 
-    # Raising only the room gate rejects the same 4R target setup; the two
-    # controls deliberately have separate meanings.
+    # Fixed-R retains its actual-stop geometry regardless of impulse room.
     p.config.fib_minimum_target_r = 4.0
+    fixed = p._fib_target_plan(0, 1)
+    assert fixed["passed"] is True
+    assert fixed["limit_price"] == target["limit_price"]
+    # The room gate remains authoritative for the impulse-extreme mode.
+    p.config.fib_target_mode = "IMPULSE_EXTREME"
     rejected = p._fib_target_plan(0, 1)
     assert rejected["passed"] is False
     assert rejected["reason"] == "FIB_TARGET_INSUFFICIENT_ROOM"
@@ -1150,7 +1154,7 @@ def test_fib_local_replacement_default_is_five_percent_and_invalidates_old_cache
     assert FIB_DOMINANT_REPLACEMENT_RATIO == 1.05
     assert FIB_MINIMUM_STRUCTURAL_COMPETITION_RATIO == 0.70
     assert FIB_MINIMUM_HOLD_REJECTION_ATR == 0.25
-    assert FIB_RESEARCH_CONTEXT_VERSION == 25
+    assert FIB_RESEARCH_CONTEXT_VERSION == 28
 
 
 def test_fib_tracks_recent_local_long_subswing_alongside_dominant_anchor():
