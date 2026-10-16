@@ -66,6 +66,8 @@ def test_http_preserves_fibonacci_flags_and_all_six_profiles(tmp_path):
         assert actual == expected
         for section in ("data", "features", "strategy", "execution"):
             assert actual[section] == expected[section]
+        assert set(actual["strategy"]["profiles"]) == set(PROFILE_KEYS)
+        assert set(actual["execution"]["profiles"]) == set(PROFILE_KEYS)
         assert actual["features"]["fib_candle_confirmation_enabled"] is True
         assert actual["features"]["fib_first_zone_hold_entry"] is True
         assert actual["features"]["fib_candle_engulfing"] is False
