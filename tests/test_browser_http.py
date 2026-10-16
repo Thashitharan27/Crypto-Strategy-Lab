@@ -161,6 +161,43 @@ def test_completed_run_undefined_summary_metrics_json_safe(tmp_path):
     assert math.isinf(summary["profit_factor"])
 
 
+
+def test_completed_run_numpy_scalar_metrics_are_strict_json_safe(tmp_path):
+    pytest.importorskip("fastapi")
+    np = pytest.importorskip("numpy")
+    from unittest.mock import Mock
+    from fastapi.testclient import TestClient
+
+    (tmp_path / "numpy_run").mkdir()
+    summary = {
+        "win_rate": np.float32(0.5),
+        "total_trades": np.int64(2),
+        "profit_factor": np.float32("inf"),
+        "nested": {"undefined_metric": np.float32("nan"), "loss": np.float32("-inf")},
+    }
+    service = Mock()
+    service.completed_run.return_value = {"summary": summary}
+    token = "m" * 48
+    app = create_browser_app(token=token, read_service=service, completed_run_root=tmp_path)
+    with TestClient(app, base_url="http://localhost") as client:
+        response = client.get("/api/v1/runs/numpy_run", headers={"Authorization": "Bearer " + token})
+        assert response.status_code == 200
+        encoded = response.json()["summary"]
+        assert encoded == {
+            "win_rate": 0.5,
+            "total_trades": 2,
+            "profit_factor": "Infinity",
+            "nested": {"undefined_metric": None, "loss": "-Infinity"},
+        }
+        import json
+        json.dumps(encoded, allow_nan=False)
+
+    # Native persisted-report objects are not modified by browser serialization.
+    assert np.isnan(summary["nested"]["undefined_metric"])
+    assert np.isposinf(summary["profit_factor"])
+    assert isinstance(summary["total_trades"], np.integer)
+
+
 def test_browser_api_rejects_malformed_local_host_ports():
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
