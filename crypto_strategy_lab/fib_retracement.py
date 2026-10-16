@@ -1426,7 +1426,12 @@ class FibonacciRetracementMixin:
         start = pd.Timestamp(self.times[i])
         end = start + self.entry_delta
         frame = getattr(self, "intrabar_data", None)
-        if getattr(self.config, "use_intrabar_data", False) and frame is not None:
+        if getattr(self.config, "use_intrabar_data", False):
+            if frame is None:
+                raise ValueError(
+                    "Fibonacci pending-limit fill requires complete intrabar "
+                    "coverage for the eligible strategy candle"
+                )
             from .entry_plan import has_complete_intrabar_window
 
             step = pd.Timedelta(
