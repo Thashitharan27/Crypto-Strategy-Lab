@@ -1732,7 +1732,9 @@ def test_deeper_limit_fast_intrabar_window_enforces_same_complete_grid():
     p.intrabar_data = as_searchsorted_intrabar(complete)
     raw, timestamp = p._fib_limit_fill(1, 138.2, "LONG")
     assert raw == 138.2
-    assert timestamp == p.times[1] + pd.Timedelta(minutes=1)
+    assert timestamp == (
+        pd.Timestamp(p.times[1]).tz_localize("UTC") + pd.Timedelta(minutes=1)
+    )
 
     incomplete = complete.iloc[:-1].reset_index(drop=True)
     p.intrabar_data = as_searchsorted_intrabar(incomplete)
