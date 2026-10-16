@@ -43,3 +43,30 @@ def test_comparison_cli_fails_on_modified_fee(tmp_path, capsys):
     assert report["status"] == "MISMATCH"
     assert report["differences"][0]["field"] == "fees"
     assert report["expected_sha256"] != report["actual_sha256"]
+
+
+def test_zero_tolerance_detects_decimal_precision_loss(tmp_path):
+    first, second, mapping, row = _fixture(tmp_path)
+    row["entry_price"] = "1.0000000000000001"
+    with second.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=TRADE_FIELDS)
+        writer.writeheader()
+        writer.writerow(row)
+    report = compare_reports(first, second, mapping)
+    assert report["status"] == "MISMATCH"
+    assert any(d["field"] == "entry_price" for d in report["differences"])
+
+
+def test_cli_runs_directly_from_tools_path(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    first, second, mapping, row = _fixture(tmp_path)
+    cli = Path(__file__).resolve().parents[1] / "tools" / "compare_frozen_trade_csv.py"
+    completed = subprocess.run(
+        [sys.executable, str(cli), str(first), str(second), "--mapping", str(mapping)],
+        cwd=tmp_path, text=True, capture_output=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["status"] == "PASS"
