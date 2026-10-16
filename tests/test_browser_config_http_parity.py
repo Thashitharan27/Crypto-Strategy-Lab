@@ -18,8 +18,10 @@ def test_authenticated_http_config_matches_native_reader_byte_safe(tmp_path):
     config = ResearchRunConfig()
     path.write_text(json.dumps(config.to_dict(), allow_nan=False), encoding="utf-8")
     before = path.read_bytes()
-    expected = read_research_config(path)
-    assert expected == config.to_dict()
+    native = read_research_config(path)
+    # JSON represents native tuples as arrays; preserve all JSON scalar types.
+    expected = json.loads(json.dumps(native, allow_nan=False))
+    assert native == config.to_dict()
 
     class Reader:
         def research_config(self, selected):
@@ -33,6 +35,7 @@ def test_authenticated_http_config_matches_native_reader_byte_safe(tmp_path):
         response = client.get(endpoint, headers={"Authorization": "Bearer " + token})
         assert response.status_code == 200
         assert response.json()["config"] == expected
+        assert json.dumps(response.json()["config"], sort_keys=True, allow_nan=False) == json.dumps(native, sort_keys=True, allow_nan=False)
     assert path.read_bytes() == before
 
 
@@ -54,7 +57,9 @@ def test_http_preserves_fibonacci_flags_and_all_six_profiles(tmp_path):
         snapshot["execution"]["profiles"][profile]["reward_risk_ratio"] = float(index + 1)
     path.write_text(json.dumps(snapshot, allow_nan=False), encoding="utf-8")
     before = path.read_bytes()
-    expected = read_research_config(path)
+    native = read_research_config(path)
+    # JSON represents native tuples as arrays; preserve all JSON scalar types.
+    expected = json.loads(json.dumps(native, allow_nan=False))
 
     class Reader:
         def research_config(self, selected):
@@ -67,6 +72,7 @@ def test_http_preserves_fibonacci_flags_and_all_six_profiles(tmp_path):
         assert response.status_code == 200
         actual = response.json()["config"]
         assert actual == expected
+        assert json.dumps(actual, sort_keys=True, allow_nan=False) == json.dumps(native, sort_keys=True, allow_nan=False)
         for section in ("data", "features", "strategy", "execution"):
             assert actual[section] == expected[section]
         assert set(actual["strategy"]["profiles"]) == set(PROFILE_KEYS)

@@ -119,6 +119,12 @@ jobs:
           tests/test_browser_http_coverage.py
           tests/test_browser_http_completed_run.py
           tests/test_browser_http_config.py
+          tests/test_browser_config_http_parity.py
+          tests/test_browser_fib_execution_http_parity.py
+          tests/test_browser_committed_http_config_parity.py
+          tests/test_browser_repository_config_parity.py
+          tests/test_browser_saved_config_parity.py
+          tests/test_browser_saved_config_parity_cli.py
           tests/test_browser_http_static.py
           tests/test_browser_readonly_service.py
           tests/test_browser_config.py
