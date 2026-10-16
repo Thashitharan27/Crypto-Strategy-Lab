@@ -92,3 +92,25 @@ def test_native_pair_columns_cannot_fake_missing_leg_slippage(tmp_path):
     }
     with pytest.raises(ValueError, match="missing trade columns"):
         read_mapped_trade_csv(path, mapping)
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf", "-inf"])
+def test_nonfinite_trade_amount_rejected(tmp_path, bad):
+    path = tmp_path / "trades.csv"
+    row = _row()
+    row["fees"] = bad
+    _write(path, [row])
+    with pytest.raises(ValueError, match="invalid numeric fees"):
+        read_mapped_trade_csv(path, {key: key for key in TRADE_FIELDS})
+
+
+def test_duplicate_csv_header_rejected_before_parity(tmp_path):
+    path = tmp_path / "trades.csv"
+    # A duplicate column must not overwrite its earlier value via DictReader.
+    headers = list(TRADE_FIELDS) + ["entry_price"]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(headers)
+        writer.writerow([_row()[key] for key in headers])
+    with pytest.raises(ValueError, match="duplicate trade columns"):
+        read_mapped_trade_csv(path, {key: key for key in TRADE_FIELDS})
