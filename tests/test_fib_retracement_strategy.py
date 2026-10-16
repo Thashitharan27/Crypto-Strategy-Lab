@@ -1771,10 +1771,19 @@ def test_deeper_limit_short_intrabar_gap_through_first_touch_matches_all_windows
 
     # If the first touch itself gaps through the limit, sell at the better open.
     frame.loc[3, ["open", "high", "low"]] = [182.0, 185.0, 178.0]
-    p.intrabar_data = frame
-    raw, timestamp = p._fib_limit_fill(1, trigger, "SHORT")
-    assert raw == 182.0
-    assert timestamp == times[3]
+    gap_windows = [
+        frame,
+        as_searchsorted_intrabar(frame),
+        IntrabarExecutionData(
+            frame.timestamp.to_numpy(), pd.Timedelta(minutes=1),
+            frame.open.to_numpy(), frame.high.to_numpy(), frame.low.to_numpy(),
+        ),
+    ]
+    for intrabar in gap_windows:
+        p.intrabar_data = intrabar
+        raw, timestamp = p._fib_limit_fill(1, trigger, "SHORT")
+        assert raw == 182.0
+        assert pd.to_datetime(timestamp, utc=True) == pd.to_datetime(times[3], utc=True)
 
 
 def test_deeper_limit_long_gap_through_first_touch_matches_all_windows():
