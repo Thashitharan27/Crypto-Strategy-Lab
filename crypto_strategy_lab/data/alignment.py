@@ -41,8 +41,12 @@ def causal_asof_join(
 
     left = decisions.copy()
     right = features.copy()
-    left[decision_time_col] = pd.to_datetime(left[decision_time_col], utc=True, errors="raise")
-    right[available_at_col] = pd.to_datetime(right[available_at_col], utc=True, errors="raise")
+    left[decision_time_col] = pd.to_datetime(
+        left[decision_time_col], utc=True, errors="raise"
+    ).astype("datetime64[ns, UTC]")
+    right[available_at_col] = pd.to_datetime(
+        right[available_at_col], utc=True, errors="raise"
+    ).astype("datetime64[ns, UTC]")
 
     # merge_asof requires the `on` keys to be globally monotonic. Group keys are
     # secondary so interleaved symbols still obey that requirement.
