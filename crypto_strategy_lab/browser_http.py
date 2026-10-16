@@ -53,6 +53,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 and parsed_host.password is None
                 and parsed_host.path == ""
                 and parsed_host.query == ""
+                and parsed_host.fragment == ""
             )
             if origin is None:
                 valid_origin = True
