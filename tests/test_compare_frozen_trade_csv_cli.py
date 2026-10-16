@@ -26,6 +26,8 @@ def test_comparison_cli_reports_frozen_hashes_and_pass(tmp_path, capsys):
     assert main([str(first), str(second), "--mapping", str(mapping)]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "PASS"
+    assert report["scope"] == "MAPPED_15_FIELD_TRADE_ROWS_ONLY"
+    assert report["historical_execution_certified"] is False
     assert report["difference_count"] == 0
     assert report["expected_sha256"] == report["actual_sha256"]
     assert len(report["mapping_sha256"]) == 64
