@@ -151,6 +151,61 @@ def capture_parity(
     return summary
 
 
+
+def review_captured_parity(evidence_dir: Path) -> dict[str, Any]:
+    """Independently review the frozen local V2 capture, without loading market data.
+
+    Fail closed on missing, altered, inconsistent or incomplete files. The
+    capture remains local; this command prints no candle/trade payload content.
+    """
+    evidence_dir = Path(evidence_dir)
+    def read_json(path: Path) -> Any:
+        return json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
+        )
+
+    summary = read_json(evidence_dir / "summary.json")
+    if not isinstance(summary, dict):
+        raise ValueError("Invalid V2 parity summary")
+    if summary.get("run_id") != DEFAULT_RUN_ID or type(summary.get("trade_count")) is not int or summary["trade_count"] != FROZEN_TRADE_COUNT:
+        raise ValueError("Frozen run identity or trade count mismatch")
+    cases = summary.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("Missing parity cases")
+
+    seen: set[tuple[int, str]] = set()
+    for case in cases:
+        if not isinstance(case, dict):
+            raise ValueError("Malformed parity case")
+        index, timeframe = case.get("trade_index"), case.get("timeframe")
+        if type(index) is not int or not 0 <= index < FROZEN_TRADE_COUNT or not isinstance(timeframe, str) or not timeframe.isalnum():
+            raise ValueError("Invalid parity case identity")
+        key = (index, timeframe)
+        if key in seen:
+            raise ValueError("Duplicate parity case")
+        seen.add(key)
+        stem = f"trade_{index:03d}_{timeframe}"
+        desktop = read_json(evidence_dir / f"desktop_{stem}.json")
+        browser = read_json(evidence_dir / f"browser_{stem}.json")
+        desktop_hash = canonical_sha256(desktop)
+        browser_hash = canonical_sha256(browser)
+        if (desktop_hash != case.get("desktop_sha256")
+                or browser_hash != case.get("browser_sha256")
+                or desktop_hash != browser_hash
+                or compare_payloads(desktop, browser)
+                or case.get("exact_match") is not True
+                or case.get("mismatches") != []):
+            raise ValueError(f"Captured payload differs: trade={index}, timeframe={timeframe}")
+
+    required = {(index, timeframe) for index in (0, 39, 78) for timeframe in DEFAULT_TIMEFRAMES}
+    if not required.issubset(seen):
+        raise ValueError("Frozen first/middle/last trade and timeframe matrix incomplete")
+    if summary.get("pass") is not True:
+        raise ValueError("Parity summary is not PASS")
+    return {"run_id": DEFAULT_RUN_ID, "trade_count": FROZEN_TRADE_COUNT, "cases_checked": len(seen), "pass": True}
+
+
 def _output_root(value: str | None) -> Path:
     if value:
         return Path(value).expanduser().resolve()
@@ -176,12 +231,18 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", default=DEFAULT_RUN_ID)
     parser.add_argument("--output-root")
+    parser.add_argument("--review-only", action="store_true", help="Verify retained local V2 parity captures without the Data Lake")
     parser.add_argument(
         "--evidence-dir",
         default="parity_verification/v2_historical_chart",
         help="Local-only evidence directory; do not commit captured payloads.",
     )
     args = parser.parse_args(argv)
+
+    if args.review_only:
+        review = review_captured_parity(Path(args.evidence_dir))
+        print(f"V2 historical capture review: PASS ({review['cases_checked']} cases; {review['trade_count']} trades)")
+        return 0
 
     # Fail closed even when canonical model loading fails before capture_parity starts.
     evidence_dir = Path(args.evidence_dir)
