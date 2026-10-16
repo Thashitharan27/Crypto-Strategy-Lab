@@ -37,7 +37,7 @@ class _Model:
     def build_v2_diagnostic_payload(self, *, trade_index=None, chart_timeframe=None):
         self.calls.append((trade_index, chart_timeframe))
         return {
-            "run": {"runId": "BTCUSDT_4h_fixture"},
+            "run": {"runId": self.manifest["run_id"], "chartTimeframe": chart_timeframe},
             "selectedTradeIndex": trade_index,
             "chartTimeframe": chart_timeframe,
             "candles": [{"time": 1, "open": 10.0, "high": 11.0, "low": 9.0, "close": 10.5}],
@@ -218,4 +218,51 @@ def test_review_only_rejects_tampering_missing_files_and_false_summary(tmp_path)
     summary["cases"].append(summary["cases"][0])
     summary_path.write_text(json.dumps(summary), encoding="utf-8")
     with pytest.raises(ValueError, match="Duplicate parity case"):
+        review_captured_parity(tmp_path)
+
+
+def test_review_rejects_matching_hashes_for_wrong_selected_payload_identity(tmp_path):
+    """Hashes and equality cannot substitute for verifying selected run/trade/TF."""
+    import json
+    import pytest
+    from crypto_strategy_lab.browser_chart_parity import canonical_sha256
+    from crypto_strategy_lab.browser_v2_historical_parity import review_captured_parity
+
+    desktop = _Model(sides=("LONG",) * 79)
+    browser = _Model(sides=("LONG",) * 79)
+    frozen = "BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f"
+    desktop.manifest["run_id"] = browser.manifest["run_id"] = frozen
+    capture_parity(
+        desktop, browser, tmp_path,
+        browser_payload=lambda i, tf: browser.build_v2_diagnostic_payload(
+            trade_index=i, chart_timeframe=tf,
+        ),
+    )
+    summary_path = tmp_path / "summary.json"
+    pristine_summary = summary_path.read_text(encoding="utf-8")
+    case_path = tmp_path / "desktop_trade_000_4h.json"
+    browser_path = tmp_path / "browser_trade_000_4h.json"
+    pristine_payload = case_path.read_text(encoding="utf-8")
+    for field, invalid in (("selectedTradeIndex", 39), ("chartTimeframe", "1d")):
+        payload = json.loads(pristine_payload)
+        payload[field] = invalid
+        for target in (case_path, browser_path):
+            target.write_text(json.dumps(payload), encoding="utf-8")
+        summary = json.loads(pristine_summary)
+        summary["cases"][1]["desktop_sha256"] = canonical_sha256(payload)
+        summary["cases"][1]["browser_sha256"] = canonical_sha256(payload)
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+        with pytest.raises(ValueError, match="payload identity mismatch"):
+            review_captured_parity(tmp_path)
+    for target in (case_path, browser_path):
+        target.write_text(pristine_payload, encoding="utf-8")
+    summary = json.loads(pristine_summary)
+    payload = json.loads(pristine_payload)
+    payload["run"]["runId"] = "unrelated_run"
+    for target in (case_path, browser_path):
+        target.write_text(json.dumps(payload), encoding="utf-8")
+    summary["cases"][1]["desktop_sha256"] = canonical_sha256(payload)
+    summary["cases"][1]["browser_sha256"] = canonical_sha256(payload)
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    with pytest.raises(ValueError, match="payload identity mismatch"):
         review_captured_parity(tmp_path)
