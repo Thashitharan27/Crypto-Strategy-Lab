@@ -10,7 +10,7 @@ The intended read-only composition chain is:
 
 ```text
 React/TypeScript browser shell
-  -> authenticated localhost GET API
+  -> authenticated localhost GET API (and explicit in-memory V2 session launch)
   -> BrowserReadOnlyService
   -> existing GuiApplicationService / CatalogStatusService
   -> existing MarketDataStore / CacheLayout / DuckDB catalog
@@ -39,7 +39,7 @@ Therefore:
 
 ## HTTP surface
 
-The current API route inventory is locked by regression test to:
+The current API is composed with optional dependencies. The read service routes are locked by `tests/test_browser_http.py::test_browser_api_route_inventory_is_read_only`; the separately wired visualizer session route is locked by `tests/test_browser_http_visualizer.py::test_visualizer_route_is_the_only_explicit_non_get_api_operation`:
 
 | Route | Method | Owner |
 | --- | --- | --- |
@@ -47,12 +47,14 @@ The current API route inventory is locked by regression test to:
 | `/api/v1/capabilities` | GET | authoritative strategy/feature registry projection |
 | `/api/v1/catalog/symbols` | GET | existing catalog service |
 | `/api/v1/catalog/coverage` | GET | existing catalog service |
+| `/api/v1/portfolio/candidates` | GET | existing verified resilience-run discovery, metadata projection only |
 | `/api/v1/runs/{run_id}` | GET | existing completed-run reader |
 | `/api/v1/configs/{config_id}` | GET | existing config reader |
+| `/api/v1/visualizer/sessions/{run_id}` | POST (optional) | explicitly authorized, same-origin in-memory V2 session launch via existing coordinator; **not research execution** |
 
-There are no browser API routes for run creation, engine execution, configuration writes, delete/update operations, trading, promotion, or live-bot actions.
+There are no browser API routes for research/backtest run creation, engine execution, configuration writes, stored-run mutation, trading, promotion, or live-bot actions. The optional POST starts a *read-only visualizer HTTP session* for an already verified completed run; it is not a research job or write endpoint. It additionally requires a runtime bearer token, exact same-origin `Origin`, and `Sec-Fetch-Site` same-origin checks. Its session is stopped on replacement or application shutdown.
 
-`tests/test_browser_http.py::test_browser_api_route_inventory_is_read_only` fails if the API method/path inventory changes without an explicit test update.
+Both route-inventory tests fail if the respective API method/path contracts change without an explicit test update.
 
 ## Local security boundary
 
@@ -77,7 +79,7 @@ The browser completed-run path delegates to `read_completed_run` and does not re
 
 ## Remaining integration and execution gates
 
-This audit certifies only the **read-only component boundaries and reuse contracts** listed above. The repository now includes `browser_launcher.py` and `tests/test_browser_launcher.py`, which cover runtime composition, static assets, token-authenticated read-only API operations and loopback binding. These tests **do not** establish operator-local historical browser certification or authorize POST/PUT/PATCH/DELETE operations or research/backtest execution.
+This audit certifies only the **read-only component boundaries and reuse contracts** listed above. The repository now includes `browser_launcher.py` and `tests/test_browser_launcher.py`, which cover runtime composition, static assets, token-authenticated read-only API operations and loopback binding. These tests **do not** establish operator-local historical browser certification or authorize any additional POST, PUT, PATCH or DELETE operations, configuration writes, or research/backtest execution. The sole currently permitted POST is the already-tested, in-memory, read-only visualizer session launch described above.
 
 The next gate is to run the **existing** V2 historical chart parity command described in `docs/browser_chart_payload_parity_operator_gate.md` against the canonical saved workstation run and inspect its evidence, alongside a practical browser session check for saved configurations and finalized-run Portfolio discovery. Do not duplicate the existing launcher, historical parity comparator, or Data Lake readers.
 
