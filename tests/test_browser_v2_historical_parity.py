@@ -152,3 +152,69 @@ def test_main_invalidates_stale_pass_when_canonical_loading_fails(tmp_path, monk
     with pytest.raises(ValueError, match="canonical data unavailable"):
         parity.main(["--evidence-dir", str(tmp_path), "--output-root", str(tmp_path)])
     assert not summary_path.exists()
+
+
+def test_review_only_rechecks_frozen_capture_hashes_without_market_data(tmp_path, monkeypatch):
+    import pytest
+    from crypto_strategy_lab import browser_v2_historical_parity as parity
+
+    desktop = _Model(sides=("LONG",) * 79)
+    browser = _Model(sides=("LONG",) * 79)
+    desktop.manifest["run_id"] = browser.manifest["run_id"] = "BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f"
+    capture_parity(
+        desktop, browser, tmp_path,
+        browser_payload=lambda i, tf: browser.build_v2_diagnostic_payload(
+            trade_index=i, chart_timeframe=tf,
+        ),
+    )
+    def no_data_lake(*_args, **_kwargs):
+        raise AssertionError("Review must never load market data")
+    monkeypatch.setattr(parity, "load_models", no_data_lake)
+    report = parity.review_captured_parity(tmp_path)
+    assert report == {
+        "run_id": parity.DEFAULT_RUN_ID, "trade_count": 79, "cases_checked": 9, "pass": True,
+    }
+    assert parity.main(["--review-only", "--evidence-dir", str(tmp_path)]) == 0
+
+
+def test_review_only_rejects_tampering_missing_files_and_false_summary(tmp_path):
+    import json
+    import pytest
+    from crypto_strategy_lab.browser_v2_historical_parity import review_captured_parity
+
+    desktop = _Model(sides=("LONG",) * 79)
+    browser = _Model(sides=("LONG",) * 79)
+    capture_parity(
+        desktop, browser, tmp_path,
+        browser_payload=lambda i, tf: browser.build_v2_diagnostic_payload(
+            trade_index=i, chart_timeframe=tf,
+        ),
+    )
+    path = tmp_path / "browser_trade_000_4h.json"
+    original = path.read_text(encoding="utf-8")
+    payload = json.loads(original)
+    payload["candles"][0]["close"] = 999.0
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="Captured payload differs"):
+        review_captured_parity(tmp_path)
+    path.write_text(original, encoding="utf-8")
+
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        review_captured_parity(tmp_path)
+    path.write_text(original, encoding="utf-8")
+
+    summary_path = tmp_path / "summary.json"
+    original_summary = summary_path.read_text(encoding="utf-8")
+    summary = json.loads(original_summary)
+    summary["pass"] = False
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    with pytest.raises(ValueError, match="not PASS"):
+        review_captured_parity(tmp_path)
+    summary_path.write_text(original_summary, encoding="utf-8")
+
+    summary = json.loads(original_summary)
+    summary["cases"].append(summary["cases"][0])
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    with pytest.raises(ValueError, match="Duplicate parity case"):
+        review_captured_parity(tmp_path)
