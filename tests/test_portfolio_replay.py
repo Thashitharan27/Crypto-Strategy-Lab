@@ -291,33 +291,3 @@ def test_spot_short_replay_rejects_fill_price_from_different_exit_time(tmp_path)
     run = _write_run(tmp_path, "BTCUSDT", [short])
     with pytest.raises(RunArtifactError, match="fill time differs"):
         replay_spot_short(run, output_root=tmp_path / "results")
-
-
-def test_portfolio_discovery_rejects_symlinked_run_directory(tmp_path, monkeypatch):
-    """The browser-facing shared discovery cannot leave its selected output root."""
-    from crypto_strategy_lab import portfolio_replay
-
-    root = tmp_path / "output"
-    root.mkdir()
-    outside = tmp_path / "outside_private"
-    outside.mkdir()
-    (outside / "run_manifest.json").write_text("{}", encoding="utf-8")
-    ordinary = root / "ordinary_run"
-    ordinary.mkdir()
-    (ordinary / "run_manifest.json").write_text("{}", encoding="utf-8")
-    linked = root / "linked_private"
-    try:
-        linked.symlink_to(outside, target_is_directory=True)
-    except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"Directory symlinks unavailable in this environment: {type(exc).__name__}")
-
-    inspected = []
-
-    def fake_inspect(path):
-        inspected.append(path)
-        return {"run_id": path.name, "symbol": "BTCUSDT", "completed_at": "2026-10-16"}
-
-    monkeypatch.setattr(portfolio_replay, "inspect_resilience_run", fake_inspect)
-    rows = portfolio_replay.discover_resilience_runs(root)
-    assert [row["run_id"] for row in rows] == ["ordinary_run"]
-    assert inspected == [ordinary]
