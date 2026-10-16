@@ -1909,8 +1909,8 @@ def test_deeper_limit_fill_minute_allows_protective_stop_and_accounts_fees():
 
     assert len(engine.completed_pairs) == 1
     pos = engine.completed_pairs[0].positions()[0]
-    assert pd.Timestamp(pos.entry_time) == times[481]
-    assert pd.Timestamp(pos.exit_time) == times[481]
+    assert pd.to_datetime(pos.entry_time, utc=True) == pd.to_datetime(times[481], utc=True)
+    assert pd.to_datetime(pos.exit_time, utc=True) == pd.to_datetime(times[481], utc=True)
     assert pos.exit_reason == ExitReason.SL
     assert np.isclose(pos.entry_price, 138.2)
     assert np.isclose(pos.exit_price, 121.4)
@@ -1934,11 +1934,11 @@ def test_deeper_limit_fill_minute_defers_profit_target_until_next_minute():
 
     assert len(engine.completed_pairs) == 1
     pos = engine.completed_pairs[0].positions()[0]
-    assert pd.Timestamp(pos.entry_time) == times[481]
+    assert pd.to_datetime(pos.entry_time, utc=True) == pd.to_datetime(times[481], utc=True)
     # The 195 high on the fill minute is intentionally ignored because OHLC
     # cannot prove it occurred after the pullback fill. The same high on the
     # following minute is eligible and closes at the fixed-R target.
-    assert pd.Timestamp(pos.exit_time) == times[482]
+    assert pd.to_datetime(pos.exit_time, utc=True) == pd.to_datetime(times[482], utc=True)
     assert pos.exit_reason == ExitReason.TP
     assert np.isclose(pos.entry_price, 138.2)
     assert np.isclose(pos.exit_price, 188.6)
