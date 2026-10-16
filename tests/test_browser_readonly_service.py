@@ -73,3 +73,33 @@ def test_portfolio_candidates_preserve_empty_discovery_without_side_effects(tmp_
         result = BrowserReadOnlyService(catalog=None).portfolio_candidates(tmp_path)
     assert result == []
     discover.assert_called_once_with(tmp_path)
+
+
+def test_portfolio_discovery_skips_linked_directories_outside_root(tmp_path, monkeypatch):
+    """Follow the shared discovery path but never inspect linked external runs."""
+    import pytest
+    from crypto_strategy_lab import portfolio_replay
+
+    root = tmp_path / "output"
+    root.mkdir()
+    outside = tmp_path / "private"
+    outside.mkdir()
+    (outside / "run_manifest.json").write_text("{}", encoding="utf-8")
+    ordinary = root / "ordinary_run"
+    ordinary.mkdir()
+    (ordinary / "run_manifest.json").write_text("{}", encoding="utf-8")
+    try:
+        (root / "linked_private").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Directory symlinks unavailable: {type(exc).__name__}")
+
+    inspected = []
+
+    def inspect(path):
+        inspected.append(path)
+        return {"run_id": path.name, "symbol": "BTCUSDT", "completed_at": "2026-10-16"}
+
+    monkeypatch.setattr(portfolio_replay, "inspect_resilience_run", inspect)
+    result = portfolio_replay.discover_resilience_runs(root)
+    assert [row["run_id"] for row in result] == ["ordinary_run"]
+    assert inspected == [ordinary]
