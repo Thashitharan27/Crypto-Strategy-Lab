@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -144,7 +145,7 @@ def data_lake_bundle():
     })
     intrabar_times = pd.date_range(times[0], periods=720, freq="1min", tz="UTC")
     intrabar = pd.DataFrame({
-        "period_start": intrabar_times, "open": 1.0, "high": 2.0, "low": .5,
+        "period_start": intrabar_times, "open": 1.0, "high": 2.0, "low": .5, "close": 1.5,
     })
     research = pd.DataFrame({
         "timestamp": times, "available_at": times + pd.Timedelta(hours=4), "funding": .01,
@@ -301,7 +302,8 @@ def test_constructs_from_current_data_lake_bundle_path():
         data_lake_bundle().strategy["period_start"].to_numpy(dtype="datetime64[ns]"),
     )
     assert np.array_equal(prepared.open, np.ones(3))
-    assert prepared.research[0].name == "funding"
+    funding = next(block for block in prepared.research if block.name == "funding")
+    assert np.array_equal(funding.values["funding"], np.full(3, 0.01))
     assert execution is not None and len(execution.timestamp) == 720
 
 
@@ -333,7 +335,7 @@ def test_bundle_feature_timestamps_must_exactly_match_strategy(block):
         from_data_lake_bundle(bundle)
 
 
-def test_prepared_run_cache_uses_larger_budget_for_store_and_load(tmp_path, monkeypatch):
+def test_prepared_run_cache_applies_bounded_store_and_load_budgets(tmp_path, monkeypatch):
     cache = PreparedRunCache(tmp_path)
     original_bounded_connection = cache._bounded_connection
     seen = []
@@ -355,9 +357,9 @@ def test_prepared_run_cache_uses_larger_budget_for_store_and_load(tmp_path, monk
 
     assert seen[0] == (PREPARED_CACHE_STORE_MEMORY_LIMIT, 1)
     assert seen[1] == (PREPARED_CACHE_LOAD_MEMORY_LIMIT, 1)
-    assert PREPARED_CACHE_STORE_MEMORY_LIMIT == "3GB"
+    assert PREPARED_CACHE_STORE_MEMORY_LIMIT == "1GB"
     assert PREPARED_CACHE_LOAD_MEMORY_LIMIT == "1GB"
-    assert PREPARED_CACHE_STORE_ROW_GROUP_SIZE == 16384
+    assert PREPARED_CACHE_STORE_ROW_GROUP_SIZE == 2048
 
 
 def test_prepared_run_cache_duckdb_connection_is_memory_bounded_and_spillable(tmp_path):
@@ -402,7 +404,9 @@ def test_fib_evidence_is_persisted_in_feature_context_when_required():
 
     prepared, _ = from_data_lake_bundle(bundle, policy)
     fib = next(block for block in prepared.research if block.name == "fibonacci_retracement")
-    assert set(fib.values) == set(FIB_RULE_INDICATORS)
+    assert set(fib.values) == set(FIB_RULE_INDICATORS) | {
+        "_FIB_CANDIDATE_INVENTORY_JSON", "_FIB_SELECTED_CANDIDATE_ID",
+    }
     assert np.array_equal(fib.available_at, prepared.decision_available_at)
 
     context = feature_context_frame(prepared)
