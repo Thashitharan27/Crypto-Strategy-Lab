@@ -38,17 +38,19 @@ timestamps fail closed before any candidate touch is accepted. This reuses
 first-touch helper and does not expose a browser execution API.
 
 This closes the **minute-grid completeness** defect for the native Fibonacci
-pending-fill owner.
+pending-fill owner. It does not by itself establish within-minute event-order
+equivalence for every exit mode or historical trade-level parity. Those remain
+release gates before browser-controlled execution or configuration writes.
 
-The existing fill-minute collision policy is also being certified incrementally:
-for a newly filled Fibonacci pending order, the exact fill minute may apply an
-adverse protective stop immediately, while favourable TP/profit extremes on that
-same OHLC minute are ignored because their ordering relative to the fill is
-unknowable. A favourable extreme on a later minute is eligible normally. Engine
-regressions additionally assert entry/exit fees and realized P&L/R accounting for
-the same-minute protective-stop case.
 
-This does not yet establish within-minute equivalence for partial TP/SL ladders,
-trailing or break-even activation, or historical trade-level parity against the
-original workstation outputs. Those remain release gates before browser-controlled
-execution or configuration writes.
+## Fill-minute ordering regression (CI-only)
+
+The native Fibonacci pending-limit executor clamps the favorable extreme to the
+actual fill price on the fill minute, for both LONG and SHORT directions, while
+retaining the adverse extreme for stop handling. A regression now checks that
+behavior at a non-opening-minute touch, its timestamp, and the restoration of
+ordinary ranges from the next minute onward. This protects a conservative
+OHLC ambiguity policy; it does **not** prove the ordering of stops, profit
+partials, trailing activations, fees, and position accounting. End-to-end
+minute-collision equivalence and original-file execution replay remain blocked.
+
