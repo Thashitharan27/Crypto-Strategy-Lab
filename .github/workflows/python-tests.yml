@@ -146,6 +146,8 @@ jobs:
           tests/test_trade_parity.py
           tests/test_trade_parity_artifacts.py
           tests/test_walk_forward_monthly_summary.py
+          tests/test_backtester.py
+          tests/test_stage22_risk_semantics.py
 
   data-lake-v2-safety:
     runs-on: ubuntu-latest
