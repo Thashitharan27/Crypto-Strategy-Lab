@@ -1,0 +1,79 @@
+# Original-file browser certification — Windows, 2026-10-16
+
+Base: GitHub main `0e620371f1c94906ebb2509be09278a1ad0e9469`, fetched and
+fast-forwarded before certification. The local implementation adds the two
+identity fixes below; the market-data engine and saved artifacts are unchanged.
+
+## Completed checks
+
+| Gate | Evidence and result |
+| --- | --- |
+| Retained V2 historical evidence | `browser_v2_historical_parity --review-only`: PASS, 9 cases, 79 trades, trades 0/39/78 at 1h/4h/1d. Recomputed payload hashes and exact equality; retained files were not rewritten. |
+| Original saved V3 configurations | `browser_saved_config_parity --http`: PASS for both existing native saved files. Native serialization, browser reader and authenticated HTTP hashes agree; unauthorized requests are rejected; original bytes are unchanged. |
+| Live configuration projections | PASS for both original configs: Configurations raw snapshot, Strategy Designer strategy/features, Research Features and Risk & Execution retain exact JSON values from the same selected snapshot, including six execution profiles. No save or execution controls were enabled. |
+| Original completed outputs | PASS: all 178 completed runs read successfully through the existing native service and authenticated HTTP, with exact expected JSON-safe summary projection. No run was rejected. |
+| Original Portfolio discovery | PASS: 129 verified Every Viable Entry runs, 6,867 candidate rows; HTTP matches the first 100 native projections under its existing response bound. No portfolio replay was executed. |
+| Live Portfolio navigation | PASS after fixing native UUID versus folder ID: the frozen run opens as COMPLETED with 79 trades and the existing saved metrics. |
+| Historical 1-minute coverage | PASS: 3,287,520 unique, ordered, minute-aligned canonical candles from 2020-06-01 inclusive to 2026-09-01 exclusive, with no leading, trailing or internal gaps. Existing loader reused canonical partitions; rebuilding from raw archives was prohibited during this check. |
+| Saved entry/exit chronology | PASS for the 79-trade frozen output: no exit-before-entry, entry-before-signal-availability, actual-entry mismatch or missing entry candle. One terminal exit is exactly at the end-exclusive boundary and explicitly marked END_OF_DATA; it is not claimed as a minute candle. No unexplained missing exit candle. |
+| Real Windows junction containment | PASS: an actual directory junction escaping a temporary completed-run root returns HTTP 404 without calling the saved-run reader; Portfolio excludes it. |
+| React build | PASS: TypeScript and Vite production build. |
+| Local consolidated regressions | 354 passed, 9 skipped, exit 0. Skips concern filesystem symlinks unavailable without the local Windows privilege. |
+| Original-file preservation | PASS: before/after SHA-256 inventories match for all 2,836 files in the configuration and output roots, with no additions, removals or byte changes. |
+
+Original files and captured payloads remain workstation-local. Detailed CLI logs,
+JUnit results, discovery and chronology reports, and before/after preservation
+inventories are retained in the ignored local certification evidence directory.
+
+The test process also printed a Qt background GitHub worker teardown error
+(`Signal source has been deleted`) after its passing summary. This is an
+existing desktop worker lifetime issue, not a failing parity assertion; preserve
+it as a separate follow-up rather than silently declaring a clean desktop log.
+
+## Reproducible migration fixes
+
+1. The retained original manifest and V2 payload use the native run UUID, while
+   the review gate previously required the prefixed output-folder ID. The gate
+   now recognizes only the two exact frozen identities and enforces the
+   BTCUSDT/4h metadata for the native UUID, the 79-trade count, selected trade,
+   timeframe and full required matrix. It does not rename original evidence.
+2. Portfolio displayed native manifest IDs and incorrectly reused those IDs as
+   completed-run folder lookups. The facade now exposes the basename of the
+   already verified run directory as `run_folder_id`. The UI uses that field
+   for navigation, preserves the displayed native `run_id`, and exposes no
+   absolute artifact path. Existing HTTP path containment remains authoritative.
+
+## PR #501 overlap: HOLD
+
+The draft helper remains an isolated, non-executing first-touch proposal alongside
+the existing pending-limit candidate/schedule helpers and the native Fibonacci
+pending-order lifecycle. It has not been merged or enabled.
+
+A local probe of the actual `_has_missing_intrabar` used by the draft confirmed
+that missing first minute, missing last minute, duplicate timestamps and
+off-grid minute timestamps are all accepted. Its current inter-row gap check
+cannot establish complete eligible-candle coverage. The draft tests mock that
+checker and therefore do not close the defect.
+
+The frozen chronological audit establishes persisted timestamp ordering and
+canonical minute availability. It does **not** establish price-event order
+inside one minute's OHLC or prove equivalent pending-limit execution, collisions,
+partials, stops, fees and slippage. Those remain explicit release gates.
+
+## Remaining limits and next task
+
+- File-symlink checks require a Windows symlink privilege unavailable in this
+  session (WinError 1314). Real directory-junction containment was separately
+  exercised successfully. Do not change Windows security settings to bypass it.
+- Only two original saved V3 files exist in the established configuration root.
+  They cover minimal and production configurations with all six profiles; no
+  separate original saved historical Fibonacci pending-limit fixture was
+  available there. Synthetic repository fixtures are not original-file evidence.
+- Review-only chart certification checks retained data consistency, not a new
+  engine replay or interactive zoom/pan/resize certification.
+
+Next: establish one authoritative pending-limit execution owner with complete
+minute-grid coverage and explicit within-minute collision policy, then certify
+historical execution/configuration parity before Phase 5 writes or execution.
+Keep browser execution and configuration writes disabled, PySide6 fallback
+supported, and PR #501 on hold.

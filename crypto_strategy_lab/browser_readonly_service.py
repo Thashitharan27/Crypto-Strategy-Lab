@@ -42,6 +42,7 @@ class BrowserReadOnlyService:
         return [
             {
                 "run_id": row["run_id"],
+                "run_folder_id": Path(row["run_dir"]).name,
                 "symbol": row["symbol"],
                 "strategy_timeframe": row.get("strategy_timeframe"),
                 "candidate_rows": row["candidate_rows"],
