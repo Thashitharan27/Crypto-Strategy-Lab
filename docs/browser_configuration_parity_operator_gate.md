@@ -8,6 +8,27 @@ For an existing v3 saved config file, compare the complete value returned by the
 
 The browser Configurations page, Strategy Designer, Research Features, and Risk & Execution views must derive from that same returned config object, **not** a copy of independent browser defaults. Retain original raw JSON inspection. Compare original nested sections `data`, `features`, `strategy`, `execution` wherever present.
 
+## Local authenticated HTTP parity without starting a server
+
+On the original Windows workstation, the existing saved-config parity CLI supports
+an optional in-process check of the **actual** authenticated FastAPI route:
+
+```powershell
+python -m crypto_strategy_lab.browser_saved_config_parity --http ".\\config\\data_lake\\SAVED_ID.json"
+```
+
+Use the path to an actual native saved configuration within the established
+configuration folder; replace the sample name with the real file. This starts
+no browser listener and accesses no Data Lake. It checks that an unauthenticated
+request is rejected, compares the full native reader snapshot against the
+authenticated endpoint response, and verifies unchanged source bytes. It prints
+only file basename and hashes, not configuration values or tokens.
+
+This automated HTTP check **does not** replace the operator's browser UI
+projection inspection in Configurations, Strategy Designer, Research Features,
+and Risk & Execution, or the live browser session check. Do not infer them from
+an in-process HTTP PASS.
+
 ## Evidence requirements
 
 1. Record Git commit, saved configuration ID, config version, canonical source path, and SHA-256 of the normalized **full** JSON object (sorted keys, deterministic separators, no NaN or Infinity). Do not upload personal/private config values or local tokens.
