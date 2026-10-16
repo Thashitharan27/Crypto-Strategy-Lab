@@ -6,6 +6,7 @@ guessing execution timestamps, fees, stop levels or PnL semantics.
 from __future__ import annotations
 
 import csv
+from math import isfinite
 from pathlib import Path
 from typing import Mapping
 
@@ -33,7 +34,10 @@ def read_mapped_trade_csv(
 
     with Path(path).open("r", newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
-        columns = set(reader.fieldnames or ())
+        headers = reader.fieldnames or []
+        if len(headers) != len(set(headers)):
+            raise ValueError("duplicate trade columns in CSV header")
+        columns = set(headers)
         missing_columns = set(source_names) - columns
         if missing_columns:
             raise ValueError(f"missing trade columns: {sorted(missing_columns)}")
@@ -48,7 +52,10 @@ def read_mapped_trade_csv(
                     raise ValueError(f"empty {field} on CSV line {line_number}")
                 if field in NUMERIC_FIELDS:
                     try:
-                        row[field] = float(value)
+                        parsed = float(value)
+                        if not isfinite(parsed):
+                            raise ValueError("non-finite numeric value")
+                        row[field] = parsed
                     except ValueError as exc:
                         raise ValueError(f"invalid numeric {field} on CSV line {line_number}") from exc
                 else:
