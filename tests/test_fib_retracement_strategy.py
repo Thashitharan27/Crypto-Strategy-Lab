@@ -1766,6 +1766,39 @@ def test_deeper_limit_fast_intrabar_window_enforces_same_complete_grid():
         p._fib_limit_fill(1, 138.2, "LONG")
 
 
+def test_deeper_limit_prepared_array_window_fails_closed_on_missing_minutes():
+    import pandas as pd
+    import pytest
+    from crypto_strategy_lab.prepared_backtest import IntrabarExecutionData
+
+    p = _limit_probe()
+    p.config.use_intrabar_data = True
+    p.config.intrabar_timeframe_minutes = 1
+    complete = _complete_limit_intrabar_frame(p)
+
+    def execution_data(frame):
+        return IntrabarExecutionData(
+            frame["timestamp"].to_numpy(),
+            pd.Timedelta(minutes=1),
+            frame["open"].to_numpy(),
+            frame["high"].to_numpy(),
+            frame["low"].to_numpy(),
+        )
+
+    p.intrabar_data = execution_data(complete)
+    raw, timestamp = p._fib_limit_fill(1, 138.2, "LONG")
+    assert raw == 138.2
+    assert pd.to_datetime(timestamp, utc=True) == pd.to_datetime(
+        complete.loc[1, "timestamp"], utc=True
+    )
+
+    for missing in (0, 20, len(complete) - 1):
+        incomplete = complete.drop(index=missing).reset_index(drop=True)
+        p.intrabar_data = execution_data(incomplete)
+        with pytest.raises(ValueError, match="complete intrabar coverage"):
+            p._fib_limit_fill(1, 138.2, "LONG")
+
+
 def test_deeper_limit_full_engine_sizes_trade_at_fill_price():
     import pandas as pd
     from dataclasses import replace
