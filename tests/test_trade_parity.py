@@ -85,3 +85,19 @@ def test_79_trade_rehearsal_rejects_missing_last_trade():
     differences = compare_trades(baseline, baseline[:-1])
     assert differences[0].field == "trade_count"
     assert (differences[0].expected, differences[0].actual) == (79, 78)
+
+
+def test_matching_duplicate_trade_ids_are_not_a_parity_pass():
+    rows = [trade(trade_id="DUP", pnl=1.0), trade(trade_id="DUP", pnl=2.0)]
+    differences = compare_trades(rows, [dict(row) for row in rows])
+    assert {(d.trade_index, d.field) for d in differences} == {
+        (1, "expected_trade_id_duplicate"), (1, "actual_trade_id_duplicate")
+    }
+
+
+def test_invalid_trade_identity_is_rejected_even_on_both_sides():
+    rows = [trade(trade_id="")]
+    differences = compare_trades(rows, [dict(row) for row in rows])
+    assert {d.field for d in differences} == {
+        "expected_trade_id_valid", "actual_trade_id_valid"
+    }

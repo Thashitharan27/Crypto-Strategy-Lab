@@ -48,6 +48,18 @@ def compare_trades(
     differences: list[ParityDifference] = []
     if len(expected) != len(actual):
         differences.append(ParityDifference(-1, "trade_count", len(expected), len(actual)))
+    # A duplicated trade identity makes a purportedly exact historical replay
+    # ambiguous even when both reports contain the same duplicated rows.
+    for label, rows in (("expected", expected), ("actual", actual)):
+        seen: set[str] = set()
+        for index, row in enumerate(rows):
+            identity = row.get("trade_id")
+            if not isinstance(identity, str) or not identity.strip():
+                differences.append(ParityDifference(index, f"{label}_trade_id_valid", identity, "nonempty string"))
+            elif identity in seen:
+                differences.append(ParityDifference(index, f"{label}_trade_id_duplicate", identity, "unique trade ID"))
+            else:
+                seen.add(identity)
     for index, (old, new) in enumerate(zip(expected, actual)):
         for key in TRADE_FIELDS:
             if key not in old or key not in new:
