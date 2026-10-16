@@ -184,6 +184,7 @@ def test_review_only_rejects_tampering_missing_files_and_false_summary(tmp_path)
 
     desktop = _Model(sides=("LONG",) * 79)
     browser = _Model(sides=("LONG",) * 79)
+    desktop.manifest["run_id"] = browser.manifest["run_id"] = "BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f"
     capture_parity(
         desktop, browser, tmp_path,
         browser_payload=lambda i, tf: browser.build_v2_diagnostic_payload(
