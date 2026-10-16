@@ -272,3 +272,38 @@ def test_fib_fill_minute_combined_partials_allow_adverse_sl1_then_later_tp1():
     assert pos.tp1_fees == pytest.approx(
         pos.tp1_exit_price * pos.tp1_quantity * 0.0005
     )
+
+
+def test_fib_fill_minute_defers_trailing_activation_until_next_minute():
+    """Trailing cannot activate on a possibly pre-entry favorable extreme."""
+    from crypto_strategy_lab.fib_retracement import FibonacciRetracementMixin
+    from crypto_strategy_lab.trade import ExitSource
+
+    class FibExitEngine(FibonacciRetracementMixin, BacktestEngine):
+        pass
+
+    profile = base_profile(
+        partial_profit_enabled=False,
+        trailing_enabled=True,
+        trailing_activation_r=1,
+        trailing_distance_r=0.5,
+    )
+    engine, pos = open_long(
+        (100, 100), (130, 99), (130, 99),
+        profile=profile, engine_class=FibExitEngine,
+    )
+    fill_time = pd.Timestamp(engine.times[1])
+    pos.fib_limit_fill_time = fill_time
+    pos.fib_limit_fill_price = 100.0
+
+    engine._maybe_exit_bar(pos, 1, 130.0, 99.0, fill_time, ExitSource.INTRABAR)
+    assert not pos.trailing_active
+    assert pos.trailing_stop is None
+    assert pos.is_open
+
+    following_time = fill_time + pd.Timedelta(minutes=1)
+    engine._maybe_exit_bar(pos, 1, 130.0, 99.0, following_time, ExitSource.INTRABAR)
+    assert pos.trailing_active
+    assert pos.trailing_activation_time == following_time
+    assert pos.trailing_stop is not None
+    assert pos.is_open
