@@ -135,3 +135,20 @@ def test_failed_parity_capture_does_not_leave_stale_pass_summary(tmp_path):
     with pytest.raises(ValueError, match="trade counts differ"):
         capture_parity(desktop, browser, tmp_path, browser_payload=lambda i, tf: {})
     assert not summary_path.exists()
+
+
+def test_main_invalidates_stale_pass_when_canonical_loading_fails(tmp_path, monkeypatch):
+    import json
+    import pytest
+    from crypto_strategy_lab import browser_v2_historical_parity as parity
+
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(json.dumps({"pass": True, "run_id": "previous"}), encoding="utf-8")
+
+    def unavailable(*_args):
+        raise ValueError("canonical data unavailable")
+
+    monkeypatch.setattr(parity, "load_models", unavailable)
+    with pytest.raises(ValueError, match="canonical data unavailable"):
+        parity.main(["--evidence-dir", str(tmp_path), "--output-root", str(tmp_path)])
+    assert not summary_path.exists()
