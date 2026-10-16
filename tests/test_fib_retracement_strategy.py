@@ -1777,6 +1777,50 @@ def test_deeper_limit_short_intrabar_gap_through_first_touch_matches_all_windows
     assert timestamp == times[3]
 
 
+def test_deeper_limit_long_gap_through_first_touch_matches_all_windows():
+    import pandas as pd
+    from crypto_strategy_lab.data.intrabar_index import as_searchsorted_intrabar
+    from crypto_strategy_lab.prepared_backtest import IntrabarExecutionData
+
+    p = _limit_probe()
+    p.config.use_intrabar_data = True
+    p.config.intrabar_timeframe_minutes = 1
+    trigger = 138.2
+    times = pd.date_range(p.times[1], periods=60, freq="min")
+    frame = pd.DataFrame({
+        "timestamp": times,
+        "open": [145.0] * 60,
+        "high": [150.0] * 60,
+        "low": [140.0] * 60,
+    })
+    # A later, better-priced gap must never displace the first touch.
+    frame.loc[3, ["open", "high", "low"]] = [145.0, 148.0, 137.0]
+    frame.loc[7, ["open", "high", "low"]] = [130.0, 138.0, 125.0]
+
+    def windows():
+        return [
+            frame,
+            as_searchsorted_intrabar(frame),
+            IntrabarExecutionData(
+                frame.timestamp.to_numpy(), pd.Timedelta(minutes=1),
+                frame.open.to_numpy(), frame.high.to_numpy(), frame.low.to_numpy(),
+            ),
+        ]
+
+    for intrabar in windows():
+        p.intrabar_data = intrabar
+        raw, timestamp = p._fib_limit_fill(1, trigger, "LONG")
+        assert raw == trigger
+        assert pd.to_datetime(timestamp, utc=True) == pd.to_datetime(times[3], utc=True)
+
+    frame.loc[3, ["open", "high", "low"]] = [135.0, 140.0, 132.0]
+    for intrabar in windows():
+        p.intrabar_data = intrabar
+        raw, timestamp = p._fib_limit_fill(1, trigger, "LONG")
+        assert raw == 135.0
+        assert pd.to_datetime(timestamp, utc=True) == pd.to_datetime(times[3], utc=True)
+
+
 def test_deeper_limit_intrabar_fill_rejects_incomplete_minute_grid():
     import pandas as pd
     import pytest
