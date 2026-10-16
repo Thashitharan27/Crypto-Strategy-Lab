@@ -56,7 +56,7 @@ def _report(interval, *, start="2020-01-01T00:00:00+00:00", status=DataQualitySt
 
 def test_structural_requirement_matches_runtime_warmup_contract():
     request = _request()
-    requirement = structural_benchmark_requirement(request, FeatureConfig())
+    requirement = structural_benchmark_requirement(request, FeatureConfig(market_regime_method="BTC_STRUCTURAL"))
 
     assert requirement is not None
     assert requirement.symbol == "BTCUSDT"
@@ -68,7 +68,7 @@ def test_structural_requirement_matches_runtime_warmup_contract():
 
 def test_required_run_quality_includes_structural_benchmark_prestart_history():
     request = _request()
-    features = FeatureConfig()
+    features = FeatureConfig(market_regime_method="BTC_STRUCTURAL")
     requirement = structural_benchmark_requirement(request, features)
     base = DataQualityReport((_report("1h"), _report("1m")))
     calls = []
@@ -150,6 +150,8 @@ def test_setup_cannot_be_ready_when_structural_warmup_is_missing():
     try:
         from PySide6.QtCore import QDate
 
+        regime = window.feature_form.widgets["market_regime_method"]
+        regime.setCurrentIndex(regime.findData("BTC_STRUCTURAL"))
         window.start.setDate(QDate(2020, 1, 1))
         window.end.setDate(QDate(2020, 12, 1))
         window.strategy_tf.setCurrentText("1 Hour")
