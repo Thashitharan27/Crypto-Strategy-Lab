@@ -53,3 +53,4 @@ ordinary ranges from the next minute onward. This protects a conservative
 OHLC ambiguity policy; it does **not** prove the ordering of stops, profit
 partials, trailing activations, fees, and position accounting. End-to-end
 minute-collision equivalence and original-file execution replay remain blocked.
+

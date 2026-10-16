@@ -1865,6 +1865,113 @@ def test_deeper_limit_prepared_engine_uses_fast_intrabar_first_touch():
 
 
 
+def _prepared_fib_limit_collision_engine(*, fill_low, fill_high, next_high=145.0):
+    import pandas as pd
+    from dataclasses import replace
+    from test_prepared_backtest import valid_kwargs
+    from crypto_strategy_lab.config import BacktestConfig
+    from crypto_strategy_lab.data_lake_production_engine import DataLakeProductionBacktestEngine
+    from crypto_strategy_lab.prepared_backtest import PreparedBacktestFrame, IntrabarExecutionData
+    from crypto_strategy_lab.strategy_profiles import default_profiles
+
+    class Engine(FibonacciRetracementMixin, DataLakeProductionBacktestEngine):
+        pass
+
+    p = _limit_probe()
+    kwargs = valid_kwargs(4)
+    kwargs.update(open=p.open, high=p.high, low=p.low, close=p.close, atr=np.ones(4))
+    prepared = PreparedBacktestFrame(**kwargs)
+    profiles = {
+        key: replace(profile, enabled=True)
+        for key, profile in default_profiles().items()
+    }
+    config = replace(
+        BacktestConfig(),
+        strategy_profiles=profiles,
+        enable_trade_telemetry=False,
+        fib_third_retest_entry=True,
+        slippage=0.0,
+        maker_fee=0.0002,
+        taker_fee=0.0005,
+        use_maker_entry=False,
+        use_maker_exit=False,
+        fib_stop_buffer_atr=0.0,
+        fib_target_mode="FIXED_R",
+        fib_fixed_target_r=3.0,
+        strategy_timeframe_minutes=240,
+        telemetry_interval_minutes=240,
+    )
+    times = pd.date_range("2025-01-01", periods=960, freq="min")
+    opening = np.full(960, 145.0)
+    high = np.full(960, 150.0)
+    low = np.full(960, 140.0)
+    # Strategy execution index 2 starts at minute 480. Minute 481 is the first
+    # limit touch. The fill minute deliberately contains an unordered
+    # favourable extreme as well as the supplied adverse low.
+    low[481] = float(fill_low)
+    high[481] = float(fill_high)
+    high[482] = float(next_high)
+    intrabar = IntrabarExecutionData(
+        times, pd.Timedelta(minutes=1), opening, high, low
+    )
+    engine = Engine.from_prepared(prepared, intrabar, config)
+    engine.signal_strategy_mode = FIB_RETRACEMENT_MODE
+    engine.fib_retracement = p.fib_retracement
+    return engine, times
+
+
+def test_deeper_limit_fill_minute_allows_protective_stop_and_accounts_fees():
+    import pandas as pd
+    from crypto_strategy_lab.trade import ExitReason
+
+    engine, times = _prepared_fib_limit_collision_engine(
+        fill_low=120.0,
+        fill_high=195.0,
+        next_high=195.0,
+    )
+    engine.run()
+
+    assert len(engine.completed_pairs) == 1
+    pos = engine.completed_pairs[0].positions()[0]
+    assert pd.to_datetime(pos.entry_time, utc=True) == pd.to_datetime(times[481], utc=True)
+    assert pd.to_datetime(pos.exit_time, utc=True) == pd.to_datetime(times[481], utc=True)
+    assert pos.exit_reason == ExitReason.SL
+    assert np.isclose(pos.entry_price, 138.2)
+    assert np.isclose(pos.exit_price, 121.4)
+    expected_gross = (pos.exit_price - pos.entry_price) * pos.quantity
+    expected_entry_fee = pos.entry_price * pos.quantity * 0.0005
+    expected_exit_fee = pos.exit_price * pos.quantity * 0.0005
+    assert np.isclose(pos.gross_pnl, expected_gross)
+    assert np.isclose(pos.entry_fee, expected_entry_fee)
+    assert np.isclose(pos.exit_fee, expected_exit_fee)
+    assert np.isclose(pos.fees, pos.entry_fee + pos.exit_fee)
+    assert np.isclose(pos.net_pnl, pos.gross_pnl - pos.fees)
+    assert np.isclose(pos.net_r, pos.net_pnl / pos.risk_amount)
+
+
+def test_deeper_limit_fill_minute_defers_profit_target_until_next_minute():
+    import pandas as pd
+    from crypto_strategy_lab.trade import ExitReason
+
+    engine, times = _prepared_fib_limit_collision_engine(
+        fill_low=138.0,
+        fill_high=195.0,
+        next_high=195.0,
+    )
+    engine.run()
+
+    assert len(engine.completed_pairs) == 1
+    pos = engine.completed_pairs[0].positions()[0]
+    assert pd.to_datetime(pos.entry_time, utc=True) == pd.to_datetime(times[481], utc=True)
+    # The 195 high on the fill minute is intentionally ignored because OHLC
+    # cannot prove it occurred after the pullback fill. The same high on the
+    # following minute is eligible and closes at the fixed-R target.
+    assert pd.to_datetime(pos.exit_time, utc=True) == pd.to_datetime(times[482], utc=True)
+    assert pos.exit_reason == ExitReason.TP
+    assert np.isclose(pos.entry_price, 138.2)
+    assert np.isclose(pos.exit_price, 188.6)
+
+
 def test_limit_fill_bar_fallback_cannot_credit_earlier_profit_or_exit_before_fill():
     import pandas as pd
     from crypto_strategy_lab.trade import ExitSource
