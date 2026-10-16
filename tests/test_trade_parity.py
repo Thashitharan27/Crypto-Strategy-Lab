@@ -101,3 +101,12 @@ def test_invalid_trade_identity_is_rejected_even_on_both_sides():
     assert {d.field for d in differences} == {
         "expected_trade_id_valid", "actual_trade_id_valid"
     }
+
+
+@pytest.mark.parametrize("field", ["side", "signal_time", "entry_time", "exit_time", "exit_reason"])
+def test_equal_blank_required_trade_text_cannot_pass(field):
+    record = trade(**{field: "  "})
+    differences = compare_trades([record], [dict(record)])
+    assert {d.field for d in differences} == {
+        f"expected_{field}_valid", f"actual_{field}_valid"
+    }
