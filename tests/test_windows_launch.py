@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from crypto_strategy_lab.gui import chatgpt_connection
+from crypto_strategy_lab.gui import chatgpt_connection_impl
 from crypto_strategy_lab.gui import github_manager
 from crypto_strategy_lab.gui.github_manager import CREATE_NO_WINDOW, GitManager
 
@@ -50,7 +51,9 @@ def test_qprocess_without_create_modifier_still_initializes(monkeypatch):
             self.channel_mode = mode
 
     monkeypatch.setattr(chatgpt_connection.sys, "platform", "win32")
-    monkeypatch.setattr(chatgpt_connection, "QProcess", ProcessWithoutModifier)
+    # Construction is inherited from the implementation; patch its owner,
+    # rather than the facade's separate exported QProcess binding.
+    monkeypatch.setattr(chatgpt_connection_impl, "QProcess", ProcessWithoutModifier)
 
     manager = chatgpt_connection.ChatGPTConnectionManager(lambda: ".")
 

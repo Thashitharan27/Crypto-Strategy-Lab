@@ -327,6 +327,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_chatgpt_connection.py
+          tests/test_windows_launch.py
           tests/test_browser_http.py
           tests/test_browser_http_completed_run.py
           tests/test_browser_http_config.py

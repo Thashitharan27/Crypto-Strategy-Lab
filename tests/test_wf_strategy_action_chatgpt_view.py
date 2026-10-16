@@ -43,7 +43,9 @@ def test_chatgpt_disagreement_never_replaces_strategy_trade(tmp_path):
         auto_advance=False,
     )
 
-    assert result["status"] == "TRADE_SETTLED"
+    # The strategy's settled loss opens its normal research review; the
+    # independent ChatGPT view cannot turn it into a winning short.
+    assert result["status"] == "LOSS_REVIEW_REQUIRED"
     assert result["strategy_action"] == "LONG"
     assert result["chatgpt_view"] == "SHORT"
     assert result["chatgpt_agrees_with_strategy"] is False
