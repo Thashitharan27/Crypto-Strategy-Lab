@@ -58,6 +58,12 @@ Each case records canonical SHA-256 values for the desktop and browser payload. 
 
 Payload equality certifies the historical V2 data/geometry contract. Visual browser interaction (zoom, pan, resize and visible overlay behavior) still needs the already performed operator smoke checks and any future feature-specific UI checks.
 
+## Operator-reported result (2026-10-16)
+
+The workstation operator ran `python -m crypto_strategy_lab.browser_v2_historical_parity` against the original local completed-run store and supplied the command output in the project conversation. It reported **PASS (9/9)** for frozen BTCUSDT 4h baseline, **79 trades**, with identical desktop/browser SHA-256 hashes for trades **0, 39, 78** across **1h, 4h, 1d**. No mismatches were reported.
+
+This is an **operator-reported command PASS**, not an independent review of the local `summary.json` or raw captured payloads. Do not publish those private payloads or mark the full operator evidence review complete without checking the retained local summary. This result certifies no browser write or execution path, and does not alter PR #501's hold.
+
 ## Certification decision
 
-Historical browser chart parity remains **UNVERIFIED** until the frozen workstation command above returns PASS and the local `summary.json` evidence has been reviewed. This gate introduces no run creation, backtest execution, config write, canonical data/cache modification or permission to merge PR #501.
+The frozen workstation command is **operator-reported PASS (9/9)**; independent review of the retained local `summary.json` remains **PENDING**. This gate introduces no run creation, backtest execution, config write, canonical data/cache modification or permission to merge PR #501.
