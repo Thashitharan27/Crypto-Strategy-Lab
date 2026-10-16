@@ -49,6 +49,9 @@ def test_http_preserves_fibonacci_flags_and_all_six_profiles(tmp_path):
     snapshot["features"]["fib_candle_confirmation_enabled"] = True
     snapshot["features"]["fib_first_zone_hold_entry"] = True
     snapshot["features"]["fib_candle_engulfing"] = False
+    for index, profile in enumerate(PROFILE_KEYS):
+        snapshot["strategy"]["profiles"][profile]["flip_direction"] = bool(index % 2)
+        snapshot["execution"]["profiles"][profile]["reward_risk_ratio"] = float(index + 1)
     path.write_text(json.dumps(snapshot, allow_nan=False), encoding="utf-8")
     before = path.read_bytes()
     expected = read_research_config(path)
@@ -68,6 +71,9 @@ def test_http_preserves_fibonacci_flags_and_all_six_profiles(tmp_path):
             assert actual[section] == expected[section]
         assert set(actual["strategy"]["profiles"]) == set(PROFILE_KEYS)
         assert set(actual["execution"]["profiles"]) == set(PROFILE_KEYS)
+        for index, profile in enumerate(PROFILE_KEYS):
+            assert actual["strategy"]["profiles"][profile]["flip_direction"] is bool(index % 2)
+            assert actual["execution"]["profiles"][profile]["reward_risk_ratio"] == float(index + 1)
         assert actual["features"]["fib_candle_confirmation_enabled"] is True
         assert actual["features"]["fib_first_zone_hold_entry"] is True
         assert actual["features"]["fib_candle_engulfing"] is False
