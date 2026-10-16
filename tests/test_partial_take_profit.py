@@ -200,3 +200,34 @@ def test_fib_fill_minute_defers_partial_tp_and_break_even_until_next_bar():
     assert pos.remaining_quantity == pytest.approx(pos.original_quantity / 2)
     expected_tp1_fee = pos.tp1_exit_price * pos.tp1_quantity * 0.0005
     assert pos.tp1_fees == pytest.approx(expected_tp1_fee)
+
+
+def test_fib_fill_minute_keeps_adverse_partial_stop_eligible():
+    """A pending-limit fill suppresses pre-fill profit, not protective exits."""
+    from crypto_strategy_lab.fib_retracement import FibonacciRetracementMixin
+    from crypto_strategy_lab.trade import ExitSource
+
+    class FibExitEngine(FibonacciRetracementMixin, BacktestEngine):
+        pass
+
+    profile = base_profile(
+        partial_stop_enabled=True, sl1_r=0.5, sl1_close_pct=25, sl2_r=2,
+    )
+    engine, pos = open_long(
+        (100, 100), (140, 89), (120, 100),
+        profile=profile, fee=0.0005, engine_class=FibExitEngine,
+    )
+    fill_time = pd.Timestamp(engine.times[1])
+    pos.fib_limit_fill_time = fill_time
+    pos.fib_limit_fill_price = 100.0
+
+    engine._maybe_exit_bar(pos, 1, 140.0, 89.0, fill_time, ExitSource.INTRABAR)
+    assert pos.sl1_hit
+    assert not pos.tp1_hit
+    assert pos.is_open
+    assert pos.sl1_quantity == pytest.approx(pos.original_quantity * 0.25)
+    assert pos.remaining_quantity == pytest.approx(pos.original_quantity * 0.75)
+    assert pos.sl1_exit_time == fill_time
+    assert pos.sl1_fees == pytest.approx(
+        pos.sl1_exit_price * pos.sl1_quantity * 0.0005
+    )
