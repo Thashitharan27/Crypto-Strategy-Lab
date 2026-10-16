@@ -5,6 +5,7 @@ optional; application construction exposes no trading or filesystem endpoints.
 """
 import secrets
 import math
+from numbers import Integral, Real
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
@@ -15,10 +16,15 @@ def _json_safe_summary(value):
         return {key: _json_safe_summary(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe_summary(item) for item in value]
-    if isinstance(value, float) and not math.isfinite(value):
-        if math.isnan(value):
-            return None  # Undefined statistic (for example, no losing trades).
-        return "Infinity" if value > 0 else "-Infinity"
+    if isinstance(value, Integral) and not isinstance(value, bool):
+        return int(value)
+    if isinstance(value, Real) and not isinstance(value, bool):
+        number = float(value)
+        if not math.isfinite(number):
+            if math.isnan(number):
+                return None  # Undefined statistic (for example, no losing trades).
+            return "Infinity" if number > 0 else "-Infinity"
+        return number
     return value
 
 
