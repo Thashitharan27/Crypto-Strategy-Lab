@@ -1,5 +1,6 @@
 """HTTP parity regression using the committed BTCUSDT 4h native v3 fixture."""
 from pathlib import Path
+import json
 
 import pytest
 
@@ -17,7 +18,8 @@ def test_committed_native_config_via_authorized_browser_http(tmp_path):
     target = root / "btc_4h.json"
     target.write_bytes(source.read_bytes())
     before = target.read_bytes()
-    expected = read_research_config(source)
+    native = read_research_config(source)
+    expected = json.loads(json.dumps(native, allow_nan=False))
 
     class Reader:
         def research_config(self, selected):
@@ -30,6 +32,7 @@ def test_committed_native_config_via_authorized_browser_http(tmp_path):
         reply = client.get("/api/v1/configs/btc_4h", headers={"Authorization": "Bearer " + token})
         assert reply.status_code == 200
         assert reply.json()["config"] == expected
+        assert json.dumps(reply.json()["config"], sort_keys=True, allow_nan=False) == json.dumps(native, sort_keys=True, allow_nan=False)
         assert reply.json()["config"]["data"]["strategy_timeframe_minutes"] == 240
     assert target.read_bytes() == before
     assert source.read_bytes() == before

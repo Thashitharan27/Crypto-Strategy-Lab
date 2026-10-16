@@ -27,7 +27,9 @@ def test_fibonacci_execution_profiles_authorized_http_parity(tmp_path):
     path = root / "fibonacci_execution.json"
     path.write_text(json.dumps(saved.to_dict(), allow_nan=False), encoding="utf-8")
     before = path.read_bytes()
-    expected = read_research_config(path)
+    native = read_research_config(path)
+    # JSON represents native tuples as arrays; preserve all JSON scalar types.
+    expected = json.loads(json.dumps(native, allow_nan=False))
 
     class Reader:
         def research_config(self, selected):
@@ -41,7 +43,9 @@ def test_fibonacci_execution_profiles_authorized_http_parity(tmp_path):
         reply = client.get(url, headers={"Authorization": "Bearer " + token})
         assert reply.status_code == 200
         actual = reply.json()["config"]
-    assert actual == expected == saved.to_dict()
+    assert native == saved.to_dict()
+    assert actual == expected
+    assert json.dumps(actual, sort_keys=True, allow_nan=False) == json.dumps(native, sort_keys=True, allow_nan=False)
     assert actual["features"]["fib_third_retest_entry"] is True
     assert actual["execution"]["ema_cross_entry_confirmation_enabled"] is True
     assert actual["strategy"]["profiles"] == expected["strategy"]["profiles"]
