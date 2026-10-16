@@ -77,3 +77,23 @@ minute-grid coverage and explicit within-minute collision policy, then certify
 historical execution/configuration parity before Phase 5 writes or execution.
 Keep browser execution and configuration writes disabled, PySide6 fallback
 supported, and PR #501 on hold.
+
+## CI verification and merge decision
+
+PR #688 implementation commit `0f9da3fca3a529db7633575b988afa103823e974`
+passed the React build, Windows smoke and all blocking Python/Data Lake/runtime
+safety jobs. The full-suite job's green conclusion is insufficient: its
+`continue-on-error` step actually reported **20 failed, 1,868 passed**.
+
+The full-suite log for the PR #687 head merged as the requested main revision
+reported **the same 20 failing test IDs**, with 1,866 passed. The two additional
+passing tests are this PR's regressions. No new failing test ID was introduced,
+but the repository-wide suite remains unverified as a clean PASS. The failures
+span desktop autostart/connections, DI ladder, EMA/FVG/funding, S/R, volume
+profile and walk-forward tests. Detailed comparisons remain local.
+
+**PR #688 remains open and unmerged** under the full-verification requirement.
+Resolve those baseline failures without weakening execution invariants, then
+rerun the full suite and required checks before merging. Do not treat the
+workflow's success status as a passing full suite. PR #501's separate execution
+overlap hold remains unchanged.
