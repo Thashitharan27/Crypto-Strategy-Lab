@@ -1435,11 +1435,12 @@ class FibonacciRetracementMixin:
             fast_window = getattr(frame, "fast_window", None)
             if callable(fast_window):
                 window = fast_window(start, end)
-                timestamps = (
-                    []
-                    if window is None or window.empty
-                    else window.timestamps[window.left : window.right]
-                )
+                if window is None or window.empty:
+                    timestamps = []
+                elif hasattr(window, "timestamps"):
+                    timestamps = window.timestamps[window.left : window.right]
+                else:
+                    timestamps = window.data.timestamp[window.start : window.stop]
                 if not has_complete_intrabar_window(timestamps, start, end, step):
                     raise ValueError(
                         "Fibonacci pending-limit fill requires complete intrabar "
