@@ -1,6 +1,6 @@
 # Browser configuration parity — operator gate
 
-Status: verification plan only. No browser configuration editing or backtest execution is authorized by this document.
+Status (2026-10-16): browser read-only config projections and repository synthetic/committed-fixture API parity tests exist; **operator-local saved-config/UI parity remains PENDING**. No browser configuration editing or backtest execution is authorized by this document.
 
 ## Canonical comparison
 
