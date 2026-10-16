@@ -59,6 +59,9 @@ def check_http(path: Path) -> dict:
         raise ValueError("Saved config filename is not an allowed browser ID")
     original_bytes = path.read_bytes()
     native = read_research_config(path)
+    # Compare the actual JSON wire contract: native tuples serialize as arrays.
+    # Do not alter native config values, persistence or the canonical reader.
+    expected_json = json.loads(json.dumps(native, allow_nan=False))
     token = secrets.token_urlsafe(48)
     app = create_browser_app(
         token=token, read_service=BrowserReadOnlyService(None), config_root=path.parent,
@@ -76,12 +79,12 @@ def check_http(path: Path) -> dict:
     source_unchanged = path.read_bytes() == original_bytes
     return {
         "file": path.name,
-        "native_sha256": _digest(native),
+        "native_sha256": _digest(expected_json),
         "browser_http_sha256": _digest(projected),
         "source_unchanged": source_unchanged,
         "auth_rejected": denied.status_code == 401,
-        "exact_match": type(native) is type(projected) and native == projected,
-        "pass": source_unchanged and native == projected,
+        "exact_match": expected_json == projected,
+        "pass": source_unchanged and expected_json == projected and denied.status_code == 401,
     }
 
 
