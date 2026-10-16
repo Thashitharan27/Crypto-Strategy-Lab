@@ -1914,8 +1914,12 @@ def test_deeper_limit_fill_minute_allows_protective_stop_and_accounts_fees():
     assert pos.exit_reason == ExitReason.SL
     assert np.isclose(pos.entry_price, 138.2)
     assert np.isclose(pos.exit_price, 121.4)
-    assert pos.entry_fee > 0
-    assert pos.exit_fee > 0
+    expected_gross = (pos.exit_price - pos.entry_price) * pos.quantity
+    expected_entry_fee = pos.entry_price * pos.quantity * 0.0005
+    expected_exit_fee = pos.exit_price * pos.quantity * 0.0005
+    assert np.isclose(pos.gross_pnl, expected_gross)
+    assert np.isclose(pos.entry_fee, expected_entry_fee)
+    assert np.isclose(pos.exit_fee, expected_exit_fee)
     assert np.isclose(pos.fees, pos.entry_fee + pos.exit_fee)
     assert np.isclose(pos.net_pnl, pos.gross_pnl - pos.fees)
     assert np.isclose(pos.net_r, pos.net_pnl / pos.risk_amount)
