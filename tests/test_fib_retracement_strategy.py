@@ -1700,6 +1700,29 @@ def _complete_limit_intrabar_frame(p):
     return frame
 
 
+def test_deeper_limit_missing_required_intrabar_data_fails_closed():
+    import pytest
+
+    for direction in ("LONG", "SHORT"):
+        p = _limit_probe(direction)
+        p.config.use_intrabar_data = True
+        p.intrabar_data = None
+        # A strategy OHLC touch is not proof of the first execution-minute
+        # touch when the user required intrabar resolution.
+        with pytest.raises(ValueError, match="complete intrabar coverage"):
+            p._fib_limit_fill(1, 138.2, direction)
+
+
+def test_deeper_limit_explicit_no_intrabar_mode_retains_legacy_bar_fill():
+    p = _limit_probe()
+    p.config.use_intrabar_data = False
+    p.intrabar_data = None
+    p.low[1] = 130.0
+    raw, timestamp = p._fib_limit_fill(1, 138.2, "LONG")
+    assert raw == 138.2
+    assert timestamp == p.times[1]
+
+
 def test_deeper_limit_intrabar_fill_uses_first_touch():
     import pandas as pd
 
