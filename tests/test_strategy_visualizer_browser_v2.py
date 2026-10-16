@@ -125,9 +125,10 @@ def test_v2_fib_levels_remain_drawable_when_swing_anchor_is_offscreen():
 
 def test_v2_renders_trading_ema_overlays_with_toggle():
     html = build_browser_visualizer_v2_html(_Model(), "abc")
-    assert 'id="fib-emas"' in html
-    assert "overlay.period" in html
-    assert "[320,1600]" in html
+    assert 'id="ema-menu"' in html
+    for period in (9, 20, 100, 320, 1600):
+        assert f'class="ema-period" value="{period}"' in html
+    assert "selectedEmas.has(Number(overlay.period))" in html
     assert "series.setData(overlay.data || [])" in html
     assert "window.LightweightCharts.LineSeries" in html
 
@@ -216,11 +217,14 @@ def test_v2_includes_price_ema20_with_existing_trend_emas():
     import inspect
     from crypto_strategy_lab.strategy_visualizer import CompletedRunVisualizer
     html = build_browser_visualizer_v2_html(_Model(), "abc")
-    assert "EMA 20 / 320 / 1600" in html
-    assert "[20,320,1600].includes(Number(overlay.period))" in html
-    assert "Number(overlay.period)===20 ? '#4ade80'" in html
+    for period in (20, 320, 1600):
+        assert f'class="ema-period" value="{period}" checked' in html
+    for period in (9, 100):
+        assert f'class="ema-period" value="{period}">' in html
+    assert "selectedEmas.has(Number(overlay.period))" in html
+    assert "20:'#4ade80'" in html
     source = inspect.getsource(CompletedRunVisualizer.build_v2_diagnostic_payload)
-    assert "for period in ((20, 320, 1600) if strategy_timeframe == \"15m\" else (320,)):" in source
+    assert "for period in (9, 20, 100, 320, 1600):" in source
 
 
 def test_standard_visualizer_ema320_layer_and_payload_support():
