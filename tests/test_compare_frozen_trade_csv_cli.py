@@ -72,3 +72,35 @@ def test_cli_runs_directly_from_tools_path(tmp_path):
     )
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["status"] == "PASS"
+
+
+def test_comparison_with_independent_source_column_mappings(tmp_path):
+    first, second, mapping, row = _fixture(tmp_path)
+    actual_mapping = {field: f"replay_{field}" for field in TRADE_FIELDS}
+    actual_mapping_path = tmp_path / "replay_mapping.json"
+    actual_mapping_path.write_text(json.dumps(actual_mapping), encoding="utf-8")
+    with second.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(actual_mapping.values()))
+        writer.writeheader()
+        writer.writerow({actual_mapping[field]: row[field] for field in TRADE_FIELDS})
+    result = compare_reports(first, second, mapping, actual_mapping_path=actual_mapping_path)
+    assert result["status"] == "PASS"
+    assert result["historical_execution_certified"] is False
+    assert result["mapping_sha256"] != result["actual_mapping_sha256"]
+    assert main([str(first), str(second), "--mapping", str(mapping),
+                 "--actual-mapping", str(actual_mapping_path)]) == 0
+
+
+def test_independent_mappings_still_detect_exact_decimal_change(tmp_path):
+    first, second, mapping, row = _fixture(tmp_path)
+    actual_mapping = {field: f"replay_{field}" for field in TRADE_FIELDS}
+    actual_mapping_path = tmp_path / "replay_mapping.json"
+    actual_mapping_path.write_text(json.dumps(actual_mapping), encoding="utf-8")
+    row["entry_price"] = "1.0000000000000001"
+    with second.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(actual_mapping.values()))
+        writer.writeheader()
+        writer.writerow({actual_mapping[field]: row[field] for field in TRADE_FIELDS})
+    result = compare_reports(first, second, mapping, actual_mapping_path=actual_mapping_path)
+    assert result["status"] == "MISMATCH"
+    assert any(d["field"] == "entry_price" for d in result["differences"])
