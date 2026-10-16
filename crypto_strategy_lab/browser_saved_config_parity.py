@@ -61,10 +61,12 @@ def check_http(path: Path) -> dict:
             and all(ch.isalnum() or ch in "_-" for ch in path.stem)):
         raise ValueError("Saved config filename is not an allowed browser ID")
     original_bytes = path.read_bytes()
-    native = read_research_config(path)
+    native = load_data_lake_config(path)
+    native.validate()
     # Compare the actual JSON wire contract: native tuples serialize as arrays.
-    # Do not alter native config values, persistence or the canonical reader.
-    expected_json = json.loads(json.dumps(native, allow_nan=False))
+    # Validate native serialization independently of the browser read projection.
+    expected_json = json.loads(json.dumps(native.to_dict(), allow_nan=False))
+    browser_reader_json = json.loads(json.dumps(read_research_config(path), allow_nan=False))
     token = secrets.token_urlsafe(48)
     app = create_browser_app(
         token=token, read_service=BrowserReadOnlyService(None), config_root=path.parent,
@@ -81,11 +83,15 @@ def check_http(path: Path) -> dict:
     projected = payload["config"]
     source_unchanged = path.read_bytes() == original_bytes
     native_hash = _digest(expected_json)
+    reader_hash = _digest(browser_reader_json)
     browser_hash = _digest(projected)
-    exact_match = expected_json == projected and native_hash == browser_hash
+    # Hashes also guard against Python's True == 1 numeric/boolean equality.
+    exact_match = (expected_json == browser_reader_json == projected
+                   and native_hash == reader_hash == browser_hash)
     return {
         "file": path.name,
         "native_sha256": native_hash,
+        "browser_reader_sha256": reader_hash,
         "browser_http_sha256": browser_hash,
         "source_unchanged": source_unchanged,
         "auth_rejected": denied.status_code == 401,
