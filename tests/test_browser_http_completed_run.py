@@ -81,3 +81,36 @@ def test_portfolio_discovery_errors_fail_closed_without_paths(tmp_path):
     assert response.status_code == 503
     assert response.json() == {"detail": "Portfolio discovery unavailable"}
     assert "private original source path" not in response.text
+
+
+def test_completed_run_http_rejects_junction_like_external_directory(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from pathlib import Path
+
+    root = tmp_path / "runs"
+    root.mkdir()
+    outside = tmp_path / "private"
+    outside.mkdir()
+    linked = root / "BTCUSDT_4h"
+    try:
+        linked.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Directory links are unavailable")
+    original = Path.is_symlink
+    monkeypatch.setattr(
+        Path, "is_symlink",
+        lambda path: False if path == linked else original(path),
+    )
+    service = Mock()
+    token = "j" * 48
+    with TestClient(
+        create_browser_app(token=token, read_service=service, completed_run_root=root),
+        base_url="http://localhost",
+    ) as client:
+        response = client.get(
+            "/api/v1/runs/BTCUSDT_4h",
+            headers={"Authorization": "Bearer " + token},
+        )
+    assert response.status_code == 404
+    service.completed_run.assert_not_called()
