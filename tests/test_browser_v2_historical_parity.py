@@ -299,3 +299,38 @@ def test_nonfrozen_capture_preserves_existing_available_timeframe_fallback(tmp_p
     )
     assert summary["pass"] is True
     assert {case["timeframe"] for case in summary["cases"]} == {"1h", "4h"}
+
+
+def test_frozen_capture_rejects_equal_wrong_identity_without_pass_summary(tmp_path):
+    """Identical wrong payloads must not yield a capture PASS."""
+    import pytest
+    from crypto_strategy_lab.browser_v2_historical_parity import DEFAULT_RUN_ID
+
+    for field, wrong in (
+        ("selectedTradeIndex", False),
+        ("selectedTradeIndex", 39),
+        ("chartTimeframe", "1d"),
+        ("runId", "not_the_frozen_run"),
+    ):
+        case_dir = tmp_path / (field + "_" + str(wrong))
+        desktop = _Model(sides=("LONG",) * 79)
+        browser = _Model(sides=("LONG",) * 79)
+        desktop.manifest["run_id"] = browser.manifest["run_id"] = DEFAULT_RUN_ID
+        original = desktop.build_v2_diagnostic_payload
+
+        def wrong_desktop(*, trade_index, chart_timeframe):
+            payload = original(trade_index=trade_index, chart_timeframe=chart_timeframe)
+            if field == "runId":
+                payload["run"]["runId"] = wrong
+            else:
+                payload[field] = wrong
+            return payload
+
+        desktop.build_v2_diagnostic_payload = wrong_desktop
+
+        def wrong_browser(index, timeframe):
+            return wrong_desktop(trade_index=index, chart_timeframe=timeframe)
+
+        with pytest.raises(ValueError, match="payload identity mismatch"):
+            capture_parity(desktop, browser, case_dir, browser_payload=wrong_browser)
+        assert not (case_dir / "summary.json").exists()

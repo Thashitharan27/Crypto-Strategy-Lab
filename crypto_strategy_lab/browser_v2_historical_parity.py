@@ -80,6 +80,20 @@ def _http_payload(base_url: str, trade_index: int, chart_timeframe: str) -> Any:
         )
 
 
+def _require_payload_identity(payload: Any, label: str, run_id: str, index: int, timeframe: str) -> None:
+    """Require the selected payload to identify the requested run and chart."""
+    if (not isinstance(payload, dict)
+            or not isinstance(payload.get("run"), dict)
+            or payload["run"].get("runId") != run_id
+            or type(payload.get("selectedTradeIndex")) is not int
+            or payload["selectedTradeIndex"] != index
+            or payload.get("chartTimeframe") != timeframe
+            or payload["run"].get("chartTimeframe") != timeframe):
+        raise ValueError(
+            f"Captured {label} payload identity mismatch: trade={index}, timeframe={timeframe}"
+        )
+
+
 def capture_parity(
     desktop_model: Any,
     browser_model: Any,
@@ -119,6 +133,9 @@ def capture_parity(
                 chart_timeframe=timeframe,
             )
             browser = browser_payload(trade_index, timeframe)
+            if run_id == DEFAULT_RUN_ID:
+                _require_payload_identity(desktop, "desktop", run_id, trade_index, timeframe)
+                _require_payload_identity(browser, "browser", run_id, trade_index, timeframe)
             differences = compare_payloads(desktop, browser)
             stem = f"trade_{trade_index:03d}_{timeframe}"
             desktop_path = evidence_dir / f"desktop_{stem}.json"
@@ -197,16 +214,7 @@ def review_captured_parity(evidence_dir: Path) -> dict[str, Any]:
         desktop = read_json(evidence_dir / f"desktop_{stem}.json")
         browser = read_json(evidence_dir / f"browser_{stem}.json")
         for label, payload in (("desktop", desktop), ("browser", browser)):
-            if (not isinstance(payload, dict)
-                    or not isinstance(payload.get("run"), dict)
-                    or payload["run"].get("runId") != DEFAULT_RUN_ID
-                    or type(payload.get("selectedTradeIndex")) is not int
-                    or payload["selectedTradeIndex"] != index
-                    or payload.get("chartTimeframe") != timeframe
-                    or payload["run"].get("chartTimeframe") != timeframe):
-                raise ValueError(
-                    f"Captured {label} payload identity mismatch: trade={index}, timeframe={timeframe}"
-                )
+            _require_payload_identity(payload, label, DEFAULT_RUN_ID, index, timeframe)
         desktop_hash = canonical_sha256(desktop)
         browser_hash = canonical_sha256(browser)
         if (desktop_hash != case.get("desktop_sha256")
