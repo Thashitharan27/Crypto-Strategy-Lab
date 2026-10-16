@@ -1655,6 +1655,30 @@ def test_limit_fill_bar_does_not_use_profit_extreme_before_entry():
     assert p._maybe_exit_bar(pos, 2, 150., 130., p.times[2], None) == (150., 130.)
 
 
+def test_fib_pending_fill_minute_clamps_profit_symmetrically_for_both_sides():
+    import pandas as pd
+
+    p = _limit_probe()
+    fill = pd.Timestamp(p.times[1]) + pd.Timedelta(minutes=7)
+    for side, expected in (
+        ("LONG", (138.2, 120.0)),
+        ("SHORT", (190.0, 138.2)),
+    ):
+        pos = SimpleNamespace(
+            side=side,
+            fib_limit_fill_time=fill,
+            fib_limit_fill_price=138.2,
+        )
+        # The unknown pre-fill OHLC path cannot award an immediate favorable
+        # extreme. The adverse extreme remains available to a protective stop.
+        assert p._maybe_exit_bar(pos, 1, 190.0, 120.0, fill, None) == expected
+        assert p.last_exit_timestamp == fill
+        # Only the fill minute is restricted; later minutes retain full prices.
+        later = fill + pd.Timedelta(minutes=1)
+        assert p._maybe_exit_bar(pos, 1, 190.0, 120.0, later, None) == (190.0, 120.0)
+        assert p.last_exit_timestamp == later
+
+
 def _complete_limit_intrabar_frame(p):
     import pandas as pd
 
