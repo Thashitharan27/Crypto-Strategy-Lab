@@ -224,7 +224,9 @@ def test_secondary_connection_rejects_primary_port(qapp, tmp_path):
         widget.path.setText(str(exe))
         widget.tunnel_id2.setText("tunnel_two")
         widget.port2.setValue(widget.port.value())
-        with patch(
+        # Credential lookup must be stubbed at validation time too, not only
+        # while constructing the widget; otherwise Linux CI has no keyring.
+        with patch.object(widget, "_credential_secondary", return_value="secret"), patch(
             "crypto_strategy_lab.gui.chatgpt_connection_impl.importlib.util.find_spec",
             return_value=object(),
         ):
@@ -255,7 +257,9 @@ def test_tertiary_connection_rejects_existing_port_and_tunnel_id(qapp, tmp_path)
         widget.tunnel_id2.setText("tunnel_two")
         widget.tunnel_id3.setText("tunnel_two")
         widget.port3.setValue(widget.port2.value())
-        with patch(
+        # Credential lookup must be stubbed at validation time too, not only
+        # while constructing the widget; otherwise Linux CI has no keyring.
+        with patch.object(widget, "_credential_tertiary", return_value="secret"), patch(
             "crypto_strategy_lab.gui.chatgpt_connection_impl.importlib.util.find_spec",
             return_value=object(),
         ):

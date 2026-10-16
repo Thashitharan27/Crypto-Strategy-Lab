@@ -99,6 +99,11 @@ def _engine(intrabar, *, direction="LONG", config=None):
         engine.minus_di_values[:] = 50.0
     engine.di_spread[:] = 40.0
     engine.adx_values[:] = 25.0
+    # These scenarios test one ladder episode, not multiple independently
+    # eligible DI signals on the two synthetic strategy candles. Keep native
+    # first-candle eligibility and all ladder child execution paths intact.
+    original_should_enter = engine._should_enter
+    engine._should_enter = lambda i: i == 0 and original_should_enter(i)
     return engine
 
 

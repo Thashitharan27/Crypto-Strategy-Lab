@@ -20,6 +20,7 @@ from crypto_strategy_lab.walk_forward_orchestrator import (
     record_walk_forward_teacher_review,
     resolve_walk_forward_trade,
     submit_walk_forward_decision,
+    submit_walk_forward_view,
 )
 
 
@@ -492,13 +493,13 @@ def test_submit_loss_returns_review_and_review_then_advances(tmp_path):
         expected_state_hash=head["state_hash"],
     )
     assert first["status"] == "CANDIDATE_DECISION_REQUIRED"
-    loss = submit_walk_forward_decision(
+    loss = submit_walk_forward_view(
         control,
         reports,
         experiment_id=EXPERIMENT_ID,
         candidate_id=first["candidate_id"],
         candidate_token=first["candidate_token"],
-        final_action="LONG",
+        chatgpt_view="LONG",
         confidence_pct=70,
         reasoning="Valid long setup.",
         operation_id="decision:loss",
@@ -1048,7 +1049,27 @@ def test_teacher_review_is_a_judgment_boundary_and_never_changes_equity(tmp_path
             }
         ]
     )
-    control, reports, store, head = _write_reference(tmp_path, teachers=teachers)
+    teacher_sample = {
+        **_samples().iloc[0].to_dict(),
+        "research_sample_id": "9-LONG-teacher",
+        "research_signal_index": 9,
+        "walk_forward_candidate_id": "wf-9-long",
+        "entry_time": "2025-01-01T12:00:00Z",
+        "signal_available_at": "2025-01-01T12:00:00Z",
+        "signal_close_price": 99.0,
+        "pair_net_r": 1.0,
+        "pair_net_pnl": 10.0,
+        "exit_time": "2025-01-01T18:00:00Z",
+    }
+    teacher_samples = pd.concat(
+        [pd.DataFrame([teacher_sample]), _samples()],
+        ignore_index=True,
+    )
+    control, reports, store, head = _write_reference(
+        tmp_path,
+        teachers=teachers,
+        samples_frame=teacher_samples,
+    )
     due = advance_walk_forward(
         control,
         reports,

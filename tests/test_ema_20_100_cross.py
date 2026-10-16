@@ -100,9 +100,13 @@ class EmaCrossTests(unittest.TestCase):
         strategy_profiles = dict(config.strategy.profiles)
         execution_profiles = dict(config.execution.profiles)
         key = next(iter(strategy_profiles))
+        # The adapter validates native rules; a mode marker alone is not a
+        # valid ENTRY rule. Preserve it alongside a valid inert test rule.
         strategy_profiles[key] = replace(
             strategy_profiles[key],
-            entry_rules=({"_strategy_direction_mode": EMA_920_MODE},),
+            entry_rules=({"_strategy_direction_mode": EMA_920_MODE,
+                          "action": "REJECT", "indicator": "ADX",
+                          "minimum": 0, "maximum": 100},),
         )
         execution_profiles[key] = replace(
             execution_profiles[key],

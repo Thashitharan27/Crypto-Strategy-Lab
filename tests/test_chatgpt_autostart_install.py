@@ -66,11 +66,11 @@ def test_user_enabled_autostart_survives_widget_recreation_without_manual_sync(q
     finally:
         window.close()
 
-    # The legacy widget can overwrite its old key while loading the MCP port.
-    # The v2 installer must restore the authoritative preference afterward.
+    # Recreated widgets now read the persisted enabled preference directly.
+    # The installer must preserve it, not require a transient false state.
     second_window, second_widget, _settings = _window_with_chat(tmp_path)
     try:
-        assert second_widget.auto_start.isChecked() is False
+        assert second_widget.auto_start.isChecked() is True
         apply_chatgpt_autostart(second_window)
         assert second_widget.auto_start.isChecked() is True
     finally:
