@@ -83,8 +83,10 @@ def test_teacher_loss_packet_falls_back_to_immutable_replay(monkeypatch):
         "_ORIGINAL_TEACHER_LOSS_DECORATOR",
         lambda control, reports, experiment_id, result: dict(base),
     )
+    # Control-plane review now uses the fast immutable read path. Keep this
+    # fixture aligned with the actual store interface without touching replay.
     fake_store = SimpleNamespace(
-        read=lambda experiment_id, recent_events=0: {
+        read_fast=lambda experiment_id, recent_events=0: {
             "manifest": {"definition": {"reference_run": "BTCUSDT_4h_reference"}}
         }
     )

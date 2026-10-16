@@ -30,7 +30,11 @@ class _Base:
 
 
 class _Probe(FairValueGapMixin, _Base):
-    pass
+    # This fixture isolates the 15m confirmation scheduler. The production
+    # FVG target/box validity is covered separately and requires market arrays
+    # that are intentionally absent from this narrow scheduling fixture.
+    def _fvg_target_plan(self, i, execution_i=None):
+        return {"passed": True}
 
 
 def _probe(closes):

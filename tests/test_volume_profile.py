@@ -98,6 +98,13 @@ def test_higher_timeframe_profile_ignores_incomplete_context_bucket():
 
 def test_rule_value_supports_strategy_and_higher_timeframe_context():
     engine = _probe(minutes=15, count=160)
+    # Trading rules require prepared exact aggTrade profile columns. OHLCV
+    # profile approximations remain research-only, never an implicit fallback.
+    def exact_profile(index, family, name):
+        assert family == "trade_flow_context" and index == 140
+        return {"vp_exact_strategy_accumulation_score": 42.0,
+                "vp_exact_1h_accumulation_score": 55.0}[name]
+    engine._prepared_research_raw_value = exact_profile
     strategy_value = engine._volume_profile_rule_value(
         140, "LONG", "VP_ACCUMULATION_SCORE", 0
     )
@@ -112,7 +119,18 @@ def test_rule_value_supports_strategy_and_higher_timeframe_context():
 
 def test_position_and_near_hvn_are_categorical_native_codes():
     engine = _probe()
+    def exact_profile(index, family, name):
+        assert family == "trade_flow_context" and index == 50
+        return {"vp_exact_strategy_position": "INSIDE_VALUE",
+                "vp_exact_strategy_near_hvn": 1.0}[name]
+    engine._prepared_research_raw_value = exact_profile
     position = engine._volume_profile_rule_value(50, "LONG", "VP_POSITION", 0)
     near = engine._volume_profile_rule_value(50, "LONG", "VP_NEAR_HVN", 0)
     assert position in CATEGORICAL_VALUE_CODES["VP_POSITION"].values()
     assert near in {0.0, 1.0}
+
+
+def test_trading_vp_rules_fail_closed_without_exact_aggtrade_evidence():
+    engine = _probe()
+    with pytest.raises(RuntimeError, match="OHLCV fallback is disabled"):
+        engine._volume_profile_rule_value(50, "LONG", "VP_POSITION", 0)

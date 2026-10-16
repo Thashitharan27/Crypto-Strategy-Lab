@@ -493,7 +493,7 @@ class TestSupportResistanceDetector:
         opens = np.array([9.0, 12.0, 11.0, 11.5], dtype=np.float64)
         highs = np.array([10.0, 15.0, 10.0, 12.0], dtype=np.float64)
         lows = np.array([8.0, 9.0, 8.5, 9.5], dtype=np.float64)
-        closes = np.array([9.0, 12.0, 9.5, 12.0], dtype=np.float64)
+        closes = np.array([9.0, 12.0, 9.5, 11.0], dtype=np.float64)
         # Pivot at index 1 becomes confirmed at index 2, where ATR is 7.
         atr_low_now = np.array([1.0, 2.0, 7.0, 20.0], dtype=np.float64)
         atr_high_now = np.array([1.0, 2.0, 7.0, 200.0], dtype=np.float64)
@@ -506,6 +506,7 @@ class TestSupportResistanceDetector:
                 zone_width_atr=0.5,
                 zone_padding_atr=0.25,
                 max_cluster_span_atr=1.0,
+                min_rejection_atr=0.25,
             )
             context = detector.analyze_price_location(
                 3, opens, highs, lows, closes, atrs, "LONG"
@@ -523,8 +524,8 @@ class TestSupportResistanceDetector:
         assert low_now.resistance_zone_high == pytest.approx(15.0)
         assert high_now.resistance_zone_low == pytest.approx(12.0)
         assert high_now.resistance_zone_high == pytest.approx(15.0)
-        assert low_now.nearest_resistance_distance_price == pytest.approx(0.0)
-        assert high_now.nearest_resistance_distance_price == pytest.approx(0.0)
+        assert low_now.nearest_resistance_distance_price == pytest.approx(1.0)
+        assert high_now.nearest_resistance_distance_price == pytest.approx(1.0)
         assert low_now.nearest_resistance_distance_atr != pytest.approx(
             high_now.nearest_resistance_distance_atr
         )
@@ -620,8 +621,8 @@ class TestSupportResistanceDetector:
             100.0,  # 11
             100.0,  # 12
             100.0,  # 13
-            99.9,   # 14
-            99.8,   # 15 - near resistance at 110
+            109.9,  # 14
+            109.8,  # 15 - genuinely near resistance at 110
         ], dtype=np.float64)
         
         opens = closes.copy()
@@ -849,7 +850,7 @@ class TestSupportResistanceDetector:
         open_ = np.array([100.0, 100.0, 100.0, 100.0, 100.0])
         high = np.array([101.0, 102.0, 101.0, 101.0, 101.0])
         low = np.array([99.0, 99.5, 99.0, 99.0, 99.0])
-        close = np.array([100.0, 100.5, 100.4, 100.3, 100.2])
+        close = np.array([100.0, 100.5, 101.6, 100.3, 100.2])
         atr = np.ones(5)
 
         detector.analyze_price_location(

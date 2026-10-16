@@ -535,7 +535,10 @@ class MtfSrReactionMixin:
                         active_age = 0
                         states[i] = "BREAKOUT_CONFIRMED"
 
-                    if active_low is not None and active_high is not None:
+                    # A newly confirmed break is its own causal state. Retest
+                    # classification starts on the next strategy bar; otherwise the
+                    # breakout bar can immediately overwrite BREAKOUT_CONFIRMED.
+                    if active_low is not None and active_high is not None and not just_broke:
                         active_age += 1
                         atr_value = self._finite(self.atr_values[i])
                         close = self._finite(self.close[i])
