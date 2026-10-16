@@ -397,7 +397,7 @@ def test_completed_run_drives_output_folder_and_new_run_clears_it(monkeypatch,tm
 def test_normal_summary_uses_six_direction_regime_rows():
     app(); window=MainWindow()
     try:
-        trades=pd.DataFrame({"market_regime":["BULL"],"pair_net_pnl":[10.0],"pair_net_r":[1.0],"long_pair_net_pnl":[10.0],"long_pair_net_r":[1.0]})
+        trades=pd.DataFrame({"market_regime":["BULL"],"side":["LONG"],"pair_net_pnl":[10.0],"pair_net_r":[1.0],"long_pair_net_pnl":[10.0],"long_pair_net_r":[1.0]})
         window.populate_summary({"total_trades":1},trades)
         assert window.comparison_box.title()=="Direction / Regime Performance"
         assert window.combo_table.rowCount()==6
@@ -778,7 +778,7 @@ def test_risk_ui_separates_account_risk_distance_units_and_trade_r():
     try:
         assert window.account_form.parentWidget().title()=="Account Risk & Leverage"
         assert window.distance_basis_form.parentWidget().title()=="Stop Distance Basis"
-        assert window.account_form.labelForField(window.risk_leg).text()=="Base Risk Per Trade"
+        assert window.account_form.labelForField(window.risk_leg).text()=="Base Sizing Budget Per Trade"
         assert window.distance_basis_form.labelForField(window.risk_mode).text()=="Distance Basis"
         assert window.risk_mode.itemText(0)=="ATR volatility"
         assert window.risk_mode.currentText()=="ATR"

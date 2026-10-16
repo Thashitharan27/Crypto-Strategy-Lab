@@ -39,6 +39,7 @@ jobs:
         run: >-
           python -m pytest -q
           tests/test_gui_ux_phase1.py
+          tests/test_gui_main_window.py
           tests/test_risk_execution_workspace.py
           tests/test_research_warmup.py
           tests/test_setup_structural_benchmark_readiness.py
