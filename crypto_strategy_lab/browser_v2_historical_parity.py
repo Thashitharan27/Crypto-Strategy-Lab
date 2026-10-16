@@ -188,6 +188,16 @@ def review_captured_parity(evidence_dir: Path) -> dict[str, Any]:
         stem = f"trade_{index:03d}_{timeframe}"
         desktop = read_json(evidence_dir / f"desktop_{stem}.json")
         browser = read_json(evidence_dir / f"browser_{stem}.json")
+        for label, payload in (("desktop", desktop), ("browser", browser)):
+            if (not isinstance(payload, dict)
+                    or not isinstance(payload.get("run"), dict)
+                    or payload["run"].get("runId") != DEFAULT_RUN_ID
+                    or payload.get("selectedTradeIndex") != index
+                    or payload.get("chartTimeframe") != timeframe
+                    or payload["run"].get("chartTimeframe") != timeframe):
+                raise ValueError(
+                    f"Captured {label} payload identity mismatch: trade={index}, timeframe={timeframe}"
+                )
         desktop_hash = canonical_sha256(desktop)
         browser_hash = canonical_sha256(browser)
         if (desktop_hash != case.get("desktop_sha256")
