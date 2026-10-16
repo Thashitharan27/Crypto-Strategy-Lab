@@ -52,6 +52,7 @@ def test_portfolio_candidates_project_existing_discovery_without_leaking_local_p
     }]
     expected = [{
         "run_id": "BTCUSDT_4h_verified",
+        "run_folder_id": "private-run",
         "symbol": "BTCUSDT",
         "strategy_timeframe": "4h",
         "candidate_rows": 79,

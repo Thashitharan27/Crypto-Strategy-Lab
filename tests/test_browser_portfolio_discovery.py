@@ -17,6 +17,7 @@ def test_portfolio_candidates_reuses_verified_discovery_and_hides_paths(tmp_path
     discovered.assert_called_once_with(tmp_path)
     assert rows == [{
         "run_id": "BTCUSDT_4h_test", "symbol": "BTCUSDT",
+        "run_folder_id": "private",
         "strategy_timeframe": "4h", "candidate_rows": 25,
         "completed_at": "2026-09-01", "sampling_mode": "EVERY_VIABLE_ENTRY",
     }]

@@ -154,6 +154,40 @@ def test_main_invalidates_stale_pass_when_canonical_loading_fails(tmp_path, monk
     assert not summary_path.exists()
 
 
+def test_main_accepts_native_manifest_uuid_for_frozen_prefixed_folder(tmp_path, monkeypatch):
+    from crypto_strategy_lab import browser_v2_historical_parity as parity
+
+    desktop = _Model(sides=("LONG",) * 79)
+    browser = _Model(sides=("LONG",) * 79)
+    desktop.manifest["run_id"] = parity.FROZEN_NATIVE_RUN_ID
+    browser.manifest["run_id"] = parity.FROZEN_NATIVE_RUN_ID
+
+    monkeypatch.setattr(
+        parity,
+        "load_models",
+        lambda run_id, output_root: (desktop, browser),
+    )
+    monkeypatch.setattr(
+        parity,
+        "capture_parity",
+        lambda desktop_model, browser_model, evidence_dir: {
+            "run_id": parity.FROZEN_NATIVE_RUN_ID,
+            "trade_count": 79,
+            "cases": [],
+            "pass": True,
+        },
+    )
+
+    assert parity.main([
+        "--run-id",
+        parity.DEFAULT_RUN_ID,
+        "--evidence-dir",
+        str(tmp_path),
+        "--output-root",
+        str(tmp_path),
+    ]) == 0
+
+
 def test_review_only_rechecks_frozen_capture_hashes_without_market_data(tmp_path, monkeypatch):
     import pytest
     from crypto_strategy_lab import browser_v2_historical_parity as parity
@@ -334,3 +368,39 @@ def test_frozen_capture_rejects_equal_wrong_identity_without_pass_summary(tmp_pa
         with pytest.raises(ValueError, match="payload identity mismatch"):
             capture_parity(desktop, browser, case_dir, browser_payload=wrong_browser)
         assert not (case_dir / "summary.json").exists()
+
+
+def test_native_manifest_uuid_capture_and_review_require_frozen_market_and_matrix(tmp_path):
+    import pytest
+    from crypto_strategy_lab.browser_v2_historical_parity import (
+        FROZEN_NATIVE_RUN_ID, review_captured_parity,
+    )
+
+    desktop = _Model(sides=("LONG",) * 79)
+    browser = _Model(sides=("LONG",) * 79)
+    desktop.manifest["run_id"] = browser.manifest["run_id"] = FROZEN_NATIVE_RUN_ID
+    original = desktop.build_v2_diagnostic_payload
+
+    def payload(*, trade_index, chart_timeframe):
+        value = original(trade_index=trade_index, chart_timeframe=chart_timeframe)
+        value["run"].update(symbol="BTCUSDT", strategyTimeframe="4h")
+        return value
+
+    desktop.build_v2_diagnostic_payload = payload
+    get_browser = lambda i, tf: payload(trade_index=i, chart_timeframe=tf)
+    capture_parity(desktop, browser, tmp_path / "valid", browser_payload=get_browser)
+    assert review_captured_parity(tmp_path / "valid")["pass"] is True
+
+    desktop.available_chart_timeframes = lambda: [{"interval": "4h"}]
+    with pytest.raises(ValueError, match="requires first/middle/last"):
+        capture_parity(desktop, browser, tmp_path / "missing_tf", browser_payload=get_browser)
+    desktop.available_chart_timeframes = browser.available_chart_timeframes
+
+    def wrong_market(*, trade_index, chart_timeframe):
+        value = payload(trade_index=trade_index, chart_timeframe=chart_timeframe)
+        value["run"]["symbol"] = "ETHUSDT"
+        return value
+
+    desktop.build_v2_diagnostic_payload = wrong_market
+    with pytest.raises(ValueError, match="payload identity mismatch"):
+        capture_parity(desktop, browser, tmp_path / "wrong_market", browser_payload=get_browser)

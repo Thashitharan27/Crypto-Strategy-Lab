@@ -43,7 +43,7 @@ function App() {
   const [configError, setConfigError] = React.useState("");
   const [configDetails, setConfigDetails] = React.useState<Record<string, unknown> | null>(null);
   const configRequest = React.useRef(0);
-  type PortfolioCandidate = {run_id: string; symbol: string; strategy_timeframe?: string | null; candidate_rows: number; completed_at?: string | null; sampling_mode: string};
+  type PortfolioCandidate = {run_id: string; run_folder_id: string; symbol: string; strategy_timeframe?: string | null; candidate_rows: number; completed_at?: string | null; sampling_mode: string};
   const [portfolioCandidates, setPortfolioCandidates] = React.useState<PortfolioCandidate[] | null>(null);
   const [portfolioError, setPortfolioError] = React.useState("");
   const portfolioRequest = React.useRef(0);
@@ -295,7 +295,7 @@ function App() {
         {portfolioCandidates && portfolioCandidates.length > 0 && <table>
           <thead><tr><th>Run ID</th><th>Symbol</th><th>Timeframe</th><th>Sampling mode</th><th>Candidates</th><th>Completed</th></tr></thead>
           <tbody>{portfolioCandidates.map((item, i) => <tr key={item.run_id + "-" + i}>
-            <td><button type="button" onClick={() => {++runRequest.current; setRunId(item.run_id); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError(""); setSection("Runs & Results");}} aria-label={`Inspect completed run ${item.run_id}`}>{item.run_id}</button></td><td>{item.symbol}</td><td>{item.strategy_timeframe || "—"}</td><td>{item.sampling_mode}</td>
+            <td><button type="button" onClick={() => {++runRequest.current; setRunId(item.run_folder_id); setRunInfo(null); setRunMetrics(null); setRunRisk(null); setRunError(""); setSection("Runs & Results");}} aria-label={`Inspect completed run ${item.run_id}`}>{item.run_id}</button></td><td>{item.symbol}</td><td>{item.strategy_timeframe || "—"}</td><td>{item.sampling_mode}</td>
             <td>{item.candidate_rows}</td><td>{item.completed_at || "—"}</td>
           </tr>)}</tbody>
         </table>}

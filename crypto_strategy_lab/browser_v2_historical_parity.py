@@ -24,8 +24,15 @@ from crypto_strategy_lab.strategy_visualizer_browser_v2 import StrategyVisualize
 
 
 DEFAULT_RUN_ID = "BTCUSDT_4h_ad58a712d8e7492380b99ec96c20c80f"
+FROZEN_NATIVE_RUN_ID = "ad58a712d8e7492380b99ec96c20c80f"
 DEFAULT_TIMEFRAMES = ("1h", "4h", "1d")
 FROZEN_TRADE_COUNT = 79
+
+
+def _is_frozen_run_id(value: Any) -> bool:
+    # CompletedRunVisualizer uses the manifest UUID, not the output folder ID.
+    # Accept only these two exact identities; never strip arbitrary prefixes.
+    return isinstance(value, str) and value in (DEFAULT_RUN_ID, FROZEN_NATIVE_RUN_ID)
 
 
 def _available_timeframes(model: Any) -> list[str]:
@@ -85,6 +92,9 @@ def _require_payload_identity(payload: Any, label: str, run_id: str, index: int,
     if (not isinstance(payload, dict)
             or not isinstance(payload.get("run"), dict)
             or payload["run"].get("runId") != run_id
+            or (run_id == FROZEN_NATIVE_RUN_ID and (
+                payload["run"].get("symbol") != "BTCUSDT"
+                or payload["run"].get("strategyTimeframe") != "4h"))
             or type(payload.get("selectedTradeIndex")) is not int
             or payload["selectedTradeIndex"] != index
             or payload.get("chartTimeframe") != timeframe
@@ -113,7 +123,9 @@ def capture_parity(
     # A frozen baseline capture is not certified with a silently reduced
     # timeframe matrix; reject missing columns before any browser server starts.
     run_id = str(desktop_model.manifest.get("run_id") or desktop_model.run_dir.name)
-    if run_id == DEFAULT_RUN_ID:
+    if _is_frozen_run_id(run_id):
+        if int(desktop_model.trade_count) != FROZEN_TRADE_COUNT:
+            raise ValueError("Frozen run identity or trade count mismatch")
         required = {(index, tf) for index in (0, FROZEN_TRADE_COUNT // 2, FROZEN_TRADE_COUNT - 1)
                     for tf in DEFAULT_TIMEFRAMES}
         if not required.issubset(set(cases)):
@@ -133,7 +145,7 @@ def capture_parity(
                 chart_timeframe=timeframe,
             )
             browser = browser_payload(trade_index, timeframe)
-            if run_id == DEFAULT_RUN_ID:
+            if _is_frozen_run_id(run_id):
                 _require_payload_identity(desktop, "desktop", run_id, trade_index, timeframe)
                 _require_payload_identity(browser, "browser", run_id, trade_index, timeframe)
             differences = compare_payloads(desktop, browser)
@@ -193,7 +205,7 @@ def review_captured_parity(evidence_dir: Path) -> dict[str, Any]:
     summary = read_json(evidence_dir / "summary.json")
     if not isinstance(summary, dict):
         raise ValueError("Invalid V2 parity summary")
-    if summary.get("run_id") != DEFAULT_RUN_ID or type(summary.get("trade_count")) is not int or summary["trade_count"] != FROZEN_TRADE_COUNT:
+    if not _is_frozen_run_id(summary.get("run_id")) or type(summary.get("trade_count")) is not int or summary["trade_count"] != FROZEN_TRADE_COUNT:
         raise ValueError("Frozen run identity or trade count mismatch")
     cases = summary.get("cases")
     if not isinstance(cases, list) or not cases:
@@ -214,7 +226,7 @@ def review_captured_parity(evidence_dir: Path) -> dict[str, Any]:
         desktop = read_json(evidence_dir / f"desktop_{stem}.json")
         browser = read_json(evidence_dir / f"browser_{stem}.json")
         for label, payload in (("desktop", desktop), ("browser", browser)):
-            _require_payload_identity(payload, label, DEFAULT_RUN_ID, index, timeframe)
+            _require_payload_identity(payload, label, summary["run_id"], index, timeframe)
         desktop_hash = canonical_sha256(desktop)
         browser_hash = canonical_sha256(browser)
         if (desktop_hash != case.get("desktop_sha256")
@@ -280,7 +292,9 @@ def main(argv=None) -> int:
         if int(desktop_model.trade_count) != FROZEN_TRADE_COUNT or int(browser_model.trade_count) != FROZEN_TRADE_COUNT:
             raise ValueError("Frozen BTCUSDT baseline must contain exactly 79 trades")
         for model in (desktop_model, browser_model):
-            if str(model.manifest.get("run_id") or model.run_dir.name) != DEFAULT_RUN_ID:
+            if not _is_frozen_run_id(
+                str(model.manifest.get("run_id") or model.run_dir.name)
+            ):
                 raise ValueError("Frozen BTCUSDT run identity mismatch")
     summary = capture_parity(desktop_model, browser_model, evidence_dir)
 
