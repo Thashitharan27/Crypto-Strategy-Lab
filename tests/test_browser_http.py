@@ -197,3 +197,30 @@ def test_completed_run_api_rejects_symlinked_run_folder(tmp_path):
         response = client.get("/api/v1/runs/alias_run", headers={"Authorization": "Bearer " + token})
         assert response.status_code == 404
     service.completed_run.assert_not_called()
+
+
+def test_saved_config_api_rejects_symlinked_file_alias(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from unittest.mock import Mock
+
+    root = tmp_path / "configs"
+    root.mkdir()
+    (root / "canonical.json").write_text("{}", encoding="utf-8")
+    link = root / "alias.json"
+    try:
+        link.symlink_to(root / "canonical.json")
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"Filesystem symlinks are unavailable: {type(exc).__name__}")
+
+    service = Mock()
+    service.research_config.return_value = {"config_version": 3}
+    token = "c" * 48
+    app = create_browser_app(token=token, read_service=service, config_root=root)
+    with TestClient(app, base_url="http://localhost") as client:
+        headers = {"Authorization": "Bearer " + token}
+        assert client.get("/api/v1/configs/alias", headers=headers).status_code == 404
+        canonical = client.get("/api/v1/configs/canonical", headers=headers)
+        assert canonical.status_code == 200
+        assert canonical.json() == {"config": {"config_version": 3}}
+    service.research_config.assert_called_once_with((root / "canonical.json").resolve())
