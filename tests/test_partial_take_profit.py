@@ -310,7 +310,7 @@ def test_fib_fill_minute_defers_trailing_activation_until_next_minute():
 
 
 def test_fib_trailing_ratchet_stop_only_exits_on_following_minute():
-    """A newly ratcheted stop must not retroactively stop the same OHLC minute."""
+    """Existing trail ratchets after old-stop check, never retroactively."""
     from crypto_strategy_lab.fib_retracement import FibonacciRetracementMixin
     from crypto_strategy_lab.trade import ExitSource, ExitReason
 
@@ -324,7 +324,7 @@ def test_fib_trailing_ratchet_stop_only_exits_on_following_minute():
         trailing_distance_r=0.5,
     )
     engine, pos = open_long(
-        (100, 100), (130, 99), (130, 99), (110, 109),
+        (100, 100), (130, 99), (130, 99), (140, 125), (130, 119),
         profile=profile, engine_class=FibExitEngine,
     )
     fill_time = pd.Timestamp(engine.times[1])
@@ -333,20 +333,27 @@ def test_fib_trailing_ratchet_stop_only_exits_on_following_minute():
     engine._maybe_exit_bar(pos, 1, 130.0, 99.0, fill_time, ExitSource.INTRABAR)
     assert not pos.trailing_active
 
-    minute_two = fill_time + pd.Timedelta(minutes=1)
-    engine._maybe_exit_bar(pos, 1, 130.0, 99.0, minute_two, ExitSource.INTRABAR)
+    activation_minute = fill_time + pd.Timedelta(minutes=1)
+    engine._maybe_exit_bar(pos, 1, 130.0, 99.0, activation_minute, ExitSource.INTRABAR)
     assert pos.trailing_active and pos.is_open
-    new_stop = pos.trailing_stop
-    assert new_stop is not None
-    assert new_stop > 100
+    old_stop = pos.trailing_stop
+    assert old_stop is not None
 
-    # The ratcheted stop becomes executable only on a subsequent minute.
-    minute_three = minute_two + pd.Timedelta(minutes=1)
+    # An already-active trail ratchets higher. The minute low is between
+    # old/new stops, so the newly calculated stop cannot execute retroactively.
+    ratchet_minute = activation_minute + pd.Timedelta(minutes=1)
+    engine._maybe_exit_bar(pos, 1, 140.0, 125.0, ratchet_minute, ExitSource.INTRABAR)
+    new_stop = pos.trailing_stop
+    assert new_stop is not None and new_stop > old_stop
+    assert old_stop < 125.0 < new_stop
+    assert pos.is_open
+
+    following_minute = ratchet_minute + pd.Timedelta(minutes=1)
     engine._maybe_exit_bar(
         pos, 1, float(new_stop) + 1, float(new_stop) - 1,
-        minute_three, ExitSource.INTRABAR,
+        following_minute, ExitSource.INTRABAR,
     )
     assert not pos.is_open
     assert pos.exit_reason == ExitReason.TRAILING_STOP
-    assert pos.exit_time == minute_three
+    assert pos.exit_time == following_minute
     assert pos.exit_price == pytest.approx(new_stop)
