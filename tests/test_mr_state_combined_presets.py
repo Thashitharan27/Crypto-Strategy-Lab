@@ -42,7 +42,7 @@ def test_any_below_mean_compiles_to_both_below_state_codes():
         required_rules=(rule,),
     )
 
-    native = strategy["BULL_LONG"].entry_rules[0]
+    native = strategy["bull_long"].entry_rules[0]
     assert native["condition"] == "OUTSIDE"
     assert native["minimum"] == 1.0
     assert native["maximum"] == 2.0
@@ -60,7 +60,7 @@ def test_any_above_mean_compiles_to_both_above_state_codes():
         required_rules=(rule,),
     )
 
-    native = strategy["BULL_LONG"].entry_rules[0]
+    native = strategy["bull_long"].entry_rules[0]
     assert native["condition"] == "OUTSIDE"
     assert native["minimum"] == 4.0
     assert native["maximum"] == 5.0
@@ -78,7 +78,7 @@ def test_is_not_combined_preset_inverts_the_whole_combined_region():
         required_rules=(rule,),
     )
 
-    native = strategy["BULL_LONG"].entry_rules[0]
+    native = strategy["bull_long"].entry_rules[0]
     # REQUIRED + Is Not means reject when the state is inside the combined
     # below-mean region (Strongly Below or Below).
     assert native["condition"] == "INSIDE"
@@ -94,6 +94,6 @@ def test_exact_below_mean_keeps_exact_historical_meaning():
         required_rules=(rule,),
     )
 
-    native = strategy["BULL_LONG"].entry_rules[0]
+    native = strategy["bull_long"].entry_rules[0]
     assert native["condition"] == "OUTSIDE"
     assert native["minimum"] == native["maximum"] == 2.0
