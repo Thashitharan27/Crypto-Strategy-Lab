@@ -292,7 +292,9 @@ def main(argv=None) -> int:
         if int(desktop_model.trade_count) != FROZEN_TRADE_COUNT or int(browser_model.trade_count) != FROZEN_TRADE_COUNT:
             raise ValueError("Frozen BTCUSDT baseline must contain exactly 79 trades")
         for model in (desktop_model, browser_model):
-            if str(model.manifest.get("run_id") or model.run_dir.name) != DEFAULT_RUN_ID:
+            if not _is_frozen_run_id(
+                str(model.manifest.get("run_id") or model.run_dir.name)
+            ):
                 raise ValueError("Frozen BTCUSDT run identity mismatch")
     summary = capture_parity(desktop_model, browser_model, evidence_dir)
 
