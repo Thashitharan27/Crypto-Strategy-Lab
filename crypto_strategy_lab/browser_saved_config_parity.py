@@ -37,7 +37,10 @@ def check(path: Path) -> dict:
         "source_unchanged": before == after,
         "exact_match": expected == projected,
     }
-    result["pass"] = result["source_unchanged"] and result["exact_match"]
+    # Python equality conflates JSON booleans with integers (True == 1).
+    # Require canonical serialized identity, not just Python value equality.
+    result["pass"] = (result["source_unchanged"] and result["exact_match"]
+                      and result["native_sha256"] == result["browser_reader_sha256"])
     return result
 
 
@@ -77,14 +80,17 @@ def check_http(path: Path) -> dict:
         raise ValueError("Unexpected browser config response")
     projected = payload["config"]
     source_unchanged = path.read_bytes() == original_bytes
+    native_hash = _digest(expected_json)
+    browser_hash = _digest(projected)
+    exact_match = expected_json == projected and native_hash == browser_hash
     return {
         "file": path.name,
-        "native_sha256": _digest(expected_json),
-        "browser_http_sha256": _digest(projected),
+        "native_sha256": native_hash,
+        "browser_http_sha256": browser_hash,
         "source_unchanged": source_unchanged,
         "auth_rejected": denied.status_code == 401,
-        "exact_match": expected_json == projected,
-        "pass": source_unchanged and expected_json == projected and denied.status_code == 401,
+        "exact_match": exact_match,
+        "pass": source_unchanged and exact_match and denied.status_code == 401,
     }
 
 
