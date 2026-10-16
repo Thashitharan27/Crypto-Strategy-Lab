@@ -307,3 +307,53 @@ def test_fib_fill_minute_defers_trailing_activation_until_next_minute():
     assert pos.trailing_activation_time == following_time
     assert pos.trailing_stop is not None
     assert pos.is_open
+
+
+def test_fib_trailing_ratchet_stop_only_exits_on_following_minute():
+    """Existing trail ratchets after old-stop check, never retroactively."""
+    from crypto_strategy_lab.fib_retracement import FibonacciRetracementMixin
+    from crypto_strategy_lab.trade import ExitSource, ExitReason
+
+    class FibExitEngine(FibonacciRetracementMixin, BacktestEngine):
+        pass
+
+    profile = base_profile(
+        partial_profit_enabled=False,
+        trailing_enabled=True,
+        trailing_activation_r=1,
+        trailing_distance_r=0.5,
+    )
+    engine, pos = open_long(
+        (100, 100), (130, 99), (130, 99), (140, 125), (130, 119),
+        profile=profile, engine_class=FibExitEngine,
+    )
+    fill_time = pd.Timestamp(engine.times[1])
+    pos.fib_limit_fill_time = fill_time
+    pos.fib_limit_fill_price = 100.0
+    engine._maybe_exit_bar(pos, 1, 130.0, 99.0, fill_time, ExitSource.INTRABAR)
+    assert not pos.trailing_active
+
+    activation_minute = fill_time + pd.Timedelta(minutes=1)
+    engine._maybe_exit_bar(pos, 1, 130.0, 99.0, activation_minute, ExitSource.INTRABAR)
+    assert pos.trailing_active and pos.is_open
+    old_stop = pos.trailing_stop
+    assert old_stop is not None
+
+    # An already-active trail ratchets higher. The minute low is between
+    # old/new stops, so the newly calculated stop cannot execute retroactively.
+    ratchet_minute = activation_minute + pd.Timedelta(minutes=1)
+    engine._maybe_exit_bar(pos, 1, 140.0, 125.0, ratchet_minute, ExitSource.INTRABAR)
+    new_stop = pos.trailing_stop
+    assert new_stop is not None and new_stop > old_stop
+    assert old_stop < 125.0 < new_stop
+    assert pos.is_open
+
+    following_minute = ratchet_minute + pd.Timedelta(minutes=1)
+    engine._maybe_exit_bar(
+        pos, 1, float(new_stop) + 1, float(new_stop) - 1,
+        following_minute, ExitSource.INTRABAR,
+    )
+    assert not pos.is_open
+    assert pos.exit_reason == ExitReason.TRAILING_STOP
+    assert pos.exit_time == following_minute
+    assert pos.exit_price == pytest.approx(new_stop)
