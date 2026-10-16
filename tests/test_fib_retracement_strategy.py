@@ -1735,6 +1735,48 @@ def test_deeper_limit_intrabar_fill_uses_first_touch():
     assert timestamp == p.times[1] + pd.Timedelta(minutes=1)
 
 
+def test_deeper_limit_short_intrabar_gap_through_first_touch_matches_all_windows():
+    import pandas as pd
+    from crypto_strategy_lab.data.intrabar_index import as_searchsorted_intrabar
+    from crypto_strategy_lab.prepared_backtest import IntrabarExecutionData
+
+    p = _limit_probe("SHORT", 0.618)
+    p.config.use_intrabar_data = True
+    p.config.intrabar_timeframe_minutes = 1
+    trigger = 178.6
+    times = pd.date_range(p.times[1], periods=60, freq="min")
+    frame = pd.DataFrame({
+        "timestamp": times,
+        "open": [170.0] * 60,
+        "high": [175.0] * 60,
+        "low": [169.0] * 60,
+    })
+    # Minute 3 crosses the sell limit from below; minute 7 gaps beyond it.
+    # Earliest eligible minute must win even if a later gap looks better.
+    frame.loc[3, ["open", "high", "low"]] = [175.0, 180.0, 170.0]
+    frame.loc[7, ["open", "high", "low"]] = [185.0, 190.0, 180.0]
+    frames = [
+        frame,
+        as_searchsorted_intrabar(frame),
+        IntrabarExecutionData(
+            frame.timestamp.to_numpy(), pd.Timedelta(minutes=1),
+            frame.open.to_numpy(), frame.high.to_numpy(), frame.low.to_numpy(),
+        ),
+    ]
+    for intrabar in frames:
+        p.intrabar_data = intrabar
+        raw, timestamp = p._fib_limit_fill(1, trigger, "SHORT")
+        assert raw == trigger
+        assert pd.to_datetime(timestamp, utc=True) == pd.to_datetime(times[3], utc=True)
+
+    # If the first touch itself gaps through the limit, sell at the better open.
+    frame.loc[3, ["open", "high", "low"]] = [182.0, 185.0, 178.0]
+    p.intrabar_data = frame
+    raw, timestamp = p._fib_limit_fill(1, trigger, "SHORT")
+    assert raw == 182.0
+    assert timestamp == times[3]
+
+
 def test_deeper_limit_intrabar_fill_rejects_incomplete_minute_grid():
     import pandas as pd
     import pytest
