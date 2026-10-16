@@ -154,6 +154,40 @@ def test_main_invalidates_stale_pass_when_canonical_loading_fails(tmp_path, monk
     assert not summary_path.exists()
 
 
+def test_main_accepts_native_manifest_uuid_for_frozen_prefixed_folder(tmp_path, monkeypatch):
+    from crypto_strategy_lab import browser_v2_historical_parity as parity
+
+    desktop = _Model(sides=("LONG",) * 79)
+    browser = _Model(sides=("LONG",) * 79)
+    desktop.manifest["run_id"] = parity.FROZEN_NATIVE_RUN_ID
+    browser.manifest["run_id"] = parity.FROZEN_NATIVE_RUN_ID
+
+    monkeypatch.setattr(
+        parity,
+        "load_models",
+        lambda run_id, output_root: (desktop, browser),
+    )
+    monkeypatch.setattr(
+        parity,
+        "capture_parity",
+        lambda desktop_model, browser_model, evidence_dir: {
+            "run_id": parity.FROZEN_NATIVE_RUN_ID,
+            "trade_count": 79,
+            "cases": [],
+            "pass": True,
+        },
+    )
+
+    assert parity.main([
+        "--run-id",
+        parity.DEFAULT_RUN_ID,
+        "--evidence-dir",
+        str(tmp_path),
+        "--output-root",
+        str(tmp_path),
+    ]) == 0
+
+
 def test_review_only_rechecks_frozen_capture_hashes_without_market_data(tmp_path, monkeypatch):
     import pytest
     from crypto_strategy_lab import browser_v2_historical_parity as parity
