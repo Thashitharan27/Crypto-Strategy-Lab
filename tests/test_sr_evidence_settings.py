@@ -12,13 +12,20 @@ def test_hold_confirmation_is_the_normal_feature_default():
     assert definition.parameters["enable_sr_hold_confirmation"].default is True
 
 
-def test_timeframe_detection_overrides_inherit_shared_values_until_set():
+def test_timeframe_pivots_inherit_shared_values_and_horizons_are_timeframe_aware():
     features = FeatureConfig(sr_pivot_left=5, sr_pivot_right=5, sr_lookback_bars=200)
     assert features.sr_detection_parameters(15) == {
         "sr_pivot_left": 5,
         "sr_pivot_right": 5,
-        "sr_lookback_bars": 200,
+        "sr_lookback_bars": 672,
     }
+    # V6 zero means the automatic timeframe horizon, while pivot zero
+    # continues to inherit the shared pivot setting.
+    for minutes, label, horizon in ((15, "15m", 672), (60, "1h", 720),
+                                    (240, "4h", 540), (1440, "1d", 365)):
+        automatic = replace(features, **{f"sr_{label}_lookback_bars": 0})
+        assert automatic.sr_detection_parameters(minutes)["sr_lookback_bars"] == horizon
+    assert features.sr_detection_parameters(30)["sr_lookback_bars"] == 200
     tuned = replace(
         features,
         sr_1d_pivot_left=3,
@@ -44,9 +51,9 @@ def test_registry_carries_raw_overrides_so_each_independent_context_can_resolve_
     assert params["enable_sr_hold_confirmation"] is True
     assert params["sr_1h_pivot_right"] == 4
     assert params["sr_4h_lookback_bars"] == 150
-    # Primary 15m still uses shared values because its overrides are unset.
+    # Primary 15m keeps shared pivots and its V6 timeframe horizon.
     assert params["sr_pivot_right"] == 5
-    assert params["sr_lookback_bars"] == 200
+    assert params["sr_lookback_bars"] == 672
 
 
 def test_sr_warmup_uses_timeframe_specific_horizon():

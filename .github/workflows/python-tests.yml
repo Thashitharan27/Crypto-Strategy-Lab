@@ -222,6 +222,7 @@ jobs:
           tests/test_production_context_features.py
           tests/test_ichimoku_context.py
           tests/test_support_resistance_features.py
+          tests/test_sr_evidence_settings.py
           tests/test_futures_positioning_features.py
           tests/test_funding_context_features.py
           tests/test_shared_taker_flow_evidence.py
