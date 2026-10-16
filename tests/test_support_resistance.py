@@ -506,6 +506,7 @@ class TestSupportResistanceDetector:
                 zone_width_atr=0.5,
                 zone_padding_atr=0.25,
                 max_cluster_span_atr=1.0,
+                min_rejection_atr=0.25,
             )
             context = detector.analyze_price_location(
                 3, opens, highs, lows, closes, atrs, "LONG"
@@ -620,8 +621,8 @@ class TestSupportResistanceDetector:
             100.0,  # 11
             100.0,  # 12
             100.0,  # 13
-            99.9,   # 14
-            99.8,   # 15 - near resistance at 110
+            109.9,  # 14
+            109.8,  # 15 - genuinely near resistance at 110
         ], dtype=np.float64)
         
         opens = closes.copy()
@@ -849,7 +850,7 @@ class TestSupportResistanceDetector:
         open_ = np.array([100.0, 100.0, 100.0, 100.0, 100.0])
         high = np.array([101.0, 102.0, 101.0, 101.0, 101.0])
         low = np.array([99.0, 99.5, 99.0, 99.0, 99.0])
-        close = np.array([100.0, 100.5, 100.4, 100.3, 100.2])
+        close = np.array([100.0, 100.5, 101.6, 100.3, 100.2])
         atr = np.ones(5)
 
         detector.analyze_price_location(
