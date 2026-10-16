@@ -39,6 +39,8 @@ def compare_reports(expected: Path, actual: Path, mapping_path: Path, *, abs_tol
                     differences.append(ParityDifference(index, field, left_value, right_value))
     return {
         "status": "PASS" if not differences else "MISMATCH",
+        "scope": "MAPPED_15_FIELD_TRADE_ROWS_ONLY",
+        "historical_execution_certified": False,
         "expected_sha256": file_sha256(expected),
         "actual_sha256": file_sha256(actual),
         "mapping_sha256": file_sha256(mapping_path),
