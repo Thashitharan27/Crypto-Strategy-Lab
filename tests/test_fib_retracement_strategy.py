@@ -1970,6 +1970,20 @@ def test_deeper_limit_fill_minute_defers_profit_target_until_next_minute():
     assert pos.exit_reason == ExitReason.TP
     assert np.isclose(pos.entry_price, 138.2)
     assert np.isclose(pos.exit_price, 188.6)
+    # Explicit external-oracle accounting: the deferred TP is a genuine
+    # subsequent-minute exit with taker fees on the actual entry/exit notionals.
+    expected_gross = (188.6 - 138.2) * pos.quantity
+    expected_entry_fee = 138.2 * pos.quantity * 0.0005
+    expected_exit_fee = 188.6 * pos.quantity * 0.0005
+    assert np.isclose(pos.gross_pnl, expected_gross)
+    assert np.isclose(pos.entry_fee, expected_entry_fee)
+    assert np.isclose(pos.exit_fee, expected_exit_fee)
+    assert np.isclose(pos.fees, expected_entry_fee + expected_exit_fee)
+    assert np.isclose(pos.net_pnl, expected_gross - expected_entry_fee - expected_exit_fee)
+    assert np.isclose(
+        pos.net_r,
+        (expected_gross - expected_entry_fee - expected_exit_fee) / pos.risk_amount,
+    )
 
 
 def test_limit_fill_bar_fallback_cannot_credit_earlier_profit_or_exit_before_fill():
