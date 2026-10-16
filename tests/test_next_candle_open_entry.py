@@ -69,6 +69,7 @@ def test_queued_next_open_entry_is_opened_before_execution_candle_is_processed()
         def __init__(self):
             self.config = SimpleNamespace(
                 enable_daily_entry_schedule=False,
+                enable_di_direction_selection=False,
                 entry_timing_mode="NEXT_CANDLE_OPEN",
                 max_active_pairs=1,
             )
