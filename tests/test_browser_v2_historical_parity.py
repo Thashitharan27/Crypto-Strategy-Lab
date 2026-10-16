@@ -122,3 +122,16 @@ def test_capture_parity_rejects_mismatched_run_identity(tmp_path):
     with pytest.raises(ValueError, match="run identities differ"):
         capture_parity(desktop, browser, tmp_path, browser_payload=lambda i, tf: {})
     assert not (tmp_path / "summary.json").exists()
+
+
+def test_failed_parity_capture_does_not_leave_stale_pass_summary(tmp_path):
+    import json
+    import pytest
+
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(json.dumps({"pass": True, "run_id": "stale"}), encoding="utf-8")
+    desktop = _Model()
+    browser = _Model(sides=("LONG", "SHORT"))
+    with pytest.raises(ValueError, match="trade counts differ"):
+        capture_parity(desktop, browser, tmp_path, browser_payload=lambda i, tf: {})
+    assert not summary_path.exists()
