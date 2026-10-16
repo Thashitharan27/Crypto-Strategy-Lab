@@ -9,6 +9,19 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 
+def _json_safe_summary(value):
+    """Make non-finite summary metrics JSON-safe without changing stored results."""
+    if isinstance(value, dict):
+        return {key: _json_safe_summary(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_summary(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        if math.isnan(value):
+            return None  # Undefined statistic (for example, no losing trades).
+        return "Infinity" if value > 0 else "-Infinity"
+    return value
+
+
 def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None, visualizer_coordinator=None):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
@@ -142,10 +155,10 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             try:
                 result = read_service.completed_run(target)
                 summary = result.get("summary", {})
-                factor = summary.get("profit_factor") if isinstance(summary, dict) else None
-                if isinstance(factor, (float, int)) and not isinstance(factor, bool) and math.isinf(factor):
-                    # JSON cannot represent infinity; preserve the desktop meaning for read-only display.
-                    result = {**result, "summary": {**summary, "profit_factor": "Infinity" if factor > 0 else "-Infinity"}}
+                if isinstance(summary, dict):
+                    # Pandas statistics legitimately use NaN for undefined groups.
+                    # The API must still return strict JSON to the browser.
+                    result = {**result, "summary": _json_safe_summary(summary)}
                 return result
             except (OSError, ValueError, KeyError, TypeError):
                 raise HTTPException(status_code=404, detail="Run not found")
