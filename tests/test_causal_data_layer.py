@@ -30,6 +30,35 @@ def test_causal_asof_join_never_uses_future_feature() -> None:
     assert_causal_availability(joined)
 
 
+
+def test_causal_asof_join_accepts_mixed_utc_timestamp_resolutions() -> None:
+    decisions = pd.DataFrame({
+        "symbol": ["BTCUSDT"] * 3,
+        "decision_time": pd.Series(pd.array([
+            "2026-01-01T00:04:00Z",
+            "2026-01-01T00:05:00Z",
+            "2026-01-01T00:09:00Z",
+        ], dtype="datetime64[ns, UTC]")),
+    })
+    features = pd.DataFrame({
+        "symbol": ["BTCUSDT", "BTCUSDT"],
+        "available_at": pd.Series(pd.array([
+            "2026-01-01T00:05:00Z",
+            "2026-01-01T00:10:00Z",
+        ], dtype="datetime64[us, UTC]")),
+        "oi_change": [1.0, 99.0],
+    })
+
+    joined = causal_asof_join(decisions, features, by="symbol")
+
+    assert str(joined["decision_time"].dtype) == "datetime64[ns, UTC]"
+    assert str(joined["available_at"].dtype) == "datetime64[ns, UTC]"
+    assert pd.isna(joined.iloc[0]["oi_change"])
+    assert joined.iloc[1]["oi_change"] == 1.0
+    assert joined.iloc[2]["oi_change"] == 1.0
+    assert_causal_availability(joined)
+
+
 def test_assert_causal_availability_rejects_future_row() -> None:
     frame = pd.DataFrame(
         {
