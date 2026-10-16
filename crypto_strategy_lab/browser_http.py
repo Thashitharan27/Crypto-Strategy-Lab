@@ -48,6 +48,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             valid_host = (
                 parsed_host.hostname in {"127.0.0.1", "localhost"}
                 and (parsed_host.port is None or 1 <= parsed_host.port <= 65535)
+                and not host.endswith(":")
                 and parsed_host.username is None
                 and parsed_host.password is None
                 and parsed_host.path == ""
