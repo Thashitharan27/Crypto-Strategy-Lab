@@ -183,6 +183,9 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
+    # Fail closed even when canonical model loading fails before capture_parity starts.
+    evidence_dir = Path(args.evidence_dir)
+    (evidence_dir / "summary.json").unlink(missing_ok=True)
     output_root = _output_root(args.output_root)
     desktop_model, browser_model = load_models(args.run_id, output_root)
     if args.run_id == DEFAULT_RUN_ID:
@@ -191,7 +194,7 @@ def main(argv=None) -> int:
         for model in (desktop_model, browser_model):
             if str(model.manifest.get("run_id") or model.run_dir.name) != DEFAULT_RUN_ID:
                 raise ValueError("Frozen BTCUSDT run identity mismatch")
-    summary = capture_parity(desktop_model, browser_model, Path(args.evidence_dir))
+    summary = capture_parity(desktop_model, browser_model, evidence_dir)
 
     print(f"Run: {summary['run_id']}")
     print(f"Trades: {summary['trade_count']}")
