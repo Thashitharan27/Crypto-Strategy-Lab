@@ -89,6 +89,8 @@ def capture_parity(
     browser_payload: Callable[[int, str], Any] | None = None,
 ) -> dict[str, Any]:
     evidence_dir.mkdir(parents=True, exist_ok=True)
+    # A failed capture must never leave an earlier PASS summary as current evidence.
+    (evidence_dir / "summary.json").unlink(missing_ok=True)
     if int(desktop_model.trade_count) != int(browser_model.trade_count):
         raise ValueError("Desktop and browser trade counts differ")
     if str(desktop_model.manifest.get("run_id") or desktop_model.run_dir.name) != str(browser_model.manifest.get("run_id") or browser_model.run_dir.name):
