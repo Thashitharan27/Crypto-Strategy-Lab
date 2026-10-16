@@ -162,7 +162,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             if candidate.is_symlink():
                 raise HTTPException(status_code=404, detail="Run not found")
             target = candidate.resolve()
-            if not target.is_relative_to(root) or not target.is_dir():
+            if target.parent != root or not target.is_dir():
                 raise HTTPException(status_code=404, detail="Run not found")
             try:
                 result = read_service.completed_run(target)

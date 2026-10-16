@@ -68,3 +68,26 @@ def test_browser_visualizer_rejects_invalid_manifest_without_loading_model(tmp_p
         with pytest.raises(ValueError, match="Unverified artifact"):
             load_browser_visualizer(service, tmp_path, "BTCUSDT_4h")
     load.assert_not_called()
+
+
+def test_browser_visualizer_rejects_junction_like_run_outside_root(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    root = tmp_path / "runs"
+    root.mkdir()
+    outside = tmp_path / "private"
+    outside.mkdir()
+    linked = root / "BTCUSDT_4h"
+    try:
+        linked.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Directory links are unavailable")
+    original = Path.is_symlink
+    monkeypatch.setattr(
+        Path, "is_symlink",
+        lambda path: False if path == linked else original(path),
+    )
+    service = Mock()
+    with pytest.raises(ValueError, match="Completed run not found"):
+        load_browser_visualizer(service, root, linked.name)
+    service.completed_runs.read.assert_not_called()

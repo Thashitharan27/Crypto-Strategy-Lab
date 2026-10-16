@@ -31,7 +31,7 @@ def load_browser_visualizer(
     if run_dir.is_symlink():
         raise ValueError("Symlinked completed runs are not accepted")
     resolved = run_dir.resolve()
-    if not resolved.is_relative_to(root) or not resolved.is_dir():
+    if resolved.parent != root or not resolved.is_dir():
         raise ValueError("Completed run not found")
 
     # Preserve the same authority used by the desktop launcher.
