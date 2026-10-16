@@ -175,17 +175,19 @@ def test_browser_api_rejects_malformed_local_host_ports():
         assert client.get("/api/v1/health", headers={**headers, "Host": "localhost:8767"}).status_code == 200
 
 
-def test_completed_run_api_rejects_symlinked_run_folder(tmp_path):
+@pytest.mark.parametrize("external_target", [False, True])
+def test_completed_run_api_rejects_symlinked_run_folder(tmp_path, external_target):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
     from unittest.mock import Mock
 
     root = tmp_path / "runs"
     root.mkdir()
-    (root / "canonical_run").mkdir()
+    target = (tmp_path if external_target else root) / "canonical_run"
+    target.mkdir()
     link = root / "alias_run"
     try:
-        link.symlink_to(root / "canonical_run", target_is_directory=True)
+        link.symlink_to(target, target_is_directory=True)
     except (NotImplementedError, OSError) as exc:
         pytest.skip(f"Filesystem symlinks are unavailable: {type(exc).__name__}")
 
@@ -199,7 +201,8 @@ def test_completed_run_api_rejects_symlinked_run_folder(tmp_path):
     service.completed_run.assert_not_called()
 
 
-def test_saved_config_api_rejects_symlinked_file_alias(tmp_path):
+@pytest.mark.parametrize("external_target", [False, True])
+def test_saved_config_api_rejects_symlinked_file_alias(tmp_path, external_target):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
     from unittest.mock import Mock
@@ -207,9 +210,12 @@ def test_saved_config_api_rejects_symlinked_file_alias(tmp_path):
     root = tmp_path / "configs"
     root.mkdir()
     (root / "canonical.json").write_text("{}", encoding="utf-8")
+    target = (tmp_path / "outside.json") if external_target else (root / "canonical.json")
+    if external_target:
+        target.write_text("{}", encoding="utf-8")
     link = root / "alias.json"
     try:
-        link.symlink_to(root / "canonical.json")
+        link.symlink_to(target)
     except (NotImplementedError, OSError) as exc:
         pytest.skip(f"Filesystem symlinks are unavailable: {type(exc).__name__}")
 
