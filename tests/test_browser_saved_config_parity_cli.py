@@ -80,3 +80,35 @@ def test_saved_config_http_parity_fails_closed_for_invalid_ids(tmp_path):
         check_http(path)
     assert main(["--http", str(path)]) == 1
     assert path.read_bytes() == before
+
+
+def test_saved_config_http_rejects_json_scalar_type_drift_even_when_python_equal(tmp_path, monkeypatch):
+    import pytest
+    pytest.importorskip("fastapi")
+    from crypto_strategy_lab.browser_saved_config_parity import check_http
+    from crypto_strategy_lab import browser_http
+
+    path = tmp_path / "native_v3.json"
+    path.write_text(json.dumps(ResearchRunConfig().to_dict(), allow_nan=False), encoding="utf-8")
+    before = path.read_bytes()
+    original = browser_http.create_browser_app
+
+    def mutating_app(*, read_service, **kwargs):
+        canonical = read_service.research_config
+
+        def typed_drift(selected):
+            result = canonical(selected)
+            # JSON True and 1 are different types even though Python calls them equal.
+            result["features"]["fib_candle_confirmation_enabled"] = 1
+            return result
+
+        read_service.research_config = typed_drift
+        return original(read_service=read_service, **kwargs)
+
+    monkeypatch.setattr(browser_http, "create_browser_app", mutating_app)
+    report = check_http(path)
+    assert report["auth_rejected"] is True
+    assert report["native_sha256"] != report["browser_http_sha256"]
+    assert report["exact_match"] is False
+    assert report["pass"] is False
+    assert path.read_bytes() == before
