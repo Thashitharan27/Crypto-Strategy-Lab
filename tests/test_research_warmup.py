@@ -25,6 +25,13 @@ UTC = timezone.utc
 
 def test_default_strategy_warmup_covers_signal_and_state_context() -> None:
     config = ResearchRunConfig()
+    assert config.features.market_regime_method == "ASSET_RETURN"
+    assert strategy_warmup_period(config) == pd.Timedelta(days=90, minutes=30)
+
+
+def test_short_asset_return_lookback_retains_state_context_floor() -> None:
+    base = ResearchRunConfig()
+    config = replace(base, features=replace(base.features, bull_regime_lookback_days=1))
     assert strategy_warmup_period(config) == pd.Timedelta(days=22, minutes=30)
 
 
