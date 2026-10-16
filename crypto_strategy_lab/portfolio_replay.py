@@ -94,7 +94,12 @@ def discover_resilience_runs(output_root: Path | str) -> list[dict]:
     if not root.is_dir():
         return []
     rows = []
+    resolved_root = root.resolve()
     for child in root.iterdir():
+        # Both POSIX symlinks and Windows junction/reparse directories must be
+        # confined to the selected output root. Preserve normal direct runs.
+        if child.is_symlink() or child.resolve().parent != resolved_root:
+            continue
         if not child.is_dir() or not (child / "run_manifest.json").is_file():
             continue
         try:
