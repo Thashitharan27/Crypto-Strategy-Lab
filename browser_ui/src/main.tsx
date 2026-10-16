@@ -55,7 +55,7 @@ function App() {
   const [runInfo, setRunInfo] = React.useState<{ run_id?: string; status?: string } | null>(null);
   const [runError, setRunError] = React.useState("");
   const runRequest = React.useRef(0);
-  const [runMetrics, setRunMetrics] = React.useState<{ trades: number; winRate?: number; netPnl?: number } | null>(null);
+  const [runMetrics, setRunMetrics] = React.useState<{ trades: number; winRate?: number; netPnl?: number; totalNetR?: number; endingEquity?: number; totalReturnPercentage?: number } | null>(null);
   const [runRisk, setRunRisk] = React.useState<{profitFactor?: number; drawdown?: number; fees?: number} | null>(null);
 
   async function loadConfig() {
@@ -93,7 +93,7 @@ function App() {
       const value = await getReadOnly<{manifest: {run_id?: string; run_status?: string}; summary: Record<string, unknown>}>(`/api/v1/runs/${runId}`, token);
       if (requestId !== runRequest.current) return;
       setRunInfo({run_id: value.manifest.run_id, status: value.manifest.run_status});
-      const {total_trades, win_rate, net_pnl, profit_factor, maximum_drawdown_percentage, total_fees} = value.summary;
+      const {total_trades, win_rate, net_pnl, total_net_r, ending_equity, total_return_percentage, profit_factor, maximum_drawdown_percentage, total_fees} = value.summary;
       const safeMetric = (n: unknown) => typeof n === "number" && Number.isFinite(n) ? n : undefined;
       const profitFactor = safeMetric(profit_factor);
       const drawdown = safeMetric(maximum_drawdown_percentage);
@@ -109,6 +109,9 @@ function App() {
           trades: total_trades,
           winRate: rate !== undefined && rate >= 0 && rate <= 1 ? rate : undefined,
           netPnl: safeMetric(net_pnl),
+          totalNetR: safeMetric(total_net_r),
+          endingEquity: safeMetric(ending_equity),
+          totalReturnPercentage: safeMetric(total_return_percentage),
         });
       }
     } catch { if (requestId === runRequest.current) setRunError("Saved run unavailable or not accessible"); }
@@ -304,7 +307,7 @@ function App() {
         <button type="button" disabled={!connected} onClick={() => void loadRun()}>Read completed run</button>
         {runError && <p role="alert">{runError}</p>}
         {runInfo && <div><h3>Verified saved run</h3><p>Run ID: {runInfo.run_id ?? "Unavailable"}</p><p>Status: {runInfo.status ?? "Not specified"}</p><button type="button" onClick={() => {++visualizerRequest.current; setVisualizerRunId(runId); setVisualizerUrl(""); setVisualizerError(""); setSection("Trade Visualizer");}}>View in Trade Visualizer</button>
-          {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p>{runMetrics.winRate !== undefined && <p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p>}{runMetrics.netPnl !== undefined && <p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p>}</div>}
+          {runMetrics && <div aria-label="Saved run summary"><p>Trades: {runMetrics.trades}</p>{runMetrics.winRate !== undefined && <p>Win rate: {(runMetrics.winRate * 100).toFixed(2)}%</p>}{runMetrics.netPnl !== undefined && <p>Net P&L: {runMetrics.netPnl.toFixed(2)} (report currency)</p>}{runMetrics.totalNetR !== undefined && <p>Total net R: {runMetrics.totalNetR.toFixed(2)}R</p>}{runMetrics.endingEquity !== undefined && <p>Ending equity: {runMetrics.endingEquity.toFixed(2)} (report currency)</p>}{runMetrics.totalReturnPercentage !== undefined && <p>Total return: {runMetrics.totalReturnPercentage.toFixed(2)}%</p>}</div>}
           {runRisk && <div aria-label="Saved run risk metrics">
             {runRisk.profitFactor !== undefined && <p>Profit factor: {Number.isFinite(runRisk.profitFactor) ? runRisk.profitFactor.toFixed(2) : "∞"}</p>}
             {runRisk.drawdown !== undefined && <p>Maximum drawdown: {runRisk.drawdown.toFixed(2)}%</p>}
