@@ -169,7 +169,7 @@ def test_browser_api_rejects_malformed_local_host_ports():
     app = create_browser_app(token=token)
     with TestClient(app, base_url="http://localhost") as client:
         headers = {"Authorization": "Bearer " + token}
-        for host in ("localhost:invalid", "127.0.0.1:99999", "localhost:-1", "localhost:"):
+        for host in ("localhost:invalid", "127.0.0.1:99999", "localhost:-1", "localhost:", "localhost#attacker.invalid", "127.0.0.1:8767#suffix"):
             response = client.get("/api/v1/health", headers={**headers, "Host": host})
             assert response.status_code == 403, host
         assert client.get("/api/v1/health", headers={**headers, "Host": "localhost:8767"}).status_code == 200
