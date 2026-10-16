@@ -219,6 +219,7 @@ jobs:
           tests/test_browser_launcher.py
           tests/test_execution_kline_projection.py
           tests/test_causal_data_layer.py
+          tests/test_funding_datetime_resolution.py
           tests/test_feature_registry.py
           tests/test_feature_registry_authority.py
           tests/test_cache_hierarchy.py
