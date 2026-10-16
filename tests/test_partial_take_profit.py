@@ -35,7 +35,7 @@ def base_profile(**changes):
     return StrategyProfile(**values)
 
 
-def open_long(*bars, profile=None, fee=0, tie_policy=TiePolicy.PESSIMISTIC):
+def open_long(*bars, profile=None, fee=0, tie_policy=TiePolicy.PESSIMISTIC, engine_class=BacktestEngine):
     profiles = default_profiles()
     profiles["sideways_long"] = profile or base_profile()
     cfg = BacktestConfig(
@@ -50,7 +50,7 @@ def open_long(*bars, profile=None, fee=0, tie_policy=TiePolicy.PESSIMISTIC):
         slippage=0,
         tie_policy=tie_policy,
     )
-    engine = BacktestEngine(candles(*bars), cfg)
+    engine = engine_class(candles(*bars), cfg)
     engine.market_regime_values[:] = "SIDEWAYS"
     engine.plus_di_values[:] = 50
     engine.minus_di_values[:] = 10
@@ -160,3 +160,43 @@ def test_combined_partial_profit_uses_break_even_as_the_only_stop_override():
     assert not position.sl1_hit
     assert position.stop_exit_price == pytest.approx(100)
     assert position.final_exit_reason == "TP1_THEN_BE"
+
+
+def test_fib_fill_minute_defers_partial_tp_and_break_even_until_next_bar():
+    """Exercise actual partial/BE machinery through Fib's conservative guard."""
+    from crypto_strategy_lab.fib_retracement import FibonacciRetracementMixin
+    from crypto_strategy_lab.trade import ExitSource
+
+    class FibExitEngine(FibonacciRetracementMixin, BacktestEngine):
+        pass
+
+    profile = base_profile(
+        break_even_enabled=True,
+        break_even_activation_r=1,
+        break_even_offset_r=0,
+    )
+    engine, pos = open_long(
+        (100, 100), (120, 99), (120, 99),
+        profile=profile, fee=0.0005, engine_class=FibExitEngine,
+    )
+    fill_time = pd.Timestamp(engine.times[1])
+    pos.fib_limit_fill_time = fill_time
+    pos.fib_limit_fill_price = 100.0
+
+    # The 120 high on an OHLC fill minute might precede the limit fill.
+    # Neither TP1 nor a new BE stop can be awarded on ambiguous evidence.
+    engine._maybe_exit_bar(pos, 1, 120.0, 99.0, fill_time, ExitSource.INTRABAR)
+    assert not pos.tp1_hit
+    assert not pos.be_triggered
+    assert pos.is_open
+
+    # The same favorable price on the following execution minute is causal.
+    next_time = fill_time + pd.Timedelta(minutes=1)
+    engine._maybe_exit_bar(pos, 1, 120.0, 99.0, next_time, ExitSource.INTRABAR)
+    assert pos.tp1_hit
+    assert pos.be_triggered
+    assert pos.sl == pytest.approx(100.0)
+    assert pos.tp1_exit_time == next_time
+    assert pos.remaining_quantity == pytest.approx(pos.original_quantity / 2)
+    expected_tp1_fee = pos.tp1_exit_price * pos.tp1_quantity * 0.0005
+    assert pos.tp1_fees == pytest.approx(expected_tp1_fee)
