@@ -27,3 +27,23 @@ def test_real_file_parity_rejects_invalid_input(tmp_path, capsys):
     output = capsys.readouterr().out
     assert '"pass": false' in output
     assert path.read_bytes() == before
+
+
+def test_batch_parity_keeps_valid_sources_unchanged_when_other_fixture_fails(tmp_path, capsys):
+    """A failed configuration must not be disguised by an earlier PASS."""
+    valid = tmp_path / "valid.json"
+    invalid = tmp_path / "invalid.json"
+    valid.write_text(json.dumps(ResearchRunConfig().to_dict(), allow_nan=False), encoding="utf-8")
+    invalid.write_text("{broken", encoding="utf-8")
+    before_valid, before_invalid = valid.read_bytes(), invalid.read_bytes()
+
+    assert main([str(valid), str(invalid)]) == 1
+    results = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(results) == 2
+    assert results[0]["pass"] is True
+    assert results[0]["exact_match"] is True
+    assert results[1]["pass"] is False
+    assert results[1]["error_type"]
+    assert "native_sha256" not in results[1]
+    assert valid.read_bytes() == before_valid
+    assert invalid.read_bytes() == before_invalid
