@@ -12,8 +12,8 @@ From the original Windows checkout, after verifying that two independently produ
 CSV reports have equivalent **leg-level** semantics and stable unique trade IDs:
 
 ```powershell
-python tools/inspect_parity_trade_report.py "C:\\path\\to\\original\\trade_list.csv"
-python tools/inspect_parity_trade_report.py "C:\\path\\to\\replay\\trade_list.csv"
+python -m tools.inspect_parity_trade_report "C:\\path\\to\\original\\trade_list.csv"
+python -m tools.inspect_parity_trade_report "C:\\path\\to\\replay\\trade_list.csv"
 python tools/compare_frozen_trade_csv.py "C:\\path\\to\\original\\trade_list.csv" "C:\\path\\to\\replay\\trade_list.csv" --mapping "C:\\path\\to\\verified_mapping.json"
 ```
 
