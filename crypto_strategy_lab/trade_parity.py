@@ -60,6 +60,16 @@ def compare_trades(
                 differences.append(ParityDifference(index, f"{label}_trade_id_duplicate", identity, "unique trade ID"))
             else:
                 seen.add(identity)
+    # Direct mapping consumers can bypass the CSV adapter. Reject missing or
+    # whitespace-only execution chronology/reason on either side, even if equal.
+    required_text = ("side", "signal_time", "entry_time", "exit_time", "exit_reason")
+    for label, rows in (("expected", expected), ("actual", actual)):
+        for index, row in enumerate(rows):
+            for field in required_text:
+                if field in row and (not isinstance(row[field], str) or not row[field].strip()):
+                    differences.append(ParityDifference(
+                        index, f"{label}_{field}_valid", row[field], "nonempty string"
+                    ))
     for index, (old, new) in enumerate(zip(expected, actual)):
         for key in TRADE_FIELDS:
             if key not in old or key not in new:
