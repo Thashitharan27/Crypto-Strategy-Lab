@@ -97,3 +97,55 @@ Resolve those baseline failures without weakening execution invariants, then
 rerun the full suite and required checks before merging. Do not treat the
 workflow's success status as a passing full suite. PR #501's separate execution
 overlap hold remains unchanged.
+
+
+## Post-certification status correction and Windows execution-parity handoff (2026-10-16)
+
+**Historical note:** the CI/merge section above records the original checkpoint
+*at the time of the Windows certification* and is no longer the current merge
+decision. The 20 baseline full-suite failures were subsequently repaired;
+PRs #688 and #689 were merged after actual raw pytest logs passed, and the
+native pending-limit certification increments #690–#700 have also been merged.
+The verified #700 head ran **1,903 passed, zero failed, 45 warnings** before
+merge as main commit `183a0ccd737df1c5d6ec57fac4cb98333a2a8590`.
+Do not reinterpret the original Windows certification as having run on this
+later revision or as having certified price-event order.
+
+### Remaining original-file execution parity protocol
+
+Work exclusively in the separate CryptoBots Desktop Windows project, using the
+canonical Data Lake and already frozen original output **read-only**. Do not
+rebuild archives, mutate configurations, overwrite completed runs, regenerate
+expected values from the candidate-under-test, or enable browser execution.
+
+1. Freeze the exact repository revision, strategy configuration JSON and SHA-256,
+   canonical minute-data content manifest/hash, symbol, timeframe, start/end
+   bounds and taker/maker/slippage values before comparing execution.
+2. Choose a genuinely original **saved executed** Fibonacci pending-limit
+   fixture if one becomes available. The two original V3 config files and the
+   previously audited 79-trade 4h result do not establish that fixture. If no
+   native historical Fib pending-limit output exists, explicitly report
+   `ORIGINAL_FIB_EXECUTION_FIXTURE_MISSING`; never promote synthetic CI
+   regressions into original-file parity evidence.
+3. Compare immutable trade/leg identities and direction, signal index/time,
+   scheduled and actual entry index/time, initial/fill-adjusted price, size,
+   initial risk and SL/TP, then every partial SL1/TP1/TP2 and trailing/BE event
+   with effective timestamp, fill price, quantity and reason. Compare all
+   entry/exit fees, gross/net P&L, net R, account equity and terminal
+   END_OF_DATA handling. Use explicit numerical tolerance and explain any
+   mismatch; never count missing fields as equal.
+4. Verify each execution minute's full time grid, leading/trailing boundaries,
+   first eligible touch and gap-through-open policy. Record ambiguity where
+   1-minute OHLC cannot establish whether a favorable and adverse extreme
+   preceded/followed a fill; require a documented deterministic conservative
+   policy rather than inferring unavailable tick order.
+5. Produce a read-only discrepancy report with counts, earliest mismatched
+   timestamp, fieldwise expected/actual values and evidence paths, plus a
+   before/after SHA-256 inventory of all original configuration/output roots.
+   An exact match of prepared indicators or chart payloads is **not** a pass
+   for execution equivalence.
+
+Only after both native-owner overlap resolution (PR #501 remains on HOLD)
+and signed-off original trade-by-trade equivalence may the Phase 5 browser
+execution/config-write release gates be reconsidered. Until then, preserve
+the PySide6 fallback and disabled browser controls.
