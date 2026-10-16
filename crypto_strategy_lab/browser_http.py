@@ -190,7 +190,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             if candidate.is_symlink():
                 raise HTTPException(status_code=404, detail="Configuration not found")
             target = candidate.resolve()
-            if not target.is_relative_to(root) or not target.is_file():
+            if target.parent != root or not target.is_file():
                 raise HTTPException(status_code=404, detail="Configuration not found")
             try:
                 return {"config": read_service.research_config(target)}
