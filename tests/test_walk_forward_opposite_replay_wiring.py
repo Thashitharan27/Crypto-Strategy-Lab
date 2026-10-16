@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from crypto_strategy_lab.walk_forward_opposite_replay import _simulate_simple_one_r
 from mcp_server import control_server
@@ -55,8 +56,8 @@ def test_replay_uses_sizing_reference_for_account_r_when_stop_is_tighter():
     )
     assert outcome is not None
     assert outcome["exit_reason"] == "TP"
-    assert outcome["gross_r"] == 0.2
-    assert outcome["net_r"] == 0.2
+    assert outcome["gross_r"] == pytest.approx(0.2)
+    assert outcome["net_r"] == pytest.approx(0.2)
     assert outcome["account_r_distance"] == 1.0
 
 

@@ -159,7 +159,7 @@ def test_separate_position_sizing_stop_keeps_five_percent_budget_but_one_percent
     assert row.trade_r_price_distance == pytest.approx(2.0)
     assert row.position_sizing_reference_distance == pytest.approx(10.0)
     assert row.position_sizing_stop_multiple == pytest.approx(1.0)
-    assert row.position_sizing_stop_override_applied is True
+    assert bool(row.position_sizing_stop_override_applied) is True
     assert row.configured_sizing_budget_percentage == pytest.approx(0.05)
     assert row.planned_gross_stop_loss == pytest.approx(10.0)
     assert row.planned_gross_stop_risk_percentage == pytest.approx(0.01)
@@ -220,7 +220,7 @@ def test_disabled_sizing_override_keeps_legacy_full_stop_sizing():
 
     assert row.long_quantity == pytest.approx(25.0)
     assert row.position_sizing_reference_distance == pytest.approx(2.0)
-    assert row.position_sizing_stop_override_applied is False
+    assert bool(row.position_sizing_stop_override_applied) is False
     assert row.planned_gross_stop_risk_percentage == pytest.approx(0.05)
     assert row.pair_gross_r == pytest.approx(-1.0)
 
