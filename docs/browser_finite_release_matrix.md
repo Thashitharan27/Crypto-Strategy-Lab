@@ -95,8 +95,8 @@ disabled pending the B release review.
 
 In opt-in execution mode, an atomic exclusive worker-directory claim in the
 dedicated server output root prevents two independent guarded coordinators from
-running native simulations against that same root concurrently. Normal native
-completion/failure releases worker ownership; permanent request-ID claims remain.
+running native simulations against that same root concurrently. Normal native completion/failure and pre-start queued cancellation release
+worker ownership; permanent request-ID claims remain.
 A process crash retains the worker lock and therefore blocks new work until an
 operator verifies that the previous process is no longer running and reconciles
 artifacts. Never automatically delete an unexplained lock or resume an orphan.
