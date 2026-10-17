@@ -55,3 +55,22 @@ A1–A5 and B1–B4 are **finite gates**. For B2, cover distinct underlying exec
 - Keep draft PR #501 on hold; its separate limit-touch helper is not an approved second execution authority.
 
 Each completed gate should record: main SHA, source run/config identities, check/test names, actual raw results, known limitations, and a reviewer decision. No claim of 100% strategy correctness is intended.
+
+
+## B3 cross-process lifecycle limitation (2026-10-18)
+
+The experimental guarded coordinator retains submitted request IDs in memory
+only. Its duplicate-ID guarantee holds within one coordinator lifetime, **not**
+after an abrupt process crash or a new coordinator instance. Native completed-run
+artifact verification is read-only and must not be confused with a durable
+submission/idempotency journal. Do not claim replay protection, automatic resume,
+safe restart, or B3 acceptance until server-owned durable request identity and
+reconciliation have been designed, implemented and tested (including crashed,
+incomplete and previously completed native outputs). No browser execution or
+configuration writes are authorized by this note.
+
+Final Windows certification remains separate: preserve original files, compare
+independently invoked browser and PySide6 native runs on identical frozen inputs
+and effective configs, ordered fills/exits/trades/timestamps/fees/P&L/equity,
+saved outputs, security and lifecycle; retain A3 chart-interaction limitation,
+TP1 verifier provenance caveat and historical SL1/trailing coverage limitation.
