@@ -26,6 +26,7 @@ import crypto_strategy_lab.research_runner as runner_module
 def test_research_runner_artifact_parity_direct_native_vs_guarded_http(tmp_path, monkeypatch):
     output = tmp_path / "approved"
     output.mkdir()
+    (tmp_path / "raw").mkdir()
     candles = pd.DataFrame({
         "timestamp": pd.date_range("2024-01-01", periods=2, freq="15min", tz="UTC"),
         "open": [100.0, 100.0], "high": [101.0, 111.0],
