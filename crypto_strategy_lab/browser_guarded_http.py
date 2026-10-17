@@ -78,6 +78,10 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         except (ValueError, TypeError):
             audit("CONFIG_SAVE", "INVALID_CONFIG")
             raise HTTPException(status_code=422, detail="Invalid native configuration")
+        except OSError:
+            # Native disk errors can include private paths; never echo them.
+            audit("CONFIG_SAVE", "PERSISTENCE_FAILED")
+            raise HTTPException(status_code=503, detail="Configuration persistence unavailable")
         # Never expose server-side configuration file paths.
         return {"config_id": config_id, "status": "SAVED"}
 
@@ -139,6 +143,9 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         except (RuntimeError, ValueError):
             audit("JOB_SUBMIT", "REJECTED")
             raise HTTPException(status_code=409, detail="Job submission rejected")
+        except OSError:
+            audit("JOB_SUBMIT", "EXECUTION_UNAVAILABLE")
+            raise HTTPException(status_code=503, detail="Native research service unavailable")
         return {"request_id": request_id, "status": "ACCEPTED"}
 
     return router

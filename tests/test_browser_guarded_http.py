@@ -218,3 +218,57 @@ def test_failing_audit_callback_does_not_break_guarded_response():
     result = client.get("/api/v1/guarded/jobs/valid/progress",
         headers={"Authorization": "Bearer " + TOKEN})
     assert result.status_code == 200
+
+
+def test_config_persistence_os_failure_is_audited_and_sanitized():
+    events = []
+    integration = Mock()
+    integration.save_config.side_effect = OSError("private C:/original/configs/secret.json")
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=events.append,
+    ))
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/v1/guarded/configs/valid", json={},
+            headers={"Authorization": "Bearer " + TOKEN},
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Configuration persistence unavailable"}
+    assert "secret" not in response.text
+    assert events == [{"operation": "CONFIG_SAVE", "outcome": "PERSISTENCE_FAILED"}]
+    integration.save_config.assert_called_once_with("valid", {})
+
+
+def test_submit_native_io_failure_is_audited_and_sanitized(monkeypatch):
+    import crypto_strategy_lab.data_lake_config as native
+
+    config = Mock(spec=native.ResearchRunConfig)
+    monkeypatch.setattr(native, "normalize_data_lake_config", lambda _: config)
+    events = []
+    integration = Mock()
+    integration.submit.side_effect = OSError("private /srv/output/run-id")
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=events.append,
+    ))
+    payload = {
+        "request_id": "valid-job",
+        "request": {
+            "exchange": "binance", "market": "spot", "symbol": "BTCUSDT",
+            "period_start": "2025-01-01T00:00:00Z",
+            "period_end": "2025-01-02T00:00:00Z",
+            "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+        },
+        "config": {},
+    }
+    with TestClient(app) as client:
+        response = client.post("/api/v1/guarded/jobs", json=payload,
+            headers={"Authorization": "Bearer " + TOKEN})
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Native research service unavailable"}
+    assert "/srv/" not in response.text
+    assert events == [{"operation": "JOB_SUBMIT", "outcome": "EXECUTION_UNAVAILABLE"}]
+    integration.submit.assert_called_once()
