@@ -19,7 +19,7 @@ Status vocabulary: **PASS** (evidence with commit/fixture/log), **FAIL** (reprod
 
 | ID | Requirement | Milestone | Required acceptance evidence |
 | --- | --- | --- | --- |
-| A1 | Browser safety boundary | A | Token/localhost and allowlist route regression tests; forbidden verbs/routes and path escapes rejected; no run/config write path |
+| A1 | Read-only browser safety boundary | A | Token/localhost and allowlist route regression tests; forbidden verbs/routes and path escapes rejected; run/config write paths remain inaccessible in read-only/A mode, even if separately implemented for a future guarded B mode |
 | A2 | Canonical read-only configuration projection | A | Same JSON-safe config key paths, values and profiles via desktop/native serializer and authenticated browser GET, with representative original saved configs |
 | A3 | Saved run/results/visualizer fidelity | A | Representative genuine saved runs, stable run selection/trade IDs, timestamps, chart overlays, summary and payload parity; no mutation of originals |
 | A4 | Data Lake and historical artifact provenance | A | Registered hashes and original-file preservation checks; no unapproved canonical rebuild or hidden data download |
