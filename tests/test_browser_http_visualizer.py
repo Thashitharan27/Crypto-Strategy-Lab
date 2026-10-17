@@ -89,3 +89,14 @@ def test_visualizer_route_is_the_only_explicit_non_get_api_operation(tmp_path):
         return {}
     with pytest.raises(AssertionError):
         assert_exact_inventory()
+
+
+def test_visualizer_rejects_noncanonical_run_ids_before_coordinator():
+    client, owner = _client()
+    headers = {"Authorization": "Bearer " + "t" * 48,
+               "Origin": "http://127.0.0.1:8767"}
+    with client:
+        for run_id in (".", "..", "bad.name", "invalid%20name", "a" * 101):
+            response = client.post(f"/api/v1/visualizer/sessions/{run_id}", headers=headers)
+            assert response.status_code in {404, 422}
+    owner.open_completed_run.assert_not_called()
