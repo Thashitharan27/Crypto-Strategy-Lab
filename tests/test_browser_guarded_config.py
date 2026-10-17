@@ -187,3 +187,47 @@ def test_native_config_serialization_failure_releases_write_claim(tmp_path, monk
         )
     assert not (tmp_path / ".guarded-config-shared.lock").exists()
     assert not list(tmp_path.glob(".browser-config-*.tmp"))
+
+
+def test_guarded_http_save_matches_independent_desktop_native_serialization(tmp_path):
+    """B1: compare real serialized bytes across guarded HTTP and native save."""
+    from fastapi.testclient import TestClient
+    from unittest.mock import Mock
+
+    from crypto_strategy_lab.browser_guarded_integration import BrowserGuardedIntegration
+    from crypto_strategy_lab.browser_http import create_browser_app
+
+    config_root = tmp_path / "guarded"
+    config_root.mkdir()
+    desktop_path = tmp_path / "desktop.json"
+    config = ResearchRunConfig()
+    GuiApplicationService.save_config(desktop_path, config)
+
+    integration = BrowserGuardedIntegration(
+        Mock(), config_root, enabled=True,
+        execution_root=None,
+    )
+    token = "p" * 48
+    app = create_browser_app(
+        token=token, guarded_integration=integration, guarded_enabled=True,
+    )
+    try:
+        with TestClient(app, base_url="http://localhost") as client:
+            url = "/api/v1/guarded/configs/native-parity"
+            denied = client.put(url, json=config.to_dict())
+            assert denied.status_code == 401
+            response = client.put(
+                url, json=config.to_dict(),
+                headers={"Authorization": "Bearer " + token},
+            )
+            assert response.status_code == 200, response.text
+            assert response.json() == {"config_id": "native-parity", "status": "SAVED"}
+    finally:
+        integration.close()
+
+    browser_path = config_root / "native-parity.json"
+    assert browser_path.read_bytes() == desktop_path.read_bytes()
+    assert GuiApplicationService.load_config(browser_path).to_dict() == config.to_dict()
+    assert not list(config_root.glob(".browser-config-*.tmp"))
+    assert not (config_root / ".guarded-config-native-parity.lock").exists()
+    assert sorted(p.name for p in config_root.iterdir()) == ["native-parity.json"]

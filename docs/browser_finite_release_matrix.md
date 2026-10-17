@@ -191,3 +191,15 @@ configuration/request delegation contract **only**. Since the injected runner
 does not produce real fills or saved manifests, ordered-trade, fee, equity and
 artifact parity remain explicitly **NOT RUN** until independent frozen-input
 browser-versus-desktop certification. Normal browser mutations remain disabled.
+
+
+## B1 isolated guarded configuration-save serialization parity (2026-10-18)
+
+An authenticated opt-in HTTP save now has an isolated fixture regression that
+compares its persisted JSON **bytes** with independently calling native
+`GuiApplicationService.save_config` on the same typed configuration, and loads
+the result with `GuiApplicationService.load_config`. No browser-specific JSON
+serializer, native-engine replacement, or original-file writes are introduced.
+This test does not demonstrate Windows original-configuration parity, frozen
+source execution, or trade/output accounting; those stay deferred to final B2
+certification. Production browser writes remain disabled pending approval.
