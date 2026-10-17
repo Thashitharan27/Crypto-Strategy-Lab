@@ -6,7 +6,7 @@ No cancellation is claimed: native cancellation must be separately certified.
 from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
-from threading import Lock
+from threading import RLock
 from typing import Any
 
 
@@ -14,7 +14,7 @@ class GuardedRunJobs:
     def __init__(self, application_service: Any, *, enabled: bool = False):
         self._application = application_service
         self._enabled = enabled
-        self._lock = Lock()
+        self._lock = RLock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="csl-guarded-run")
         self._submitted: dict[str, Future] = {}
         self._active: str | None = None
@@ -42,8 +42,7 @@ class GuardedRunJobs:
             except BaseException:
                 self._active = None
                 raise
-            self._submitted[request_id] = future
-            future.add_done_callback(lambda _: self._finished(request_id))
+            # A completed Future may invoke callbacks immediately in this thread.\n            # RLock avoids deadlocking the submitter in that fast completion case.\n            self._submitted[request_id] = future\n            future.add_done_callback(lambda _: self._finished(request_id))
             return future
 
     def _finished(self, request_id: str) -> None:
