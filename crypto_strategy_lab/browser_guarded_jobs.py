@@ -147,8 +147,27 @@ class GuardedRunJobs:
             return self._submitted[request_id]
 
     def status(self, request_id: str) -> dict[str, str]:
-        """Return bounded lifecycle state without exposing native results/errors."""
-        future = self.result(request_id)
+        """Return bounded state; a persisted claim is not proof of completion."""
+        try:
+            future = self.result(request_id)
+        except KeyError:
+            # Cross-process restart: immutable claim survives but the native
+            # Future does not. Never infer success, failure, or safe replay.
+            if self._enabled is not True:
+                raise PermissionError("Browser research execution is disabled")
+            if not isinstance(request_id, str) or re.fullmatch(
+                r"[A-Za-z0-9_-]{1,100}", request_id, flags=re.ASCII,
+            ) is None or self._execution_root is None:
+                raise
+            root = Path(self._execution_root)
+            if (not root.is_absolute() or not root.is_dir()
+                    or any(part.is_symlink() for part in (root, *root.parents))
+                    or root.resolve(strict=True) != root):
+                raise
+            claim = root / (".guarded-request-" + request_id + ".claim")
+            if claim.is_symlink() or not claim.is_dir():
+                raise
+            return {"request_id": request_id, "status": "RECOVERY_UNVERIFIED"}
         if not future.done():
             state = "RUNNING" if future.running() else "QUEUED"
         elif future.cancelled():
