@@ -34,7 +34,8 @@ def test_rejects_parallel_jobs_and_duplicate_ids():
     def blocked(*args):
         entered.set()
         assert release.wait(5)
-    app = Mock(run=blocked)
+    app = Mock()
+    app.run.side_effect = blocked
     jobs = GuardedRunJobs(app, enabled=True)
     try:
         first = jobs.submit("one", object(), object())
