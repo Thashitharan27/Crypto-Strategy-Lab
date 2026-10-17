@@ -42,11 +42,11 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False)
     @router.get("/api/v1/guarded/jobs/{request_id}/progress")
     def progress(request_id: str, authorization: str | None = Header(default=None)):
         authorize(authorization)
-        return invoke(lambda: integration.progress(request_id))
+        return invoke(request_id, lambda: integration.progress(request_id))
 
     @router.post("/api/v1/guarded/jobs/{request_id}/cancel")
     def cancel(request_id: str, authorization: str | None = Header(default=None)):
         authorize(authorization)
-        return invoke(lambda: integration.cancel(request_id))
+        return invoke(request_id, lambda: integration.cancel(request_id))
 
     return router
