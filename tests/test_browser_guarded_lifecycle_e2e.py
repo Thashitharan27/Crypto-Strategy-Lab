@@ -13,13 +13,13 @@ TOKEN = "g" * 48
 def test_guarded_http_submit_status_cancel_and_completion(tmp_path, monkeypatch):
     import crypto_strategy_lab.data_lake_config as schema
 
-    config = Mock(spec=schema.ResearchRunConfig)
+    config = schema.ResearchRunConfig()
     monkeypatch.setattr(schema, "normalize_data_lake_config", lambda _: config)
     entered, release = Event(), Event()
     app_service = Mock()
 
     def native_run(request, cfg):
-        assert cfg is config
+        assert cfg.reporting.output_dir == str(tmp_path)
         entered.set()
         assert release.wait(10)
         return {"private": "native result"}
