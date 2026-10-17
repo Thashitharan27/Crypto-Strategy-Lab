@@ -14,7 +14,7 @@ def classify_recovered_job(request_id: str, previous_status: str) -> dict[str, s
             or not (1 <= len(request_id) <= 100)
             or not all(c.isalnum() or c in "_-" for c in request_id)):
         raise ValueError("Invalid request identifier")
-    if previous_status not in _ALLOWED:
+    if not isinstance(previous_status, str) or previous_status not in _ALLOWED:
         raise ValueError("Unknown retained job state")
     # Even a prior COMPLETED flag cannot prove durable output integrity.
     # Native manifests and artifacts must be verified independently.
