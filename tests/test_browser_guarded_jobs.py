@@ -331,3 +331,60 @@ def test_pre_start_cancel_releases_worker_but_retains_request_claim(tmp_path):
         app.run.assert_not_called()
     finally:
         jobs.close()
+
+
+def test_restarted_coordinator_reports_only_verified_request_claim_as_unverified(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    app = Mock()
+    app.run.return_value = "ok"
+    first = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    try:
+        assert first.submit("previous", None, ResearchRunConfig()).result(timeout=10) == "ok"
+    finally:
+        first.close()
+
+    second = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    try:
+        assert second.status("previous") == {
+            "request_id": "previous", "status": "RECOVERY_UNVERIFIED",
+        }
+        with pytest.raises(KeyError):
+            second.cancel("previous")
+        with pytest.raises(KeyError):
+            second.progress("previous")
+        with pytest.raises(ValueError, match="Duplicate"):
+            second.submit("previous", None, ResearchRunConfig())
+        with pytest.raises(KeyError):
+            second.status("never-claimed")
+        assert app.run.call_count == 1
+    finally:
+        second.close()
+
+
+def test_recovery_status_rejects_symlinked_or_invalid_request_claim(tmp_path):
+    claim = tmp_path / ".guarded-request-previous.claim"
+    other = tmp_path / "other"
+    other.mkdir()
+    try:
+        claim.symlink_to(other, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks unavailable")
+    jobs = GuardedRunJobs(Mock(), enabled=True, execution_root=tmp_path)
+    try:
+        with pytest.raises(KeyError):
+            jobs.status("previous")
+        with pytest.raises(KeyError):
+            jobs.status("../other")
+    finally:
+        jobs.close()
+
+
+def test_disabled_coordinator_does_not_expose_persisted_request_claim(tmp_path):
+    (tmp_path / ".guarded-request-previous.claim").mkdir()
+    jobs = GuardedRunJobs(Mock(), execution_root=tmp_path)
+    try:
+        with pytest.raises(PermissionError, match="disabled"):
+            jobs.status("previous")
+    finally:
+        jobs.close()
