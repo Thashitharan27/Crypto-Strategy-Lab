@@ -20,7 +20,7 @@ class BrowserGuardedIntegration:
         self._enabled = enabled is True
         self._execution_root = Path(execution_root) if execution_root is not None else None
         self._config = GuardedConfigStore(config_root, enabled=self._enabled)
-        self._jobs = GuardedRunJobs(application_service, enabled=self._enabled)
+        self._jobs = GuardedRunJobs(application_service, enabled=self._enabled, execution_root=self._execution_root)
 
     def _require_enabled(self) -> None:
         if not self._enabled:
