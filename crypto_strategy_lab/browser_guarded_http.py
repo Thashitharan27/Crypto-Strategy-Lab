@@ -28,7 +28,7 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
                 pass
 
     def authorize(authorization: str | None):
-        supplied = authorization.removeprefix("Bearer ") if authorization else ""
+        supplied = authorization[len("Bearer "):] if authorization and authorization.startswith("Bearer ") else ""
         if not secrets.compare_digest(supplied, token):
             audit("AUTH", "DENIED")
             raise HTTPException(status_code=401, detail="Unauthorized")
