@@ -13,7 +13,7 @@ HEADERS = {"Authorization": "Bearer " + TOKEN}
 def test_failed_job_is_sanitized_and_does_not_block_next_submission(tmp_path, monkeypatch):
     import crypto_strategy_lab.data_lake_config as schema
 
-    config = Mock(spec=schema.ResearchRunConfig)
+    config = schema.ResearchRunConfig()
     monkeypatch.setattr(schema, "normalize_data_lake_config", lambda _: config)
     service = Mock()
     service.progress_callback = None
