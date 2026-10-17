@@ -37,7 +37,7 @@ def _write_frozen_real_klines(root: Path):
         day = date.strftime("%Y-%m-%d")
         destination = directory / f"BTCUSDT-4h-{day}.zip"
         with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(f"BTCUSDT-4h-{day}.csv", "\\n".join(rows) + "\\n")
+            archive.writestr(f"BTCUSDT-4h-{day}.csv", "\n".join(rows) + "\n")
 
 
 def test_real_zip_loader_and_prepared_frames_match_native_and_guarded_http(tmp_path):
