@@ -109,3 +109,42 @@ def test_status_reports_running_completed_and_failed_without_native_details():
         assert failed.status("failure") == {"request_id": "failure", "status": "FAILED"}
     finally:
         failed.close()
+
+
+def test_native_progress_is_bounded_scoped_and_previous_observer_restored():
+    app = Mock()
+    original = Mock()
+    app.progress_callback = original
+    def run(request, config):
+        app.progress_callback({"kind": "stage", "phase": "preparing", "detail": "private path"})
+        app.progress_callback({"kind": "partition", "detail": "private raw candles"})
+        return "done"
+    app.run.side_effect = run
+    jobs = GuardedRunJobs(app, enabled=True)
+    try:
+        assert jobs.submit("progress", None, None).result(timeout=5) == "done"
+        assert jobs.progress("progress") == {"phase": "preparing"}
+        assert jobs.progress("progress") == {"phase": "preparing"}
+        assert app.progress_callback is original
+        assert original.call_count == 2
+        with pytest.raises(KeyError):
+            jobs.progress("not-found")
+    finally:
+        jobs.close()
+
+
+def test_native_progress_observer_restored_after_exception():
+    app = Mock()
+    app.progress_callback = None
+    def broken(request, config):
+        app.progress_callback({"kind": "stage", "phase": "failed"})
+        raise RuntimeError("native failure private data")
+    app.run.side_effect = broken
+    jobs = GuardedRunJobs(app, enabled=True)
+    try:
+        with pytest.raises(RuntimeError):
+            jobs.submit("failure", None, None).result(timeout=5)
+        assert jobs.progress("failure") == {"phase": "failed"}
+        assert app.progress_callback is None
+    finally:
+        jobs.close()
