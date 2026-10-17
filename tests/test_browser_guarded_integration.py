@@ -42,11 +42,11 @@ def test_explicit_server_opt_in_delegates_to_native_job_owner(tmp_path):
         integration.close()
 
 
-def test_enabled_config_path_still_rejects_bad_native_config(tmp_path):
+def test_enabled_config_path_rejects_traversal_before_native_validation(tmp_path):
     integration = BrowserGuardedIntegration(Mock(), tmp_path, enabled=True)
     try:
-        with pytest.raises((ValueError, TypeError)):
-            integration.save_config("item", {"not": "a native config"})
+        with pytest.raises(ValueError, match="Invalid configuration ID"):
+            integration.save_config("../item", {"not": "a native config"})
         assert not (tmp_path / "item.json").exists()
     finally:
         integration.close()
