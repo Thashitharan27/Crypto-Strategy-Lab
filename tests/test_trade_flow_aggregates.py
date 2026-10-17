@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from dataclasses import replace
+import json
 
 import numpy as np
+import duckdb
 import pandas as pd
 import pytest
 
@@ -19,6 +22,16 @@ from crypto_strategy_lab.features.trade_flow import (
 
 
 UTC = timezone.utc
+
+
+@pytest.fixture(params=["UTC", "Asia/Colombo", "America/New_York"])
+def aggregate_timezone(monkeypatch, request):
+    connect = duckdb.connect
+    def connect_with_default_timezone(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connection.execute("SET TimeZone = ?", [request.param])
+        return connection
+    monkeypatch.setattr(duckdb, "connect", connect_with_default_timezone)
 
 
 def record(
@@ -343,7 +356,7 @@ def test_deleted_trade_source_forces_full_catalog_reconciliation_before_cache_re
     assert all(selected.path != stale_path for selected in store.catalog.selected_records)
 
 
-def test_conflicting_overlap_error_reports_minute_and_source_archives(tmp_path):
+def test_conflicting_overlap_error_reports_minute_and_source_archives(tmp_path, aggregate_timezone):
     raw = tmp_path / "raw"
     first_path = raw / "first.csv"
     second_path = raw / "second.csv"
@@ -397,7 +410,7 @@ def test_cached_partition_validation_prunes_large_volume_profile_payload():
 
 
 def test_cached_partition_validation_does_not_materialize_pandas_frame(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, aggregate_timezone
 ):
     raw = tmp_path / "raw"
     path = raw / "day.csv"
@@ -422,6 +435,35 @@ def test_cached_partition_validation_does_not_materialize_pandas_frame(
     )
     assert cached is not None
     assert cached.is_file()
+
+def test_utc_partition_identity_reuses_valid_legacy_timezone_cache(tmp_path):
+    raw = tmp_path / "raw"
+    path = raw / "day.csv"
+    write_trades(path, ["1,100,1,100,1767225600000,false"])
+    rec = record(path, fingerprint="day", raw_root=raw)
+    store = MarketDataStore(raw, tmp_path / "cache")
+    store.catalog.sync_root(raw, [rec])
+    aggregates = TradeAggregateStore(store)
+    aggregates.load(request(datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)), DatasetKind.TRADES)
+    local = replace(rec,
+                    period_start=pd.Timestamp(rec.period_start).tz_convert("Asia/Colombo").to_pydatetime(),
+                    period_end=pd.Timestamp(rec.period_end).tz_convert("Asia/Colombo").to_pydatetime())
+    identity = aggregates._partition_identity(rec, DatasetKind.TRADES, None)
+    assert identity == aggregates._partition_identity(local, DatasetKind.TRADES, None)
+    legacy = aggregates._partition_identity(local, DatasetKind.TRADES, None, _legacy_timezone=True)
+    assert legacy != identity
+    parquet, manifest = aggregates._partition_paths(DatasetKind.TRADES, rec.symbol, identity)
+    old_parquet, old_manifest = aggregates._partition_paths(DatasetKind.TRADES, rec.symbol, legacy)
+    payload = json.loads(manifest.read_text())
+    payload.update(identity=legacy, source_period_start=str(local.period_start), source_period_end=str(local.period_end))
+    parquet.replace(old_parquet)
+    old_manifest.write_text(json.dumps(payload))
+    manifest.unlink()
+    original_bytes = old_parquet.read_bytes()
+    assert aggregates._read_cached_partition(local, DatasetKind.TRADES, identity, None) == old_parquet
+    assert old_parquet.read_bytes() == original_bytes
+    assert not parquet.exists() and not manifest.exists()
+
 
 def test_large_threshold_changes_aggregate_identity(tmp_path):
     raw = tmp_path / "raw"
