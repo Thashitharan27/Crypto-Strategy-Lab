@@ -275,3 +275,17 @@ loader/prepared generation remain injected fixtures; therefore genuine
 historical source-derived report parity remains **NOT RUN** pending independent
 original-frozen-input Windows certification. Browser mutations stay disabled
 for ordinary users until explicit release approval.
+
+
+## B2 genuine isolated Binance ZIP loader and prepared-frame HTTP parity (2026-10-18)
+
+Independent native GuiApplicationService and authenticated opt-in guarded HTTP
+calls now exercise the actual `load_backtest_bundle` and `from_data_lake_bundle`
+against isolated daily Binance-format ZIP candles. The test compares exact
+canonical source identity, loaded candle frames, causal prepared feature
+contexts, native request and normalized configuration. No production source
+archives or canonical Data Lake are accessed. The downstream simulator and
+reporter remain outside this focused loader/preparation test; earlier B2 tests
+cover their native paths separately. The **combined full original-data
+execution** and final desktop/browser comparison are still NOT RUN and must
+remain release-blocking. Guarded mutations stay disabled for normal users.
