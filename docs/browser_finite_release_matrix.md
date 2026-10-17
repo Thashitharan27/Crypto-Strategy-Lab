@@ -113,3 +113,16 @@ previous saved configuration if serialization, flush or replacement fails.
 Isolated regression tests do not certify full OS power-loss durability or
 Windows original-file behavior; those remain in consolidated final acceptance.
 No normal-user browser configuration writes are enabled.
+
+
+## B3 missing intrabar negative-path test (2026-10-18)
+
+An isolated guarded HTTP lifecycle test drives the genuine
+`GuiApplicationService.run` owner with an injected native runner that raises
+when required 1m intrabar candles are unavailable. It asserts the typed native
+`ERROR` policy, redacted FAILED status, retained duplicate-ID claim, released
+worker ownership and successful next submission under a new request ID.
+This is controlled failure injection, **not** proof of original Data Lake
+1m-candle gaps or independently executed browser/desktop trade parity.
+Those remain in the final frozen-input certification. Production browser
+execution/configuration writes stay disabled.
