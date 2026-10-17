@@ -148,3 +148,40 @@ def test_native_progress_observer_restored_after_exception():
         assert app.progress_callback is None
     finally:
         jobs.close()
+
+
+def test_cancel_running_native_job_never_claims_cancellation():
+    entered, release = Event(), Event()
+    def run(*args):
+        entered.set()
+        assert release.wait(5)
+        return "completed"
+    app = Mock()
+    app.run.side_effect = run
+    jobs = GuardedRunJobs(app, enabled=True)
+    try:
+        future = jobs.submit("active", None, None)
+        assert entered.wait(5)
+        assert jobs.cancel("active") == {
+            "request_id": "active", "status": "CANCELLATION_UNAVAILABLE"
+        }
+        assert not future.cancelled()
+        release.set()
+        assert future.result(timeout=5) == "completed"
+        assert jobs.cancel("active") == {
+            "request_id": "active", "status": "COMPLETED"
+        }
+    finally:
+        release.set()
+        jobs.close()
+
+
+def test_cancel_unknown_job_rejected_without_native_action():
+    app = Mock()
+    jobs = GuardedRunJobs(app, enabled=True)
+    try:
+        with pytest.raises(KeyError):
+            jobs.cancel("unknown")
+        app.run.assert_not_called()
+    finally:
+        jobs.close()
