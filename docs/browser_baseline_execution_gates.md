@@ -67,3 +67,20 @@ Original executed partial exits, complete event histories, an explicit
 per-trade slippage representation and current feature regeneration remain
 uncertified. PR #501 remains held and browser writes/execution remain disabled.
 
+## Original Windows feature regeneration (2026-10-17)
+
+The eight original references now pass independent regeneration of their five
+distinct prepared inputs: 92,776 rows and 8,486,781 Fibonacci candidate records.
+Every existing feature value, missing-value pattern, timestamp instant and
+pre-existing candidate field agrees. Raw JSON adds eight versioned diagnostics;
+some decoded timestamp dtype labels differ only by timezone display. See
+`docs/browser_fib_feature_regeneration_2026-10-17.md` for those explicit limits,
+preservation hashes and the cache/UTC defects fixed in PR #712.
+
+The broader original store contains 40 TP1 exits and 40 break-even triggers in
+two other genuine runs; their artifact hashes and read-only queries validate.
+This establishes available evidence, not a new execution-parity certificate.
+No original executed SL1/trailing records, full event histories or dedicated
+per-trade slippage fields were found. Full migration certification remains
+blocked; PR #501 and browser execution/configuration writes remain held.
+

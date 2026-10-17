@@ -120,3 +120,12 @@ verify current feature preparation before any Phase 5 release decision.
 
 **PR #501 remains on HOLD. Browser execution and configuration writes remain
 disabled, and the PySide6 fallback remains supported.**
+
+## Feature-regeneration follow-up (2026-10-17)
+
+Independent regeneration now passes for all existing feature semantics across
+these eight references, with explicit additive JSON and timezone-display
+differences. See [the feature-regeneration report](browser_fib_feature_regeneration_2026-10-17.md).
+The original 35-trade executor replay was reused without repetition. Remaining
+SL1/trailing/event-history/slippage and guarded browser execution gates stay
+blocked; PR #501 remains held.
