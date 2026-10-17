@@ -229,3 +229,17 @@ certification, and does not establish 1m fill/slippage/partial/short coverage.
 The final consolidated original-frozen-input desktop-versus-browser run and
 saved manifest/artifact verification remain NOT RUN and release-blocking.
 Normal browser execution and configuration writes remain disabled.
+
+
+## B2 isolated ResearchRunner orchestration parity (2026-10-18)
+
+An opt-in authenticated guarded HTTP test and independent direct native service
+now each call the real `ResearchRunner`, driving the existing `BacktestEngine`
+on identical frozen synthetic candles. It compares exact ordered trade DataFrames,
+TP/end-of-data outcomes, the effective runner inputs, and byte-for-byte output
+from the same isolated deterministic CSV reporter. Native `ResearchRunner`
+orchestration is exercised; the bundle loader/preparation and reporter are
+injected fixtures. Thus it **does not** certify the production Data Lake loader,
+production manifest reporter, full 1m execution, or original saved artifacts.
+Those remain NOT RUN for consolidated independent desktop-versus-browser B2
+certification. Production browser mutation routes remain disabled.
