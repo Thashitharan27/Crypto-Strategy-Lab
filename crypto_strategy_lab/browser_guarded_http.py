@@ -63,4 +63,57 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False)
         # Never expose server-side configuration file paths.
         return {"config_id": config_id, "status": "SAVED"}
 
+    @router.post("/api/v1/guarded/jobs", status_code=202)
+    def submit_job(payload: dict, authorization: str | None = Header(default=None)):
+        authorize(authorization)
+        from datetime import datetime
+        from crypto_strategy_lab.data_lake_config import (
+            ResearchRunConfig, normalize_data_lake_config,
+        )
+        from crypto_strategy_lab.gui.v2_controller import GuiResearchRequest
+        request_id = payload.get("request_id")
+        if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
+            raise HTTPException(status_code=422, detail="Invalid request identifier")
+        details = payload.get("request")
+        config_data = payload.get("config")
+        if not isinstance(details, dict) or not isinstance(config_data, dict):
+            raise HTTPException(status_code=422, detail="Invalid native job payload")
+        required = {"exchange", "market", "symbol", "period_start", "period_end",
+                    "strategy_timeframe", "intrabar_timeframe"}
+        if set(details) != required:
+            raise HTTPException(status_code=422, detail="Invalid native research request")
+        try:
+            start = datetime.fromisoformat(details["period_start"].replace("Z", "+00:00"))
+            end = datetime.fromisoformat(details["period_end"].replace("Z", "+00:00"))
+            if not (start.tzinfo and end.tzinfo and start < end):
+                raise ValueError("Invalid native request window")
+            if details["exchange"] != "binance" or details["market"] not in {"spot", "futures_um"}:
+                raise ValueError("Unsupported market")
+            symbol = details["symbol"]
+            if not isinstance(symbol, str) or not symbol.isascii() or not symbol.isalnum() or not 1 <= len(symbol) <= 32:
+                raise ValueError("Invalid symbol")
+            if details["strategy_timeframe"] not in {"15m", "1h", "4h", "1d"}:
+                raise ValueError("Invalid timeframe")
+            if details["intrabar_timeframe"] not in {"1m", "5m", "15m"}:
+                raise ValueError("Invalid intrabar timeframe")
+            request = GuiResearchRequest(
+                exchange="binance", market=details["market"], symbol=symbol.upper(),
+                period_start=start, period_end=end,
+                strategy_timeframe=details["strategy_timeframe"],
+                intrabar_timeframe=details["intrabar_timeframe"],
+            )
+            config = normalize_data_lake_config(config_data)
+            if not isinstance(config, ResearchRunConfig):
+                raise ValueError("Native v3 config required")
+            config.validate()
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise HTTPException(status_code=422, detail="Invalid native job payload")
+        try:
+            integration.submit(request_id, request, config)
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Guarded operations disabled")
+        except (RuntimeError, ValueError):
+            raise HTTPException(status_code=409, detail="Job submission rejected")
+        return {"request_id": request_id, "status": "ACCEPTED"}
+
     return router

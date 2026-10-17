@@ -106,3 +106,84 @@ def test_opt_in_config_write_rejects_bad_ids_and_sanitizes_native_errors():
     response = client.put("/api/v1/guarded/configs/valid", json={}, headers=headers)
     assert response.status_code == 403
     assert response.json() == {"detail": "Guarded operations disabled"}
+
+
+def test_job_submission_route_absent_by_default():
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(token=TOKEN, integration=Mock()))
+    client = TestClient(app)
+    assert client.post("/api/v1/guarded/jobs", json={}).status_code == 404
+
+
+def test_job_submission_is_authenticated_and_rejects_malformed_payload():
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(token=TOKEN, integration=integration, enabled=True))
+    client = TestClient(app)
+    path = "/api/v1/guarded/jobs"
+    assert client.post(path, json={}).status_code == 401
+    assert client.post(path, json={}, headers={"Authorization": "Bearer bad"}).status_code == 401
+    auth = {"Authorization": "Bearer " + TOKEN}
+    for bad in ({}, {"request_id": "../bad", "request": {}, "config": {}},
+                {"request_id": "ok", "request": {}, "config": {}}):
+        assert client.post(path, json=bad, headers=auth).status_code == 422
+    integration.submit.assert_not_called()
+
+
+def test_guarded_submission_delegates_native_types_without_result_leak(monkeypatch):
+    import crypto_strategy_lab.data_lake_config as native
+    config = Mock(spec=native.ResearchRunConfig)
+    monkeypatch.setattr(native, "normalize_data_lake_config", lambda _: config)
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(token=TOKEN, integration=integration, enabled=True))
+    client = TestClient(app)
+    payload = {
+        "request_id": "job-2",
+        "request": {
+            "exchange": "binance", "market": "futures_um", "symbol": "btcusdt",
+            "period_start": "2025-01-01T00:00:00Z",
+            "period_end": "2025-01-02T00:00:00Z",
+            "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+        },
+        "config": {"native": "test-only"},
+    }
+    response = client.post("/api/v1/guarded/jobs", json=payload,
+                           headers={"Authorization": "Bearer " + TOKEN})
+    assert response.status_code == 202
+    assert response.json() == {"request_id": "job-2", "status": "ACCEPTED"}
+    integration.submit.assert_called_once()
+    args = integration.submit.call_args.args
+    assert args[0] == "job-2"
+    assert args[1].symbol == "BTCUSDT"
+    assert args[2] is config
+    config.validate.assert_called_once()
+
+
+def test_submission_permission_and_duplicate_fail_closed(monkeypatch):
+    import crypto_strategy_lab.data_lake_config as native
+    config = Mock(spec=native.ResearchRunConfig)
+    monkeypatch.setattr(native, "normalize_data_lake_config", lambda _: config)
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(token=TOKEN, integration=integration, enabled=True))
+    client = TestClient(app)
+    payload = {
+        "request_id": "job-2",
+        "request": {
+            "exchange": "binance", "market": "spot", "symbol": "BTCUSDT",
+            "period_start": "2025-01-01T00:00:00Z",
+            "period_end": "2025-01-02T00:00:00Z",
+            "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+        }, "config": {},
+    }
+    integration.submit.side_effect = PermissionError("private disk")
+    response = client.post("/api/v1/guarded/jobs", json=payload,
+                           headers={"Authorization": "Bearer " + TOKEN})
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Guarded operations disabled"}
+    integration.submit.side_effect = ValueError("private output path")
+    response = client.post("/api/v1/guarded/jobs", json=payload,
+                           headers={"Authorization": "Bearer " + TOKEN})
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Job submission rejected"}
