@@ -126,3 +126,15 @@ This is controlled failure injection, **not** proof of original Data Lake
 1m-candle gaps or independently executed browser/desktop trade parity.
 Those remain in the final frozen-input certification. Production browser
 execution/configuration writes stay disabled.
+
+
+## B4 authenticated request-body boundary (2026-10-18)
+
+The opt-in guarded mutation router authenticates the bearer token **before**
+parsing user-supplied JSON. Malformed, scalar or array bodies are rejected
+with bounded 422 responses only after authentication, and missing credentials
+receive uniform 401 responses with bounded AUTH audit. Native job submission
+and config persistence continue to share the existing validation and ownership
+paths. This regression does not authorize enabling browser mutations; the
+production launcher remains read-only pending explicit approval and
+independent browser-versus-desktop certification.
