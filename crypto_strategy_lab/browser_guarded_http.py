@@ -91,14 +91,17 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         from crypto_strategy_lab.gui.v2_controller import GuiResearchRequest
         request_id = payload.get("request_id")
         if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
+            audit("JOB_SUBMIT", "INVALID_INPUT")
             raise HTTPException(status_code=422, detail="Invalid request identifier")
         details = payload.get("request")
         config_data = payload.get("config")
         if not isinstance(details, dict) or not isinstance(config_data, dict):
+            audit("JOB_SUBMIT", "INVALID_INPUT")
             raise HTTPException(status_code=422, detail="Invalid native job payload")
         required = {"exchange", "market", "symbol", "period_start", "period_end",
                     "strategy_timeframe", "intrabar_timeframe"}
         if set(details) != required:
+            audit("JOB_SUBMIT", "INVALID_INPUT")
             raise HTTPException(status_code=422, detail="Invalid native research request")
         try:
             start = datetime.fromisoformat(details["period_start"].replace("Z", "+00:00"))
@@ -125,6 +128,7 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
                 raise ValueError("Native v3 config required")
             config.validate()
         except (ValueError, TypeError, KeyError, AttributeError):
+            audit("JOB_SUBMIT", "INVALID_INPUT")
             raise HTTPException(status_code=422, detail="Invalid native job payload")
         try:
             integration.submit(request_id, request, config)
