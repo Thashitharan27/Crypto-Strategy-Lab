@@ -218,3 +218,24 @@ def test_failing_audit_callback_does_not_break_guarded_response():
     result = client.get("/api/v1/guarded/jobs/valid/progress",
         headers={"Authorization": "Bearer " + TOKEN})
     assert result.status_code == 200
+
+
+def test_config_persistence_os_failure_is_audited_and_sanitized():
+    events = []
+    integration = Mock()
+    integration.save_config.side_effect = OSError("private C:/original/configs/secret.json")
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=events.append,
+    ))
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/v1/guarded/configs/valid", json={},
+            headers={"Authorization": "Bearer " + TOKEN},
+        )
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Configuration persistence unavailable"}
+    assert "secret" not in response.text
+    assert events == [{"operation": "CONFIG_SAVE", "outcome": "PERSISTENCE_FAILED"}]
+    integration.save_config.assert_called_once_with("valid", {})
