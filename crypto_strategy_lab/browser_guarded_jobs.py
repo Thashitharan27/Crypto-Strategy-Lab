@@ -8,11 +8,14 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from threading import RLock
 from typing import Any
+from pathlib import Path
+from crypto_strategy_lab.browser_guarded_output import bind_guarded_output_root
 
 
 class GuardedRunJobs:
-    def __init__(self, application_service: Any, *, enabled: bool = False):
+    def __init__(self, application_service: Any, *, enabled: bool = False, execution_root: Path | None = None):
         self._application = application_service
+        self._execution_root = execution_root
         self._enabled = enabled
         self._lock = RLock()
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="csl-guarded-run")
@@ -62,6 +65,8 @@ class GuardedRunJobs:
                 previous(event)
         self._application.progress_callback = observe
         try:
+            if self._execution_root is not None:
+                config = bind_guarded_output_root(config, self._execution_root)
             return self._application.run(request, config)
         finally:
             self._application.progress_callback = previous
