@@ -30,10 +30,12 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
     def authorize(authorization: str | None):
         supplied = authorization.removeprefix("Bearer ") if authorization else ""
         if not secrets.compare_digest(supplied, token):
+            audit("AUTH", "DENIED")
             raise HTTPException(status_code=401, detail="Unauthorized")
 
     def invoke(request_id, call, operation):
         if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
+            audit(operation, "INVALID_ID")
             raise HTTPException(status_code=404, detail="Unknown job")
         try:
             result = call()
@@ -65,13 +67,16 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
     def save_config(config_id: str, payload: dict, authorization: str | None = Header(default=None)):
         authorize(authorization)
         if not isinstance(config_id, str) or _REQUEST_ID.fullmatch(config_id) is None:
+            audit("CONFIG_SAVE", "INVALID_ID")
             raise HTTPException(status_code=404, detail="Unknown configuration")
         try:
             integration.save_config(config_id, payload)
             audit("CONFIG_SAVE", "SUCCESS")
         except PermissionError:
+            audit("CONFIG_SAVE", "DENIED")
             raise HTTPException(status_code=403, detail="Guarded operations disabled")
         except (ValueError, TypeError):
+            audit("CONFIG_SAVE", "INVALID_CONFIG")
             raise HTTPException(status_code=422, detail="Invalid native configuration")
         # Never expose server-side configuration file paths.
         return {"config_id": config_id, "status": "SAVED"}
@@ -125,8 +130,10 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
             integration.submit(request_id, request, config)
             audit("JOB_SUBMIT", "SUCCESS")
         except PermissionError:
+            audit("JOB_SUBMIT", "DENIED")
             raise HTTPException(status_code=403, detail="Guarded operations disabled")
         except (RuntimeError, ValueError):
+            audit("JOB_SUBMIT", "REJECTED")
             raise HTTPException(status_code=409, detail="Job submission rejected")
         return {"request_id": request_id, "status": "ACCEPTED"}
 
