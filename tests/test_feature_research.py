@@ -757,3 +757,16 @@ def test_fib_candidate_inventory_frame_expands_all_candidates():
     assert selected["bars_since_signal_test"] == 1
     assert selected["final_score"] == pytest.approx(4.95)
     assert selected["rsi_divergence"] == "BULLISH"
+
+
+@pytest.mark.parametrize("timezone_name", ["Asia/Colombo", "America/New_York"])
+def test_research_artifact_join_uses_utc_in_non_utc_sessions(tmp_path, monkeypatch, timezone_name):
+    connect = duckdb.connect
+    def non_utc_connect(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        connection.execute("SET TimeZone = ?", [timezone_name])
+        return connection
+    monkeypatch.setattr(duckdb, "connect", non_utc_connect)
+    run = _write_run(tmp_path)
+    with ResearchQueryService(run) as service:
+        assert service.query({}).trades.sum() == 5

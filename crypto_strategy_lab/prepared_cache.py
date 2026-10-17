@@ -39,8 +39,10 @@ def _digest(payload: object) -> str:
 def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object]:
     """Only definitions/configuration physically materialized into the prepared frame.
 
-    TP/SL, trailing, fees, slippage, portfolio behavior and reporting/UI values
-    are intentionally absent. Profile momentum lookbacks are present because
+    Runtime TP/SL, trailing, fees, slippage, portfolio behavior and reporting/UI
+    values are intentionally absent. Fibonacci's stop buffer is an exception:
+    candidate selection materializes it into the prepared research context.
+    Profile momentum lookbacks are present because
     their arrays are physically stored in the prepared contract. The authoritative
     policy-market feature definition hash is also included so implementation,
     version, schema, causality or dependency-contract changes invalidate L3.
@@ -51,7 +53,7 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
     policy_definition = registry.definition_hash(
         [POLICY_MARKET_FEATURE_NAME]
     )
-    return {
+    inputs = {
         "policy_features": True,
         "policy_market_definition": policy_definition,
         "market_regime_method": config.market_regime_method,
@@ -98,6 +100,16 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
         "fib_half_swing_mode": bool(getattr(config, "fib_half_swing_mode", False)),
         "fib_third_retest_entry": bool(getattr(config, "fib_third_retest_entry", False)),
     }
+    if inputs["fib_features_required"]:
+        inputs.update({
+            "fib_first_zone_hold_entry": bool(getattr(config, "fib_first_zone_hold_entry", False)),
+            "fib_candidate_context_selection": bool(getattr(config, "fib_candidate_context_selection", False)),
+            "mean_reversion_period": int(getattr(config, "mean_reversion_period", 20)),
+            "mean_reversion_mean_type": str(getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
+            "strategy_timeframe_minutes": int(getattr(config, "strategy_timeframe_minutes", 15)),
+            "fib_stop_buffer_atr": float(getattr(config, "fib_stop_buffer_atr", 0.05)),
+        })
+    return inputs
 
 
 class PreparedRunCache:

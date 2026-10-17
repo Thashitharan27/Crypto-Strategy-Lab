@@ -51,6 +51,9 @@ def _bounded_duckdb_connection(
     connection = duckdb.connect()
     spill = str(Path(temporary.name)).replace("'", "''")
     try:
+        # Naive artifact timestamps represent UTC. Mixed TIMESTAMP/TIMESTAMPTZ
+        # joins must interpret them identically on every workstation timezone.
+        connection.execute("SET TimeZone='UTC'")
         connection.execute(f"SET memory_limit='{memory_limit}'")
         connection.execute(f"SET threads={int(threads)}")
         connection.execute("SET preserve_insertion_order=false")

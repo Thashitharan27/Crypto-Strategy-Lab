@@ -107,6 +107,9 @@ class TradeAggregateStore:
         con = duckdb.connect()
         spill = str(Path(temporary.name)).replace("'", "''")
         try:
+            # Partition bounds and UTC-day coverage must not depend on the
+            # workstation timezone when SQL mixes naive and aware timestamps.
+            con.execute("SET TimeZone='UTC'")
             con.execute(f"SET memory_limit='{memory_limit}'")
             con.execute(f"SET threads={int(threads)}")
             con.execute("SET preserve_insertion_order=false")
@@ -209,6 +212,8 @@ class TradeAggregateStore:
         record: ArchiveRecord,
         dataset: DatasetKind,
         large_trade_quote_threshold: float | None,
+        *,
+        _legacy_timezone: bool = False,
     ) -> str:
         adapter = self.store._adapter_for(dataset)
         payload = {
@@ -219,8 +224,8 @@ class TradeAggregateStore:
             "market": record.market.value,
             "dataset": dataset.value,
             "symbol": record.symbol,
-            "period_start": record.period_start,
-            "period_end": record.period_end,
+            "period_start": record.period_start if _legacy_timezone or record.period_start is None else pd.to_datetime(record.period_start, utc=True).to_pydatetime(),
+            "period_end": record.period_end if _legacy_timezone or record.period_end is None else pd.to_datetime(record.period_end, utc=True).to_pydatetime(),
             "source_fingerprint": record.fingerprint,
             "adapter_contract": adapter.canonical_contract(),
             "large_trade_quote_threshold": large_trade_quote_threshold,
@@ -292,6 +297,11 @@ class TradeAggregateStore:
         """
         parquet, manifest = self._partition_paths(dataset, record.symbol, identity)
         if not parquet.is_file() or not manifest.is_file():
+            # Retain and validate locally generated pre-normalization caches.
+            legacy = self._partition_identity(record, dataset, large_trade_quote_threshold, _legacy_timezone=True)
+            canonical = self._partition_identity(record, dataset, large_trade_quote_threshold)
+            if identity == canonical and legacy != identity:
+                return self._read_cached_partition(record, dataset, legacy, large_trade_quote_threshold)
             return None
         try:
             metadata = json.loads(manifest.read_text(encoding="utf-8"))
@@ -726,6 +736,7 @@ class TradeAggregateStore:
 
         try:
             with duckdb.connect(str(database)) as con:
+                con.execute("SET TimeZone='UTC'")
                 con.execute("SET memory_limit='1GB'")
                 escaped_spill = str(spill).replace("'", "''")
                 con.execute(f"SET temp_directory='{escaped_spill}'")
@@ -1111,6 +1122,7 @@ class TradeAggregateStore:
         escaped_spill = str(spill).replace("'", "''")
         try:
             with duckdb.connect() as con:
+                con.execute("SET TimeZone='UTC'")
                 # Keep substantial headroom for the GUI/backtest process. DuckDB
                 # may spill sort/hash state to disk instead of competing for all
                 # physical RAM during a multi-year final combine.

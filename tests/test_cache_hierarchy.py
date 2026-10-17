@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import zipfile
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from crypto_strategy_lab.data import DataRequest, DatasetKind, MarketDataStore
@@ -283,3 +284,32 @@ def test_prepared_contract_version_changes_l3_identity(tmp_path: Path) -> None:
     assert PreparedRunCache(tmp_path, contract_version=1).identity(**kwargs) != PreparedRunCache(
         tmp_path, contract_version=2
     ).identity(**kwargs)
+
+
+@pytest.mark.parametrize("changed", [
+    {"fib_first_zone_hold_entry": True},
+    {"fib_candidate_context_selection": True},
+    {"mean_reversion_period": 40},
+    {"mean_reversion_mean_type": "SMA"},
+    {"strategy_timeframe_minutes": 240},
+    {"fib_stop_buffer_atr": 0.2},
+])
+def test_fib_preparation_changes_cannot_reuse_stale_l3(tmp_path, changed):
+    cache = PreparedRunCache(tmp_path)
+    def key(config):
+        return cache.identity(
+            request_identity="same-market-window", feature_identities={"core": "same"},
+            canonical_identities={"strategy": "same"},
+            prepared_inputs=prepared_policy_inputs(config),
+        )
+    baseline = _policy_config(fib_features_required=True, strategy_timeframe_minutes=15)
+    original = PreparedBacktestFrame(**_prepared_kwargs())
+    cache.get_or_build(key(baseline), lambda: original, provenance={})
+    candidate = _policy_config(**vars(baseline) | changed)
+    builds = []
+    def rebuild():
+        builds.append(True)
+        return original
+    _, hit = cache.get_or_build(key(candidate), rebuild, provenance={})
+    assert not hit, "changed Fibonacci preparation reused the old frame"
+    assert builds == [True]
