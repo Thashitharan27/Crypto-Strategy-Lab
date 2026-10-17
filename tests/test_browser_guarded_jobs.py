@@ -185,3 +185,23 @@ def test_cancel_unknown_job_rejected_without_native_action():
         app.run.assert_not_called()
     finally:
         jobs.close()
+
+
+def test_progress_does_not_disclose_freeform_native_stage_diagnostics():
+    app = Mock()
+    def run(request, config):
+        app.progress_callback({"kind": "stage", "phase": "loading"})
+        app.progress_callback({"kind": "stage", "phase": "/private/secret/config.json"})
+        app.progress_callback({"kind": "stage", "phase": "SECRET_TOKEN=abc"})
+        app.progress_callback({"kind": "stage", "phase": "x" * 120})
+        app.progress_callback({"kind": "stage", "phase": 123})
+        return "done"
+    app.run.side_effect = run
+    jobs = GuardedRunJobs(app, enabled=True)
+    try:
+        jobs.submit("redacted", None, None).result(timeout=5)
+        assert jobs.progress("redacted") == {"phase": "loading"}
+        assert "private" not in str(jobs.progress("redacted"))
+        assert "SECRET" not in str(jobs.progress("redacted"))
+    finally:
+        jobs.close()

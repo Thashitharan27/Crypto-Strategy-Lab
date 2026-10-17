@@ -9,6 +9,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from threading import RLock
 from typing import Any
 from pathlib import Path
+import re
 from crypto_strategy_lab.browser_guarded_output import bind_guarded_output_root
 
 
@@ -58,9 +59,12 @@ class GuardedRunJobs:
         previous = getattr(self._application, "progress_callback", None)
         def observe(event: Any) -> None:
             if isinstance(event, dict) and event.get("kind") == "stage":
-                phase = str(event.get("phase") or "")[:64]
-                with self._lock:
-                    self._progress[request_id] = {"phase": phase}
+                phase = event.get("phase")
+                # No free-form native diagnostics, paths or secrets in HTTP progress.
+                # A stage identifier may contain only bounded ASCII token characters.
+                if isinstance(phase, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", phase, flags=re.ASCII):
+                    with self._lock:
+                        self._progress[request_id] = {"phase": phase}
             if callable(previous):
                 previous(event)
         self._application.progress_callback = observe
