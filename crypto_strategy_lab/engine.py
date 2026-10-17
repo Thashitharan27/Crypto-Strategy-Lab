@@ -551,6 +551,39 @@ class BacktestEngine(DILadderExecutionMixin):
             "actual_entry_timestamp": None,
         }
 
+    def _first_intrabar_limit_touch(self, scheduled_entry, execution_index):
+        """Find first eligible 1m touch; return (timestamp, candidate price).
+
+        This helper is non-executing. Reject missing/gapped intervals instead of
+        pretending a strategy candle's OHLC provides a reliable fill timestamp.
+        """
+        from .entry_plan import EntryTiming, limit_fill_price_candidate
+        if scheduled_entry.timing != EntryTiming.LIMIT_LEVEL:
+            raise ValueError("intrabar limit touch requires LIMIT_LEVEL")
+        if not self.config.use_intrabar_data or self.intrabar_data is None:
+            return None
+        if not (0 <= execution_index < len(self.times)):
+            return None
+        from .entry_plan import is_scheduled_entry_eligible
+        if not is_scheduled_entry_eligible(scheduled_entry, execution_index):
+            return None
+        start = pd.Timestamp(self.times[execution_index])
+        end = start + self.entry_delta
+        sub = self.intrabar_data[
+            (self.intrabar_data.timestamp >= start)
+            & (self.intrabar_data.timestamp < end)
+        ].sort_values("timestamp")
+        if sub.empty or self._has_missing_intrabar(sub, start, end):
+            return None
+        for bar in sub.itertuples(index=False):
+            price = limit_fill_price_candidate(
+                scheduled_entry, execution_index,
+                float(bar.open), float(bar.low), float(bar.high),
+            )
+            if price is not None:
+                return pd.Timestamp(bar.timestamp), price
+        return None
+
     def _execute_pending_next_open_entry(self, i, active_at_candle_start=False):
         decision = self.pending_next_open_entry
         if not decision or int(decision.get("execution_index", -1)) != i:
