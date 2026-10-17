@@ -88,3 +88,35 @@ def test_relative_config_root_is_rejected_before_persistence():
         GuardedConfigStore(Path("."), enabled=True).save(
             "not_saved", ResearchRunConfig().to_dict(),
         )
+
+
+def test_atomic_replace_failure_preserves_original_and_removes_temp(tmp_path, monkeypatch):
+    import os
+    original = tmp_path / "safe.json"
+    original.write_bytes(b"previous version")
+    def fail_replace(src, dst):
+        assert Path(src).is_file()
+        assert Path(dst) == original
+        raise OSError("injected persistence failure")
+    monkeypatch.setattr(os, "replace", fail_replace)
+    with pytest.raises(OSError, match="injected persistence failure"):
+        GuardedConfigStore(tmp_path, enabled=True).save(
+            "safe", ResearchRunConfig().to_dict(),
+        )
+    assert original.read_bytes() == b"previous version"
+    assert not list(tmp_path.glob(".browser-config-*.tmp"))
+
+
+def test_pre_replace_sync_failure_preserves_original(tmp_path, monkeypatch):
+    import os
+    original = tmp_path / "safe.json"
+    original.write_bytes(b"previous version")
+    def fail_sync(fd):
+        raise OSError("simulated storage failure")
+    monkeypatch.setattr(os, "fsync", fail_sync)
+    with pytest.raises(OSError, match="simulated storage failure"):
+        GuardedConfigStore(tmp_path, enabled=True).save(
+            "safe", ResearchRunConfig().to_dict(),
+        )
+    assert original.read_bytes() == b"previous version"
+    assert not list(tmp_path.glob(".browser-config-*.tmp"))
