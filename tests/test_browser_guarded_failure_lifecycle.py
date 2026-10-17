@@ -13,12 +13,12 @@ HEADERS = {"Authorization": "Bearer " + TOKEN}
 def test_failed_job_is_sanitized_and_does_not_block_next_submission(tmp_path, monkeypatch):
     import crypto_strategy_lab.data_lake_config as schema
 
-    config = Mock(spec=schema.ResearchRunConfig)
+    config = schema.ResearchRunConfig()
     monkeypatch.setattr(schema, "normalize_data_lake_config", lambda _: config)
     service = Mock()
     service.progress_callback = None
     service.run.side_effect = [RuntimeError("private file C:/secret/run"), "ok"]
-    integration = BrowserGuardedIntegration(service, tmp_path, enabled=True)
+    integration = BrowserGuardedIntegration(service, tmp_path, enabled=True, execution_root=tmp_path)
     app = create_browser_app(token=TOKEN, guarded_integration=integration, guarded_enabled=True)
     request = {
         "exchange": "binance", "market": "futures_um", "symbol": "BTCUSDT",

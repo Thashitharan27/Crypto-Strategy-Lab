@@ -29,15 +29,18 @@ def test_default_deny_all_methods_even_when_storage_does_not_exist(tmp_path):
 def test_explicit_server_opt_in_delegates_to_native_job_owner(tmp_path):
     app = Mock()
     app.run.return_value = "native-only"
-    integration = BrowserGuardedIntegration(app, tmp_path, enabled=True)
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    config = ResearchRunConfig()
+    integration = BrowserGuardedIntegration(app, tmp_path, enabled=True, execution_root=tmp_path)
     try:
-        future = integration.submit("job-1", "request", "config")
+        future = integration.submit("job-1", "request", config)
         assert future.result(timeout=5) == "native-only"
         assert integration.status("job-1") == {
             "request_id": "job-1", "status": "COMPLETED"
         }
         assert integration.progress("job-1") == {}
-        app.run.assert_called_once_with("request", "config")
+        assert app.run.call_args.args[0] == "request"
+        assert app.run.call_args.args[1].reporting.output_dir == str(tmp_path)
     finally:
         integration.close()
 
@@ -48,5 +51,17 @@ def test_enabled_config_path_rejects_traversal_before_native_validation(tmp_path
         with pytest.raises(ValueError, match="Invalid configuration ID"):
             integration.save_config("../item", {"not": "a native config"})
         assert not (tmp_path / "item.json").exists()
+    finally:
+        integration.close()
+
+
+def test_enabled_submission_without_server_root_fails_before_native_run(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    app = Mock()
+    integration = BrowserGuardedIntegration(app, tmp_path, enabled=True)
+    try:
+        with pytest.raises(PermissionError, match="root is not configured"):
+            integration.submit("job", "request", ResearchRunConfig())
+        app.run.assert_not_called()
     finally:
         integration.close()

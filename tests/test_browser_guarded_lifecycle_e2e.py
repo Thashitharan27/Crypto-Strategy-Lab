@@ -13,19 +13,19 @@ TOKEN = "g" * 48
 def test_guarded_http_submit_status_cancel_and_completion(tmp_path, monkeypatch):
     import crypto_strategy_lab.data_lake_config as schema
 
-    config = Mock(spec=schema.ResearchRunConfig)
+    config = schema.ResearchRunConfig()
     monkeypatch.setattr(schema, "normalize_data_lake_config", lambda _: config)
     entered, release = Event(), Event()
     app_service = Mock()
 
     def native_run(request, cfg):
-        assert cfg is config
+        assert cfg.reporting.output_dir == str(tmp_path)
         entered.set()
         assert release.wait(10)
         return {"private": "native result"}
 
     app_service.run.side_effect = native_run
-    integration = BrowserGuardedIntegration(app_service, tmp_path, enabled=True)
+    integration = BrowserGuardedIntegration(app_service, tmp_path, enabled=True, execution_root=tmp_path)
     app = create_browser_app(
         token=TOKEN, guarded_integration=integration, guarded_enabled=True,
     )
@@ -66,7 +66,7 @@ def test_guarded_http_submit_status_cancel_and_completion(tmp_path, monkeypatch)
 
 def test_production_app_is_read_only_even_with_real_guarded_integration(tmp_path):
     service = Mock()
-    integration = BrowserGuardedIntegration(service, tmp_path, enabled=True)
+    integration = BrowserGuardedIntegration(service, tmp_path, enabled=True, execution_root=tmp_path)
     try:
         app = create_browser_app(token=TOKEN, guarded_integration=integration)
         with TestClient(app, base_url="http://localhost") as client:
