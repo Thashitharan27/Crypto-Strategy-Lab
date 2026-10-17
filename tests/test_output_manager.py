@@ -128,11 +128,17 @@ def test_periodic_results_accepts_newer_month_year_aliases_on_installed_pandas()
 
 
 def test_no_unresolved_merge_markers_remain():
+    import subprocess
     root = Path(__file__).resolve().parents[1]
-    excluded_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", "data", "output", "outputs", "paper_output"}
+    # Certification workstations retain large ignored Data Lake caches and
+    # evidence logs. Scan versioned text sources, never those original inputs.
+    tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode().split("\0")
+    text_suffixes = {".py", ".md", ".txt", ".json", ".toml", ".yaml", ".yml",
+                     ".js", ".ts", ".tsx", ".css", ".html", ".sh", ".ps1", ".bat"}
     offenders = []
-    for path in root.rglob("*"):
-        if path.is_file() and not excluded_dirs.intersection(path.parts) and path.suffix not in {".pyc", ".png", ".csv"}:
+    for relative in filter(None, tracked):
+        path = root / relative
+        if path.is_file() and (path.suffix in text_suffixes or path.name in {".gitignore", ".gitattributes"}):
             text = path.read_text(errors="ignore")
             if any(line.startswith(("<<<<<<<", "=======", ">>>>>>>")) for line in text.splitlines()):
                 offenders.append(path.relative_to(root))

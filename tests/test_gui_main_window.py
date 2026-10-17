@@ -386,7 +386,8 @@ def test_completed_run_drives_output_folder_and_new_run_clears_it(monkeypatch,tm
         window.on_finished({},pd.DataFrame(),pd.DataFrame(),str(completed))
         window._open_report("output")
         assert window.report_buttons["output"].isEnabled()
-        assert opened == [str(completed.resolve())]
+    # QUrl.toLocalFile() uses forward slashes on Windows; compare path identity.
+    assert [Path(path).resolve() for path in opened] == [completed.resolve()]
         monkeypatch.setattr(window,"_confirm_new_run",lambda:True)
         window.new_run()
         assert window.completed_run_dir is None
