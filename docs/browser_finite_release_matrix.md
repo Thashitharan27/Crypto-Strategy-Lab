@@ -213,3 +213,19 @@ produce a green Python workflow despite genuine failures; this already masked
 16 guarded HTTP regressions during B4 development. Required checks plus the raw
 full-suite summary are still reviewed before merging. Windows original-file
 certification remains separate and is not implicitly promoted by Linux CI.
+
+
+## B2 isolated native-engine browser invocation regression (2026-10-18)
+
+A guarded HTTP regression now invokes the existing `GuiApplicationService`
+with an injected runner that executes the **actual native BacktestEngine** on
+frozen synthetic candles. An independently invoked direct native service uses
+the same source and config. The test compares full ordered trade frames exactly,
+including timestamps, fees, P&L, equity, TP and END_OF_DATA exit behavior,
+plus native effective config/request equality. No duplicate fill model is
+introduced. The fixture bypasses the live ResearchRunner/Data Lake preparation
+and reporter; it is **LIMITED engineering evidence**, not historical B2
+certification, and does not establish 1m fill/slippage/partial/short coverage.
+The final consolidated original-frozen-input desktop-versus-browser run and
+saved manifest/artifact verification remain NOT RUN and release-blocking.
+Normal browser execution and configuration writes remain disabled.
