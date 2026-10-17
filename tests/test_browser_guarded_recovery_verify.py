@@ -65,3 +65,25 @@ def test_recovery_rejects_relative_root_without_accessing_outputs():
     assert verify_recovered_run(Path("relative"), "job") == {
         "run_id": "job", "status": "RECOVERY_UNVERIFIED"
     }
+
+
+def test_recovery_root_resolution_io_error_fails_closed(tmp_path):
+    with patch("pathlib.Path.resolve", side_effect=OSError("private inaccessible root")):
+        assert verify_recovered_run(tmp_path, "run1") == {
+            "run_id": "run1", "status": "RECOVERY_UNVERIFIED"
+        }
+
+
+def test_recovery_candidate_inspection_io_error_fails_closed(tmp_path):
+    (tmp_path / "run1").mkdir()
+    original_is_dir = type(tmp_path).is_dir
+
+    def inaccessible_candidate(path):
+        if path == tmp_path / "run1":
+            raise PermissionError("private candidate path")
+        return original_is_dir(path)
+
+    with patch("pathlib.Path.is_dir", autospec=True, side_effect=inaccessible_candidate):
+        assert verify_recovered_run(tmp_path, "run1") == {
+            "run_id": "run1", "status": "RECOVERY_UNVERIFIED"
+        }
