@@ -30,3 +30,22 @@ def test_invalid_guarded_job_payloads_emit_only_bounded_audit_events():
     assert events == [{"operation": "JOB_SUBMIT", "outcome": "INVALID_INPUT"}] * 4
     assert "SECRET" not in str(events)
     integration.submit.assert_not_called()
+
+
+def test_guarded_auth_requires_explicit_bearer_scheme():
+    events = []
+    integration = Mock()
+    token = "j" * 48
+    app = create_browser_app(
+        token=token, guarded_integration=integration,
+        guarded_enabled=True, guarded_audit_callback=events.append,
+    )
+    with TestClient(app, base_url="http://localhost") as client:
+        for header in (token, "Basic " + token, "bearer " + token, "Bearer " + token + " "):
+            response = client.get(
+                "/api/v1/guarded/jobs/known",
+                headers={"Authorization": header},
+            )
+            assert response.status_code == 401
+    assert events == [{"operation": "AUTH", "outcome": "DENIED"}] * 4
+    integration.status.assert_not_called()
