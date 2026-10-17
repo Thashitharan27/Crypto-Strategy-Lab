@@ -103,3 +103,13 @@ artifacts. Never automatically delete an unexplained lock or resume an orphan.
 This does not protect unrelated native desktop processes operating on the same
 root: provision a dedicated guarded directory. Production browser write/execute
 features remain disabled pending complete B certification and explicit approval.
+
+
+## B3 isolated guarded configuration rollback (2026-10-18)
+
+The opt-in configuration store retains native serializer ownership, flushes the
+serialized temporary candidate before atomic replacement, and preserves the
+previous saved configuration if serialization, flush or replacement fails.
+Isolated regression tests do not certify full OS power-loss durability or
+Windows original-file behavior; those remain in consolidated final acceptance.
+No normal-user browser configuration writes are enabled.
