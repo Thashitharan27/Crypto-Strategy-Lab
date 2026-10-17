@@ -75,3 +75,37 @@ def test_rejects_invalid_ids_and_closed_jobs():
     with pytest.raises(RuntimeError, match="closed"):
         jobs.submit("good", None, None)
     app.run.assert_not_called()
+
+
+def test_status_reports_running_completed_and_failed_without_native_details():
+    entered, release = Event(), Event()
+    def slow(*args):
+        entered.set()
+        assert release.wait(5)
+        return {"secret": "not for status"}
+    app = Mock()
+    app.run.side_effect = slow
+    jobs = GuardedRunJobs(app, enabled=True)
+    try:
+        future = jobs.submit("running", None, None)
+        assert entered.wait(5)
+        assert jobs.status("running") == {"request_id": "running", "status": "RUNNING"}
+        with pytest.raises(KeyError):
+            jobs.status("unknown")
+        release.set()
+        assert future.result(timeout=5) == {"secret": "not for status"}
+        assert jobs.status("running") == {"request_id": "running", "status": "COMPLETED"}
+    finally:
+        release.set()
+        jobs.close()
+
+    failed_app = Mock()
+    failed_app.run.side_effect = RuntimeError("private native failure")
+    failed = GuardedRunJobs(failed_app, enabled=True)
+    try:
+        future = failed.submit("failure", None, None)
+        with pytest.raises(RuntimeError):
+            future.result(timeout=5)
+        assert failed.status("failure") == {"request_id": "failure", "status": "FAILED"}
+    finally:
+        failed.close()
