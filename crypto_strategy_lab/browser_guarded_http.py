@@ -8,7 +8,7 @@ from __future__ import annotations
 import secrets
 import re
 
-_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\\Z")
+_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 
 
 def create_guarded_job_router(*, token: str, integration, enabled: bool = False):
