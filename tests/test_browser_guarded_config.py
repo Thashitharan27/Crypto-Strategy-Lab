@@ -120,3 +120,70 @@ def test_pre_replace_sync_failure_preserves_original(tmp_path, monkeypatch):
         )
     assert original.read_bytes() == b"previous version"
     assert not list(tmp_path.glob(".browser-config-*.tmp"))
+
+
+def test_separate_stores_cannot_overwrite_while_native_save_is_active(tmp_path, monkeypatch):
+    from threading import Event, Thread
+
+    original = tmp_path / "shared.json"
+    original.write_bytes(b"previous config")
+    entered, release = Event(), Event()
+    real_save = GuiApplicationService.save_config
+    errors = []
+
+    def blocked_native_save(path, config):
+        entered.set()
+        assert release.wait(10)
+        real_save(path, config)
+
+    monkeypatch.setattr(GuiApplicationService, "save_config", blocked_native_save)
+    first = GuardedConfigStore(tmp_path, enabled=True)
+    second = GuardedConfigStore(tmp_path, enabled=True)
+
+    def save_first():
+        try:
+            first.save("shared", ResearchRunConfig().to_dict())
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = Thread(target=save_first)
+    thread.start()
+    try:
+        assert entered.wait(10)
+        assert (tmp_path / ".guarded-config-shared.lock").is_dir()
+        with pytest.raises(RuntimeError, match="already owned"):
+            second.save("shared", ResearchRunConfig().to_dict())
+        assert original.read_bytes() == b"previous config"
+    finally:
+        release.set()
+        thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert not errors
+    assert not (tmp_path / ".guarded-config-shared.lock").exists()
+    assert GuiApplicationService.load_config(original).to_dict() == ResearchRunConfig().to_dict()
+
+
+def test_stale_config_write_claim_rejected_without_mutation(tmp_path):
+    original = tmp_path / "shared.json"
+    original.write_bytes(b"previous config")
+    claim = tmp_path / ".guarded-config-shared.lock"
+    claim.mkdir()
+    with pytest.raises(RuntimeError, match="already owned"):
+        GuardedConfigStore(tmp_path, enabled=True).save(
+            "shared", ResearchRunConfig().to_dict(),
+        )
+    assert claim.is_dir()
+    assert original.read_bytes() == b"previous config"
+    assert not list(tmp_path.glob(".browser-config-*.tmp"))
+
+
+def test_native_config_serialization_failure_releases_write_claim(tmp_path, monkeypatch):
+    def fail_save(path, config):
+        raise OSError("injected native serialization failure")
+    monkeypatch.setattr(GuiApplicationService, "save_config", fail_save)
+    with pytest.raises(OSError, match="injected native serialization failure"):
+        GuardedConfigStore(tmp_path, enabled=True).save(
+            "shared", ResearchRunConfig().to_dict(),
+        )
+    assert not (tmp_path / ".guarded-config-shared.lock").exists()
+    assert not list(tmp_path.glob(".browser-config-*.tmp"))
