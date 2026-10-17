@@ -187,3 +187,34 @@ def test_submission_permission_and_duplicate_fail_closed(monkeypatch):
                            headers={"Authorization": "Bearer " + TOKEN})
     assert response.status_code == 409
     assert response.json() == {"detail": "Job submission rejected"}
+
+
+def test_audit_events_are_bounded_and_exclude_identifiers_and_payloads():
+    events = []
+    integration = Mock()
+    integration.status.return_value = {"request_id": "sensitive-run", "status": "RUNNING"}
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True, audit_callback=events.append,
+    ))
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + TOKEN}
+    assert client.get("/api/v1/guarded/jobs/sensitive-run", headers=headers).status_code == 200
+    assert events == [{"operation": "STATUS", "outcome": "SUCCESS"}]
+    assert client.get("/api/v1/guarded/jobs/sensitive-run").status_code == 401
+    assert len(events) == 1
+
+
+def test_failing_audit_callback_does_not_break_guarded_response():
+    integration = Mock()
+    integration.progress.return_value = {}
+    app = FastAPI()
+    def broken_audit(_):
+        raise RuntimeError("logging unavailable")
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True, audit_callback=broken_audit,
+    ))
+    client = TestClient(app)
+    result = client.get("/api/v1/guarded/jobs/valid/progress",
+        headers={"Authorization": "Bearer " + TOKEN})
+    assert result.status_code == 200
