@@ -205,6 +205,9 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             supplied = authorization.removeprefix("Bearer ") if authorization else ""
             if not secrets.compare_digest(supplied, token):
                 raise HTTPException(status_code=401, detail="Unauthorized")
+            if not (1 <= len(run_id) <= 100 and run_id.isascii() and
+                    all(char.isalnum() or char in "_-" for char in run_id)):
+                raise HTTPException(status_code=404, detail="Completed run unavailable")
             origin = request.headers.get("origin")
             if not origin or origin != f"http://{request.headers.get('host', '')}":
                 raise HTTPException(status_code=403, detail="Same-origin launch required")
