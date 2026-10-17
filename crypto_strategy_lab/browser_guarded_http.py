@@ -49,4 +49,18 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False)
         authorize(authorization)
         return invoke(request_id, lambda: integration.cancel(request_id))
 
+    @router.put("/api/v1/guarded/configs/{config_id}")
+    def save_config(config_id: str, payload: dict, authorization: str | None = Header(default=None)):
+        authorize(authorization)
+        if not isinstance(config_id, str) or _REQUEST_ID.fullmatch(config_id) is None:
+            raise HTTPException(status_code=404, detail="Unknown configuration")
+        try:
+            integration.save_config(config_id, payload)
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="Guarded operations disabled")
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="Invalid native configuration")
+        # Never expose server-side configuration file paths.
+        return {"config_id": config_id, "status": "SAVED"}
+
     return router

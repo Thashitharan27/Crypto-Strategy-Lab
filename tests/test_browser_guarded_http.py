@@ -65,3 +65,44 @@ def test_guarded_routes_reject_invalid_ids_before_native_inspection():
     integration.status.assert_not_called()
     integration.progress.assert_not_called()
     integration.cancel.assert_not_called()
+
+
+def test_guarded_config_write_absent_by_default():
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(token=TOKEN, integration=Mock()))
+    client = TestClient(app)
+    assert client.put("/api/v1/guarded/configs/test", json={}).status_code == 404
+
+
+def test_opt_in_config_write_requires_auth_and_returns_no_server_path():
+    integration = Mock()
+    integration.save_config.return_value = "/private/configs/test.json"
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(token=TOKEN, integration=integration, enabled=True))
+    client = TestClient(app)
+    url = "/api/v1/guarded/configs/test"
+    assert client.put(url, json={}).status_code == 401
+    assert client.put(url, json={}, headers={"Authorization": "Bearer bad"}).status_code == 401
+    assert integration.save_config.call_count == 0
+    result = client.put(url, json={"native": "payload"}, headers={"Authorization": "Bearer " + TOKEN})
+    assert result.status_code == 200
+    assert result.json() == {"config_id": "test", "status": "SAVED"}
+    integration.save_config.assert_called_once_with("test", {"native": "payload"})
+
+
+def test_opt_in_config_write_rejects_bad_ids_and_sanitizes_native_errors():
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(token=TOKEN, integration=integration, enabled=True))
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + TOKEN}
+    assert client.put("/api/v1/guarded/configs/bad.name", json={}, headers=headers).status_code == 404
+    integration.save_config.assert_not_called()
+    integration.save_config.side_effect = ValueError("private C:/original/path")
+    response = client.put("/api/v1/guarded/configs/valid", json={}, headers=headers)
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid native configuration"}
+    integration.save_config.side_effect = PermissionError("internal")
+    response = client.put("/api/v1/guarded/configs/valid", json={}, headers=headers)
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Guarded operations disabled"}
