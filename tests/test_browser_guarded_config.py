@@ -64,3 +64,27 @@ def test_symlink_destination_is_rejected(tmp_path):
     with pytest.raises(ValueError, match="Unsafe"):
         GuardedConfigStore(tmp_path, enabled=True).save("linked", ResearchRunConfig().to_dict())
     assert real.read_bytes() == b"original"
+
+
+def test_config_root_with_symlinked_parent_fails_before_native_save(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    approved = real / "configs"
+    approved.mkdir()
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(real, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks unavailable")
+    store = GuardedConfigStore(linked / "configs", enabled=True)
+    with pytest.raises(ValueError, match="Unsafe"):
+        store.save("should_not_exist", ResearchRunConfig().to_dict())
+    assert not (approved / "should_not_exist.json").exists()
+    assert not list(approved.glob(".browser-config-*.tmp"))
+
+
+def test_relative_config_root_is_rejected_before_persistence():
+    with pytest.raises(ValueError, match="unavailable"):
+        GuardedConfigStore(Path("."), enabled=True).save(
+            "not_saved", ResearchRunConfig().to_dict(),
+        )

@@ -35,9 +35,14 @@ class GuardedConfigStore:
         if not isinstance(payload, dict):
             raise ValueError("Configuration must be an object")
         root = self.root
-        if root.is_symlink() or not root.is_dir():
+        if not root.is_absolute() or not root.is_dir():
             raise ValueError("Configuration directory is unavailable")
-        root = root.resolve(strict=True)
+        if any(part == ".." for part in root.parts) or any(part.is_symlink() for part in (root, *root.parents)):
+            raise ValueError("Unsafe configuration directory")
+        resolved = root.resolve(strict=True)
+        if resolved != root:
+            raise ValueError("Unsafe configuration directory")
+        root = resolved
         destination = root / (config_id + ".json")
         if destination.is_symlink() or (destination.exists() and not destination.is_file()):
             raise ValueError("Unsafe configuration destination")
