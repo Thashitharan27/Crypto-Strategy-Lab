@@ -74,3 +74,18 @@ independently invoked browser and PySide6 native runs on identical frozen inputs
 and effective configs, ordered fills/exits/trades/timestamps/fees/P&L/equity,
 saved outputs, security and lifecycle; retain A3 chart-interaction limitation,
 TP1 verifier provenance caveat and historical SL1/trailing coverage limitation.
+
+
+## B3 request ownership progress (2026-10-18)
+
+Opt-in guarded execution with a server-owned existing output directory now
+atomically reserves a persistent, non-sensitive request-ID claim before queueing
+native execution. Reuse of the same ID in another coordinator lifetime fails
+closed, including after a crash. Claims are retained intentionally; no automatic
+retry or resume is inferred from a claim. This is **not** a complete durable job
+journal, a proof of completed native execution, or a cross-process global runner
+lock. An administrator must explicitly reconcile interrupted native artifacts
+using the existing manifest/hash verifier; no automatic claim deletion is safe.
+Independent browser/desktop invocation, write rollback, and interrupted output
+recovery certification remain outstanding. Production browser mutations remain
+disabled pending the B release review.

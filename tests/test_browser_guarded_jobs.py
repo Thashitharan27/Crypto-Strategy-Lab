@@ -205,3 +205,46 @@ def test_progress_does_not_disclose_freeform_native_stage_diagnostics():
         assert "SECRET" not in str(jobs.progress("redacted"))
     finally:
         jobs.close()
+
+
+def test_durable_claim_blocks_replay_across_coordinator_restart(tmp_path):
+    app = Mock()
+    app.run.return_value = "ok"
+    first = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    try:
+        from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+        assert first.submit("stable-id", object(), ResearchRunConfig()).result(timeout=10) == "ok"
+    finally:
+        first.close()
+    second = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    try:
+        with pytest.raises(ValueError, match="Duplicate"):
+            second.submit("stable-id", object(), ResearchRunConfig())
+        assert app.run.call_count == 1
+        assert (tmp_path / ".guarded-request-stable-id.claim").is_dir()
+    finally:
+        second.close()
+
+
+def test_interrupted_request_claim_is_not_replayed(tmp_path):
+    (tmp_path / ".guarded-request-interrupted.claim").mkdir()
+    app = Mock()
+    jobs = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    try:
+        with pytest.raises(ValueError, match="Duplicate"):
+            jobs.submit("interrupted", None, None)
+        app.run.assert_not_called()
+    finally:
+        jobs.close()
+
+
+def test_invalid_execution_root_never_creates_request_claim(tmp_path):
+    app = Mock()
+    jobs = GuardedRunJobs(app, enabled=True, execution_root=tmp_path / "missing")
+    try:
+        with pytest.raises(ValueError, match="Unsafe guarded execution root"):
+            jobs.submit("unsafe", None, None)
+        assert not (tmp_path / "missing").exists()
+        app.run.assert_not_called()
+    finally:
+        jobs.close()

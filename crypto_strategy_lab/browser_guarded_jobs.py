@@ -9,6 +9,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from threading import RLock
 from typing import Any
 from pathlib import Path
+import os
 import re
 from crypto_strategy_lab.browser_guarded_output import bind_guarded_output_root
 
@@ -24,6 +25,33 @@ class GuardedRunJobs:
         self._active: str | None = None
         self._closed = False
         self._progress: dict[str, dict[str, str]] = {}
+
+    def _claim_request(self, request_id: str) -> None:
+        """Reserve an ID on disk before queuing native work; never auto-replay it.
+
+        The dedicated execution root is provisioned by the operator. Claims are
+        intentionally retained after success, failure or interruption.
+        """
+        if self._execution_root is None:
+            return  # Standalone in-memory coordinator; no HTTP execution root.
+        root = Path(self._execution_root)
+        if (not root.is_absolute() or not root.is_dir()
+                or any(part in (".", "..") for part in root.parts)
+                or any(part.is_symlink() for part in (root, *root.parents))
+                or root.resolve(strict=True) != root):
+            raise ValueError("Unsafe guarded execution root")
+        claim = root / (".guarded-request-" + request_id + ".claim")
+        try:
+            os.mkdir(claim, mode=0o700)  # Atomic cross-process exclusive claim.
+        except FileExistsError as exc:
+            raise ValueError("Duplicate request identifier") from exc
+        # Flush the parent directory where supported, before native submission.
+        if os.name == "posix":
+            fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
 
     def submit(self, request_id: str, request: Any, config: Any) -> Future:
         if self._enabled is not True:
@@ -41,6 +69,7 @@ class GuardedRunJobs:
                 raise RuntimeError("A native research job is already active")
             # Important: avoid submitting a queue of jobs against a shared
             # native store.progress_callback observer.
+            self._claim_request(request_id)
             self._active = request_id
             try:
                 future = self._executor.submit(self._run_observed, request_id, request, config)
