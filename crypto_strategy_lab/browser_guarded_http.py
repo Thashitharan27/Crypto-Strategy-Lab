@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import secrets
 import re
+from starlette.requests import Request
 
 _REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 
 
 def create_guarded_job_router(*, token: str, integration, enabled: bool = False, audit_callback=None):
-    from fastapi import APIRouter, Header, HTTPException, Request
+    from fastapi import APIRouter, Header, HTTPException
     router = APIRouter()
     if enabled is not True:
         return router

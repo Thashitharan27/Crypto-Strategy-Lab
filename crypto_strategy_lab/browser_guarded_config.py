@@ -52,6 +52,14 @@ class GuardedConfigStore:
         if not isinstance(config, ResearchRunConfig):
             raise ValueError("A native v3 configuration is required")
         config.validate()
+        # An atomic per-ID directory claim serializes writes across separate
+        # guarded service instances and OS processes. Crash-stale claims fail
+        # closed until an operator reconciles them; never auto-steal a claim.
+        write_claim = root / (".guarded-config-" + config_id + ".lock")
+        try:
+            os.mkdir(write_claim, mode=0o700)
+        except FileExistsError as exc:
+            raise RuntimeError("Configuration write already owned") from exc
         temp_name = None
         try:
             fd, temp_name = tempfile.mkstemp(prefix=".browser-config-", suffix=".tmp", dir=root)
@@ -69,5 +77,8 @@ class GuardedConfigStore:
             temp_name = None
             return destination
         finally:
-            if temp_name is not None:
-                Path(temp_name).unlink(missing_ok=True)
+            try:
+                if temp_name is not None:
+                    Path(temp_name).unlink(missing_ok=True)
+            finally:
+                os.rmdir(write_claim)
