@@ -42,7 +42,10 @@ class GuardedRunJobs:
             except BaseException:
                 self._active = None
                 raise
-            # A completed Future may invoke callbacks immediately in this thread.\n            # RLock avoids deadlocking the submitter in that fast completion case.\n            self._submitted[request_id] = future\n            future.add_done_callback(lambda _: self._finished(request_id))
+            # A completed Future may invoke callbacks immediately in this thread.
+            # RLock avoids deadlocking the submitter in that fast completion case.
+            self._submitted[request_id] = future
+            future.add_done_callback(lambda _: self._finished(request_id))
             return future
 
     def _finished(self, request_id: str) -> None:
