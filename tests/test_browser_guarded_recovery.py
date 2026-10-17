@@ -20,3 +20,9 @@ def test_invalid_identifier_fails_closed(bad):
 def test_unknown_prior_state_fails_closed():
     with pytest.raises(ValueError, match="state"):
         classify_recovered_job("job_1", "SUCCESS")
+
+
+@pytest.mark.parametrize("invalid", [None, 42, [], {}])
+def test_non_string_previous_state_fails_closed(invalid):
+    with pytest.raises(ValueError, match="state"):
+        classify_recovered_job("job_1", invalid)
