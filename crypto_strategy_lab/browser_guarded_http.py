@@ -143,6 +143,9 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         except (RuntimeError, ValueError):
             audit("JOB_SUBMIT", "REJECTED")
             raise HTTPException(status_code=409, detail="Job submission rejected")
+        except OSError:
+            audit("JOB_SUBMIT", "EXECUTION_UNAVAILABLE")
+            raise HTTPException(status_code=503, detail="Native research service unavailable")
         return {"request_id": request_id, "status": "ACCEPTED"}
 
     return router
