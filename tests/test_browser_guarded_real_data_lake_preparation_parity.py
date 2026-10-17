@@ -18,7 +18,8 @@ from crypto_strategy_lab.browser_http import create_browser_app
 from crypto_strategy_lab.data.backtest_service import load_backtest_bundle
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
 from crypto_strategy_lab.gui.v2_controller import GuiApplicationService, GuiResearchRequest
-from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle, feature_context_frame
+from crypto_strategy_lab.prepared_backtest import from_data_lake_bundle
+from crypto_strategy_lab.feature_research import feature_context_frame
 
 
 def _write_frozen_real_klines(root: Path):
