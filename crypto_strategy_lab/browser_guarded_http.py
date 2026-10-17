@@ -6,6 +6,9 @@ that includes this router. This router additionally authenticates every call.
 from __future__ import annotations
 
 import secrets
+import re
+
+_REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 
 
 def create_guarded_job_router(*, token: str, integration, enabled: bool = False):
@@ -21,7 +24,9 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False)
         if not secrets.compare_digest(supplied, token):
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-    def invoke(call):
+    def invoke(request_id, call):
+        if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
+            raise HTTPException(status_code=404, detail="Unknown job")
         try:
             return call()
         except KeyError:
@@ -32,16 +37,16 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False)
     @router.get("/api/v1/guarded/jobs/{request_id}")
     def status(request_id: str, authorization: str | None = Header(default=None)):
         authorize(authorization)
-        return invoke(lambda: integration.status(request_id))
+        return invoke(request_id, lambda: integration.status(request_id))
 
     @router.get("/api/v1/guarded/jobs/{request_id}/progress")
     def progress(request_id: str, authorization: str | None = Header(default=None)):
         authorize(authorization)
-        return invoke(lambda: integration.progress(request_id))
+        return invoke(request_id, lambda: integration.progress(request_id))
 
     @router.post("/api/v1/guarded/jobs/{request_id}/cancel")
     def cancel(request_id: str, authorization: str | None = Header(default=None)):
         authorize(authorization)
-        return invoke(lambda: integration.cancel(request_id))
+        return invoke(request_id, lambda: integration.cancel(request_id))
 
     return router

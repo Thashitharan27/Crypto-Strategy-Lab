@@ -48,3 +48,20 @@ def test_disabled_integration_denies_even_with_valid_token():
     result = client.get("/api/v1/guarded/jobs/job-1", headers={"Authorization": "Bearer " + TOKEN})
     assert result.status_code == 403
     assert result.json() == {"detail": "Guarded operations disabled"}
+
+
+def test_guarded_routes_reject_invalid_ids_before_native_inspection():
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(token=TOKEN, integration=integration, enabled=True))
+    client = TestClient(app)
+    for bad in ("bad.name", "space%20id", "é", "a" * 101):
+        for method, suffix in (("get", ""), ("get", "/progress"), ("post", "/cancel")):
+            response = getattr(client, method)(
+                "/api/v1/guarded/jobs/" + bad + suffix,
+                headers={"Authorization": "Bearer " + TOKEN},
+            )
+            assert response.status_code == 404
+    integration.status.assert_not_called()
+    integration.progress.assert_not_called()
+    integration.cancel.assert_not_called()
