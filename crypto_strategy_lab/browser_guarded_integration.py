@@ -10,13 +10,15 @@ from typing import Any
 
 from crypto_strategy_lab.browser_guarded_config import GuardedConfigStore
 from crypto_strategy_lab.browser_guarded_jobs import GuardedRunJobs
+from crypto_strategy_lab.browser_guarded_output import bind_guarded_output_root
 
 
 class BrowserGuardedIntegration:
     """Minimal façade over the authoritative native persistence/run owners."""
 
-    def __init__(self, application_service: Any, config_root: Path, *, enabled: bool = False):
+    def __init__(self, application_service: Any, config_root: Path, *, enabled: bool = False, execution_root: Path | None = None):
         self._enabled = enabled is True
+        self._execution_root = Path(execution_root) if execution_root is not None else None
         self._config = GuardedConfigStore(config_root, enabled=self._enabled)
         self._jobs = GuardedRunJobs(application_service, enabled=self._enabled)
 
@@ -30,6 +32,9 @@ class BrowserGuardedIntegration:
 
     def submit(self, request_id: str, request: Any, config: Any):
         self._require_enabled()
+        if self._execution_root is None:
+            raise PermissionError('Guarded execution output root is not configured')
+        config = bind_guarded_output_root(config, self._execution_root)
         return self._jobs.submit(request_id, request, config)
 
     def status(self, request_id: str) -> dict[str, str]:
