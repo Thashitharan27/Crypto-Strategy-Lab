@@ -87,3 +87,73 @@ def test_recovery_candidate_inspection_io_error_fails_closed(tmp_path):
         assert verify_recovered_run(tmp_path, "run1") == {
             "run_id": "run1", "status": "RECOVERY_UNVERIFIED"
         }
+
+
+def test_native_completed_manifest_reader_and_recovery_verify_real_artifact_hashes(tmp_path):
+    """No mocked loader: native completed reader and recovery share canonical hashes."""
+    import hashlib
+    import json
+
+    from crypto_strategy_lab.feature_research import (
+        FEATURE_RESEARCH_ARTIFACT_CONTRACT,
+        FEATURE_RESEARCH_ARTIFACT_VERSION,
+    )
+    from crypto_strategy_lab.gui.v2_controller import CompletedRunReader
+    from crypto_strategy_lab.run_manifest import (
+        RUN_MANIFEST_CONTRACT,
+        RUN_MANIFEST_VERSION,
+        RunArtifactError,
+    )
+
+    run = tmp_path / "frozen-run"
+    run.mkdir()
+    artifacts = run / "artifacts"
+    artifacts.mkdir()
+    summary_path = artifacts / "summary.json"
+    trade_path = artifacts / "trades.csv"
+    summary = {"total_trades": 1, "ending_equity": 1009.79}
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    trade_path.write_text(
+        "side,entry_time,exit_time,pair_net_pnl,equity_after_trade\\n"
+        "LONG,2024-01-01T00:15:00Z,2024-01-01T00:30:00Z,9.79,1009.79\\n",
+        encoding="utf-8",
+    )
+    def catalog(path):
+        return {
+            "path": path.relative_to(run).as_posix(),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "bytes": path.stat().st_size,
+        }
+
+    manifest = {
+        "run_manifest_contract": RUN_MANIFEST_CONTRACT,
+        "run_manifest_version": RUN_MANIFEST_VERSION,
+        "run_status": "COMPLETED",
+        "research": {
+            "artifact_contract": FEATURE_RESEARCH_ARTIFACT_CONTRACT,
+            "artifact_version": FEATURE_RESEARCH_ARTIFACT_VERSION,
+        },
+        "artifacts": {
+            "summary": catalog(summary_path),
+            "trades": catalog(trade_path),
+        },
+    }
+    (run / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    native_manifest, native_summary = CompletedRunReader().read(run)
+    assert native_manifest == manifest
+    assert native_summary == summary
+    assert verify_recovered_run(tmp_path, "frozen-run") == {
+        "run_id": "frozen-run", "status": "ARTIFACTS_VERIFIED",
+    }
+
+    # A valid manifest and summary alone cannot establish verified completion.
+    original = trade_path.read_bytes()
+    trade_path.write_bytes(original.replace(b"9.79", b"8.79"))
+    assert verify_recovered_run(tmp_path, "frozen-run") == {
+        "run_id": "frozen-run", "status": "RECOVERY_UNVERIFIED",
+    }
+    with pytest.raises(RunArtifactError, match="integrity"):
+        CompletedRunReader.artifact_path(run, manifest, "trades")
+    assert CompletedRunReader().read(run)[1] == summary
+    assert (run / "run_manifest.json").read_text(encoding="utf-8") == json.dumps(manifest)
