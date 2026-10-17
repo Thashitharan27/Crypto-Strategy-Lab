@@ -28,7 +28,7 @@ def _json_safe_summary(value):
     return value
 
 
-def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None, visualizer_coordinator=None):
+def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None, visualizer_coordinator=None, guarded_integration=None, guarded_enabled=False):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
@@ -44,6 +44,16 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
                 visualizer_coordinator.stop()
 
     app = FastAPI(title="Crypto Strategy Lab (read-only)", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+
+    # Only an explicit non-production composition may attach guarded routes.
+    # browser_launcher intentionally passes neither argument.
+    if guarded_enabled is True:
+        if guarded_integration is None:
+            raise ValueError("Guarded integration is required for opt-in composition")
+        from crypto_strategy_lab.browser_guarded_http import create_guarded_job_router
+        app.include_router(create_guarded_job_router(
+            token=token, integration=guarded_integration, enabled=True,
+        ))
 
     @app.middleware("http")
     async def local_guard(request: Request, call_next):
