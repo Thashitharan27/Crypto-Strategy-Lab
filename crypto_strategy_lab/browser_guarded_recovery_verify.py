@@ -31,6 +31,6 @@ def verify_recovered_run(output_root: Path, run_id: str) -> dict[str, str]:
             raise RunArtifactError("No cataloged artifacts")
         for name in artifacts:
             artifact_path(candidate, manifest, name, verify=True)
-    except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, AttributeError):
         return {"run_id": run_id, "status": "RECOVERY_UNVERIFIED"}
     return {"run_id": run_id, "status": "ARTIFACTS_VERIFIED"}
