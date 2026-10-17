@@ -107,8 +107,9 @@ def prepared_policy_inputs(config, *, feature_registry=None) -> dict[str, object
             "mean_reversion_period": int(getattr(config, "mean_reversion_period", 20)),
             "mean_reversion_mean_type": str(getattr(config, "mean_reversion_mean_type", "AUTO_TIMEFRAME")),
             "strategy_timeframe_minutes": int(getattr(config, "strategy_timeframe_minutes", 15)),
-            "fib_stop_buffer_atr": float(getattr(config, "fib_stop_buffer_atr", 0.05)),
         })
+        if inputs["fib_candidate_context_selection"]:
+            inputs["fib_stop_buffer_atr"] = float(getattr(config, "fib_stop_buffer_atr", 0.05))
     return inputs
 
 

@@ -292,7 +292,6 @@ def test_prepared_contract_version_changes_l3_identity(tmp_path: Path) -> None:
     {"mean_reversion_period": 40},
     {"mean_reversion_mean_type": "SMA"},
     {"strategy_timeframe_minutes": 240},
-    {"fib_stop_buffer_atr": 0.2},
 ])
 def test_fib_preparation_changes_cannot_reuse_stale_l3(tmp_path, changed):
     cache = PreparedRunCache(tmp_path)
@@ -313,3 +312,15 @@ def test_fib_preparation_changes_cannot_reuse_stale_l3(tmp_path, changed):
     _, hit = cache.get_or_build(key(candidate), rebuild, provenance={})
     assert not hit, "changed Fibonacci preparation reused the old frame"
     assert builds == [True]
+
+
+def test_fib_stop_buffer_changes_l3_only_with_context_selection(tmp_path):
+    cache = PreparedRunCache(tmp_path)
+    def key(**changes):
+        config = _policy_config(fib_features_required=True, **changes)
+        return cache.identity(request_identity="fixed", feature_identities={"core": "fixed"},
+                              canonical_identities={"strategy": "fixed"},
+                              prepared_inputs=prepared_policy_inputs(config))
+    assert key(fib_stop_buffer_atr=0.05) == key(fib_stop_buffer_atr=0.2)
+    assert key(fib_candidate_context_selection=True, fib_stop_buffer_atr=0.05) != key(
+        fib_candidate_context_selection=True, fib_stop_buffer_atr=0.2)

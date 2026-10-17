@@ -448,3 +448,4 @@ def test_atr_volatility_is_persisted_in_feature_context():
     assert context["atr_change_pct_5"].tolist() == [-0.1, 0.0, 0.1]
     assert context["atr_volatility_state"].tolist() == ["CONTRACTING", "FLAT", "EXPANDING"]
     assert "atr_volatility_feature_available_at" in context.columns
+
