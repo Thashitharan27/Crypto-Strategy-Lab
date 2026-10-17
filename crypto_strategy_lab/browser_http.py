@@ -40,8 +40,12 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
         try:
             yield
         finally:
-            if visualizer_coordinator is not None:
-                visualizer_coordinator.stop()
+            try:
+                if guarded_enabled is True and guarded_integration is not None:
+                    guarded_integration.close()
+            finally:
+                if visualizer_coordinator is not None:
+                    visualizer_coordinator.stop()
 
     app = FastAPI(title="Crypto Strategy Lab (read-only)", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
