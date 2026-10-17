@@ -299,3 +299,37 @@ def test_guarded_inspection_io_failures_are_sanitized_and_audited():
         assert "private" not in response.text
         assert events == [{"operation": operation, "outcome": "UNAVAILABLE"}]
         getattr(integration, integration_method).assert_called_once_with("safe")
+
+
+def test_guarded_native_runtime_errors_are_sanitized_with_bounded_audit():
+    for operation, method, path, delegated in (
+        ("STATUS", "get", "/api/v1/guarded/jobs/job-1", "status"),
+        ("PROGRESS", "get", "/api/v1/guarded/jobs/job-1/progress", "progress"),
+        ("CANCEL", "post", "/api/v1/guarded/jobs/job-1/cancel", "cancel"),
+        ("CONFIG_SAVE", "put", "/api/v1/guarded/configs/test", "save_config"),
+    ):
+        audit_events = []
+        integration = Mock()
+        getattr(integration, delegated).side_effect = RuntimeError(
+            "private C:/native/secrets/credentials"
+        )
+        app = FastAPI()
+        app.include_router(create_guarded_job_router(
+            token=TOKEN, integration=integration, enabled=True,
+            audit_callback=audit_events.append,
+        ))
+        with TestClient(app) as client:
+            args = {"json": {}} if method == "put" else {}
+            response = getattr(client, method)(
+                path, headers={"Authorization": "Bearer " + TOKEN}, **args,
+            )
+        assert response.status_code == 503
+        expected = ("Configuration persistence unavailable" if method == "put"
+                    else "Guarded job service unavailable")
+        assert response.json() == {"detail": expected}
+        assert "secrets" not in response.text
+        assert audit_events == [{
+            "operation": operation,
+            "outcome": "PERSISTENCE_FAILED" if method == "put" else "UNAVAILABLE",
+        }]
+        getattr(integration, delegated).assert_called_once()
