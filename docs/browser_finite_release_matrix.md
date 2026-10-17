@@ -203,3 +203,13 @@ serializer, native-engine replacement, or original-file writes are introduced.
 This test does not demonstrate Windows original-configuration parity, frozen
 source execution, or trade/output accounting; those stay deferred to final B2
 certification. Production browser writes remain disabled pending approval.
+
+
+## CI gate: full pytest is blocking (2026-10-18)
+
+The `full-suite-observation` GitHub Actions job now fails when its actual
+`python -m pytest` execution fails. The prior `continue-on-error` step could
+produce a green Python workflow despite genuine failures; this already masked
+16 guarded HTTP regressions during B4 development. Required checks plus the raw
+full-suite summary are still reviewed before merging. Windows original-file
+certification remains separate and is not implicitly promoted by Linux CI.
