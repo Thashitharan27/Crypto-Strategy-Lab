@@ -12,7 +12,7 @@ _REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
 
 
 def create_guarded_job_router(*, token: str, integration, enabled: bool = False, audit_callback=None):
-    from fastapi import APIRouter, Header, HTTPException
+    from fastapi import APIRouter, Header, HTTPException, Request
     router = APIRouter()
     if enabled is not True:
         return router
@@ -66,9 +66,23 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         authorize(authorization)
         return invoke(request_id, lambda: integration.cancel(request_id), "CANCEL")
 
-    @router.put("/api/v1/guarded/configs/{config_id}")
-    def save_config(config_id: str, payload: dict, authorization: str | None = Header(default=None)):
+    async def authenticated_json_object(request: Request, authorization: str | None, operation: str):
+        # FastAPI's typed body validation runs before endpoint authorization.
+        # Explicitly authenticate first, then parse only for authorized callers.
         authorize(authorization)
+        try:
+            payload = await request.json()
+        except (ValueError, UnicodeError):
+            audit(operation, "INVALID_INPUT")
+            raise HTTPException(status_code=422, detail="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            audit(operation, "INVALID_INPUT")
+            raise HTTPException(status_code=422, detail="Invalid JSON object")
+        return payload
+
+    @router.put("/api/v1/guarded/configs/{config_id}")
+    async def save_config(config_id: str, request: Request, authorization: str | None = Header(default=None)):
+        payload = await authenticated_json_object(request, authorization, "CONFIG_SAVE")
         if not isinstance(config_id, str) or _REQUEST_ID.fullmatch(config_id) is None:
             audit("CONFIG_SAVE", "INVALID_ID")
             raise HTTPException(status_code=404, detail="Unknown configuration")
@@ -89,8 +103,8 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         return {"config_id": config_id, "status": "SAVED"}
 
     @router.post("/api/v1/guarded/jobs", status_code=202)
-    def submit_job(payload: dict, authorization: str | None = Header(default=None)):
-        authorize(authorization)
+    async def submit_job(request: Request, authorization: str | None = Header(default=None)):
+        payload = await authenticated_json_object(request, authorization, "JOB_SUBMIT")
         from datetime import datetime
         from crypto_strategy_lab.data_lake_config import (
             ResearchRunConfig, normalize_data_lake_config,
