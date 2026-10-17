@@ -1,0 +1,57 @@
+# Browser migration — finite, risk-based release gates
+
+Status: **decision framework, not authorization to enable execution or configuration writes**.
+The migrated browser is an interface to the existing authoritative Python engine, not a rewritten trading engine. The PySide6 desktop remains available. Use this checklist to stop treating every possible strategy/filter combination as a release prerequisite.
+
+## Separate milestones
+
+| Milestone | Meaning | Decision rule |
+| --- | --- | --- |
+| A — read-only browser acceptance | Browse saved runs, configs, Data Lake, charts and research without executing or writing | All A checks PASS; known noncritical display gaps may be accepted and recorded |
+| B — guarded execution/config editing | Browser invokes existing run/config owners, without duplicating engine logic | All A and B checks PASS, explicit approval to expose these capabilities, no unresolved high-severity defect |
+| C — later enhancements | Additional visualizer controls, uncommon strategies and quality-of-life features | Prioritize after A/B; never implicitly gate A unless they affect safety or correctness |
+
+**No automatic promotion:** passing historical native-engine replay does not pass browser invocation, persistence or write safety. Browser execution and configuration writes remain disabled pending separate B verification and approval. PR #501 remains held until its ownership conflict is resolved.
+
+## Finite acceptance matrix
+
+Status vocabulary: **PASS** (evidence with commit/fixture/log), **FAIL** (reproduced error), **BLOCKED** (necessary evidence or capability unavailable), **LIMITED** (specified coverage exists, no universal claim), **NOT RUN**. A historical gap is not silently relabeled PASS.
+
+| ID | Requirement | Milestone | Required acceptance evidence |
+| --- | --- | --- | --- |
+| A1 | Read-only browser safety boundary | A | Token/localhost and allowlist route regression tests; forbidden verbs/routes and path escapes rejected; run/config write paths remain inaccessible in read-only/A mode, even if separately implemented for a future guarded B mode |
+| A2 | Canonical read-only configuration projection | A | Same JSON-safe config key paths, values and profiles via desktop/native serializer and authenticated browser GET, with representative original saved configs |
+| A3 | Saved run/results/visualizer fidelity | A | Representative genuine saved runs, stable run selection/trade IDs, timestamps, chart overlays, summary and payload parity; no mutation of originals |
+| A4 | Data Lake and historical artifact provenance | A | Registered hashes and original-file preservation checks; no unapproved canonical rebuild or hidden data download |
+| A5 | CI and desktop fallback | A | Raw full pytest 0 failures, required Python safety, browser build, runtime fast-path checks; PySide6 smoke/fallback remains viable |
+| B1 | One authoritative execution/config owner | B | Trace browser request to existing native owner; compare normalized effective configs and ensure no second indicator, fill or exit engine |
+| B2 | Guarded browser-versus-desktop execution | B | Same pinned config, commit, frozen prepared/source data, and ordered trade output for representative long/short, entry, stop, partial and end-of-data paths; document numeric tolerance or exact equality |
+| B3 | Run/write lifecycle and negative cases | B | Explicitly authorized create/save/cancel/restart and rollback behavior; invalid token/input, missing 1m data, interruptions, stale request, duplicate submissions all fail safely |
+| B4 | Final security and release switch | B | Auth, allowlists, local binding, no secret exposure, operation audit and explicit release review/approval before enabling capabilities |
+
+A1–A5 and B1–B4 are **finite gates**. For B2, cover distinct underlying execution mechanisms and their risk-sensitive interactions, **not** all cross-products of symbols, timeframes, indicators and strategy options. Use existing engine tests for exhaustive edge-case permutations, and a small set of independent historical references for regression anchors. Changing strategy semantics after a historical save requires version-aware attribution, not automatic declaration of a migration defect.
+
+## Evidence already established (not blanket sign-off)
+
+- Original Fibonacci pending limit: 8 references, 35 native trades matched on frozen prepared inputs. See `browser_fib_historical_execution_2026-10-17.md`.
+- Fibonacci feature regeneration: 5 distinct prepared frames, 92,776 rows and 8,486,781 candidate records agree on existing semantics. Raw JSON diagnostics and timezone dtype representations differ as documented in `browser_fib_feature_regeneration_2026-10-17.md`.
+- Original break-even: 79 trades × 877 columns matched; 40 genuine BE triggers. See `browser_break_even_historical_execution_2026-10-17.md`.
+- TP1: 40 genuine original TP1 exits with matching retained artifacts; the previous replay's clean executor provenance is **not independently established**. Do not upgrade this to an unqualified clean replay PASS without the supporting record.
+- Genuine original executed SL1/trailing events, full event histories and dedicated per-trade slippage columns were absent from the inspected 178-run store. Mark **LIMITED/UNOBSERVED** and rely on verified engineering regression tests for *behavioral coverage only*, not historical parity. Do not fabricate events, tick order or trade-level slippage.
+- Windows symlink skips due to WinError 1314 are environment-specific; keep the skips reported, do not call them passes.
+
+## Practical release triage
+
+1. **Stop and fix before advancing:** data corruption, authorization bypass, unsafe write/execute route, wrong effective config, wrong results/trade ordering or accounting in a representative pinned browser path, or a failing required CI job.
+2. **Document and proceed to the next independent gate:** missing historical evidence for a behavior already protected by regression tests, cosmetic UI variance, absent unused optional integration, or intentional versioned feature-diagnostic differences. State the resulting limitation; do not claim historical certification of it.
+3. **Do not expand scope automatically:** new strategy options and extra GUI features belong in separate workstreams. Open a follow-up issue for low-risk discoveries rather than making release certification open-ended.
+4. **Release decision:** A can pass and support read-only use without B. B cannot pass on native replay alone; guarded browser calls and write lifecycle must be demonstrated and explicitly approved. Failure to find historical SL1/trailing records is not by itself a reason to keep searching forever or to claim their historical parity.
+
+## Current action queue
+
+- First check the operator-local browser configuration and chart/run projection gates; reuse existing `browser_configuration_parity_operator_gate.md` and `browser_chart_payload_parity_operator_gate.md` evidence instead of rewriting it.
+- Resolve or clearly bound the TP1 verifier provenance discrepancy from retained records only; no need to rerun already matched BE/Fib suites.
+- Inventory browser execution/config ownership and prepare a *disabled-by-default*, testable guarded integration plan; **do not enable** it in this phase.
+- Keep draft PR #501 on hold; its separate limit-touch helper is not an approved second execution authority.
+
+Each completed gate should record: main SHA, source run/config identities, check/test names, actual raw results, known limitations, and a reviewer decision. No claim of 100% strategy correctness is intended.
