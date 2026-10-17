@@ -163,3 +163,17 @@ The guarded request type is now available at module scope. The original
 authentication-order regression and existing guarded HTTP integration tests
 must all pass again before merging this correction. An Actions workflow with
 continue-on-error is **not** evidence of a passing full pytest suite.
+
+
+## B3 read-only request inspection following restart (2026-10-18)
+
+In the isolated, opt-in guarded coordinator, status lookup for a persistently
+claimed request ID after coordinator restart now returns RECOVERY_UNVERIFIED
+rather than implying the request never existed. It does **not** prove the run
+completed, passed native manifest validation or is safe to resume. Cancellation,
+progress history and result retrieval cannot operate on a lost native Future;
+persistent request claims remain non-replayable. Only canonical non-linked
+server-owned execution roots and genuine claim directories qualify; unknown,
+invalid or symlinked claims do not produce a recovered status. Production
+browser mutation routes remain absent, pending complete certification and
+explicit approval.
