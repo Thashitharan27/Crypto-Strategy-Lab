@@ -39,3 +39,29 @@ def test_malformed_native_manifest_fails_closed(tmp_path, malformed):
     (tmp_path / "run1").mkdir()
     with patch("crypto_strategy_lab.browser_guarded_recovery_verify.load_completed_manifest", return_value=malformed):
         assert verify_recovered_run(tmp_path, "run1")["status"] == "RECOVERY_UNVERIFIED"
+
+
+def test_recovery_rejects_symlinked_parent_without_traversing_run(tmp_path):
+    from crypto_strategy_lab.browser_guarded_recovery_verify import verify_recovered_run
+    import pytest
+
+    original = tmp_path / "original"
+    original.mkdir()
+    (original / "jobs").mkdir()
+    link = tmp_path / "linked"
+    try:
+        link.symlink_to(original, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks unavailable")
+    assert verify_recovered_run(link / "jobs", "job") == {
+        "run_id": "job", "status": "RECOVERY_UNVERIFIED"
+    }
+
+
+def test_recovery_rejects_relative_root_without_accessing_outputs():
+    from pathlib import Path
+    from crypto_strategy_lab.browser_guarded_recovery_verify import verify_recovered_run
+
+    assert verify_recovered_run(Path("relative"), "job") == {
+        "run_id": "job", "status": "RECOVERY_UNVERIFIED"
+    }
