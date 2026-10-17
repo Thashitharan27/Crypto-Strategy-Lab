@@ -32,3 +32,10 @@ def test_failed_native_integrity_check_never_claims_verification(tmp_path):
 def test_recovery_verifier_rejects_invalid_identifiers(tmp_path, bad):
     with pytest.raises(ValueError):
         verify_recovered_run(tmp_path, bad)
+
+
+@pytest.mark.parametrize("malformed", [None, [], "untrusted"])
+def test_malformed_native_manifest_fails_closed(tmp_path, malformed):
+    (tmp_path / "run1").mkdir()
+    with patch("crypto_strategy_lab.browser_guarded_recovery_verify.load_completed_manifest", return_value=malformed):
+        assert verify_recovered_run(tmp_path, "run1")["status"] == "RECOVERY_UNVERIFIED"
