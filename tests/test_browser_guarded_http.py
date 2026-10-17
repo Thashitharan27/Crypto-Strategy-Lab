@@ -333,3 +333,38 @@ def test_guarded_native_runtime_errors_are_sanitized_with_bounded_audit():
             "outcome": "PERSISTENCE_FAILED" if method == "put" else "UNAVAILABLE",
         }]
         getattr(integration, delegated).assert_called_once()
+
+
+def test_guarded_mutations_authenticate_before_malformed_body_validation():
+    integration = Mock()
+    events = []
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=events.append,
+    ))
+    cases = (
+        ("post", "/api/v1/guarded/jobs"),
+        ("put", "/api/v1/guarded/configs/safe"),
+    )
+    with TestClient(app) as client:
+        for method, path in cases:
+            for body in ('{not-json', '[]', '"scalar"'):
+                unauthorized = getattr(client, method)(
+                    path, content=body, headers={"Content-Type": "application/json"},
+                )
+                assert unauthorized.status_code == 401
+                assert unauthorized.json() == {"detail": "Unauthorized"}
+                authorized = getattr(client, method)(
+                    path, content=body, headers={
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + TOKEN,
+                    },
+                )
+                assert authorized.status_code == 422
+                assert "private" not in authorized.text
+    assert events.count({"operation": "AUTH", "outcome": "DENIED"}) == 6
+    assert events.count({"operation": "JOB_SUBMIT", "outcome": "INVALID_INPUT"}) == 3
+    assert events.count({"operation": "CONFIG_SAVE", "outcome": "INVALID_INPUT"}) == 3
+    integration.submit.assert_not_called()
+    integration.save_config.assert_not_called()
