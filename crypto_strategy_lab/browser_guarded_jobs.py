@@ -96,6 +96,17 @@ class GuardedRunJobs:
             state = "COMPLETED"
         return {"request_id": request_id, "status": state}
 
+    def cancel(self, request_id: str) -> dict[str, str]:
+        """Fail safely: never claim a running native simulation was cancelled.
+
+        A pending Future can be cancelled before it starts. Once running,
+        native engine cancellation has not been certified and is unsupported.
+        """
+        future = self.result(request_id)
+        if not future.done() and not future.cancel():
+            return {"request_id": request_id, "status": "CANCELLATION_UNAVAILABLE"}
+        return self.status(request_id)
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
