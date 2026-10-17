@@ -3,10 +3,10 @@
 Uses the existing BacktestEngine on frozen candles, not a substitute fill model.
 Original-file and production Data Lake parity remain separate certification.
 """
-from dataclasses import replace
 from datetime import datetime, timezone
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 from pandas.testing import assert_frame_equal
 
@@ -127,9 +127,9 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     assert len(direct) == 2
     assert direct.iloc[0].side == "LONG"
     assert direct.iloc[0].long_exit_reason == "TP"
-    assert direct.iloc[0].long_fees == 0.21
-    assert direct.iloc[0].pair_net_pnl == 9.79
-    assert direct.iloc[0].equity_after_trade == 1009.79
+    assert direct.iloc[0].long_fees == pytest.approx(0.21)
+    assert direct.iloc[0].pair_net_pnl == pytest.approx(9.79)
+    assert direct.iloc[0].equity_after_trade == pytest.approx(1009.79)
     assert direct.iloc[0].strategy_entry_time == pd.Timestamp("2024-01-01T00:15:00Z")
     assert direct.iloc[1].long_exit_reason == "END_OF_DATA"
     assert_frame_equal(source, _frozen_candles(), check_exact=True)
