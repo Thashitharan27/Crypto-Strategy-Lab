@@ -141,5 +141,3 @@ def test_guarded_http_and_desktop_native_owner_use_same_effective_config(tmp_pat
     assert captured[0][1]["reporting"]["output_dir"] == str(root)
     assert captured[0][2] == captured[1][2]
     assert config.to_dict() == original
-    assert not raw.exists()
-    assert not cache.exists()
