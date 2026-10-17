@@ -177,3 +177,17 @@ server-owned execution roots and genuine claim directories qualify; unknown,
 invalid or symlinked claims do not produce a recovered status. Production
 browser mutation routes remain absent, pending complete certification and
 explicit approval.
+
+
+## B1 isolated browser-to-native effective configuration comparison (2026-10-18)
+
+A focused opt-in test independently invokes the native GuiApplicationService
+from the desktop-side callable and through authenticated guarded HTTP, using
+the same native v3 configuration and a deterministic injected runner. It checks
+identical effective native typed configuration serialization, canonical
+server-owned output path, native DataRequest parameters and injected-runner
+output without implementing another simulation engine. This confirms the
+configuration/request delegation contract **only**. Since the injected runner
+does not produce real fills or saved manifests, ordered-trade, fee, equity and
+artifact parity remain explicitly **NOT RUN** until independent frozen-input
+browser-versus-desktop certification. Normal browser mutations remain disabled.
