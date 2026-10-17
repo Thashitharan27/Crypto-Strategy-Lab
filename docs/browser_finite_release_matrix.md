@@ -258,3 +258,20 @@ not production `BayesianSamplingCsvManifestReporter` *generation*, Data Lake
 loading, or browser-versus-desktop historical saved-run equality. Those remain
 NOT RUN for consolidated frozen-input certification. Production browser
 mutation capabilities stay disabled.
+
+
+## B2 production native reporter fixture parity (2026-10-18)
+
+An isolated opt-in guarded HTTP test and an independently invoked native
+GuiApplicationService now use the existing ResearchRunner orchestration,
+BacktestEngine, and **actual BayesianSamplingCsvManifestReporter** with the
+same frozen synthetic candles and prepared-feature fixture. The test compares
+ordered trades, native reader summaries, stable request/config/cache/source
+provenance, semantic trade fingerprints, and selected cataloged artifact bytes.
+All cataloged artifacts are hash-verified with native `artifact_path` and
+recovered-run verification. Volatile run IDs, timestamps, local paths, workbook
+metadata and performance timings are not assumed equal. The Data Lake bundle
+loader/prepared generation remain injected fixtures; therefore genuine
+historical source-derived report parity remains **NOT RUN** pending independent
+original-frozen-input Windows certification. Browser mutations stay disabled
+for ordinary users until explicit release approval.
