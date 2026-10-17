@@ -59,6 +59,19 @@ class GuardedRunJobs:
                 raise KeyError("Unknown research request")
             return self._submitted[request_id]
 
+    def status(self, request_id: str) -> dict[str, str]:
+        """Return bounded lifecycle state without exposing native results/errors."""
+        future = self.result(request_id)
+        if not future.done():
+            state = "RUNNING" if future.running() else "QUEUED"
+        elif future.cancelled():
+            state = "CANCELLED"
+        elif future.exception() is not None:
+            state = "FAILED"
+        else:
+            state = "COMPLETED"
+        return {"request_id": request_id, "status": state}
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
