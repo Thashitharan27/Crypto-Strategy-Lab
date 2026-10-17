@@ -460,6 +460,7 @@ def test_utc_partition_identity_reuses_valid_legacy_timezone_cache(tmp_path):
     old_manifest.write_text(json.dumps(payload))
     manifest.unlink()
     original_bytes = old_parquet.read_bytes()
+    assert aggregates._read_cached_partition(local, DatasetKind.TRADES, "different-request", None) is None
     assert aggregates._read_cached_partition(local, DatasetKind.TRADES, identity, None) == old_parquet
     assert old_parquet.read_bytes() == original_bytes
     assert not parquet.exists() and not manifest.exists()

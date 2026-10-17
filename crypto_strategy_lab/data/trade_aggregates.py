@@ -299,7 +299,8 @@ class TradeAggregateStore:
         if not parquet.is_file() or not manifest.is_file():
             # Retain and validate locally generated pre-normalization caches.
             legacy = self._partition_identity(record, dataset, large_trade_quote_threshold, _legacy_timezone=True)
-            if legacy != identity:
+            canonical = self._partition_identity(record, dataset, large_trade_quote_threshold)
+            if identity == canonical and legacy != identity:
                 return self._read_cached_partition(record, dataset, legacy, large_trade_quote_threshold)
             return None
         try:
