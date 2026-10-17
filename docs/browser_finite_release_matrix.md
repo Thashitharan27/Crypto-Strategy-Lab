@@ -243,3 +243,18 @@ injected fixtures. Thus it **does not** certify the production Data Lake loader,
 production manifest reporter, full 1m execution, or original saved artifacts.
 Those remain NOT RUN for consolidated independent desktop-versus-browser B2
 certification. Production browser mutation routes remain disabled.
+
+
+## B2 completed-manifest read and recovered-integrity evidence (2026-10-18)
+
+An isolated regression exercises the **real**, unmocked native
+`CompletedRunReader`, `load_completed_manifest`, `artifact_path`, and guarded
+read-only recovery verifier against a frozen fixture using the canonical
+manifest/research contract and SHA-256 catalog entries. It verifies the summary
+and **every** cataloged artifact, then tampers with the trade artifact and
+requires `RECOVERY_UNVERIFIED` despite the surviving `COMPLETED` manifest and
+valid summary. This covers native artifact reading and fail-closed recovery,
+not production `BayesianSamplingCsvManifestReporter` *generation*, Data Lake
+loading, or browser-versus-desktop historical saved-run equality. Those remain
+NOT RUN for consolidated frozen-input certification. Production browser
+mutation capabilities stay disabled.
