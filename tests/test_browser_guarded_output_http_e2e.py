@@ -68,3 +68,78 @@ def test_http_missing_approved_root_never_starts_native_execution(tmp_path, monk
         assert not (tmp_path / "missing").exists()
     finally:
         integration.close()
+
+
+def test_guarded_http_and_desktop_native_owner_use_same_effective_config(tmp_path):
+    """Isolated B1 parity: exercise HTTP route and native app.run independently.
+
+    Injected runner captures the native request and effective typed config;
+    this does not assert historical market fills or trade parity.
+    """
+    from crypto_strategy_lab.gui.v2_controller import GuiApplicationService, GuiResearchRequest
+    from crypto_strategy_lab.browser_guarded_output import bind_guarded_output_root
+    from datetime import datetime, timezone
+
+    root = tmp_path / "approved"
+    root.mkdir()
+    raw = tmp_path / "raw"
+    cache = tmp_path / "cache"
+    captured = []
+
+    class CaptureRunner:
+        def run(self, data_request, config, **kwargs):
+            captured.append((data_request, config.to_dict(), kwargs))
+            return {"native": "isolated fixture result"}
+
+    def service():
+        return GuiApplicationService(
+            raw, cache, runner_factory=lambda output_root: CaptureRunner(),
+        )
+
+    config = ResearchRunConfig()
+    # Native-only typed config serialization, not a browser projection.
+    original = config.to_dict()
+    assert config.reporting.output_dir != str(root)
+    direct_config = bind_guarded_output_root(config, root)
+    desktop = service()
+    direct_request = GuiResearchRequest(
+        exchange="binance", market="futures_um", symbol="BTCUSDT",
+        period_start=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        period_end=datetime(2025, 1, 2, tzinfo=timezone.utc),
+        strategy_timeframe="4h", intrabar_timeframe="1m",
+    )
+    direct_result = desktop.run(direct_request, direct_config)
+    assert direct_result == {"native": "isolated fixture result"}
+
+    guarded = service()
+    integration = BrowserGuardedIntegration(
+        guarded, tmp_path, enabled=True, execution_root=root,
+    )
+    app = create_browser_app(
+        token=TOKEN, guarded_integration=integration, guarded_enabled=True,
+    )
+    try:
+        with TestClient(app, base_url="http://localhost") as client:
+            response = client.post("/api/v1/guarded/jobs", headers=HEADERS, json={
+                "request_id": "b1-effective-parity",
+                "request": REQUEST,
+                "config": original,
+            })
+            assert response.status_code == 202, response.text
+            browser_result = integration._jobs.result("b1-effective-parity").result(timeout=10)
+            assert browser_result == direct_result
+            assert client.get(
+                "/api/v1/guarded/jobs/b1-effective-parity",
+                headers=HEADERS,
+            ).json()["status"] == "COMPLETED"
+    finally:
+        integration.close()
+
+    assert len(captured) == 2
+    assert captured[0][0] == captured[1][0]
+    assert captured[0][1] == captured[1][1] == direct_config.to_dict()
+    assert captured[0][1]["reporting"]["output_dir"] == str(root)
+    assert captured[0][2] == captured[1][2]
+    assert config.to_dict() == original
+    assert not raw.exists()
+    assert not cache.exists()
