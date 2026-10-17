@@ -138,3 +138,16 @@ and config persistence continue to share the existing validation and ownership
 paths. This regression does not authorize enabling browser mutations; the
 production launcher remains read-only pending explicit approval and
 independent browser-versus-desktop certification.
+
+
+## B3 cross-process configuration write ownership (2026-10-18)
+
+The isolated guarded native-config save wrapper now atomically reserves a
+per-configuration-ID directory before serialization and replacement. A second
+guarded coordinator cannot silently overwrite the same configuration while the
+first is writing. Normal save and failure paths release ownership; unexplained
+crash-stale claims reject writes until manual operator reconciliation, with no
+automatic lock stealing. Native serialization and the original-file boundary
+remain unchanged. This prevents concurrent guarded-writer overlap, not external
+desktop edits or physical power-loss faults. Final Windows certification and
+explicit release approval are still required before exposing browser writes.
