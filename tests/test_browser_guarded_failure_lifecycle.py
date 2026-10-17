@@ -18,8 +18,8 @@ def test_failed_job_is_sanitized_and_does_not_block_next_submission(tmp_path, mo
     service = Mock()
     service.progress_callback = None
     service.run.side_effect = [RuntimeError("private file C:/secret/run"), "ok"]
-    integration = BrowserGuardedIntegration(service, tmp_path, enabled=True)
-    app = create_browser_app(token=TOKEN, guarded_integration=integration, guarded_enabled=True)
+    integration = BrowserGuardedIntegration(service, tmp_path, enabled=True, execution_root=tmp_path)
+    app = create_browser_app(token=TOKEN, guarded_integration=integration, guarded_enabled=True, execution_root=tmp_path)
     request = {
         "exchange": "binance", "market": "futures_um", "symbol": "BTCUSDT",
         "period_start": "2025-01-01T00:00:00Z",
