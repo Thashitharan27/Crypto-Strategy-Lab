@@ -58,9 +58,14 @@ real exchange tick order. No new trace substitutes for missing original history.
 
 The [existing TP1 certificate](browser_historical_replay_certification_2026-10-15.md)
 was reused: its original/replay registered artifacts and fingerprint remain
-valid, covering 79 trades including 40 LONG TP1 exits. Its certified executor
-revision is `3a4b3cf489a0d0ccf5b2416c928a5f580df78153`; this report does not
-renew TP1 against current main. No TP1, Fibonacci pending-limit or feature-
+valid, covering 79 trades including 40 LONG TP1 exits. The certificate records
+executor revision `3a4b3cf489a0d0ccf5b2416c928a5f580df78153`, but the retained
+replay manifest records the later verifier revision
+`62bf3157f92ed64d0b2e430be2ddbc23c63b745d`, `code_dirty=true` and
+`reproducibility_status=PARTIAL`. These records do not independently establish
+a clean executor checkout for that prior replay; its artifact equality is
+reused with this source-provenance limitation. This report does not renew TP1
+against current main. No TP1, Fibonacci pending-limit or feature-
 regeneration replay was repeated. The BE and TP1 source-provenance Parquets are
 byte-identical, and their data, feature and strategy configurations agree.
 
