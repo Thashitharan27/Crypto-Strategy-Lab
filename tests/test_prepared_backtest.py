@@ -448,3 +448,15 @@ def test_atr_volatility_is_persisted_in_feature_context():
     assert context["atr_change_pct_5"].tolist() == [-0.1, 0.0, 0.1]
     assert context["atr_volatility_state"].tolist() == ["CONTRACTING", "FLAT", "EXPANDING"]
     assert "atr_volatility_feature_available_at" in context.columns
+
+
+def test_fib_stop_buffer_cache_identity_only_when_context_selection_enabled():
+    from crypto_strategy_lab.prepared_cache import prepared_policy_inputs
+
+    config = replace(BacktestConfig(), fib_features_required=True,
+                     fib_candidate_context_selection=False, fib_stop_buffer_atr=0.05)
+    other = replace(config, fib_stop_buffer_atr=0.75)
+    assert prepared_policy_inputs(config) == prepared_policy_inputs(other)
+    selected = replace(config, fib_candidate_context_selection=True)
+    changed = replace(selected, fib_stop_buffer_atr=0.75)
+    assert prepared_policy_inputs(selected) != prepared_policy_inputs(changed)
