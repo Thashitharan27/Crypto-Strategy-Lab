@@ -24,6 +24,7 @@ class GuardedRunJobs:
         self._submitted: dict[str, Future] = {}
         self._active: str | None = None
         self._closed = False
+        self._worker_claimed = False
         self._progress: dict[str, dict[str, str]] = {}
 
     def _claim_request(self, request_id: str) -> None:
@@ -40,18 +41,36 @@ class GuardedRunJobs:
                 or any(part.is_symlink() for part in (root, *root.parents))
                 or root.resolve(strict=True) != root):
             raise ValueError("Unsafe guarded execution root")
-        claim = root / (".guarded-request-" + request_id + ".claim")
+        worker_claim = root / ".guarded-native-worker.lock"
         try:
-            os.mkdir(claim, mode=0o700)  # Atomic cross-process exclusive claim.
+            os.mkdir(worker_claim, mode=0o700)
         except FileExistsError as exc:
-            raise ValueError("Duplicate request identifier") from exc
-        # Flush the parent directory where supported, before native submission.
-        if os.name == "posix":
-            fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            # A stale crash lock is deliberately not reclaimed automatically.
+            raise RuntimeError("Native execution root is already owned") from exc
+        self._worker_claimed = True
+        try:
+            claim = root / (".guarded-request-" + request_id + ".claim")
             try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
+                os.mkdir(claim, mode=0o700)  # Atomic cross-process exclusive ID.
+            except FileExistsError as exc:
+                raise ValueError("Duplicate request identifier") from exc
+            # Flush claims before submitting native work where supported.
+            if os.name == "posix":
+                fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        except BaseException:
+            self._release_worker_claim()
+            raise
+
+    def _release_worker_claim(self) -> None:
+        if self._worker_claimed:
+            # Only normal coordinator completion frees the lock. Process crashes
+            # leave it behind for explicit operator reconciliation.
+            os.rmdir(Path(self._execution_root) / ".guarded-native-worker.lock")
+            self._worker_claimed = False
 
     def submit(self, request_id: str, request: Any, config: Any) -> Future:
         if self._enabled is not True:
@@ -75,6 +94,7 @@ class GuardedRunJobs:
                 future = self._executor.submit(self._run_observed, request_id, request, config)
             except BaseException:
                 self._active = None
+                self._release_worker_claim()
                 raise
             # A completed Future may invoke callbacks immediately in this thread.
             # RLock avoids deadlocking the submitter in that fast completion case.
@@ -103,6 +123,7 @@ class GuardedRunJobs:
             return self._application.run(request, config)
         finally:
             self._application.progress_callback = previous
+            self._release_worker_claim()
 
     def progress(self, request_id: str) -> dict[str, str]:
         """Return safe, bounded latest phase for a known job, or empty dict."""
@@ -113,6 +134,10 @@ class GuardedRunJobs:
     def _finished(self, request_id: str) -> None:
         with self._lock:
             if self._active == request_id:
+                # A queued future can be cancelled before _run_observed starts,
+                # so its finally block never executes to release ownership.
+                if self._submitted[request_id].cancelled():
+                    self._release_worker_claim()
                 self._active = None
 
     def result(self, request_id: str) -> Future:

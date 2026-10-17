@@ -89,3 +89,17 @@ using the existing manifest/hash verifier; no automatic claim deletion is safe.
 Independent browser/desktop invocation, write rollback, and interrupted output
 recovery certification remain outstanding. Production browser mutations remain
 disabled pending the B release review.
+
+
+## B3 guarded native worker ownership (2026-10-18)
+
+In opt-in execution mode, an atomic exclusive worker-directory claim in the
+dedicated server output root prevents two independent guarded coordinators from
+running native simulations against that same root concurrently. Normal native completion/failure and pre-start queued cancellation release
+worker ownership; permanent request-ID claims remain.
+A process crash retains the worker lock and therefore blocks new work until an
+operator verifies that the previous process is no longer running and reconciles
+artifacts. Never automatically delete an unexplained lock or resume an orphan.
+This does not protect unrelated native desktop processes operating on the same
+root: provision a dedicated guarded directory. Production browser write/execute
+features remain disabled pending complete B certification and explicit approval.

@@ -248,3 +248,86 @@ def test_invalid_execution_root_never_creates_request_claim(tmp_path):
         app.run.assert_not_called()
     finally:
         jobs.close()
+
+
+def test_separate_coordinators_cannot_run_different_ids_concurrently(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    entered, release = Event(), Event()
+    app_one = Mock()
+    app_two = Mock()
+    def blocking_run(*_):
+        entered.set()
+        assert release.wait(10)
+        return "ok"
+    app_one.run.side_effect = blocking_run
+    first = GuardedRunJobs(app_one, enabled=True, execution_root=tmp_path)
+    second = GuardedRunJobs(app_two, enabled=True, execution_root=tmp_path)
+    try:
+        future = first.submit("first", None, ResearchRunConfig())
+        assert entered.wait(10)
+        with pytest.raises(RuntimeError, match="already owned"):
+            second.submit("second", None, ResearchRunConfig())
+        assert not (tmp_path / ".guarded-request-second.claim").exists()
+        app_two.run.assert_not_called()
+        release.set()
+        assert future.result(timeout=10) == "ok"
+        assert not (tmp_path / ".guarded-native-worker.lock").exists()
+        assert second.submit("second", None, ResearchRunConfig()).result(timeout=10) is app_two.run.return_value
+    finally:
+        release.set()
+        first.close()
+        second.close()
+
+
+def test_stale_native_worker_claim_requires_manual_reconciliation(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    (tmp_path / ".guarded-native-worker.lock").mkdir()
+    app = Mock()
+    jobs = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    try:
+        with pytest.raises(RuntimeError, match="already owned"):
+            jobs.submit("new-id", None, ResearchRunConfig())
+        assert not (tmp_path / ".guarded-request-new-id.claim").exists()
+        assert (tmp_path / ".guarded-native-worker.lock").is_dir()
+        app.run.assert_not_called()
+    finally:
+        jobs.close()
+
+
+def test_native_failure_releases_worker_claim_without_reusing_request_id(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    app = Mock()
+    app.run.side_effect = [RuntimeError("native failed"), "ok"]
+    jobs = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    try:
+        with pytest.raises(RuntimeError, match="native failed"):
+            jobs.submit("failed", None, ResearchRunConfig()).result(timeout=10)
+        assert not (tmp_path / ".guarded-native-worker.lock").exists()
+        assert jobs.submit("new-id", None, ResearchRunConfig()).result(timeout=10) == "ok"
+        with pytest.raises(ValueError, match="Duplicate"):
+            jobs.submit("failed", None, ResearchRunConfig())
+    finally:
+        jobs.close()
+
+
+def test_pre_start_cancel_releases_worker_but_retains_request_claim(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    app = Mock()
+    jobs = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    # Deterministically emulate the worker not having started yet.
+    pending = Future()
+    jobs._executor.submit = Mock(return_value=pending)
+    try:
+        assert jobs.submit("pending", None, ResearchRunConfig()) is pending
+        assert (tmp_path / ".guarded-native-worker.lock").is_dir()
+        assert jobs.cancel("pending") == {
+            "request_id": "pending", "status": "CANCELLED"
+        }
+        assert not (tmp_path / ".guarded-native-worker.lock").exists()
+        assert (tmp_path / ".guarded-request-pending.claim").is_dir()
+        with pytest.raises(ValueError, match="Duplicate"):
+            jobs.submit("pending", None, ResearchRunConfig())
+        app.run.assert_not_called()
+    finally:
+        jobs.close()
