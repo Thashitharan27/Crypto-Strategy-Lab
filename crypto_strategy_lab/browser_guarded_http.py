@@ -78,6 +78,10 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         except (ValueError, TypeError):
             audit("CONFIG_SAVE", "INVALID_CONFIG")
             raise HTTPException(status_code=422, detail="Invalid native configuration")
+        except OSError:
+            # Native disk errors can include private paths; never echo them.
+            audit("CONFIG_SAVE", "PERSISTENCE_FAILED")
+            raise HTTPException(status_code=503, detail="Configuration persistence unavailable")
         # Never expose server-side configuration file paths.
         return {"config_id": config_id, "status": "SAVED"}
 
