@@ -58,6 +58,9 @@ class GuardedConfigStore:
             os.close(fd)
             # Native serialization, with validation, is the only write owner.
             GuiApplicationService.save_config(Path(temp_name), config)
+            # Persist the fully serialized candidate before replacing a saved config.
+            with open(temp_name, "rb") as written:
+                os.fsync(written.fileno())
             # The target must still be a regular non-link file immediately
             # before replace; a filesystem adversary requires OS ACL controls.
             if destination.is_symlink() or (destination.exists() and not destination.is_file()):
