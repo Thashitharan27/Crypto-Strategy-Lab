@@ -134,6 +134,10 @@ class GuardedRunJobs:
     def _finished(self, request_id: str) -> None:
         with self._lock:
             if self._active == request_id:
+                # A queued future can be cancelled before _run_observed starts,
+                # so its finally block never executes to release ownership.
+                if self._submitted[request_id].cancelled():
+                    self._release_worker_claim()
                 self._active = None
 
     def result(self, request_id: str) -> Future:
