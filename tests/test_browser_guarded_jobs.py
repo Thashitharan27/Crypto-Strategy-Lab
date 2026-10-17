@@ -308,3 +308,26 @@ def test_native_failure_releases_worker_claim_without_reusing_request_id(tmp_pat
             jobs.submit("failed", None, ResearchRunConfig())
     finally:
         jobs.close()
+
+
+def test_pre_start_cancel_releases_worker_but_retains_request_claim(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    app = Mock()
+    jobs = GuardedRunJobs(app, enabled=True, execution_root=tmp_path)
+    # Deterministically emulate the worker not having started yet.
+    pending = Future()
+    jobs._executor.submit = Mock(return_value=pending)
+    try:
+        assert jobs.submit("pending", None, ResearchRunConfig()) is pending
+        assert (tmp_path / ".guarded-native-worker.lock").is_dir()
+        assert jobs.cancel("pending") == {
+            "request_id": "pending", "status": "CANCELLED"
+        }
+        assert not (tmp_path / ".guarded-native-worker.lock").exists()
+        assert (tmp_path / ".guarded-request-pending.claim").is_dir()
+        with pytest.raises(ValueError, match="Duplicate"):
+            jobs.submit("pending", None, ResearchRunConfig())
+        app.run.assert_not_called()
+    finally:
+        jobs.close()
