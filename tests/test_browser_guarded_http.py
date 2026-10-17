@@ -202,7 +202,7 @@ def test_audit_events_are_bounded_and_exclude_identifiers_and_payloads():
     assert client.get("/api/v1/guarded/jobs/sensitive-run", headers=headers).status_code == 200
     assert events == [{"operation": "STATUS", "outcome": "SUCCESS"}]
     assert client.get("/api/v1/guarded/jobs/sensitive-run").status_code == 401
-    assert len(events) == 1
+    assert events == [{"operation": "STATUS", "outcome": "SUCCESS"}, {"operation": "AUTH", "outcome": "DENIED"}]
 
 
 def test_failing_audit_callback_does_not_break_guarded_response():
