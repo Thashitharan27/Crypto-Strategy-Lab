@@ -272,3 +272,30 @@ def test_submit_native_io_failure_is_audited_and_sanitized(monkeypatch):
     assert "/srv/" not in response.text
     assert events == [{"operation": "JOB_SUBMIT", "outcome": "EXECUTION_UNAVAILABLE"}]
     integration.submit.assert_called_once()
+
+
+def test_guarded_inspection_io_failures_are_sanitized_and_audited():
+    for operation, method, path, integration_method in (
+        ("STATUS", "get", "/api/v1/guarded/jobs/safe", "status"),
+        ("PROGRESS", "get", "/api/v1/guarded/jobs/safe/progress", "progress"),
+        ("CANCEL", "post", "/api/v1/guarded/jobs/safe/cancel", "cancel"),
+    ):
+        events = []
+        integration = Mock()
+        getattr(integration, integration_method).side_effect = OSError(
+            "private /srv/native/output/credentials"
+        )
+        app = FastAPI()
+        app.include_router(create_guarded_job_router(
+            token=TOKEN, integration=integration, enabled=True,
+            audit_callback=events.append,
+        ))
+        with TestClient(app) as client:
+            response = getattr(client, method)(
+                path, headers={"Authorization": "Bearer " + TOKEN},
+            )
+        assert response.status_code == 503
+        assert response.json() == {"detail": "Guarded job service unavailable"}
+        assert "private" not in response.text
+        assert events == [{"operation": operation, "outcome": "UNAVAILABLE"}]
+        getattr(integration, integration_method).assert_called_once_with("safe")

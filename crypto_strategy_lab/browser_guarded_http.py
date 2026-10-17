@@ -47,6 +47,9 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         except PermissionError:
             audit(operation, "DENIED")
             raise HTTPException(status_code=403, detail="Guarded operations disabled")
+        except OSError:
+            audit(operation, "UNAVAILABLE")
+            raise HTTPException(status_code=503, detail="Guarded job service unavailable")
 
     @router.get("/api/v1/guarded/jobs/{request_id}")
     def status(request_id: str, authorization: str | None = Header(default=None)):
