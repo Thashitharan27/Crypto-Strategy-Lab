@@ -87,6 +87,10 @@ def isolated_browser_certification(
                 # workers finish, even when the server exits with an error.
                 # Do not infer certification success from copying files.
                 if evidence is not None:
+                    # Never follow an output symlink into original data.
+                    for source in (config_root, output_root):
+                        if any(path.is_symlink() for path in source.rglob("*")):
+                            raise ValueError("Unsafe symlink in certification evidence")
                     shutil.copytree(config_root, evidence / "configs")
                     shutil.copytree(output_root, evidence / "runs")
 
