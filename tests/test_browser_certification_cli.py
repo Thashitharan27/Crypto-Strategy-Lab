@@ -224,3 +224,78 @@ def test_cli_accepts_separate_persistent_root_without_touching_canonical_sources
     runner.assert_called_once()
     assert runner.call_args.kwargs["persistent_execution_root"] == root
     assert frozen.read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("overlap", [
+    "raw_child", "cache_child", "raw_parent", "static_child", "frozen_parent",
+])
+def test_cli_rejects_evidence_overlapping_protected_sources_before_native_setup(
+    monkeypatch, tmp_path, overlap,
+):
+    """Evidence copying must never target canonical data, cache or originals."""
+    raw = tmp_path / "original-raw"
+    cache = tmp_path / "original-cache"
+    static = tmp_path / "dist-certification"
+    frozen = tmp_path / "original-configs" / "saved.json"
+    for part in (raw, cache, static, frozen.parent):
+        part.mkdir()
+    frozen.write_bytes(b"original")
+    (raw / "keep.bin").write_bytes(b"raw")
+    (cache / "keep.bin").write_bytes(b"cache")
+    candidates = {
+        "raw_child": raw / "csl-browser-evidence-in-raw",
+        "cache_child": cache / "csl-browser-evidence-in-cache",
+        "raw_parent": tmp_path,
+        "static_child": static / "csl-browser-evidence-in-static",
+        "frozen_parent": frozen.parent / "csl-browser-evidence-in-configs",
+    }
+    evidence = candidates[overlap]
+    build = Mock(side_effect=AssertionError("Native must not be constructed"))
+    runner = Mock()
+    monkeypatch.setattr(command, "build_browser_readonly_service", build)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
+    monkeypatch.setattr(command, "resolve_data_lake_runtime_paths",
+                        lambda: SimpleNamespace(raw_root=raw, cache_root=cache))
+    with pytest.raises(SystemExit) as exc:
+        command.main([
+            "--acknowledge-test-only", "--static-root", str(static),
+            "--port", "8919", "--frozen-config", str(frozen),
+            "--evidence-root", str(evidence),
+        ])
+    assert exc.value.code == 2
+    build.assert_not_called()
+    runner.assert_not_called()
+    assert frozen.read_bytes() == b"original"
+    assert (raw / "keep.bin").read_bytes() == b"raw"
+    assert (cache / "keep.bin").read_bytes() == b"cache"
+    if overlap != "raw_parent":
+        assert not evidence.exists()
+
+
+def test_cli_accepts_separate_evidence_root_without_touching_canonical_sources(
+    monkeypatch, tmp_path,
+):
+    raw = tmp_path / "original-raw"
+    cache = tmp_path / "original-cache"
+    static = tmp_path / "dist-certification"
+    original_configs = tmp_path / "original-configs"
+    evidence = tmp_path / "isolated" / "csl-browser-evidence-dedicated"
+    for part in (raw, cache, static, original_configs, evidence.parent):
+        part.mkdir()
+    frozen = original_configs / "saved.json"
+    frozen.write_bytes(b"original")
+    factory = Mock(return_value=SimpleNamespace(application_service=Mock()))
+    runner = Mock()
+    monkeypatch.setattr(command, "build_browser_readonly_service", factory)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
+    monkeypatch.setattr(command, "resolve_data_lake_runtime_paths",
+                        lambda: SimpleNamespace(raw_root=raw, cache_root=cache))
+    command.main([
+        "--acknowledge-test-only", "--static-root", str(static),
+        "--port", "8919", "--frozen-config", str(frozen),
+        "--evidence-root", str(evidence),
+    ])
+    factory.assert_called_once()
+    runner.assert_called_once()
+    assert runner.call_args.kwargs["evidence_root"] == evidence
+    assert frozen.read_bytes() == b"original"

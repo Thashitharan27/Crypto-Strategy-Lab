@@ -17,13 +17,13 @@ from crypto_strategy_lab.browser_readonly_service import build_browser_readonly_
 from crypto_strategy_lab.paths import resolve_data_lake_runtime_paths
 
 
-def _check_persistent_root_separation(root: Path, protected: list[Path]) -> None:
-    """Reject a crash-test execution root intersecting known read/write sources."""
+def _check_test_output_separation(root: Path, protected: list[Path]) -> None:
+    """Reject any test-only output root intersecting canonical input trees."""
     candidate = Path(root).resolve(strict=False)
     for entry in protected:
         known = Path(entry).resolve(strict=False)
         if candidate == known or candidate in known.parents or known in candidate.parents:
-            raise ValueError("Persistent certification root overlaps protected data")
+            raise ValueError("Certification test output overlaps protected data")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -55,16 +55,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     # test-only execution at the workstation's canonical writable cache.
     # The raw market-data root remains the established source of truth.
     paths = resolve_data_lake_runtime_paths()
-    if args.persistent_execution_root is not None:
-        # The marker alone cannot make an original input/cache directory safe
-        # to write. Deny any overlap before constructing the native service.
-        protected = [paths.raw_root, paths.cache_root, args.static_root]
-        if args.frozen_config is not None:
-            protected.append(args.frozen_config.parent)
-        try:
-            _check_persistent_root_separation(args.persistent_execution_root, protected)
-        except ValueError as exc:
-            parser.error(str(exc))
+    # Both persistent native execution and copied evidence are writable test
+    # outputs. Neither may be placed within a canonical source/cache tree,
+    # even if the nested destination does not yet exist.
+    protected = [paths.raw_root, paths.cache_root, args.static_root]
+    if args.frozen_config is not None:
+        protected.append(args.frozen_config.parent)
+    for output_root in (args.persistent_execution_root, args.evidence_root):
+        if output_root is not None:
+            try:
+                _check_test_output_separation(output_root, protected)
+            except ValueError as exc:
+                parser.error(str(exc))
     with TemporaryDirectory(prefix="csl-browser-cert-cache-") as scratch:
         cache_root = Path(scratch).resolve() / "cache"
         cache_root.mkdir()
