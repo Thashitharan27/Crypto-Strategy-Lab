@@ -273,7 +273,7 @@ def test_background_refresh_failure_is_inline_and_does_not_open_modal(qtbot, mon
     qtbot.waitUntil(lambda: widget.state.text() == "● Git error", timeout=3000)
     assert fetches == [True]
     assert widget.status_detail.text() == "Background fetch unavailable"
-    assert widget.activity[-1] == "Error: Background fetch unavailable"
+    assert widget.activity[-1] == "[GIT] Error: Background fetch unavailable"
     assert warnings == []
 
 
