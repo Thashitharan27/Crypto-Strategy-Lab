@@ -97,15 +97,15 @@ export async function inspectVerifiedSavedRun(enabled: boolean, token: string, f
       !ID.test(response.manifest.run_id) ||
       !response.summary || typeof response.summary !== "object" ||
       Array.isArray(response.summary) ||
-      (response.manifest.run_status !== undefined &&
-        (typeof response.manifest.run_status !== "string" ||
-         !ID.test(response.manifest.run_status)))) {
+      response.manifest.run_status !== "COMPLETED") {
+    // The native CompletedRunReader contract admits only completed manifests.
+    // Never label a malformed or incomplete HTTP response as verified.
     throw new Error("Invalid verified saved-run response");
   }
   return {
     folderId,
     nativeRunId: response.manifest.run_id,
-    runStatus: response.manifest.run_status ?? "not specified",
+    runStatus: "COMPLETED",
   };
 }
 
