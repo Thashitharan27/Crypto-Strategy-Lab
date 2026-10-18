@@ -429,3 +429,75 @@ test("guarded cancellation unavailable is never displayed as cancelled", async (
     assert.ok(serialized.includes("No cancellation is confirmed"));
   } finally {globalThis.fetch = original;}
 });
+
+
+test("guarded verified saved-run handoff uses explicit folder ID, not request ID", async () => {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (path, options) => {
+    calls.push([path, options]);
+    return {ok: true, json: async () => ({
+      manifest: {run_id: "native-output-42", run_status: "COMPLETED"},
+      summary: {total_trades: 3},
+    })};
+  };
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "request-42");
+    ui.change("guard-saved-run-folder", "folder-42");
+    ui.click("Inspect verified saved run");
+    await settleHandlers();
+    ui.render();
+    assert.deepEqual(calls.map(([url, init]) => [url, init.method]), [
+      ["/api/v1/runs/folder-42", "GET"],
+    ]);
+    const displayed = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(displayed.includes("native-output-42"));
+    assert.ok(displayed.includes("folder-42"));
+    assert.ok(!calls[0][0].includes("request-42"));
+  } finally { globalThis.fetch = original; }
+});
+
+test("saved-run handoff hides old results after folder or session changes", async () => {
+  for (const switchContext of ["folder", "session"]) {
+    const original = globalThis.fetch;
+    let complete;
+    globalThis.fetch = async () => new Promise(resolve => {complete = resolve;});
+    try {
+      const ui = guardedEventHarness();
+      ui.change("guard-saved-run-folder", "first-folder");
+      ui.click("Inspect verified saved run");
+      if (switchContext === "folder") ui.change("guard-saved-run-folder", "second-folder");
+      else ui.rerender({enabled: true, token: "changed-session-token"});
+      complete({ok: true, json: async () => ({
+        manifest: {run_id: "obsolete-run", run_status: "COMPLETED"}, summary: {},
+      })});
+      await settleHandlers();
+      ui.render();
+      const displayed = JSON.stringify(ui.find("section", undefined).props.children);
+      assert.ok(!displayed.includes("obsolete-run"), switchContext);
+    } finally {globalThis.fetch = original;}
+  }
+});
+
+test("saved-run handoff rejects malformed IDs and unverified or invalid outputs", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  const responses = [{}, {manifest: {run_id: "native"}, summary: null},
+    {manifest: {run_id: 42}, summary: {}}, {manifest: {run_id: "native"}, summary: {}}];
+  globalThis.fetch = async () => {
+    calls++;
+    return {ok: true, json: async () => responses[calls - 1]};
+  };
+  try {
+    await assert.rejects(api.inspectVerifiedSavedRun(false, TOKEN, "valid"), /disabled/);
+    await assert.rejects(api.inspectVerifiedSavedRun(true, TOKEN, "../unsafe"), /Invalid identifier/);
+    assert.equal(calls, 0);
+    for (let i = 0; i < 3; i++) {
+      await assert.rejects(api.inspectVerifiedSavedRun(true, TOKEN, "folder"), /Invalid verified saved-run response/);
+    }
+    assert.deepEqual(await api.inspectVerifiedSavedRun(true, TOKEN, "folder"), {
+      folderId: "folder", nativeRunId: "native", runStatus: "not specified",
+    });
+  } finally {globalThis.fetch = original;}
+});
