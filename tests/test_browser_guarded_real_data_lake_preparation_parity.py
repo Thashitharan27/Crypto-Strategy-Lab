@@ -87,7 +87,7 @@ def test_real_zip_loader_and_prepared_frames_match_native_and_guarded_http(tmp_p
         exchange="binance", market="futures_um", symbol="BTCUSDT",
         period_start=datetime(2026, 1, 1, tzinfo=timezone.utc),
         period_end=datetime(2026, 1, 3, tzinfo=timezone.utc),
-        strategy_timeframe="4h", intrabar_timeframe="1m",
+        strategy_timeframe="4h", intrabar_timeframe=None,
     )
     direct = service("cache-desktop").run(
         request, bind_guarded_output_root(config, approved),
@@ -112,7 +112,7 @@ def test_real_zip_loader_and_prepared_frames_match_native_and_guarded_http(tmp_p
                         "symbol": "BTCUSDT",
                         "period_start": "2026-01-01T00:00:00Z",
                         "period_end": "2026-01-03T00:00:00Z",
-                        "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+                        "strategy_timeframe": "4h", "intrabar_timeframe": None,
                     },
                     "config": config.to_dict(),
                 },
