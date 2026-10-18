@@ -17,7 +17,7 @@ import re
 from tempfile import TemporaryDirectory
 
 _CRASH_ROOT_MARKER = ".csl-browser-crash-test-only"
-_CRASH_ROOT_MARKER_CONTENT = b"CSL_BROWSER_CRASH_CERT_V1\\n"
+_CRASH_ROOT_MARKER_CONTENT = b"CSL_BROWSER_CRASH_CERT_V1"
 
 
 def _validated_crash_execution_root(path: Path) -> Path:
