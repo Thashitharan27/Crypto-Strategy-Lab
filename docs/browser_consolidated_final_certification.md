@@ -1,0 +1,70 @@
+# Crypto Strategy Lab — consolidated browser-versus-desktop final certification
+
+**Prepared:** 2026-10-18. **Implementation baseline:** GitHub `main` `3cf595c5038b90c626e54c046b542d82dd7939f4` (PR #783). This is an **execution plan, not a certification result** or release authorization. Refresh the commit, open PRs, required CI, and this document before collecting final evidence. Keep PR #501 on hold until its native limit-fill ownership conflict is independently resolved.
+
+## 1. Scope and source of truth
+
+Use the established native `ResearchRunConfig` serializer, `GuiResearchRequest`, `GuiApplicationService`, canonical Data Lake readers, native `ResearchRunner`/`BacktestEngine` and existing `CompletedRunReader` plus visualizer. The browser is a client of those Python owners. Do not implement a parallel strategy/execution/reporting stack or claim that two MCP/native runs constitute independent browser invocation parity.
+
+The target operating system is the original Windows `C:\CryptoBots\Crypto Strategy Lab` environment in the **separate CryptoBots Desktop project**. Do not download replacement history, rebuild the canonical data, or alter the original saved configurations/runs as a side effect of certification. Write fresh execution outputs **only** to separate, explicitly approved isolated test roots. Do not touch DMI-Trend-Bot or its deployed shared core.
+
+Normal browser use remains **read-only**. Guarded configuration writes, submission and lifecycle APIs are server-denied or unmounted by default and must stay so until every required acceptance condition passes and the user explicitly approves release. Test-only opt-in is not release approval.
+
+## 2. Freeze and provenance before running
+
+Capture immutable Git commit/tree, Python/Node/dependency versions, OS version, environment path mappings, original frozen config IDs, serialized complete JSON hashes and original byte hashes; preserve all six strategy/execution profiles and existing Fibonacci keys. Identify canonical source partitions and independent 1m candle coverage. Record output-root selection, configuration schema version, fee/slippage conventions, backtest dates (UTC; end exclusive), intrabar policies, and strategy/timeframe/symbol. Hash the original file inventory before starting.
+
+Retain the already established evidence and limitations in:
+- `docs/browser_original_file_certification_2026-10-16.md` and PR #717 (Milestone A evidence; read-only acceptance is not B sign-off).
+- `docs/browser_configuration_parity_operator_gate.md` (native v3 versus authenticated config GET and the actual browser projections).
+- `docs/browser_chart_payload_parity_operator_gate.md` (active V2 chart payload and interactive visualizer).
+- `docs/browser_finite_release_matrix.md` (A1–A5 and B1–B4, including unknown coverage).
+
+Known original-evidence caveats: TP1 replay provenance was not fully independently established, genuine saved SL1/trailing events and per-trade slippage evidence were absent from the inspected originals, A3 interactive chart acceptance was limited, and Windows privilege-dependent symlink tests were skipped. Do not silently mark these PASS.
+
+## 3. Independent invocation: required test configuration
+
+Create **two isolated invocations from the same immutable frozen config and canonical inputs**:
+
+1. **Desktop:** launch the actual PySide6 desktop setup/Run UI (not an MCP `GuiApplicationService.run` substitute), load the original v3 config through its existing adapter, inspect effective settings and execute into dedicated desktop output.
+2. **Browser:** from a distinct authorized **test-only** local `127.0.0.1` session, mount the dormant guarded React interface only in an explicitly isolated certification build/fixture. Use real click/input interactions in the browser and actual authenticated FastAPI POST/PUT/GET calls into the existing guarded integration and native worker. Configure the test-only server with its own dedicated saved-config/output directories and independent per-launch token. Do **not** modify the normal production launcher, publish its opt-in mode to regular users, expose a remote host/tunnel, or enable ordinary users.
+
+Preserve an invocation trace: UI action, request ID, authenticated HTTP request/response (credentials redacted), server audit outcome, validated effective native configuration identity, native service invocation, worker status/progress, resulting `ResearchRunResult.output_dir`, and final manifest/verified artifact IDs. It is a **failure** if only the native controller or MCP path is exercised twice while the browser component is not mounted.
+
+The current dormant UI has simulated React event-handler tests, **not** real browser click-through with a live local server. Building the isolated certification harness, if missing, is a functional prerequisite. Keep it out of production composition. Verify the local desktop work can access original directories before treating this part as runnable.
+
+## 4. Finite parity cases (not a strategy cross-product)
+
+Use the existing pinned reference cases and native fixture evidence for:
+- Base long and short full stop / TP with independently ordered 1m fills.
+- Stop-versus-target touches in distinct intrabar minutes and same-bar tie/priority semantics when the prepared fixtures provide evidence.
+- Genuine available partial TP1 → protective stop and TP1 → break-even paths; do not assert independent TP1 replay provenance beyond retained evidence.
+- Pending-limit/Fibonacci historical cases with existing candidate-selection and fill-order sources.
+- One explicit missing intrabar-input or incomplete coverage case that refuses execution safely.
+- End-of-data/equity accounting where the existing engine and saved original case support it.
+
+Compare independently invoked desktop and browser effective configuration **deeply** (all nested fields, types, profiles, defaults and original semantic keys), and compare exact ordered signals, candidate decisions, trades, entry/exit/fill/stop/target timestamps, direction, quantities, partial legs, maker/taker fee rates, slippage, gross/net P&L, R, equity and final completion manifest. Record exact equality where technically meaningful; otherwise state a field-specific numeric tolerance and why it is safe. Include sanitized report/canonical manifest hashes and every cataloged output's integrity and row counts. Preserve nonmatching outcomes as FAIL with source record IDs.
+
+Do not accept native-to-native replay alone as browser invocation evidence; do not fabricate absent real historical SL1/trailing event samples. Such cases remain LIMITED/UNOBSERVED and are supplemented by verified mechanism tests only.
+
+## 5. Separate negative/security and lifecycle acceptance
+
+From the **actual test browser UI and HTTP** paths, verify:
+- Unauthenticated/wrong/expired token rejection; Host/Origin/DNS rebinding/path traversal/absolute/symlink/non-allowlisted ID rejection; JSON upload limits and sanitized error/audit.
+- Full native configuration load/edit/save/roundtrip; concurrent per-ID writer conflict; storage failure, uncertain post-rename sync and crash-stale config lock **without clobbering originals**.
+- Submit once with persistent request claim and serialized native worker; duplicate request, cross-coordinator contention, disabled mode, missing 1m history and invalid dates. Verify request claims persist but no invalid claim confers execution rights.
+- Progress and statuses `ACCEPTED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLATION_UNAVAILABLE`, `CANCELLED`, `RECOVERY_UNVERIFIED`. Cancellation of running native execution is not claimed. A restart must **not** reconstruct completion or auto-replay from a directory claim.
+- In the same coordinator process, an optional verified output folder is allowed only when the native result's `output_dir` is under the approved root and every cataloged artifact passes the existing verifier. After restart, never infer a request-to-folder mapping from IDs or surviving claims.
+- Session changes, stale UI responses and rejected operations do not leak prior run/config information. Full browser visualizer click, chart payload/trade linkage, zoom/pan and labels must be inspected as actual browser behaviors.
+- No external bind, CORS bypass, credential exposure, silent data downloads or canonical source writes. PySide6 remains operational and normal production browser reads remain possible with all guarded routes inaccessible.
+
+A real forced-kill/OS crash and permission-protected Windows filesystem behavior must be validated in the Desktop project. Synthetic claim-directory injection alone is LIMITED rather than proof of crash recovery.
+
+## 6. Evidence ledger and decision
+
+For each A1–A5/B1–B4 gate record:
+`gate | outcome (PASS/FAIL/BLOCKED/LIMITED/NOT RUN) | frozen commit | input/config IDs | desktop invocation proof | browser invocation proof | exact command/session evidence | raw pytest/CI | ordered trade/result hash comparison | original-file hash comparison | reviewer | limitation`.
+
+Preserve separate original-file inventories before/after and immutable desktop/browser output bundles. Review failures before advancing. A gate is PASS only with reproducible evidence, not a green CI job or the absence of observed anomalies. If local originals, privilege, live UI or broker-specific evidence are inaccessible in the current project, mark the precise item BLOCKED or LIMITED and continue independent development; **do not** relabel certification as complete.
+
+**Release decision:** require all critical safety, integrity and independently invoked execution gates PASS, explicit acknowledgement of bounded historical coverage limitations, independent full raw pytest on the final commit with zero failures, required CI checks and a reviewer sign-off. **Only after explicit user approval** may a separately reviewed server-side guarded release switch and UI composition be considered. No code changes in this certification plan enable that switch.
