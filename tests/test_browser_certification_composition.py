@@ -402,3 +402,152 @@ def test_certification_frozen_config_rejects_invalid_and_linked_sources(tmp_path
             pytest.fail("Symlinked source admitted")
     assert source.exists()
     native.run.assert_not_called()
+
+
+def test_persistent_crash_certification_preserves_claims_across_independent_sessions(tmp_path):
+    """A real coordinator is reused across sessions without replay or stale-lock cleanup."""
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    dist = _certification_dist(tmp_path)
+    output = tmp_path / "csl-browser-crash-test"
+    output.mkdir()
+    marker = output / ".csl-browser-crash-test-only"
+    marker.write_bytes(b"CSL_BROWSER_CRASH_CERT_V1")
+    native = Mock()
+    native.run.return_value = None
+    headers = None
+    first_token = None
+    with isolated_browser_certification(
+        native_application=native, static_root=dist,
+        acknowledge_test_only=True, persistent_execution_root=output,
+    ) as (app, token):
+        first_token = token
+        headers = {"Authorization": "Bearer " + token}
+        with TestClient(app, base_url="http://localhost") as client:
+            payload = {
+                "request_id": "persisted-request",
+                "request": {
+                    "exchange": "binance", "market": "futures_um", "symbol": "BTCUSDT",
+                    "period_start": "2025-01-01T00:00:00Z",
+                    "period_end": "2025-01-02T00:00:00Z",
+                    "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+                },
+                "config": ResearchRunConfig().to_dict(),
+            }
+            response = client.post("/api/v1/guarded/jobs", json=payload, headers=headers)
+            assert response.status_code == 202, response.text
+        assert (output / ".guarded-request-persisted-request.claim").is_dir()
+    assert (output / ".guarded-request-persisted-request.claim").is_dir()
+    assert marker.read_bytes() == b"CSL_BROWSER_CRASH_CERT_V1"
+    assert native.run.call_count == 1
+
+    with isolated_browser_certification(
+        native_application=native, static_root=dist,
+        acknowledge_test_only=True, persistent_execution_root=output,
+    ) as (app, token):
+        assert token != first_token
+        with TestClient(app, base_url="http://localhost") as client:
+            assert client.get("/api/v1/guarded/jobs/persisted-request",
+                              headers=headers).status_code == 401
+            auth = {"Authorization": "Bearer " + token}
+            result = client.get("/api/v1/guarded/jobs/persisted-request", headers=auth)
+            assert result.json() == {"request_id": "persisted-request",
+                                     "status": "RECOVERY_UNVERIFIED"}
+            rejected = client.post("/api/v1/guarded/jobs", json=payload, headers=auth)
+            assert rejected.status_code == 409
+        assert native.run.call_count == 1
+    assert (output / ".guarded-request-persisted-request.claim").is_dir()
+    assert marker.is_file()
+
+
+def test_persistent_crash_certification_preserves_stale_worker_lock(tmp_path):
+    """A stale root stays owned; restarting must never clear it or launch native work."""
+    dist = _certification_dist(tmp_path)
+    output = tmp_path / "csl-browser-crash-stale"
+    output.mkdir()
+    marker = output / ".csl-browser-crash-test-only"
+    marker.write_bytes(b"CSL_BROWSER_CRASH_CERT_V1")
+    (output / ".guarded-request-killed.claim").mkdir()
+    (output / ".guarded-native-worker.lock").mkdir()
+    native = Mock()
+    with isolated_browser_certification(
+        native_application=native, static_root=dist,
+        acknowledge_test_only=True, persistent_execution_root=output,
+    ) as (app, token):
+        with TestClient(app, base_url="http://localhost") as client:
+            headers = {"Authorization": "Bearer " + token}
+            assert client.get("/api/v1/guarded/jobs/killed", headers=headers).json() == {
+                "request_id": "killed", "status": "RECOVERY_UNVERIFIED",
+            }
+    assert (output / ".guarded-native-worker.lock").is_dir()
+    native.run.assert_not_called()
+
+
+def test_persistent_crash_certification_rejects_unsafe_roots_before_start(tmp_path):
+    dist = _certification_dist(tmp_path)
+    native = Mock()
+    good = tmp_path / "csl-browser-crash-safe"
+    good.mkdir()
+    marker = good / ".csl-browser-crash-test-only"
+    marker.write_bytes(b"CSL_BROWSER_CRASH_CERT_V1")
+    original = tmp_path / "original-files"
+    original.mkdir()
+    (original / "keep.json").write_bytes(b"original")
+    for path in (original, tmp_path / "csl-browser-crash-missing",
+                 Path("csl-browser-crash-relative")):
+        with pytest.raises(ValueError, match="Unsafe persistent"):
+            with isolated_browser_certification(
+                native_application=native, static_root=dist,
+                acknowledge_test_only=True, persistent_execution_root=path,
+            ):
+                pytest.fail("Unsafe persistence root accepted")
+    marker.unlink()
+    with pytest.raises(ValueError, match="test-only marker"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, persistent_execution_root=good,
+        ):
+            pytest.fail("Unmarked root accepted")
+    marker.write_bytes(b"CSL_BROWSER_CRASH_CERT_V1")
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, persistent_execution_root=good,
+            evidence_root=tmp_path / "csl-browser-evidence-do-not-create",
+        ):
+            pytest.fail("Incompatible evidence-copy and crash-root modes accepted")
+    assert (original / "keep.json").read_bytes() == b"original"
+    native.run.assert_not_called()
+
+
+@pytest.mark.parametrize("location", ["root", "ancestor", "descendant", "marker"])
+def test_persistent_crash_root_rejects_windows_junction_like_reparse_entries(
+    tmp_path, monkeypatch, location,
+):
+    """Model a Windows reparse attribute on each path without requiring NTFS."""
+    import crypto_strategy_lab.browser_certification as certification
+
+    dist = _certification_dist(tmp_path)
+    parent = tmp_path / "isolated-parent"
+    parent.mkdir()
+    root = parent / "csl-browser-crash-reparse"
+    root.mkdir()
+    marker = root / ".csl-browser-crash-test-only"
+    marker.write_bytes(b"CSL_BROWSER_CRASH_CERT_V1")
+    descendant = root / "subdir"
+    descendant.mkdir()
+    flagged = {"root": root, "ancestor": parent,
+               "descendant": descendant, "marker": marker}[location]
+    real_check = certification._unsafe_reparse_path
+    monkeypatch.setattr(
+        certification, "_unsafe_reparse_path",
+        lambda candidate: Path(candidate) == flagged or real_check(candidate),
+    )
+    native = Mock()
+    with pytest.raises(ValueError, match="persistent|marker",):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, persistent_execution_root=root,
+        ):
+            pytest.fail("A Windows junction-like reparse path must be rejected")
+    native.run.assert_not_called()

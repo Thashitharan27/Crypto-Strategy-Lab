@@ -27,6 +27,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                         help="Original native v3 config to seed read-only into test session")
     parser.add_argument("--evidence-root", type=Path, default=None,
                         help="Optional new absolute csl-browser-evidence-* directory for retaining only test outputs")
+    parser.add_argument("--persistent-execution-root", type=Path, default=None,
+                        help="Only for crash certification: pre-created marked csl-browser-crash-* root; reused across process restarts")
     parser.add_argument("--port", type=int, required=True,
                         help="Local-only test port (1-65535)")
     args = parser.parse_args(argv)
@@ -36,6 +38,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.error("--acknowledge-test-only is mandatory for certification")
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
+    if args.persistent_execution_root is not None and args.evidence_root is not None:
+        parser.error("--persistent-execution-root cannot be combined with --evidence-root")
     if not args.static_root.is_absolute() or args.static_root.name != "dist-certification":
         parser.error("--static-root must be an absolute dist-certification directory")
     # A native run can update caches and refresh the catalog; never point
@@ -51,6 +55,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         extra = {"evidence_root": args.evidence_root} if args.evidence_root is not None else {}
         if args.frozen_config is not None:
             extra["frozen_config_path"] = args.frozen_config
+        if args.persistent_execution_root is not None:
+            extra["persistent_execution_root"] = args.persistent_execution_root
         serve_isolated_browser_certification(
             native_application=native,
             static_root=args.static_root,

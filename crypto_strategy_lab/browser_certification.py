@@ -1,8 +1,9 @@
 """Isolated, opt-in certification composition; never a production launcher.
 
 Only for independently exercising the certification-only React bundle against
-existing guarded FastAPI/native owners. Fresh temporary config/output roots are
-created for each session and deleted after close. Native market data sources
+existing guarded FastAPI/native owners. Normal sessions use fresh temporary
+config/output roots. Explicit crash testing can retain an operator-owned
+isolated execution root across restarts. Native market data sources
 remain those of the injected authoritative application service.
 """
 from __future__ import annotations
@@ -13,7 +14,37 @@ import os
 import secrets
 import shutil
 import re
+import stat
 from tempfile import TemporaryDirectory
+
+_CRASH_ROOT_MARKER = ".csl-browser-crash-test-only"
+_CRASH_ROOT_MARKER_CONTENT = b"CSL_BROWSER_CRASH_CERT_V1"
+
+
+def _unsafe_reparse_path(path: Path) -> bool:
+    """Reject symlinks, NTFS junctions and other Windows reparse points."""
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    if callable(is_junction) and is_junction():
+        return True
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
+def _validated_crash_execution_root(path: Path) -> Path:
+    """Operator-prepared, marker-protected root; never create or clean it."""
+    path = Path(path)
+    if (not path.is_absolute() or not path.name.startswith("csl-browser-crash-")
+            or not path.is_dir() or any(_unsafe_reparse_path(part) for part in (path, *path.parents))
+            or path.resolve(strict=True) != path):
+        raise ValueError("Unsafe persistent certification execution root")
+    marker = path / _CRASH_ROOT_MARKER
+    if (not marker.is_file() or _unsafe_reparse_path(marker)
+            or marker.read_bytes() != _CRASH_ROOT_MARKER_CONTENT
+            or any(_unsafe_reparse_path(item) for item in path.rglob("*"))):
+        raise ValueError("Persistent certification root requires a test-only marker and no links")
+    return path
 
 from crypto_strategy_lab.browser_guarded_integration import BrowserGuardedIntegration
 from crypto_strategy_lab.browser_http import create_browser_app
@@ -25,12 +56,13 @@ def isolated_browser_certification(
     *, native_application, static_root: Path, acknowledge_test_only: bool = False,
     evidence_root: Path | None = None,
     frozen_config_path: Path | None = None,
+    persistent_execution_root: Path | None = None,
 ):
     """Yield (FastAPI app, bearer token) with no original-file mutation roots.
 
     The caller must explicitly supply the existing native application. There
-    is intentionally no default path, environment-based opt-in, port listener,
-    CLI entrypoint or persistent request/output root.
+    is intentionally no default path, environment-based opt-in or automatic
+    persistent-root creation. Crash mode requires a separately prepared marker.
     """
     if acknowledge_test_only is not True:
         raise PermissionError("Explicit isolated certification opt-in required")
@@ -56,11 +88,18 @@ def isolated_browser_certification(
                 or evidence.parent.resolve(strict=True) != evidence.parent):
             raise ValueError("Evidence destination must be a new canonical csl-browser-evidence-* directory")
 
+    if persistent_execution_root is not None and evidence is not None:
+        raise ValueError("Persistent crash root and evidence-copy mode are mutually exclusive")
+    crash_root = (_validated_crash_execution_root(persistent_execution_root)
+                  if persistent_execution_root is not None else None)
+
     with TemporaryDirectory(prefix="csl-browser-cert-") as scratch:
         temp_root = Path(scratch).resolve()
-        config_root, output_root = temp_root / "configs", temp_root / "runs"
+        config_root = temp_root / "configs"
+        output_root = crash_root if crash_root is not None else temp_root / "runs"
         config_root.mkdir()
-        output_root.mkdir()
+        if crash_root is None:
+            output_root.mkdir()
         if frozen_config_path is not None:
             # Import an explicitly selected original *read-only*, without
             # modifying its bytes or sending the original path to the client.
@@ -142,6 +181,7 @@ def serve_isolated_browser_certification(
     acknowledge_test_only: bool = False,
     evidence_root: Path | None = None,
     frozen_config_path: Path | None = None,
+    persistent_execution_root: Path | None = None,
 ) -> None:
     """Serve test-only UI/API on loopback, never on public interfaces.
 
@@ -164,6 +204,7 @@ def serve_isolated_browser_certification(
         acknowledge_test_only=True,
         evidence_root=evidence_root,
         frozen_config_path=frozen_config_path,
+        persistent_execution_root=persistent_execution_root,
     ) as (app, token):
         # Token remains in the local operator terminal and never in a URL.
         print(f"CSL isolated browser certification: http://127.0.0.1:{port}/")
