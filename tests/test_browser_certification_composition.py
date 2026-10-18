@@ -197,3 +197,48 @@ def test_certification_evidence_fails_closed_on_existing_or_unsafe_paths(tmp_pat
     assert protected.read_bytes() == b"never overwrite"
     assert not (existing / "configs").exists()
     native.run.assert_not_called()
+
+
+def test_certification_evidence_never_follows_output_symlinks(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    from types import SimpleNamespace
+
+    dist = _certification_dist(tmp_path)
+    secret = tmp_path / "original-private.txt"
+    secret.write_text("do-not-copy", encoding="utf-8")
+    evidence = tmp_path / "csl-browser-evidence-links"
+    native = Mock()
+
+    def run(request, config):
+        root = Path(config.reporting.output_dir)
+        try:
+            (root / "unsafe-link").symlink_to(secret)
+        except (OSError, NotImplementedError):
+            pytest.skip("Local filesystem symlinks unavailable")
+        return SimpleNamespace(output_dir=None)
+
+    native.run.side_effect = run
+    with pytest.raises(ValueError, match="Unsafe symlink"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, evidence_root=evidence,
+        ) as (app, token):
+            with TestClient(app, base_url="http://localhost") as client:
+                payload = {
+                    "request_id": "with-link",
+                    "request": {
+                        "exchange": "binance", "market": "futures_um",
+                        "symbol": "BTCUSDT",
+                        "period_start": "2025-01-01T00:00:00Z",
+                        "period_end": "2025-01-02T00:00:00Z",
+                        "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+                    },
+                    "config": ResearchRunConfig().to_dict(),
+                }
+                response = client.post(
+                    "/api/v1/guarded/jobs", json=payload,
+                    headers={"Authorization": "Bearer " + token},
+                )
+                assert response.status_code == 202
+    assert secret.read_text(encoding="utf-8") == "do-not-copy"
+    assert not (evidence / "runs" / "unsafe-link").exists()
