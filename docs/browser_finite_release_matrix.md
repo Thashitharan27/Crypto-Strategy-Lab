@@ -380,3 +380,19 @@ reasons are checked. These engineering fixtures do **not** certify original
 historical 1m data, live browser UI invocation or original Windows saved
 artifacts. Browser mutations remain disabled pending consolidated independent
 Windows/desktop-versus-browser certification and explicit release approval.
+
+
+## B3 crash-stale worker and interrupted request HTTP boundary (2026-10-18)
+
+An isolated opt-in authenticated HTTP regression constructs both a surviving
+server-owned request-ID claim and an unexplained native-worker directory claim
+to represent the on-disk evidence remaining after an interrupted process.
+The historical request is reported only as `RECOVERY_UNVERIFIED`; progress and
+cancellation of the lost Future remain unavailable. Fresh submissions are
+rejected and do not reserve a new request ID, steal the stale worker lock,
+invoke native execution, or change the existing request claim. This is
+controlled crash-state injection, not a real OS process-kill, recovered
+run certification, or permission to remove stale ownership automatically.
+The final Windows operator reconciliation, original artifact validation and
+interruption testing remain deferred to consolidated certification. Production
+browser execution and configuration writes remain disabled.
