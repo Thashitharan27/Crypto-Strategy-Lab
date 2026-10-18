@@ -360,3 +360,68 @@ test("late rejected operations cannot mark a newly selected run or config as fai
     } finally {globalThis.fetch = original;}
   }
 });
+
+
+test("guarded recovery state does not imply completion or allow cancellation", async () => {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push([url, options]);
+    return {ok: true, json: async () => ({
+      request_id: "interrupted", status: "RECOVERY_UNVERIFIED",
+    })};
+  };
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "interrupted");
+    ui.click("Refresh status");
+    await settleHandlers();
+    ui.render();
+    assert.equal(ui.find("button", "Request cancellation").props.disabled, true);
+    const children = ui.find("section", undefined).props.children;
+    assert.ok(JSON.stringify(children).includes("Recovery unverified"));
+    assert.ok(JSON.stringify(children).includes("Do not resubmit or assume completion"));
+    assert.equal(calls.length, 1);
+    ui.change("guard-job-id", "another");
+    assert.equal(ui.find("button", "Request cancellation").props.disabled, false);
+  } finally {globalThis.fetch = original;}
+});
+
+test("guarded native statuses reject unknown states and mismatched identities", async () => {
+  const original = globalThis.fetch;
+  const cases = [
+    {request_id: "different", status: "COMPLETED"},
+    {request_id: "chosen", status: "PRIVATE_/home/user/data"},
+  ];
+  let index = 0;
+  globalThis.fetch = async () => ({ok: true, json: async () => cases[index++]});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "chosen");
+    for (const _ of cases) {
+      ui.click("Refresh status");
+      await settleHandlers();
+      ui.render();
+      const serialized = JSON.stringify(ui.find("section", undefined).props.children);
+      assert.ok(serialized.includes("Guarded operation unavailable or rejected"));
+      assert.ok(!serialized.includes("/home/user/data"));
+    }
+  } finally {globalThis.fetch = original;}
+});
+
+test("guarded cancellation unavailable is never displayed as cancelled", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({ok: true, json: async () => ({
+    request_id: "busy", status: "CANCELLATION_UNAVAILABLE",
+  })});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "busy");
+    ui.click("Request cancellation");
+    await settleHandlers();
+    ui.render();
+    const serialized = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(serialized.includes("Cancellation unavailable"));
+    assert.ok(serialized.includes("No cancellation is confirmed"));
+  } finally {globalThis.fetch = original;}
+});
