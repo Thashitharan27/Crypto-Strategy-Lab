@@ -330,3 +330,15 @@ end-of-data exits and positive net P&L/equity on the short fixture. This test
 uses the existing native engine; it is limited engineering coverage, not
 original-history short/stop/partial certification. No normal browser execution
 or configuration writes are enabled.
+
+
+## B2 protective-stop native HTTP parity (2026-10-18)
+
+The native-engine guarded HTTP trade regression now has four finite cases:
+LONG/SHORT each taking an isolated +1R TP or protective SL, followed by the
+native END_OF_DATA closure. An independently invoked native application service
+and authenticated opt-in guarded HTTP must agree exactly on ordered trade rows,
+including exit direction, fees, net P&L and equity. The native engine alone
+resolves stops and targets; no browser-side fill calculations are added. These
+are limited 15m synthetic fixtures, not original-history intrabar stop/slippage
+or partial-profit certification. Normal browser mutation routes stay disabled.
