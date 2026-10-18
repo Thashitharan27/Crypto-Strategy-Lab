@@ -47,12 +47,12 @@ A1–A5 and B1–B4 are **finite gates**. For B2, cover distinct underlying exec
 3. **Do not expand scope automatically:** new strategy options and extra GUI features belong in separate workstreams. Open a follow-up issue for low-risk discoveries rather than making release certification open-ended.
 4. **Release decision:** A can pass and support read-only use without B. B cannot pass on native replay alone; guarded browser calls and write lifecycle must be demonstrated and explicitly approved. Failure to find historical SL1/trailing records is not by itself a reason to keep searching forever or to claim their historical parity.
 
-## Current action queue
+## Current action queue — after guarded implementation (2026-10-18)
 
-- First check the operator-local browser configuration and chart/run projection gates; reuse existing `browser_configuration_parity_operator_gate.md` and `browser_chart_payload_parity_operator_gate.md` evidence instead of rewriting it.
-- Resolve or clearly bound the TP1 verifier provenance discrepancy from retained records only; no need to rerun already matched BE/Fib suites.
-- Inventory browser execution/config ownership and prepare a *disabled-by-default*, testable guarded integration plan; **do not enable** it in this phase.
-- Keep draft PR #501 on hold; its separate limit-touch helper is not an approved second execution authority.
+- The guarded integration, native config owner, job lifecycle, read-only saved-output handoff, localhost security and isolated certification CLI are **implemented but not released** as of GitHub main `6ecd75c121145cba57c0b8eabc616f1a20244175` (#799). Reverify the latest main before using this checkpoint. Do not repeat the old implementation-inventory task as unfinished without finding a concrete gap.
+- Next independent gate: execute the consolidated **actual browser-UI/HTTP versus PySide6 UI** Windows certification at the verified commit, on identical original frozen inputs, using `docs/browser_consolidated_final_certification.md` §14. Retain existing read-only config/chart parity evidence rather than rerunning already matched historical BE/Fib suites.
+- Preserve A3 interactive-chart limitations, TP1 verifier-provenance uncertainty, absent genuine SL1/trailing/per-trade slippage events and Windows symlink privilege skips as documented. A missing historical observation is not a reason to invent new engine behavior.
+- Keep draft PR #501 on hold; its separate limit-touch helper is not an approved second execution authority. Keep **normal browser execution/configuration writes server-disabled** until all critical independent gates pass and the user explicitly approves a separately reviewed release switch.
 
 Each completed gate should record: main SHA, source run/config identities, check/test names, actual raw results, known limitations, and a reviewer decision. No claim of 100% strategy correctness is intended.
 
