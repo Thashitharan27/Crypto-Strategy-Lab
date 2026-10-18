@@ -235,6 +235,42 @@ test("guarded editor click-load, ID switch and edit/save preserve selection owne
   } finally { globalThis.fetch = original; }
 });
 
+test("operator switch clears native config and ignores previous-session loaded config", async () => {
+  const original = globalThis.fetch;
+  let complete;
+  globalThis.fetch = async () => new Promise(resolve => {complete = resolve;});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-config-id", "original-config");
+    ui.change("guard-config-json", '{"config_version":3,"owner":"first"}', "textarea");
+    ui.click("Load saved native configuration");
+    ui.rerender({enabled: true, token: "second-operator"});
+    complete({ok: true, json: async () => ({config: {owner: "obsolete"}})});
+    await settleHandlers();
+    ui.render();
+    assert.equal(ui.find("input", "guard-config-id").props.value, "");
+    assert.equal(ui.find("textarea", "guard-config-json").props.value, "{}");
+    assert.ok(!JSON.stringify(ui.find("section", undefined).props.children).includes("obsolete"));
+  } finally {globalThis.fetch = original;}
+});
+
+test("manual guarded config edit wins over a delayed load for the same ID", async () => {
+  const original = globalThis.fetch;
+  let complete;
+  globalThis.fetch = async () => new Promise(resolve => {complete = resolve;});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-config-id", "same-config");
+    ui.click("Load saved native configuration");
+    ui.change("guard-config-json", '{"config_version":3,"owner":"edited"}', "textarea");
+    complete({ok: true, json: async () => ({config: {owner: "obsolete"}})});
+    await settleHandlers();
+    ui.render();
+    assert.equal(ui.find("textarea", "guard-config-json").props.value,
+      '{"config_version":3,"owner":"edited"}');
+  } finally {globalThis.fetch = original;}
+});
+
 test("guarded UI click-submit and status/progress/cancel use selected request ID", async () => {
   const original = globalThis.fetch;
   const calls = [];
