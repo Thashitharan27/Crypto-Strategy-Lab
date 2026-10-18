@@ -199,6 +199,29 @@ def test_certification_evidence_fails_closed_on_existing_or_unsafe_paths(tmp_pat
     native.run.assert_not_called()
 
 
+def test_invalid_frozen_config_does_not_reserve_evidence_root(tmp_path):
+    """Reject a bad original before creating the operator's evidence folder."""
+    from crypto_strategy_lab.gui.v2_controller import GuiApplicationService
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    dist = _certification_dist(tmp_path)
+    native = Mock()
+    evidence = tmp_path / "csl-browser-evidence-rejected"
+    frozen = tmp_path / "invalid.name.json"
+    GuiApplicationService.save_config(frozen, ResearchRunConfig())
+
+    with pytest.raises(ValueError, match="Unsafe frozen"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, evidence_root=evidence,
+            frozen_config_path=frozen,
+        ):
+            pytest.fail("Invalid frozen input must not open certification")
+    assert not evidence.exists()
+    assert frozen.is_file()
+    native.run.assert_not_called()
+
+
 def test_certification_evidence_never_follows_output_symlinks(tmp_path):
     from crypto_strategy_lab.data_lake_config import ResearchRunConfig
     from types import SimpleNamespace
