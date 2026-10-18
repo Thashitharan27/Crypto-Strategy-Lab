@@ -124,3 +124,38 @@ def test_operator_cli_passes_explicit_original_config_as_read_only_seed(monkeypa
         native_application=native, static_root=dist, port=8919,
         acknowledge_test_only=True, frozen_config_path=source,
     )
+
+
+def test_cli_passes_only_explicit_persistent_crash_root(monkeypatch, tmp_path):
+    native = Mock()
+    facade = Mock()
+    facade.application_service = native
+    factory = Mock(return_value=facade)
+    runner = Mock()
+    monkeypatch.setattr(command, "build_browser_readonly_service", factory)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
+    dist = tmp_path / "dist-certification"
+    root = tmp_path / "csl-browser-crash-prepared"
+    command.main([
+        "--acknowledge-test-only", "--static-root", str(dist),
+        "--port", "8919", "--persistent-execution-root", str(root),
+    ])
+    runner.assert_called_once_with(
+        native_application=native, static_root=dist, port=8919,
+        acknowledge_test_only=True, persistent_execution_root=root,
+    )
+
+
+def test_cli_rejects_combining_persistent_root_and_evidence_before_native_setup(monkeypatch, tmp_path):
+    factory = Mock(side_effect=AssertionError("Native must not be constructed"))
+    monkeypatch.setattr(command, "build_browser_readonly_service", factory)
+    with pytest.raises(SystemExit) as error:
+        command.main([
+            "--acknowledge-test-only",
+            "--static-root", str(tmp_path / "dist-certification"),
+            "--port", "8919",
+            "--persistent-execution-root", str(tmp_path / "csl-browser-crash-prepared"),
+            "--evidence-root", str(tmp_path / "csl-browser-evidence-existing"),
+        ])
+    assert error.value.code == 2
+    factory.assert_not_called()
