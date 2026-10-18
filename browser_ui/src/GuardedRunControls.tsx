@@ -2,6 +2,7 @@
  * The server must separately opt in to its guarded router; UI gating is NOT authorization.
  */
 import React from "react";
+import {getReadOnly} from "./api";
 
 type NativeRequest = {
   exchange: "binance";
@@ -46,6 +47,16 @@ async function guardedRequest<T>(
   const response = await fetch(path, options);
   if (!response.ok) throw new Error(`Guarded operation rejected (HTTP ${response.status})`);
   return response.json() as Promise<T>;
+}
+
+export async function loadGuardedConfig(enabled: boolean, token: string, id: string): Promise<Record<string, unknown>> {
+  requireGuardedSession(enabled, token);
+  const response = await getReadOnly<{config: unknown}>(`/api/v1/configs/${safeId(id)}`, token);
+  if (!response || typeof response !== "object" || !response.config ||
+      typeof response.config !== "object" || Array.isArray(response.config)) {
+    throw new Error("Invalid native configuration response");
+  }
+  return response.config as Record<string, unknown>;
 }
 
 export function saveGuardedConfig(enabled: boolean, token: string, id: string, config: Record<string, unknown>) {
@@ -139,6 +150,13 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     <input id="guard-config-id" value={configId} onChange={e => setConfigId(e.target.value)} />
     <label htmlFor="guard-config-json">Native configuration JSON</label>
     <textarea id="guard-config-json" value={configJson} onChange={e => setConfigJson(e.target.value)} rows={8} />
+    <button type="button" onClick={() => void perform(async isCurrent => {
+      const result = await loadGuardedConfig(enabled, token, configId);
+      if (isCurrent()) {
+        setConfigJson(JSON.stringify(result, null, 2));
+        setState("Validated saved configuration loaded for editing");
+      }
+    })}>Load saved native configuration</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const result = await saveGuardedConfig(enabled, token, configId, nativeConfig());
       if (isCurrent()) setState(`Configuration ${result.config_id}: ${result.status}`);
