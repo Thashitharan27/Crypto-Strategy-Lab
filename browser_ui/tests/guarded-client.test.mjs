@@ -286,6 +286,48 @@ test("manual guarded config edit wins over a delayed load for the same ID", asyn
   } finally {globalThis.fetch = original;}
 });
 
+test("guarded config save rejects mismatched or unbounded acknowledgements", async () => {
+  const original = globalThis.fetch;
+  const responses = [
+    {config_id: "different", status: "SAVED"},
+    {config_id: "safe", status: "/private/native/path"},
+    {config_id: 123, status: "SAVED"},
+    null,
+  ];
+  let index = 0;
+  globalThis.fetch = async () => ({ok: true, json: async () => responses[index++]});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-config-id", "safe");
+    ui.change("guard-config-json", '{"config_version":3}', "textarea");
+    for (const _ of responses) {
+      ui.click("Save native configuration");
+      await settleHandlers();
+      ui.render();
+      const rendered = JSON.stringify(ui.find("section", undefined).props.children);
+      assert.ok(rendered.includes("Guarded operation unavailable or rejected"));
+      assert.ok(!rendered.includes("/private/native/path"));
+      assert.ok(!rendered.includes("Configuration different"));
+      assert.ok(!rendered.includes("Configuration safe: SAVED"));
+    }
+  } finally {globalThis.fetch = original;}
+});
+
+test("guarded config save accepts only matching native success acknowledgement", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({ok: true, json: async () => ({config_id: "safe", status: "SAVED"})});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-config-id", "safe");
+    ui.change("guard-config-json", '{"config_version":3}', "textarea");
+    ui.click("Save native configuration");
+    await settleHandlers();
+    ui.render();
+    const rendered = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(rendered.includes("Configuration safe: SAVED"));
+  } finally {globalThis.fetch = original;}
+});
+
 test("guarded UI click-submit and status/progress/cancel use selected request ID", async () => {
   const original = globalThis.fetch;
   const calls = [];
