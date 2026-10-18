@@ -288,9 +288,9 @@ test("manual guarded config edit wins over a delayed load for the same ID", asyn
 
 test("configuration actions preserve completed job state and terminal progress lockout", async () => {
   const original = globalThis.fetch;
-  globalThis.fetch = async (url) => ({ok: true, json: async () => {
+  globalThis.fetch = async (url, options) => ({ok: true, json: async () => {
     if (url.endsWith("/guarded/jobs/job-A")) return {request_id: "job-A", status: "COMPLETED"};
-    if (url.endsWith("/configs/safe")) return {config: {config_version: 3}};
+    if (url.endsWith("/configs/safe") && options?.method === "GET") return {config: {config_version: 3}};
     return {config_id: "safe", status: "SAVED"};
   }});
   try {
