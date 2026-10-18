@@ -174,6 +174,9 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             assert direct.iloc[0].long_fees == pytest.approx(0.21)
             assert direct.iloc[0].pair_net_pnl == pytest.approx(9.79)
             assert direct.iloc[0].equity_after_trade == pytest.approx(1009.79)
+        elif exit_case == "TP1_THEN_BE":
+            assert direct.iloc[0].pair_net_pnl == pytest.approx(4.895)
+            assert direct.iloc[0].equity_after_trade == pytest.approx(1004.895)
         else:
             assert direct.iloc[0].pair_net_pnl < 0
             assert direct.iloc[0].equity_after_trade < 1000
