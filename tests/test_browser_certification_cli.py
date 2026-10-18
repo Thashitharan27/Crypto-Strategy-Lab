@@ -104,3 +104,23 @@ def test_certification_cache_is_fresh_and_cleans_up_after_server_failure(monkeyp
     assert len(observed) == 1
     assert not observed[0].exists()
     assert (cache / "keep.txt").read_text() == "unchanged"
+
+
+def test_operator_cli_passes_explicit_original_config_as_read_only_seed(monkeypatch, tmp_path):
+    native = Mock()
+    facade = Mock()
+    facade.application_service = native
+    service = Mock(return_value=facade)
+    runner = Mock()
+    monkeypatch.setattr(command, "build_browser_readonly_service", service)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
+    dist = tmp_path / "dist-certification"
+    source = tmp_path / "original-v3.json"
+    command.main([
+        "--acknowledge-test-only", "--static-root", str(dist),
+        "--port", "8919", "--frozen-config", str(source),
+    ])
+    runner.assert_called_once_with(
+        native_application=native, static_root=dist, port=8919,
+        acknowledge_test_only=True, frozen_config_path=source,
+    )

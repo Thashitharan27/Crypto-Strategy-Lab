@@ -12,6 +12,7 @@ from pathlib import Path
 import os
 import secrets
 import shutil
+import re
 from tempfile import TemporaryDirectory
 
 from crypto_strategy_lab.browser_guarded_integration import BrowserGuardedIntegration
@@ -23,6 +24,7 @@ from crypto_strategy_lab.browser_readonly_service import BrowserReadOnlyService
 def isolated_browser_certification(
     *, native_application, static_root: Path, acknowledge_test_only: bool = False,
     evidence_root: Path | None = None,
+    frozen_config_path: Path | None = None,
 ):
     """Yield (FastAPI app, bearer token) with no original-file mutation roots.
 
@@ -60,6 +62,30 @@ def isolated_browser_certification(
         config_root, output_root = temp_root / "configs", temp_root / "runs"
         config_root.mkdir()
         output_root.mkdir()
+        if frozen_config_path is not None:
+            # Import an explicitly selected original *read-only*, without
+            # modifying its bytes or sending the original path to the client.
+            from crypto_strategy_lab.gui.v2_controller import GuiApplicationService
+
+            source = Path(frozen_config_path)
+            config_id = source.stem
+            if (not source.is_absolute() or source.suffix != ".json"
+                    or re.fullmatch(r"[A-Za-z0-9_-]{1,100}", config_id, flags=re.ASCII) is None
+                    or not source.is_file()
+                    or any(part.is_symlink() for part in (source, *source.parents))
+                    or source.resolve(strict=True) != source):
+                raise ValueError("Unsafe frozen native configuration source")
+            original = source.read_bytes()
+            if len(original) > 4 * 1024 * 1024:
+                raise ValueError("Frozen configuration exceeds guarded JSON limit")
+            # Validate the exact bytes that will be served, rather than
+            # reopening a mutable original after the read (TOCTOU).
+            seeded = config_root / source.name
+            seeded.write_bytes(original)
+            native_config = GuiApplicationService.load_config(seeded)
+            native_config.validate()
+            # The source is never opened for writing. Browser GET uses the
+            # original safe saved ID from the isolated copy.
         integration = BrowserGuardedIntegration(
             native_application, config_root, enabled=True,
             execution_root=output_root,
@@ -99,6 +125,7 @@ def serve_isolated_browser_certification(
     *, native_application, static_root: Path, port: int,
     acknowledge_test_only: bool = False,
     evidence_root: Path | None = None,
+    frozen_config_path: Path | None = None,
 ) -> None:
     """Serve test-only UI/API on loopback, never on public interfaces.
 
@@ -120,6 +147,7 @@ def serve_isolated_browser_certification(
         static_root=static_root,
         acknowledge_test_only=True,
         evidence_root=evidence_root,
+        frozen_config_path=frozen_config_path,
     ) as (app, token):
         # Token remains in the local operator terminal and never in a URL.
         print(f"CSL isolated browser certification: http://127.0.0.1:{port}/")

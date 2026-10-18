@@ -23,6 +23,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                         help="Explicitly permit temporary guarded test endpoints")
     parser.add_argument("--static-root", type=Path, required=True,
                         help="Canonical absolute path to browser_ui/dist-certification")
+    parser.add_argument("--frozen-config", type=Path, default=None,
+                        help="Original native v3 config to seed read-only into test session")
     parser.add_argument("--evidence-root", type=Path, default=None,
                         help="Optional new absolute csl-browser-evidence-* directory for retaining only test outputs")
     parser.add_argument("--port", type=int, required=True,
@@ -47,6 +49,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             raw_root=paths.raw_root, cache_root=cache_root,
         ).application_service
         extra = {"evidence_root": args.evidence_root} if args.evidence_root is not None else {}
+        if args.frozen_config is not None:
+            extra["frozen_config_path"] = args.frozen_config
         serve_isolated_browser_certification(
             native_application=native,
             static_root=args.static_root,
