@@ -491,3 +491,16 @@ similarly scoped to the original config selection. Simulated React event tests
 exercise delayed results and ID changes for the four job operations. This
 is not actual browser UI certification, not job cancellation of running native
 work, and not authorization to expose guarded operations to normal users.
+
+
+## B4 guarded request body resource boundary (2026-10-18)
+
+The opt-in authenticated guarded HTTP adapter bounds native configuration-save
+and job-submission JSON payloads to 4 MiB before decoding. It authenticates
+first, rejects oversized declared lengths immediately, and independently counts
+bytes received through chunked/streamed bodies so omitting or understating
+Content-Length cannot bypass the limit. The 413 response and audit outcome are
+sanitized; malformed JSON continues to receive 422. Isolated tests verify
+both mutation handlers reject oversized input without invoking their native
+owners. The limit applies only to experimental guarded mutations, not to saved
+read-only results or original files, and grants no release authorization.
