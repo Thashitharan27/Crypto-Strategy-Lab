@@ -67,8 +67,8 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         source = pd.DataFrame({
             "timestamp": pd.date_range("2024-01-01", periods=4, freq="15min", tz="UTC"),
             "open": [100.0] * 4, "close": [100.0] * 4,
-            "high": [100.0, 100.0, 120.0, 105.0],
-            "low": [100.0, 100.0, 99.0, 79.0], "volume": [1] * 4,
+            "high": [101.0, 101.0, 120.0, 105.0],
+            "low": [99.0, 99.0, 99.0, 79.0], "volume": [1] * 4,
         })
         profiles = dict(engine_config.strategy_profiles)
         profiles["sideways_long"] = StrategyProfile(
