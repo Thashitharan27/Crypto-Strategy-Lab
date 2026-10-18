@@ -623,7 +623,7 @@ test("saved-run handoff rejects malformed IDs and unverified or invalid outputs"
   const original = globalThis.fetch;
   let calls = 0;
   const responses = [{}, {manifest: {run_id: "native"}, summary: null},
-    {manifest: {run_id: 42}, summary: {}}, {manifest: {run_id: "native"}, summary: {}}];
+    {manifest: {run_id: 42}, summary: {}}, {manifest: {run_id: "native", run_status: "COMPLETED"}, summary: {}}];
   globalThis.fetch = async () => {
     calls++;
     return {ok: true, json: async () => responses[calls - 1]};
@@ -636,11 +636,26 @@ test("saved-run handoff rejects malformed IDs and unverified or invalid outputs"
       await assert.rejects(api.inspectVerifiedSavedRun(true, TOKEN, "folder"), /Invalid verified saved-run response/);
     }
     assert.deepEqual(await api.inspectVerifiedSavedRun(true, TOKEN, "folder"), {
-      folderId: "folder", nativeRunId: "native", runStatus: "not specified",
+      folderId: "folder", nativeRunId: "native", runStatus: "COMPLETED",
     });
   } finally {globalThis.fetch = original;}
 });
 
+
+test("guarded saved-run inspection never accepts incomplete native manifests", async () => {
+  const original = globalThis.fetch;
+  const responses = ["FAILED", "RUNNING", "RECOVERY_UNVERIFIED", undefined, null].map(
+    status => ({manifest: {run_id: "native-1", run_status: status}, summary: {}}),
+  );
+  let index = 0;
+  globalThis.fetch = async () => ({ok: true, json: async () => responses[index++]});
+  try {
+    for (const _ of responses) {
+      await assert.rejects(api.inspectVerifiedSavedRun(true, TOKEN, "native-folder"),
+        /Invalid verified saved-run response/);
+    }
+  } finally { globalThis.fetch = original; }
+});
 
 test("saved-run handoff rejects unsafe native manifest identity and status strings", async () => {
   const original = globalThis.fetch;
