@@ -40,7 +40,7 @@ def _validated_crash_execution_root(path: Path) -> Path:
             or path.resolve(strict=True) != path):
         raise ValueError("Unsafe persistent certification execution root")
     marker = path / _CRASH_ROOT_MARKER
-    if (_unsafe_reparse_path(marker) or not marker.is_file()
+    if (not marker.is_file() or _unsafe_reparse_path(marker)
             or marker.read_bytes() != _CRASH_ROOT_MARKER_CONTENT
             or any(_unsafe_reparse_path(item) for item in path.rglob("*"))):
         raise ValueError("Persistent certification root requires a test-only marker and no links")
