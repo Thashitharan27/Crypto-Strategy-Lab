@@ -229,6 +229,14 @@ def test_certification_app_composition_failure_leaves_no_evidence_destination(tm
     dist = _certification_dist(tmp_path)
     evidence = tmp_path / "csl-browser-evidence-app-rejected"
     native = Mock()
+    closes = []
+    original_close = certification.BrowserGuardedIntegration.close
+
+    def tracked_close(self):
+        closes.append(True)
+        return original_close(self)
+
+    monkeypatch.setattr(certification.BrowserGuardedIntegration, "close", tracked_close)
 
     def fail_composition(**_kwargs):
         raise RuntimeError("injected test-only app composition failure")
@@ -241,6 +249,7 @@ def test_certification_app_composition_failure_leaves_no_evidence_destination(tm
         ):
             pytest.fail("Rejected app must never start a certification session")
     assert not evidence.exists()
+    assert closes == [True]
     native.run.assert_not_called()
 
 
