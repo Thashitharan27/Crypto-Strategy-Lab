@@ -18,6 +18,11 @@ type JobState = {
 };
 const ID = /^[A-Za-z0-9_-]{1,100}$/;
 
+function requireGuardedSession(enabled: boolean, token: string): void {
+  if (enabled !== true) throw new Error("Guarded operations are disabled");
+  if (!token || /[\\r\\n]/.test(token)) throw new Error("Invalid session token");
+}
+
 function safeId(value: string): string {
   if (!ID.test(value)) throw new Error("Invalid identifier");
   return value;
@@ -44,22 +49,27 @@ async function guardedRequest<T>(
 }
 
 export function saveGuardedConfig(enabled: boolean, token: string, id: string, config: Record<string, unknown>) {
+  requireGuardedSession(enabled, token);
   return guardedRequest<{config_id: string; status: string}>(
     enabled, token, "PUT", `/api/v1/guarded/configs/${safeId(id)}`, config,
   );
 }
 export function submitGuardedRun(enabled: boolean, token: string, id: string, request: NativeRequest, config: Record<string, unknown>) {
+  requireGuardedSession(enabled, token);
   return guardedRequest<JobState>(enabled, token, "POST", "/api/v1/guarded/jobs", {
     request_id: safeId(id), request, config,
   });
 }
 export function guardedStatus(enabled: boolean, token: string, id: string) {
+  requireGuardedSession(enabled, token);
   return guardedRequest<JobState>(enabled, token, "GET", `/api/v1/guarded/jobs/${safeId(id)}`);
 }
 export function guardedProgress(enabled: boolean, token: string, id: string) {
+  requireGuardedSession(enabled, token);
   return guardedRequest<{phase?: string}>(enabled, token, "GET", `/api/v1/guarded/jobs/${safeId(id)}/progress`);
 }
 export function guardedCancel(enabled: boolean, token: string, id: string) {
+  requireGuardedSession(enabled, token);
   return guardedRequest<JobState>(enabled, token, "POST", `/api/v1/guarded/jobs/${safeId(id)}/cancel`);
 }
 
@@ -77,17 +87,32 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   const [phase, setPhase] = React.useState("");
   const [error, setError] = React.useState("");
   const busy = React.useRef(false);
+  // Keep the latest authorization/session props visible to pending promises.
+  const session = React.useRef({enabled, token});
+  session.current = {enabled, token};
+  React.useEffect(() => {
+    // Clear information from a previous operator/session; do not preserve
+    // successful results when the guarded capability is removed.
+    setState("");
+    setPhase("");
+    setError("");
+    busy.current = false;
+  }, [enabled, token]);
 
   // Never render interactive controls for the ordinary read-only browser.
   if (enabled !== true) return null;
 
-  async function perform(action: () => Promise<unknown>) {
-    if (busy.current) return;
+  async function perform(action: (isCurrent: () => boolean) => Promise<unknown>) {
+    if (enabled !== true || busy.current) return;
+    const submittedSession = session.current;
+    const isCurrent = () => session.current.enabled === true &&
+      session.current.enabled === submittedSession.enabled &&
+      session.current.token === submittedSession.token;
     busy.current = true;
     setError("");
-    try { await action(); }
-    catch { setError("Guarded operation unavailable or rejected"); }
-    finally { busy.current = false; }
+    try { await action(isCurrent); }
+    catch { if (isCurrent()) setError("Guarded operation unavailable or rejected"); }
+    finally { if (isCurrent()) busy.current = false; }
   }
   function nativeConfig(): Record<string, unknown> {
     const value: unknown = JSON.parse(configJson);
@@ -111,9 +136,9 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     <input id="guard-config-id" value={configId} onChange={e => setConfigId(e.target.value)} />
     <label htmlFor="guard-config-json">Native configuration JSON</label>
     <textarea id="guard-config-json" value={configJson} onChange={e => setConfigJson(e.target.value)} rows={8} />
-    <button type="button" onClick={() => void perform(async () => {
+    <button type="button" onClick={() => void perform(async isCurrent => {
       const result = await saveGuardedConfig(enabled, token, configId, nativeConfig());
-      setState(`Configuration ${result.config_id}: ${result.status}`);
+      if (isCurrent()) setState(`Configuration ${result.config_id}: ${result.status}`);
     })}>Save native configuration</button>
     <label htmlFor="guard-job-id">Request ID</label>
     <input id="guard-job-id" value={jobId} onChange={e => setJobId(e.target.value)} />
@@ -135,18 +160,21 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     <select id="guard-intrabar" value={intrabar} onChange={e => setIntrabar(e.target.value as typeof intrabar)}>
       <option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option>
     </select>
-    <button type="button" onClick={() => void perform(async () => {
+    <button type="button" onClick={() => void perform(async isCurrent => {
       const result = await submitGuardedRun(enabled, token, jobId, request(), nativeConfig());
-      setState(result.status);
+      if (isCurrent()) setState(result.status);
     })}>Submit native research run</button>
-    <button type="button" onClick={() => void perform(async () => {
-      setState((await guardedStatus(enabled, token, jobId)).status);
+    <button type="button" onClick={() => void perform(async isCurrent => {
+      const result = await guardedStatus(enabled, token, jobId);
+      if (isCurrent()) setState(result.status);
     })}>Refresh status</button>
-    <button type="button" onClick={() => void perform(async () => {
-      setPhase((await guardedProgress(enabled, token, jobId)).phase ?? "No stage available");
+    <button type="button" onClick={() => void perform(async isCurrent => {
+      const result = await guardedProgress(enabled, token, jobId);
+      if (isCurrent()) setPhase(result.phase ?? "No stage available");
     })}>Refresh progress</button>
-    <button type="button" onClick={() => void perform(async () => {
-      setState((await guardedCancel(enabled, token, jobId)).status);
+    <button type="button" onClick={() => void perform(async isCurrent => {
+      const result = await guardedCancel(enabled, token, jobId);
+      if (isCurrent()) setState(result.status);
     })}>Request cancellation</button>
     {state && <p role="status">Native operation state: {state}</p>}
     {phase && <p role="status">Latest native stage: {phase}</p>}
