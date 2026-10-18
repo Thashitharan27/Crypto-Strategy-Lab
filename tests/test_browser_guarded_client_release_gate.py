@@ -47,3 +47,14 @@ def test_server_integration_still_denies_mutations_by_default(tmp_path):
         assert not (tmp_path / ".guarded-request-unapproved.claim").exists()
     finally:
         integration.close()
+
+
+def test_guarded_client_session_epoch_and_executable_browser_build_gate():
+    component = (ROOT / "browser_ui" / "src" / "GuardedRunControls.tsx").read_text(encoding="utf-8")
+    package = (ROOT / "browser_ui" / "package.json").read_text(encoding="utf-8")
+    assert "session.current.version + 1" in component
+    assert "session.current.version === submittedSession.version" in component
+    assert "if (isCurrent()) setState" in component
+    assert "if (isCurrent()) setPhase" in component
+    assert "requireGuardedSession(enabled, token)" in component
+    assert "npm run test:guarded && tsc -b && vite build" in package
