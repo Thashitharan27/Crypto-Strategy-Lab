@@ -6,6 +6,7 @@ browser mutations, persist authorization or use original saved output roots.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Sequence
@@ -14,7 +15,7 @@ from crypto_strategy_lab.browser_certification import (
     serve_isolated_browser_certification,
 )
 from crypto_strategy_lab.browser_readonly_service import build_browser_readonly_service
-from crypto_strategy_lab.paths import resolve_data_lake_runtime_paths
+from crypto_strategy_lab.paths import CONFIG_DIR, OUTPUT_DIR, resolve_data_lake_runtime_paths
 
 
 def _check_test_output_separation(root: Path, protected: list[Path]) -> None:
@@ -58,7 +59,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     # Both persistent native execution and copied evidence are writable test
     # outputs. Neither may be placed within a canonical source/cache tree,
     # even if the nested destination does not yet exist.
-    protected = [paths.raw_root, paths.cache_root, args.static_root]
+    # Historical saved runs/configurations must remain immutable during
+    # certification too, including when a workstation overrides their roots.
+    # Check the project defaults as well as the effective browser/control roots.
+    protected = [
+        paths.raw_root, paths.cache_root, args.static_root,
+        OUTPUT_DIR, CONFIG_DIR,
+    ]
+    for env_name in ("CRYPTO_STRATEGY_LAB_OUTPUT_DIR", "CRYPTO_STRATEGY_LAB_CONFIG_DIR"):
+        configured = os.environ.get(env_name, "").strip()
+        if configured:
+            protected.append(Path(configured).expanduser())
     if args.frozen_config is not None:
         protected.append(args.frozen_config.parent)
     for output_root in (args.persistent_execution_root, args.evidence_root):

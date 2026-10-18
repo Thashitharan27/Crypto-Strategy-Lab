@@ -299,3 +299,51 @@ def test_cli_accepts_separate_evidence_root_without_touching_canonical_sources(
     runner.assert_called_once()
     assert runner.call_args.kwargs["evidence_root"] == evidence
     assert frozen.read_bytes() == b"original"
+
+
+@pytest.mark.parametrize("mode", ["--evidence-root", "--persistent-execution-root"])
+@pytest.mark.parametrize("source", ["default-output", "default-config", "configured-output", "configured-config"])
+def test_cli_rejects_certification_outputs_in_original_saved_trees_before_native_setup(
+    monkeypatch, tmp_path, mode, source,
+):
+    """Never create test outputs below a saved run/config root, including overrides."""
+    raw = tmp_path / "market-raw"
+    cache = tmp_path / "market-cache"
+    static = tmp_path / "dist-certification"
+    default_output = tmp_path / "original-output"
+    default_config = tmp_path / "original-config"
+    configured_output = tmp_path / "other-output"
+    configured_config = tmp_path / "other-config"
+    roots = {
+        "default-output": default_output,
+        "default-config": default_config,
+        "configured-output": configured_output,
+        "configured-config": configured_config,
+    }
+    for directory in (raw, cache, static, *roots.values()):
+        directory.mkdir()
+        (directory / "keep.bin").write_bytes(b"original")
+    monkeypatch.setattr(command, "OUTPUT_DIR", default_output)
+    monkeypatch.setattr(command, "CONFIG_DIR", default_config)
+    monkeypatch.setenv("CRYPTO_STRATEGY_LAB_OUTPUT_DIR", str(configured_output))
+    monkeypatch.setenv("CRYPTO_STRATEGY_LAB_CONFIG_DIR", str(configured_config))
+    monkeypatch.setattr(command, "resolve_data_lake_runtime_paths",
+                        lambda: SimpleNamespace(raw_root=raw, cache_root=cache))
+    build = Mock(side_effect=AssertionError("Native service must not initialize"))
+    runner = Mock()
+    monkeypatch.setattr(command, "build_browser_readonly_service", build)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
+    destination_name = ("csl-browser-evidence-test" if mode == "--evidence-root"
+                        else "csl-browser-crash-test")
+    destination = roots[source] / destination_name
+    with pytest.raises(SystemExit) as error:
+        command.main([
+            "--acknowledge-test-only", "--static-root", str(static),
+            "--port", "8919", mode, str(destination),
+        ])
+    assert error.value.code == 2
+    build.assert_not_called()
+    runner.assert_not_called()
+    assert not destination.exists()
+    assert all((directory / "keep.bin").read_bytes() == b"original"
+               for directory in (raw, cache, static, *roots.values()))
