@@ -176,7 +176,32 @@ class GuardedRunJobs:
             state = "FAILED"
         else:
             state = "COMPLETED"
-        return {"request_id": request_id, "status": state}
+        response = {"request_id": request_id, "status": state}
+        if state == "COMPLETED" and self._execution_root is not None:
+            # The authoritative native reporter sets output_dir after
+            # completing its manifest. Never derive it from a request ID.
+            try:
+                from crypto_strategy_lab.browser_guarded_recovery_verify import (
+                    verify_recovered_run,
+                )
+
+                result = future.result()
+                output = getattr(result, "output_dir", None)
+                root = Path(self._execution_root)
+                if output is not None:
+                    candidate = Path(output)
+                    if (candidate.is_absolute() and candidate.parent == root
+                            and not candidate.is_symlink()
+                            and re.fullmatch(r"[A-Za-z0-9_-]{1,100}",
+                                             candidate.name, flags=re.ASCII)
+                            and verify_recovered_run(root, candidate.name)["status"]
+                            == "ARTIFACTS_VERIFIED"):
+                        response["verified_run_folder_id"] = candidate.name
+            except (OSError, ValueError, TypeError, RuntimeError, AttributeError, KeyError):
+                # Completion does not prove saved integrity. Never disclose
+                # an unverified path or suppress the native worker status.
+                pass
+        return response
 
     def cancel(self, request_id: str) -> dict[str, str]:
         """Fail safely: never claim a running native simulation was cancelled.
