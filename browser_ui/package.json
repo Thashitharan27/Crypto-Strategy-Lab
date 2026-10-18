@@ -6,7 +6,8 @@
   "scripts": {
     "build": "npm run test:guarded && tsc -b && vite build",
     "dev": "vite --host 127.0.0.1",
-    "test:guarded": "node --test tests/guarded-client.test.mjs"
+    "test:guarded": "node --test tests/guarded-client.test.mjs",
+    "build:certification": "tsc -b && vite build --config vite.certification.config.ts"
   },
   "dependencies": {
     "react": "^18.3.1",
