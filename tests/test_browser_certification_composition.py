@@ -207,7 +207,9 @@ def test_invalid_frozen_config_does_not_reserve_evidence_root(tmp_path):
     dist = _certification_dist(tmp_path)
     native = Mock()
     evidence = tmp_path / "csl-browser-evidence-rejected"
-    frozen = tmp_path / "invalid.name.json"
+    frozen_dir = tmp_path / "original-configs"
+    frozen_dir.mkdir()
+    frozen = frozen_dir / "invalid.name.json"
     GuiApplicationService.save_config(frozen, ResearchRunConfig())
 
     with pytest.raises(ValueError, match="Unsafe frozen"):
@@ -686,4 +688,30 @@ def test_direct_certification_factory_rejects_persistent_root_overlapping_inputs
         ):
             pytest.fail("Overlapping test-only root accepted")
     assert frozen.read_bytes() == original
+    native.run.assert_not_called()
+
+@pytest.mark.parametrize("location", ["inside-static", "inside-original-configs"])
+def test_evidence_destination_cannot_overlap_certification_or_original_inputs(tmp_path, location):
+    """Reject evidence destinations inside source trees before reservation."""
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    from crypto_strategy_lab.gui.v2_controller import GuiApplicationService
+
+    dist = _certification_dist(tmp_path)
+    original_parent = tmp_path / "original-configs"
+    original_parent.mkdir()
+    frozen = original_parent / "pinned.json"
+    GuiApplicationService.save_config(frozen, ResearchRunConfig())
+    original_bytes = frozen.read_bytes()
+    evidence = (dist / "csl-browser-evidence-static" if location == "inside-static"
+                else original_parent / "csl-browser-evidence-original")
+    native = Mock()
+    with pytest.raises(ValueError, match="overlaps protected inputs"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, frozen_config_path=frozen,
+            evidence_root=evidence,
+        ):
+            pytest.fail("Overlapping evidence root was accepted")
+    assert frozen.read_bytes() == original_bytes
+    assert not evidence.exists()
     native.run.assert_not_called()

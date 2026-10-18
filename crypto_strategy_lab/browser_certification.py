@@ -89,6 +89,16 @@ def isolated_browser_certification(
                 or evidence.parent.resolve(strict=True) != evidence.parent):
             raise ValueError("Evidence destination must be a new canonical csl-browser-evidence-* directory")
 
+    if evidence is not None:
+        # New evidence must never create files inside original/configuration
+        # sources or the served certification asset tree. Validate at the
+        # composition boundary, not just in the command-line launcher.
+        for protected in (root, *([Path(frozen_config_path).parent]
+                                  if frozen_config_path is not None else [])):
+            known = protected.resolve(strict=False)
+            if evidence == known or evidence in known.parents or known in evidence.parents:
+                raise ValueError("Certification evidence destination overlaps protected inputs")
+
     if persistent_execution_root is not None and evidence is not None:
         raise ValueError("Persistent crash root and evidence-copy mode are mutually exclusive")
     crash_root = (_validated_crash_execution_root(persistent_execution_root)
