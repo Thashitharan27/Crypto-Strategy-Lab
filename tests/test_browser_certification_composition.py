@@ -650,3 +650,40 @@ def test_certification_evidence_copy_rejects_output_reparse_entries(tmp_path, mo
                 assert res.status_code == 202
     assert evidence.is_dir()
     assert not (evidence / "runs").exists()
+
+
+@pytest.mark.parametrize("overlap", ["inside-static", "inside-frozen", "ancestor-of-static"])
+def test_direct_certification_factory_rejects_persistent_root_overlapping_inputs(
+    tmp_path, overlap,
+):
+    """The underlying test-only composition cannot bypass CLI path isolation."""
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    from crypto_strategy_lab.gui.v2_controller import GuiApplicationService
+
+    static_parent = tmp_path / "csl-browser-crash-parent"
+    static_parent.mkdir()
+    dist = static_parent / "dist-certification"
+    dist.mkdir()
+    (dist / "index.html").write_text("test-only", encoding="utf-8")
+    frozen_parent = tmp_path / "original-configs"
+    frozen_parent.mkdir()
+    frozen = frozen_parent / "frozen.json"
+    GuiApplicationService.save_config(frozen, ResearchRunConfig())
+    output = {
+        "inside-static": dist / "csl-browser-crash-overlap",
+        "inside-frozen": frozen_parent / "csl-browser-crash-overlap",
+        "ancestor-of-static": static_parent,
+    }[overlap]
+    output.mkdir(exist_ok=True)
+    (output / ".csl-browser-crash-test-only").write_bytes(b"CSL_BROWSER_CRASH_CERT_V1")
+    original = frozen.read_bytes()
+    native = Mock()
+    with pytest.raises(ValueError, match="overlaps protected inputs"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True,
+            persistent_execution_root=output, frozen_config_path=frozen,
+        ):
+            pytest.fail("Overlapping test-only root accepted")
+    assert frozen.read_bytes() == original
+    native.run.assert_not_called()
