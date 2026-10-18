@@ -246,4 +246,4 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         else:
             assert source.iloc[3]["high"] == (121.0 if exit_case == "TP1_THEN_SL" else 101.0)
     else:
-        assert source.iloc[1]["low"] == pytest.approx(89.0 if (side == "SHORT" and exit_case == "TP") or (side == "LONG" and exit_case == "SL") else 99.0)
+        assert source.iloc[1]["low"] == pytest.approx(89.0 if (side == "SHORT" and exit_case in ("TP", "INTRABAR_TP")) or (side == "LONG" and exit_case == "SL") else 99.0)
