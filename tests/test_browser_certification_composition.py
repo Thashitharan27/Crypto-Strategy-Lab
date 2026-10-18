@@ -617,9 +617,9 @@ def test_certification_evidence_copy_rejects_output_reparse_entries(tmp_path, mo
             native_application=native, static_root=dist,
             acknowledge_test_only=True, evidence_root=evidence,
         ) as (app, token):
-            with TestClient(app, base_url="http://localhost") as client:
-                assert client.get("/", headers={"Authorization": "Bearer " + token}).status_code == 200
             output = None
+            # Run through one authenticated client lifespan. Exiting TestClient
+            # closes the guarded coordinator, so never reopen it for submission.
             # The native original roots remain inaccessible. Mark only an
             # isolated native output directory through its private integration.
             from crypto_strategy_lab.data_lake_config import ResearchRunConfig
