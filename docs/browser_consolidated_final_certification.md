@@ -216,3 +216,25 @@ original config and effective execution settings for the desktop/browser
 comparison. No Data Lake downloader, replacement archive or canonical cache
 rebuild is authorized by certification. The browser mutation outputs remain
 isolated independently as documented above.
+
+
+## 13. Read-only original configuration import into test workspace
+
+The certification-only CLI optionally accepts
+`--frozen-config "C:\CryptoBots\Crypto Strategy Lab\config\data_lake\SAVED_ID.json"`.
+This is **not** a writable source path: the factory requires an absolute,
+canonical, symlink-free native `.json` filename with a safe saved ID,
+loads/validates it via the existing `GuiApplicationService.load_config`,
+and copies its unchanged bytes into the temporary certification config
+directory. The original file remains untouched. The isolated browser can
+then enter `SAVED_ID` and use its existing authenticated "Load saved native
+configuration" action to test the exact source parameters. The standalone
+read-only original is never exposed by absolute path over HTTP.
+
+Do not manually reconstruct the config in frontend defaults. Record the
+original SHA-256 before/after, compare full native/browser normalized values
+and use this seeded file for the browser invocation. Execution still requires
+an explicit job ID and guarded test-only opt-in; this option neither starts a
+run nor grants normal browser write permissions. Independently inspect the
+PySide6 effective configuration for the same frozen original. The final
+Windows interaction and parity gates remain NOT RUN until performed.
