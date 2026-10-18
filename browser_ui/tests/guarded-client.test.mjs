@@ -340,6 +340,35 @@ test("configuration actions preserve recovery-unverified job lockout", async () 
   } finally {globalThis.fetch = original;}
 });
 
+test("editing a saved config clears prior persistence acknowledgement without changing job status", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => ({ok: true, json: async () =>
+    url.endsWith("/guarded/jobs/job-A")
+      ? {request_id: "job-A", status: "COMPLETED"}
+      : {config_id: "safe", status: "SAVED"},
+  });
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "job-A");
+    ui.click("Refresh status");
+    await settleHandlers();
+    ui.change("guard-config-id", "safe");
+    ui.change("guard-config-json", '{"config_version":3}', "textarea");
+    ui.click("Save native configuration");
+    await settleHandlers();
+    ui.render();
+    let output = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(output.includes("Configuration safe: SAVED"));
+    assert.equal(ui.find("button", "Refresh progress").props.disabled, true);
+    ui.change("guard-config-json", '{"config_version":3,"edited":true}', "textarea");
+    ui.render();
+    output = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(!output.includes("Configuration safe: SAVED"));
+    assert.ok(output.includes("Native worker completed"));
+    assert.equal(ui.find("button", "Refresh progress").props.disabled, true);
+  } finally {globalThis.fetch = original;}
+});
+
 test("guarded config save rejects mismatched or unbounded acknowledgements", async () => {
   const original = globalThis.fetch;
   const responses = [
