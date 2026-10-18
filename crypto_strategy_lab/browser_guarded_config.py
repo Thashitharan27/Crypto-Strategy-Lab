@@ -63,6 +63,15 @@ class GuardedConfigStore:
         temp_name = None
         durability_uncertain = False
         try:
+            # Persist the ownership entry BEFORE the native replacement.
+            # Otherwise power loss could preserve the new config while
+            # losing its fail-closed reconciliation claim.
+            if os.name == "posix":
+                directory_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
             fd, temp_name = tempfile.mkstemp(prefix=".browser-config-", suffix=".tmp", dir=root)
             os.close(fd)
             # Native serialization, with validation, is the only write owner.
