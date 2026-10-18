@@ -207,7 +207,9 @@ def test_invalid_frozen_config_does_not_reserve_evidence_root(tmp_path):
     dist = _certification_dist(tmp_path)
     native = Mock()
     evidence = tmp_path / "csl-browser-evidence-rejected"
-    frozen = tmp_path / "invalid.name.json"
+    frozen_dir = tmp_path / "original-configs"
+    frozen_dir.mkdir()
+    frozen = frozen_dir / "invalid.name.json"
     GuiApplicationService.save_config(frozen, ResearchRunConfig())
 
     with pytest.raises(ValueError, match="Unsafe frozen"):
