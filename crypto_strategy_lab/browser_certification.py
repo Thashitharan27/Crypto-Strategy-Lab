@@ -14,23 +14,35 @@ import os
 import secrets
 import shutil
 import re
+import stat
 from tempfile import TemporaryDirectory
 
 _CRASH_ROOT_MARKER = ".csl-browser-crash-test-only"
 _CRASH_ROOT_MARKER_CONTENT = b"CSL_BROWSER_CRASH_CERT_V1"
 
 
+def _unsafe_reparse_path(path: Path) -> bool:
+    """Reject symlinks, NTFS junctions and other Windows reparse points."""
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    if callable(is_junction) and is_junction():
+        return True
+    attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
 def _validated_crash_execution_root(path: Path) -> Path:
     """Operator-prepared, marker-protected root; never create or clean it."""
     path = Path(path)
     if (not path.is_absolute() or not path.name.startswith("csl-browser-crash-")
-            or not path.is_dir() or any(part.is_symlink() for part in (path, *path.parents))
+            or not path.is_dir() or any(_unsafe_reparse_path(part) for part in (path, *path.parents))
             or path.resolve(strict=True) != path):
         raise ValueError("Unsafe persistent certification execution root")
     marker = path / _CRASH_ROOT_MARKER
-    if (marker.is_symlink() or not marker.is_file()
+    if (_unsafe_reparse_path(marker) or not marker.is_file()
             or marker.read_bytes() != _CRASH_ROOT_MARKER_CONTENT
-            or any(item.is_symlink() for item in path.rglob("*"))):
+            or any(_unsafe_reparse_path(item) for item in path.rglob("*"))):
         raise ValueError("Persistent certification root requires a test-only marker and no links")
     return path
 
