@@ -105,8 +105,14 @@ def isolated_browser_certification(
         # Reserve an evidence directory only after *all* native input and
         # application-composition checks succeeded. A failed factory setup
         # must not leave an empty operator evidence destination behind.
-        if evidence is not None:
-            os.mkdir(evidence, mode=0o700)
+        try:
+            if evidence is not None:
+                os.mkdir(evidence, mode=0o700)
+        except BaseException:
+            # The native coordinator is already constructed. A failed
+            # exclusive evidence reservation must not leak its worker pool.
+            integration.close()
+            raise
         try:
             yield app, token
         finally:
