@@ -443,3 +443,14 @@ Node client contract tests exercise this read path and malformed payloads.
 The production browser workspace still does **not** mount the editor; no normal
 browser saves/execution are exposed. This is engineering coverage, not operator
 file certification, UI click-through proof or authorization to enable writes.
+
+
+## B4 config selection response ownership (2026-10-18)
+
+The dormant guarded editor additionally invalidates pending saved-config load
+responses when the selected configuration identifier changes. Changing the ID
+clears the old editable JSON and suppresses outdated completion, preventing an
+old config snapshot from appearing under another save destination. This is a
+client-side precaution: server-native schema validation and guarded write locks
+remain authoritative. Real interactive browser click-level coverage remains
+outstanding; the production browser does not mount the control.
