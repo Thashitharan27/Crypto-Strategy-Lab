@@ -38,3 +38,37 @@ def test_test_only_opt_in_routes_retain_localhost_origin_and_auth_guards():
 def test_opt_in_without_server_integration_fails_closed():
     with pytest.raises(ValueError, match="Guarded integration"):
         create_browser_app(token=TOKEN, guarded_enabled=True)
+
+
+def test_guarded_routes_reject_other_loopback_origins_before_native_access():
+    """Loopback ports are distinct browser origins for native mutations."""
+    integration = Mock()
+    app = create_browser_app(token=TOKEN, guarded_integration=integration, guarded_enabled=True)
+    auth = {"Authorization": "Bearer " + TOKEN}
+    with TestClient(app, base_url="http://localhost:8919") as client:
+        for origin in ("http://localhost:8920", "http://127.0.0.1:8919"):
+            denied = client.get("/api/v1/guarded/jobs/job-1",
+                headers={**auth, "Origin": origin})
+            assert denied.status_code == 403
+            assert denied.json() == {"detail": "Forbidden"}
+            denied = client.put("/api/v1/guarded/configs/test",
+                headers={**auth, "Origin": origin}, json={})
+            assert denied.status_code == 403
+        allowed = client.get("/api/v1/guarded/jobs/job-1",
+            headers={**auth, "Origin": "http://localhost:8919"})
+        assert allowed.status_code == 200
+        no_origin = client.get("/api/v1/guarded/jobs/job-1", headers=auth)
+        assert no_origin.status_code == 200
+    assert integration.status.call_count == 2
+    integration.save_config.assert_not_called()
+
+
+def test_default_read_only_endpoint_keeps_existing_local_origin_policy():
+    """Do not silently alter the established read-only API perimeter."""
+    app = create_browser_app(token=TOKEN)
+    with TestClient(app, base_url="http://localhost:8919") as client:
+        response = client.get("/api/v1/health", headers={
+            "Authorization": "Bearer " + TOKEN,
+            "Origin": "http://localhost:8920",
+        })
+        assert response.status_code == 200
