@@ -242,7 +242,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
         setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
         if (status === "RECOVERY_UNVERIFIED") setPhase("");
       }
-    }, "job")}>Submit native research run</button>
+    }, "job")} disabled={recoveryUnverified}>Submit native research run</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
       const result = await guardedStatus(enabled, token, jobId);
@@ -259,7 +259,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       const result = await guardedProgress(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
           jobSelection.current.id === selectedJob.id) setPhase(result.phase ?? "No stage available");
-    }, "job")}>Refresh progress</button>
+    }, "job")} disabled={recoveryUnverified}>Refresh progress</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
       const result = await guardedCancel(enabled, token, jobId);
