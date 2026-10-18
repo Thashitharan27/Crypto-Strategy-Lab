@@ -466,3 +466,15 @@ already-replaced candidate to be reconciled, and releases the per-ID write claim
 This is not a rollback guarantee or a substitute for actual crash/power-loss
 and Windows filesystem verification. Ordinary production browser config writes
 remain disabled and original saved configurations are untouched.
+
+
+## B4 guarded React event-handler integration tests (2026-10-18)
+
+A separate development-only Node test harness exercises the actual dormant
+React TSX event handlers with controlled hook state: native config input/load,
+selection changes during an in-flight load, edited native JSON save, job
+submission, status/progress/cancel actions and token changes during an
+in-flight request. The build remains gated on these tests. This is an isolated
+simulated-event harness, not an installed interactive browser or an independent
+Windows native UI certification. The normal read-only app continues not to
+mount these controls and server-enforced guarded routes remain disabled.
