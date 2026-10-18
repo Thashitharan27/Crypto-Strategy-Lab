@@ -108,9 +108,19 @@ export async function inspectVerifiedSavedRun(enabled: boolean, token: string, f
 
 export function saveGuardedConfig(enabled: boolean, token: string, id: string, config: Record<string, unknown>) {
   requireGuardedSession(enabled, token);
-  return guardedRequest<{config_id: string; status: string}>(
+  return guardedRequest<{config_id: unknown; status: unknown}>(
     enabled, token, "PUT", `/api/v1/guarded/configs/${safeId(id)}`, config,
   );
+}
+
+function confirmedConfigSave(result: {config_id: unknown; status: unknown}, selectedId: string): string {
+  // No server-supplied diagnostics or foreign ID are presented as a successful
+  // native save. The server's documented acknowledgment is deliberately narrow.
+  if (!result || typeof result !== "object" || Array.isArray(result) ||
+      result.config_id !== selectedId || result.status !== "SAVED") {
+    throw new Error("Invalid native save acknowledgement");
+  }
+  return `Configuration ${selectedId}: SAVED`;
 }
 export function submitGuardedRun(enabled: boolean, token: string, id: string, request: NativeRequest, config: Record<string, unknown>) {
   requireGuardedSession(enabled, token);
@@ -266,7 +276,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     }, "config")}>Load saved native configuration</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const result = await saveGuardedConfig(enabled, token, configId, nativeConfig());
-      if (isCurrent()) setState(`Configuration ${result.config_id}: ${result.status}`);
+      if (isCurrent()) setState(confirmedConfigSave(result, configId));
     }, "config")}>Save native configuration</button>
     <label htmlFor="guard-job-id">Request ID</label>
     <input id="guard-job-id" value={jobId} onChange={e => {
