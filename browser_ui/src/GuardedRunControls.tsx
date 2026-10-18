@@ -117,10 +117,16 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   // Never render interactive controls for the ordinary read-only browser.
   if (enabled !== true) return null;
 
-  async function perform(action: (isCurrent: () => boolean) => Promise<unknown>) {
+  async function perform(action: (isCurrent: () => boolean) => Promise<unknown>, selection?: "job" | "config") {
     if (enabled !== true || busy.current) return;
     const submittedSession = session.current;
-    const isCurrent = () => session.current.enabled === true &&
+    const selectedJob = jobSelection.current;
+    const selectedConfig = configSelection.current;
+    const isCurrent = () => (selection !== "job" ||
+      (jobSelection.current.id === selectedJob.id && jobSelection.current.version === selectedJob.version)) &&
+      (selection !== "config" || (configSelection.current.id === selectedConfig.id &&
+       configSelection.current.version === selectedConfig.version)) &&
+      session.current.enabled === true &&
       session.current.enabled === submittedSession.enabled &&
       session.current.token === submittedSession.token &&
       session.current.version === submittedSession.version;
@@ -166,11 +172,11 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
         setConfigJson(JSON.stringify(result, null, 2));
         setState("Validated saved configuration loaded for editing");
       }
-    })}>Load saved native configuration</button>
+    }, "config")}>Load saved native configuration</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const result = await saveGuardedConfig(enabled, token, configId, nativeConfig());
       if (isCurrent()) setState(`Configuration ${result.config_id}: ${result.status}`);
-    })}>Save native configuration</button>
+    }, "config")}>Save native configuration</button>
     <label htmlFor="guard-job-id">Request ID</label>
     <input id="guard-job-id" value={jobId} onChange={e => {
       jobSelection.current = {id: e.target.value, version: jobSelection.current.version + 1};
@@ -202,25 +208,25 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       const result = await submitGuardedRun(enabled, token, jobId, request(), nativeConfig());
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
           jobSelection.current.id === selectedJob.id) setState(result.status);
-    })}>Submit native research run</button>
+    }, "job")}>Submit native research run</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
       const result = await guardedStatus(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
           jobSelection.current.id === selectedJob.id) setState(result.status);
-    })}>Refresh status</button>
+    }, "job")}>Refresh status</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
       const result = await guardedProgress(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
           jobSelection.current.id === selectedJob.id) setPhase(result.phase ?? "No stage available");
-    })}>Refresh progress</button>
+    }, "job")}>Refresh progress</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
       const result = await guardedCancel(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
           jobSelection.current.id === selectedJob.id) setState(result.status);
-    })}>Request cancellation</button>
+    }, "job")}>Request cancellation</button>
     {state && <p role="status">Native operation state: {state}</p>}
     {phase && <p role="status">Latest native stage: {phase}</p>}
     {error && <p role="alert">{error}</p>}
