@@ -244,7 +244,7 @@ def test_certification_evidence_never_follows_output_symlinks(tmp_path):
     assert not (evidence / "runs" / "unsafe-link").exists()
 
 
-def test_certification_seeds_original_native_config_unchanged_and_reads_through_http(tmp_path):
+def test_certification_seeds_original_native_config_unchanged_and_reads_through_http(tmp_path, monkeypatch):
     from crypto_strategy_lab.data_lake_config import ResearchRunConfig
     from crypto_strategy_lab.gui.v2_controller import GuiApplicationService
 
@@ -255,6 +255,16 @@ def test_certification_seeds_original_native_config_unchanged_and_reads_through_
     config = ResearchRunConfig()
     GuiApplicationService.save_config(source, config)
     original_bytes = source.read_bytes()
+    actual_load = GuiApplicationService.load_config
+    validated_paths = []
+
+    def tracked_native_load(path):
+        validated_paths.append(Path(path))
+        assert Path(path) != source
+        assert Path(path).read_bytes() == original_bytes
+        return actual_load(path)
+
+    monkeypatch.setattr(GuiApplicationService, "load_config", tracked_native_load)
     native = Mock()
     with isolated_browser_certification(
         native_application=native, static_root=dist,
@@ -271,6 +281,7 @@ def test_certification_seeds_original_native_config_unchanged_and_reads_through_
         # The original remains untouched before and after the HTTP read.
         assert source.read_bytes() == original_bytes
     assert source.read_bytes() == original_bytes
+    assert len(validated_paths) == 1
     native.run.assert_not_called()
 
 
