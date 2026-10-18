@@ -57,7 +57,9 @@ def test_guarded_client_session_epoch_and_executable_browser_build_gate():
     assert "setConfigJson(\"{}\")" in component
     assert "session.current.version + 1" in component
     assert "session.current.version === submittedSession.version" in component
-    assert "if (isCurrent()) setState" in component
+    assert "if (isCurrent()) setConfigNotice(confirmedConfigSave(result, configId))" in component
+    assert "setState(status)" in component
+    assert "TERMINAL_JOB_STATES.has(state)" in component
     assert "jobSelection.current.version === selectedJob.version" in component
     assert "setPhase(safeNativeStage(result))" in component
     assert "function safeNativeStage(" in component
