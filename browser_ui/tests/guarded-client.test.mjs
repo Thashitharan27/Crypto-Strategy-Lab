@@ -672,6 +672,55 @@ test("saved-run handoff hides old results after folder or session changes", asyn
   }
 });
 
+test("latest repeat saved-run inspection wins when responses resolve out of order", async () => {
+  const original = globalThis.fetch;
+  const resolves = [];
+  globalThis.fetch = async () => new Promise(resolve => resolves.push(resolve));
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-saved-run-folder", "stable-folder");
+    ui.click("Inspect verified saved run");
+    ui.click("Inspect verified saved run");
+    assert.equal(resolves.length, 2);
+    resolves[1]({ok: true, json: async () => ({
+      manifest: {run_id: "newer-run", run_status: "COMPLETED"}, summary: {},
+    })});
+    await settleHandlers();
+    ui.render();
+    assert.ok(JSON.stringify(ui.find("section", undefined).props.children).includes("newer-run"));
+    resolves[0]({ok: true, json: async () => ({
+      manifest: {run_id: "obsolete-run", run_status: "COMPLETED"}, summary: {},
+    })});
+    await settleHandlers();
+    ui.render();
+    const displayed = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(displayed.includes("newer-run"));
+    assert.ok(!displayed.includes("obsolete-run"));
+  } finally {globalThis.fetch = original;}
+});
+
+test("late failed saved-run inspection cannot mark newer successful inspection as failed", async () => {
+  const original = globalThis.fetch;
+  const settles = [];
+  globalThis.fetch = () => new Promise((resolve, reject) => settles.push({resolve, reject}));
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-saved-run-folder", "stable-folder");
+    ui.click("Inspect verified saved run");
+    ui.click("Inspect verified saved run");
+    settles[1].resolve({ok: true, json: async () => ({
+      manifest: {run_id: "newer-run", run_status: "COMPLETED"}, summary: {},
+    })});
+    await settleHandlers();
+    settles[0].reject(new Error("stale read"));
+    await settleHandlers();
+    ui.render();
+    const displayed = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(displayed.includes("newer-run"));
+    assert.ok(!displayed.includes("Saved run not available or verification rejected"));
+  } finally {globalThis.fetch = original;}
+});
+
 test("saved-run handoff rejects malformed IDs and unverified or invalid outputs", async () => {
   const original = globalThis.fetch;
   let calls = 0;
