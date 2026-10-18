@@ -257,6 +257,7 @@ def test_commands_never_construct_force_push(repo, monkeypatch):
 
 def test_git_subprocess_timeout_is_bounded_and_reported(monkeypatch, tmp_path):
     from crypto_strategy_lab.gui import github_manager
+    from types import SimpleNamespace
     calls = []
 
     def stalled(command, **kwargs):
@@ -264,8 +265,57 @@ def test_git_subprocess_timeout_is_bounded_and_reported(monkeypatch, tmp_path):
         raise subprocess.TimeoutExpired(command, kwargs["timeout"])
 
     monkeypatch.setattr(github_manager.subprocess, "run", stalled)
+    monkeypatch.setattr(github_manager, "os", SimpleNamespace(name="posix"))
     with pytest.raises(GitError, match="timed out after 120 seconds") as failure:
         GitManager(tmp_path)._run("fetch", "--prune", "origin")
     assert isinstance(failure.value.__cause__, subprocess.TimeoutExpired)
     assert calls[0][1]["timeout"] == github_manager.GIT_COMMAND_TIMEOUT_SECONDS
     assert calls[0][1]["shell"] is False
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_git_task_completion_after_qt_signal_deletion_is_safe(qapp, failed):
+    from crypto_strategy_lab.gui.github_manager import _Task
+    from shiboken6 import delete
+
+    seen = []
+    def work():
+        seen.append(True)
+        if failed:
+            raise GitError("native timeout")
+        return "completed"
+    task = _Task(work)
+    delete(task.signals)
+    task.run()
+    assert seen == [True]
+
+
+@pytest.mark.skipif(__import__('os').name != 'nt', reason='Real Windows process-tree contract')
+def test_windows_git_timeout_kills_child_holding_output_pipes(tmp_path, monkeypatch):
+    import sys
+    import time
+    import ctypes
+    from crypto_strategy_lab.gui import github_manager
+
+    marker = tmp_path / 'owned-child.pid'
+    child = (
+        "import subprocess,sys,time;from pathlib import Path;"
+        "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+        f"Path({str(marker)!r}).write_text(str(p.pid));time.sleep(60)"
+    )
+    monkeypatch.setattr(github_manager, 'GIT_COMMAND_TIMEOUT_SECONDS', 3)
+    started = time.monotonic()
+    with pytest.raises(GitError, match='timed out after 3 seconds'):
+        GitManager(tmp_path, git=sys.executable)._run('-c', child)
+    assert time.monotonic() - started < 15
+    assert marker.is_file(), 'Owned child must start before timeout'
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel.OpenProcess(0x00100000, False, int(marker.read_text()))
+    if handle:
+        try:
+            assert kernel.WaitForSingleObject(handle, 0) == 0
+        finally:
+            kernel.CloseHandle(handle)

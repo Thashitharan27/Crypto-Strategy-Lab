@@ -14,6 +14,7 @@ from typing import Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
+from shiboken6 import isValid
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -178,16 +179,37 @@ class GitManager:
     def _run(self, *args: str, check=True) -> subprocess.CompletedProcess[str]:
         try:
             creationflags = CREATE_NO_WINDOW if os.name == "nt" else 0
-            result = subprocess.run(
-                [self.git, *args],
-                cwd=self.root,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=False,
-                creationflags=creationflags,
-                timeout=GIT_COMMAND_TIMEOUT_SECONDS,
-            )
+            options = dict(cwd=self.root, text=True, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, shell=False,
+                           creationflags=creationflags)
+            command = [self.git, *args]
+            if os.name == "nt":
+                # subprocess.run kills only the outer Windows Git launcher on
+                # timeout, then waits indefinitely for pipe readers held by
+                # its surviving remote helpers. Kill the owned tree first.
+                process = subprocess.Popen(command, **options)
+                try:
+                    stdout, stderr = process.communicate(timeout=GIT_COMMAND_TIMEOUT_SECONDS)
+                except subprocess.TimeoutExpired:
+                    try:
+                        subprocess.run(
+                            ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            shell=False, creationflags=CREATE_NO_WINDOW, timeout=10,
+                        )
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+                    if process.poll() is None:
+                        process.kill()
+                    # Never fall back to unbounded Windows communicate().
+                    try:
+                        process.communicate(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    raise
+                result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+            else:
+                result = subprocess.run(command, **options, timeout=GIT_COMMAND_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired as exc:
             raise GitError(
                 f"Git command timed out after {GIT_COMMAND_TIMEOUT_SECONDS} seconds. "
@@ -346,9 +368,21 @@ class _Task(QRunnable):
 
     def run(self):
         try:
-            self.signals.done.emit(self.fn())
+            result = self.fn()
         except Exception as exc:
-            self.signals.failed.emit(str(exc))
+            self._emit_if_alive("failed", str(exc))
+        else:
+            self._emit_if_alive("done", result)
+
+    def _emit_if_alive(self, name, value):
+        # QApplication teardown can delete the receiver while Git is finishing.
+        if not isValid(self.signals):
+            return
+        try:
+            getattr(self.signals, name).emit(value)
+        except RuntimeError:
+            if isValid(self.signals):
+                raise
 
 
 class GitHubIntegrationWidget(QWidget):
