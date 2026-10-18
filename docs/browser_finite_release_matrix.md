@@ -478,3 +478,16 @@ in-flight request. The build remains gated on these tests. This is an isolated
 simulated-event harness, not an installed interactive browser or an independent
 Windows native UI certification. The normal read-only app continues not to
 mount these controls and server-enforced guarded routes remain disabled.
+
+
+## B4 guarded run selection ownership (2026-10-18)
+
+The unmounted guarded React component now binds asynchronous job submit,
+status, progress and cancellation result presentation to the job ID and
+selection generation originating each request. Changing the selected job
+clears prior status, phase and error, and late completions or rejections
+cannot annotate a different selected job. Config edit/save/load errors are
+similarly scoped to the original config selection. Simulated React event tests
+exercise delayed results and ID changes for the four job operations. This
+is not actual browser UI certification, not job cancellation of running native
+work, and not authorization to expose guarded operations to normal users.
