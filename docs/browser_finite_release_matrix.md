@@ -318,3 +318,15 @@ orphan progress/cancellation, and replay all fail closed; no native rerun
 occurs. This covers one process-restart lifecycle edge, not verified resume,
 automated stale-lock reconciliation, crash-during-write durability or Windows
 operator recovery. Ordinary browser mutations remain disabled.
+
+
+## B2 native short-side guarded HTTP execution parity (2026-10-18)
+
+The isolated frozen-candle native `BacktestEngine` regression now independently
+invokes the desktop service and opt-in authenticated HTTP with both the earlier
+long TP/end-of-data case and its mirrored short-side counterpart. The full
+ordered trade DataFrames must match exactly, with direction-specific TP and
+end-of-data exits and positive net P&L/equity on the short fixture. This test
+uses the existing native engine; it is limited engineering coverage, not
+original-history short/stop/partial certification. No normal browser execution
+or configuration writes are enabled.
