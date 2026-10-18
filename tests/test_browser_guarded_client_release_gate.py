@@ -59,7 +59,8 @@ def test_guarded_client_session_epoch_and_executable_browser_build_gate():
     assert "session.current.version === submittedSession.version" in component
     assert "if (isCurrent()) setState" in component
     assert "jobSelection.current.version === selectedJob.version" in component
-    assert "setPhase(result.phase" in component
+    assert "setPhase(safeNativeStage(result))" in component
+    assert "function safeNativeStage(" in component
     assert "requireGuardedSession(enabled, token)" in component
     assert "npm run test:guarded && tsc -b && vite build" in package
 
