@@ -86,6 +86,7 @@ export function guardedCancel(enabled: boolean, token: string, id: string) {
 
 export function GuardedRunControls({enabled = false, token}: {enabled?: boolean; token: string}) {
   const [configId, setConfigId] = React.useState("");
+  const configSelection = React.useRef({id: "", version: 0});
   const [configJson, setConfigJson] = React.useState("{}");
   const [jobId, setJobId] = React.useState("");
   const [symbol, setSymbol] = React.useState("BTCUSDT");
@@ -147,12 +148,20 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     <h3>Experimental guarded native operations</h3>
     <p>Server-side opt-in and separate certification are required. Cancellation is unavailable after native execution starts; claims are never automatically replayed after restart.</p>
     <label htmlFor="guard-config-id">Configuration ID</label>
-    <input id="guard-config-id" value={configId} onChange={e => setConfigId(e.target.value)} />
+    <input id="guard-config-id" value={configId} onChange={e => {
+      configSelection.current = {id: e.target.value, version: configSelection.current.version + 1};
+      setConfigId(e.target.value);
+      setConfigJson("{}");
+      setState("");
+      setError("");
+    }} />
     <label htmlFor="guard-config-json">Native configuration JSON</label>
     <textarea id="guard-config-json" value={configJson} onChange={e => setConfigJson(e.target.value)} rows={8} />
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selection = configSelection.current;
       const result = await loadGuardedConfig(enabled, token, configId);
-      if (isCurrent()) {
+      if (isCurrent() && configSelection.current.version === selection.version &&
+          configSelection.current.id === selection.id) {
         setConfigJson(JSON.stringify(result, null, 2));
         setState("Validated saved configuration loaded for editing");
       }
