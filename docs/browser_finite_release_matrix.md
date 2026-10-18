@@ -504,3 +504,18 @@ sanitized; malformed JSON continues to receive 422. Isolated tests verify
 both mutation handlers reject oversized input without invoking their native
 owners. The limit applies only to experimental guarded mutations, not to saved
 read-only results or original files, and grants no release authorization.
+
+
+## B3/B4 guarded UI lifecycle outcome semantics (2026-10-18)
+
+The development-only, unmounted React control surface now distinguishes
+`ACCEPTED` (not completed), `CANCELLATION_UNAVAILABLE` (no cancellation
+confirmed), `COMPLETED` (native worker completion, not verified saved results),
+and `RECOVERY_UNVERIFIED` (claim survives but outcome and artifacts remain
+unknown). For recovery-unverified requests it suppresses prior phase information
+and disables repeat submission, progress and cancellation controls until a
+different request is selected. It accepts only bounded enumerated native job
+states with a matching request identifier, preventing an unexpected server
+payload from being displayed as proof of completion. Simulated event-handler
+tests exercise these states. No restart reconciliation or independent desktop-
+versus-browser invocation is certified; the normal browser remains read-only.
