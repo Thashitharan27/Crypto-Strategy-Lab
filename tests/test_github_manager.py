@@ -207,7 +207,7 @@ def test_widget_initial_refresh_fetches_remote_and_uses_clean_labels(qapp, monke
     monkeypatch.setattr(
         GitHubIntegrationWidget,
         "_async",
-        lambda self, fn, done, description: done(fn()),
+        lambda self, fn, done, description, **kwargs: done(fn()),
     )
 
     widget = GitHubIntegrationWidget()
@@ -229,7 +229,7 @@ def test_widget_shows_up_to_date_instead_of_second_refresh_action(qapp, monkeypa
     monkeypatch.setattr(
         GitHubIntegrationWidget,
         "_async",
-        lambda self, fn, done, description: done(fn()),
+        lambda self, fn, done, description, **kwargs: done(fn()),
     )
 
     widget = GitHubIntegrationWidget()
@@ -253,6 +253,44 @@ def test_commands_never_construct_force_push(repo, monkeypatch):
     manager.push("main")
     assert seen == [("push", "origin", "main")]
     assert all("--force" not in command for command in seen)
+
+
+def test_background_refresh_failure_is_inline_and_does_not_open_modal(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    warnings = []
+    fetches = []
+
+    def unavailable(self, fetch=False):
+        fetches.append(fetch)
+        raise GitError("Background fetch unavailable")
+
+    monkeypatch.setattr(GitManager, "status", unavailable)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
+    widget = GitHubIntegrationWidget()
+    qtbot.addWidget(widget)
+    # Drive the real QThreadPool -> queued Qt signal path, not a synchronous
+    # replacement of _async. This was the event-loop hang seen in raw CI.
+    qtbot.waitUntil(lambda: widget.state.text() == "● Git error", timeout=3000)
+    assert fetches == [True]
+    assert widget.status_detail.text() == "Background fetch unavailable"
+    assert widget.activity[-1] == "[GIT] Error: Background fetch unavailable"
+    assert warnings == []
+
+
+def test_explicit_operation_failure_keeps_error_dialog(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    warnings = []
+    monkeypatch.setattr(GitManager, "status", lambda self, fetch=False: GitStatus("main", "origin", ()))
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args: warnings.append(args))
+    widget = GitHubIntegrationWidget()
+    qtbot.addWidget(widget)
+
+    def unavailable():
+        raise GitError("Explicit update failed")
+
+    widget._async(unavailable, lambda result: None, "Updating from GitHub")
+    qtbot.waitUntil(lambda: bool(warnings), timeout=3000)
+    assert warnings[0][1:] == ("GitHub Sync", "Explicit update failed")
 
 
 def test_git_subprocess_timeout_is_bounded_and_reported(monkeypatch, tmp_path):
