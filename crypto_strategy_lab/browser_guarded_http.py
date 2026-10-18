@@ -118,7 +118,13 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         try:
             integration.save_config(config_id, payload)
             audit("CONFIG_SAVE", "SUCCESS")
-        except PermissionError:
+        except PermissionError as exc:
+            # Capability denial uses a plain PermissionError. A native OS
+            # permission/sharing error carries errno and is a persistence
+            # failure, not evidence that the guarded capability is disabled.
+            if exc.errno is not None:
+                audit("CONFIG_SAVE", "PERSISTENCE_FAILED")
+                raise HTTPException(status_code=503, detail="Configuration persistence unavailable")
             audit("CONFIG_SAVE", "DENIED")
             raise HTTPException(status_code=403, detail="Guarded operations disabled")
         except (ValueError, TypeError):
