@@ -51,8 +51,8 @@ def _engine_config():
 @pytest.mark.parametrize("side,exit_case", [
     ("LONG", "TP"), ("SHORT", "TP"),
     ("LONG", "SL"), ("SHORT", "SL"),
-    ("LONG", "TP1_THEN_SL"),
-    ("LONG", "TP1_THEN_BE"),
+    ("LONG", "TP1_THEN_SL"), ("SHORT", "TP1_THEN_SL"),
+    ("LONG", "TP1_THEN_BE"), ("SHORT", "TP1_THEN_BE"),
 ])
 def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path, side, exit_case):
     root = tmp_path / "guarded-output"
@@ -72,7 +72,11 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             "low": [99.0, 99.0, 99.0, 79.0 if exit_case == "TP1_THEN_SL" else 99.0], "volume": [1] * 4,
         })
         profiles = dict(engine_config.strategy_profiles)
-        profiles["sideways_long"] = StrategyProfile(
+        if side == "SHORT":
+            source["high"], source["low"] = (
+                200.0 - source["low"].copy(), 200.0 - source["high"].copy()
+            )
+        profiles["sideways_long" if side == "LONG" else "sideways_short"] = StrategyProfile(
             enabled=True, stop_loss_multiple=2,
             partial_profit_enabled=True, tp1_r=1,
             tp1_close_pct=50, tp2_r=2,
@@ -183,13 +187,31 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         if not exit_case.startswith("TP1_THEN_"):
             assert direct.iloc[1].long_exit_reason == "END_OF_DATA"
     else:
-        assert direct.iloc[0].short_exit_reason == exit_case
-        assert (direct.iloc[0].pair_net_pnl > 0) == (exit_case == "TP")
-        assert (direct.iloc[0].equity_after_trade > 1000) == (exit_case == "TP")
-        assert direct.iloc[1].short_exit_reason == "END_OF_DATA"
+        if exit_case.startswith("TP1_THEN_"):
+            assert direct.iloc[0].short_exit_reason in ("SL", "BE")
+            assert direct.iloc[0].short_final_exit_reason == exit_case
+            assert direct.iloc[0].short_tp1_hit
+            assert direct.iloc[0].short_tp1_quantity > 0
+            assert direct.iloc[0].short_stop_exit_quantity > 0
+            assert direct.iloc[0].short_fees > 0
+            assert direct.iloc[0].pair_net_pnl == pytest.approx(
+                direct.iloc[0].pair_gross_pnl - direct.iloc[0].pair_total_fees
+            )
+        else:
+            assert direct.iloc[0].short_exit_reason == exit_case
+            assert direct.iloc[1].short_exit_reason == "END_OF_DATA"
+        if exit_case in ("TP", "TP1_THEN_BE"):
+            assert direct.iloc[0].pair_net_pnl > 0
+            assert direct.iloc[0].equity_after_trade > 1000
+        else:
+            assert direct.iloc[0].pair_net_pnl < 0
+            assert direct.iloc[0].equity_after_trade < 1000
     if side == "LONG" and exit_case == "TP":
         assert_frame_equal(source, _frozen_candles(), check_exact=True)
     elif exit_case.startswith("TP1_THEN_"):
-        assert source.iloc[3]["low"] == (79.0 if exit_case == "TP1_THEN_SL" else 99.0)
+        if side == "LONG":
+            assert source.iloc[3]["low"] == (79.0 if exit_case == "TP1_THEN_SL" else 99.0)
+        else:
+            assert source.iloc[3]["high"] == (121.0 if exit_case == "TP1_THEN_SL" else 101.0)
     else:
         assert source.iloc[1]["low"] == pytest.approx(89.0 if (side == "SHORT" and exit_case == "TP") or (side == "LONG" and exit_case == "SL") else 99.0)
