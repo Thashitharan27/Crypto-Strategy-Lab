@@ -7,7 +7,7 @@ import {resolve} from "node:path";
 // No DOM is mounted and no production endpoint is contacted.
 const bundle = await build({
   entryPoints: [resolve("src/GuardedRunControls.tsx")],
-  platform: "node", format: "cjs", bundle: true, write: false, logLevel: "silent",
+  platform: "node", format: "cjs", bundle: true, external: ["react", "react-dom"], write: false, logLevel: "silent",
 });
 const generated = {exports: {}};
 new Function("module", "exports", "require", bundle.outputFiles[0].text)(
