@@ -61,7 +61,8 @@ def test_certification_uses_ephemeral_roots_and_authenticated_native_http(tmp_pa
         native_application=native, static_root=dist, acknowledge_test_only=True,
     ) as (app, token):
         assert token != TOKEN and len(token) >= 32
-        # Verify effective HTTP behavior below rather than relying on\n        # route introspection across optional FastAPI versions.\n        with TestClient(app, base_url="http://localhost") as client:
+        # Verify actual HTTP auth, not route list introspection.
+        with TestClient(app, base_url="http://localhost") as client:
             assert client.get("/").status_code == 200
             assert client.post("/api/v1/guarded/jobs", json={}).status_code == 401
             headers = {"Authorization": "Bearer " + token}
