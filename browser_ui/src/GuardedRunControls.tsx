@@ -344,7 +344,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       const result = await guardedProgress(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
           jobSelection.current.id === selectedJob.id) setPhase(safeNativeStage(result));
-    }, "job")} disabled={recoveryUnverified}>Refresh progress</button>
+    }, "job")} disabled={TERMINAL_JOB_STATES.has(state)}>Refresh progress</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
       const result = await guardedCancel(enabled, token, jobId);
@@ -397,7 +397,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     {verifiedSavedRun && <p role="status">{verifiedSavedRun}</p>}
     {savedRunError && <p role="alert">{savedRunError}</p>}
     {state && <p role="status">{describeJobState(state)}</p>}
-    {phase && !recoveryUnverified && <p role="status">Latest native stage: {phase}</p>}
+    {phase && !TERMINAL_JOB_STATES.has(state) && <p role="status">Latest native stage: {phase}</p>}
     {error && <p role="alert">{error}</p>}
   </section>;
 }
