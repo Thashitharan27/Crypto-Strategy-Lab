@@ -518,3 +518,36 @@ def test_persistent_crash_certification_rejects_unsafe_roots_before_start(tmp_pa
             pytest.fail("Incompatible evidence-copy and crash-root modes accepted")
     assert (original / "keep.json").read_bytes() == b"original"
     native.run.assert_not_called()
+
+
+@pytest.mark.parametrize("location", ["root", "ancestor", "descendant", "marker"])
+def test_persistent_crash_root_rejects_windows_junction_like_reparse_entries(
+    tmp_path, monkeypatch, location,
+):
+    """Model a Windows reparse attribute on each path without requiring NTFS."""
+    import crypto_strategy_lab.browser_certification as certification
+
+    dist = _certification_dist(tmp_path)
+    parent = tmp_path / "isolated-parent"
+    parent.mkdir()
+    root = parent / "csl-browser-crash-reparse"
+    root.mkdir()
+    marker = root / ".csl-browser-crash-test-only"
+    marker.write_bytes(b"CSL_BROWSER_CRASH_CERT_V1")
+    descendant = root / "subdir"
+    descendant.mkdir()
+    flagged = {"root": root, "ancestor": parent,
+               "descendant": descendant, "marker": marker}[location]
+    real_check = certification._unsafe_reparse_path
+    monkeypatch.setattr(
+        certification, "_unsafe_reparse_path",
+        lambda candidate: Path(candidate) == flagged or real_check(candidate),
+    )
+    native = Mock()
+    with pytest.raises(ValueError, match="persistent|marker",):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, persistent_execution_root=root,
+        ):
+            pytest.fail("A Windows junction-like reparse path must be rejected")
+    native.run.assert_not_called()
