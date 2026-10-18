@@ -21,6 +21,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                         help="Explicitly permit temporary guarded test endpoints")
     parser.add_argument("--static-root", type=Path, required=True,
                         help="Canonical absolute path to browser_ui/dist-certification")
+    parser.add_argument("--evidence-root", type=Path, default=None,
+                        help="Optional new absolute csl-browser-evidence-* directory for retaining only test outputs")
     parser.add_argument("--port", type=int, required=True,
                         help="Local-only test port (1-65535)")
     args = parser.parse_args(argv)
@@ -33,11 +35,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     if not args.static_root.is_absolute() or args.static_root.name != "dist-certification":
         parser.error("--static-root must be an absolute dist-certification directory")
     native = build_browser_readonly_service().application_service
+    extra = {"evidence_root": args.evidence_root} if args.evidence_root is not None else {}
     serve_isolated_browser_certification(
         native_application=native,
         static_root=args.static_root,
         port=args.port,
         acknowledge_test_only=True,
+        **extra,
     )
 
 

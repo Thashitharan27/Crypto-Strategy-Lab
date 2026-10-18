@@ -41,3 +41,23 @@ def test_cli_delegates_only_explicit_isolated_composition(monkeypatch, tmp_path)
         native_application=native, static_root=root, port=8919,
         acknowledge_test_only=True,
     )
+
+
+def test_operator_cli_propagates_explicit_evidence_destination(monkeypatch, tmp_path):
+    root = tmp_path / "dist-certification"
+    native = Mock()
+    service = Mock()
+    service.application_service = native
+    factory = Mock(return_value=service)
+    runner = Mock()
+    monkeypatch.setattr(command, "build_browser_readonly_service", factory)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
+    evidence = tmp_path / "csl-browser-evidence-operator"
+    command.main([
+        "--acknowledge-test-only", "--static-root", str(root),
+        "--port", "8919", "--evidence-root", str(evidence),
+    ])
+    runner.assert_called_once_with(
+        native_application=native, static_root=root,
+        port=8919, acknowledge_test_only=True, evidence_root=evidence,
+    )

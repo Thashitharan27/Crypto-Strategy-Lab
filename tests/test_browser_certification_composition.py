@@ -144,3 +144,101 @@ def test_certification_listener_is_explicitly_local_and_closes_ephemeral_roots(t
     printed = capsys.readouterr().out
     assert "http://127.0.0.1:8917/" in printed
     assert "TEST ONLY" in printed
+
+
+def test_certification_optional_evidence_preserves_only_isolated_inputs_and_outputs(tmp_path):
+    from crypto_strategy_lab.browser_certification import isolated_browser_certification
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    static_root = _certification_dist(tmp_path)
+    evidence = tmp_path / "csl-browser-evidence-case1"
+    original = tmp_path / "original-saved-config.json"
+    original.write_bytes(b"original untouched")
+    native = Mock()
+
+    with isolated_browser_certification(
+        native_application=native, static_root=static_root,
+        acknowledge_test_only=True, evidence_root=evidence,
+    ) as (app, token):
+        headers = {"Authorization": "Bearer " + token}
+        with TestClient(app, base_url="http://localhost") as client:
+            result = client.put("/api/v1/guarded/configs/fixture",
+                                json=ResearchRunConfig().to_dict(),
+                                headers=headers)
+            assert result.status_code == 200, result.text
+        assert evidence.is_dir()
+        assert not (evidence / "configs").exists()
+        assert not (evidence / "runs").exists()
+    assert (evidence / "configs" / "fixture.json").is_file()
+    assert (evidence / "runs").is_dir()
+    assert original.read_bytes() == b"original untouched"
+    native.run.assert_not_called()
+
+
+def test_certification_evidence_fails_closed_on_existing_or_unsafe_paths(tmp_path):
+    static_root = _certification_dist(tmp_path)
+    native = Mock()
+    existing = tmp_path / "csl-browser-evidence-existing"
+    existing.mkdir()
+    protected = existing / "original.json"
+    protected.write_bytes(b"never overwrite")
+    cases = (
+        existing,
+        tmp_path / "not-a-certification-directory",
+        Path("csl-browser-evidence-relative"),
+    )
+    for case in cases:
+        with pytest.raises(ValueError, match="Evidence destination"):
+            with isolated_browser_certification(
+                native_application=native, static_root=static_root,
+                acknowledge_test_only=True, evidence_root=case,
+            ):
+                pytest.fail("Unsafe evidence path was accepted")
+    assert protected.read_bytes() == b"never overwrite"
+    assert not (existing / "configs").exists()
+    native.run.assert_not_called()
+
+
+def test_certification_evidence_never_follows_output_symlinks(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    from types import SimpleNamespace
+
+    dist = _certification_dist(tmp_path)
+    secret = tmp_path / "original-private.txt"
+    secret.write_text("do-not-copy", encoding="utf-8")
+    evidence = tmp_path / "csl-browser-evidence-links"
+    native = Mock()
+
+    def run(request, config):
+        root = Path(config.reporting.output_dir)
+        try:
+            (root / "unsafe-link").symlink_to(secret)
+        except (OSError, NotImplementedError):
+            pytest.skip("Local filesystem symlinks unavailable")
+        return SimpleNamespace(output_dir=None)
+
+    native.run.side_effect = run
+    with pytest.raises(ValueError, match="Unsafe symlink"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, evidence_root=evidence,
+        ) as (app, token):
+            with TestClient(app, base_url="http://localhost") as client:
+                payload = {
+                    "request_id": "with-link",
+                    "request": {
+                        "exchange": "binance", "market": "futures_um",
+                        "symbol": "BTCUSDT",
+                        "period_start": "2025-01-01T00:00:00Z",
+                        "period_end": "2025-01-02T00:00:00Z",
+                        "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+                    },
+                    "config": ResearchRunConfig().to_dict(),
+                }
+                response = client.post(
+                    "/api/v1/guarded/jobs", json=payload,
+                    headers={"Authorization": "Bearer " + token},
+                )
+                assert response.status_code == 202
+    assert secret.read_text(encoding="utf-8") == "do-not-copy"
+    assert not (evidence / "runs" / "unsafe-link").exists()
