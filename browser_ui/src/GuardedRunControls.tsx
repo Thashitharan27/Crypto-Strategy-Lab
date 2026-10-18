@@ -161,6 +161,13 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   React.useEffect(() => {
     // Clear information from a previous operator/session; do not preserve
     // successful results when the guarded capability is removed.
+    // Changing operators must discard editable native configuration and
+    // invalidate pending loads, not just clear status messages.
+    configSelection.current = {
+      id: "", version: configSelection.current.version + 1,
+    };
+    setConfigId("");
+    setConfigJson("{}");
     setState("");
     setPhase("");
     setRecoveryUnverified(false);
@@ -224,7 +231,13 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       setError("");
     }} />
     <label htmlFor="guard-config-json">Native configuration JSON</label>
-    <textarea id="guard-config-json" value={configJson} onChange={e => setConfigJson(e.target.value)} rows={8} />
+    <textarea id="guard-config-json" value={configJson} onChange={e => {
+      // A pending server load must not overwrite a newer manual edit.
+      configSelection.current = {
+        id: configSelection.current.id, version: configSelection.current.version + 1,
+      };
+      setConfigJson(e.target.value);
+    }} rows={8} />
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selection = configSelection.current;
       const result = await loadGuardedConfig(enabled, token, configId);
