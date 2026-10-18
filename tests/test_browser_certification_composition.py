@@ -265,7 +265,8 @@ def test_certification_seeds_original_native_config_unchanged_and_reads_through_
             assert client.get(path).status_code == 401
             response = client.get(path, headers={"Authorization": "Bearer " + token})
             assert response.status_code == 200
-            assert response.json()["config"] == config.to_dict()
+            from crypto_strategy_lab.browser_config import read_research_config
+            assert response.json()["config"] == read_research_config(source)
         # The original remains untouched before and after the HTTP read.
         assert source.read_bytes() == original_bytes
     assert source.read_bytes() == original_bytes
