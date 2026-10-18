@@ -388,3 +388,83 @@ def test_disabled_coordinator_does_not_expose_persisted_request_claim(tmp_path):
             jobs.status("previous")
     finally:
         jobs.close()
+
+
+def test_completed_job_exposes_only_native_verified_output_folder(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    import crypto_strategy_lab.browser_guarded_recovery_verify as verifier
+
+    root = tmp_path.resolve()
+    output = root / "native-output"
+    output.mkdir()
+    app = Mock()
+    app.run.return_value = SimpleNamespace(output_dir=output)
+    jobs = GuardedRunJobs(app, enabled=True, execution_root=root)
+    checked = []
+    def verify(root_path, folder):
+        checked.append((root_path, folder))
+        return {"run_id": folder, "status": "ARTIFACTS_VERIFIED"}
+    monkeypatch.setattr(verifier, "verify_recovered_run", verify)
+    try:
+        jobs.submit("request-A", object(), ResearchRunConfig()).result(timeout=10)
+        assert jobs.status("request-A") == {
+            "request_id": "request-A", "status": "COMPLETED",
+            "verified_run_folder_id": "native-output",
+        }
+        assert checked == [(root, "native-output")]
+    finally:
+        jobs.close()
+
+
+def test_completed_job_never_maps_unverified_or_outside_native_output(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    import crypto_strategy_lab.browser_guarded_recovery_verify as verifier
+
+    root = tmp_path.resolve()
+    output = root / "native-output"
+    output.mkdir()
+    external = root.parent / "different-root" / "native-output"
+    candidates = (None, external, root / "bad.name", output)
+    monkeypatch.setattr(verifier, "verify_recovered_run",
+                        lambda *_: {"status": "RECOVERY_UNVERIFIED"})
+    for idx, candidate in enumerate(candidates):
+        app = Mock()
+        app.run.return_value = SimpleNamespace(output_dir=candidate)
+        jobs = GuardedRunJobs(app, enabled=True, execution_root=root)
+        try:
+            request_id = f"request-{idx}"
+            jobs.submit(request_id, object(), ResearchRunConfig()).result(timeout=10)
+            assert jobs.status(request_id) == {
+                "request_id": request_id, "status": "COMPLETED",
+            }
+        finally:
+            jobs.close()
+
+
+def test_completed_job_restart_never_reconstructs_verified_folder_mapping(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    import crypto_strategy_lab.browser_guarded_recovery_verify as verifier
+
+    root = tmp_path.resolve()
+    output = root / "native-output"
+    output.mkdir()
+    monkeypatch.setattr(verifier, "verify_recovered_run",
+                        lambda *_: {"status": "ARTIFACTS_VERIFIED"})
+    app = Mock()
+    app.run.return_value = SimpleNamespace(output_dir=output)
+    first = GuardedRunJobs(app, enabled=True, execution_root=root)
+    try:
+        first.submit("request-A", object(), ResearchRunConfig()).result(timeout=10)
+        assert first.status("request-A")["verified_run_folder_id"] == "native-output"
+    finally:
+        first.close()
+    second = GuardedRunJobs(app, enabled=True, execution_root=root)
+    try:
+        assert second.status("request-A") == {
+            "request_id": "request-A", "status": "RECOVERY_UNVERIFIED",
+        }
+    finally:
+        second.close()
