@@ -78,11 +78,14 @@ def isolated_browser_certification(
             original = source.read_bytes()
             if len(original) > 4 * 1024 * 1024:
                 raise ValueError("Frozen configuration exceeds guarded JSON limit")
-            native_config = GuiApplicationService.load_config(source)
+            # Validate the exact bytes that will be served, rather than
+            # reopening a mutable original after the read (TOCTOU).
+            seeded = config_root / source.name
+            seeded.write_bytes(original)
+            native_config = GuiApplicationService.load_config(seeded)
             native_config.validate()
-            # Source is read and validated only. The temporary name is the
-            # exact original basename, so browser GET uses the same identity.
-            (config_root / source.name).write_bytes(original)
+            # The source is never opened for writing. Browser GET uses the
+            # original safe saved ID from the isolated copy.
         integration = BrowserGuardedIntegration(
             native_application, config_root, enabled=True,
             execution_root=output_root,
