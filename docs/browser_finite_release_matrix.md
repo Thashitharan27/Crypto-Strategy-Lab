@@ -366,3 +366,17 @@ exits on native break-even protection. Full ordered trade frames, the composite
 must match an independently invoked native service. This extends B2 execution
 coverage but does not certify original historical fills, 1m timing, break-even
 race conditions or release readiness. Production mutation routes remain off.
+
+
+## B2 frozen one-minute execution sequences (2026-10-18)
+
+The isolated guarded HTTP regression exercises native `BacktestEngine` on complete,
+synthetic 1m candles separately from direct `GuiApplicationService`. The finite
+long/short cases include first TP or stop, different-minute TP/SL touch order,
+and TP1 followed by later break-even or protective stop, with nonzero configured
+slippage. Exact ordered trade DataFrames, source candles, exit timestamps,
+partial quantities, fee-inclusive net accounting and native composite exit
+reasons are checked. These engineering fixtures do **not** certify original
+historical 1m data, live browser UI invocation or original Windows saved
+artifacts. Browser mutations remain disabled pending consolidated independent
+Windows/desktop-versus-browser certification and explicit release approval.
