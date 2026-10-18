@@ -160,7 +160,7 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             assert direct.iloc[0].long_stop_exit_quantity > 0
             assert direct.iloc[0].long_fees > 0
             assert direct.iloc[0].pair_net_pnl == pytest.approx(
-                direct.iloc[0].pair_gross_pnl - direct.iloc[0].long_fees
+                direct.iloc[0].pair_gross_pnl - direct.iloc[0].pair_total_fees
             )
         if exit_case == "TP":
             assert direct.iloc[0].long_fees == pytest.approx(0.21)
