@@ -94,15 +94,18 @@ export async function inspectVerifiedSavedRun(enabled: boolean, token: string, f
   if (!response || !response.manifest ||
       typeof response.manifest !== "object" || Array.isArray(response.manifest) ||
       typeof response.manifest.run_id !== "string" ||
+      !ID.test(response.manifest.run_id) ||
       !response.summary || typeof response.summary !== "object" ||
-      Array.isArray(response.summary)) {
+      Array.isArray(response.summary) ||
+      (response.manifest.run_status !== undefined &&
+        (typeof response.manifest.run_status !== "string" ||
+         !ID.test(response.manifest.run_status)))) {
     throw new Error("Invalid verified saved-run response");
   }
   return {
     folderId,
     nativeRunId: response.manifest.run_id,
-    runStatus: typeof response.manifest.run_status === "string"
-      ? response.manifest.run_status : "not specified",
+    runStatus: response.manifest.run_status ?? "not specified",
   };
 }
 
