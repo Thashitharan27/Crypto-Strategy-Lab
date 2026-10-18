@@ -94,3 +94,27 @@ test process must not reuse original config/output write roots. Test both
 ordinary read-only composition (no guarded routes) and the explicit
 certification composition. No run of that harness or real browser click-through
 is claimed in this document.
+
+
+## 8. Isolated FastAPI test composition prepared
+
+`crypto_strategy_lab.browser_certification.isolated_browser_certification`
+is a context-managed **explicitly opted-in** factory. It accepts an injected
+existing native application service and the canonical, separate
+`dist-certification` static bundle; generates a fresh high-entropy token,
+creates brand-new temporary config/run directories, composes the existing
+authenticated FastAPI read/guarded endpoints, and removes the temporary
+directories after closing native jobs. The ordinary read-only launcher is not
+modified. Its tests cover missing opt-in, wrong static bundle, absent native
+owner, denied unauthenticated mutations, authenticated native save/submit,
+isolated output binding and source-file nonmutation.
+
+The factory itself does **not** listen on a network port, automatically opt in
+from environment variables, or independently exercise a graphical browser.
+For Windows operator certification, use this factory in a deliberate local-only
+test process with FastAPI TestClient or a separately reviewed temporary
+`uvicorn` binding to `127.0.0.1`; launch a real browser against that process,
+enter its fresh token in the separate certification page and execute the
+frozen test case. Retain actual browser/desktop invocation traces before
+claiming a B2/B3/B4 PASS. The in-process regression test is development
+evidence only, and the production launcher still mounts no guarded routes.
