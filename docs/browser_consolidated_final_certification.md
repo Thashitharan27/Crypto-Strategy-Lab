@@ -140,3 +140,32 @@ capture the resulting authenticated native invocations and inspect saved
 outputs before recording B2/B3/B4 evidence. Real native runs must use the
 already approved frozen input set and must never write to the canonical
 Data Lake, original saved files or live bot directories.
+
+
+## 10. Explicit operator command for an isolated certification session
+
+After building the certification-only assets (`cd browser_ui; npm run
+build:certification`), the Windows CryptoBots Desktop operator may start the
+separate test-only service with an **explicit acknowledgement**:
+
+```powershell
+python -m crypto_strategy_lab.browser_certification_cli `
+  --acknowledge-test-only `
+  --static-root "C:\CryptoBots\Crypto Strategy Lab\browser_ui\dist-certification" `
+  --port 8919
+```
+
+The entrypoint constructs the **existing** native application using the
+established Data Lake environment paths and hands it to the opt-in
+`serve_isolated_browser_certification` factory. Configurations and results
+created by this test server use temporary isolated write roots, not the
+canonical originals. The server binds only to `127.0.0.1`, prints its
+session token to the operator terminal, and requires a manually armed
+certification-only browser page. The normal `browser_launcher` does not
+import or call this entrypoint and still exposes zero guarded routes.
+
+**No actual browser or desktop run has been executed by adding this CLI.**
+The operator must capture the real browser UI/HTTP trace and separately
+launch the PySide6 UI on matching frozen inputs, compare results and record
+Windows acceptance. Do not use the CLI for production, external listeners,
+live trading, or automatic release.
