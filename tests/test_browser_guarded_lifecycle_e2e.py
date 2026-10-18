@@ -161,3 +161,76 @@ def test_authenticated_http_restart_reports_unverified_without_replay(tmp_path):
         native.run.assert_called_once()
     finally:
         restarted.close()
+
+
+def test_authenticated_http_crash_stale_worker_fails_closed_without_replay(tmp_path):
+    """B3: simulated crash claims block fresh work until manual reconciliation.
+
+    Neither an abandoned request claim nor a stale worker lock is proof of
+    native completion. This tests the HTTP boundary, not process termination.
+    """
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    output_root = tmp_path / "guarded-output"
+    output_root.mkdir()
+    old_claim = output_root / ".guarded-request-interrupted.claim"
+    old_claim.mkdir()
+    stale_worker = output_root / ".guarded-native-worker.lock"
+    stale_worker.mkdir()
+
+    native = Mock()
+    integration = BrowserGuardedIntegration(
+        native, tmp_path, enabled=True, execution_root=output_root,
+    )
+    app = create_browser_app(
+        token=TOKEN, guarded_integration=integration, guarded_enabled=True,
+    )
+    headers = {"Authorization": "Bearer " + TOKEN}
+    payload = {
+        "request_id": "new-after-crash",
+        "request": {
+            "exchange": "binance", "market": "futures_um", "symbol": "BTCUSDT",
+            "period_start": "2025-01-01T00:00:00Z",
+            "period_end": "2025-01-02T00:00:00Z",
+            "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+        },
+        "config": ResearchRunConfig().to_dict(),
+    }
+    try:
+        with TestClient(app, base_url="http://localhost") as client:
+            # A surviving claim only says an earlier request existed.
+            assert client.get(
+                "/api/v1/guarded/jobs/interrupted", headers=headers,
+            ).json() == {
+                "request_id": "interrupted",
+                "status": "RECOVERY_UNVERIFIED",
+            }
+            assert client.get(
+                "/api/v1/guarded/jobs/interrupted/progress", headers=headers,
+            ).status_code == 404
+            assert client.post(
+                "/api/v1/guarded/jobs/interrupted/cancel", headers=headers,
+            ).status_code == 404
+
+            # A new job cannot steal the crashed native worker's ownership.
+            assert client.post(
+                "/api/v1/guarded/jobs", json=payload,
+            ).status_code == 401
+            rejected = client.post(
+                "/api/v1/guarded/jobs", json=payload, headers=headers,
+            )
+            assert rejected.status_code == 503
+            assert rejected.json() == {"detail": "Native research service unavailable"}
+            assert client.get(
+                "/api/v1/guarded/jobs/new-after-crash", headers=headers,
+            ).status_code == 404
+            payload["request_id"] = "interrupted"
+            assert client.post(
+                "/api/v1/guarded/jobs", json=payload, headers=headers,
+            ).status_code == 503
+        native.run.assert_not_called()
+        assert old_claim.is_dir()
+        assert stale_worker.is_dir()
+        assert not (output_root / ".guarded-request-new-after-crash.claim").exists()
+    finally:
+        integration.close()
