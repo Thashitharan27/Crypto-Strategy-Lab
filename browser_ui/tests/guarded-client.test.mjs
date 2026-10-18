@@ -27,7 +27,6 @@ test("all guarded operations deny before network access", async () => {
   };
   try {
     for (const invoke of [
-      () => api.loadGuardedConfig(false, TOKEN, "../bad"),
       () => api.saveGuardedConfig(false, TOKEN, "../bad", {}),
       () => api.submitGuardedRun(false, TOKEN, "../bad", request, {}),
       () => api.guardedStatus(false, TOKEN, "../bad"),
@@ -36,6 +35,7 @@ test("all guarded operations deny before network access", async () => {
     ]) {
       assert.throws(invoke, /disabled/);
     }
+    await assert.rejects(api.loadGuardedConfig(false, TOKEN, "../bad"), /disabled/);
     assert.equal(calls, 0);
   } finally { globalThis.fetch = original; }
 });
@@ -133,7 +133,7 @@ test("saved native config loader rejects invalid identifiers and response shapes
     ok: true, json: async () => cases[index++],
   });
   try {
-    assert.throws(() => api.loadGuardedConfig(true, TOKEN, "../escape"), /Invalid identifier/);
+    await assert.rejects(api.loadGuardedConfig(true, TOKEN, "../escape"), /Invalid identifier/);
     for (let i = 0; i < cases.length; i++) {
       await assert.rejects(api.loadGuardedConfig(true, TOKEN, "safe"), /Invalid native configuration response/);
     }
