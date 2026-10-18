@@ -53,6 +53,7 @@ def _engine_config():
     ("LONG", "SL"), ("SHORT", "SL"),
     ("LONG", "TP1_THEN_SL"), ("SHORT", "TP1_THEN_SL"),
     ("LONG", "TP1_THEN_BE"), ("SHORT", "TP1_THEN_BE"),
+    ("LONG", "INTRABAR_TP1_THEN_BE"), ("SHORT", "INTRABAR_TP1_THEN_BE"),
     ("LONG", "INTRABAR_TP"), ("SHORT", "INTRABAR_TP"),
     ("LONG", "INTRABAR_SL"), ("SHORT", "INTRABAR_SL"),
     ("LONG", "INTRABAR_ORDER_TP_FIRST"), ("SHORT", "INTRABAR_ORDER_TP_FIRST"),
@@ -74,12 +75,18 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     intrabar = None
     if exit_case.startswith("INTRABAR_"):
         intrabar = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=45, freq="1min", tz="UTC"),
-            "open": [100.0] * 45, "close": [100.0] * 45,
-            "high": [101.0] * 45, "low": [99.0] * 45,
-            "volume": [1] * 45,
+            "timestamp": pd.date_range("2024-01-01", periods=75, freq="1min", tz="UTC"),
+            "open": [100.0] * 75, "close": [100.0] * 75,
+            "high": [101.0] * 75, "low": [99.0] * 75,
+            "volume": [1] * 75,
         })
-        if exit_case in ("INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST"):
+        if exit_case == "INTRABAR_TP1_THEN_BE":
+            intrabar.loc[35, "high"] = 130.0
+            # Hold away from the BE stop until minute 50 in both directions.
+            intrabar.loc[36:49, "high"] = 101.5
+            intrabar.loc[36:49, "low"] = 100.5
+            intrabar.loc[50, "low"] = 99.0
+        elif exit_case in ("INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST"):
             intrabar.loc[20, "high"] = 111.0
         else:
             intrabar.loc[20, "low"] = 89.0
@@ -97,13 +104,15 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             strategy_timeframe_minutes=15, intrabar_timeframe_minutes=1,
             slippage=0.0005,
         )
-    if exit_case in ("TP1_THEN_SL", "TP1_THEN_BE"):
+    if "TP1_THEN_" in exit_case:
         source = pd.DataFrame({
             "timestamp": pd.date_range("2024-01-01", periods=4, freq="15min", tz="UTC"),
             "open": [100.0] * 4, "close": [100.0] * 4,
             "high": [101.0, 101.0, 120.0, 105.0],
             "low": [99.0, 99.0, 99.0, 79.0 if exit_case == "TP1_THEN_SL" else 99.0], "volume": [1] * 4,
         })
+        if exit_case == "INTRABAR_TP1_THEN_BE":
+            source.loc[2, "high"] = 130.0
         profiles = dict(engine_config.strategy_profiles)
         if side == "SHORT":
             source["high"], source["low"] = (
@@ -113,7 +122,7 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             enabled=True, stop_loss_multiple=2,
             partial_profit_enabled=True, tp1_r=1,
             tp1_close_pct=50, tp2_r=2,
-            break_even_enabled=exit_case == "TP1_THEN_BE",
+            break_even_enabled=exit_case.endswith("TP1_THEN_BE"),
             break_even_activation_r=1,
             break_even_offset_r=0,
         )
@@ -193,9 +202,20 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     assert calls[0][0] == calls[1][0]
     assert calls[0][1] == calls[1][1] == direct_config.to_dict()
     assert_frame_equal(direct, browser, check_exact=True)
-    assert len(direct) >= 1 if exit_case.startswith("TP1_THEN_") else len(direct) == 2
+    assert len(direct) >= 1 if ("TP1_THEN_" in exit_case) else len(direct) == 2
+    if exit_case == "INTRABAR_TP1_THEN_BE":
+        prefix = "long" if side == "LONG" else "short"
+        assert bool(direct.iloc[0][f"{prefix}_tp1_hit"]), direct.iloc[0][[
+            f"{prefix}_final_exit_reason", f"{prefix}_tp1_exit_time", f"{prefix}_be_triggered"
+        ]]
+        assert bool(direct.iloc[0][f"{prefix}_be_triggered"]), direct.iloc[0][[
+            f"{prefix}_final_exit_reason", f"{prefix}_tp1_exit_time", f"{prefix}_be_triggered"
+        ]]
     if exit_case.startswith("INTRABAR_"):
-        assert direct.iloc[0].exit_time == pd.Timestamp("2024-01-01T00:20:00Z")
+        assert direct.iloc[0].exit_time == pd.Timestamp(
+            "2024-01-01T00:50:00Z" if exit_case == "INTRABAR_TP1_THEN_BE"
+            else "2024-01-01T00:20:00Z"
+        )
         assert direct.iloc[0].pair_total_fees > 0
         assert direct.iloc[0].pair_net_pnl == pytest.approx(
             direct.iloc[0].pair_gross_pnl - direct.iloc[0].pair_total_fees
@@ -203,12 +223,12 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     assert direct.iloc[0].side == side
     assert direct.iloc[0].strategy_entry_time == pd.Timestamp("2024-01-01T00:15:00Z")
     if side == "LONG":
-        if exit_case.startswith("TP1_THEN_"):
+        if "TP1_THEN_" in exit_case:
             assert direct.iloc[0].long_exit_reason in ("SL", "BE")
         else:
             assert direct.iloc[0].long_exit_reason == ("TP" if exit_case in ("INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST") else "SL" if exit_case.startswith("INTRABAR_") else exit_case)
-        if exit_case.startswith("TP1_THEN_"):
-            assert direct.iloc[0].long_final_exit_reason == exit_case
+        if "TP1_THEN_" in exit_case:
+            assert direct.iloc[0].long_final_exit_reason == exit_case.removeprefix("INTRABAR_")
             assert direct.iloc[0].long_tp1_hit
             assert direct.iloc[0].long_tp1_quantity > 0
             assert direct.iloc[0].long_stop_exit_quantity > 0
@@ -223,18 +243,22 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         elif exit_case in ("INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST"):
             assert direct.iloc[0].pair_net_pnl > 0
             assert direct.iloc[0].equity_after_trade > 1000
-        elif exit_case == "TP1_THEN_BE":
-            assert direct.iloc[0].pair_net_pnl == pytest.approx(4.895)
-            assert direct.iloc[0].equity_after_trade == pytest.approx(1004.895)
+        elif exit_case in ("TP1_THEN_BE", "INTRABAR_TP1_THEN_BE"):
+            if exit_case == "TP1_THEN_BE":
+                assert direct.iloc[0].pair_net_pnl == pytest.approx(4.895)
+                assert direct.iloc[0].equity_after_trade == pytest.approx(1004.895)
+            else:
+                assert direct.iloc[0].pair_net_pnl > 0
+                assert direct.iloc[0].equity_after_trade > 1000
         else:
             assert direct.iloc[0].pair_net_pnl < 0
             assert direct.iloc[0].equity_after_trade < 1000
-        if not exit_case.startswith("TP1_THEN_"):
+        if not "TP1_THEN_" in exit_case:
             assert direct.iloc[1].long_exit_reason == "END_OF_DATA"
     else:
-        if exit_case.startswith("TP1_THEN_"):
+        if "TP1_THEN_" in exit_case:
             assert direct.iloc[0].short_exit_reason in ("SL", "BE")
-            assert direct.iloc[0].short_final_exit_reason == exit_case
+            assert direct.iloc[0].short_final_exit_reason == exit_case.removeprefix("INTRABAR_")
             assert direct.iloc[0].short_tp1_hit
             assert direct.iloc[0].short_tp1_quantity > 0
             assert direct.iloc[0].short_stop_exit_quantity > 0
@@ -245,7 +269,7 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         else:
             assert direct.iloc[0].short_exit_reason == ("TP" if exit_case in ("INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST") else "SL" if exit_case.startswith("INTRABAR_") else exit_case)
             assert direct.iloc[1].short_exit_reason == "END_OF_DATA"
-        if exit_case in ("TP", "TP1_THEN_BE", "INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST"):
+        if exit_case in ("TP", "TP1_THEN_BE", "INTRABAR_TP1_THEN_BE", "INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST"):
             assert direct.iloc[0].pair_net_pnl > 0
             assert direct.iloc[0].equity_after_trade > 1000
         else:
@@ -253,7 +277,7 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             assert direct.iloc[0].equity_after_trade < 1000
     if side == "LONG" and exit_case == "TP":
         assert_frame_equal(source, _frozen_candles(), check_exact=True)
-    elif exit_case.startswith("TP1_THEN_"):
+    elif "TP1_THEN_" in exit_case:
         if side == "LONG":
             assert source.iloc[3]["low"] == (79.0 if exit_case == "TP1_THEN_SL" else 99.0)
         else:
