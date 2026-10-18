@@ -96,12 +96,18 @@ def isolated_browser_certification(
             getattr(native_application, "catalog", None),
             application_service=native_application,
         )
-        app = create_browser_app(
-            token=token, read_service=service,
-            completed_run_root=output_root, config_root=config_root,
-            static_root=root, guarded_integration=integration,
-            guarded_enabled=True,
-        )
+        try:
+            app = create_browser_app(
+                token=token, read_service=service,
+                completed_run_root=output_root, config_root=config_root,
+                static_root=root, guarded_integration=integration,
+                guarded_enabled=True,
+            )
+        except BaseException:
+            # No ASGI lifespan exists to close this coordinator if
+            # application composition itself fails.
+            integration.close()
+            raise
         # Reserve an evidence directory only after *all* native input and
         # application-composition checks succeeded. A failed factory setup
         # must not leave an empty operator evidence destination behind.
