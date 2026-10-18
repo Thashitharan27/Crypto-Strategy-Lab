@@ -134,7 +134,11 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     setError("");
     try { await action(isCurrent); }
     catch { if (isCurrent()) setError("Guarded operation unavailable or rejected"); }
-    finally { if (isCurrent()) busy.current = false; }
+    finally {
+      // A selection change invalidates the response, not ownership of the
+      // in-flight request. Always release its busy claim in the same session.
+      if (session.current.version === submittedSession.version) busy.current = false;
+    }
   }
   function nativeConfig(): Record<string, unknown> {
     const value: unknown = JSON.parse(configJson);
