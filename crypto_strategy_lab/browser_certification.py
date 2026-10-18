@@ -55,7 +55,6 @@ def isolated_browser_certification(
                 or any(part.is_symlink() for part in (evidence.parent, *evidence.parent.parents))
                 or evidence.parent.resolve(strict=True) != evidence.parent):
             raise ValueError("Evidence destination must be a new canonical csl-browser-evidence-* directory")
-        os.mkdir(evidence, mode=0o700)
 
     with TemporaryDirectory(prefix="csl-browser-cert-") as scratch:
         temp_root = Path(scratch).resolve()
@@ -86,6 +85,11 @@ def isolated_browser_certification(
             native_config.validate()
             # The source is never opened for writing. Browser GET uses the
             # original safe saved ID from the isolated copy.
+        # Do not reserve a permanent evidence destination until the frozen
+        # source has passed native validation. Rejected input must leave no
+        # empty certification-evidence directory behind.
+        if evidence is not None:
+            os.mkdir(evidence, mode=0o700)
         integration = BrowserGuardedIntegration(
             native_application, config_root, enabled=True,
             execution_root=output_root,
