@@ -485,17 +485,20 @@ class GitHubIntegrationWidget(QWidget):
     def _log(self, text):
         self.activity = (self.activity + [f"[GIT] {text}"])[-200:]
 
-    def _async(self, fn, done, description):
+    def _async(self, fn, done, description, *, error_handler=None):
         self._log(description)
         task = _Task(fn)
         task.signals.done.connect(done)
-        task.signals.failed.connect(self._error)
+        task.signals.failed.connect(error_handler or self._error)
         self.pool.start(task)
 
-    def _error(self, message):
+    def _status_error(self, message):
         self.state.setText("● Git error")
         self.status_detail.setText(message.splitlines()[0])
         self._log("Error: " + message.splitlines()[0])
+
+    def _error(self, message):
+        self._status_error(message)
         QMessageBox.warning(self, "GitHub Sync", message)
 
     def refresh_status(self, fetch=True):
@@ -505,6 +508,9 @@ class GitHubIntegrationWidget(QWidget):
             lambda: self.manager.status(fetch),
             self._show_status,
             "Checking repository status",
+            # Refresh also runs automatically during workstation startup. Its
+            # failure must not enter a modal event loop and block research.
+            error_handler=self._status_error,
         )
 
     def _show_status(self, status):
