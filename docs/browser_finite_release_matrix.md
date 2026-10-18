@@ -413,3 +413,20 @@ This is implementation/build coverage only, not independent browser interactive
 certification or approval to enable configuration writes or execution. Do not
 expose this module to normal browser users before consolidated certification
 and explicit approval.
+
+
+## B4 dormant guarded UI session isolation and request contract (2026-10-18)
+
+The unmounted guarded React controls now associate asynchronous results with the
+originating authorization session/epoch, clear stale status and progress on
+session changes, and ignore late completions from prior sessions. The exported
+request helpers reject disabled sessions and malformed tokens before building
+HTTP operations. Node's built-in test runner executes the real TSX helper code
+transformed with the existing Vite/esbuild dependency; mocked network tests
+cover default denial, all five authenticated guarded API operations, request
+bodies and bounded error handling. The browser build executes these tests before
+TypeScript compilation. These are controlled client/helper tests, not real
+interactive browser certification, OS-level interruption or approval to mount
+the module. The production read-only App still does not import it, and server
+execution/configuration mutations stay disabled until final certification and
+explicit approval.
