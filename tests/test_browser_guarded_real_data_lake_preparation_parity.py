@@ -159,3 +159,101 @@ def test_real_zip_loader_and_prepared_frames_match_native_and_guarded_http(tmp_p
     assert_frame_equal(captures[0][3], captures[1][3], check_exact=True)
     assert_frame_equal(captures[0][5], captures[1][5], check_exact=True)
     assert captures[0][2]["close"].notna().all()
+
+
+def test_full_native_zip_run_and_manifest_parity_direct_vs_guarded_http(tmp_path):
+    """Use the *default* production ResearchRunner/native simulator/reporter.
+
+    Both paths independently load the same immutable ZIP sources. This does
+    not replace original Windows market-data certification.
+    """
+    from crypto_strategy_lab.browser_guarded_recovery_verify import verify_recovered_run
+    from crypto_strategy_lab.gui.v2_controller import CompletedRunReader
+    from crypto_strategy_lab.run_manifest import artifact_path
+
+    raw = tmp_path / "lake"
+    _write_frozen_real_klines(raw)
+    output = tmp_path / "approved"
+    output.mkdir()
+    config = replace(ResearchRunConfig(), data=replace(
+        ResearchRunConfig().data,
+        strategy_timeframe_minutes=240,
+        intrabar_timeframe_minutes=1,
+        use_intrabar_data=True,
+    ))
+    request = GuiResearchRequest(
+        exchange="binance", market="futures_um", symbol="BTCUSDT",
+        period_start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        period_end=datetime(2026, 1, 3, tzinfo=timezone.utc),
+        strategy_timeframe="4h", intrabar_timeframe="1m",
+    )
+
+    # No runner_factory: the actual GUI service composes the existing
+    # ResearchRunner + NativeSimulator + canonical manifest reporter.
+    direct_service = GuiApplicationService(raw, tmp_path / "native-cache")
+    direct = direct_service.run(request, bind_guarded_output_root(config, output))
+
+    browser_service = GuiApplicationService(raw, tmp_path / "browser-cache")
+    integration = BrowserGuardedIntegration(
+        browser_service, tmp_path, enabled=True, execution_root=output,
+    )
+    token = "n" * 48
+    app = create_browser_app(
+        token=token, guarded_integration=integration, guarded_enabled=True,
+    )
+    try:
+        with TestClient(app, base_url="http://localhost") as client:
+            response = client.post(
+                "/api/v1/guarded/jobs",
+                headers={"Authorization": "Bearer " + token},
+                json={
+                    "request_id": "native-zip-complete",
+                    "request": {
+                        "exchange": "binance", "market": "futures_um",
+                        "symbol": "BTCUSDT",
+                        "period_start": "2026-01-01T00:00:00Z",
+                        "period_end": "2026-01-03T00:00:00Z",
+                        "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+                    },
+                    "config": config.to_dict(),
+                },
+            )
+            assert response.status_code == 202, response.text
+            browser = integration._jobs.result("native-zip-complete").result(timeout=120)
+            status = client.get(
+                "/api/v1/guarded/jobs/native-zip-complete",
+                headers={"Authorization": "Bearer " + token},
+            )
+            assert status.status_code == 200
+            assert status.json()["status"] == "COMPLETED"
+    finally:
+        integration.close()
+
+    assert_frame_equal(direct.trades, browser.trades, check_exact=True)
+    assert direct.prepared_cache_key == browser.prepared_cache_key
+    assert direct.strategy_rows == browser.strategy_rows
+    assert direct.prepared_rows == browser.prepared_rows
+    assert direct.output_dir != browser.output_dir
+
+    reader = CompletedRunReader()
+    native_manifest, native_summary = reader.read(direct.output_dir)
+    http_manifest, http_summary = reader.read(browser.output_dir)
+    assert native_summary == http_summary
+    for section in ("request", "config", "hashes", "catalog", "prepared"):
+        assert native_manifest[section] == http_manifest[section]
+    assert (
+        native_manifest["research"]["trade_fingerprint"]
+        == http_manifest["research"]["trade_fingerprint"]
+    )
+    assert set(native_manifest["artifacts"]) == set(http_manifest["artifacts"])
+    for run, manifest in (
+        (direct.output_dir, native_manifest),
+        (browser.output_dir, http_manifest),
+    ):
+        for name in manifest["artifacts"]:
+            artifact_path(run, manifest, name, verify=True)
+        assert verify_recovered_run(output, Path(run).name)["status"] == "ARTIFACTS_VERIFIED"
+    for name in ("trades", "trade_csv", "signals", "summary"):
+        assert artifact_path(direct.output_dir, native_manifest, name).read_bytes() == (
+            artifact_path(browser.output_dir, http_manifest, name).read_bytes()
+        )
