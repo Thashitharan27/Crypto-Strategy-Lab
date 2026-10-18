@@ -145,6 +145,7 @@ test("saved native config loader rejects invalid identifiers and response shapes
 // TSX component. No DOM, new test framework or production mount is required.
 // This deliberately uses React's test-only dispatcher seam, not application code.
 const ReactForEvents = await import("react");
+const settleHandlers = () => new Promise(resolve => setImmediate(resolve));
 function guardedEventHarness(initialProps = {enabled: true, token: TOKEN}) {
   const internals = ReactForEvents.default.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
   const hooks = [];
@@ -223,12 +224,12 @@ test("guarded editor click-load, ID switch and edit/save preserve selection owne
     assert.equal(calls.length, 1);
     ui.change("guard-config-id", "second");
     resolveLoad({ok: true, json: async () => ({config: {config_version: 3, symbol: "OLD"}})});
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    await settleHandlers();
     ui.render();
     assert.equal(ui.find("textarea", "guard-config-json").props.value, "{}");
     ui.change("guard-config-json", '{"config_version":3,"symbol":"NEW"}', "textarea");
     ui.click("Save native configuration");
-    await Promise.resolve(); await Promise.resolve();
+    await settleHandlers();
     assert.equal(calls[1][0], "/api/v1/guarded/configs/second");
     assert.deepEqual(JSON.parse(calls[1][1].body), {config_version: 3, symbol: "NEW"});
   } finally { globalThis.fetch = original; }
@@ -246,13 +247,13 @@ test("guarded UI click-submit and status/progress/cancel use selected request ID
     ui.change("guard-job-id", "job-A");
     ui.change("guard-config-json", '{"config_version":3}', "textarea");
     ui.click("Submit native research run");
-    await Promise.resolve(); await Promise.resolve();
+    await settleHandlers();
     ui.click("Refresh status");
-    await Promise.resolve(); await Promise.resolve();
+    await settleHandlers();
     ui.click("Refresh progress");
-    await Promise.resolve(); await Promise.resolve();
+    await settleHandlers();
     ui.click("Request cancellation");
-    await Promise.resolve(); await Promise.resolve();
+    await settleHandlers();
     assert.deepEqual(calls.map(([url, options]) => [options.method, url]), [
       ["POST", "/api/v1/guarded/jobs"],
       ["GET", "/api/v1/guarded/jobs/job-A"],
@@ -273,7 +274,7 @@ test("operator token switch invalidates in-flight guarded status response", asyn
     ui.click("Refresh status");
     ui.rerender({enabled: true, token: "different-operator-token"});
     resolveRequest({ok: true, json: async () => ({status: "COMPLETED"})});
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    await settleHandlers();
     ui.render();
     const statuses = [];
     // The underlying React state must not receive a previous operator's result.
