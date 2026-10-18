@@ -222,6 +222,28 @@ def test_invalid_frozen_config_does_not_reserve_evidence_root(tmp_path):
     native.run.assert_not_called()
 
 
+def test_certification_app_composition_failure_leaves_no_evidence_destination(tmp_path, monkeypatch):
+    """The operator should not lose an evidence name if FastAPI setup fails."""
+    import crypto_strategy_lab.browser_certification as certification
+
+    dist = _certification_dist(tmp_path)
+    evidence = tmp_path / "csl-browser-evidence-app-rejected"
+    native = Mock()
+
+    def fail_composition(**_kwargs):
+        raise RuntimeError("injected test-only app composition failure")
+
+    monkeypatch.setattr(certification, "create_browser_app", fail_composition)
+    with pytest.raises(RuntimeError, match="app composition failure"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, evidence_root=evidence,
+        ):
+            pytest.fail("Rejected app must never start a certification session")
+    assert not evidence.exists()
+    native.run.assert_not_called()
+
+
 def test_certification_evidence_never_follows_output_symlinks(tmp_path):
     from crypto_strategy_lab.data_lake_config import ResearchRunConfig
     from types import SimpleNamespace
