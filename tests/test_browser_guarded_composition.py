@@ -43,6 +43,7 @@ def test_opt_in_without_server_integration_fails_closed():
 def test_guarded_routes_reject_other_loopback_origins_before_native_access():
     """Loopback ports are distinct browser origins for native mutations."""
     integration = Mock()
+    integration.status.return_value = {"request_id": "job-1", "status": "RUNNING"}
     app = create_browser_app(token=TOKEN, guarded_integration=integration, guarded_enabled=True)
     auth = {"Authorization": "Bearer " + TOKEN}
     with TestClient(app, base_url="http://localhost:8919") as client:
