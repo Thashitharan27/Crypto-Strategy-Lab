@@ -355,3 +355,14 @@ net P&L and exit reason are checked. This supplements native partial-profit
 unit tests, but original historical intrabar ordering, slippage, partial-stop
 SL1 and break-even variants remain deferred to final consolidated acceptance.
 Normal browser mutations remain disabled pending explicit approval.
+
+
+## B2 guarded HTTP TP1 then break-even exit (2026-10-18)
+
+The isolated native-engine guarded HTTP comparison now additionally covers
+`TP1_THEN_BE`: 50% take profit is realized before the remaining position
+exits on native break-even protection. Full ordered trade frames, the composite
+`long_final_exit_reason`, native TP1/stop quantities and fee-inclusive P&L
+must match an independently invoked native service. This extends B2 execution
+coverage but does not certify original historical fills, 1m timing, break-even
+race conditions or release readiness. Production mutation routes remain off.
