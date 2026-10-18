@@ -377,6 +377,13 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     }} />
     <button type="button" onClick={() => {
       const originatingSession = session.current;
+      // Every inspection supersedes earlier requests for the same folder.
+      // Selection changes already increment this version; repeat clicks must
+      // also invalidate older responses so they cannot overwrite a fresh read.
+      savedRunSelection.current = {
+        id: savedRunSelection.current.id,
+        version: savedRunSelection.current.version + 1,
+      };
       const selection = savedRunSelection.current;
       setSavedRunError("");
       setVerifiedSavedRun("");
