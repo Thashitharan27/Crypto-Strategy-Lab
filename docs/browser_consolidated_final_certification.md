@@ -169,3 +169,35 @@ The operator must capture the real browser UI/HTTP trace and separately
 launch the PySide6 UI on matching frozen inputs, compare results and record
 Windows acceptance. Do not use the CLI for production, external listeners,
 live trading, or automatic release.
+
+
+## 11. Optional preservation of isolated browser evidence
+
+The certification-only operator command can retain its test-session artifacts
+when the user explicitly supplies **a new, nonexistent, absolute directory**
+whose leaf name starts with `csl-browser-evidence-`. Example:
+
+```powershell
+python -m crypto_strategy_lab.browser_certification_cli `
+  --acknowledge-test-only `
+  --static-root "C:\CryptoBots\Crypto Strategy Lab\browser_ui\dist-certification" `
+  --port 8919 `
+  --evidence-root "C:\CryptoBots\Certification Evidence\csl-browser-evidence-run01"
+```
+
+The factory exclusively creates that new evidence directory and rejects
+existing names, relative paths and symlinked ancestors. **It never overwrites
+a previous evidence directory or original saved files.** After the guarded
+native worker closes, it copies only the session's temporary `configs` and
+`runs` trees into the new evidence directory before cleaning up the
+temporary working roots. This makes it possible to compare saved manifests,
+ordered trades, fees, slippage and equity *after* closing the local server.
+
+If the option is omitted, the previous temporary-delete behavior remains.
+A copied output, including an incomplete one, is **not** automatically
+verified or approved; validate it with existing native manifest/artifact
+readers, inventory hashes and the independently invoked PySide6 reference.
+The operator must keep the evidence directory private and choose a
+dedicated location outside original configuration, result and Data Lake
+folders. Actual Windows permissions, free space, crash interruption and
+desktop-versus-browser parity still require separate operator certification.
