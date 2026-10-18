@@ -73,3 +73,23 @@ def test_default_read_only_endpoint_keeps_existing_local_origin_policy():
             "Origin": "http://localhost:8920",
         })
         assert response.status_code == 200
+
+
+def test_guarded_job_submit_exact_path_rejects_other_loopback_origin_before_native_call():
+    """The submission endpoint has no trailing slash; it is still guarded."""
+    integration = Mock()
+    app = create_browser_app(token=TOKEN, guarded_integration=integration, guarded_enabled=True)
+    auth = {"Authorization": "Bearer " + TOKEN}
+    with TestClient(app, base_url="http://localhost:8919") as client:
+        for origin in ("http://localhost:8920", "http://127.0.0.1:8919"):
+            result = client.post("/api/v1/guarded/jobs", json={},
+                headers={**auth, "Origin": origin})
+            assert result.status_code == 403
+            assert result.json() == {"detail": "Forbidden"}
+        # A matching origin reaches the authenticated native request validator.
+        valid_origin = client.post("/api/v1/guarded/jobs", json={},
+            headers={**auth, "Origin": "http://localhost:8919"})
+        assert valid_origin.status_code == 422
+        no_origin = client.post("/api/v1/guarded/jobs", json={}, headers=auth)
+        assert no_origin.status_code == 422
+    integration.submit.assert_not_called()

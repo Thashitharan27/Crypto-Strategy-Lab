@@ -98,7 +98,8 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
         # port is a different browser origin, even if both are loopback.
         # Preserve no-Origin CLI/TestClient requests; bearer auth remains
         # mandatory inside every guarded route.
-        if (request.url.path.startswith("/api/v1/guarded/")
+        if ((request.url.path == "/api/v1/guarded/jobs" or
+                 request.url.path.startswith("/api/v1/guarded/"))
                 and origin is not None
                 and origin != "http://" + host):
             return JSONResponse({"detail": "Forbidden"}, status_code=403)
