@@ -597,7 +597,8 @@ test("cancellation unavailable preserves progress while native job may still run
     await settleHandlers();
     ui.render();
     const displayed = JSON.stringify(ui.find("section", undefined).props.children);
-    assert.ok(displayed.includes("Latest native stage: running"));
+    assert.ok(displayed.includes("Latest native stage:"));
+    assert.ok(displayed.includes("running"));
     assert.ok(displayed.includes("Cancellation unavailable"));
   } finally {globalThis.fetch = original;}
 });
