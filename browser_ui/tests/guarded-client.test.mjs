@@ -378,12 +378,16 @@ test("guarded recovery state does not imply completion or allow cancellation", a
     await settleHandlers();
     ui.render();
     assert.equal(ui.find("button", "Request cancellation").props.disabled, true);
+    assert.equal(ui.find("button", "Refresh progress").props.disabled, true);
+    assert.equal(ui.find("button", "Submit native research run").props.disabled, true);
     const children = ui.find("section", undefined).props.children;
     assert.ok(JSON.stringify(children).includes("Recovery unverified"));
     assert.ok(JSON.stringify(children).includes("Do not resubmit or assume completion"));
     assert.equal(calls.length, 1);
     ui.change("guard-job-id", "another");
     assert.equal(ui.find("button", "Request cancellation").props.disabled, false);
+    assert.equal(ui.find("button", "Refresh progress").props.disabled, false);
+    assert.equal(ui.find("button", "Submit native research run").props.disabled, false);
   } finally {globalThis.fetch = original;}
 });
 
