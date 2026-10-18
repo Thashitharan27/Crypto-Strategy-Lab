@@ -94,6 +94,14 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
             valid_host, valid_origin = False, False
         if not valid_host or not valid_origin:
             return JSONResponse({"detail": "Forbidden"}, status_code=403)
+        # Guarded endpoints may change native state. A different localhost
+        # port is a different browser origin, even if both are loopback.
+        # Preserve no-Origin CLI/TestClient requests; bearer auth remains
+        # mandatory inside every guarded route.
+        if (request.url.path.startswith("/api/v1/guarded/")
+                and origin is not None
+                and origin != "http://" + host):
+            return JSONResponse({"detail": "Forbidden"}, status_code=403)
         return await call_next(request)
 
     @app.get("/api/v1/health")
