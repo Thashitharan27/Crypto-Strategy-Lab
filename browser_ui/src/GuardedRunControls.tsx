@@ -177,6 +177,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   const [timeframe, setTimeframe] = React.useState<NativeRequest["strategy_timeframe"]>("4h");
   const [intrabar, setIntrabar] = React.useState<NativeRequest["intrabar_timeframe"]>("1m");
   const [state, setState] = React.useState("");
+  const [configNotice, setConfigNotice] = React.useState("");
   const [phase, setPhase] = React.useState("");
   const [recoveryUnverified, setRecoveryUnverified] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -201,6 +202,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     setJobId("");
     setSavedRunFolderId("");
     setState("");
+    setConfigNotice("");
     setPhase("");
     setRecoveryUnverified(false);
     setError("");
@@ -259,7 +261,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       configSelection.current = {id: e.target.value, version: configSelection.current.version + 1};
       setConfigId(e.target.value);
       setConfigJson("{}");
-      setState("");
+      setConfigNotice("");
       setError("");
     }} />
     <label htmlFor="guard-config-json">Native configuration JSON</label>
@@ -276,12 +278,12 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       if (isCurrent() && configSelection.current.version === selection.version &&
           configSelection.current.id === selection.id) {
         setConfigJson(JSON.stringify(result, null, 2));
-        setState("Validated saved configuration loaded for editing");
+        setConfigNotice("Validated saved configuration loaded for editing");
       }
     }, "config")}>Load saved native configuration</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const result = await saveGuardedConfig(enabled, token, configId, nativeConfig());
-      if (isCurrent()) setState(confirmedConfigSave(result, configId));
+      if (isCurrent()) setConfigNotice(confirmedConfigSave(result, configId));
     }, "config")}>Save native configuration</button>
     <label htmlFor="guard-job-id">Request ID</label>
     <input id="guard-job-id" value={jobId} onChange={e => {
@@ -403,6 +405,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     }}>Inspect verified saved run</button>
     {verifiedSavedRun && <p role="status">{verifiedSavedRun}</p>}
     {savedRunError && <p role="alert">{savedRunError}</p>}
+    {configNotice && <p role="status">{configNotice}</p>}
     {state && <p role="status">{describeJobState(state)}</p>}
     {phase && !TERMINAL_JOB_STATES.has(state) && <p role="status">Latest native stage: {phase}</p>}
     {error && <p role="alert">{error}</p>}

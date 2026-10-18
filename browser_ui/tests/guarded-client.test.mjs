@@ -286,6 +286,60 @@ test("manual guarded config edit wins over a delayed load for the same ID", asyn
   } finally {globalThis.fetch = original;}
 });
 
+test("configuration actions preserve completed job state and terminal progress lockout", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, options) => ({ok: true, json: async () => {
+    if (url.endsWith("/guarded/jobs/job-A")) return {request_id: "job-A", status: "COMPLETED"};
+    if (url.endsWith("/configs/safe") && options?.method === "GET") return {config: {config_version: 3}};
+    return {config_id: "safe", status: "SAVED"};
+  }});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "job-A");
+    ui.click("Refresh status");
+    await settleHandlers();
+    ui.render();
+    assert.equal(ui.find("button", "Refresh progress").props.disabled, true);
+    ui.change("guard-config-id", "safe");
+    ui.click("Load saved native configuration");
+    await settleHandlers();
+    ui.render();
+    assert.equal(ui.find("button", "Refresh progress").props.disabled, true);
+    ui.click("Save native configuration");
+    await settleHandlers();
+    ui.render();
+    assert.equal(ui.find("button", "Refresh progress").props.disabled, true);
+    const output = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(output.includes("Native worker completed"));
+    assert.ok(output.includes("Configuration safe: SAVED"));
+  } finally {globalThis.fetch = original;}
+});
+
+test("configuration actions preserve recovery-unverified job lockout", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => ({ok: true, json: async () => {
+    if (url.endsWith("/guarded/jobs/interrupted")) return {request_id: "interrupted", status: "RECOVERY_UNVERIFIED"};
+    return {config_id: "safe", status: "SAVED"};
+  }});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "interrupted");
+    ui.click("Refresh status");
+    await settleHandlers();
+    ui.change("guard-config-id", "safe");
+    ui.change("guard-config-json", '{"config_version":3}', "textarea");
+    ui.click("Save native configuration");
+    await settleHandlers();
+    ui.render();
+    for (const name of ["Refresh progress", "Request cancellation", "Submit native research run"]) {
+      assert.equal(ui.find("button", name).props.disabled, true, name);
+    }
+    const output = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(output.includes("Recovery unverified"));
+    assert.ok(output.includes("Configuration safe: SAVED"));
+  } finally {globalThis.fetch = original;}
+});
+
 test("guarded config save rejects mismatched or unbounded acknowledgements", async () => {
   const original = globalThis.fetch;
   const responses = [
