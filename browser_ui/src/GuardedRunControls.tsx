@@ -271,6 +271,8 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
         id: configSelection.current.id, version: configSelection.current.version + 1,
       };
       setConfigJson(e.target.value);
+      // A prior SAVED acknowledgement describes the previous bytes only.
+      setConfigNotice("");
     }} rows={8} />
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selection = configSelection.current;
