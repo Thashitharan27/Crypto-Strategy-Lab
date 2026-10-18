@@ -468,3 +468,87 @@ def test_completed_job_restart_never_reconstructs_verified_folder_mapping(tmp_pa
         }
     finally:
         second.close()
+
+
+def test_real_process_termination_preserves_unverified_claim_and_stale_worker_lock(tmp_path):
+    """Kill a fixture worker process, then inspect its exact persistent isolated root.
+
+    This tests durable fail-closed ownership across an actual process kill;
+    it does not certify a real Windows browser/UI/native run or authorize replay.
+    """
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+    import time
+
+    root = tmp_path.resolve()
+    entered = root / "native-entered.marker"
+    child = r"""
+import pathlib
+import sys
+import time
+
+from crypto_strategy_lab.browser_guarded_jobs import GuardedRunJobs
+from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+root, entered = map(pathlib.Path, sys.argv[1:3])
+
+class BlockingNative:
+    progress_callback = None
+
+    def run(self, request, config):
+        entered.write_text("started", encoding="ascii")
+        while True:
+            time.sleep(0.1)
+
+jobs = GuardedRunJobs(BlockingNative(), enabled=True, execution_root=root)
+jobs.submit("killed-request", object(), ResearchRunConfig())
+while True:
+    time.sleep(0.1)
+"""
+    repo = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(repo), env.get("PYTHONPATH", "")]
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-u", "-c", child, str(root), str(entered)],
+        cwd=repo, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while not entered.is_file() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert entered.is_file(), (
+            "Fixture native worker never started; "
+            + process.stderr.read().decode(errors="replace")[:600]
+            if process.poll() is not None else "Fixture worker startup timed out"
+        )
+        assert (root / ".guarded-request-killed-request.claim").is_dir()
+        assert (root / ".guarded-native-worker.lock").is_dir()
+    finally:
+        process.kill()
+        process.wait(timeout=10)
+        process.stderr.close()
+
+    # New coordinator has no Future. Persisted claim cannot imply completion.
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    app = Mock()
+    restarted = GuardedRunJobs(app, enabled=True, execution_root=root)
+    try:
+        assert restarted.status("killed-request") == {
+            "request_id": "killed-request", "status": "RECOVERY_UNVERIFIED",
+        }
+        with pytest.raises(KeyError):
+            restarted.progress("killed-request")
+        with pytest.raises(KeyError):
+            restarted.cancel("killed-request")
+        with pytest.raises(RuntimeError, match="already owned"):
+            restarted.submit("new-request", object(), ResearchRunConfig())
+        assert (root / ".guarded-native-worker.lock").is_dir()
+        assert not (root / ".guarded-request-new-request.claim").exists()
+        app.run.assert_not_called()
+    finally:
+        restarted.close()
