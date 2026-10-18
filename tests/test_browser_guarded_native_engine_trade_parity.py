@@ -48,12 +48,16 @@ def _engine_config():
 
 
 @pytest.mark.parametrize("side", ["LONG", "SHORT"])
-def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path, side):
+@pytest.mark.parametrize("exit_case", ["TP", "SL"])
+def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path, side, exit_case):
     root = tmp_path / "guarded-output"
     root.mkdir()
     source = _frozen_candles()
     if side == "SHORT":
         source["high"], source["low"] = 200.0 - source["low"].copy(), 200.0 - source["high"].copy()
+    if exit_case == "SL":
+        source.loc[1, "high"] = 101.0 if side == "LONG" else 111.0
+        source.loc[1, "low"] = 89.0 if side == "LONG" else 99.0
     engine_config = _engine_config()
     calls = []
 
@@ -94,7 +98,7 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         token=token, guarded_integration=guarded, guarded_enabled=True,
     )
     payload = {
-        "request_id": "frozen-native-" + side.lower(),
+        "request_id": "frozen-native-" + side.lower() + "-" + exit_case.lower(),
         "request": {
             "exchange": "binance", "market": "futures_um",
             "symbol": "BTCUSDT",
@@ -112,13 +116,13 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
                 json=payload, headers={"Authorization": "Bearer " + token},
             )
             assert response.status_code == 202, response.text
-            browser = guarded._jobs.result("frozen-native-" + side.lower()).result(timeout=10)
+            browser = guarded._jobs.result("frozen-native-" + side.lower() + "-" + exit_case.lower()).result(timeout=10)
             status = client.get(
                 "/api/v1/guarded/jobs/frozen-native-" + side.lower(),
                 headers={"Authorization": "Bearer " + token},
             )
             assert status.json() == {
-                "request_id": "frozen-native-" + side.lower(), "status": "COMPLETED",
+                "request_id": "frozen-native-" + side.lower() + "-" + exit_case.lower(), "status": "COMPLETED",
             }
     finally:
         guarded.close()
@@ -131,17 +135,21 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     assert direct.iloc[0].side == side
     assert direct.iloc[0].strategy_entry_time == pd.Timestamp("2024-01-01T00:15:00Z")
     if side == "LONG":
-        assert direct.iloc[0].long_exit_reason == "TP"
-        assert direct.iloc[0].long_fees == pytest.approx(0.21)
-        assert direct.iloc[0].pair_net_pnl == pytest.approx(9.79)
-        assert direct.iloc[0].equity_after_trade == pytest.approx(1009.79)
+        assert direct.iloc[0].long_exit_reason == exit_case
+        if exit_case == "TP":
+            assert direct.iloc[0].long_fees == pytest.approx(0.21)
+            assert direct.iloc[0].pair_net_pnl == pytest.approx(9.79)
+            assert direct.iloc[0].equity_after_trade == pytest.approx(1009.79)
+        else:
+            assert direct.iloc[0].pair_net_pnl < 0
+            assert direct.iloc[0].equity_after_trade < 1000
         assert direct.iloc[1].long_exit_reason == "END_OF_DATA"
     else:
-        assert direct.iloc[0].short_exit_reason == "TP"
-        assert direct.iloc[0].pair_net_pnl > 0
-        assert direct.iloc[0].equity_after_trade > 1000
+        assert direct.iloc[0].short_exit_reason == exit_case
+        assert (direct.iloc[0].pair_net_pnl > 0) == (exit_case == "TP")
+        assert (direct.iloc[0].equity_after_trade > 1000) == (exit_case == "TP")
         assert direct.iloc[1].short_exit_reason == "END_OF_DATA"
-    if side == "LONG":
+    if side == "LONG" and exit_case == "TP":
         assert_frame_equal(source, _frozen_candles(), check_exact=True)
     else:
-        assert source.iloc[1]["low"] == pytest.approx(89.0)
+        assert source.iloc[1]["low"] == pytest.approx(89.0 if (side == "SHORT" and exit_case == "TP") or (side == "LONG" and exit_case == "SL") else 99.0)
