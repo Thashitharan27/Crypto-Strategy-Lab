@@ -305,3 +305,16 @@ original Windows files or the canonical Data Lake; long/short/partial/SL1
 representativeness and interactive browser/desktop acceptance remain NOT RUN.
 Production guarded routes remain server-disabled for normal users pending
 final consolidated certification and explicit release approval.
+
+
+## B3 authenticated HTTP recovery after restart (2026-10-18)
+
+An isolated regression now submits an opt-in guarded native job via authenticated
+HTTP, closes its coordinator, and creates a fresh HTTP app against the same
+persistent execution root. With the original request claim retained, the new
+status endpoint returns only `RECOVERY_UNVERIFIED`, without inferring native
+completion from old process memory. Unknown IDs, unauthenticated status,
+orphan progress/cancellation, and replay all fail closed; no native rerun
+occurs. This covers one process-restart lifecycle edge, not verified resume,
+automated stale-lock reconciliation, crash-during-write durability or Windows
+operator recovery. Ordinary browser mutations remain disabled.

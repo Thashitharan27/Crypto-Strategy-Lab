@@ -76,3 +76,88 @@ def test_production_app_is_read_only_even_with_real_guarded_integration(tmp_path
         service.run.assert_not_called()
     finally:
         integration.close()
+
+
+def test_authenticated_http_restart_reports_unverified_without_replay(tmp_path):
+    """B3: a fresh HTTP coordinator cannot assert persisted native completion."""
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+
+    root = tmp_path / "approved"
+    root.mkdir()
+    token_headers = {"Authorization": "Bearer " + TOKEN}
+    config = ResearchRunConfig()
+    request = {
+        "exchange": "binance", "market": "futures_um", "symbol": "BTCUSDT",
+        "period_start": "2025-01-01T00:00:00Z",
+        "period_end": "2025-01-02T00:00:00Z",
+        "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+    }
+    payload = {
+        "request_id": "durable-http-id",
+        "request": request,
+        "config": config.to_dict(),
+    }
+    native = Mock()
+    native.run.return_value = {"secret": "private native output"}
+    first = BrowserGuardedIntegration(
+        native, tmp_path, enabled=True, execution_root=root,
+    )
+    try:
+        app = create_browser_app(
+            token=TOKEN, guarded_integration=first, guarded_enabled=True,
+        )
+        with TestClient(app, base_url="http://localhost") as client:
+            submit = client.post(
+                "/api/v1/guarded/jobs", json=payload, headers=token_headers,
+            )
+            assert submit.status_code == 202, submit.text
+            assert first._jobs.result("durable-http-id").result(timeout=10) == {
+                "secret": "private native output",
+            }
+            assert client.get(
+                "/api/v1/guarded/jobs/durable-http-id", headers=token_headers,
+            ).json() == {
+                "request_id": "durable-http-id", "status": "COMPLETED",
+            }
+    finally:
+        first.close()
+
+    claim = root / ".guarded-request-durable-http-id.claim"
+    assert claim.is_dir()
+    assert not (root / ".guarded-native-worker.lock").exists()
+
+    restarted = BrowserGuardedIntegration(
+        native, tmp_path, enabled=True, execution_root=root,
+    )
+    try:
+        app = create_browser_app(
+            token=TOKEN, guarded_integration=restarted, guarded_enabled=True,
+        )
+        with TestClient(app, base_url="http://localhost") as client:
+            assert client.get("/api/v1/guarded/jobs/durable-http-id").status_code == 401
+            assert client.get(
+                "/api/v1/guarded/jobs/durable-http-id", headers=token_headers,
+            ).json() == {
+                "request_id": "durable-http-id",
+                "status": "RECOVERY_UNVERIFIED",
+            }
+            assert client.get(
+                "/api/v1/guarded/jobs/not-claimed", headers=token_headers,
+            ).status_code == 404
+            assert client.get(
+                "/api/v1/guarded/jobs/durable-http-id/progress",
+                headers=token_headers,
+            ).status_code == 404
+            assert client.post(
+                "/api/v1/guarded/jobs/durable-http-id/cancel",
+                headers=token_headers,
+            ).status_code == 404
+            duplicate = client.post(
+                "/api/v1/guarded/jobs", json=payload, headers=token_headers,
+            )
+            assert duplicate.status_code == 409
+            assert claim.is_dir()
+            assert not (root / ".guarded-native-worker.lock").exists()
+        native.run.assert_called_once()
+    finally:
+        restarted.close()
