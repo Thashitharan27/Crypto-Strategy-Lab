@@ -287,3 +287,76 @@ test("operator token switch invalidates in-flight guarded status response", asyn
     assert.ok(!statuses.some(s => s.includes("COMPLETED")));
   } finally { globalThis.fetch = original; }
 });
+
+
+test("switching guarded job IDs rejects late status and progress results", async () => {
+  for (const [action, latest, obsolete] of [
+    ["Refresh status", "job-B", "DONE_FROM_A"],
+    ["Refresh progress", "job-B", "PROGRESS_FROM_A"],
+    ["Request cancellation", "job-B", "CANCELLED_A"],
+    ["Submit native research run", "job-B", "SUBMITTED_A"],
+  ]) {
+    const original = globalThis.fetch;
+    let finish;
+    const calls = [];
+    globalThis.fetch = async (url, options) => {
+      calls.push([url, options]);
+      return new Promise(resolve => {finish = resolve;});
+    };
+    try {
+      const ui = guardedEventHarness();
+      ui.change("guard-job-id", "job-A");
+      ui.change("guard-config-json", '{"config_version":3}', "textarea");
+      ui.click(action);
+      assert.equal(calls.length, 1, action);
+      ui.change("guard-job-id", latest);
+      finish({ok: true, json: async () => ({status: obsolete, phase: obsolete})});
+      await settleHandlers();
+      ui.render();
+      const statuses = [];
+      const collect = node => {
+        if (!node || typeof node !== "object") return;
+        if (node.props?.role === "status") statuses.push(String(node.props.children));
+        for (const child of [].concat(node.props?.children ?? [])) collect(child);
+      };
+      collect(ui.find("section", undefined));
+      assert.ok(!statuses.some(v => v.includes(obsolete)), action + " leaked result from old job");
+      assert.equal(ui.find("input", "guard-job-id").props.value, latest);
+    } finally {globalThis.fetch = original;}
+  }
+});
+
+
+test("late rejected operations cannot mark a newly selected run or config as failed", async () => {
+  for (const [field, action, nextId] of [
+    ["guard-job-id", "Refresh status", "next-job"],
+    ["guard-job-id", "Refresh progress", "next-job"],
+    ["guard-job-id", "Request cancellation", "next-job"],
+    ["guard-job-id", "Submit native research run", "next-job"],
+    ["guard-config-id", "Load saved native configuration", "next-config"],
+    ["guard-config-id", "Save native configuration", "next-config"],
+  ]) {
+    const original = globalThis.fetch;
+    let rejectRequest;
+    globalThis.fetch = async () => new Promise((_resolve, reject) => {rejectRequest = reject;});
+    try {
+      const ui = guardedEventHarness();
+      ui.change(field, "original");
+      ui.change("guard-config-json", '{"config_version":3}', "textarea");
+      ui.click(action);
+      assert.equal(typeof rejectRequest, "function", action);
+      ui.change(field, nextId);
+      rejectRequest(new Error("/private/sensitive/native-file"));
+      await settleHandlers();
+      ui.render();
+      const messages = [];
+      const collect = node => {
+        if (!node || typeof node !== "object") return;
+        if (node.props?.role === "alert") messages.push(String(node.props.children));
+        for (const child of [].concat(node.props?.children ?? [])) collect(child);
+      };
+      collect(ui.find("section", undefined));
+      assert.deepEqual(messages, [], action + " polluted new selection with stale error");
+    } finally {globalThis.fetch = original;}
+  }
+});

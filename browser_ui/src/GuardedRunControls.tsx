@@ -89,6 +89,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   const configSelection = React.useRef({id: "", version: 0});
   const [configJson, setConfigJson] = React.useState("{}");
   const [jobId, setJobId] = React.useState("");
+  const jobSelection = React.useRef({id: "", version: 0});
   const [symbol, setSymbol] = React.useState("BTCUSDT");
   const [market, setMarket] = React.useState<"spot" | "futures_um">("futures_um");
   const [from, setFrom] = React.useState("2025-01-01T00:00:00Z");
@@ -116,10 +117,16 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   // Never render interactive controls for the ordinary read-only browser.
   if (enabled !== true) return null;
 
-  async function perform(action: (isCurrent: () => boolean) => Promise<unknown>) {
+  async function perform(action: (isCurrent: () => boolean) => Promise<unknown>, selection?: "job" | "config") {
     if (enabled !== true || busy.current) return;
     const submittedSession = session.current;
-    const isCurrent = () => session.current.enabled === true &&
+    const selectedJob = jobSelection.current;
+    const selectedConfig = configSelection.current;
+    const isCurrent = () => (selection !== "job" ||
+      (jobSelection.current.id === selectedJob.id && jobSelection.current.version === selectedJob.version)) &&
+      (selection !== "config" || (configSelection.current.id === selectedConfig.id &&
+       configSelection.current.version === selectedConfig.version)) &&
+      session.current.enabled === true &&
       session.current.enabled === submittedSession.enabled &&
       session.current.token === submittedSession.token &&
       session.current.version === submittedSession.version;
@@ -127,7 +134,11 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     setError("");
     try { await action(isCurrent); }
     catch { if (isCurrent()) setError("Guarded operation unavailable or rejected"); }
-    finally { if (isCurrent()) busy.current = false; }
+    finally {
+      // A selection change invalidates the response, not ownership of the
+      // in-flight request. Always release its busy claim in the same session.
+      if (session.current.version === submittedSession.version) busy.current = false;
+    }
   }
   function nativeConfig(): Record<string, unknown> {
     const value: unknown = JSON.parse(configJson);
@@ -165,13 +176,19 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
         setConfigJson(JSON.stringify(result, null, 2));
         setState("Validated saved configuration loaded for editing");
       }
-    })}>Load saved native configuration</button>
+    }, "config")}>Load saved native configuration</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const result = await saveGuardedConfig(enabled, token, configId, nativeConfig());
       if (isCurrent()) setState(`Configuration ${result.config_id}: ${result.status}`);
-    })}>Save native configuration</button>
+    }, "config")}>Save native configuration</button>
     <label htmlFor="guard-job-id">Request ID</label>
-    <input id="guard-job-id" value={jobId} onChange={e => setJobId(e.target.value)} />
+    <input id="guard-job-id" value={jobId} onChange={e => {
+      jobSelection.current = {id: e.target.value, version: jobSelection.current.version + 1};
+      setJobId(e.target.value);
+      setState("");
+      setPhase("");
+      setError("");
+    }} />
     <label htmlFor="guard-symbol">Symbol</label>
     <input id="guard-symbol" value={symbol} onChange={e => setSymbol(e.target.value)} />
     <label htmlFor="guard-market">Market</label>
@@ -191,21 +208,29 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       <option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option>
     </select>
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selectedJob = jobSelection.current;
       const result = await submitGuardedRun(enabled, token, jobId, request(), nativeConfig());
-      if (isCurrent()) setState(result.status);
-    })}>Submit native research run</button>
+      if (isCurrent() && jobSelection.current.version === selectedJob.version &&
+          jobSelection.current.id === selectedJob.id) setState(result.status);
+    }, "job")}>Submit native research run</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selectedJob = jobSelection.current;
       const result = await guardedStatus(enabled, token, jobId);
-      if (isCurrent()) setState(result.status);
-    })}>Refresh status</button>
+      if (isCurrent() && jobSelection.current.version === selectedJob.version &&
+          jobSelection.current.id === selectedJob.id) setState(result.status);
+    }, "job")}>Refresh status</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selectedJob = jobSelection.current;
       const result = await guardedProgress(enabled, token, jobId);
-      if (isCurrent()) setPhase(result.phase ?? "No stage available");
-    })}>Refresh progress</button>
+      if (isCurrent() && jobSelection.current.version === selectedJob.version &&
+          jobSelection.current.id === selectedJob.id) setPhase(result.phase ?? "No stage available");
+    }, "job")}>Refresh progress</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selectedJob = jobSelection.current;
       const result = await guardedCancel(enabled, token, jobId);
-      if (isCurrent()) setState(result.status);
-    })}>Request cancellation</button>
+      if (isCurrent() && jobSelection.current.version === selectedJob.version &&
+          jobSelection.current.id === selectedJob.id) setState(result.status);
+    }, "job")}>Request cancellation</button>
     {state && <p role="status">Native operation state: {state}</p>}
     {phase && <p role="status">Latest native stage: {phase}</p>}
     {error && <p role="alert">{error}</p>}
