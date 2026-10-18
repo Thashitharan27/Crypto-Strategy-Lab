@@ -552,6 +552,56 @@ test("guarded progress accepts bounded stages and missing phase only", async () 
   } finally {globalThis.fetch = original;}
 });
 
+test("terminal guarded job outcomes clear stale active progress stages", async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const [action, terminal] of [
+      ["Refresh status", "COMPLETED"],
+      ["Refresh status", "FAILED"],
+      ["Request cancellation", "CANCELLED"],
+      ["Refresh status", "RECOVERY_UNVERIFIED"],
+    ]) {
+      globalThis.fetch = async (path) => ({ok: true, json: async () =>
+        path.endsWith("/progress")
+          ? {phase: "preparing"}
+          : {request_id: "job-A", status: terminal},
+      });
+      const ui = guardedEventHarness();
+      ui.change("guard-job-id", "job-A");
+      ui.click("Refresh progress");
+      await settleHandlers();
+      ui.render();
+      assert.ok(JSON.stringify(ui.find("section", undefined).props.children).includes("preparing"));
+      ui.click(action);
+      await settleHandlers();
+      ui.render();
+      const displayed = JSON.stringify(ui.find("section", undefined).props.children);
+      assert.ok(!displayed.includes("Latest native stage: preparing"), action + " " + terminal);
+    }
+  } finally {globalThis.fetch = original;}
+});
+
+test("cancellation unavailable preserves progress while native job may still run", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (path) => ({ok: true, json: async () =>
+    path.endsWith("/progress")
+      ? {phase: "running"}
+      : {request_id: "job-A", status: "CANCELLATION_UNAVAILABLE"},
+  });
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "job-A");
+    ui.click("Refresh progress");
+    await settleHandlers();
+    ui.click("Request cancellation");
+    await settleHandlers();
+    ui.render();
+    const displayed = JSON.stringify(ui.find("section", undefined).props.children);
+    assert.ok(displayed.includes("Latest native stage: running"));
+    assert.ok(displayed.includes("Cancellation unavailable"));
+  } finally {globalThis.fetch = original;}
+});
+
 test("guarded cancellation unavailable is never displayed as cancelled", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => ({ok: true, json: async () => ({
