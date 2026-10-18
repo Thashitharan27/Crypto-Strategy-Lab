@@ -52,6 +52,9 @@ def test_server_integration_still_denies_mutations_by_default(tmp_path):
 def test_guarded_client_session_epoch_and_executable_browser_build_gate():
     component = (ROOT / "browser_ui" / "src" / "GuardedRunControls.tsx").read_text(encoding="utf-8")
     package = (ROOT / "browser_ui" / "package.json").read_text(encoding="utf-8")
+    assert "configSelection.current.version + 1" in component
+    assert "configSelection.current.version === selection.version" in component
+    assert "setConfigJson(\"{}\")" in component
     assert "session.current.version + 1" in component
     assert "session.current.version === submittedSession.version" in component
     assert "if (isCurrent()) setState" in component
