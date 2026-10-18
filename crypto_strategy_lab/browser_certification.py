@@ -69,7 +69,8 @@ def isolated_browser_certification(
     root = Path(static_root)
     if (not root.is_absolute() or root.name != "dist-certification"
             or not root.is_dir() or not (root / "index.html").is_file()
-            or any(part.is_symlink() for part in (root, *root.parents))
+            or any(_unsafe_reparse_path(part) for part in (root, *root.parents))
+            or any(_unsafe_reparse_path(part) for part in root.rglob("*"))
             or root.resolve(strict=True) != root):
         raise ValueError("Only a canonical separate certification build is allowed")
     if native_application is None or not callable(getattr(native_application, "run", None)):
@@ -84,7 +85,7 @@ def isolated_browser_certification(
                 or not evidence.name.startswith("csl-browser-evidence-")
                 or evidence.exists() or evidence.is_symlink()
                 or not evidence.parent.is_dir()
-                or any(part.is_symlink() for part in (evidence.parent, *evidence.parent.parents))
+                or any(_unsafe_reparse_path(part) for part in (evidence.parent, *evidence.parent.parents))
                 or evidence.parent.resolve(strict=True) != evidence.parent):
             raise ValueError("Evidence destination must be a new canonical csl-browser-evidence-* directory")
 
@@ -110,7 +111,7 @@ def isolated_browser_certification(
             if (not source.is_absolute() or source.suffix != ".json"
                     or re.fullmatch(r"[A-Za-z0-9_-]{1,100}", config_id, flags=re.ASCII) is None
                     or not source.is_file()
-                    or any(part.is_symlink() for part in (source, *source.parents))
+                    or any(_unsafe_reparse_path(part) for part in (source, *source.parents))
                     or source.resolve(strict=True) != source):
                 raise ValueError("Unsafe frozen native configuration source")
             original = source.read_bytes()
@@ -170,8 +171,8 @@ def isolated_browser_certification(
                 if evidence is not None:
                     # Never follow an output symlink into original data.
                     for source in (config_root, output_root):
-                        if any(path.is_symlink() for path in source.rglob("*")):
-                            raise ValueError("Unsafe symlink in certification evidence")
+                        if any(_unsafe_reparse_path(path) for path in source.rglob("*")):
+                            raise ValueError("Unsafe link or reparse point in certification evidence")
                     shutil.copytree(config_root, evidence / "configs")
                     shutil.copytree(output_root, evidence / "runs")
 
