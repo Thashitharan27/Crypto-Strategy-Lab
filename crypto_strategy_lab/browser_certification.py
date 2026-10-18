@@ -85,11 +85,6 @@ def isolated_browser_certification(
             native_config.validate()
             # The source is never opened for writing. Browser GET uses the
             # original safe saved ID from the isolated copy.
-        # Do not reserve a permanent evidence destination until the frozen
-        # source has passed native validation. Rejected input must leave no
-        # empty certification-evidence directory behind.
-        if evidence is not None:
-            os.mkdir(evidence, mode=0o700)
         integration = BrowserGuardedIntegration(
             native_application, config_root, enabled=True,
             execution_root=output_root,
@@ -101,12 +96,29 @@ def isolated_browser_certification(
             getattr(native_application, "catalog", None),
             application_service=native_application,
         )
-        app = create_browser_app(
-            token=token, read_service=service,
-            completed_run_root=output_root, config_root=config_root,
-            static_root=root, guarded_integration=integration,
-            guarded_enabled=True,
-        )
+        try:
+            app = create_browser_app(
+                token=token, read_service=service,
+                completed_run_root=output_root, config_root=config_root,
+                static_root=root, guarded_integration=integration,
+                guarded_enabled=True,
+            )
+        except BaseException:
+            # No ASGI lifespan exists to close this coordinator if
+            # application composition itself fails.
+            integration.close()
+            raise
+        # Reserve an evidence directory only after *all* native input and
+        # application-composition checks succeeded. A failed factory setup
+        # must not leave an empty operator evidence destination behind.
+        try:
+            if evidence is not None:
+                os.mkdir(evidence, mode=0o700)
+        except BaseException:
+            # The native coordinator is already constructed. A failed
+            # exclusive evidence reservation must not leak its worker pool.
+            integration.close()
+            raise
         try:
             yield app, token
         finally:

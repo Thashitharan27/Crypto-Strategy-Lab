@@ -222,6 +222,70 @@ def test_invalid_frozen_config_does_not_reserve_evidence_root(tmp_path):
     native.run.assert_not_called()
 
 
+def test_certification_app_composition_failure_leaves_no_evidence_destination(tmp_path, monkeypatch):
+    """The operator should not lose an evidence name if FastAPI setup fails."""
+    import crypto_strategy_lab.browser_certification as certification
+
+    dist = _certification_dist(tmp_path)
+    evidence = tmp_path / "csl-browser-evidence-app-rejected"
+    native = Mock()
+    closes = []
+    original_close = certification.BrowserGuardedIntegration.close
+
+    def tracked_close(self):
+        closes.append(True)
+        return original_close(self)
+
+    monkeypatch.setattr(certification.BrowserGuardedIntegration, "close", tracked_close)
+
+    def fail_composition(**_kwargs):
+        raise RuntimeError("injected test-only app composition failure")
+
+    monkeypatch.setattr(certification, "create_browser_app", fail_composition)
+    with pytest.raises(RuntimeError, match="app composition failure"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, evidence_root=evidence,
+        ):
+            pytest.fail("Rejected app must never start a certification session")
+    assert not evidence.exists()
+    assert closes == [True]
+    native.run.assert_not_called()
+
+
+def test_evidence_reservation_failure_closes_guarded_native_coordinator(tmp_path, monkeypatch):
+    """An exclusive-create failure after app composition must release its worker."""
+    import crypto_strategy_lab.browser_certification as certification
+
+    dist = _certification_dist(tmp_path)
+    evidence = tmp_path / "csl-browser-evidence-create-failure"
+    native = Mock()
+    closes = []
+    original_close = certification.BrowserGuardedIntegration.close
+    original_mkdir = certification.os.mkdir
+
+    def track_close(self):
+        closes.append(True)
+        return original_close(self)
+
+    def fail_evidence_only(path, *args, **kwargs):
+        if Path(path) == evidence:
+            raise OSError("injected exclusive-create failure")
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(certification.BrowserGuardedIntegration, "close", track_close)
+    monkeypatch.setattr(certification.os, "mkdir", fail_evidence_only)
+    with pytest.raises(OSError, match="exclusive-create failure"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, evidence_root=evidence,
+        ):
+            pytest.fail("No session may start without the requested evidence root")
+    assert closes == [True]
+    assert not evidence.exists()
+    native.run.assert_not_called()
+
+
 def test_certification_evidence_never_follows_output_symlinks(tmp_path):
     from crypto_strategy_lab.data_lake_config import ResearchRunConfig
     from types import SimpleNamespace
