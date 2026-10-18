@@ -289,3 +289,19 @@ reporter remain outside this focused loader/preparation test; earlier B2 tests
 cover their native paths separately. The **combined full original-data
 execution** and final desktop/browser comparison are still NOT RUN and must
 remain release-blocking. Guarded mutations stay disabled for normal users.
+
+
+## B2 combined default-native isolated ZIP execution parity (2026-10-18)
+
+An isolated opt-in browser HTTP regression independently exercises the **default**
+`GuiApplicationService` composition: genuine Binance daily ZIP loading, actual
+Data Lake feature preparation/cache, `ResearchRunner`, `NativeStrategyPolicy`,
+`NativeSimulator` and the production `BayesianSamplingCsvManifestReporter`.
+A separate direct native service processes the same frozen temporary source ZIPs
+and config. The test compares ordered trade rows, prepared identity, stable
+native manifest sections, trade fingerprints, saved summaries and selected
+artifact bytes, and verifies all cataloged artifact hashes. It does not touch
+original Windows files or the canonical Data Lake; long/short/partial/SL1
+representativeness and interactive browser/desktop acceptance remain NOT RUN.
+Production guarded routes remain server-disabled for normal users pending
+final consolidated certification and explicit release approval.
