@@ -118,3 +118,25 @@ enter its fresh token in the separate certification page and execute the
 frozen test case. Retain actual browser/desktop invocation traces before
 claiming a B2/B3/B4 PASS. The in-process regression test is development
 evidence only, and the production launcher still mounts no guarded routes.
+
+
+## 9. Local certification server runner (test-only)
+
+For real browser observation the existing factory is now callable through
+`crypto_strategy_lab.browser_certification.serve_isolated_browser_certification`.
+The calling Windows test harness must inject the existing native
+`GuiApplicationService`, pass the canonical separate
+`browser_ui/dist-certification` directory, an explicit local port, and
+`acknowledge_test_only=True`. The runner creates isolated temporary output
+and config roots, starts FastAPI **only on 127.0.0.1**, and prints its
+per-session token only to the operator terminal. It has **no automatic CLI**,
+persistent release toggle, environment opt-in or production launcher path.
+When the test server exits, its temporary roots are destroyed.
+
+This runner supports the next real-browser test but **has not executed**
+an actual browser/UI interaction or a Windows original-file parity run.
+The operator must launch the test page in a browser, explicitly arm it,
+capture the resulting authenticated native invocations and inspect saved
+outputs before recording B2/B3/B4 evidence. Real native runs must use the
+already approved frozen input set and must never write to the canonical
+Data Lake, original saved files or live bot directories.
