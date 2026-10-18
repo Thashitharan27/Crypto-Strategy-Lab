@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import secrets
 import re
+import json
+
+# Limit pre-schema materialization of opt-in guarded native configuration bodies.
+_MAX_GUARDED_JSON_BYTES = 4 * 1024 * 1024
 from starlette.requests import Request
 
 _REQUEST_ID = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
@@ -71,9 +75,33 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         # FastAPI's typed body validation runs before endpoint authorization.
         # Explicitly authenticate first, then parse only for authorized callers.
         authorize(authorization)
+        # Authenticate before consuming any body. Neither Content-Length nor
+        # client-side UI limits are trusted as the sole protection: streaming
+        # requests may omit or lie about their declared byte count.
+        declared = request.headers.get("content-length")
+        if declared is not None:
+            try:
+                declared_size = int(declared)
+            except ValueError:
+                audit(operation, "INVALID_INPUT")
+                raise HTTPException(status_code=422, detail="Invalid request length")
+            if declared_size < 0:
+                audit(operation, "INVALID_INPUT")
+                raise HTTPException(status_code=422, detail="Invalid request length")
+            if declared_size > _MAX_GUARDED_JSON_BYTES:
+                audit(operation, "OVERSIZED")
+                raise HTTPException(status_code=413, detail="Guarded JSON payload too large")
+        raw = bytearray()
         try:
-            payload = await request.json()
-        except (ValueError, UnicodeError):
+            async for chunk in request.stream():
+                if len(raw) + len(chunk) > _MAX_GUARDED_JSON_BYTES:
+                    audit(operation, "OVERSIZED")
+                    raise HTTPException(status_code=413, detail="Guarded JSON payload too large")
+                raw.extend(chunk)
+            payload = json.loads(raw)
+        except HTTPException:
+            raise
+        except (ValueError, UnicodeError, RuntimeError):
             audit(operation, "INVALID_INPUT")
             raise HTTPException(status_code=422, detail="Invalid JSON payload")
         if not isinstance(payload, dict):
