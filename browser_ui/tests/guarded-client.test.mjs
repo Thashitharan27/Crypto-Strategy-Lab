@@ -27,6 +27,7 @@ test("all guarded operations deny before network access", async () => {
   };
   try {
     for (const invoke of [
+      () => api.loadGuardedConfig(false, TOKEN, "../bad"),
       () => api.saveGuardedConfig(false, TOKEN, "../bad", {}),
       () => api.submitGuardedRun(false, TOKEN, "../bad", request, {}),
       () => api.guardedStatus(false, TOKEN, "../bad"),
@@ -44,7 +45,7 @@ test("guarded operations call only existing authenticated local endpoints", asyn
   const calls = [];
   globalThis.fetch = async (url, init) => {
     calls.push({url, init});
-    return {ok: true, json: async () => ({request_id: "run-1", status: "COMPLETED", phase: "loading", config_id: "native"})};
+    return {ok: true, json: async () => ({config: {config_version: 3}, request_id: "run-1", status: "COMPLETED", phase: "loading", config_id: "native"})};
   };
   const request = {
     exchange: "binance", market: "futures_um", symbol: "BTCUSDT",
@@ -52,12 +53,15 @@ test("guarded operations call only existing authenticated local endpoints", asyn
     strategy_timeframe: "4h", intrabar_timeframe: "1m",
   };
   try {
+    const loaded = await api.loadGuardedConfig(true, TOKEN, "native");
+    assert.equal(loaded.config_version, 3);
     await api.saveGuardedConfig(true, TOKEN, "native", {config_version: 3});
     await api.submitGuardedRun(true, TOKEN, "run-1", request, {config_version: 3});
     await api.guardedStatus(true, TOKEN, "run-1");
     await api.guardedProgress(true, TOKEN, "run-1");
     await api.guardedCancel(true, TOKEN, "run-1");
     assert.deepEqual(calls.map(c => [c.init.method, c.url]), [
+      ["GET", "/api/v1/configs/native"],
       ["PUT", "/api/v1/guarded/configs/native"],
       ["POST", "/api/v1/guarded/jobs"],
       ["GET", "/api/v1/guarded/jobs/run-1"],
@@ -70,7 +74,7 @@ test("guarded operations call only existing authenticated local endpoints", asyn
       assert.equal(init.redirect, "error");
       assert.equal(init.cache, "no-store");
     }
-    assert.deepEqual(JSON.parse(calls[1].init.body), {
+    assert.deepEqual(JSON.parse(calls[2].init.body), {
       request_id: "run-1", request, config: {config_version: 3},
     });
   } finally { globalThis.fetch = original; }
@@ -112,11 +116,26 @@ test("dormant React component renders no controls unless explicitly enabled", as
     React.createElement(api.GuardedRunControls, {token: TOKEN, enabled: true}),
   );
   for (const label of [
-    "Save native configuration", "Submit native research run",
+    "Load saved native configuration", "Save native configuration", "Submit native research run",
     "Refresh status", "Refresh progress", "Request cancellation",
     "Experimental guarded native operations",
   ]) {
     assert.ok(enabled.includes(label), label);
   }
   assert.ok(!enabled.includes(TOKEN), "Session credentials must not appear in markup");
+});
+
+test("saved native config loader rejects invalid identifiers and response shapes", async () => {
+  const original = globalThis.fetch;
+  const cases = [null, [], "text", {config: []}, {config: "raw text"}, {config: null}];
+  let index = 0;
+  globalThis.fetch = async () => ({
+    ok: true, json: async () => cases[index++],
+  });
+  try {
+    assert.throws(() => api.loadGuardedConfig(true, TOKEN, "../escape"), /Invalid identifier/);
+    for (let i = 0; i < cases.length; i++) {
+      await assert.rejects(api.loadGuardedConfig(true, TOKEN, "safe"), /Invalid native configuration response/);
+    }
+  } finally { globalThis.fetch = original; }
 });
