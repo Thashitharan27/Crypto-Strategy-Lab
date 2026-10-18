@@ -298,12 +298,18 @@ def test_certification_evidence_never_follows_output_symlinks(tmp_path):
     evidence = tmp_path / "csl-browser-evidence-links"
     native = Mock()
 
+    # Skip on the pytest thread: a skip raised inside the native Future is
+    # captured as its exception rather than marking this test skipped.
+    probe = tmp_path / "symlink-probe"
+    try:
+        probe.symlink_to(secret)
+    except (OSError, NotImplementedError):
+        pytest.skip("Local filesystem symlinks unavailable")
+    probe.unlink()
+
     def run(request, config):
         root = Path(config.reporting.output_dir)
-        try:
-            (root / "unsafe-link").symlink_to(secret)
-        except (OSError, NotImplementedError):
-            pytest.skip("Local filesystem symlinks unavailable")
+        (root / "unsafe-link").symlink_to(secret)
         return SimpleNamespace(output_dir=None)
 
     native.run.side_effect = run
