@@ -102,3 +102,47 @@ def test_production_read_only_composition_still_has_no_guarded_routes():
     assert "/api/v1/guarded/jobs" not in paths
     assert not any(path and path.startswith("/api/v1/guarded/configs/")
                    for path in paths)
+
+
+def test_certification_listener_is_explicitly_local_and_closes_ephemeral_roots(tmp_path, monkeypatch, capsys):
+    from crypto_strategy_lab.browser_certification import (
+        serve_isolated_browser_certification,
+    )
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    from types import SimpleNamespace
+    import uvicorn
+
+    dist = _certification_dist(tmp_path)
+    native = Mock()
+    recorded = []
+
+    def fake_run(app, **options):
+        recorded.append(options)
+        assert options["host"] == "127.0.0.1"
+        assert options["port"] == 8917
+        with TestClient(app, base_url="http://127.0.0.1:8917") as client:
+            assert client.get("/").status_code == 200
+            assert client.post("/api/v1/guarded/jobs", json={}).status_code == 401
+            assert client.put("/api/v1/guarded/configs/valid", json={}).status_code == 401
+        # Only the certification root is served; the native app is not executed.
+        native.run.assert_not_called()
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    with pytest.raises(PermissionError):
+        serve_isolated_browser_certification(
+            native_application=native, static_root=dist, port=8917,
+        )
+    for invalid_port in (0, 65536, True, "8917"):
+        with pytest.raises(ValueError):
+            serve_isolated_browser_certification(
+                native_application=native, static_root=dist,
+                port=invalid_port, acknowledge_test_only=True,
+            )
+    serve_isolated_browser_certification(
+        native_application=native, static_root=dist,
+        port=8917, acknowledge_test_only=True,
+    )
+    assert len(recorded) == 1
+    printed = capsys.readouterr().out
+    assert "http://127.0.0.1:8917/" in printed
+    assert "TEST ONLY" in printed
