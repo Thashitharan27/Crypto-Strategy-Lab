@@ -62,11 +62,12 @@ def test_qprocess_without_create_modifier_still_initializes(monkeypatch):
 
 
 def test_git_commands_use_argument_list_without_a_shell(monkeypatch, tmp_path):
-    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
-    monkeypatch.setattr("crypto_strategy_lab.gui.github_manager.subprocess.run", run)
+    process = SimpleNamespace(returncode=0, communicate=Mock(return_value=("", "")))
+    launch = Mock(return_value=process)
+    monkeypatch.setattr("crypto_strategy_lab.gui.github_manager.subprocess.Popen", launch)
     monkeypatch.setattr(github_manager, "os", SimpleNamespace(name="nt"))
     GitManager(tmp_path)._run("status")
-    args, kwargs = run.call_args
+    args, kwargs = launch.call_args
     assert args[0] == ["git", "status"]
     assert kwargs["shell"] is False
     assert kwargs["creationflags"] == CREATE_NO_WINDOW
