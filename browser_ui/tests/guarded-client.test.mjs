@@ -95,3 +95,28 @@ test("malformed IDs, tokens and failed HTTP responses do not leak private diagno
     assert.equal(calls, 1);
   } finally { globalThis.fetch = original; }
 });
+
+
+test("dormant React component renders no controls unless explicitly enabled", async () => {
+  const React = await import("react");
+  const {renderToStaticMarkup} = await import("react-dom/server");
+  const disabled = renderToStaticMarkup(
+    React.createElement(api.GuardedRunControls, {token: TOKEN}),
+  );
+  assert.equal(disabled, "");
+  const explicitlyDisabled = renderToStaticMarkup(
+    React.createElement(api.GuardedRunControls, {token: TOKEN, enabled: false}),
+  );
+  assert.equal(explicitlyDisabled, "");
+  const enabled = renderToStaticMarkup(
+    React.createElement(api.GuardedRunControls, {token: TOKEN, enabled: true}),
+  );
+  for (const label of [
+    "Save native configuration", "Submit native research run",
+    "Refresh status", "Refresh progress", "Request cancellation",
+    "Experimental guarded native operations",
+  ]) {
+    assert.ok(enabled.includes(label), label);
+  }
+  assert.ok(!enabled.includes(TOKEN), "Session credentials must not appear in markup");
+});
