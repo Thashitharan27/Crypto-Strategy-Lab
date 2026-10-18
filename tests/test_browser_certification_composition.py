@@ -674,7 +674,7 @@ def test_direct_certification_factory_rejects_persistent_root_overlapping_inputs
         "inside-frozen": frozen_parent / "csl-browser-crash-overlap",
         "ancestor-of-static": static_parent,
     }[overlap]
-    output.mkdir()
+    output.mkdir(exist_ok=True)
     (output / ".csl-browser-crash-test-only").write_bytes(b"CSL_BROWSER_CRASH_CERT_V1")
     original = frozen.read_bytes()
     native = Mock()
