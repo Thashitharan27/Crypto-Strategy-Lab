@@ -261,6 +261,8 @@ test("operator switch resets guarded request and saved-run IDs", async () => {
   ui.change("guard-config-id", "previous-config");
   ui.change("guard-config-json", '{"config_version":3,"owner":"old"}', "textarea");
   ui.rerender({enabled: true, token: "next-operator-token"});
+  // The test harness commits effect state on the next render.
+  ui.render();
   assert.equal(ui.find("input", "guard-job-id").props.value, "");
   assert.equal(ui.find("input", "guard-saved-run-folder").props.value, "");
   assert.equal(ui.find("input", "guard-config-id").props.value, "");
