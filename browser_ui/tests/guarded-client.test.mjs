@@ -254,6 +254,21 @@ test("operator switch clears native config and ignores previous-session loaded c
   } finally {globalThis.fetch = original;}
 });
 
+test("operator switch resets guarded request and saved-run IDs", async () => {
+  const ui = guardedEventHarness();
+  ui.change("guard-job-id", "previous-job");
+  ui.change("guard-saved-run-folder", "previous-native-folder");
+  ui.change("guard-config-id", "previous-config");
+  ui.change("guard-config-json", '{"config_version":3,"owner":"old"}', "textarea");
+  ui.rerender({enabled: true, token: "next-operator-token"});
+  // The test harness commits effect state on the next render.
+  ui.render();
+  assert.equal(ui.find("input", "guard-job-id").props.value, "");
+  assert.equal(ui.find("input", "guard-saved-run-folder").props.value, "");
+  assert.equal(ui.find("input", "guard-config-id").props.value, "");
+  assert.equal(ui.find("textarea", "guard-config-json").props.value, "{}");
+});
+
 test("manual guarded config edit wins over a delayed load for the same ID", async () => {
   const original = globalThis.fetch;
   let complete;
