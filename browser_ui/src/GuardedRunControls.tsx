@@ -19,6 +19,28 @@ type JobState = {
 };
 const ID = /^[A-Za-z0-9_-]{1,100}$/;
 
+const JOB_STATES = new Set([
+  "ACCEPTED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED",
+  "CANCELLATION_UNAVAILABLE", "RECOVERY_UNVERIFIED",
+]);
+function safeJobState(response: JobState, selectedId: string): string {
+  if (!response || response.request_id !== selectedId ||
+      !JOB_STATES.has(response.status)) {
+    throw new Error("Invalid native job status response");
+  }
+  return response.status;
+}
+
+function describeJobState(status: string): string {
+  if (status === "ACCEPTED") return "Submission accepted. Native completion is not yet confirmed.";
+  if (status === "RECOVERY_UNVERIFIED") return "Recovery unverified: a request claim survived restart, but its native execution and saved outputs have not been independently verified. Do not resubmit or assume completion.";
+  if (status === "CANCELLATION_UNAVAILABLE") return "Cancellation unavailable: native execution may be running. No cancellation is confirmed.";
+  if (status === "COMPLETED") return "Native worker completed in this session. Inspect verified saved results separately.";
+  if (status === "FAILED") return "Native worker failed. Check sanitized service status; no successful saved output is implied.";
+  if (status === "CANCELLED") return "Queued native job cancelled before execution.";
+  return "Native job state: " + status;
+}
+
 function requireGuardedSession(enabled: boolean, token: string): void {
   if (enabled !== true) throw new Error("Guarded operations are disabled");
   if (!token || token.includes(String.fromCharCode(13)) || token.includes(String.fromCharCode(10))) throw new Error("Invalid session token");
@@ -98,6 +120,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   const [intrabar, setIntrabar] = React.useState<NativeRequest["intrabar_timeframe"]>("1m");
   const [state, setState] = React.useState("");
   const [phase, setPhase] = React.useState("");
+  const [recoveryUnverified, setRecoveryUnverified] = React.useState(false);
   const [error, setError] = React.useState("");
   const busy = React.useRef(false);
   // Keep the latest authorization/session props visible to pending promises.
@@ -110,6 +133,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     // successful results when the guarded capability is removed.
     setState("");
     setPhase("");
+    setRecoveryUnverified(false);
     setError("");
     busy.current = false;
   }, [enabled, token]);
@@ -186,6 +210,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       jobSelection.current = {id: e.target.value, version: jobSelection.current.version + 1};
       setJobId(e.target.value);
       setState("");
+      setRecoveryUnverified(false);
       setPhase("");
       setError("");
     }} />
@@ -211,7 +236,12 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       const selectedJob = jobSelection.current;
       const result = await submitGuardedRun(enabled, token, jobId, request(), nativeConfig());
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
-          jobSelection.current.id === selectedJob.id) setState(result.status);
+          jobSelection.current.id === selectedJob.id) {
+        const status = safeJobState(result, jobId);
+        setState(status);
+        setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
+        if (status === "RECOVERY_UNVERIFIED") setPhase("");
+      }
     }, "job")}>Submit native research run</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
@@ -230,9 +260,9 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       const result = await guardedCancel(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
           jobSelection.current.id === selectedJob.id) setState(result.status);
-    }, "job")}>Request cancellation</button>
-    {state && <p role="status">Native operation state: {state}</p>}
-    {phase && <p role="status">Latest native stage: {phase}</p>}
+    }, "job")} disabled={recoveryUnverified}>Request cancellation</button>
+    {state && <p role="status">{describeJobState(state)}</p>}
+    {phase && !recoveryUnverified && <p role="status">Latest native stage: {phase}</p>}
     {error && <p role="alert">{error}</p>}
   </section>;
 }
