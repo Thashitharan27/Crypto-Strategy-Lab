@@ -501,3 +501,48 @@ test("saved-run handoff rejects malformed IDs and unverified or invalid outputs"
     });
   } finally {globalThis.fetch = original;}
 });
+
+
+test("native verified output folder is offered only for completed matching jobs", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (path) => ({ok: true, json: async () => ({
+    request_id: "request-A", status: "COMPLETED",
+    verified_run_folder_id: "native-folder-42",
+  })});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "request-A");
+    ui.click("Refresh status");
+    await settleHandlers();
+    ui.render();
+    assert.equal(ui.find("button", "Select verified native output folder").props.disabled, undefined);
+    ui.click("Select verified native output folder");
+    assert.equal(ui.find("input", "guard-saved-run-folder").props.value, "native-folder-42");
+    ui.change("guard-job-id", "request-B");
+    assert.throws(() => ui.find("button", "Select verified native output folder"), /Control not found/);
+  } finally {globalThis.fetch = original;}
+});
+
+test("unverified outputs are never offered as native verified folder links", async () => {
+  const original = globalThis.fetch;
+  const cases = [
+    {status: "COMPLETED", verified_run_folder_id: "../outside"},
+    {status: "COMPLETED", verified_run_folder_id: "bad.name"},
+    {status: "RECOVERY_UNVERIFIED", verified_run_folder_id: "valid-but-unverified"},
+    {status: "RUNNING", verified_run_folder_id: "claimed-too-early"},
+  ];
+  let i = 0;
+  globalThis.fetch = async () => ({ok: true, json: async () => ({
+    request_id: "request-A", ...cases[i++],
+  })});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "request-A");
+    for (const _ of cases) {
+      ui.click("Refresh status");
+      await settleHandlers();
+      ui.render();
+      assert.throws(() => ui.find("button", "Select verified native output folder"), /Control not found/);
+    }
+  } finally {globalThis.fetch = original;}
+});
