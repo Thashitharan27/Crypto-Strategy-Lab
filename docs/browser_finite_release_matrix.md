@@ -413,3 +413,44 @@ This is implementation/build coverage only, not independent browser interactive
 certification or approval to enable configuration writes or execution. Do not
 expose this module to normal browser users before consolidated certification
 and explicit approval.
+
+
+## B4 dormant guarded UI session isolation and request contract (2026-10-18)
+
+The unmounted guarded React controls now associate asynchronous results with the
+originating authorization session/epoch, clear stale status and progress on
+session changes, and ignore late completions from prior sessions. The exported
+request helpers reject disabled sessions and malformed tokens before building
+HTTP operations. Node's built-in test runner executes the real TSX helper code
+transformed with the existing Vite/esbuild dependency; mocked network tests
+cover default denial, all five authenticated guarded API operations, request
+bodies and bounded error handling. The browser build executes these tests before
+TypeScript compilation. These are controlled client/helper tests, not real
+interactive browser certification, OS-level interruption or approval to mount
+the module. The production read-only App still does not import it, and server
+execution/configuration mutations stay disabled until final certification and
+explicit approval.
+
+
+## B4 existing native configuration edit preparation (2026-10-18)
+
+The dormant guarded React editor now reads a selected original validated saved
+configuration through existing authenticated read-only `GET /api/v1/configs/{id}`
+and pre-fills native JSON for review/edit before submitting it to the existing
+opt-in native guarded config save route. It validates identifiers, refuses
+missing/non-object responses and ignores late responses after session changes.
+Node client contract tests exercise this read path and malformed payloads.
+The production browser workspace still does **not** mount the editor; no normal
+browser saves/execution are exposed. This is engineering coverage, not operator
+file certification, UI click-through proof or authorization to enable writes.
+
+
+## B4 config selection response ownership (2026-10-18)
+
+The dormant guarded editor additionally invalidates pending saved-config load
+responses when the selected configuration identifier changes. Changing the ID
+clears the old editable JSON and suppresses outdated completion, preventing an
+old config snapshot from appearing under another save destination. This is a
+client-side precaution: server-native schema validation and guarded write locks
+remain authoritative. Real interactive browser click-level coverage remains
+outstanding; the production browser does not mount the control.
