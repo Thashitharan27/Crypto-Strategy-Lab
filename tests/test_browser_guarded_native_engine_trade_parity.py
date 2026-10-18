@@ -118,7 +118,7 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             assert response.status_code == 202, response.text
             browser = guarded._jobs.result("frozen-native-" + side.lower() + "-" + exit_case.lower()).result(timeout=10)
             status = client.get(
-                "/api/v1/guarded/jobs/frozen-native-" + side.lower(),
+                "/api/v1/guarded/jobs/frozen-native-" + side.lower() + "-" + exit_case.lower(),
                 headers={"Authorization": "Bearer " + token},
             )
             assert status.json() == {
