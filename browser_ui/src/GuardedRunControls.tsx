@@ -20,7 +20,7 @@ const ID = /^[A-Za-z0-9_-]{1,100}$/;
 
 function requireGuardedSession(enabled: boolean, token: string): void {
   if (enabled !== true) throw new Error("Guarded operations are disabled");
-  if (!token || token.includes("\\r") || token.includes("\\n")) throw new Error("Invalid session token");
+  if (!token || token.includes(String.fromCharCode(13)) || token.includes(String.fromCharCode(10))) throw new Error("Invalid session token");
 }
 
 function safeId(value: string): string {
