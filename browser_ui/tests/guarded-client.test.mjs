@@ -139,3 +139,151 @@ test("saved native config loader rejects invalid identifiers and response shapes
     }
   } finally { globalThis.fetch = original; }
 });
+
+
+// Exercise the actual event-handler closures and React hook state in the dormant
+// TSX component. No DOM, new test framework or production mount is required.
+// This deliberately uses React's test-only dispatcher seam, not application code.
+const ReactForEvents = await import("react");
+const settleHandlers = () => new Promise(resolve => setImmediate(resolve));
+function guardedEventHarness(initialProps = {enabled: true, token: TOKEN}) {
+  const internals = ReactForEvents.default.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED;
+  const hooks = [];
+  let props = initialProps;
+  let root;
+  const dispatch = {
+    useState(initial) {
+      const index = dispatch.index++;
+      if (!(index in hooks)) hooks[index] = typeof initial === "function" ? initial() : initial;
+      return [hooks[index], next => { hooks[index] = typeof next === "function" ? next(hooks[index]) : next; }];
+    },
+    useRef(initial) {
+      const index = dispatch.index++;
+      if (!(index in hooks)) hooks[index] = {current: initial};
+      return hooks[index];
+    },
+    useEffect(effect, deps) {
+      const index = dispatch.index++;
+      const previous = hooks[index];
+      if (!previous || deps.some((v, i) => v !== previous[i])) {
+        hooks[index] = deps;
+        dispatch.effects.push(effect);
+      }
+    },
+    index: 0, effects: [],
+  };
+  function render() {
+    dispatch.index = 0;
+    dispatch.effects = [];
+    const prior = internals.ReactCurrentDispatcher.current;
+    internals.ReactCurrentDispatcher.current = dispatch;
+    try { root = api.GuardedRunControls(props); }
+    finally { internals.ReactCurrentDispatcher.current = prior; }
+    for (const effect of dispatch.effects) effect();
+    return root;
+  }
+  function find(tag, idOrText) {
+    const stack = [root];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || typeof node !== "object") continue;
+      if (node.type === tag &&
+          (node.props?.id === idOrText || node.props?.children === idOrText)) return node;
+      const children = node.props?.children;
+      if (Array.isArray(children)) stack.push(...children.slice().reverse());
+      else if (children) stack.push(children);
+    }
+    throw new Error("Control not found: " + tag + " " + idOrText);
+  }
+  function change(id, value, tag = "input") {
+    find(tag, id).props.onChange({target: {value}});
+    render();
+  }
+  function click(text) {
+    find("button", text).props.onClick();
+    render();
+  }
+  function rerender(nextProps) { props = nextProps; render(); }
+  render();
+  return {find, change, click, render, rerender};
+}
+
+test("guarded editor click-load, ID switch and edit/save preserve selection ownership", async () => {
+  const original = globalThis.fetch;
+  const calls = [];
+  let resolveLoad;
+  globalThis.fetch = async (url, options) => {
+    calls.push([url, options]);
+    if (options.method === "GET") return new Promise(resolve => { resolveLoad = resolve; });
+    return {ok: true, json: async () => ({config_id: "second", status: "SAVED"})};
+  };
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-config-id", "first");
+    ui.click("Load saved native configuration");
+    assert.equal(calls.length, 1);
+    ui.change("guard-config-id", "second");
+    resolveLoad({ok: true, json: async () => ({config: {config_version: 3, symbol: "OLD"}})});
+    await settleHandlers();
+    ui.render();
+    assert.equal(ui.find("textarea", "guard-config-json").props.value, "{}");
+    ui.change("guard-config-json", '{"config_version":3,"symbol":"NEW"}', "textarea");
+    ui.click("Save native configuration");
+    await settleHandlers();
+    assert.equal(calls[1][0], "/api/v1/guarded/configs/second");
+    assert.deepEqual(JSON.parse(calls[1][1].body), {config_version: 3, symbol: "NEW"});
+  } finally { globalThis.fetch = original; }
+});
+
+test("guarded UI click-submit and status/progress/cancel use selected request ID", async () => {
+  const original = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push([url, options]);
+    return {ok: true, json: async () => ({request_id: "job-A", status: "QUEUED", phase: "VALIDATING"})};
+  };
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "job-A");
+    ui.change("guard-config-json", '{"config_version":3}', "textarea");
+    ui.click("Submit native research run");
+    await settleHandlers();
+    ui.click("Refresh status");
+    await settleHandlers();
+    ui.click("Refresh progress");
+    await settleHandlers();
+    ui.click("Request cancellation");
+    await settleHandlers();
+    assert.deepEqual(calls.map(([url, options]) => [options.method, url]), [
+      ["POST", "/api/v1/guarded/jobs"],
+      ["GET", "/api/v1/guarded/jobs/job-A"],
+      ["GET", "/api/v1/guarded/jobs/job-A/progress"],
+      ["POST", "/api/v1/guarded/jobs/job-A/cancel"],
+    ]);
+    assert.equal(JSON.parse(calls[0][1].body).request_id, "job-A");
+  } finally { globalThis.fetch = original; }
+});
+
+test("operator token switch invalidates in-flight guarded status response", async () => {
+  const original = globalThis.fetch;
+  let resolveRequest;
+  globalThis.fetch = async () => new Promise(resolve => {resolveRequest = resolve;});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "job-A");
+    ui.click("Refresh status");
+    ui.rerender({enabled: true, token: "different-operator-token"});
+    resolveRequest({ok: true, json: async () => ({status: "COMPLETED"})});
+    await settleHandlers();
+    ui.render();
+    const statuses = [];
+    // The underlying React state must not receive a previous operator's result.
+    const collect = node => {
+      if (!node || typeof node !== "object") return;
+      if (node.props?.role === "status") statuses.push(String(node.props.children));
+      for (const child of [].concat(node.props?.children ?? [])) collect(child);
+    };
+    collect(ui.find("section", undefined));
+    assert.ok(!statuses.some(s => s.includes("COMPLETED")));
+  } finally { globalThis.fetch = original; }
+});
