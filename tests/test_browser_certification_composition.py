@@ -242,3 +242,63 @@ def test_certification_evidence_never_follows_output_symlinks(tmp_path):
                 assert response.status_code == 202
     assert secret.read_text(encoding="utf-8") == "do-not-copy"
     assert not (evidence / "runs" / "unsafe-link").exists()
+
+
+def test_certification_seeds_original_native_config_unchanged_and_reads_through_http(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    from crypto_strategy_lab.gui.v2_controller import GuiApplicationService
+
+    dist = _certification_dist(tmp_path)
+    original_folder = tmp_path / "originals"
+    original_folder.mkdir()
+    source = original_folder / "native-reference.json"
+    config = ResearchRunConfig()
+    GuiApplicationService.save_config(source, config)
+    original_bytes = source.read_bytes()
+    native = Mock()
+    with isolated_browser_certification(
+        native_application=native, static_root=dist,
+        acknowledge_test_only=True, frozen_config_path=source,
+    ) as (app, token):
+        with TestClient(app, base_url="http://localhost") as client:
+            path = "/api/v1/configs/native-reference"
+            assert client.get(path).status_code == 401
+            response = client.get(path, headers={"Authorization": "Bearer " + token})
+            assert response.status_code == 200
+            assert response.json()["config"] == config.to_dict()
+        # The original remains untouched before and after the HTTP read.
+        assert source.read_bytes() == original_bytes
+    assert source.read_bytes() == original_bytes
+    native.run.assert_not_called()
+
+
+def test_certification_frozen_config_rejects_invalid_and_linked_sources(tmp_path):
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    from crypto_strategy_lab.gui.v2_controller import GuiApplicationService
+
+    dist = _certification_dist(tmp_path)
+    native = Mock()
+    invalid = tmp_path / "bad.name.json"
+    GuiApplicationService.save_config(invalid, ResearchRunConfig())
+    for candidate in (invalid, tmp_path / "absent.json", Path("relative.json")):
+        with pytest.raises(ValueError):
+            with isolated_browser_certification(
+                native_application=native, static_root=dist,
+                frozen_config_path=candidate, acknowledge_test_only=True,
+            ):
+                pytest.fail("Unsafe source admitted")
+    source = tmp_path / "original.json"
+    GuiApplicationService.save_config(source, ResearchRunConfig())
+    link = tmp_path / "linked.json"
+    try:
+        link.symlink_to(source)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks unavailable")
+    with pytest.raises(ValueError, match="Unsafe frozen"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            frozen_config_path=link, acknowledge_test_only=True,
+        ):
+            pytest.fail("Symlinked source admitted")
+    assert source.exists()
+    native.run.assert_not_called()
