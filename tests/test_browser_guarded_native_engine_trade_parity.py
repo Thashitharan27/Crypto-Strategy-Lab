@@ -198,6 +198,14 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     assert calls[0][1] == calls[1][1] == direct_config.to_dict()
     assert_frame_equal(direct, browser, check_exact=True)
     assert len(direct) >= 1 if ("TP1_THEN_" in exit_case) else len(direct) == 2
+    if exit_case == "INTRABAR_TP1_THEN_BE":
+        prefix = "long" if side == "LONG" else "short"
+        assert bool(direct.iloc[0][f"{prefix}_tp1_hit"]), direct.iloc[0][[
+            f"{prefix}_final_exit_reason", f"{prefix}_tp1_exit_time", f"{prefix}_be_triggered"
+        ]]
+        assert bool(direct.iloc[0][f"{prefix}_be_triggered"]), direct.iloc[0][[
+            f"{prefix}_final_exit_reason", f"{prefix}_tp1_exit_time", f"{prefix}_be_triggered"
+        ]]
     if exit_case.startswith("INTRABAR_"):
         assert direct.iloc[0].exit_time == pd.Timestamp(
             "2024-01-01T00:50:00Z" if exit_case == "INTRABAR_TP1_THEN_BE"
