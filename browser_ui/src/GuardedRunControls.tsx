@@ -16,6 +16,7 @@ type NativeRequest = {
 type JobState = {
   request_id: string;
   status: string;
+  verified_run_folder_id?: string;
 };
 const ID = /^[A-Za-z0-9_-]{1,100}$/;
 
@@ -138,6 +139,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   const [savedRunFolderId, setSavedRunFolderId] = React.useState("");
   const savedRunSelection = React.useRef({id: "", version: 0});
   const [verifiedSavedRun, setVerifiedSavedRun] = React.useState("");
+  const [nativeVerifiedFolder, setNativeVerifiedFolder] = React.useState("");
   const [savedRunError, setSavedRunError] = React.useState("");
   const jobSelection = React.useRef({id: "", version: 0});
   const [symbol, setSymbol] = React.useState("BTCUSDT");
@@ -164,6 +166,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     setRecoveryUnverified(false);
     setError("");
     setVerifiedSavedRun("");
+    setNativeVerifiedFolder("");
     setSavedRunError("");
     busy.current = false;
   }, [enabled, token]);
@@ -239,6 +242,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     <input id="guard-job-id" value={jobId} onChange={e => {
       jobSelection.current = {id: e.target.value, version: jobSelection.current.version + 1};
       setJobId(e.target.value);
+      setNativeVerifiedFolder("");
       setState("");
       setRecoveryUnverified(false);
       setPhase("");
@@ -269,6 +273,9 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
           jobSelection.current.id === selectedJob.id) {
         const status = safeJobState(result, jobId);
         setState(status);
+        setNativeVerifiedFolder(status === "COMPLETED" &&
+          typeof result.verified_run_folder_id === "string" &&
+          ID.test(result.verified_run_folder_id) ? result.verified_run_folder_id : "");
         setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
         if (status === "RECOVERY_UNVERIFIED") setPhase("");
       }
@@ -280,6 +287,9 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
           jobSelection.current.id === selectedJob.id) {
         const status = safeJobState(result, jobId);
         setState(status);
+        setNativeVerifiedFolder(status === "COMPLETED" &&
+          typeof result.verified_run_folder_id === "string" &&
+          ID.test(result.verified_run_folder_id) ? result.verified_run_folder_id : "");
         setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
         if (status === "RECOVERY_UNVERIFIED") setPhase("");
       }
@@ -297,10 +307,20 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
           jobSelection.current.id === selectedJob.id) {
         const status = safeJobState(result, jobId);
         setState(status);
+        setNativeVerifiedFolder(status === "COMPLETED" &&
+          typeof result.verified_run_folder_id === "string" &&
+          ID.test(result.verified_run_folder_id) ? result.verified_run_folder_id : "");
         setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
         if (status === "RECOVERY_UNVERIFIED") setPhase("");
       }
     }, "job")} disabled={recoveryUnverified}>Request cancellation</button>
+    {nativeVerifiedFolder && <p role="status">Native job output verified in this session: folder {nativeVerifiedFolder}. Select this folder for independent read-only inspection.</p>}
+    {nativeVerifiedFolder && <button type="button" onClick={() => {
+      savedRunSelection.current = {id: nativeVerifiedFolder, version: savedRunSelection.current.version + 1};
+      setSavedRunFolderId(nativeVerifiedFolder);
+      setVerifiedSavedRun("");
+      setSavedRunError("");
+    }}>Select verified native output folder</button>}
     <label htmlFor="guard-saved-run-folder">Saved run folder ID (not the request ID)</label>
     <input id="guard-saved-run-folder" value={savedRunFolderId} onChange={event => {
       savedRunSelection.current = {
