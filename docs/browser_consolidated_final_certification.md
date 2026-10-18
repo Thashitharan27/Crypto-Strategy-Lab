@@ -68,3 +68,29 @@ For each A1–A5/B1–B4 gate record:
 Preserve separate original-file inventories before/after and immutable desktop/browser output bundles. Review failures before advancing. A gate is PASS only with reproducible evidence, not a green CI job or the absence of observed anomalies. If local originals, privilege, live UI or broker-specific evidence are inaccessible in the current project, mark the precise item BLOCKED or LIMITED and continue independent development; **do not** relabel certification as complete.
 
 **Release decision:** require all critical safety, integrity and independently invoked execution gates PASS, explicit acknowledgement of bounded historical coverage limitations, independent full raw pytest on the final commit with zero failures, required CI checks and a reviewer sign-off. **Only after explicit user approval** may a separately reviewed server-side guarded release switch and UI composition be considered. No code changes in this certification plan enable that switch.
+
+
+## 7. Isolated test-only browser artifact (prepared, not certified)
+
+An independent React entrypoint lives in `browser_ui/certification/index.html`
+and `browser_ui/certification/main.tsx`. Its guarded controls are initially
+disabled and require the operator to enter a test token and explicitly arm the
+page. The dedicated Vite config writes to `browser_ui/dist-certification`,
+**not** the production `browser_ui/dist`, and Git excludes the former from
+source control. The normal `npm run build` compiles both targets separately
+to catch certification-page regressions without serving certification controls
+through the read-only launcher. Direct development-only compilation is
+`cd browser_ui; npm run build:certification`.
+
+This prepares a real browser-renderable frontend, but **does not yet provide
+an approved real-browser certification invocation**: the production FastAPI
+launcher continues to mount only `browser_ui/dist` and never opts into
+guarded routes. Before B2/B3 acceptance, the CryptoBots Desktop test process
+must explicitly compose `create_browser_app` with the separate
+`dist-certification` static root, a test-only enabled guarded integration,
+dedicated **empty isolated** saved-config/output roots, fresh session token,
+loopback-only binding and an operator-reviewed test harness. That isolated
+test process must not reuse original config/output write roots. Test both
+ordinary read-only composition (no guarded routes) and the explicit
+certification composition. No run of that harness or real browser click-through
+is claimed in this document.
