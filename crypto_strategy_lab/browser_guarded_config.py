@@ -75,6 +75,16 @@ class GuardedConfigStore:
                 raise ValueError("Unsafe configuration destination")
             os.replace(temp_name, destination)
             temp_name = None
+            # On POSIX, fsyncing only the temporary file does not guarantee
+            # the atomic rename survives an unexpected power loss. Sync the
+            # directory entry before reporting success; if this fails the
+            # outcome is uncertain and the caller must reconcile on disk.
+            if os.name == "posix":
+                directory_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
             return destination
         finally:
             try:
