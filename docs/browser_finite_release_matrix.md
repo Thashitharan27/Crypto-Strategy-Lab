@@ -535,3 +535,23 @@ job-to-artifact correlation, independent browser UI exercise, a guarantee that
 all expected original output files exist, or permission to turn on browser
 execution. Complete certification must still compare identical frozen native
 and browser invocations, saved manifests, outputs and original artifacts.
+
+
+## B3 native reporter result to verified output association (2026-10-18)
+
+The native `ResearchRunResult.output_dir` is assigned by the existing
+reporter after its final manifest publication. While the original guarded
+Future remains available in the same process and reports COMPLETED, the
+guarded status owner may expose a bounded `verified_run_folder_id` only if
+the native output directory is directly under the configured guarded root,
+uses an allowlisted folder name and passes the already-existing full
+cataloged-artifact verifier. No client-supplied request ID is used as an
+output folder name. When validation fails or the native return does not
+provide an output path, COMPLETED remains a *worker state* without a verified
+folder field. A restarted process has only a durable request-ID claim and
+still returns RECOVERY_UNVERIFIED; no mapping is reconstructed and no replay
+is authorized. The dormant React UI offers a separate user-triggered
+read-only inspection of the verified folder, not automatic acceptance of its
+summary or a second artifact parser. Final independent Windows/browser
+invocation and original-file certification remains required. Production
+guarded execution/config writes remain disabled.
