@@ -1,5 +1,6 @@
 """Opt-in routes must be absent by default and require bearer auth."""
 from unittest.mock import Mock
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -220,10 +221,14 @@ def test_failing_audit_callback_does_not_break_guarded_response():
     assert result.status_code == 200
 
 
-def test_config_persistence_os_failure_is_audited_and_sanitized():
+@pytest.mark.parametrize("failure", [
+    OSError("private C:/original/configs/secret.json"),
+    PermissionError(13, "Windows sharing/permission failure", "C:/original/configs/secret.json"),
+])
+def test_config_persistence_os_failure_is_audited_and_sanitized(failure):
     events = []
     integration = Mock()
-    integration.save_config.side_effect = OSError("private C:/original/configs/secret.json")
+    integration.save_config.side_effect = failure
     app = FastAPI()
     app.include_router(create_guarded_job_router(
         token=TOKEN, integration=integration, enabled=True,
