@@ -6,10 +6,16 @@ from crypto_strategy_lab.browser_guarded_recovery_verify import verify_recovered
 from crypto_strategy_lab.run_manifest import RunArtifactError
 
 
-def test_absent_and_symlinked_run_never_verify(tmp_path):
+def test_absent_run_never_verifies(tmp_path):
     assert verify_recovered_run(tmp_path, "missing")["status"] == "RECOVERY_UNVERIFIED"
+
+
+def test_symlinked_run_never_verifies(tmp_path):
     (tmp_path / "elsewhere").mkdir()
-    (tmp_path / "linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    try:
+        (tmp_path / "linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Filesystem symlinks unavailable")
     assert verify_recovered_run(tmp_path, "linked")["status"] == "RECOVERY_UNVERIFIED"
 
 
