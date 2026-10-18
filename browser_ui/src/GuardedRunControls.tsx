@@ -89,6 +89,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   const configSelection = React.useRef({id: "", version: 0});
   const [configJson, setConfigJson] = React.useState("{}");
   const [jobId, setJobId] = React.useState("");
+  const jobSelection = React.useRef({id: "", version: 0});
   const [symbol, setSymbol] = React.useState("BTCUSDT");
   const [market, setMarket] = React.useState<"spot" | "futures_um">("futures_um");
   const [from, setFrom] = React.useState("2025-01-01T00:00:00Z");
@@ -171,7 +172,13 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       if (isCurrent()) setState(`Configuration ${result.config_id}: ${result.status}`);
     })}>Save native configuration</button>
     <label htmlFor="guard-job-id">Request ID</label>
-    <input id="guard-job-id" value={jobId} onChange={e => setJobId(e.target.value)} />
+    <input id="guard-job-id" value={jobId} onChange={e => {
+      jobSelection.current = {id: e.target.value, version: jobSelection.current.version + 1};
+      setJobId(e.target.value);
+      setState("");
+      setPhase("");
+      setError("");
+    }} />
     <label htmlFor="guard-symbol">Symbol</label>
     <input id="guard-symbol" value={symbol} onChange={e => setSymbol(e.target.value)} />
     <label htmlFor="guard-market">Market</label>
@@ -191,20 +198,28 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       <option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option>
     </select>
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selectedJob = jobSelection.current;
       const result = await submitGuardedRun(enabled, token, jobId, request(), nativeConfig());
-      if (isCurrent()) setState(result.status);
+      if (isCurrent() && jobSelection.current.version === selectedJob.version &&
+          jobSelection.current.id === selectedJob.id) setState(result.status);
     })}>Submit native research run</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selectedJob = jobSelection.current;
       const result = await guardedStatus(enabled, token, jobId);
-      if (isCurrent()) setState(result.status);
+      if (isCurrent() && jobSelection.current.version === selectedJob.version &&
+          jobSelection.current.id === selectedJob.id) setState(result.status);
     })}>Refresh status</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selectedJob = jobSelection.current;
       const result = await guardedProgress(enabled, token, jobId);
-      if (isCurrent()) setPhase(result.phase ?? "No stage available");
+      if (isCurrent() && jobSelection.current.version === selectedJob.version &&
+          jobSelection.current.id === selectedJob.id) setPhase(result.phase ?? "No stage available");
     })}>Refresh progress</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
+      const selectedJob = jobSelection.current;
       const result = await guardedCancel(enabled, token, jobId);
-      if (isCurrent()) setState(result.status);
+      if (isCurrent() && jobSelection.current.version === selectedJob.version &&
+          jobSelection.current.id === selectedJob.id) setState(result.status);
     })}>Request cancellation</button>
     {state && <p role="status">Native operation state: {state}</p>}
     {phase && <p role="status">Latest native stage: {phase}</p>}
