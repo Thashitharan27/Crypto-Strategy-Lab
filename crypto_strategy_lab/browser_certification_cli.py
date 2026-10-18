@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Sequence
 
 from crypto_strategy_lab.browser_certification import (
     serve_isolated_browser_certification,
 )
 from crypto_strategy_lab.browser_readonly_service import build_browser_readonly_service
+from crypto_strategy_lab.paths import resolve_data_lake_runtime_paths
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -34,15 +36,24 @@ def main(argv: Sequence[str] | None = None) -> None:
         parser.error("--port must be between 1 and 65535")
     if not args.static_root.is_absolute() or args.static_root.name != "dist-certification":
         parser.error("--static-root must be an absolute dist-certification directory")
-    native = build_browser_readonly_service().application_service
-    extra = {"evidence_root": args.evidence_root} if args.evidence_root is not None else {}
-    serve_isolated_browser_certification(
-        native_application=native,
-        static_root=args.static_root,
-        port=args.port,
-        acknowledge_test_only=True,
-        **extra,
-    )
+    # A native run can update caches and refresh the catalog; never point
+    # test-only execution at the workstation's canonical writable cache.
+    # The raw market-data root remains the established source of truth.
+    paths = resolve_data_lake_runtime_paths()
+    with TemporaryDirectory(prefix="csl-browser-cert-cache-") as scratch:
+        cache_root = Path(scratch).resolve() / "cache"
+        cache_root.mkdir()
+        native = build_browser_readonly_service(
+            raw_root=paths.raw_root, cache_root=cache_root,
+        ).application_service
+        extra = {"evidence_root": args.evidence_root} if args.evidence_root is not None else {}
+        serve_isolated_browser_certification(
+            native_application=native,
+            static_root=args.static_root,
+            port=args.port,
+            acknowledge_test_only=True,
+            **extra,
+        )
 
 
 if __name__ == "__main__":

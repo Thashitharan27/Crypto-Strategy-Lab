@@ -201,3 +201,18 @@ The operator must keep the evidence directory private and choose a
 dedicated location outside original configuration, result and Data Lake
 folders. Actual Windows permissions, free space, crash interruption and
 desktop-versus-browser parity still require separate operator certification.
+
+
+## 12. Isolated Data Lake cache during certification
+
+The operator CLI resolves the established canonical **raw** market-data root but
+constructs the existing native application with a separate, freshly created
+temporary cache directory for the full localhost certification session. Any
+prepared/feature/catalog caches written during the test cannot mutate the
+ordinary workstation cache. This isolated cache is removed even when the
+test-only listener exits exceptionally. Do not mistake cold-cache runtime or
+cache provenance for an engine change: retain the same frozen raw inputs,
+original config and effective execution settings for the desktop/browser
+comparison. No Data Lake downloader, replacement archive or canonical cache
+rebuild is authorized by certification. The browser mutation outputs remain
+isolated independently as documented above.

@@ -1,5 +1,6 @@
 """The operator CLI must never implicitly enable production guarded routes."""
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -36,7 +37,11 @@ def test_cli_delegates_only_explicit_isolated_composition(monkeypatch, tmp_path)
     monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
     command.main(["--acknowledge-test-only", "--static-root", str(root),
                   "--port", "8919"])
-    factory.assert_called_once_with()
+    factory.assert_called_once()
+    args = factory.call_args.kwargs
+    assert args["raw_root"] == command.resolve_data_lake_runtime_paths().raw_root
+    assert not args["cache_root"].exists(), "Temporary cache must be removed after the run"
+    assert args["cache_root"] != command.resolve_data_lake_runtime_paths().cache_root
     runner.assert_called_once_with(
         native_application=native, static_root=root, port=8919,
         acknowledge_test_only=True,
@@ -61,3 +66,41 @@ def test_operator_cli_propagates_explicit_evidence_destination(monkeypatch, tmp_
         native_application=native, static_root=root,
         port=8919, acknowledge_test_only=True, evidence_root=evidence,
     )
+
+
+def test_certification_cache_is_fresh_and_cleans_up_after_server_failure(monkeypatch, tmp_path):
+    dist = tmp_path / "dist-certification"
+    native = Mock()
+    observed = []
+    source = tmp_path / "canonical-raw"
+    source.mkdir()
+    cache = tmp_path / "canonical-cache"
+    cache.mkdir()
+    (cache / "keep.txt").write_text("unchanged")
+    monkeypatch.setattr(
+        command, "resolve_data_lake_runtime_paths",
+        lambda: SimpleNamespace(raw_root=source, cache_root=cache),
+    )
+
+    def build_service(*, raw_root, cache_root):
+        assert raw_root == source
+        assert cache_root.is_dir()
+        assert cache_root != cache
+        assert not list(cache_root.iterdir())
+        observed.append(cache_root)
+        (cache_root / "simulation-cache.bin").write_bytes(b"fixture")
+        return SimpleNamespace(application_service=native)
+
+    def failing_runner(**kwargs):
+        assert kwargs["native_application"] is native
+        assert (observed[-1] / "simulation-cache.bin").is_file()
+        raise RuntimeError("injected certification server stop")
+
+    monkeypatch.setattr(command, "build_browser_readonly_service", build_service)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", failing_runner)
+    with pytest.raises(RuntimeError, match="injected"):
+        command.main(["--acknowledge-test-only", "--static-root", str(dist),
+                      "--port", "8919"])
+    assert len(observed) == 1
+    assert not observed[0].exists()
+    assert (cache / "keep.txt").read_text() == "unchanged"
