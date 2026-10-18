@@ -124,7 +124,20 @@ export function guardedStatus(enabled: boolean, token: string, id: string) {
 }
 export function guardedProgress(enabled: boolean, token: string, id: string) {
   requireGuardedSession(enabled, token);
-  return guardedRequest<{phase?: string}>(enabled, token, "GET", `/api/v1/guarded/jobs/${safeId(id)}/progress`);
+  return guardedRequest<{phase?: unknown}>(enabled, token, "GET", `/api/v1/guarded/jobs/${safeId(id)}/progress`);
+}
+
+function safeNativeStage(result: {phase?: unknown}): string {
+  // Match the server's bounded stage allowlist. Never show native free-form
+  // diagnostics, filesystem paths or unexpected progress response bodies.
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    throw new Error("Invalid native progress response");
+  }
+  if (result.phase === undefined) return "No stage available";
+  if (typeof result.phase !== "string" || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(result.phase)) {
+    throw new Error("Invalid native progress stage");
+  }
+  return result.phase;
 }
 export function guardedCancel(enabled: boolean, token: string, id: string) {
   requireGuardedSession(enabled, token);
@@ -315,7 +328,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       const selectedJob = jobSelection.current;
       const result = await guardedProgress(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
-          jobSelection.current.id === selectedJob.id) setPhase(result.phase ?? "No stage available");
+          jobSelection.current.id === selectedJob.id) setPhase(safeNativeStage(result));
     }, "job")} disabled={recoveryUnverified}>Refresh progress</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
