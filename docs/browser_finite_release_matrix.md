@@ -519,3 +519,19 @@ states with a matching request identifier, preventing an unexpected server
 payload from being displayed as proof of completion. Simulated event-handler
 tests exercise these states. No restart reconciliation or independent desktop-
 versus-browser invocation is certified; the normal browser remains read-only.
+
+
+## B3 verified saved-run inspection handoff (2026-10-18)
+
+The dormant guarded React workspace now offers an explicit saved-run *folder ID*
+inspection action, independent of the native guarded request ID. It uses the
+pre-existing authenticated `GET /api/v1/runs/{run_id}` endpoint and the native
+`CompletedRunReader` verification path; it does not infer an output mapping from
+`ACCEPTED`, `COMPLETED` or `RECOVERY_UNVERIFIED` job states. Responses are
+bounded to the originating token/session and selected folder, and malformed or
+unavailable run payloads do not become successful confirmations. This is a
+manually selected, read-only output verification handoff, **not** automatic
+job-to-artifact correlation, independent browser UI exercise, a guarantee that
+all expected original output files exist, or permission to turn on browser
+execution. Complete certification must still compare identical frozen native
+and browser invocations, saved manifests, outputs and original artifacts.

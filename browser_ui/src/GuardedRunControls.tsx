@@ -81,6 +81,30 @@ export async function loadGuardedConfig(enabled: boolean, token: string, id: str
   return response.config as Record<string, unknown>;
 }
 
+/** A separate, explicit read of the existing verified completed-run endpoint.
+ * Request IDs are not necessarily output-folder IDs. No mapping is guessed.
+ */
+export async function inspectVerifiedSavedRun(enabled: boolean, token: string, folderId: string) {
+  requireGuardedSession(enabled, token);
+  const response = await getReadOnly<{
+    manifest?: {run_id?: unknown; run_status?: unknown};
+    summary?: unknown;
+  }>(`/api/v1/runs/${safeId(folderId)}`, token);
+  if (!response || !response.manifest ||
+      typeof response.manifest !== "object" || Array.isArray(response.manifest) ||
+      typeof response.manifest.run_id !== "string" ||
+      !response.summary || typeof response.summary !== "object" ||
+      Array.isArray(response.summary)) {
+    throw new Error("Invalid verified saved-run response");
+  }
+  return {
+    folderId,
+    nativeRunId: response.manifest.run_id,
+    runStatus: typeof response.manifest.run_status === "string"
+      ? response.manifest.run_status : "not specified",
+  };
+}
+
 export function saveGuardedConfig(enabled: boolean, token: string, id: string, config: Record<string, unknown>) {
   requireGuardedSession(enabled, token);
   return guardedRequest<{config_id: string; status: string}>(
@@ -111,6 +135,10 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   const configSelection = React.useRef({id: "", version: 0});
   const [configJson, setConfigJson] = React.useState("{}");
   const [jobId, setJobId] = React.useState("");
+  const [savedRunFolderId, setSavedRunFolderId] = React.useState("");
+  const savedRunSelection = React.useRef({id: "", version: 0});
+  const [verifiedSavedRun, setVerifiedSavedRun] = React.useState("");
+  const [savedRunError, setSavedRunError] = React.useState("");
   const jobSelection = React.useRef({id: "", version: 0});
   const [symbol, setSymbol] = React.useState("BTCUSDT");
   const [market, setMarket] = React.useState<"spot" | "futures_um">("futures_um");
@@ -135,6 +163,8 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     setPhase("");
     setRecoveryUnverified(false);
     setError("");
+    setVerifiedSavedRun("");
+    setSavedRunError("");
     busy.current = false;
   }, [enabled, token]);
 
@@ -271,6 +301,36 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
         if (status === "RECOVERY_UNVERIFIED") setPhase("");
       }
     }, "job")} disabled={recoveryUnverified}>Request cancellation</button>
+    <label htmlFor="guard-saved-run-folder">Saved run folder ID (not the request ID)</label>
+    <input id="guard-saved-run-folder" value={savedRunFolderId} onChange={event => {
+      savedRunSelection.current = {
+        id: event.target.value, version: savedRunSelection.current.version + 1,
+      };
+      setSavedRunFolderId(event.target.value);
+      setVerifiedSavedRun("");
+      setSavedRunError("");
+    }} />
+    <button type="button" onClick={() => {
+      const originatingSession = session.current;
+      const selection = savedRunSelection.current;
+      setSavedRunError("");
+      setVerifiedSavedRun("");
+      void inspectVerifiedSavedRun(enabled, token, savedRunFolderId).then(result => {
+        if (session.current.version === originatingSession.version &&
+            session.current.enabled && savedRunSelection.current.version === selection.version &&
+            savedRunSelection.current.id === selection.id) {
+          setVerifiedSavedRun(`Verified saved run folder ${result.folderId}; native run ID ${result.nativeRunId}; manifest status ${result.runStatus}`);
+        }
+      }).catch(() => {
+        if (session.current.version === originatingSession.version &&
+            session.current.enabled && savedRunSelection.current.version === selection.version &&
+            savedRunSelection.current.id === selection.id) {
+          setSavedRunError("Saved run not available or verification rejected");
+        }
+      });
+    }}>Inspect verified saved run</button>
+    {verifiedSavedRun && <p role="status">{verifiedSavedRun}</p>}
+    {savedRunError && <p role="alert">{savedRunError}</p>}
     {state && <p role="status">{describeJobState(state)}</p>}
     {phase && !recoveryUnverified && <p role="status">Latest native stage: {phase}</p>}
     {error && <p role="alert">{error}</p>}
