@@ -259,7 +259,9 @@ def test_posix_native_config_save_syncs_directory_after_atomic_replace(tmp_path,
     )
     assert result.is_file()
     assert "file_sync" in events
-    assert events.index("file_sync") < events.index("replace") < events.index("directory_sync")
+    assert events.index("directory_sync") < events.index("file_sync") < events.index("replace")
+    assert events.index("replace") < len(events) - 1
+    assert events[-1] == "directory_sync"
     assert GuiApplicationService.load_config(result).to_dict() == ResearchRunConfig().to_dict()
     assert not list(tmp_path.glob(".browser-config-*.tmp"))
     assert not (tmp_path / ".guarded-config-durable.lock").exists()
@@ -275,10 +277,14 @@ def test_directory_sync_failure_is_not_reported_as_confirmed_save(tmp_path, monk
     previous = tmp_path / "ambiguous.json"
     previous.write_bytes(b"old configuration")
     real_fsync = os.fsync
+    directory_syncs = 0
 
     def fail_directory_sync(fd):
+        nonlocal directory_syncs
         if stat.S_ISDIR(os.fstat(fd).st_mode):
-            raise OSError("injected rename durability failure")
+            directory_syncs += 1
+            if directory_syncs == 2:
+                raise OSError("injected rename durability failure")
         return real_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", fail_directory_sync)
@@ -286,6 +292,7 @@ def test_directory_sync_failure_is_not_reported_as_confirmed_save(tmp_path, monk
         GuardedConfigStore(tmp_path, enabled=True).save(
             "ambiguous", ResearchRunConfig().to_dict(),
         )
+    assert directory_syncs == 2
     # Replacement has already happened, and no code should claim rollback.
     assert GuiApplicationService.load_config(previous).to_dict() == ResearchRunConfig().to_dict()
     claim = tmp_path / ".guarded-config-ambiguous.lock"
@@ -296,4 +303,29 @@ def test_directory_sync_failure_is_not_reported_as_confirmed_save(tmp_path, monk
         )
     assert claim.is_dir()
     assert GuiApplicationService.load_config(previous).to_dict() == ResearchRunConfig().to_dict()
+    assert not list(tmp_path.glob(".browser-config-*.tmp"))
+
+def test_failed_claim_directory_sync_never_replaces_original(tmp_path, monkeypatch):
+    """Claim must be durably reserved before the replacement can begin."""
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("Directory fsync is POSIX-specific")
+    original = tmp_path / "claim-first.json"
+    original.write_bytes(b"previous config")
+    real_fsync = os.fsync
+
+    def fail_claim_sync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("claim directory sync failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_claim_sync)
+    with pytest.raises(OSError, match="claim directory sync failure"):
+        GuardedConfigStore(tmp_path, enabled=True).save(
+            "claim-first", ResearchRunConfig().to_dict(),
+        )
+    assert original.read_bytes() == b"previous config"
+    assert not (tmp_path / ".guarded-config-claim-first.lock").exists()
     assert not list(tmp_path.glob(".browser-config-*.tmp"))
