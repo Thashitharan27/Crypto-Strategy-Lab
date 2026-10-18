@@ -93,6 +93,16 @@ def isolated_browser_certification(
         raise ValueError("Persistent crash root and evidence-copy mode are mutually exclusive")
     crash_root = (_validated_crash_execution_root(persistent_execution_root)
                   if persistent_execution_root is not None else None)
+    if crash_root is not None:
+        # Enforce separation even when the test-only factory is called without
+        # the CLI's wider canonical Data Lake and cache checks.
+        protected_roots = [root]
+        if frozen_config_path is not None:
+            protected_roots.append(Path(frozen_config_path).parent)
+        for protected in protected_roots:
+            known = protected.resolve(strict=False)
+            if crash_root == known or crash_root in known.parents or known in crash_root.parents:
+                raise ValueError("Persistent certification root overlaps protected inputs")
 
     with TemporaryDirectory(prefix="csl-browser-cert-") as scratch:
         temp_root = Path(scratch).resolve()
