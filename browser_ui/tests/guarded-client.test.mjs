@@ -287,3 +287,41 @@ test("operator token switch invalidates in-flight guarded status response", asyn
     assert.ok(!statuses.some(s => s.includes("COMPLETED")));
   } finally { globalThis.fetch = original; }
 });
+
+
+test("switching guarded job IDs rejects late status and progress results", async () => {
+  for (const [action, latest, obsolete] of [
+    ["Refresh status", "job-B", "DONE_FROM_A"],
+    ["Refresh progress", "job-B", "PROGRESS_FROM_A"],
+    ["Request cancellation", "job-B", "CANCELLED_A"],
+    ["Submit native research run", "job-B", "SUBMITTED_A"],
+  ]) {
+    const original = globalThis.fetch;
+    let finish;
+    const calls = [];
+    globalThis.fetch = async (url, options) => {
+      calls.push([url, options]);
+      return new Promise(resolve => {finish = resolve;});
+    };
+    try {
+      const ui = guardedEventHarness();
+      ui.change("guard-job-id", "job-A");
+      ui.change("guard-config-json", '{"config_version":3}', "textarea");
+      ui.click(action);
+      assert.equal(calls.length, 1, action);
+      ui.change("guard-job-id", latest);
+      finish({ok: true, json: async () => ({status: obsolete, phase: obsolete})});
+      await settleHandlers();
+      ui.render();
+      const statuses = [];
+      const collect = node => {
+        if (!node || typeof node !== "object") return;
+        if (node.props?.role === "status") statuses.push(String(node.props.children));
+        for (const child of [].concat(node.props?.children ?? [])) collect(child);
+      };
+      collect(ui.find("section", undefined));
+      assert.ok(!statuses.some(v => v.includes(obsolete)), action + " leaked result from old job");
+      assert.equal(ui.find("input", "guard-job-id").props.value, latest);
+    } finally {globalThis.fetch = original;}
+  }
+});
