@@ -454,3 +454,15 @@ old config snapshot from appearing under another save destination. This is a
 client-side precaution: server-native schema validation and guarded write locks
 remain authoritative. Real interactive browser click-level coverage remains
 outstanding; the production browser does not mount the control.
+
+
+## B4 guarded saved-configuration rename durability (2026-10-18)
+
+The opt-in native-backed configuration store now syncs the containing directory
+on POSIX after atomic replacement of the already-fsynced serialized candidate.
+An isolated regression verifies file-sync → rename → directory-sync ordering;
+a separate injected post-rename sync failure propagates an error, leaves the
+already-replaced candidate to be reconciled, and releases the per-ID write claim.
+This is not a rollback guarantee or a substitute for actual crash/power-loss
+and Windows filesystem verification. Ordinary production browser config writes
+remain disabled and original saved configurations are untouched.

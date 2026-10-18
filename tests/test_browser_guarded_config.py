@@ -231,3 +231,62 @@ def test_guarded_http_save_matches_independent_desktop_native_serialization(tmp_
     assert not list(config_root.glob(".browser-config-*.tmp"))
     assert not (config_root / ".guarded-config-native-parity.lock").exists()
     assert sorted(p.name for p in config_root.iterdir()) == ["native-parity.json"]
+
+
+def test_posix_native_config_save_syncs_directory_after_atomic_replace(tmp_path, monkeypatch):
+    """A successful guarded save must durably publish the renamed entry."""
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("Directory fsync is POSIX-specific")
+    events = []
+    real_fsync = os.fsync
+    real_replace = os.replace
+
+    def record_fsync(fd):
+        events.append("directory_sync" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file_sync")
+        return real_fsync(fd)
+
+    def record_replace(source, target):
+        events.append("replace")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(os, "fsync", record_fsync)
+    monkeypatch.setattr(os, "replace", record_replace)
+    result = GuardedConfigStore(tmp_path, enabled=True).save(
+        "durable", ResearchRunConfig().to_dict(),
+    )
+    assert result.is_file()
+    assert "file_sync" in events
+    assert events.index("file_sync") < events.index("replace") < events.index("directory_sync")
+    assert GuiApplicationService.load_config(result).to_dict() == ResearchRunConfig().to_dict()
+    assert not list(tmp_path.glob(".browser-config-*.tmp"))
+    assert not (tmp_path / ".guarded-config-durable.lock").exists()
+
+
+def test_directory_sync_failure_is_not_reported_as_confirmed_save(tmp_path, monkeypatch):
+    """After rename, fsync failure means persistence is uncertain, not rolled back."""
+    import os
+    import stat
+
+    if os.name != "posix":
+        pytest.skip("Directory fsync is POSIX-specific")
+    previous = tmp_path / "ambiguous.json"
+    previous.write_bytes(b"old configuration")
+    real_fsync = os.fsync
+
+    def fail_directory_sync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("injected rename durability failure")
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_directory_sync)
+    with pytest.raises(OSError, match="injected rename durability failure"):
+        GuardedConfigStore(tmp_path, enabled=True).save(
+            "ambiguous", ResearchRunConfig().to_dict(),
+        )
+    # Replacement has already happened, and no code should claim rollback.
+    assert GuiApplicationService.load_config(previous).to_dict() == ResearchRunConfig().to_dict()
+    assert not (tmp_path / ".guarded-config-ambiguous.lock").exists()
+    assert not list(tmp_path.glob(".browser-config-*.tmp"))
