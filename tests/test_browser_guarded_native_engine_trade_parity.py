@@ -14,7 +14,7 @@ from pandas.testing import assert_frame_equal
 from crypto_strategy_lab.browser_guarded_integration import BrowserGuardedIntegration
 from crypto_strategy_lab.browser_http import create_browser_app
 from crypto_strategy_lab.browser_guarded_output import bind_guarded_output_root
-from crypto_strategy_lab.config import BacktestConfig, EntryMode, RiskMode, TiePolicy
+from crypto_strategy_lab.config import BacktestConfig, EntryMode, IntrabarMissingPolicy, RiskMode, TiePolicy
 from crypto_strategy_lab.data_lake_config import ResearchRunConfig
 from crypto_strategy_lab.engine import BacktestEngine
 from crypto_strategy_lab.gui.v2_controller import GuiApplicationService, GuiResearchRequest
@@ -53,6 +53,7 @@ def _engine_config():
     ("LONG", "SL"), ("SHORT", "SL"),
     ("LONG", "TP1_THEN_SL"), ("SHORT", "TP1_THEN_SL"),
     ("LONG", "TP1_THEN_BE"), ("SHORT", "TP1_THEN_BE"),
+    ("LONG", "INTRABAR_TP"), ("SHORT", "INTRABAR_TP"),
 ])
 def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path, side, exit_case):
     root = tmp_path / "guarded-output"
@@ -64,6 +65,25 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         source.loc[1, "high"] = 101.0 if side == "LONG" else 111.0
         source.loc[1, "low"] = 89.0 if side == "LONG" else 99.0
     engine_config = _engine_config()
+    intrabar = None
+    if exit_case == "INTRABAR_TP":
+        intrabar = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=45, freq="1min", tz="UTC"),
+            "open": [100.0] * 45, "close": [100.0] * 45,
+            "high": [101.0] * 45, "low": [99.0] * 45,
+            "volume": [1] * 45,
+        })
+        intrabar.loc[20, "high"] = 111.0
+        if side == "SHORT":
+            intrabar["high"], intrabar["low"] = (
+                200.0 - intrabar["low"].copy(), 200.0 - intrabar["high"].copy()
+            )
+        engine_config = replace(
+            engine_config, use_intrabar_data=True,
+            intrabar_missing_policy=IntrabarMissingPolicy.ERROR,
+            strategy_timeframe_minutes=15, intrabar_timeframe_minutes=1,
+            slippage=0.0005,
+        )
     if exit_case in ("TP1_THEN_SL", "TP1_THEN_BE"):
         source = pd.DataFrame({
             "timestamp": pd.date_range("2024-01-01", periods=4, freq="15min", tz="UTC"),
@@ -91,7 +111,10 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         def run(self, request, config, **kwargs):
             assert request.symbol == "BTCUSDT"
             assert config.reporting.output_dir == str(root)
-            engine = BacktestEngine(source.copy(deep=True), engine_config)
+            engine = BacktestEngine(
+                source.copy(deep=True), engine_config,
+                intrabar.copy(deep=True) if intrabar is not None else None,
+            )
             engine.market_regime_values[:] = "SIDEWAYS"
             engine.plus_di_values[:] = 50 if side == "LONG" else 10
             engine.minus_di_values[:] = 10 if side == "LONG" else 50
@@ -158,13 +181,19 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     assert calls[0][1] == calls[1][1] == direct_config.to_dict()
     assert_frame_equal(direct, browser, check_exact=True)
     assert len(direct) >= 1 if exit_case.startswith("TP1_THEN_") else len(direct) == 2
+    if exit_case == "INTRABAR_TP":
+        assert direct.iloc[0].exit_time == pd.Timestamp("2024-01-01T00:20:00Z")
+        assert direct.iloc[0].pair_total_fees > 0
+        assert direct.iloc[0].pair_net_pnl == pytest.approx(
+            direct.iloc[0].pair_gross_pnl - direct.iloc[0].pair_total_fees
+        )
     assert direct.iloc[0].side == side
     assert direct.iloc[0].strategy_entry_time == pd.Timestamp("2024-01-01T00:15:00Z")
     if side == "LONG":
         if exit_case.startswith("TP1_THEN_"):
             assert direct.iloc[0].long_exit_reason in ("SL", "BE")
         else:
-            assert direct.iloc[0].long_exit_reason == exit_case
+            assert direct.iloc[0].long_exit_reason == ("TP" if exit_case == "INTRABAR_TP" else exit_case)
         if exit_case.startswith("TP1_THEN_"):
             assert direct.iloc[0].long_final_exit_reason == exit_case
             assert direct.iloc[0].long_tp1_hit
@@ -198,9 +227,9 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
                 direct.iloc[0].pair_gross_pnl - direct.iloc[0].pair_total_fees
             )
         else:
-            assert direct.iloc[0].short_exit_reason == exit_case
+            assert direct.iloc[0].short_exit_reason == ("TP" if exit_case == "INTRABAR_TP" else exit_case)
             assert direct.iloc[1].short_exit_reason == "END_OF_DATA"
-        if exit_case in ("TP", "TP1_THEN_BE"):
+        if exit_case in ("TP", "TP1_THEN_BE", "INTRABAR_TP"):
             assert direct.iloc[0].pair_net_pnl > 0
             assert direct.iloc[0].equity_after_trade > 1000
         else:
