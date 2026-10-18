@@ -551,3 +551,102 @@ def test_persistent_crash_root_rejects_windows_junction_like_reparse_entries(
         ):
             pytest.fail("A Windows junction-like reparse path must be rejected")
     native.run.assert_not_called()
+
+
+@pytest.mark.parametrize("location", ["static-parent", "static-asset", "frozen-file", "frozen-parent", "evidence-parent"])
+def test_certification_rejects_windows_reparse_sources_and_destination_parents(
+    tmp_path, monkeypatch, location,
+):
+    """Emulate NTFS reparse paths on POSIX to protect original Windows inputs."""
+    import crypto_strategy_lab.browser_certification as certification
+    from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+    from crypto_strategy_lab.gui.v2_controller import GuiApplicationService
+
+    dist_parent = tmp_path / "static-parent"
+    dist_parent.mkdir()
+    dist = dist_parent / "dist-certification"
+    dist.mkdir()
+    asset = dist / "index.html"
+    asset.write_text("certification", encoding="utf-8")
+    frozen_parent = tmp_path / "original-configs"
+    frozen_parent.mkdir()
+    frozen = frozen_parent / "original.json"
+    GuiApplicationService.save_config(frozen, ResearchRunConfig())
+    evidence_parent = tmp_path / "evidence-parent"
+    evidence_parent.mkdir()
+    evidence = evidence_parent / "csl-browser-evidence-uncreated"
+    flagged = {
+        "static-parent": dist_parent, "static-asset": asset,
+        "frozen-file": frozen, "frozen-parent": frozen_parent,
+        "evidence-parent": evidence_parent,
+    }[location]
+    original_bytes = frozen.read_bytes()
+    real_check = certification._unsafe_reparse_path
+    monkeypatch.setattr(
+        certification, "_unsafe_reparse_path",
+        lambda path: Path(path) == flagged or real_check(path),
+    )
+    native = Mock()
+    with pytest.raises(ValueError, match="canonical|Unsafe"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, frozen_config_path=frozen,
+            evidence_root=evidence,
+        ):
+            pytest.fail("A reparse-backed source or destination was accepted")
+    assert not evidence.exists()
+    assert frozen.read_bytes() == original_bytes
+    native.run.assert_not_called()
+
+
+def test_certification_evidence_copy_rejects_output_reparse_entries(tmp_path, monkeypatch):
+    """Do not copy or traverse junction-like native output descendants."""
+    import crypto_strategy_lab.browser_certification as certification
+
+    dist = _certification_dist(tmp_path)
+    evidence = tmp_path / "csl-browser-evidence-reparse"
+    native = Mock()
+    real_check = certification._unsafe_reparse_path
+    flagged = set()
+    monkeypatch.setattr(
+        certification, "_unsafe_reparse_path",
+        lambda path: Path(path) in flagged or real_check(path),
+    )
+    with pytest.raises(ValueError, match="reparse"):
+        with isolated_browser_certification(
+            native_application=native, static_root=dist,
+            acknowledge_test_only=True, evidence_root=evidence,
+        ) as (app, token):
+            with TestClient(app, base_url="http://localhost") as client:
+                assert client.get("/", headers={"Authorization": "Bearer " + token}).status_code == 200
+            output = None
+            # The native original roots remain inaccessible. Mark only an
+            # isolated native output directory through its private integration.
+            from crypto_strategy_lab.data_lake_config import ResearchRunConfig
+            from types import SimpleNamespace
+
+            def native_run(request, config):
+                nonlocal output
+                output = Path(config.reporting.output_dir)
+                file = output / "junction-like-output"
+                file.mkdir()
+                flagged.add(file)
+                return SimpleNamespace(output_dir=None)
+
+            native.run.side_effect = native_run
+            payload = {
+                "request_id": "reparse-output",
+                "request": {
+                    "exchange": "binance", "market": "futures_um", "symbol": "BTCUSDT",
+                    "period_start": "2025-01-01T00:00:00Z",
+                    "period_end": "2025-01-02T00:00:00Z",
+                    "strategy_timeframe": "4h", "intrabar_timeframe": "1m",
+                },
+                "config": ResearchRunConfig().to_dict(),
+            }
+            with TestClient(app, base_url="http://localhost") as client:
+                res = client.post("/api/v1/guarded/jobs", json=payload,
+                                  headers={"Authorization": "Bearer " + token})
+                assert res.status_code == 202
+    assert evidence.is_dir()
+    assert not (evidence / "runs").exists()
