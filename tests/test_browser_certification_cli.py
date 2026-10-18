@@ -159,3 +159,68 @@ def test_cli_rejects_combining_persistent_root_and_evidence_before_native_setup(
         ])
     assert error.value.code == 2
     factory.assert_not_called()
+
+
+@pytest.mark.parametrize("overlap", ["raw_child", "cache_child", "raw_parent", "static_child", "frozen_parent"])
+def test_cli_rejects_persistent_execution_root_overlapping_protected_sources(
+    monkeypatch, tmp_path, overlap,
+):
+    """Never reach the native factory with an output rooted in original inputs."""
+    raw = tmp_path / "original-raw"
+    cache = tmp_path / "original-cache"
+    static = tmp_path / "dist-certification"
+    frozen = tmp_path / "original-configs" / "saved.json"
+    for p in (raw, cache, static, frozen.parent):
+        p.mkdir()
+    mapping = {
+        "raw_child": raw / "csl-browser-crash-inside",
+        "cache_child": cache / "csl-browser-crash-inside",
+        "raw_parent": tmp_path,
+        "static_child": static / "csl-browser-crash-inside",
+        "frozen_parent": frozen.parent / "csl-browser-crash-inside",
+    }
+    root = mapping[overlap]
+    build = Mock(side_effect=AssertionError("Native app must not be constructed"))
+    runner = Mock()
+    monkeypatch.setattr(command, "build_browser_readonly_service", build)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
+    monkeypatch.setattr(command, "resolve_data_lake_runtime_paths",
+                        lambda: SimpleNamespace(raw_root=raw, cache_root=cache))
+    with pytest.raises(SystemExit) as exc:
+        command.main([
+            "--acknowledge-test-only", "--static-root", str(static), "--port", "8919",
+            "--frozen-config", str(frozen),
+            "--persistent-execution-root", str(root),
+        ])
+    assert exc.value.code == 2
+    build.assert_not_called()
+    runner.assert_not_called()
+
+
+def test_cli_accepts_separate_persistent_root_without_touching_canonical_sources(
+    monkeypatch, tmp_path,
+):
+    raw = tmp_path / "original-raw"
+    cache = tmp_path / "original-cache"
+    static = tmp_path / "dist-certification"
+    original_configs = tmp_path / "original-configs"
+    root = tmp_path / "isolated" / "csl-browser-crash-dedicated"
+    for p in (raw, cache, static, original_configs, root.parent):
+        p.mkdir()
+    frozen = original_configs / "saved.json"
+    frozen.write_bytes(b"original")
+    fixture = SimpleNamespace(application_service=Mock())
+    factory = Mock(return_value=fixture)
+    runner = Mock()
+    monkeypatch.setattr(command, "build_browser_readonly_service", factory)
+    monkeypatch.setattr(command, "serve_isolated_browser_certification", runner)
+    monkeypatch.setattr(command, "resolve_data_lake_runtime_paths",
+                        lambda: SimpleNamespace(raw_root=raw, cache_root=cache))
+    command.main([
+        "--acknowledge-test-only", "--static-root", str(static), "--port", "8919",
+        "--frozen-config", str(frozen), "--persistent-execution-root", str(root),
+    ])
+    factory.assert_called_once()
+    runner.assert_called_once()
+    assert runner.call_args.kwargs["persistent_execution_root"] == root
+    assert frozen.read_bytes() == b"original"
