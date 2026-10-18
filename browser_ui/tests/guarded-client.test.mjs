@@ -642,6 +642,25 @@ test("saved-run handoff rejects malformed IDs and unverified or invalid outputs"
 });
 
 
+test("saved-run handoff rejects unsafe native manifest identity and status strings", async () => {
+  const original = globalThis.fetch;
+  const responses = [
+    {manifest: {run_id: "/private/native/output", run_status: "COMPLETED"}, summary: {}},
+    {manifest: {run_id: "valid", run_status: "/private/secret"}, summary: {}},
+    {manifest: {run_id: "valid", run_status: "x".repeat(101)}, summary: {}},
+    {manifest: {run_id: "valid", run_status: 123}, summary: {}},
+    {manifest: {run_id: "a".repeat(101), run_status: "COMPLETED"}, summary: {}},
+  ];
+  let index = 0;
+  globalThis.fetch = async () => ({ok: true, json: async () => responses[index++]});
+  try {
+    for (const _ of responses) {
+      await assert.rejects(api.inspectVerifiedSavedRun(true, TOKEN, "approved-folder"),
+        /Invalid verified saved-run response/);
+    }
+  } finally {globalThis.fetch = original;}
+});
+
 test("native verified output folder is offered only for completed matching jobs", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async (path) => ({ok: true, json: async () => ({
