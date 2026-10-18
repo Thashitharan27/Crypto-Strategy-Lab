@@ -172,7 +172,7 @@ def isolated_browser_certification(
                     # Never follow an output symlink into original data.
                     for source in (config_root, output_root):
                         if any(_unsafe_reparse_path(path) for path in source.rglob("*")):
-                            raise ValueError("Unsafe link or reparse point in certification evidence")
+                            raise ValueError("Unsafe symlink or reparse point in certification evidence")
                     shutil.copytree(config_root, evidence / "configs")
                     shutil.copytree(output_root, evidence / "runs")
 
