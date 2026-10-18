@@ -577,6 +577,7 @@ test("terminal guarded job outcomes clear stale active progress stages", async (
       ui.render();
       const displayed = JSON.stringify(ui.find("section", undefined).props.children);
       assert.ok(!displayed.includes("Latest native stage:"), action + " " + terminal);
+      assert.equal(ui.find("button", "Refresh progress").props.disabled, true, terminal);
     }
   } finally {globalThis.fetch = original;}
 });
@@ -600,6 +601,7 @@ test("cancellation unavailable preserves progress while native job may still run
     assert.ok(displayed.includes("Latest native stage:"));
     assert.ok(displayed.includes("running"));
     assert.ok(displayed.includes("Cancellation unavailable"));
+    assert.equal(ui.find("button", "Refresh progress").props.disabled, false);
   } finally {globalThis.fetch = original;}
 });
 
