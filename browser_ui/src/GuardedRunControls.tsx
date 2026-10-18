@@ -20,6 +20,8 @@ type JobState = {
 };
 const ID = /^[A-Za-z0-9_-]{1,100}$/;
 
+const TERMINAL_JOB_STATES = new Set(["COMPLETED", "FAILED", "CANCELLED", "RECOVERY_UNVERIFIED"]);
+
 const JOB_STATES = new Set([
   "ACCEPTED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED",
   "CANCELLATION_UNAVAILABLE", "RECOVERY_UNVERIFIED",
@@ -320,7 +322,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
           typeof result.verified_run_folder_id === "string" &&
           ID.test(result.verified_run_folder_id) ? result.verified_run_folder_id : "");
         setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
-        if (status === "RECOVERY_UNVERIFIED") setPhase("");
+        if (TERMINAL_JOB_STATES.has(status)) setPhase("");
       }
     }, "job")} disabled={recoveryUnverified}>Submit native research run</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
@@ -334,7 +336,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
           typeof result.verified_run_folder_id === "string" &&
           ID.test(result.verified_run_folder_id) ? result.verified_run_folder_id : "");
         setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
-        if (status === "RECOVERY_UNVERIFIED") setPhase("");
+        if (TERMINAL_JOB_STATES.has(status)) setPhase("");
       }
     }, "job")}>Refresh status</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
@@ -354,7 +356,7 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
           typeof result.verified_run_folder_id === "string" &&
           ID.test(result.verified_run_folder_id) ? result.verified_run_folder_id : "");
         setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
-        if (status === "RECOVERY_UNVERIFIED") setPhase("");
+        if (TERMINAL_JOB_STATES.has(status)) setPhase("");
       }
     }, "job")} disabled={recoveryUnverified}>Request cancellation</button>
     {nativeVerifiedFolder && <p role="status">Native job output verified in this session: folder {nativeVerifiedFolder}. Select this folder for independent read-only inspection.</p>}
