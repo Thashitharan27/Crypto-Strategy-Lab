@@ -81,7 +81,7 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             "volume": [1] * 75,
         })
         if exit_case == "INTRABAR_TP1_THEN_BE":
-            intrabar.loc[35, "high"] = 120.0
+            intrabar.loc[35, "high"] = 130.0
             intrabar.loc[50, "low"] = 99.0
         elif exit_case in ("INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST"):
             intrabar.loc[20, "high"] = 111.0
@@ -108,6 +108,8 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
             "high": [101.0, 101.0, 120.0, 105.0],
             "low": [99.0, 99.0, 99.0, 79.0 if exit_case == "TP1_THEN_SL" else 99.0], "volume": [1] * 4,
         })
+        if exit_case == "INTRABAR_TP1_THEN_BE":
+            source.loc[2, "high"] = 130.0
         profiles = dict(engine_config.strategy_profiles)
         if side == "SHORT":
             source["high"], source["low"] = (
