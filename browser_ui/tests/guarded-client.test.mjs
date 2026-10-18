@@ -464,6 +464,52 @@ test("guarded native statuses reject unknown states and mismatched identities", 
   } finally {globalThis.fetch = original;}
 });
 
+test("guarded progress rejects native diagnostics and malformed phases", async () => {
+  const original = globalThis.fetch;
+  const phases = [
+    {phase: "/private/output/native-run"},
+    {phase: "SECRET_TOKEN=private"},
+    {phase: "x".repeat(100)},
+    {phase: 123},
+    null,
+  ];
+  let next = 0;
+  globalThis.fetch = async () => ({ok: true, json: async () => phases[next++]});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "safe-job");
+    for (const _ of phases) {
+      ui.click("Refresh progress");
+      await settleHandlers();
+      ui.render();
+      const rendered = JSON.stringify(ui.find("section", undefined).props.children);
+      assert.ok(rendered.includes("Guarded operation unavailable or rejected"));
+      assert.ok(!rendered.includes("/private/output"));
+      assert.ok(!rendered.includes("SECRET_TOKEN"));
+      assert.ok(!rendered.includes("Latest native stage:"));
+    }
+  } finally {globalThis.fetch = original;}
+});
+
+test("guarded progress accepts bounded stages and missing phase only", async () => {
+  const original = globalThis.fetch;
+  const responses = [{phase: "loading_1"}, {}];
+  let index = 0;
+  globalThis.fetch = async () => ({ok: true, json: async () => responses[index++]});
+  try {
+    const ui = guardedEventHarness();
+    ui.change("guard-job-id", "safe-job");
+    ui.click("Refresh progress");
+    await settleHandlers();
+    ui.render();
+    assert.ok(JSON.stringify(ui.find("section", undefined).props.children).includes("loading_1"));
+    ui.click("Refresh progress");
+    await settleHandlers();
+    ui.render();
+    assert.ok(JSON.stringify(ui.find("section", undefined).props.children).includes("No stage available"));
+  } finally {globalThis.fetch = original;}
+});
+
 test("guarded cancellation unavailable is never displayed as cancelled", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = async () => ({ok: true, json: async () => ({
