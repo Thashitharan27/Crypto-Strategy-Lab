@@ -396,3 +396,20 @@ run certification, or permission to remove stale ownership automatically.
 The final Windows operator reconciliation, original artifact validation and
 interruption testing remain deferred to consolidated certification. Production
 browser execution and configuration writes remain disabled.
+
+
+## B4 dormant guarded browser control surface (2026-10-18)
+
+A separate React/TypeScript `GuardedRunControls` module prepares native v3
+configuration save and guarded run submission, status, progress and cancellation.
+Every mutating/inspection call additionally requires an explicit client-side
+`enabled === true` argument and bearer token, validates bounded identifiers,
+and delegates to the already-existing server-enforced opt-in guarded routes.
+**The module is not imported or mounted by the production read-only App**;
+there is no release flag, user-visible activation mechanism or background
+polling. Server-side authentication and disabled-by-default route installation
+remain the actual authorization boundary; client gating is defense in depth.
+This is implementation/build coverage only, not independent browser interactive
+certification or approval to enable configuration writes or execution. Do not
+expose this module to normal browser users before consolidated certification
+and explicit approval.
