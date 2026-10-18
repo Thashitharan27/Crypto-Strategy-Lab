@@ -86,6 +86,8 @@ def test_real_zip_loader_and_prepared_frames_match_native_and_guarded_http(tmp_p
             )
             prepared, _ = from_data_lake_bundle(bundle)
             assert bundle.strategy.attrs["canonical_source_identity"]
+            assert bundle.intrabar is not None
+            assert len(bundle.intrabar) >= 2880
             assert effective.reporting.output_dir == str(approved)
             captures.append((
                 request,
@@ -93,6 +95,7 @@ def test_real_zip_loader_and_prepared_frames_match_native_and_guarded_http(tmp_p
                 bundle.strategy.copy(deep=True),
                 feature_context_frame(prepared),
                 bundle.strategy.attrs["canonical_source_identity"],
+                bundle.intrabar.copy(deep=True),
             ))
             return len(prepared)
 
@@ -154,4 +157,5 @@ def test_real_zip_loader_and_prepared_frames_match_native_and_guarded_http(tmp_p
     assert captures[0][4] == captures[1][4]
     assert_frame_equal(captures[0][2], captures[1][2], check_exact=True)
     assert_frame_equal(captures[0][3], captures[1][3], check_exact=True)
+    assert_frame_equal(captures[0][5], captures[1][5], check_exact=True)
     assert captures[0][2]["close"].notna().all()
