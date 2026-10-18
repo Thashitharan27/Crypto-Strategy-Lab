@@ -23,3 +23,6 @@ data/.*.tmp
 
 # Operator-local browser/data parity evidence; may contain run payloads and local provenance.
 parity_verification/
+
+# Separate non-production browser certification build; never ship with read-only dist.
+browser_ui/dist-certification/

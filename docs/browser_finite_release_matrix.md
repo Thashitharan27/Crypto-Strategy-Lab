@@ -555,3 +555,13 @@ read-only inspection of the verified folder, not automatic acceptance of its
 summary or a second artifact parser. Final independent Windows/browser
 invocation and original-file certification remains required. Production
 guarded execution/config writes remain disabled.
+
+
+## Consolidated final operator certification handoff (2026-10-18)
+
+Use `docs/browser_consolidated_final_certification.md` as the single finite
+cross-gate checklist for authentic, **independently invoked** PySide6 desktop and
+actual browser-UI/HTTP test-only guarded paths. It consolidates established A/B
+proof and retained historical caveats rather than restarting historical tests.
+The read-only launcher remains unchanged and ordinary guarded mutations remain
+server-disabled pending independent Windows evidence and explicit release approval.
