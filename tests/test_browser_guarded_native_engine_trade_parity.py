@@ -82,6 +82,9 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         })
         if exit_case == "INTRABAR_TP1_THEN_BE":
             intrabar.loc[35, "high"] = 130.0
+            # Hold away from the BE stop until minute 50 in both directions.
+            intrabar.loc[36:49, "high"] = 101.5
+            intrabar.loc[36:49, "low"] = 100.5
             intrabar.loc[50, "low"] = 99.0
         elif exit_case in ("INTRABAR_TP", "INTRABAR_ORDER_TP_FIRST"):
             intrabar.loc[20, "high"] = 111.0
