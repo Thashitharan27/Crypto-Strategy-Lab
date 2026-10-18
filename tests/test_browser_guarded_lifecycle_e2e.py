@@ -219,15 +219,15 @@ def test_authenticated_http_crash_stale_worker_fails_closed_without_replay(tmp_p
             rejected = client.post(
                 "/api/v1/guarded/jobs", json=payload, headers=headers,
             )
-            assert rejected.status_code == 503
-            assert rejected.json() == {"detail": "Native research service unavailable"}
+            assert rejected.status_code == 409
+            assert rejected.json() == {"detail": "Job submission rejected"}
             assert client.get(
                 "/api/v1/guarded/jobs/new-after-crash", headers=headers,
             ).status_code == 404
             payload["request_id"] = "interrupted"
             assert client.post(
                 "/api/v1/guarded/jobs", json=payload, headers=headers,
-            ).status_code == 503
+            ).status_code == 409
         native.run.assert_not_called()
         assert old_claim.is_dir()
         assert stale_worker.is_dir()
