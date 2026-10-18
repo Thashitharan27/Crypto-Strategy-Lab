@@ -61,6 +61,7 @@ class GuardedConfigStore:
         except FileExistsError as exc:
             raise RuntimeError("Configuration write already owned") from exc
         temp_name = None
+        durability_uncertain = False
         try:
             fd, temp_name = tempfile.mkstemp(prefix=".browser-config-", suffix=".tmp", dir=root)
             os.close(fd)
@@ -75,6 +76,11 @@ class GuardedConfigStore:
                 raise ValueError("Unsafe configuration destination")
             os.replace(temp_name, destination)
             temp_name = None
+            # After replacement, any failure to establish directory durability
+            # leaves the saved outcome uncertain. Retain this per-ID claim
+            # until explicit operator reconciliation; never permit a second
+            # guarded writer to silently overwrite the ambiguous result.
+            durability_uncertain = True
             # On POSIX, fsyncing only the temporary file does not guarantee
             # the atomic rename survives an unexpected power loss. Sync the
             # directory entry before reporting success; if this fails the
@@ -85,10 +91,12 @@ class GuardedConfigStore:
                     os.fsync(directory_fd)
                 finally:
                     os.close(directory_fd)
+            durability_uncertain = False
             return destination
         finally:
             try:
                 if temp_name is not None:
                     Path(temp_name).unlink(missing_ok=True)
             finally:
-                os.rmdir(write_claim)
+                if not durability_uncertain:
+                    os.rmdir(write_claim)
