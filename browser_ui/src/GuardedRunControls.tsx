@@ -20,7 +20,7 @@ const ID = /^[A-Za-z0-9_-]{1,100}$/;
 
 function requireGuardedSession(enabled: boolean, token: string): void {
   if (enabled !== true) throw new Error("Guarded operations are disabled");
-  if (!token || /[\\r\\n]/.test(token)) throw new Error("Invalid session token");
+  if (!token || token.includes("\\r") || token.includes("\\n")) throw new Error("Invalid session token");
 }
 
 function safeId(value: string): string {
@@ -88,8 +88,10 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
   const [error, setError] = React.useState("");
   const busy = React.useRef(false);
   // Keep the latest authorization/session props visible to pending promises.
-  const session = React.useRef({enabled, token});
-  session.current = {enabled, token};
+  const session = React.useRef({enabled, token, version: 0});
+  if (session.current.enabled !== enabled || session.current.token !== token) {
+    session.current = {enabled, token, version: session.current.version + 1};
+  }
   React.useEffect(() => {
     // Clear information from a previous operator/session; do not preserve
     // successful results when the guarded capability is removed.
@@ -107,7 +109,8 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
     const submittedSession = session.current;
     const isCurrent = () => session.current.enabled === true &&
       session.current.enabled === submittedSession.enabled &&
-      session.current.token === submittedSession.token;
+      session.current.token === submittedSession.token &&
+      session.current.version === submittedSession.version;
     busy.current = true;
     setError("");
     try { await action(isCurrent); }
