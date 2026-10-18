@@ -576,7 +576,7 @@ test("terminal guarded job outcomes clear stale active progress stages", async (
       await settleHandlers();
       ui.render();
       const displayed = JSON.stringify(ui.find("section", undefined).props.children);
-      assert.ok(!displayed.includes("Latest native stage: preparing"), action + " " + terminal);
+      assert.ok(!displayed.includes("Latest native stage:"), action + " " + terminal);
     }
   } finally {globalThis.fetch = original;}
 });
