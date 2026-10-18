@@ -65,10 +65,10 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     engine_config = _engine_config()
     if exit_case == "TP1_THEN_SL":
         source = pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=3, freq="15min", tz="UTC"),
-            "open": [100.0] * 3, "close": [100.0] * 3,
-            "high": [100.0, 120.0, 105.0],
-            "low": [100.0, 99.0, 79.0], "volume": [1] * 3,
+            "timestamp": pd.date_range("2024-01-01", periods=4, freq="15min", tz="UTC"),
+            "open": [100.0] * 4, "close": [100.0] * 4,
+            "high": [100.0, 100.0, 120.0, 105.0],
+            "low": [100.0, 100.0, 99.0, 79.0], "volume": [1] * 4,
         })
         profiles = dict(engine_config.strategy_profiles)
         profiles["sideways_long"] = StrategyProfile(
@@ -179,6 +179,6 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     if side == "LONG" and exit_case == "TP":
         assert_frame_equal(source, _frozen_candles(), check_exact=True)
     elif exit_case == "TP1_THEN_SL":
-        assert source.iloc[2]["low"] == 79.0
+        assert source.iloc[3]["low"] == 79.0
     else:
         assert source.iloc[1]["low"] == pytest.approx(89.0 if (side == "SHORT" and exit_case == "TP") or (side == "LONG" and exit_case == "SL") else 99.0)
