@@ -247,7 +247,12 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       const selectedJob = jobSelection.current;
       const result = await guardedStatus(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
-          jobSelection.current.id === selectedJob.id) setState(result.status);
+          jobSelection.current.id === selectedJob.id) {
+        const status = safeJobState(result, jobId);
+        setState(status);
+        setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
+        if (status === "RECOVERY_UNVERIFIED") setPhase("");
+      }
     }, "job")}>Refresh status</button>
     <button type="button" onClick={() => void perform(async isCurrent => {
       const selectedJob = jobSelection.current;
@@ -259,7 +264,12 @@ export function GuardedRunControls({enabled = false, token}: {enabled?: boolean;
       const selectedJob = jobSelection.current;
       const result = await guardedCancel(enabled, token, jobId);
       if (isCurrent() && jobSelection.current.version === selectedJob.version &&
-          jobSelection.current.id === selectedJob.id) setState(result.status);
+          jobSelection.current.id === selectedJob.id) {
+        const status = safeJobState(result, jobId);
+        setState(status);
+        setRecoveryUnverified(status === "RECOVERY_UNVERIFIED");
+        if (status === "RECOVERY_UNVERIFIED") setPhase("");
+      }
     }, "job")} disabled={recoveryUnverified}>Request cancellation</button>
     {state && <p role="status">{describeJobState(state)}</p>}
     {phase && !recoveryUnverified && <p role="status">Latest native stage: {phase}</p>}
