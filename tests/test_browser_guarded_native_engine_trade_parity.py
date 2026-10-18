@@ -3,6 +3,7 @@
 Uses the existing BacktestEngine on frozen candles, not a substitute fill model.
 Original-file and production Data Lake parity remain separate certification.
 """
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -47,8 +48,11 @@ def _engine_config():
     )
 
 
-@pytest.mark.parametrize("side", ["LONG", "SHORT"])
-@pytest.mark.parametrize("exit_case", ["TP", "SL"])
+@pytest.mark.parametrize("side,exit_case", [
+    ("LONG", "TP"), ("SHORT", "TP"),
+    ("LONG", "SL"), ("SHORT", "SL"),
+    ("LONG", "TP1_THEN_SL"),
+])
 def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path, side, exit_case):
     root = tmp_path / "guarded-output"
     root.mkdir()
@@ -59,6 +63,20 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         source.loc[1, "high"] = 101.0 if side == "LONG" else 111.0
         source.loc[1, "low"] = 89.0 if side == "LONG" else 99.0
     engine_config = _engine_config()
+    if exit_case == "TP1_THEN_SL":
+        source = pd.DataFrame({
+            "timestamp": pd.date_range("2024-01-01", periods=4, freq="15min", tz="UTC"),
+            "open": [100.0] * 4, "close": [100.0] * 4,
+            "high": [101.0, 101.0, 120.0, 105.0],
+            "low": [99.0, 99.0, 99.0, 79.0], "volume": [1] * 4,
+        })
+        profiles = dict(engine_config.strategy_profiles)
+        profiles["sideways_long"] = StrategyProfile(
+            enabled=True, stop_loss_multiple=2,
+            partial_profit_enabled=True, tp1_r=1,
+            tp1_close_pct=50, tp2_r=2,
+        )
+        engine_config = replace(engine_config, atr_period=1, strategy_profiles=profiles)
     calls = []
 
     class NativeEngineRunner:
@@ -131,11 +149,20 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     assert calls[0][0] == calls[1][0]
     assert calls[0][1] == calls[1][1] == direct_config.to_dict()
     assert_frame_equal(direct, browser, check_exact=True)
-    assert len(direct) == 2
+    assert len(direct) >= 1 if exit_case == "TP1_THEN_SL" else len(direct) == 2
     assert direct.iloc[0].side == side
     assert direct.iloc[0].strategy_entry_time == pd.Timestamp("2024-01-01T00:15:00Z")
     if side == "LONG":
-        assert direct.iloc[0].long_exit_reason == exit_case
+        assert direct.iloc[0].long_exit_reason == ("SL" if exit_case == "TP1_THEN_SL" else exit_case)
+        if exit_case == "TP1_THEN_SL":
+            assert direct.iloc[0].long_final_exit_reason == "TP1_THEN_SL"
+            assert direct.iloc[0].long_tp1_hit
+            assert direct.iloc[0].long_tp1_quantity > 0
+            assert direct.iloc[0].long_stop_exit_quantity > 0
+            assert direct.iloc[0].long_fees > 0
+            assert direct.iloc[0].pair_net_pnl == pytest.approx(
+                direct.iloc[0].pair_gross_pnl - direct.iloc[0].pair_total_fees
+            )
         if exit_case == "TP":
             assert direct.iloc[0].long_fees == pytest.approx(0.21)
             assert direct.iloc[0].pair_net_pnl == pytest.approx(9.79)
@@ -143,7 +170,8 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         else:
             assert direct.iloc[0].pair_net_pnl < 0
             assert direct.iloc[0].equity_after_trade < 1000
-        assert direct.iloc[1].long_exit_reason == "END_OF_DATA"
+        if exit_case != "TP1_THEN_SL":
+            assert direct.iloc[1].long_exit_reason == "END_OF_DATA"
     else:
         assert direct.iloc[0].short_exit_reason == exit_case
         assert (direct.iloc[0].pair_net_pnl > 0) == (exit_case == "TP")
@@ -151,5 +179,7 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
         assert direct.iloc[1].short_exit_reason == "END_OF_DATA"
     if side == "LONG" and exit_case == "TP":
         assert_frame_equal(source, _frozen_candles(), check_exact=True)
+    elif exit_case == "TP1_THEN_SL":
+        assert source.iloc[3]["low"] == 79.0
     else:
         assert source.iloc[1]["low"] == pytest.approx(89.0 if (side == "SHORT" and exit_case == "TP") or (side == "LONG" and exit_case == "SL") else 99.0)

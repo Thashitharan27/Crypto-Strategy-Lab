@@ -342,3 +342,16 @@ including exit direction, fees, net P&L and equity. The native engine alone
 resolves stops and targets; no browser-side fill calculations are added. These
 are limited 15m synthetic fixtures, not original-history intrabar stop/slippage
 or partial-profit certification. Normal browser mutation routes stay disabled.
+
+
+## B2 guarded HTTP partial-profit then protective-stop regression (2026-10-18)
+
+The frozen native-engine comparison adds a genuine `TP1_THEN_SL` execution
+case through independently invoked direct `GuiApplicationService` and
+opt-in authenticated guarded HTTP. The standard native `BacktestEngine`
+performs the 50% TP1 and remaining protective-stop execution. Full ordered
+trade frames must agree exactly; directional TP1/stop quantities, fee-inclusive
+net P&L and exit reason are checked. This supplements native partial-profit
+unit tests, but original historical intrabar ordering, slippage, partial-stop
+SL1 and break-even variants remain deferred to final consolidated acceptance.
+Normal browser mutations remain disabled pending explicit approval.
