@@ -11,7 +11,7 @@ def test_active_v3_window_binds_github_source_changes_to_run_thread(qapp, monkey
     monkeypatch.setattr(
         GitHubIntegrationWidget,
         "_async",
-        lambda self, fn, done, description: done(fn()),
+        lambda self, fn, done, description, **kwargs: done(fn()),
     )
 
     window = QMainWindow()
