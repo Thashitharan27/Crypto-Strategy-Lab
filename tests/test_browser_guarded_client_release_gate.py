@@ -62,3 +62,28 @@ def test_guarded_client_session_epoch_and_executable_browser_build_gate():
     assert "setPhase(result.phase" in component
     assert "requireGuardedSession(enabled, token)" in component
     assert "npm run test:guarded && tsc -b && vite build" in package
+
+
+def test_certification_browser_entry_is_separate_and_unarmed_by_default():
+    """Certification harness must not be mounted or shipped by read-only entry."""
+    import json
+
+    ui = ROOT / "browser_ui"
+    production = (ui / "src" / "main.tsx").read_text(encoding="utf-8")
+    certification = (ui / "certification" / "main.tsx").read_text(
+        encoding="utf-8"
+    )
+    config = (ui / "vite.certification.config.ts").read_text(
+        encoding="utf-8"
+    )
+    manifest = json.loads((ui / "package.json").read_text(encoding="utf-8"))
+    assert "GuardedRunControls" not in production
+    assert "GuardedRunControls" in certification
+    assert "React.useState(false)" in certification
+    assert "enabled={armed && token.length > 0}" in certification
+    assert "dist-certification" in config
+    assert 'root: "certification"' in config
+    assert "vite build --config vite.certification.config.ts" in manifest["scripts"]["build"]
+    assert "browser_ui/dist-certification/" in (
+        ROOT / ".gitignore"
+    ).read_text(encoding="utf-8")
