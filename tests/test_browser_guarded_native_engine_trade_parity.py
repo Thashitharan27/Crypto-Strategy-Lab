@@ -153,8 +153,9 @@ def test_frozen_native_trade_rows_match_direct_service_and_guarded_http(tmp_path
     assert direct.iloc[0].side == side
     assert direct.iloc[0].strategy_entry_time == pd.Timestamp("2024-01-01T00:15:00Z")
     if side == "LONG":
-        assert direct.iloc[0].long_exit_reason == exit_case
+        assert direct.iloc[0].long_exit_reason == ("SL" if exit_case == "TP1_THEN_SL" else exit_case)
         if exit_case == "TP1_THEN_SL":
+            assert direct.iloc[0].long_final_exit_reason == "TP1_THEN_SL"
             assert direct.iloc[0].long_tp1_hit
             assert direct.iloc[0].long_tp1_quantity > 0
             assert direct.iloc[0].long_stop_exit_quantity > 0
