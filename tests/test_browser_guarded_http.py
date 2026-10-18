@@ -368,3 +368,70 @@ def test_guarded_mutations_authenticate_before_malformed_body_validation():
     assert events.count({"operation": "CONFIG_SAVE", "outcome": "INVALID_INPUT"}) == 3
     integration.submit.assert_not_called()
     integration.save_config.assert_not_called()
+
+
+def test_guarded_config_and_job_posts_reject_large_bodies_before_native_calls():
+    from crypto_strategy_lab.browser_guarded_http import _MAX_GUARDED_JSON_BYTES
+
+    integration = Mock()
+    events = []
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+        audit_callback=events.append,
+    ))
+    oversized = b'{"padding":"' + b"x" * _MAX_GUARDED_JSON_BYTES + b'"}'
+    auth = {"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"}
+    with TestClient(app) as client:
+        for method, path, operation in (
+            ("put", "/api/v1/guarded/configs/safe", "CONFIG_SAVE"),
+            ("post", "/api/v1/guarded/jobs", "JOB_SUBMIT"),
+        ):
+            # Authorization always wins over request-body validation.
+            denied = getattr(client, method)(path, content=oversized,
+                                              headers={"Content-Type": "application/json"})
+            assert denied.status_code == 401
+            response = getattr(client, method)(path, content=oversized, headers=auth)
+            assert response.status_code == 413
+            assert response.json() == {"detail": "Guarded JSON payload too large"}
+            assert {"operation": operation, "outcome": "OVERSIZED"} in events
+    integration.save_config.assert_not_called()
+    integration.submit.assert_not_called()
+
+
+def test_guarded_streamed_payload_size_is_checked_without_content_length():
+    from crypto_strategy_lab.browser_guarded_http import _MAX_GUARDED_JSON_BYTES
+
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+    ))
+    def chunks():
+        yield b'{"padding":"'
+        yield b"x" * _MAX_GUARDED_JSON_BYTES
+        yield b'"}'
+    headers = {"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"}
+    with TestClient(app) as client:
+        response = client.put("/api/v1/guarded/configs/safe",
+                              content=chunks(), headers=headers)
+    assert response.status_code == 413
+    integration.save_config.assert_not_called()
+
+
+def test_guarded_declared_oversize_rejected_without_reading_or_native_write():
+    integration = Mock()
+    app = FastAPI()
+    app.include_router(create_guarded_job_router(
+        token=TOKEN, integration=integration, enabled=True,
+    ))
+    auth = {
+        "Authorization": "Bearer " + TOKEN,
+        "Content-Type": "application/json",
+        "Content-Length": str(4 * 1024 * 1024 + 1),
+    }
+    with TestClient(app) as client:
+        response = client.put("/api/v1/guarded/configs/safe",
+                              content=b"{}", headers=auth)
+    assert response.status_code == 413
+    integration.save_config.assert_not_called()
