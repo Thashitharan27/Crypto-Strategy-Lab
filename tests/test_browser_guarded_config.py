@@ -288,5 +288,12 @@ def test_directory_sync_failure_is_not_reported_as_confirmed_save(tmp_path, monk
         )
     # Replacement has already happened, and no code should claim rollback.
     assert GuiApplicationService.load_config(previous).to_dict() == ResearchRunConfig().to_dict()
-    assert not (tmp_path / ".guarded-config-ambiguous.lock").exists()
+    claim = tmp_path / ".guarded-config-ambiguous.lock"
+    assert claim.is_dir()  # Uncertain durability requires operator reconciliation.
+    with pytest.raises(RuntimeError, match="already owned"):
+        GuardedConfigStore(tmp_path, enabled=True).save(
+            "ambiguous", ResearchRunConfig().to_dict(),
+        )
+    assert claim.is_dir()
+    assert GuiApplicationService.load_config(previous).to_dict() == ResearchRunConfig().to_dict()
     assert not list(tmp_path.glob(".browser-config-*.tmp"))
