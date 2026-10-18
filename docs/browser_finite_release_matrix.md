@@ -430,3 +430,16 @@ interactive browser certification, OS-level interruption or approval to mount
 the module. The production read-only App still does not import it, and server
 execution/configuration mutations stay disabled until final certification and
 explicit approval.
+
+
+## B4 existing native configuration edit preparation (2026-10-18)
+
+The dormant guarded React editor now reads a selected original validated saved
+configuration through existing authenticated read-only `GET /api/v1/configs/{id}`
+and pre-fills native JSON for review/edit before submitting it to the existing
+opt-in native guarded config save route. It validates identifiers, refuses
+missing/non-object responses and ignores late responses after session changes.
+Node client contract tests exercise this read path and malformed payloads.
+The production browser workspace still does **not** mount the editor; no normal
+browser saves/execution are exposed. This is engineering coverage, not operator
+file certification, UI click-through proof or authorization to enable writes.
