@@ -301,3 +301,14 @@ replay a request, clear claims, or prove commit completion. Clients must retain
 an uncertain result and seek independent operator reconciliation rather than
 assuming failure and automatically retrying. The ordinary production browser
 still does not mount guarded routes; activation remains prohibited.
+
+
+## B4 guarded mutation admission overlap (2026-10-19)
+
+In strict-audit candidate mode, only one guarded mutation may be admitted
+while its native call and outcome audit are unsettled. A concurrent mutation
+returns sanitized 503 before the native mutation path; the existing audit
+latch remains fail closed after persistence failure. This is an in-process
+candidate gate, not cross-process ownership, hardware durability, native
+cancellation, or release approval. The native request/worker claims remain
+authoritative; the ordinary production launcher remains read-only.
