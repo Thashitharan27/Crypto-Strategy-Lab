@@ -140,3 +140,22 @@ how to manage disk-full/restart/rotation, and how to provision independent
 audit-root ACLs and per-session ownership. Do not present an isolated
 `fsync` success as hardware power-loss certification. The ordinary production
 launcher remains read-only; PR #501 stays held.
+
+
+## Candidate pre-operation audit admission (2026-10-19)
+
+The internal B4 candidate opts into `guarded_require_audit_admission=True`.
+Before calling the native save, run submission or cancel method, the HTTP router
+must persist an allowlisted `ATTEMPT` record through its injected journal.
+Missing or failing audit admission returns a sanitized 503 **before** invoking
+native mutation. An audit failure on a later outcome also latches the candidate
+to deny further mutations. The ordinary production browser still omits guarded
+routes, and the separate certification harness retains its previous default
+router behavior.
+
+**Bounded guarantee:** a native mutation may already have committed by the
+time its `SUCCESS` outcome audit fails. The response to that mutation is not
+proof of rollback; preserve request/worker claims and verify native artifacts
+before any manual resolution. Subsequent mutation requests fail closed.
+Auditor filesystem durability, concurrency with in-flight work, host power loss
+and restart reconciliation still require an independent final release review.
