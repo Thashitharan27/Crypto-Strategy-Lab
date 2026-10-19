@@ -151,6 +151,36 @@ def run_readonly_release_smoke() -> dict[str, object]:
         assert journal.path.read_bytes() == before_audit
         assert retained.read_bytes() == b"retain native ownership"
         assert claim.is_dir() and worker.is_dir()
+        # Simulate rollback to a fresh normal read-only session while stale
+        # native ownership evidence remains untouched. No guarded candidate
+        # or native execution service is constructed.
+        replacement_token = "b4-rollback-" + "n" * 48
+        with patch(
+            "crypto_strategy_lab.browser_launcher.build_browser_readonly_service",
+            return_value=Mock(),
+        ):
+            restored = compose_b4_review_only(
+                configuration=dirs["future-config"], execution=dirs["future-runs"],
+                environ=environ, static_root=dirs["static"],
+                token=replacement_token,
+            )
+        assert restored.guarded_enabled is False
+        assert restored.user_release_approved is False
+        with TestClient(restored.runtime.app, base_url="http://127.0.0.1:8767") as client:
+            assert client.get("/api/v1/health", headers=auth).status_code == 401
+            new_auth = {"Authorization": "Bearer " + replacement_token}
+            assert client.get("/api/v1/health", headers=new_auth).json() == {
+                "status": "ok", "mode": "read-only",
+            }
+            for method, endpoint in (
+                ("POST", "/api/v1/guarded/jobs"),
+                ("PUT", "/api/v1/guarded/configs/smoke"),
+                ("GET", "/api/v1/guarded/jobs/interrupted"),
+                ("POST", "/api/v1/guarded/jobs/interrupted/cancel"),
+            ):
+                assert client.request(method, endpoint, headers=new_auth).status_code == 404
+        assert retained.read_bytes() == b"retain native ownership"
+        assert claim.is_dir() and worker.is_dir()
         assert protected.read_bytes() == b"must-stay-original"
         assert not list(dirs["future-config"].iterdir())
         assert sorted(p.name for p in dirs["future-runs"].iterdir()) == [
@@ -158,7 +188,8 @@ def run_readonly_release_smoke() -> dict[str, object]:
         ]
         return {"status": "PASS_READ_ONLY", "http_checks": checked,
                 "guarded_routes_available": False, "originals_unchanged": True,
-                "rollback_evidence": "RELEASE_HELD"}
+                "rollback_evidence": "RELEASE_HELD",
+                "rollback_restored_readonly": True}
 
 
 def main() -> None:
