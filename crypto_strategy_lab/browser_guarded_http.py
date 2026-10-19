@@ -8,6 +8,7 @@ from __future__ import annotations
 import secrets
 import re
 import json
+import threading
 
 # Limit pre-schema materialization of opt-in guarded native configuration bodies.
 _MAX_GUARDED_JSON_BYTES = 4 * 1024 * 1024
@@ -25,39 +26,48 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
         raise ValueError("A browser bearer token is required")
 
     audit_broken = False
+    audit_lock = threading.RLock()
+    mutation_active = False
 
     def audit(operation: str, outcome: str) -> bool:
         nonlocal audit_broken
         # Never log IDs, payloads, tokens, result data or native exception text.
-        if audit_callback is not None:
-            try:
-                audit_callback({"operation": operation, "outcome": outcome})
-                return True
-            except Exception:
-                # An operation may already have committed; never claim that it
-                # was rolled back. Deny all subsequent mutations in this app.
-                if require_audit_admission is True:
-                    audit_broken = True
-                return False
-        return not require_audit_admission
+        with audit_lock:
+            if audit_callback is not None:
+                try:
+                    audit_callback({"operation": operation, "outcome": outcome})
+                    return True
+                except Exception:
+                    if require_audit_admission is True:
+                        audit_broken = True
+                    return False
+            return not require_audit_admission
 
 
     def admit_mutation(operation: str) -> None:
-        nonlocal audit_broken
-        # A durable ATTEMPT record must precede any native mutation in the B4
-        # candidate. Do not treat later audit failures as rollback evidence.
+        nonlocal audit_broken, mutation_active
         if require_audit_admission is not True:
             return
-        if audit_broken:
-            raise HTTPException(status_code=503, detail="Guarded audit unavailable")
-        try:
-            if not callable(audit_callback):
-                raise RuntimeError("B4 audit callback missing")
-            audit_callback({"operation": operation, "outcome": "ATTEMPT"})
-        except Exception:
-            audit_broken = True
-            # Never leak filesystem, credentials or native error text.
-            raise HTTPException(status_code=503, detail="Guarded audit unavailable")
+        # Serialize admission with audit failures. A second candidate mutation
+        # never crosses into native code while an earlier result is unsettled.
+        with audit_lock:
+            if audit_broken or mutation_active:
+                raise HTTPException(status_code=503, detail="Guarded audit unavailable")
+            mutation_active = True
+            try:
+                if not callable(audit_callback):
+                    raise RuntimeError("B4 audit callback missing")
+                audit_callback({"operation": operation, "outcome": "ATTEMPT"})
+            except Exception:
+                audit_broken = True
+                mutation_active = False
+                raise HTTPException(status_code=503, detail="Guarded audit unavailable")
+
+    def finish_mutation():
+        nonlocal mutation_active
+        if require_audit_admission is True:
+            with audit_lock:
+                mutation_active = False
 
     def authorize(authorization: str | None):
         supplied = authorization[len("Bearer "):] if authorization and authorization.startswith("Bearer ") else ""
@@ -98,7 +108,10 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
     def cancel(request_id: str, authorization: str | None = Header(default=None)):
         authorize(authorization)
         admit_mutation("CANCEL")
-        return invoke(request_id, lambda: integration.cancel(request_id), "CANCEL")
+        try:
+            return invoke(request_id, lambda: integration.cancel(request_id), "CANCEL")
+        finally:
+            finish_mutation()
 
     async def authenticated_json_object(request: Request, authorization: str | None, operation: str):
         # FastAPI's typed body validation runs before endpoint authorization.
@@ -146,27 +159,30 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
             raise HTTPException(status_code=404, detail="Unknown configuration")
         admit_mutation("CONFIG_SAVE")
         try:
-            integration.save_config(config_id, payload)
-            if not audit("CONFIG_SAVE", "SUCCESS") and require_audit_admission:
-                raise HTTPException(status_code=503, detail="Guarded outcome unverified")
-        except PermissionError as exc:
-            # Capability denial uses a plain PermissionError. A native OS
-            # permission/sharing error carries errno and is a persistence
-            # failure, not evidence that the guarded capability is disabled.
-            if exc.errno is not None:
+            try:
+                integration.save_config(config_id, payload)
+                if not audit("CONFIG_SAVE", "SUCCESS") and require_audit_admission:
+                    raise HTTPException(status_code=503, detail="Guarded outcome unverified")
+            except PermissionError as exc:
+                # Capability denial uses a plain PermissionError. A native OS
+                # permission/sharing error carries errno and is a persistence
+                # failure, not evidence that the guarded capability is disabled.
+                if exc.errno is not None:
+                    audit("CONFIG_SAVE", "PERSISTENCE_FAILED")
+                    raise HTTPException(status_code=503, detail="Configuration persistence unavailable")
+                audit("CONFIG_SAVE", "DENIED")
+                raise HTTPException(status_code=403, detail="Guarded operations disabled")
+            except (ValueError, TypeError):
+                audit("CONFIG_SAVE", "INVALID_CONFIG")
+                raise HTTPException(status_code=422, detail="Invalid native configuration")
+            except (OSError, RuntimeError):
+                # Native failures can include private paths; never echo them.
                 audit("CONFIG_SAVE", "PERSISTENCE_FAILED")
                 raise HTTPException(status_code=503, detail="Configuration persistence unavailable")
-            audit("CONFIG_SAVE", "DENIED")
-            raise HTTPException(status_code=403, detail="Guarded operations disabled")
-        except (ValueError, TypeError):
-            audit("CONFIG_SAVE", "INVALID_CONFIG")
-            raise HTTPException(status_code=422, detail="Invalid native configuration")
-        except (OSError, RuntimeError):
-            # Native failures can include private paths; never echo them.
-            audit("CONFIG_SAVE", "PERSISTENCE_FAILED")
-            raise HTTPException(status_code=503, detail="Configuration persistence unavailable")
-        # Never expose server-side configuration file paths.
-        return {"config_id": config_id, "status": "SAVED"}
+            # Never expose server-side configuration file paths.
+            return {"config_id": config_id, "status": "SAVED"}
+        finally:
+            finish_mutation()
 
     @router.post("/api/v1/guarded/jobs", status_code=202)
     async def submit_job(request: Request, authorization: str | None = Header(default=None)):
@@ -219,18 +235,21 @@ def create_guarded_job_router(*, token: str, integration, enabled: bool = False,
             raise HTTPException(status_code=422, detail="Invalid native job payload")
         admit_mutation("JOB_SUBMIT")
         try:
-            integration.submit(request_id, request, config)
-            if not audit("JOB_SUBMIT", "SUCCESS") and require_audit_admission:
-                raise HTTPException(status_code=503, detail="Guarded outcome unverified")
-        except PermissionError:
-            audit("JOB_SUBMIT", "DENIED")
-            raise HTTPException(status_code=403, detail="Guarded operations disabled")
-        except (RuntimeError, ValueError):
-            audit("JOB_SUBMIT", "REJECTED")
-            raise HTTPException(status_code=409, detail="Job submission rejected")
-        except OSError:
-            audit("JOB_SUBMIT", "EXECUTION_UNAVAILABLE")
-            raise HTTPException(status_code=503, detail="Native research service unavailable")
-        return {"request_id": request_id, "status": "ACCEPTED"}
+            try:
+                integration.submit(request_id, request, config)
+                if not audit("JOB_SUBMIT", "SUCCESS") and require_audit_admission:
+                    raise HTTPException(status_code=503, detail="Guarded outcome unverified")
+            except PermissionError:
+                audit("JOB_SUBMIT", "DENIED")
+                raise HTTPException(status_code=403, detail="Guarded operations disabled")
+            except (RuntimeError, ValueError):
+                audit("JOB_SUBMIT", "REJECTED")
+                raise HTTPException(status_code=409, detail="Job submission rejected")
+            except OSError:
+                audit("JOB_SUBMIT", "EXECUTION_UNAVAILABLE")
+                raise HTTPException(status_code=503, detail="Native research service unavailable")
+            return {"request_id": request_id, "status": "ACCEPTED"}
+        finally:
+            finish_mutation()
 
     return router
