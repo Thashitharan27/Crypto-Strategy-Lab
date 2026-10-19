@@ -28,7 +28,7 @@ def _json_safe_summary(value):
     return value
 
 
-def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None, visualizer_coordinator=None, guarded_integration=None, guarded_enabled=False, guarded_audit_callback=None):
+def create_browser_app(*, token: str, read_service=None, completed_run_root=None, config_root=None, static_root=None, visualizer_coordinator=None, guarded_integration=None, guarded_enabled=False, guarded_audit_callback=None, guarded_require_audit_admission=False):
     """Construct an authenticated app; caller must bind server to 127.0.0.1."""
     if not isinstance(token, str) or len(token) < 32:
         raise ValueError("A fresh, high-entropy browser token is required")
@@ -58,6 +58,7 @@ def create_browser_app(*, token: str, read_service=None, completed_run_root=None
         app.include_router(create_guarded_job_router(
             token=token, integration=guarded_integration, enabled=True,
             audit_callback=guarded_audit_callback,
+            require_audit_admission=guarded_require_audit_admission,
         ))
 
     @app.middleware("http")
